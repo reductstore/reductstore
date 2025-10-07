@@ -6,18 +6,18 @@ use std::sync::Arc;
 use axum::extract::State;
 use axum_extra::headers::HeaderMap;
 
-use crate::api::middleware::check_permissions;
 use crate::api::replication::ReplicationListAxum;
-use crate::api::{Components, HttpError};
+use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 
 // GET /api/v1/replications/
 pub(super) async fn list_replications(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
 ) -> Result<ReplicationListAxum, HttpError> {
-    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
-
+    let components = keeper
+        .get_with_permissions(&headers, FullAccessPolicy {})
+        .await?;
     let mut list = ReplicationListAxum::default();
 
     for x in components.replication_repo.read().await.replications() {
@@ -29,19 +29,17 @@ pub(super) async fn list_replications(
 
 #[cfg(test)]
 mod tests {
+    use rstest::rstest;
     use std::sync::Arc;
 
-    use rstest::rstest;
-
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
 
     use super::*;
 
     #[rstest]
     #[tokio::test]
-    async fn test_list_replications_ok(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let components = components.await;
-        let list = list_replications(State(Arc::clone(&components)), headers)
+    async fn test_list_replications_ok(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let list = list_replications(State(keeper.await), headers)
             .await
             .unwrap()
             .0;

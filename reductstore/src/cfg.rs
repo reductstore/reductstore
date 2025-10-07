@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 pub mod io;
+mod lock_file;
 mod provision;
 pub mod remote_storage;
 pub mod replication;
@@ -9,20 +10,24 @@ pub mod replication;
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
-use crate::backend::Backend;
+use crate::backend::{Backend, BackendType};
 use crate::cfg::io::IoConfig;
+use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
 use crate::ext::ext_repository::create_ext_repository;
+use crate::license::parse_license;
+use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::ext::ExtSettings;
 use reduct_base::internal_server_error;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::replication_api::ReplicationSettings;
+use reduct_base::msg::server_api::License;
 use reduct_base::msg::token_api::Token;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
@@ -57,6 +62,7 @@ pub struct Cfg {
     pub io_conf: IoConfig,
     pub replication_conf: ReplicationConfig,
     pub cs_config: RemoteStorageConfig,
+    pub lock_file_config: LockFileConfig,
 }
 
 impl Default for Cfg {
@@ -80,6 +86,7 @@ impl Default for Cfg {
             io_conf: IoConfig::default(),
             replication_conf: ReplicationConfig::default(),
             cs_config: RemoteStorageConfig::default(),
+            lock_file_config: LockFileConfig::default(),
         }
     }
 }
@@ -87,6 +94,7 @@ impl Default for Cfg {
 /// Database configuration
 pub struct CfgParser<EnvGetter: GetEnv> {
     pub cfg: Cfg,
+    pub license: Option<License>,
     pub env: Env<EnvGetter>,
 }
 
@@ -121,31 +129,33 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             public_url.push('/');
         }
 
-        let cfg = CfgParser {
-            cfg: Cfg {
-                log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
-                host,
-                public_url,
-                port,
-                api_base_path,
-                data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string())),
-                api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
-                cert_path,
-                cert_key_path,
-                license_path: env.get_optional("RS_LICENSE_PATH"),
-                ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
-                cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
-                buckets: Self::parse_buckets(&mut env),
-                tokens: Self::parse_tokens(&mut env),
-                replications: Self::parse_replications(&mut env),
-                io_conf: Self::parse_io_config(&mut env),
-                replication_conf: Self::parse_replication_config(&mut env, port),
-                cs_config: Self::parse_remote_storage_cfg(&mut env),
-            },
-            env,
+        let cfg = Cfg {
+            log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
+            host,
+            public_url,
+            port,
+            api_base_path,
+            data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string())),
+            api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
+            cert_path,
+            cert_key_path,
+            license_path: env.get_optional("RS_LICENSE_PATH"),
+            ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
+            cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
+            buckets: Self::parse_buckets(&mut env),
+            tokens: Self::parse_tokens(&mut env),
+            replications: Self::parse_replications(&mut env),
+            io_conf: Self::parse_io_config(&mut env),
+            replication_conf: Self::parse_replication_config(&mut env, port),
+            cs_config: Self::parse_remote_storage_cfg(&mut env),
+            lock_file_config: Self::parse_lock_file_config(&mut env),
         };
 
-        cfg
+        let license = parse_license(cfg.license_path.clone());
+        let me = Self { cfg, env, license };
+        me.init_storage_backend()
+            .expect("Failed to initialize storage backend");
+        me
     }
 
     fn normalize_url_path(api_base_path: &mut String) {
@@ -158,49 +168,27 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         }
     }
 
+    pub fn build_lock_file(&self) -> Result<BoxedLockFile, ReductError> {
+        let data_path = self.get_data_path()?;
+
+        if !self.cfg.lock_file_config.enabled {
+            return Ok(LockFileBuilder::new().build());
+        }
+
+        let lock_file = LockFileBuilder::new()
+            .with_path(&data_path.join(".lock"))
+            .with_failure_action(self.cfg.lock_file_config.failure_action.clone())
+            .with_timeout(self.cfg.lock_file_config.timeout.clone())
+            .build();
+
+        Ok(lock_file)
+    }
+
     pub fn build(&self) -> Result<Components, ReductError> {
-        // Initialize storage backend
-        let mut backend_builder = Backend::builder()
-            .backend_type(self.cfg.cs_config.backend_type.clone())
-            .local_data_path(self.cfg.data_path.clone())
-            .cache_size(self.cfg.cs_config.cache_size);
+        let data_path = self.get_data_path()?;
 
-        if let Some(bucket) = &self.cfg.cs_config.bucket {
-            backend_builder = backend_builder.remote_bucket(bucket);
-        }
-
-        if let Some(region) = &self.cfg.cs_config.region {
-            backend_builder = backend_builder.remote_region(region);
-        }
-
-        if let Some(endpoint) = &self.cfg.cs_config.endpoint {
-            backend_builder = backend_builder.remote_endpoint(endpoint);
-        }
-
-        if let Some(access_key) = &self.cfg.cs_config.access_key {
-            backend_builder = backend_builder.remote_access_key(access_key);
-        }
-
-        if let Some(secret_key) = &self.cfg.cs_config.secret_key {
-            backend_builder = backend_builder.remote_secret_key(secret_key);
-        }
-
-        if let Some(cache_path) = &self.cfg.cs_config.cache_path {
-            backend_builder = backend_builder.remote_cache_path(cache_path.clone());
-        }
-
-        FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
-            internal_server_error!(
-                "Failed to initialize storage backend at {}: {}",
-                self.cfg.data_path.to_str().unwrap(),
-                e
-            )
-        })?);
-
-        FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
-
-        let storage = Arc::new(self.provision_buckets());
-        let token_repo = self.provision_tokens(storage.data_path());
+        let storage = Arc::new(self.provision_buckets(&data_path));
+        let token_repo = self.provision_tokens(&data_path);
         let console = create_asset_manager(load_console());
         let select_ext = create_asset_manager(load_select_ext());
         let ros_ext = create_asset_manager(load_ros_ext());
@@ -241,6 +229,65 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             )),
             cfg: self.cfg.clone(),
         })
+    }
+
+    fn get_data_path(&self) -> Result<PathBuf, ReductError> {
+        let data_path = if self.cfg.cs_config.backend_type == BackendType::Filesystem {
+            self.cfg.data_path.clone()
+        } else {
+            self.cfg
+                .cs_config
+                .cache_path
+                .clone()
+                .ok_or(internal_server_error!(
+                    "Cache path must be set for remote storage"
+                ))?
+        };
+        Ok(data_path)
+    }
+
+    fn init_storage_backend(&self) -> Result<(), ReductError> {
+        // Initialize storage backend
+        let mut backend_builder = Backend::builder()
+            .backend_type(self.cfg.cs_config.backend_type.clone())
+            .local_data_path(self.cfg.data_path.clone())
+            .cache_size(self.cfg.cs_config.cache_size);
+
+        if let Some(bucket) = &self.cfg.cs_config.bucket {
+            backend_builder = backend_builder.remote_bucket(bucket);
+        }
+
+        if let Some(region) = &self.cfg.cs_config.region {
+            backend_builder = backend_builder.remote_region(region);
+        }
+
+        if let Some(endpoint) = &self.cfg.cs_config.endpoint {
+            backend_builder = backend_builder.remote_endpoint(endpoint);
+        }
+
+        if let Some(access_key) = &self.cfg.cs_config.access_key {
+            backend_builder = backend_builder.remote_access_key(access_key);
+        }
+
+        if let Some(secret_key) = &self.cfg.cs_config.secret_key {
+            backend_builder = backend_builder.remote_secret_key(secret_key);
+        }
+
+        if let Some(cache_path) = &self.cfg.cs_config.cache_path {
+            backend_builder = backend_builder.remote_cache_path(cache_path.clone());
+        }
+
+        FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
+            internal_server_error!(
+                "Failed to initialize storage backend at {}: {}",
+                self.cfg.data_path.to_str().unwrap(),
+                e
+            )
+        })?);
+
+        FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
+
+        Ok(())
     }
 
     fn parse_cors_allow_origin(env: &mut Env<EnvGetter>) -> Vec<String> {
@@ -619,6 +666,36 @@ mod tests {
         env_getter.expect_all().returning(|| BTreeMap::new());
         let parser = CfgParser::from_env(env_getter);
         parser.build().unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_build_lock_file_disabled(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let parser = CfgParser::from_env(env_getter);
+
+        let lock_file = parser.build_lock_file().unwrap();
+        assert!(lock_file.is_locked().await);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_build_lock_file_enabled(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_LOCK_FILE_ENABLED"))
+            .return_const(Ok("true".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let parser = CfgParser::from_env(env_getter);
+
+        let lock_file = parser.build_lock_file().unwrap();
+        assert!(lock_file.is_waiting().await);
     }
 
     #[fixture]

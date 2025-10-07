@@ -1,9 +1,7 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
-use crate::api::middleware::check_permissions;
-use crate::api::Components;
 use crate::api::HttpError;
 use crate::auth::policy::ReadAccessPolicy;
 use reduct_base::error::ReductError;
@@ -15,6 +13,7 @@ use axum_extra::headers::HeaderMap;
 
 use crate::api::entry::common::check_and_extract_ts_or_query_id;
 use crate::api::utils::{make_headers_from_reader, RecordStream};
+use crate::api::StateKeeper;
 use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
@@ -26,7 +25,7 @@ use tokio::sync::{Mutex, RwLock as AsyncRwLock};
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
 pub(super) async fn read_record(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     headers: HeaderMap,
@@ -34,14 +33,14 @@ pub(super) async fn read_record(
 ) -> Result<impl IntoResponse, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
-    check_permissions(
-        &components,
-        &headers,
-        ReadAccessPolicy {
-            bucket: &bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            ReadAccessPolicy {
+                bucket: bucket_name,
+            },
+        )
+        .await?;
 
     let entry = components
         .storage
@@ -108,7 +107,7 @@ mod tests {
     use super::*;
 
     use crate::api::entry::tests::query;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
     use axum::body::to_bytes;
     use bytes::Bytes;
 
@@ -121,15 +120,15 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_ts(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] body: String,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let response = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
@@ -158,16 +157,16 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_query(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] body: String,
     ) {
-        let components = components.await;
-        let query_id = query(&path_to_entry_1, Arc::clone(&components)).await;
+        let keeper = keeper.await;
+        let query_id = query(&path_to_entry_1, keeper.clone()).await;
         let response = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "q".to_string(),
@@ -194,17 +193,17 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_bucket_not_found(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entru-1".to_string()),
         ]));
 
         let err = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
@@ -223,13 +222,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_ts_not_found(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let err = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
@@ -248,13 +247,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_bad_ts(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let err = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
@@ -279,13 +278,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_query_not_found(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let err = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![("q".to_string(), "1".to_string())])),
             headers,

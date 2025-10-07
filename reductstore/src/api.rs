@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 //
 mod bucket;
@@ -13,14 +13,16 @@ mod utils;
 
 use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;
+use crate::auth::policy::Policy;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::cfg::Cfg;
 use crate::core::cache::Cache;
 use crate::ext::ext_repository::ManageExtensions;
+use crate::lock_file::BoxedLockFile;
 use crate::replication::ManageReplications;
-use crate::storage::storage::Storage;
-use axum::http::StatusCode;
+use crate::storage::engine::StorageEngine;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
 use axum::{middleware::from_fn, Router};
@@ -30,8 +32,10 @@ use hyper::http::HeaderValue;
 use log::{error, warn};
 use middleware::{default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
+use reduct_base::error::ReductError;
 use reduct_base::error::ReductError as BaseHttpError;
 use reduct_base::io::BoxedReadRecord;
+use reduct_base::service_unavailable;
 use reduct_macros::Twin;
 use replication::create_replication_api_routes;
 use serde::de::StdError;
@@ -39,11 +43,12 @@ use server::create_server_api_routes;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use token::create_token_api_routes;
+use tokio::sync::mpsc::Receiver;
 use tokio::sync::{Mutex, RwLock};
 use tower_http::cors::{Any, CorsLayer};
 
 pub struct Components {
-    pub storage: Arc<Storage>,
+    pub storage: Arc<StorageEngine>,
     pub(crate) auth: TokenAuthorization,
     pub(crate) token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub(crate) console: Box<dyn ManageStaticAsset + Send + Sync>,
@@ -52,6 +57,71 @@ pub struct Components {
     pub(crate) query_link_cache: RwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
 
     pub(crate) cfg: Cfg,
+}
+
+pub struct StateKeeper {
+    rx: RwLock<Receiver<Components>>,
+    components: RwLock<Option<Arc<Components>>>,
+    lock_file: Arc<BoxedLockFile>,
+}
+
+impl StateKeeper {
+    pub fn new(lock_file: Arc<BoxedLockFile>, rx: Receiver<Components>) -> Self {
+        StateKeeper {
+            rx: RwLock::new(rx),
+            components: RwLock::new(None),
+            lock_file,
+        }
+    }
+
+    pub async fn get_with_permissions<P>(
+        &self,
+        headers: &HeaderMap,
+        policy: P,
+    ) -> Result<Arc<Components>, HttpError>
+    where
+        P: Policy,
+    {
+        let components = self.wait_components().await?;
+
+        components.auth.check(
+            headers
+                .get("Authorization")
+                .map(|header| header.to_str().unwrap_or("")),
+            components.token_repo.read().await.as_ref(),
+            policy,
+        )?;
+
+        Ok(components)
+    }
+
+    async fn wait_components(&self) -> Result<Arc<Components>, HttpError> {
+        if !self.lock_file.is_locked().await {
+            return Err(
+                service_unavailable!("The server is starting up, please try again later").into(),
+            );
+        }
+
+        {
+            let mut lock = self.components.write().await;
+            // it's important to check again after acquiring the lock and lock must be exclusive to avoid rice conditions
+            if lock.is_none() {
+                let components = self
+                    .rx
+                    .write()
+                    .await
+                    .recv()
+                    .await
+                    .expect("Failed to receive components from channel");
+                lock.replace(Arc::new(components));
+            }
+        }
+        Ok(self.components.read().await.as_ref().unwrap().clone())
+    }
+
+    pub async fn get_anonymous(&self) -> Result<Arc<Components>, HttpError> {
+        self.wait_components().await
+    }
 }
 
 #[derive(Twin, PartialEq)]
@@ -124,56 +194,94 @@ impl From<serde_json::Error> for HttpError {
     }
 }
 
-pub fn create_axum_app(cfg: &Cfg, components: Arc<Components>) -> Router {
-    let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
-    let cors = configure_cors(&cfg.cors_allow_origin);
-
-    let app = Router::new()
-        // Server API
-        .nest(
-            &format!("{}api/v1", cfg.api_base_path),
-            create_server_api_routes(),
-        )
-        // Token API
-        .nest(
-            &format!("{}api/v1/tokens", cfg.api_base_path),
-            create_token_api_routes(),
-        )
-        // Bucket API + Entry API
-        .nest(&format!("{}api/v1/b", cfg.api_base_path), b_route)
-        // Replication API
-        .nest(
-            &format!("{}api/v1/replications", cfg.api_base_path),
-            create_replication_api_routes(),
-        )
-        .nest(
-            &format!("{}api/v1/links", cfg.api_base_path),
-            links::create_query_link_api_routes(),
-        )
-        // UI
-        .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
-        .fallback(get(show_ui))
-        .layer(from_fn(default_headers))
-        .layer(from_fn(print_statuses))
-        .layer(cors)
-        .with_state(components);
-    app
+pub struct AxumAppBuilder {
+    rx: Option<Receiver<Components>>,
+    cfg: Option<Cfg>,
+    lc: Option<Arc<BoxedLockFile>>,
 }
 
-fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
-    let cors_layer = CorsLayer::new()
-        .allow_methods(Any)
-        .allow_headers(Any)
-        .expose_headers(Any);
+impl AxumAppBuilder {
+    pub fn new() -> Self {
+        AxumAppBuilder {
+            rx: None,
+            cfg: None,
+            lc: None,
+        }
+    }
 
-    if cors_allow_origin.contains(&"*".to_string()) {
-        cors_layer.allow_origin(Any)
-    } else {
-        let parsed_origins: Vec<HeaderValue> = cors_allow_origin
-            .iter()
-            .filter_map(|origin| origin.parse().ok())
-            .collect();
-        cors_layer.allow_origin(parsed_origins)
+    pub fn with_component_receiver(mut self, components: Receiver<Components>) -> Self {
+        self.rx = Some(components);
+        self
+    }
+
+    pub fn with_lock_file(mut self, lock_file: Arc<BoxedLockFile>) -> Self {
+        self.lc = Some(lock_file);
+        self
+    }
+
+    pub fn with_cfg(mut self, cfg: Cfg) -> Self {
+        self.cfg = Some(cfg);
+        self
+    }
+
+    pub fn build(self) -> Router {
+        if self.rx.is_none() || self.cfg.is_none() {
+            panic!("Components and Cfg must be set before building the app");
+        }
+
+        let cfg = self.cfg.unwrap();
+        let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
+        let cors = Self::configure_cors(&cfg.cors_allow_origin);
+
+        Router::new()
+            // Server API
+            .nest(
+                &format!("{}api/v1", cfg.api_base_path),
+                create_server_api_routes(),
+            )
+            // Token API
+            .nest(
+                &format!("{}api/v1/tokens", cfg.api_base_path),
+                create_token_api_routes(),
+            )
+            // Bucket API + Entry API
+            .nest(&format!("{}api/v1/b", cfg.api_base_path), b_route)
+            // Replication API
+            .nest(
+                &format!("{}api/v1/replications", cfg.api_base_path),
+                create_replication_api_routes(),
+            )
+            .nest(
+                &format!("{}api/v1/links", cfg.api_base_path),
+                links::create_query_link_api_routes(),
+            )
+            // UI
+            .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
+            .fallback(get(show_ui))
+            .layer(from_fn(default_headers))
+            .layer(from_fn(print_statuses))
+            .layer(cors)
+            .with_state(Arc::new(StateKeeper::new(
+                self.lc.expect("Lock file must be set"),
+                self.rx.expect("Components must be set"),
+            )))
+    }
+
+    fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
+        let cors_layer = CorsLayer::new()
+            .allow_methods(Any)
+            .allow_headers(Any)
+            .expose_headers(Any);
+
+        if cors_allow_origin.contains(&"*".to_string()) {
+            cors_layer.allow_origin(Any)
+        } else {
+            let parsed_origins: Vec<HeaderValue> = cors_allow_origin
+                .iter()
+                .filter_map(|origin| origin.parse().ok())
+                .collect();
+            cors_layer.allow_origin(parsed_origins)
+        }
     }
 }
 
@@ -185,6 +293,7 @@ mod tests {
     use crate::backend::Backend;
     use crate::core::file_cache::FILE_CACHE;
     use crate::ext::ext_repository::create_ext_repository;
+    use crate::lock_file::{LockFile, LockFileBuilder};
     use crate::replication::create_replication_repo;
     use axum::body::Body;
     use axum::extract::Path;
@@ -272,8 +381,70 @@ mod tests {
         }
     }
 
+    mod state_keeper {
+        use super::*;
+        use crate::auth::policy::FullAccessPolicy;
+        use axum::body::to_bytes;
+        use rstest::rstest;
+        use tokio;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_anonymous(#[future] keeper: Arc<StateKeeper>) {
+            let keeper = keeper.await;
+            let components = keeper.get_anonymous().await.unwrap();
+            assert!(components.storage.info().is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_with_permissions_ok(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let keeper = keeper.await;
+            let components = keeper
+                .get_with_permissions(&headers, FullAccessPolicy {})
+                .await
+                .unwrap();
+            assert!(components.storage.info().is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_with_permissions_error(#[future] keeper: Arc<StateKeeper>) {
+            let mut headers = HeaderMap::new();
+            headers.typed_insert(Authorization::bearer("bad-token").unwrap());
+
+            let keeper = keeper.await;
+            let err = keeper
+                .get_with_permissions(&headers, FullAccessPolicy {})
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                HttpError::new(ErrorCode::Unauthorized, "Invalid token")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_wait_components_locked(#[future] waiting_keeper: Arc<StateKeeper>) {
+            let keeper = waiting_keeper.await;
+            let err = keeper.get_anonymous().await.err().unwrap();
+            assert_eq!(
+                err,
+                HttpError::new(
+                    ErrorCode::ServiceUnavailable,
+                    "The server is starting up, please try again later"
+                )
+            );
+        }
+    }
+
     #[fixture]
-    pub(crate) async fn components() -> Arc<Components> {
+    pub(crate) async fn keeper() -> Arc<StateKeeper> {
         let cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
             ..Cfg::default()
@@ -286,7 +457,10 @@ mod tests {
                 .unwrap(),
         );
 
-        let storage = Storage::load(cfg.clone(), None);
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg.clone())
+            .build();
         let mut token_repo = create_token_repository(cfg.data_path.clone(), "init-token");
 
         storage
@@ -357,7 +531,20 @@ mod tests {
             query_link_cache: RwLock::new(Cache::new(8, Duration::from_secs(60))),
         };
 
-        Arc::new(components)
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.send(components).await.unwrap();
+
+        Arc::new(StateKeeper::new(
+            Arc::new(LockFileBuilder::new().build()),
+            rx,
+        ))
+    }
+
+    #[fixture]
+    pub(crate) async fn waiting_keeper(#[future] keeper: Arc<StateKeeper>) -> Arc<StateKeeper> {
+        let mut keeper = Arc::try_unwrap(keeper.await).ok().unwrap();
+        keeper.lock_file = Arc::new(Box::new(WaitingLockFile {}));
+        Arc::new(keeper)
     }
 
     #[fixture]
@@ -379,5 +566,24 @@ mod tests {
     #[fixture]
     pub async fn empty_body() -> Body {
         Body::empty()
+    }
+
+    struct WaitingLockFile {}
+
+    #[async_trait::async_trait]
+    impl LockFile for WaitingLockFile {
+        async fn is_locked(&self) -> bool {
+            false
+        }
+
+        async fn is_failed(&self) -> bool {
+            false
+        }
+
+        async fn is_waiting(&self) -> bool {
+            true
+        }
+
+        fn release(&self) {}
     }
 }

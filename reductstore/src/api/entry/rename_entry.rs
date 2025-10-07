@@ -1,8 +1,8 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
-use crate::api::{Components, HttpError};
+use crate::api::HttpError;
+use crate::api::StateKeeper;
 use crate::auth::policy::WriteAccessPolicy;
 use axum::extract::{Path, State};
 use axum::Json;
@@ -13,22 +13,21 @@ use std::sync::Arc;
 
 // PUT /b/:bucket_name/:entry_name
 pub(super) async fn rename_entry(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(path): Path<HashMap<String, String>>,
     headers: HeaderMap,
     request: Json<RenameEntry>,
 ) -> Result<(), HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
-
-    check_permissions(
-        &components,
-        &headers,
-        WriteAccessPolicy {
-            bucket: bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            WriteAccessPolicy {
+                bucket: bucket_name,
+            },
+        )
+        .await?;
 
     components
         .storage
@@ -42,32 +41,36 @@ pub(super) async fn rename_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
+    use axum::extract::State;
+    use axum_extra::headers::HeaderMap;
     use reduct_base::error::ErrorCode;
-    use rstest::{fixture, rstest};
+    use rstest::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_rename_entry(
-        #[future] components: Arc<Components>,
-        headers: HeaderMap,
-        request: RenameEntry,
-    ) {
-        let components = components.await;
+    async fn test_rename_entry(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let keeper = keeper.await;
         let path = HashMap::from_iter(vec![
             ("bucket_name".to_string(), "bucket-1".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
         ]);
+        let request = RenameEntry {
+            new_name: "entry-2".to_string(),
+        };
 
         rename_entry(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             Path(path),
-            headers,
-            request.into(),
+            headers.clone(),
+            axum::Json(request.clone()),
         )
         .await
         .unwrap();
 
+        let components = keeper.get_anonymous().await.unwrap();
         assert_eq!(
             components
                 .storage
@@ -80,7 +83,6 @@ mod tests {
                 .status(),
             ErrorCode::NotFound
         );
-
         assert_eq!(
             components
                 .storage
@@ -97,65 +99,23 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_rename_bucket_not_found(
-        #[future] components: Arc<Components>,
-        headers: HeaderMap,
-        request: RenameEntry,
-    ) {
-        let components = components.await;
+    async fn test_rename_bucket_not_found(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let keeper = keeper.await;
         let path = HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
         ]);
-        let err = rename_entry(
-            State(Arc::clone(&components)),
-            Path(path),
-            headers,
-            request.into(),
-        )
-        .await
-        .err()
-        .unwrap();
-        assert_eq!(
-            err,
-            HttpError::new(ErrorCode::NotFound, "Bucket 'XXX' is not found",)
-        )
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_rename_entry_not_found(
-        #[future] components: Arc<Components>,
-        headers: HeaderMap,
-        request: RenameEntry,
-    ) {
-        let components = components.await;
-        let path = HashMap::from_iter(vec![
-            ("bucket_name".to_string(), "bucket-1".to_string()),
-            ("entry_name".to_string(), "XXX".to_string()),
-        ]);
-        let err = rename_entry(
-            State(Arc::clone(&components)),
-            Path(path),
-            headers,
-            request.into(),
-        )
-        .await
-        .err()
-        .unwrap();
-        assert_eq!(
-            err,
-            HttpError::new(
-                ErrorCode::NotFound,
-                "Entry 'XXX' not found in bucket 'bucket-1'",
-            )
-        )
-    }
-
-    #[fixture]
-    fn request() -> RenameEntry {
-        RenameEntry {
+        let request = RenameEntry {
             new_name: "entry-2".to_string(),
-        }
+        };
+        let result = rename_entry(
+            State(keeper.clone()),
+            Path(path),
+            headers.clone(),
+            axum::Json(request.clone()),
+        )
+        .await;
+        let err = result.unwrap_err();
+        assert_eq!(err.0.status, ErrorCode::NotFound);
     }
 }

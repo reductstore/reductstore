@@ -1,9 +1,8 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
 use crate::api::replication::ReplicationSettingsAxum;
-use crate::api::{Components, HttpError};
+use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
@@ -11,13 +10,14 @@ use std::sync::Arc;
 
 // PUT /api/v1/replications/:replication_name
 pub(super) async fn update_replication(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(replication_name): Path<String>,
     headers: HeaderMap,
     settings: ReplicationSettingsAxum,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
-
+    let components = keeper
+        .get_with_permissions(&headers, FullAccessPolicy {})
+        .await?;
     components
         .replication_repo
         .write()
@@ -30,7 +30,7 @@ pub(super) async fn update_replication(
 mod tests {
     use super::*;
     use crate::api::replication::tests::settings;
-    use crate::api::tests::{components as base_components, headers};
+    use crate::api::tests::{headers, keeper};
     use reduct_base::msg::replication_api::ReplicationSettings;
     use rstest::{fixture, rstest};
     use std::sync::Arc;
@@ -38,15 +38,16 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_replication_ok(
-        #[future] components: Arc<Components>,
+        #[future] keeper_with_bucket: Arc<StateKeeper>,
         headers: HeaderMap,
         mut settings: ReplicationSettings,
     ) {
-        let components = components.await;
+        let keeper = keeper_with_bucket.await;
+        let components = keeper.get_anonymous().await.unwrap();
         settings.dst_bucket = "bucket-3".to_string();
 
         update_replication(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             Path("test".to_string()),
             headers,
             ReplicationSettingsAxum::from(settings),
@@ -70,15 +71,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_replication_error(
-        #[future] components: Arc<Components>,
+        #[future] keeper_with_bucket: Arc<StateKeeper>,
         headers: HeaderMap,
         mut settings: ReplicationSettings,
     ) {
-        let components = components.await;
         settings.dst_host = "BROKEN URL".to_string();
 
         let result = update_replication(
-            State(Arc::clone(&components)),
+            State(keeper_with_bucket.await),
             Path("test".to_string()),
             headers,
             ReplicationSettingsAxum::from(settings),
@@ -89,17 +89,18 @@ mod tests {
     }
 
     #[fixture]
-    async fn components(
-        #[future] base_components: Arc<Components>,
+    async fn keeper_with_bucket(
+        #[future] keeper: Arc<StateKeeper>,
         settings: ReplicationSettings,
-    ) -> Arc<Components> {
-        let components = base_components.await;
+    ) -> Arc<StateKeeper> {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         components
             .replication_repo
             .write()
             .await
             .create_replication("test", settings)
             .unwrap();
-        components
+        keeper
     }
 }

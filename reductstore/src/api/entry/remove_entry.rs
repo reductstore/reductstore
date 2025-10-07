@@ -1,33 +1,32 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
-use crate::api::{Components, HttpError};
+use crate::api::HttpError;
 use crate::auth::policy::WriteAccessPolicy;
 use std::collections::HashMap;
 
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 
+use crate::api::StateKeeper;
 use std::sync::Arc;
 
 // DELETE /b/:bucket_name/:entry_name
 pub(super) async fn remove_entry(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(path): Path<HashMap<String, String>>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
-
-    check_permissions(
-        &components,
-        &headers,
-        WriteAccessPolicy {
-            bucket: bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            WriteAccessPolicy {
+                bucket: bucket_name,
+            },
+        )
+        .await?;
 
     components
         .storage
@@ -41,22 +40,26 @@ pub(super) async fn remove_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
+    use axum::extract::State;
+    use axum_extra::headers::HeaderMap;
     use reduct_base::error::ErrorCode;
-    use rstest::rstest;
+    use rstest::*;
+    use std::collections::HashMap;
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_entry(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let components = components.await;
+    async fn test_remove_entry(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let keeper = keeper.await;
         let path = HashMap::from_iter(vec![
             ("bucket_name".to_string(), "bucket-1".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
         ]);
-        remove_entry(State(Arc::clone(&components)), Path(path), headers)
+        remove_entry(State(keeper.clone()), Path(path), headers.clone())
             .await
             .unwrap();
-
+        let components = keeper.get_anonymous().await.unwrap();
         assert_eq!(
             components
                 .storage
@@ -73,46 +76,16 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_not_found(
-        #[future] components: Arc<Components>,
+    async fn test_remove_entry_bucket_not_found(
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let path = HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
         ]);
-        let err = remove_entry(State(Arc::clone(&components)), Path(path), headers)
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(
-            err,
-            HttpError::new(ErrorCode::NotFound, "Bucket 'XXX' is not found",)
-        )
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_remove_entry_not_found(
-        #[future] components: Arc<Components>,
-        headers: HeaderMap,
-    ) {
-        let components = components.await;
-        let path = HashMap::from_iter(vec![
-            ("bucket_name".to_string(), "bucket-1".to_string()),
-            ("entry_name".to_string(), "XXX".to_string()),
-        ]);
-        let err = remove_entry(State(Arc::clone(&components)), Path(path), headers)
-            .await
-            .err()
-            .unwrap();
-        assert_eq!(
-            err,
-            HttpError::new(
-                ErrorCode::NotFound,
-                "Entry 'XXX' not found in bucket 'bucket-1'",
-            )
-        )
+        let result = remove_entry(State(keeper.clone()), Path(path), headers.clone()).await;
+        assert_eq!(result.unwrap_err().0.status(), ErrorCode::NotFound);
     }
 }

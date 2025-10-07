@@ -1,20 +1,37 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::net::{IpAddr, SocketAddr};
-
 use axum_server::tls_rustls::RustlsConfig;
+use std::net::{IpAddr, SocketAddr};
 
 use axum_server::Handle;
 use log::info;
 use reduct_base::logger::Logger;
-use reductstore::api::create_axum_app;
+use reductstore::api::AxumAppBuilder;
 use reductstore::cfg::CfgParser;
 use reductstore::core::env::StdEnvGetter;
-use reductstore::storage::storage::Storage;
+use reductstore::lock_file::BoxedLockFile;
+use reductstore::storage::engine::StorageEngine;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
+use tokio::sync::mpsc;
+
+#[derive(Clone)]
+struct ContextGuard {
+    server_handle: Handle,
+    storage: Arc<StorageEngine>,
+    lock_file: Arc<BoxedLockFile>,
+}
+
+impl ContextGuard {
+    fn shutdown(self) {
+        self.server_handle
+            .graceful_shutdown(Some(Duration::from_secs(5)));
+        self.storage.sync_fs().expect("Failed to shutdown storage");
+        self.lock_file.release();
+    }
+}
 
 async fn launch_server() {
     let version: &str = env!("CARGO_PKG_VERSION");
@@ -37,12 +54,7 @@ async fn launch_server() {
     Logger::init(&parser.cfg.log_level);
     info!("Configuration: \n {}", parser);
 
-    let components = parser.build().expect("Failed to build components");
-    let info = components
-        .storage
-        .info()
-        .expect("Failed to get server info");
-    if let Some(license) = &info.license {
+    if let Some(license) = &parser.license {
         info!("License Information: {}", license);
     } else {
         info!(
@@ -51,22 +63,52 @@ async fn launch_server() {
         );
     }
 
-    let cfg = parser.cfg;
-    info!("Public URL: {}", cfg.public_url);
-
     let handle = Handle::new();
-    tokio::spawn(shutdown_ctrl_c(handle.clone(), components.storage.clone()));
-    #[cfg(unix)]
-    tokio::spawn(shutdown_signal(handle.clone(), components.storage.clone()));
-    #[cfg(test)]
-    tokio::spawn(tests::shutdown_server(handle.clone()));
+    let lock_file = Arc::new(parser.build_lock_file().unwrap());
+
+    // Run initialization in a separate thread to avoid blocking HTTP server startup
+    // if waiting for the lock file.
+    let config_lock = Arc::clone(&lock_file);
+    let signal_handle = handle.clone();
+    let cfg = parser.cfg.clone();
+    let (tx, rx) = mpsc::channel(1);
+    tokio::spawn(async move {
+        while config_lock.is_waiting().await {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+
+        if config_lock.is_failed().await {
+            panic!("Another ReductStore instance is holding the lock. Exiting.");
+        }
+
+        let components = parser.build().unwrap();
+        let ctx = ContextGuard {
+            server_handle: signal_handle.clone(),
+            storage: components.storage.clone(),
+            lock_file: config_lock.clone(),
+        };
+
+        tokio::spawn(shutdown_ctrl_c(ctx.clone()));
+        #[cfg(unix)]
+        tokio::spawn(shutdown_signal(ctx));
+        #[cfg(test)]
+        tokio::spawn(tests::shutdown_server(signal_handle.clone()));
+
+        tx.send(components).await.unwrap();
+    });
+
+    info!("Public URL: {}", cfg.public_url);
 
     let addr = SocketAddr::new(
         IpAddr::from_str(&cfg.host).expect("Invalid host address"),
-        cfg.port as u16,
+        cfg.port,
     );
 
-    let app = create_axum_app(&cfg, Arc::new(components));
+    let app = AxumAppBuilder::new()
+        .with_cfg(cfg.clone())
+        .with_component_receiver(rx)
+        .with_lock_file(lock_file)
+        .build();
 
     // Ensure that the process exits with a non-zero exit code on panic.
     let default_panic = std::panic::take_hook();
@@ -117,25 +159,19 @@ async fn main() {
     launch_server().await;
 }
 
-async fn shutdown_ctrl_c(handle: Handle, storage: Arc<Storage>) {
+async fn shutdown_ctrl_c(ctx: ContextGuard) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Ctrl-C received, shutting down...");
-    shutdown_app(handle, storage)
+    ctx.shutdown();
 }
 
 #[cfg(unix)]
-async fn shutdown_signal(handle: Handle, storage: Arc<Storage>) {
+async fn shutdown_signal(ctx: ContextGuard) {
     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .unwrap()
         .recv()
         .await;
-    info!("SIGTERM received, shutting down...");
-    shutdown_app(handle, storage);
-}
-
-fn shutdown_app(handle: Handle, storage: Arc<Storage>) {
-    handle.graceful_shutdown(Some(Duration::from_secs(5)));
-    storage.sync_fs().expect("Failed to shutdown storage");
+    ctx.shutdown()
 }
 
 #[cfg(test)]
@@ -232,7 +268,13 @@ mod tests {
         let handle = Handle::new();
         let cfg = CfgParser::from_env(StdEnvGetter::default()); // init file cache
         let storage = cfg.build().unwrap().storage;
-        shutdown_app(handle.clone(), storage.clone());
+        let ctx = ContextGuard {
+            server_handle: handle.clone(),
+            storage,
+            lock_file: Arc::new(cfg.build_lock_file().unwrap()),
+        };
+
+        ctx.shutdown();
     }
 
     async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {

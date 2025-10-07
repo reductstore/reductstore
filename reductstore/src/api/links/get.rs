@@ -2,9 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::links::derive_key_from_secret;
-use crate::api::middleware::check_permissions;
 use crate::api::utils::{make_headers_from_reader, RangeRecordStream, RecordStream};
-use crate::api::{Components, HttpError};
+use crate::api::{Components, HttpError, StateKeeper};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::storage::query::QueryRx;
@@ -32,21 +31,24 @@ use tokio::sync::{Mutex, RwLock};
 
 // GET /api/v1/links/:file_name&ct=...&s=...&i=...&r=...
 pub(super) async fn get(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     header_map: HeaderMap,
     Path(_file_name): Path<String>, // we need the file_name to have a name when downloading
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<impl IntoResponse, HttpError> {
+    // first anonymous access to decrypt the query
+    let components = keeper.get_anonymous().await?;
     let (record_num, token, query) = decrypt_query(&components, params.clone()).await?;
 
-    check_permissions(
-        &components,
-        &HeaderMap::from_iter([(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap())]),
-        ReadAccessPolicy {
-            bucket: &query.bucket,
-        },
-    )
-    .await?;
+    // then check permissions with the real token
+    let components = keeper
+        .get_with_permissions(
+            &HeaderMap::from_iter([(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap())]),
+            ReadAccessPolicy {
+                bucket: &query.bucket,
+            },
+        )
+        .await?;
 
     let range = if header_map.contains_key("Range") {
         Some(header_map.typed_get::<Range>().unwrap())
@@ -234,7 +236,7 @@ async fn prepare_response(
 mod tests {
     use super::*;
     use crate::api::links::tests::create_query_link;
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
     use crate::storage::entry::io::record_reader::tests::MockRecord;
     use axum::body::to_bytes;
     use chrono::Utc;
@@ -245,12 +247,13 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_query_link(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let components = components.await;
+    async fn test_get_query_link(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
 
         let link = create_query_link(
             headers,
-            components.clone(),
+            keeper.clone(),
             QueryEntry {
                 query_type: QueryType::Query,
                 ..Default::default()
@@ -267,7 +270,7 @@ mod tests {
                 .into_owned()
                 .collect();
         let response = get(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             HeaderMap::new(),
             Path("file.txt".to_string()),
             Query(params),
@@ -305,11 +308,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_query_link_cached(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let components = components.await;
+    async fn test_get_query_link_cached(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         let link = create_query_link(
             headers,
-            components.clone(),
+            keeper.clone(),
             QueryEntry {
                 query_type: QueryType::Query,
                 ..Default::default()
@@ -341,7 +345,7 @@ mod tests {
         );
 
         let response = get(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             HeaderMap::new(),
             Path("file.txt".to_string()),
             Query(params.clone()),
@@ -357,13 +361,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_get_query_link_record_out_of_range(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let link = create_query_link(
             headers,
-            components.clone(),
+            keeper.clone(),
             QueryEntry {
                 query_type: QueryType::Query,
                 ..Default::default()
@@ -381,7 +385,7 @@ mod tests {
                 .collect();
         params.insert("r".to_string(), "10".to_string()); // out of range
         let result = get(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             HeaderMap::new(),
             Path("file.txt".to_string()),
             Query(params),
@@ -395,11 +399,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_expire_at_in_past(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let components = components.await;
+    async fn test_expire_at_in_past(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let keeper = keeper.await;
         let link = create_query_link(
             headers,
-            components.clone(),
+            keeper.clone(),
             QueryEntry {
                 query_type: QueryType::Query,
                 ..Default::default()
@@ -415,7 +419,7 @@ mod tests {
                 .into_owned()
                 .collect();
         let err = get(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             HeaderMap::new(),
             Path("file.txt".to_string()),
             Query(params),
@@ -428,15 +432,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_query_link_range(
-        #[future] components: Arc<Components>,
-        mut headers: HeaderMap,
-    ) {
-        let components = components.await;
-
+    async fn test_get_query_link_range(#[future] keeper: Arc<StateKeeper>, mut headers: HeaderMap) {
+        let keeper = keeper.await;
         let link = create_query_link(
             headers.clone(),
-            components.clone(),
+            keeper.clone(),
             QueryEntry {
                 query_type: QueryType::Query,
                 ..Default::default()
@@ -454,7 +454,7 @@ mod tests {
                 .collect();
         headers.typed_insert(Range::bytes(0..3).unwrap()); // Request first
         let response = get(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             Path("file.txt".to_string()),
             Query(params),
@@ -481,16 +481,16 @@ mod tests {
         #[case("n", "XXX", "Invalid base64 in 'n' parameter")]
         #[tokio::test]
         async fn test_get_query_link_invalid_base64(
-            #[future] components: Arc<Components>,
+            #[future] keeper: Arc<StateKeeper>,
             headers: HeaderMap,
             #[case] key: &str,
             #[case] value: &str,
             #[case] _error_msg: &str,
         ) {
-            let components = components.await;
+            let keeper = keeper.await;
             let link = create_query_link(
                 headers,
-                components.clone(),
+                keeper.clone(),
                 QueryEntry {
                     query_type: QueryType::Query,
                     ..Default::default()
@@ -510,7 +510,7 @@ mod tests {
             let mut modified_params = params.clone();
             modified_params.insert(key.to_string(), value.to_string());
             let result = get(
-                State(Arc::clone(&components)),
+                State(Arc::clone(&keeper)),
                 HeaderMap::new(),
                 Path("file.txt".to_string()),
                 Query(modified_params),
@@ -531,14 +531,14 @@ mod tests {
         #[case("n")]
         #[case("i")]
         async fn test_get_query_link_missing_params(
-            #[future] components: Arc<Components>,
+            #[future] keeper: Arc<StateKeeper>,
             headers: HeaderMap,
             #[case] key: &str,
         ) {
-            let components = components.await;
+            let keeper = keeper.await;
             let link = create_query_link(
                 headers,
-                components.clone(),
+                keeper.clone(),
                 QueryEntry {
                     query_type: QueryType::Query,
                     ..Default::default()
@@ -558,7 +558,7 @@ mod tests {
             let mut modified_params = params.clone();
             modified_params.remove(key);
             let result = get(
-                State(Arc::clone(&components)),
+                State(Arc::clone(&keeper)),
                 HeaderMap::new(),
                 Path("file.txt".to_string()),
                 Query(modified_params),
@@ -582,8 +582,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_fetch_query_error(#[future] components: Arc<Components>) {
-            let components = components.await;
+        async fn test_fetch_query_error(#[future] keeper: Arc<StateKeeper>) {
+            let components = keeper.await.get_anonymous().await.unwrap();
             let ext_repo = &components.ext_repo;
             let (tx, rx) = channel(1);
             tx.send(Err(internal_server_error!("Oops"))).await.unwrap();

@@ -616,8 +616,8 @@ mod tests {
     use rstest::{fixture, rstest};
 
     use crate::backend::Backend;
+    use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::RecordWriter;
-    use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use rand::distr::Alphanumeric;
     use rand::{rng, Rng};
     use reduct_base::io::WriteRecord;

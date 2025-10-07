@@ -4,7 +4,7 @@
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use crate::replication::{create_replication_repo, ManageReplications};
-use crate::storage::storage::Storage;
+use crate::storage::engine::StorageEngine;
 use log::{error, info, warn};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::replication_api::ReplicationSettings;
@@ -15,7 +15,7 @@ use std::sync::Arc;
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(in crate::cfg) fn provision_replication_repo(
         &self,
-        storage: Arc<Storage>,
+        storage: Arc<StorageEngine>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
         let mut repo = create_replication_repo(Arc::clone(&storage), self.cfg.clone());
         for (name, settings) in &self.cfg.replications {
@@ -340,14 +340,17 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_replications_update_existing(mut env_with_replications: MockEnvGetter) {
-        let storage = Storage::load(
-            Cfg {
-                data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
+        let cfg = Cfg {
+            data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
 
-                ..Default::default()
-            },
-            None,
-        );
+            ..Default::default()
+        };
+
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build();
+
         storage
             .create_bucket("bucket1", Default::default())
             .unwrap();

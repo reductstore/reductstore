@@ -1,68 +1,57 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
-
-use log::{debug, error, info};
-use std::collections::BTreeMap;
-
-use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use std::time::Instant;
-
-use crate::storage::bucket::Bucket;
-use reduct_base::error::ReductError;
-
-use crate::backend::BackendType;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
 use crate::core::weak::Weak;
+use crate::storage::bucket::Bucket;
+use log::{debug, error, info};
+use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
 use reduct_base::{conflict, not_found, unprocessable_entity};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
+use std::time::Instant;
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
-/// Storage is the main entry point for the storage service.
-pub struct Storage {
-    data_path: PathBuf,
-    start_time: Instant,
-    buckets: Arc<RwLock<BTreeMap<String, Arc<Bucket>>>>,
+
+pub struct StorageEngineBuilder {
+    cfg: Option<Cfg>,
     license: Option<License>,
-    cfg: Cfg,
+    data_path: Option<PathBuf>,
 }
 
-impl Storage {
-    /// Load storage from the file system.
-    /// If the data_path doesn't exist, it will be created.
-    ///
-    /// # Arguments
-    ///
-    /// * `cfg` - The configuration
-    /// * `license` - The license info
-    ///
-    /// # Returns
-    ///
-    /// * `Storage` - The storage instance
-    ///
-    /// # Panics
-    ///
-    /// If the data_path doesn't exist and can't be created, or if a bucket can't be restored.
-    pub fn load(cfg: Cfg, license: Option<License>) -> Storage {
-        let data_path = if cfg.cs_config.backend_type == BackendType::Filesystem {
-            cfg.data_path.clone()
-        } else {
-            cfg.cs_config
-                .cache_path
-                .clone()
-                .expect("Cache path must be set for remote storage")
-        };
+impl StorageEngineBuilder {
+    pub fn with_cfg(mut self, cfg: Cfg) -> Self {
+        self.cfg = Some(cfg);
+        self
+    }
+
+    pub fn with_license(mut self, license: License) -> Self {
+        self.license = Some(license);
+        self
+    }
+
+    pub fn with_data_path(mut self, data_path: PathBuf) -> Self {
+        self.data_path = Some(data_path);
+        self
+    }
+
+    pub fn build(self) -> StorageEngine {
+        let cfg = self.cfg.expect("Config must be set");
+        let data_path = self.data_path.expect("Data path must be set");
+
         if !FILE_CACHE.try_exists(&data_path).unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
             FILE_CACHE.create_dir_all(&data_path).unwrap();
         }
 
         // restore buckets
+        let time = Instant::now();
         let mut buckets = BTreeMap::new();
         for path in FILE_CACHE.read_dir(&data_path).unwrap() {
             if path.is_dir() {
@@ -78,14 +67,33 @@ impl Storage {
             }
         }
 
-        info!("Load {} buckets", buckets.len());
+        info!("Load {} bucket(s) in {:?}", buckets.len(), time.elapsed());
 
-        Storage {
+        StorageEngine {
             data_path,
             start_time: Instant::now(),
             buckets: Arc::new(RwLock::new(buckets)),
-            license,
+            license: self.license,
             cfg,
+        }
+    }
+}
+
+/// Storage is the main entry point for the storage service.
+pub struct StorageEngine {
+    data_path: PathBuf,
+    start_time: Instant,
+    buckets: Arc<RwLock<BTreeMap<String, Arc<Bucket>>>>,
+    license: Option<License>,
+    cfg: Cfg,
+}
+
+impl StorageEngine {
+    pub fn builder() -> StorageEngineBuilder {
+        StorageEngineBuilder {
+            cfg: None,
+            license: None,
+            data_path: None,
         }
     }
 
@@ -312,7 +320,6 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 mod tests {
     use super::*;
     use crate::backend::Backend;
-    use crate::cfg::remote_storage::RemoteStorageConfig;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
@@ -330,12 +337,15 @@ mod tests {
         };
 
         assert!(!path.exists());
-        let _ = Storage::load(cfg.clone(), None);
+        let _ = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build();
         assert!(path.exists(), "Engine creates a folder if it doesn't exist");
     }
 
     #[rstest]
-    fn test_info(storage: Storage) {
+    fn test_info(storage: StorageEngine) {
         sleep(Duration::from_secs(1)); // uptime is 1 second
 
         let info = storage.info().unwrap();
@@ -357,7 +367,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_license_info(storage: Storage) {
+    fn test_license_info(storage: StorageEngine) {
         let license = License {
             licensee: "ReductSoftware UG".to_string(),
             invoice: "2021-0001".to_string(),
@@ -372,7 +382,11 @@ mod tests {
             data_path: storage.data_path.clone(),
             ..Cfg::default()
         };
-        let storage = Storage::load(cfg, Some(license.clone()));
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .with_license(license.clone())
+            .build();
         assert_eq!(storage.info().unwrap().license, Some(license));
     }
 
@@ -380,7 +394,7 @@ mod tests {
         use super::*;
         use crate::storage::bucket::settings::SETTINGS_NAME;
         #[rstest]
-        fn test_recover_from_fs(storage: Storage) {
+        fn test_recover_from_fs(storage: StorageEngine) {
             let bucket_settings = BucketSettings {
                 quota_size: Some(100),
                 quota_type: Some(QuotaType::FIFO),
@@ -420,7 +434,10 @@ mod tests {
                 data_path: storage.data_path.clone(),
                 ..Cfg::default()
             };
-            let storage = Storage::load(cfg, None);
+            let storage = StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg)
+                .build();
             assert_eq!(
                 storage.info().unwrap(),
                 ServerInfo {
@@ -444,7 +461,7 @@ mod tests {
 
         #[rstest]
         #[should_panic(expected = "Failed to load bucket from")]
-        fn test_broken_bucket(storage: Storage) {
+        fn test_broken_bucket(storage: StorageEngine) {
             let bucket_settings = BucketSettings {
                 quota_size: Some(100),
                 quota_type: Some(QuotaType::FIFO),
@@ -463,7 +480,10 @@ mod tests {
                 data_path: storage.data_path.clone(),
                 ..Cfg::default()
             };
-            let storage = Storage::load(cfg, None);
+            let storage = StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg)
+                .build();
             assert_eq!(
                 storage.info().unwrap(),
                 ServerInfo {
@@ -483,7 +503,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_create_bucket(storage: Storage) {
+    fn test_create_bucket(storage: StorageEngine) {
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap()
@@ -492,7 +512,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_create_bucket_with_invalid_name(storage: Storage) {
+    fn test_create_bucket_with_invalid_name(storage: StorageEngine) {
         let result = storage.create_bucket("test$", BucketSettings::default());
         assert_eq!(
             result.err(),
@@ -503,7 +523,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_create_bucket_with_existing_name(storage: Storage) {
+    fn test_create_bucket_with_existing_name(storage: StorageEngine) {
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap()
@@ -518,7 +538,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_get_bucket(storage: Storage) {
+    fn test_get_bucket(storage: StorageEngine) {
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap()
@@ -530,7 +550,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_get_bucket_with_non_existing_name(storage: Storage) {
+    fn test_get_bucket_with_non_existing_name(storage: StorageEngine) {
         let result = storage.get_bucket("test");
         assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
     }
@@ -539,7 +559,7 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_remove_bucket(storage: Storage) {
+        fn test_remove_bucket(storage: StorageEngine) {
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
                 .unwrap()
@@ -554,13 +574,13 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_bucket_with_non_existing_name(storage: Storage) {
+        fn test_remove_bucket_with_non_existing_name(storage: StorageEngine) {
             let result = storage.remove_bucket("test").wait();
             assert_eq!(result, Err(not_found!("Bucket 'test' is not found")));
         }
 
         #[rstest]
-        fn test_remove_bucket_persistent(cfg: Cfg, storage: Storage) {
+        fn test_remove_bucket_persistent(cfg: Cfg, storage: StorageEngine) {
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
                 .unwrap()
@@ -570,7 +590,11 @@ mod tests {
             let result = storage.remove_bucket("test").wait();
             assert_eq!(result, Ok(()));
 
-            let storage = Storage::load(cfg, None);
+            let storage = StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg)
+                .build();
+
             let result = storage.get_bucket("test");
             assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
         }
@@ -583,7 +607,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_bucket(storage: Storage) {
+        async fn test_rename_bucket(storage: StorageEngine) {
             Logger::init("TRACE");
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
@@ -616,13 +640,13 @@ mod tests {
         }
 
         #[rstest]
-        fn test_rename_bucket_with_non_existing_name(storage: Storage) {
+        fn test_rename_bucket_with_non_existing_name(storage: StorageEngine) {
             let result = storage.rename_bucket("test", "new").wait();
             assert_eq!(result, Err(not_found!("Bucket 'test' is not found")));
         }
 
         #[rstest]
-        fn test_rename_bucket_with_existing_name(storage: Storage) {
+        fn test_rename_bucket_with_existing_name(storage: StorageEngine) {
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
                 .unwrap()
@@ -640,7 +664,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_rename_bucket_with_invalid_name(storage: Storage) {
+        fn test_rename_bucket_with_invalid_name(storage: StorageEngine) {
             let result = storage.rename_bucket("test", "new$").wait();
             assert_eq!(
                 result,
@@ -651,7 +675,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_rename_provisioned_bucket(storage: Storage) {
+        fn test_rename_provisioned_bucket(storage: StorageEngine) {
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
                 .unwrap()
@@ -666,7 +690,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_get_bucket_list(storage: Storage) {
+    fn test_get_bucket_list(storage: StorageEngine) {
         storage.create_bucket("test1", Bucket::defaults()).unwrap();
         storage.create_bucket("test2", Bucket::defaults()).unwrap();
 
@@ -677,7 +701,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_provisioned_remove(storage: Storage) {
+    fn test_provisioned_remove(storage: StorageEngine) {
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap()
@@ -690,29 +714,6 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "s3-backend")]
-    #[rstest]
-    #[should_panic(expected = "Cache path must be set for remote storage")]
-    fn test_no_cache_for_s3_backend() {
-        let path = tempdir().unwrap().keep().join("data_path");
-        let cfg = Cfg {
-            data_path: path.clone(),
-            cs_config: RemoteStorageConfig {
-                backend_type: BackendType::S3,
-                cache_path: None,
-                ..Default::default()
-            },
-            ..Cfg::default()
-        };
-        let storage = Storage::load(cfg.clone(), None);
-        let bucket = storage
-            .create_bucket("test", BucketSettings::default())
-            .unwrap()
-            .upgrade_and_unwrap();
-        bucket.set_provisioned(true);
-        let _ = storage.remove_bucket("test").wait().err().unwrap();
-    }
-
     #[fixture]
     fn cfg() -> Cfg {
         Cfg {
@@ -722,13 +723,16 @@ mod tests {
     }
 
     #[fixture]
-    fn storage(cfg: Cfg) -> Storage {
+    fn storage(cfg: Cfg) -> StorageEngine {
         FILE_CACHE.set_storage_backend(
             Backend::builder()
                 .local_data_path(cfg.data_path.clone())
                 .try_build()
                 .unwrap(),
         );
-        Storage::load(cfg, None)
+        StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build()
     }
 }

@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::links::create::create;
-use crate::api::{Components, HttpError};
+use crate::api::{HttpError, StateKeeper};
 use axum::extract::FromRequest;
 use axum::routing::{get, post};
 use axum_extra::headers::HeaderMapExt;
@@ -52,7 +52,7 @@ pub(super) fn derive_key_from_secret(secret: &[u8], salt: &[u8]) -> [u8; 32] {
     key
 }
 
-pub(super) fn create_query_link_api_routes() -> axum::Router<Arc<Components>> {
+pub(super) fn create_query_link_api_routes() -> axum::Router<Arc<StateKeeper>> {
     axum::Router::new()
         .route("/{file_name}", post(create))
         .route("/{file_name}", get(get::get))
@@ -63,7 +63,7 @@ pub(super) mod tests {
     use super::*;
     use crate::api::links::create::create;
     use crate::api::links::{QueryLinkCreateRequestAxum, QueryLinkCreateResponseAxum};
-    use crate::api::{Components, HttpError};
+    use crate::api::HttpError;
     use axum::extract::{Path, State};
     use axum::http::HeaderMap;
     use chrono::{DateTime, Utc};
@@ -134,12 +134,12 @@ pub(super) mod tests {
 
     pub(super) async fn create_query_link(
         headers: HeaderMap,
-        components: Arc<Components>,
+        keeper: Arc<StateKeeper>,
         query: QueryEntry,
         expire_at: Option<DateTime<Utc>>,
     ) -> Result<QueryLinkCreateResponseAxum, HttpError> {
         create(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             Path("file.txt".to_string()),
             QueryLinkCreateRequestAxum(QueryLinkCreateRequest {

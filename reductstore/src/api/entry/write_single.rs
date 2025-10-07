@@ -1,14 +1,14 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
-use crate::api::{Components, HttpError};
+use crate::api::HttpError;
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::{Expect, Header, HeaderMap};
 
 use crate::api::entry::common::{parse_content_length_from_header, parse_timestamp_from_query};
+use crate::api::StateKeeper;
 use crate::replication::Transaction::WriteRecord;
 use crate::replication::TransactionNotification;
 use futures_util::StreamExt;
@@ -22,14 +22,16 @@ use tokio::time::timeout;
 
 // POST /:bucket/:entry?ts=<number>
 pub(super) async fn write_record(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
     body: Body,
 ) -> Result<(), HttpError> {
     let bucket = path.get("bucket_name").unwrap();
-    check_permissions(&components, &headers.clone(), WriteAccessPolicy { bucket }).await?;
+    let components = keeper
+        .get_with_permissions(&headers.clone(), WriteAccessPolicy { bucket })
+        .await?;
 
     let mut stream = body.into_data_stream();
 
@@ -132,7 +134,7 @@ pub(super) async fn write_record(
 mod tests {
     use super::*;
 
-    use crate::api::tests::{components, empty_body, path_to_entry_1};
+    use crate::api::tests::{empty_body, keeper, path_to_entry_1};
 
     use axum_extra::headers::{Authorization, HeaderMapExt};
     use reduct_base::io::ReadRecord;
@@ -142,14 +144,15 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         write_record(
-            State(Arc::clone(&components)),
+            State(keeper),
             headers,
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -184,17 +187,16 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bucket_not_found(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
         ]));
         let err = write_record(
-            State(Arc::clone(&components)),
+            State(keeper.await),
             headers,
             path,
             Query(HashMap::from_iter(vec![(
@@ -213,14 +215,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bad_ts(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
         let err = write_record(
-            State(Arc::clone(&components)),
+            State(keeper.await),
             headers,
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(

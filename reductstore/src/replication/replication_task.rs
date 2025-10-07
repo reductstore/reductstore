@@ -19,7 +19,7 @@ use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
-use crate::storage::storage::Storage;
+use crate::storage::engine::StorageEngine;
 use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;
 use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
@@ -40,7 +40,7 @@ pub struct ReplicationTask {
     io_config: IoConfig,
     filter_map: Arc<RwLock<HashMap<String, TransactionFilter>>>,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
-    storage: Arc<Storage>,
+    storage: Arc<StorageEngine>,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
     stop_flag: Arc<AtomicBool>,
     is_active: Arc<AtomicBool>,
@@ -63,7 +63,7 @@ impl ReplicationTask {
         name: String,
         settings: ReplicationSettings,
         config: Cfg,
-        storage: Arc<Storage>,
+        storage: Arc<StorageEngine>,
     ) -> Self {
         let ReplicationSettings {
             dst_bucket: remote_bucket,
@@ -99,7 +99,7 @@ impl ReplicationTask {
         io_config: IoConfig,
         remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
         filter: Arc<RwLock<HashMap<String, TransactionFilter>>>,
-        storage: Arc<Storage>,
+        storage: Arc<StorageEngine>,
     ) -> Self {
         let log_map = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
         let hourly_diagnostics = Arc::new(RwLock::new(DiagnosticsCounter::new(
@@ -685,7 +685,11 @@ mod tests {
             ..Default::default()
         };
 
-        let storage = Arc::new(Storage::load(cfg, None));
+        let storage = StorageEngine::builder()
+            .with_data_path(path)
+            .with_cfg(cfg)
+            .build();
+        let storage = Arc::new(storage);
 
         let bucket = match storage.get_bucket(&settings.src_bucket) {
             Ok(bucket) => bucket.upgrade().unwrap(),

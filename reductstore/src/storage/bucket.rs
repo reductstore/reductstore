@@ -13,9 +13,9 @@ pub use crate::storage::block_manager::RecordTx;
 use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
+use crate::storage::engine::check_name_convention;
 use crate::storage::entry::{Entry, EntrySettings, RecordReader};
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
-use crate::storage::storage::check_name_convention;
 use log::debug;
 use prost::bytes::Bytes;
 use prost::Message;

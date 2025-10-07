@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod create;
@@ -14,7 +14,7 @@ use crate::api::bucket::head::head_bucket;
 use crate::api::bucket::remove::remove_bucket;
 use crate::api::bucket::rename::rename_bucket;
 use crate::api::bucket::update::update_bucket;
-use crate::api::{Components, HttpError};
+use crate::api::{HttpError, StateKeeper};
 use axum::body::Body;
 use axum::extract::FromRequest;
 use axum::http::Request;
@@ -63,7 +63,7 @@ where
     }
 }
 
-pub(super) fn create_bucket_api_routes() -> axum::Router<Arc<Components>> {
+pub(super) fn create_bucket_api_routes() -> axum::Router<Arc<StateKeeper>> {
     axum::Router::new()
         .route("/{bucket_name}", get(get_bucket))
         .route("/{bucket_name}", head(head_bucket))

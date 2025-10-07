@@ -2,15 +2,14 @@
 // Licensed under the Business Source License 1.1
 
 use axum::body::Body;
-use axum::http::{HeaderMap, Request};
+use axum::http::Request;
 
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error};
 use reduct_base::error::ErrorCode;
 
-use crate::api::{Components, HttpError};
-use crate::auth::policy::Policy;
+use crate::api::HttpError;
 
 pub(super) async fn default_headers(
     request: Request<Body>,
@@ -59,22 +58,4 @@ pub async fn print_statuses(
     }
 
     Ok(response)
-}
-
-pub(crate) async fn check_permissions<P>(
-    components: &Components,
-    headers: &HeaderMap,
-    policy: P,
-) -> Result<(), HttpError>
-where
-    P: Policy,
-{
-    components.auth.check(
-        headers
-            .get("Authorization")
-            .map(|header| header.to_str().unwrap_or("")),
-        components.token_repo.read().await.as_ref(),
-        policy,
-    )?;
-    Ok(())
 }

@@ -2,11 +2,11 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::RemoveQueryInfoAxum;
-use crate::api::middleware::check_permissions;
-use crate::api::{Components, HttpError};
+use crate::api::HttpError;
 use crate::auth::policy::WriteAccessPolicy;
 use reduct_base::error::ReductError;
 
+use crate::api::StateKeeper;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::msg::entry_api::{QueryEntry, QueryType, RemoveQueryInfo};
@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 // POST /:bucket/:entry/q
 pub(super) async fn remove_query_json(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(path): Path<HashMap<String, String>>,
     request: QueryEntry,
     headers: HeaderMap,
@@ -26,18 +26,16 @@ pub(super) async fn remove_query_json(
         QueryType::Remove,
         "Query type must be Remove"
     );
-
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
-
-    check_permissions(
-        &components,
-        &headers,
-        WriteAccessPolicy {
-            bucket: bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            WriteAccessPolicy {
+                bucket: bucket_name,
+            },
+        )
+        .await?;
 
     let empty_query = QueryEntry {
         query_type: QueryType::Remove,
@@ -62,18 +60,17 @@ pub(super) async fn remove_query_json(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
     use reduct_base::error::ReductError;
     use rstest::*;
     #[rstest]
     #[tokio::test]
     async fn test_remove_query(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
-
+        let keeper = keeper.await;
         let request = QueryEntry {
             query_type: QueryType::Remove,
             start: Some(0),
@@ -81,26 +78,26 @@ mod tests {
             ..Default::default()
         };
 
-        let result =
-            remove_query_json(State(components.clone()), path_to_entry_1, request, headers)
-                .await
-                .unwrap()
-                .0;
+        let result = remove_query_json(State(keeper.clone()), path_to_entry_1, request, headers)
+            .await
+            .unwrap()
+            .0;
         assert_eq!(result.removed_records, 1);
     }
 
     #[rstest]
     #[tokio::test]
     async fn test_remove_query_at_least_on(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let keeper = keeper.await;
         let request = QueryEntry {
             query_type: QueryType::Remove,
             ..Default::default()
         };
-        let err = remove_query_json(State(components.await), path_to_entry_1, request, headers)
+        let err = remove_query_json(State(keeper.clone()), path_to_entry_1, request, headers)
             .await
             .err()
             .unwrap();

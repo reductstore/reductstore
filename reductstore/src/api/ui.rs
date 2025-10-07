@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 //
 
-use crate::api::Components;
 use crate::api::HttpError;
+use crate::api::StateKeeper;
 use axum::extract::State;
 
 use axum::body::Body;
@@ -14,22 +14,36 @@ use axum_extra::headers::HeaderMap;
 use bytes::Bytes;
 use log::debug;
 use mime_guess::mime;
-use reduct_base::error::ErrorCode;
+use reduct_base::error::{ErrorCode, IntEnum};
 use std::sync::Arc;
 
 pub(super) async fn redirect_to_index(
-    State(components): State<Arc<Components>>,
+    State(components): State<Arc<StateKeeper>>,
 ) -> impl IntoResponse {
+    let components = match components.get_anonymous().await {
+        Ok(c) => c,
+        Err(err) => {
+            return (
+                StatusCode::from_u16(err.0.status().int_value() as u16)
+                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
+                HeaderMap::new(),
+                err.0.message,
+            )
+                .into_response();
+        }
+    };
+
     let base_path = components.cfg.api_base_path.clone();
     let mut headers = HeaderMap::new();
     headers.insert(LOCATION, format!("{}ui/", base_path).parse().unwrap());
-    (StatusCode::FOUND, headers, Bytes::new()).into_response()
+    (StatusCode::FOUND, headers, "".to_string()).into_response()
 }
 
 pub(super) async fn show_ui(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     request: Request<Body>,
 ) -> Result<impl IntoResponse, HttpError> {
+    let components = keeper.get_anonymous().await?;
     let base_path = components.cfg.api_base_path.clone();
 
     let path = request.uri().path();
@@ -74,18 +88,35 @@ mod tests {
     use super::*;
     use axum::body::HttpBody;
 
-    use crate::api::tests::components;
+    use crate::api::tests::{keeper, waiting_keeper};
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_img_decoding(#[future] components: Arc<Components>) {
+    async fn test_img_decoding(#[future] keeper: Arc<StateKeeper>) {
         let request = Request::get("/ui/favicon.png").body(Body::empty()).unwrap();
-        let response = show_ui(State(components.await), request)
+        let response = show_ui(State(keeper.await), request)
             .await
             .unwrap()
             .into_response();
         assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "image/png");
         assert_eq!(response.body().size_hint().lower(), 592);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_redirect(#[future] keeper: Arc<StateKeeper>) {
+        let response = redirect_to_index(State(keeper.await)).await.into_response();
+        assert_eq!(response.status(), StatusCode::FOUND);
+        assert_eq!(response.headers().get(LOCATION).unwrap(), "/ui/");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_redirect_unavailable(#[future] waiting_keeper: Arc<StateKeeper>) {
+        let response = redirect_to_index(State(waiting_keeper.await))
+            .await
+            .into_response();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 }

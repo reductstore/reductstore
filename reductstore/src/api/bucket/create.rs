@@ -1,9 +1,9 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::bucket::BucketSettingsAxum;
-use crate::api::middleware::check_permissions;
-use crate::api::{Components, HttpError};
+use crate::api::HttpError;
+use crate::api::StateKeeper;
 use crate::auth::policy::FullAccessPolicy;
 
 use axum::extract::{Path, State};
@@ -12,12 +12,14 @@ use std::sync::Arc;
 
 // POST /b/:bucket_name
 pub(super) async fn create_bucket(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(bucket_name): Path<String>,
     headers: HeaderMap,
     settings: BucketSettingsAxum,
 ) -> Result<(), HttpError> {
-    check_permissions(&components, &headers, FullAccessPolicy {}).await?;
+    let components = keeper
+        .get_with_permissions(&headers, FullAccessPolicy {})
+        .await?;
     components
         .storage
         .create_bucket(&bucket_name, settings.into())?;
@@ -28,19 +30,16 @@ pub(super) async fn create_bucket(
 mod tests {
     use super::*;
 
-    use crate::api::tests::{components, headers};
-    use crate::api::Components;
-
-    use rstest::rstest;
-
+    use crate::api::tests::{headers, keeper};
     use reduct_base::error::ErrorCode;
+    use rstest::rstest;
     use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_bucket(#[future] components: Arc<Components>, headers: HeaderMap) {
+    async fn test_create_bucket(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         create_bucket(
-            State(components.await),
+            State(keeper.await),
             Path("bucket-3".to_string()),
             headers,
             BucketSettingsAxum::default(),
@@ -52,11 +51,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_create_bucket_already_exists(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
         let err = create_bucket(
-            State(components.await),
+            State(keeper.await),
             Path("bucket-1".to_string()),
             headers,
             BucketSettingsAxum::default(),

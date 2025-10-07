@@ -1,7 +1,6 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::middleware::check_permissions;
 use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
@@ -12,6 +11,7 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 
 use crate::api::entry::common::err_to_batched_header;
+use crate::api::StateKeeper;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::RecordDrainer;
@@ -36,20 +36,15 @@ type ErrorMap = BTreeMap<u64, ReductError>;
 
 // POST /:bucket/:entry/batch
 pub(super) async fn write_batched_records(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     body: Body,
 ) -> Result<impl IntoResponse, HttpError> {
-    let bucket_name = path.get("bucket_name").unwrap();
-    check_permissions(
-        &components,
-        &headers,
-        WriteAccessPolicy {
-            bucket: bucket_name,
-        },
-    )
-    .await?;
+    let bucket = path.get("bucket_name").unwrap();
+    let components = keeper
+        .get_with_permissions(&headers.clone(), WriteAccessPolicy { bucket })
+        .await?;
 
     let entry_name = path.get("entry_name").unwrap().clone();
     let record_headers: Vec<_> = sort_headers_by_time(&headers)?;
@@ -67,7 +62,7 @@ pub(super) async fn write_batched_records(
         let mut record_count = timed_headers.len();
         let mut written = 0;
         let (mut rx_writer, prepare_write_stream) =
-            spawn_getting_writers(&components, &bucket_name, &entry_name, timed_headers)?;
+            spawn_getting_writers(&components, &bucket, &entry_name, timed_headers)?;
         let mut ctx = rx_writer
             .recv()
             .await
@@ -105,7 +100,7 @@ pub(super) async fn write_batched_records(
 
                         components.replication_repo.write().await.notify(
                             TransactionNotification {
-                                bucket: bucket_name.clone(),
+                                bucket: bucket.clone(),
                                 entry: entry_name.clone(),
                                 meta: RecordMeta::builder()
                                     .timestamp(ctx.time)
@@ -275,7 +270,7 @@ async fn start_writing(
 mod tests {
     use super::*;
     use crate::api::entry::write_batched::write_batched_records;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
 
     use axum_extra::headers::HeaderValue;
     use reduct_base::error::ErrorCode;
@@ -285,7 +280,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_record_bad_timestamp(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: Body,
@@ -294,7 +289,7 @@ mod tests {
         headers.insert("x-reduct-time-yyy", "10".parse().unwrap());
 
         let err = write_batched_records(
-            State(components.await),
+            State(keeper.await),
             headers,
             path_to_entry_1,
             body_stream.await,
@@ -315,7 +310,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_batched_invalid_header(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: Body,
@@ -324,7 +319,7 @@ mod tests {
         headers.insert("x-reduct-time-1", "".parse().unwrap());
 
         let err = write_batched_records(
-            State(components.await),
+            State(keeper.await),
             headers,
             path_to_entry_1,
             body_stream.await,
@@ -342,12 +337,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_batched_records(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         headers.insert("content-length", "48".parse().unwrap());
         headers.insert("x-reduct-time-1", "10,text/plain,a=b".parse().unwrap());
         headers.insert(
@@ -358,14 +354,9 @@ mod tests {
 
         let stream = body_stream.await;
 
-        write_batched_records(
-            State(Arc::clone(&components)),
-            headers,
-            path_to_entry_1,
-            stream,
-        )
-        .await
-        .unwrap();
+        write_batched_records(State(Arc::clone(&keeper)), headers, path_to_entry_1, stream)
+            .await
+            .unwrap();
 
         let bucket = components
             .storage
@@ -431,12 +422,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_batched_records_error(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         {
             let mut writer = components
                 .storage
@@ -460,15 +452,11 @@ mod tests {
 
         let stream = body_stream.await;
 
-        let resp = write_batched_records(
-            State(Arc::clone(&components)),
-            headers,
-            path_to_entry_1,
-            stream,
-        )
-        .await
-        .unwrap()
-        .into_response();
+        let resp =
+            write_batched_records(State(Arc::clone(&keeper)), headers, path_to_entry_1, stream)
+                .await
+                .unwrap()
+                .into_response();
 
         let headers = resp.headers();
         assert_eq!(headers.len(), 1);

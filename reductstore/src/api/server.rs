@@ -5,7 +5,7 @@ mod alive;
 mod info;
 mod list;
 
-use crate::api::Components;
+use crate::api::StateKeeper;
 
 use crate::api::token::me::me;
 use axum::routing::{get, head};
@@ -20,7 +20,7 @@ pub(super) struct ServerInfoAxum(ServerInfo);
 #[derive(IntoResponse, Twin)]
 pub(super) struct BucketInfoListAxum(BucketInfoList);
 
-pub(super) fn create_server_api_routes() -> axum::Router<Arc<Components>> {
+pub(super) fn create_server_api_routes() -> axum::Router<Arc<StateKeeper>> {
     axum::Router::new()
         .route("/list", get(list::list))
         .route("/info", get(info::info))

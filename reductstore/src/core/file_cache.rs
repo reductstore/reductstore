@@ -28,17 +28,6 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
         FILE_CACHE_SYNC_INTERVAL,
     );
 
-    // #[cfg(test)]
-    // {
-    //     // Use a temporary directory for tests without backend configuration
-    //     cache.set_storage_backend(
-    //         Backend::builder()
-    //             .local_data_path(tempfile::tempdir().unwrap().keep().to_str().unwrap())
-    //             .try_build()
-    //             .unwrap(),
-    //     );
-    // }
-
     cache
 });
 

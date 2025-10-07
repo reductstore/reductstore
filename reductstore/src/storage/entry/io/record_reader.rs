@@ -3,8 +3,8 @@
 
 use crate::core::file_cache::FileWeak;
 use crate::storage::block_manager::{BlockManager, BlockRef};
+use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::Record;
-use crate::storage::storage::MAX_IO_BUFFER_SIZE;
 use async_trait::async_trait;
 use bytes::Bytes;
 use reduct_base::error::ReductError;
@@ -212,8 +212,8 @@ pub(in crate::storage) fn read_in_chunks(
 pub(crate) mod tests {
     use super::*;
     use crate::core::file_cache::FILE_CACHE;
+    use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::tests::{entry, write_record, write_stub_record};
-    use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use mockall::mock;
     use rstest::{fixture, rstest};
 

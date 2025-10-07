@@ -1,9 +1,9 @@
-// Copyright 2024-2025 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::QueryInfoAxum;
-use crate::api::middleware::check_permissions;
-use crate::api::{Components, HttpError};
+use crate::api::HttpError;
+use crate::api::StateKeeper;
 use crate::auth::policy::ReadAccessPolicy;
 
 use axum::extract::{Path, State};
@@ -14,22 +14,21 @@ use std::sync::Arc;
 
 // POST /:bucket/:entry/q
 pub(super) async fn read_query_json(
-    State(components): State<Arc<Components>>,
+    State(keeper): State<Arc<StateKeeper>>,
     Path(path): Path<HashMap<String, String>>,
     request: QueryEntry,
     headers: HeaderMap,
 ) -> Result<QueryInfoAxum, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
     let entry_name = path.get("entry_name").unwrap();
-
-    check_permissions(
-        &components,
-        &headers,
-        ReadAccessPolicy {
-            bucket: &bucket_name,
-        },
-    )
-    .await?;
+    let components = keeper
+        .get_with_permissions(
+            &headers,
+            ReadAccessPolicy {
+                bucket: bucket_name,
+            },
+        )
+        .await?;
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
     let entry = bucket.get_entry(entry_name)?.upgrade()?;
@@ -46,31 +45,31 @@ pub(super) async fn read_query_json(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
     use crate::core::weak::Weak;
     use crate::storage::query::QueryRx;
     use reduct_base::error::{ErrorCode, ReductError};
-
     use reduct_base::msg::entry_api::QueryType;
     use rstest::*;
     use serde_json::json;
+    use std::sync::Arc;
     use tokio::sync::RwLock;
 
     #[rstest]
     #[tokio::test]
     async fn test_limited_query(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let request = QueryEntry {
             query_type: QueryType::Query,
             limit: Some(1),
             ..Default::default()
         };
 
-        let rx = get_query_receiver(path_to_entry_1, headers, components, request)
+        let rx = get_query_receiver(path_to_entry_1, headers, keeper.clone(), request)
             .await
             .unwrap()
             .upgrade()
@@ -86,11 +85,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_strict_request(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let request = QueryEntry {
             query_type: QueryType::Query,
             when: Some(json!({
@@ -100,7 +99,7 @@ mod tests {
             ..Default::default()
         };
 
-        let rx = get_query_receiver(path_to_entry_1, headers, components, request)
+        let rx = get_query_receiver(path_to_entry_1, headers, keeper.clone(), request)
             .await
             .unwrap()
             .upgrade()
@@ -115,13 +114,13 @@ mod tests {
     async fn get_query_receiver(
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
-        components: Arc<Components>,
+        keeper: Arc<StateKeeper>,
         request: QueryEntry,
     ) -> Result<Weak<RwLock<QueryRx>>, ReductError> {
-        let response =
-            read_query_json(State(components.clone()), path_to_entry_1, request, headers)
-                .await
-                .unwrap();
+        let components = keeper.get_anonymous().await.unwrap();
+        let response = read_query_json(State(keeper), path_to_entry_1, request, headers)
+            .await
+            .unwrap();
         let query: QueryInfo = response.into();
         let entry = components
             .storage

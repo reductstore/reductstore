@@ -57,9 +57,9 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::tests::{entry, path, write_record, write_stub_record};
     use crate::storage::entry::EntrySettings;
-    use crate::storage::storage::MAX_IO_BUFFER_SIZE;
     use bytes::Bytes;
     use reduct_base::error::ReductError;
     use reduct_base::io::ReadRecord;

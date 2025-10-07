@@ -3,7 +3,7 @@
 
 use crate::cfg::Cfg;
 use crate::replication::replication_task::ReplicationTask;
-use crate::storage::storage::Storage;
+use crate::storage::engine::StorageEngine;
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::{
@@ -140,7 +140,7 @@ pub trait ManageReplications {
 /// Create a new replication repository
 /// A factory method to create a new replication repository and return it as a trait object.
 pub(crate) fn create_replication_repo(
-    storage: Arc<Storage>,
+    storage: Arc<StorageEngine>,
     config: Cfg,
 ) -> Box<dyn ManageReplications + Send + Sync> {
     Box::new(replication_repository::ReplicationRepository::load_or_create(storage, config))
