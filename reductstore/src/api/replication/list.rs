@@ -38,9 +38,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_list_replications_ok(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let components = components.await;
-        let list = list_replications(State(Arc::clone(&components)), headers)
+    async fn test_list_replications_ok(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let list = list_replications(State(keeper.await), headers)
             .await
             .unwrap()
             .0;

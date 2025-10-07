@@ -270,7 +270,7 @@ async fn start_writing(
 mod tests {
     use super::*;
     use crate::api::entry::write_batched::write_batched_records;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
 
     use axum_extra::headers::HeaderValue;
     use reduct_base::error::ErrorCode;
@@ -280,7 +280,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_record_bad_timestamp(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: Body,
@@ -289,7 +289,7 @@ mod tests {
         headers.insert("x-reduct-time-yyy", "10".parse().unwrap());
 
         let err = write_batched_records(
-            State(components.await),
+            State(keeper.await),
             headers,
             path_to_entry_1,
             body_stream.await,
@@ -310,7 +310,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_batched_invalid_header(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: Body,
@@ -319,7 +319,7 @@ mod tests {
         headers.insert("x-reduct-time-1", "".parse().unwrap());
 
         let err = write_batched_records(
-            State(components.await),
+            State(keeper.await),
             headers,
             path_to_entry_1,
             body_stream.await,
@@ -337,12 +337,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_batched_records(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         headers.insert("content-length", "48".parse().unwrap());
         headers.insert("x-reduct-time-1", "10,text/plain,a=b".parse().unwrap());
         headers.insert(
@@ -353,14 +354,9 @@ mod tests {
 
         let stream = body_stream.await;
 
-        write_batched_records(
-            State(Arc::clone(&components)),
-            headers,
-            path_to_entry_1,
-            stream,
-        )
-        .await
-        .unwrap();
+        write_batched_records(State(Arc::clone(&keeper)), headers, path_to_entry_1, stream)
+            .await
+            .unwrap();
 
         let bucket = components
             .storage
@@ -426,12 +422,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_batched_records_error(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] body_stream: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         {
             let mut writer = components
                 .storage
@@ -455,15 +452,11 @@ mod tests {
 
         let stream = body_stream.await;
 
-        let resp = write_batched_records(
-            State(Arc::clone(&components)),
-            headers,
-            path_to_entry_1,
-            stream,
-        )
-        .await
-        .unwrap()
-        .into_response();
+        let resp =
+            write_batched_records(State(Arc::clone(&keeper)), headers, path_to_entry_1, stream)
+                .await
+                .unwrap()
+                .into_response();
 
         let headers = resp.headers();
         assert_eq!(headers.len(), 1);

@@ -32,15 +32,15 @@ pub(super) async fn get_token(
 mod tests {
     use super::*;
 
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
 
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_token(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let token = get_token(State(components.await), Path("test".to_string()), headers)
+    async fn test_get_token(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let token = get_token(State(keeper.await), Path("test".to_string()), headers)
             .await
             .unwrap()
             .0;
@@ -50,15 +50,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_token_not_found(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let err = get_token(
-            State(components.await),
-            Path("not-found".to_string()),
-            headers,
-        )
-        .await
-        .err()
-        .unwrap();
+    async fn test_get_token_not_found(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let err = get_token(State(keeper.await), Path("not-found".to_string()), headers)
+            .await
+            .err()
+            .unwrap();
         assert_eq!(
             err,
             HttpError::new(ErrorCode::NotFound, "Token 'not-found' doesn't exist")

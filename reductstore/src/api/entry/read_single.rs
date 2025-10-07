@@ -108,7 +108,7 @@ mod tests {
     use super::*;
 
     use crate::api::entry::tests::query;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
     use axum::body::to_bytes;
     use bytes::Bytes;
 
@@ -121,15 +121,15 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_ts(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] body: String,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let response = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
@@ -158,16 +158,16 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_single_read_query(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] body: String,
     ) {
-        let components = components.await;
-        let query_id = query(&path_to_entry_1, Arc::clone(&components)).await;
+        let keeper = keeper.await;
+        let query_id = query(&path_to_entry_1, keeper.clone()).await;
         let response = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "q".to_string(),
@@ -194,17 +194,17 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_bucket_not_found(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entru-1".to_string()),
         ]));
 
         let err = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
@@ -223,13 +223,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_ts_not_found(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let err = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
@@ -248,13 +248,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_bad_ts(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let err = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "ts".to_string(),
@@ -279,13 +279,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_single_read_query_not_found(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let err = read_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![("q".to_string(), "1".to_string())])),
             headers,

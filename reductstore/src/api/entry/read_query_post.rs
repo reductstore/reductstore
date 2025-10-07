@@ -45,31 +45,31 @@ pub(super) async fn read_query_json(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
     use crate::core::weak::Weak;
     use crate::storage::query::QueryRx;
     use reduct_base::error::{ErrorCode, ReductError};
-
     use reduct_base::msg::entry_api::QueryType;
     use rstest::*;
     use serde_json::json;
+    use std::sync::Arc;
     use tokio::sync::RwLock;
 
     #[rstest]
     #[tokio::test]
     async fn test_limited_query(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let request = QueryEntry {
             query_type: QueryType::Query,
             limit: Some(1),
             ..Default::default()
         };
 
-        let rx = get_query_receiver(path_to_entry_1, headers, components, request)
+        let rx = get_query_receiver(path_to_entry_1, headers, keeper.clone(), request)
             .await
             .unwrap()
             .upgrade()
@@ -85,11 +85,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_strict_request(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let request = QueryEntry {
             query_type: QueryType::Query,
             when: Some(json!({
@@ -99,7 +99,7 @@ mod tests {
             ..Default::default()
         };
 
-        let rx = get_query_receiver(path_to_entry_1, headers, components, request)
+        let rx = get_query_receiver(path_to_entry_1, headers, keeper.clone(), request)
             .await
             .unwrap()
             .upgrade()
@@ -114,13 +114,13 @@ mod tests {
     async fn get_query_receiver(
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
-        components: Arc<Components>,
+        keeper: Arc<StateKeeper>,
         request: QueryEntry,
     ) -> Result<Weak<RwLock<QueryRx>>, ReductError> {
-        let response =
-            read_query_json(State(components.clone()), path_to_entry_1, request, headers)
-                .await
-                .unwrap();
+        let components = keeper.get_anonymous().await.unwrap();
+        let response = read_query_json(State(keeper), path_to_entry_1, request, headers)
+            .await
+            .unwrap();
         let query: QueryInfo = response.into();
         let entry = components
             .storage

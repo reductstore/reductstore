@@ -60,18 +60,17 @@ pub(super) async fn remove_query_json(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
     use reduct_base::error::ReductError;
     use rstest::*;
     #[rstest]
     #[tokio::test]
     async fn test_remove_query(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
-
+        let keeper = keeper.await;
         let request = QueryEntry {
             query_type: QueryType::Remove,
             start: Some(0),
@@ -79,26 +78,26 @@ mod tests {
             ..Default::default()
         };
 
-        let result =
-            remove_query_json(State(components.clone()), path_to_entry_1, request, headers)
-                .await
-                .unwrap()
-                .0;
+        let result = remove_query_json(State(keeper.clone()), path_to_entry_1, request, headers)
+            .await
+            .unwrap()
+            .0;
         assert_eq!(result.removed_records, 1);
     }
 
     #[rstest]
     #[tokio::test]
     async fn test_remove_query_at_least_on(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let keeper = keeper.await;
         let request = QueryEntry {
             query_type: QueryType::Remove,
             ..Default::default()
         };
-        let err = remove_query_json(State(components.await), path_to_entry_1, request, headers)
+        let err = remove_query_json(State(keeper.clone()), path_to_entry_1, request, headers)
             .await
             .err()
             .unwrap();

@@ -814,7 +814,11 @@ mod tests {
             data_path: tmp_dir.keep(),
             ..Cfg::default()
         };
-        let storage = StorageEngine::load(cfg, None);
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build();
+
         let bucket = storage
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap()

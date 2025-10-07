@@ -172,7 +172,7 @@ pub(super) fn create_entry_api_routes() -> axum::Router<Arc<StateKeeper>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::entry_api::QueryEntry;
     use rstest::rstest;
@@ -238,18 +238,20 @@ mod tests {
 
     mod remove_entry_router {
         use super::*;
+        use crate::api::tests::keeper;
 
         #[rstest]
         #[tokio::test]
         async fn test_remove_entry_router(
-            #[future] components: Arc<Components>,
+            #[future] keeper: Arc<StateKeeper>,
             path_to_entry_1: Path<HashMap<String, String>>,
             headers: HeaderMap,
         ) {
             let query = Query(HashMap::new());
-            let components = components.await;
+            let keeper = keeper.await;
+            let components = keeper.get_anonymous().await.unwrap();
             let result =
-                remove_entry_router(State(components.clone()), headers, path_to_entry_1, query)
+                remove_entry_router(State(keeper.clone()), headers, path_to_entry_1, query)
                     .await
                     .unwrap();
             assert_eq!(result, ());
@@ -270,7 +272,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_remove_record(
-            #[future] components: Arc<Components>,
+            #[future] keeper: Arc<StateKeeper>,
             path_to_entry_1: Path<HashMap<String, String>>,
             headers: HeaderMap,
         ) {
@@ -278,9 +280,10 @@ mod tests {
                 "ts".to_string(),
                 "0".to_string(),
             )]));
-            let components = components.await;
+            let keeper = keeper.await;
+            let components = keeper.get_anonymous().await.unwrap();
             let result =
-                remove_entry_router(State(components.clone()), headers, path_to_entry_1, query)
+                remove_entry_router(State(keeper.clone()), headers, path_to_entry_1, query)
                     .await
                     .unwrap();
             assert_eq!(result, ());
@@ -302,11 +305,12 @@ mod tests {
 
     mod query_entry_router {
         use super::*;
+        use crate::api::tests::keeper;
 
         #[rstest]
         #[tokio::test]
         async fn test_query_entry_router_read(
-            #[future] components: Arc<Components>,
+            #[future] keeper: Arc<StateKeeper>,
             path_to_entry_1: Path<HashMap<String, String>>,
             headers: HeaderMap,
         ) {
@@ -314,9 +318,8 @@ mod tests {
                 query_type: QueryType::Query,
                 ..Default::default()
             };
-            let components = components.await;
             let result = query_entry_router(
-                State(components.clone()),
+                State(keeper.await),
                 headers,
                 path_to_entry_1,
                 QueryEntryAxum(query),
@@ -328,7 +331,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_query_entry_router_remove(
-            #[future] components: Arc<Components>,
+            #[future] keeper: Arc<StateKeeper>,
             path_to_entry_1: Path<HashMap<String, String>>,
             headers: HeaderMap,
         ) {
@@ -337,9 +340,8 @@ mod tests {
                 start: Some(0),
                 ..Default::default()
             };
-            let components = components.await;
             let result = query_entry_router(
-                State(components.clone()),
+                State(keeper.await),
                 headers,
                 path_to_entry_1,
                 QueryEntryAxum(query),
@@ -351,7 +353,7 @@ mod tests {
 
     pub async fn query(
         path_to_entry_1: &Path<HashMap<String, String>>,
-        components: Arc<Components>,
+        keeper: Arc<StateKeeper>,
     ) -> u64 {
         let options = QueryEntry {
             start: Some(0),
@@ -359,6 +361,7 @@ mod tests {
             ..Default::default()
         };
 
+        let components = keeper.get_anonymous().await.unwrap();
         let query_id = {
             components
                 .storage

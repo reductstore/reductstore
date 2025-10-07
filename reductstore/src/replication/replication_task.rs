@@ -365,6 +365,7 @@ mod tests {
     use crate::replication::Transaction;
 
     use crate::storage::bucket::Bucket;
+    use crate::storage::engine::StorageEngineBuilder;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
     use reduct_base::Labels;
@@ -685,7 +686,11 @@ mod tests {
             ..Default::default()
         };
 
-        let storage = Arc::new(StorageEngine::load(cfg, None));
+        let storage = StorageEngine::builder()
+            .with_data_path(path)
+            .with_cfg(cfg)
+            .build();
+        let storage = Arc::new(storage);
 
         let bucket = match storage.get_bucket(&settings.src_bucket) {
             Ok(bucket) => bucket.upgrade().unwrap(),

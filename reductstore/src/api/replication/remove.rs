@@ -28,7 +28,7 @@ pub(super) async fn remove_replication(
 mod tests {
     use super::*;
     use crate::api::replication::tests::settings;
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
     use reduct_base::error::ErrorCode::NotFound;
     use reduct_base::msg::replication_api::ReplicationSettings;
     use rstest::rstest;
@@ -37,11 +37,12 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_remove_replication_ok(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         settings: ReplicationSettings,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         components
             .replication_repo
             .write()
@@ -50,7 +51,7 @@ mod tests {
             .unwrap();
 
         remove_replication(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             Path("test".to_string()),
             headers,
         )
@@ -72,19 +73,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_replication_error(
-        #[future] components: Arc<Components>,
-        headers: HeaderMap,
-    ) {
-        let components = components.await;
-        let err = remove_replication(
-            State(Arc::clone(&components)),
-            Path("test".to_string()),
-            headers,
-        )
-        .await
-        .err()
-        .unwrap();
+    async fn test_remove_replication_error(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let err = remove_replication(State(keeper.await), Path("test".to_string()), headers)
+            .await
+            .err()
+            .unwrap();
 
         assert_eq!(err.0.status, NotFound, "Should handle errors");
     }

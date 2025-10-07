@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::bucket::BucketSettingsAxum;
+use crate::api::HttpError;
 use crate::api::StateKeeper;
-use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
@@ -30,15 +30,16 @@ pub(super) async fn update_bucket(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket(#[future] components: Arc<Components>, headers: HeaderMap) {
+    async fn test_update_bucket(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         update_bucket(
-            State(components.await),
+            State(keeper.await),
             Path("bucket-1".to_string()),
             headers,
             BucketSettingsAxum::default(),
@@ -49,12 +50,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_bucket_not_found(
-        #[future] components: Arc<Components>,
-        headers: HeaderMap,
-    ) {
+    async fn test_update_bucket_not_found(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let err = update_bucket(
-            State(components.await),
+            State(keeper.await),
             Path("not-found".to_string()),
             headers,
             BucketSettingsAxum::default(),

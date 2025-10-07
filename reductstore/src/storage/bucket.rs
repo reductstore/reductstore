@@ -86,7 +86,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub async fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
+    pub fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
         let buf = {
             let lock = FILE_CACHE
                 .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))?
@@ -121,7 +121,7 @@ impl Bucket {
         }
 
         for task in task_set {
-            let entry = task.await?;
+            let entry = task.wait()?;
             entries.insert(entry.name().to_string(), entry);
         }
 

@@ -1,7 +1,5 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
-mod provision;
-
 use crate::backend::BackendType;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
@@ -55,19 +53,33 @@ impl StorageEngineBuilder {
             FILE_CACHE.create_dir_all(&data_path).unwrap();
         }
 
+        // restore buckets
+        let time = Instant::now();
+        let mut buckets = BTreeMap::new();
+        for path in FILE_CACHE.read_dir(&data_path).unwrap() {
+            if path.is_dir() {
+                match Bucket::restore(path.clone(), cfg.clone()) {
+                    Ok(bucket) => {
+                        let bucket = Arc::new(bucket);
+                        buckets.insert(bucket.name().to_string(), bucket);
+                    }
+                    Err(e) => {
+                        panic!("Failed to load bucket from {:?}: {}", path, e);
+                    }
+                }
+            }
+        }
+
+        info!("Load {} bucket(s) in {:?}", buckets.len(), time.elapsed());
+
         StorageEngine {
             data_path,
             start_time: Instant::now(),
-            buckets: Arc::new(RwLock::new(BTreeMap::new())),
+            buckets: Arc::new(RwLock::new(buckets)),
             license: self.license,
             cfg,
         }
     }
-}
-
-enum State {
-    Initializing,
-    Running,
 }
 
 /// Storage is the main entry point for the storage service.
@@ -86,41 +98,6 @@ impl StorageEngine {
             license: None,
             data_path: None,
         }
-    }
-
-    /// Load storage from the file system.
-    /// If the data_path doesn't exist, it will be created.
-    ///
-    /// # Arguments
-    ///
-    /// # Returns
-    ///
-    /// * `StorageEngine` - The storage instance
-    ///
-    /// # Panics
-    ///
-    /// If the data_path doesn't exist and can't be created, or if a bucket can't be restored.
-    pub async fn load(&self) {
-        // restore buckets
-        let time = Instant::now();
-        let mut buckets = BTreeMap::new();
-        for path in FILE_CACHE.read_dir(&self.data_path).unwrap() {
-            if path.is_dir() {
-                match Bucket::restore(path.clone(), self.cfg.clone()).await {
-                    Ok(bucket) => {
-                        let bucket = Arc::new(bucket);
-                        buckets.insert(bucket.name().to_string(), bucket);
-                    }
-                    Err(e) => {
-                        panic!("Failed to load bucket from {:?}: {}", path, e);
-                    }
-                }
-            }
-        }
-
-        info!("Load {} bucket(s) in {:?}", buckets.len(), time.elapsed());
-        *self.buckets.write().unwrap() = buckets;
-        self.provision_buckets();
     }
 
     /// Get the reductstore info.
@@ -286,7 +263,7 @@ impl StorageEngine {
                     sync_task.wait()?;
                     FILE_CACHE.discard_recursive(&path)?;
                     FILE_CACHE.rename(&path, &new_path)?;
-                    let bucket = Handle::current().block_on(Bucket::restore(new_path, cfg))?;
+                    let bucket = Bucket::restore(new_path, cfg)?;
                     buckets.insert(new_name.to_string(), Arc::new(bucket));
                     debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
                     Ok(())
@@ -364,7 +341,10 @@ mod tests {
         };
 
         assert!(!path.exists());
-        let _ = StorageEngine::load(cfg.clone(), None);
+        let _ = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build();
         assert!(path.exists(), "Engine creates a folder if it doesn't exist");
     }
 
@@ -406,7 +386,11 @@ mod tests {
             data_path: storage.data_path.clone(),
             ..Cfg::default()
         };
-        let storage = StorageEngine::load(cfg, Some(license.clone()));
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .with_license(license.clone())
+            .build();
         assert_eq!(storage.info().unwrap().license, Some(license));
     }
 
@@ -454,7 +438,10 @@ mod tests {
                 data_path: storage.data_path.clone(),
                 ..Cfg::default()
             };
-            let storage = StorageEngine::load(cfg, None);
+            let storage = StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg)
+                .build();
             assert_eq!(
                 storage.info().unwrap(),
                 ServerInfo {
@@ -497,7 +484,10 @@ mod tests {
                 data_path: storage.data_path.clone(),
                 ..Cfg::default()
             };
-            let storage = StorageEngine::load(cfg, None);
+            let storage = StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg)
+                .build();
             assert_eq!(
                 storage.info().unwrap(),
                 ServerInfo {
@@ -604,7 +594,11 @@ mod tests {
             let result = storage.remove_bucket("test").wait();
             assert_eq!(result, Ok(()));
 
-            let storage = StorageEngine::load(cfg, None);
+            let storage = StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg)
+                .build();
+
             let result = storage.get_bucket("test");
             assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
         }
@@ -738,7 +732,10 @@ mod tests {
             },
             ..Cfg::default()
         };
-        let storage = StorageEngine::load(cfg.clone(), None);
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build();
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
             .unwrap()
@@ -763,6 +760,9 @@ mod tests {
                 .try_build()
                 .unwrap(),
         );
-        StorageEngine::load(cfg, None)
+        StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build()
     }
 }

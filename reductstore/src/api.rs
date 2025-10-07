@@ -289,6 +289,7 @@ mod tests {
     use crate::backend::Backend;
     use crate::core::file_cache::FILE_CACHE;
     use crate::ext::ext_repository::create_ext_repository;
+    use crate::lock_file::LockFileBuilder;
     use crate::replication::create_replication_repo;
     use axum::body::Body;
     use axum::extract::Path;
@@ -377,7 +378,7 @@ mod tests {
     }
 
     #[fixture]
-    pub(crate) async fn components() -> Arc<Components> {
+    pub(crate) async fn keeper() -> Arc<StateKeeper> {
         let cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
             ..Cfg::default()
@@ -390,7 +391,10 @@ mod tests {
                 .unwrap(),
         );
 
-        let storage = StorageEngine::load(cfg.clone(), None);
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg.clone())
+            .build();
         let mut token_repo = create_token_repository(cfg.data_path.clone(), "init-token");
 
         storage
@@ -461,7 +465,13 @@ mod tests {
             query_link_cache: RwLock::new(Cache::new(8, Duration::from_secs(60))),
         };
 
-        Arc::new(components)
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.send(components).await.unwrap();
+
+        Arc::new(StateKeeper::new(
+            Arc::new(LockFileBuilder::new().build()),
+            rx,
+        ))
     }
 
     #[fixture]

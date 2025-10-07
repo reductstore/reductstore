@@ -48,7 +48,7 @@ pub(super) async fn remove_record(
 mod tests {
     use super::*;
 
-    use crate::api::tests::{components, path_to_entry_1};
+    use crate::api::tests::{keeper, path_to_entry_1};
     use axum_extra::headers::{Authorization, HeaderMapExt};
     use reduct_base::error::ReductError;
     use reduct_base::{not_found, unprocessable_entity};
@@ -57,14 +57,15 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_remove_single_ok(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
 
         remove_record(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -92,17 +93,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_not_found(
-        #[future] components: Arc<Components>,
-        headers: HeaderMap,
-    ) {
-        let components = components.await;
+    async fn test_remove_bucket_not_found(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let keeper = keeper.await;
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
         ]));
         let err = remove_record(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             path,
             Query(HashMap::from_iter(vec![(
@@ -123,13 +121,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_bad_ts(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let err = remove_record(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             headers,
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(

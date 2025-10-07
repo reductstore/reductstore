@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::bucket::FullBucketInfoAxum;
-use crate::api::Components;
 use crate::api::HttpError;
 use crate::api::StateKeeper;
 use crate::auth::policy::ReadAccessPolicy;
@@ -33,41 +32,29 @@ pub(super) async fn get_bucket(
 mod tests {
     use super::*;
 
-    use crate::api::Components;
-
-    use crate::api::tests::{components, headers};
-
-    use rstest::rstest;
-
+    use crate::api::tests::{headers, keeper};
     use axum::http::HeaderValue;
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::token_api::Permissions;
+    use rstest::rstest;
     use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_bucket(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let info = get_bucket(
-            State(components.await),
-            Path("bucket-1".to_string()),
-            headers,
-        )
-        .await
-        .unwrap();
+    async fn test_get_bucket(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let info = get_bucket(State(keeper.await), Path("bucket-1".to_string()), headers)
+            .await
+            .unwrap();
         assert_eq!(info.0.info.name, "bucket-1");
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_bucket_not_found(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let err = get_bucket(
-            State(components.await),
-            Path("not-found".to_string()),
-            headers,
-        )
-        .await
-        .err()
-        .unwrap();
+    async fn test_get_bucket_not_found(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let err = get_bucket(State(keeper.await), Path("not-found".to_string()), headers)
+            .await
+            .err()
+            .unwrap();
         assert_eq!(
             err,
             HttpError::new(ErrorCode::NotFound, "Bucket 'not-found' is not found")
@@ -77,10 +64,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_get_bucket_unauthorized(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         let token = components
             .token_repo
             .write()
@@ -99,7 +87,7 @@ mod tests {
             "Authorization",
             HeaderValue::from_str(&format!("Bearer {}", token.value)).unwrap(),
         );
-        let err = get_bucket(State(components), Path("bucket-2".to_string()), headers)
+        let err = get_bucket(State(keeper), Path("bucket-2".to_string()), headers)
             .await
             .err()
             .unwrap();

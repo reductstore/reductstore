@@ -1,8 +1,8 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::api::HttpError;
 use crate::api::StateKeeper;
-use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 
 use axum::extract::{Path, State};
@@ -32,41 +32,26 @@ pub(super) async fn remove_bucket(
 mod tests {
     use super::*;
 
-    use crate::api::Components;
-
-    use crate::api::tests::{components, headers};
-
-    use rstest::rstest;
-
+    use crate::api::tests::{headers, keeper};
     use reduct_base::error::ErrorCode;
+    use rstest::rstest;
     use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket(#[future] components: Arc<Components>, headers: HeaderMap) {
-        remove_bucket(
-            State(components.await),
-            Path("bucket-1".to_string()),
-            headers,
-        )
-        .await
-        .unwrap();
+    async fn test_remove_bucket(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        remove_bucket(State(keeper.await), Path("bucket-1".to_string()), headers)
+            .await
+            .unwrap();
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_bucket_not_found(
-        #[future] components: Arc<Components>,
-        headers: HeaderMap,
-    ) {
-        let err = remove_bucket(
-            State(components.await),
-            Path("not-found".to_string()),
-            headers,
-        )
-        .await
-        .err()
-        .unwrap();
+    async fn test_remove_bucket_not_found(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let err = remove_bucket(State(keeper.await), Path("not-found".to_string()), headers)
+            .await
+            .err()
+            .unwrap();
         assert_eq!(
             err,
             HttpError::new(ErrorCode::NotFound, "Bucket 'not-found' is not found",)
@@ -76,10 +61,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_remove_bucket_from_permission(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         let token = components
             .token_repo
             .read()
@@ -93,13 +79,14 @@ mod tests {
         );
 
         remove_bucket(
-            State(components.clone()),
+            State(keeper.clone()),
             Path("bucket-1".to_string()),
             headers.clone(),
         )
         .await
         .unwrap();
 
+        let components = keeper.get_anonymous().await.unwrap();
         let token = components
             .token_repo
             .read()

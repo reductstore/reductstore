@@ -30,7 +30,7 @@ pub(super) async fn create_token(
 mod tests {
     use super::*;
 
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
 
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::token_api::Permissions;
@@ -38,9 +38,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_token(#[future] components: Arc<Components>, headers: HeaderMap) {
+    async fn test_create_token(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let token = create_token(
-            State(components.await),
+            State(keeper.await),
             Path("new-token".to_string()),
             headers,
             PermissionsAxum(Permissions::default()),
@@ -54,11 +54,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_create_token_already_exists(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
         let err = create_token(
-            State(components.await),
+            State(keeper.await),
             Path("test".to_string()),
             headers,
             PermissionsAxum(Permissions::default()),

@@ -134,12 +134,12 @@ pub(super) mod tests {
 
     pub(super) async fn create_query_link(
         headers: HeaderMap,
-        components: Arc<Components>,
+        keeper: Arc<StateKeeper>,
         query: QueryEntry,
         expire_at: Option<DateTime<Utc>>,
     ) -> Result<QueryLinkCreateResponseAxum, HttpError> {
         create(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             Path("file.txt".to_string()),
             QueryLinkCreateRequestAxum(QueryLinkCreateRequest {

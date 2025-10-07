@@ -115,7 +115,7 @@ mod tests {
         .await
         .unwrap();
 
-        let components = keeper.components();
+        let components = keeper.get_anonymous().await.unwrap();
         let record = components
             .storage
             .get_bucket("bucket-1")

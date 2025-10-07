@@ -26,8 +26,9 @@ pub enum State {
 #[async_trait]
 pub trait LockFile {
     async fn is_locked(&self) -> bool;
-    async fn is_timeouted(&self) -> bool;
+    async fn is_failed(&self) -> bool;
     async fn is_waiting(&self) -> bool;
+    fn release(&self);
 }
 pub type BoxedLockFile = Box<dyn LockFile + Sync + Send>;
 
@@ -131,7 +132,7 @@ impl LockFile for ImplLockFile {
         *state == State::Locked
     }
 
-    async fn is_timeouted(&self) -> bool {
+    async fn is_failed(&self) -> bool {
         let state = self.state.read().await;
         *state == State::Failed
     }
@@ -140,18 +141,24 @@ impl LockFile for ImplLockFile {
         let state = self.state.read().await;
         *state == State::Waiting
     }
-}
 
-impl Drop for ImplLockFile {
-    fn drop(&mut self) {
+    fn release(&self) {
         self.stop_on_drop
             .store(true, std::sync::atomic::Ordering::SeqCst);
-        while !self.handle.is_finished() {
+
+        let start_time = std::time::Instant::now();
+        while !self.handle.is_finished() && start_time.elapsed() < Duration::from_secs(5) {
             sleep(Duration::from_millis(100));
         }
 
         debug!("Releasing lock file: {:?}", self.stop_on_drop);
         let _ = FILE_CACHE.remove(&self.path);
+    }
+}
+
+impl Drop for ImplLockFile {
+    fn drop(&mut self) {
+        self.release()
     }
 }
 
@@ -163,11 +170,13 @@ impl LockFile for NoopLockFile {
         true
     }
 
-    async fn is_timeouted(&self) -> bool {
+    async fn is_failed(&self) -> bool {
         false
     }
 
     async fn is_waiting(&self) -> bool {
         false
     }
+
+    fn release(&self) {}
 }

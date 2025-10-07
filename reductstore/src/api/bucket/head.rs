@@ -1,8 +1,8 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::api::HttpError;
 use crate::api::StateKeeper;
-use crate::api::{Components, HttpError};
 use crate::auth::policy::AuthenticatedPolicy;
 
 use axum::extract::{Path, State};
@@ -26,23 +26,15 @@ pub(super) async fn head_bucket(
 mod tests {
     use super::*;
 
-    use crate::api::Components;
-
-    use crate::api::tests::{components, headers};
-
+    use crate::api::tests::{headers, keeper};
     use rstest::rstest;
-
     use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_head_bucket(#[future] components: Arc<Components>, headers: HeaderMap) {
-        head_bucket(
-            State(components.await),
-            Path("bucket-1".to_string()),
-            headers,
-        )
-        .await
-        .unwrap();
+    async fn test_head_bucket(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        head_bucket(State(keeper.await), Path("bucket-1".to_string()), headers)
+            .await
+            .unwrap();
     }
 }

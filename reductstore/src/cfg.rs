@@ -171,11 +171,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         Ok(lock_file)
     }
 
-    pub async fn build(&self) -> Result<Components, ReductError> {
+    pub fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
 
-        let storage = Arc::new(self.build_storage_engine(&data_path));
-        storage.load().await;
+        let storage = Arc::new(self.provision_buckets(&data_path));
         let token_repo = self.provision_tokens(&data_path);
         let console = create_asset_manager(load_console());
         let select_ext = create_asset_manager(load_select_ext());

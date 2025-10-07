@@ -88,14 +88,14 @@ mod tests {
     use super::*;
     use axum::body::HttpBody;
 
-    use crate::api::tests::components;
+    use crate::api::tests::keeper;
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_img_decoding(#[future] components: Arc<Components>) {
+    async fn test_img_decoding(#[future] keeper: Arc<StateKeeper>) {
         let request = Request::get("/ui/favicon.png").body(Body::empty()).unwrap();
-        let response = show_ui(State(components.await), request)
+        let response = show_ui(State(keeper.await), request)
             .await
             .unwrap()
             .into_response();

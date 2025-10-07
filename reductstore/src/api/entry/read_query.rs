@@ -41,24 +41,24 @@ pub(super) async fn read_query(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
     use reduct_base::error::ErrorCode;
-
     use rstest::*;
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
     async fn test_limited_query(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let mut params = HashMap::new();
         params.insert("limit".to_string(), "1".to_string());
 
         let result = read_query(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(params),
             headers,
@@ -66,6 +66,7 @@ mod tests {
         .await;
 
         let query: QueryInfo = result.unwrap().into();
+        let components = keeper.get_anonymous().await.unwrap();
         let entry = components
             .storage
             .get_bucket("bucket-1")

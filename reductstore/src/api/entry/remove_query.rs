@@ -53,23 +53,23 @@ pub(super) async fn remove_query(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
     use reduct_base::error::ReductError;
     use rstest::*;
     #[rstest]
     #[tokio::test]
     async fn test_remove_query(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let mut params = HashMap::new();
         params.insert("start".to_string(), "0".to_string());
         params.insert("stop".to_string(), "2".to_string());
 
         let result = remove_query(
-            State(components.clone()),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(params),
             headers,
@@ -83,17 +83,17 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_remove_query_wrong_param(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let mut params = HashMap::new();
         params.insert("start".to_string(), "0".to_string());
         params.insert("stop".to_string(), "xxx".to_string());
 
         let err = remove_query(
-            State(components.clone()),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(params),
             headers,
@@ -110,13 +110,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_remove_query_at_least_on(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
+        let keeper = keeper.await;
         let params = HashMap::new();
         let err = remove_query(
-            State(components.await),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(params),
             headers,

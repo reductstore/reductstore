@@ -23,13 +23,13 @@ pub(super) async fn info(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
     use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
-    async fn test_info(#[future] components: Arc<Components>, headers: HeaderMap) {
-        let info = info(State(components.await), headers).await.unwrap();
+    async fn test_info(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+        let info = info(State(keeper.await), headers).await.unwrap();
         assert_eq!(info.0.bucket_count, 2);
     }
 }

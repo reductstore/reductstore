@@ -98,7 +98,7 @@ pub(super) async fn update_batched_records(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
+    use crate::api::tests::{empty_body, headers, keeper, path_to_entry_1};
     use crate::api::ErrorCode;
 
     use axum::response::IntoResponse;
@@ -110,7 +110,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_record_bad_timestamp(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
@@ -118,7 +118,7 @@ mod tests {
         headers.insert("x-reduct-time-yyy", "10".parse().unwrap());
 
         let err = update_batched_records(
-            State(components.await),
+            State(keeper.await),
             headers,
             path_to_entry_1,
             empty_body.await,
@@ -139,7 +139,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_batched_invalid_header(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
@@ -147,7 +147,7 @@ mod tests {
         headers.insert("x-reduct-time-1", "".parse().unwrap());
 
         let err = update_batched_records(
-            State(components.await),
+            State(keeper.await),
             headers,
             path_to_entry_1,
             empty_body.await,
@@ -165,16 +165,17 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_batched_records(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         headers.insert("x-reduct-time-0", "0,,x=z,b=,1=2".parse().unwrap());
 
         let err_map = update_batched_records(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             path_to_entry_1,
             empty_body.await,
@@ -214,12 +215,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_batched_records_error(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         {
             let mut writer = components
                 .storage
@@ -240,7 +242,7 @@ mod tests {
         headers.insert("x-reduct-time-1", "0,,".parse().unwrap());
 
         let resp = update_batched_records(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             headers,
             path_to_entry_1,
             empty_body.await,

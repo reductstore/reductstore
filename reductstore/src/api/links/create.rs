@@ -111,10 +111,9 @@ mod tests {
     #[tokio::test]
     async fn test_create_query_link(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let keeper = keeper.await;
-        let components = keeper.components();
         let response = create_query_link(
             headers,
-            components,
+            keeper.clone(),
             QueryEntry {
                 query_type: QueryType::Query,
                 ..Default::default()
@@ -142,10 +141,9 @@ mod tests {
         headers: HeaderMap,
     ) {
         let keeper = keeper.await;
-        let components = keeper.components();
         let err = create_query_link(
             headers,
-            components,
+            keeper,
             QueryEntry {
                 query_type: QueryType::Remove,
                 ..Default::default()

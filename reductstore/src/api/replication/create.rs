@@ -30,7 +30,7 @@ pub(super) async fn create_replication(
 mod tests {
     use super::*;
     use crate::api::replication::tests::settings;
-    use crate::api::tests::{components, headers};
+    use crate::api::tests::{headers, keeper};
     use reduct_base::msg::replication_api::ReplicationSettings;
     use rstest::rstest;
     use std::sync::Arc;
@@ -38,13 +38,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_create_replication_ok(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         settings: ReplicationSettings,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         create_replication(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             Path("test".to_string()),
             headers,
             ReplicationSettingsAxum::from(settings),
@@ -63,15 +64,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_create_replication_error(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         mut settings: ReplicationSettings,
     ) {
-        let components = components.await;
         settings.dst_host = "BROKEN URL".to_string();
 
         let result = create_replication(
-            State(Arc::clone(&components)),
+            State(keeper.await),
             Path("test".to_string()),
             headers,
             ReplicationSettingsAxum::from(settings),

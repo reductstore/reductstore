@@ -635,7 +635,11 @@ mod tests {
             data_path: tempfile::tempdir().unwrap().keep(),
             ..Default::default()
         };
-        let storage = Arc::new(StorageEngine::load(cfg, None));
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build();
+        let storage = Arc::new(storage);
 
         let log_map = Arc::new(RwLock::new(HashMap::new()));
         let log = RwLock::new(

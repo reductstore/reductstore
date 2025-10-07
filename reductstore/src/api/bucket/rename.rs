@@ -1,8 +1,8 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::api::HttpError;
 use crate::api::StateKeeper;
-use crate::api::{Components, HttpError};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum::Json;
@@ -35,8 +35,8 @@ pub(super) async fn rename_bucket(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, headers};
-    use crate::api::Components;
+    use crate::api::tests::{headers, keeper};
+    use axum::Json;
     use reduct_base::error::ReductError;
     use reduct_base::msg::token_api::Permissions;
     use reduct_base::not_found;
@@ -46,11 +46,12 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_rename_bucket(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         request: Json<RenameBucket>,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         components
             .token_repo
             .write()
@@ -66,7 +67,7 @@ mod tests {
             .unwrap();
 
         rename_bucket(
-            State(components.clone()),
+            State(keeper.clone()),
             Path("bucket-1".to_string()),
             headers,
             request,
@@ -74,6 +75,7 @@ mod tests {
         .await
         .unwrap();
 
+        let components = keeper.get_anonymous().await.unwrap();
         let bucket = components
             .storage
             .get_bucket("new-bucket")
@@ -99,13 +101,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_rename_bucket_not_found(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         request: Json<RenameBucket>,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         let result = rename_bucket(
-            State(components.clone()),
+            State(keeper.clone()),
             Path("NOT_EXIST".to_string()),
             headers,
             request,

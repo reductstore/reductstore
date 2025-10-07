@@ -30,7 +30,7 @@ pub(super) async fn update_replication(
 mod tests {
     use super::*;
     use crate::api::replication::tests::settings;
-    use crate::api::tests::{components as base_components, headers};
+    use crate::api::tests::{headers, keeper};
     use reduct_base::msg::replication_api::ReplicationSettings;
     use rstest::{fixture, rstest};
     use std::sync::Arc;
@@ -38,15 +38,16 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_replication_ok(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         mut settings: ReplicationSettings,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         settings.dst_bucket = "bucket-3".to_string();
 
         update_replication(
-            State(Arc::clone(&components)),
+            State(Arc::clone(&keeper)),
             Path("test".to_string()),
             headers,
             ReplicationSettingsAxum::from(settings),
@@ -70,15 +71,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_replication_error(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         mut settings: ReplicationSettings,
     ) {
-        let components = components.await;
         settings.dst_host = "BROKEN URL".to_string();
 
         let result = update_replication(
-            State(Arc::clone(&components)),
+            State(keeper.await),
             Path("test".to_string()),
             headers,
             ReplicationSettingsAxum::from(settings),
@@ -88,18 +88,18 @@ mod tests {
         assert!(result.is_err());
     }
 
-    #[fixture]
-    async fn components(
-        #[future] base_components: Arc<Components>,
-        settings: ReplicationSettings,
-    ) -> Arc<Components> {
-        let components = base_components.await;
-        components
-            .replication_repo
-            .write()
-            .await
-            .create_replication("test", settings)
-            .unwrap();
-        components
-    }
+    // #[fixture]
+    // async fn components(
+    //     #[future] keeper: Arc<StateKeeper>,
+    //     settings: ReplicationSettings,
+    // ) -> Arc<Components> {
+    //     let components = base_keeper.await.get_anonymous().await.unwrap();
+    //     components
+    //         .replication_repo
+    //         .write()
+    //         .await
+    //         .create_replication("test", settings)
+    //         .unwrap();
+    //     components
+    // }
 }

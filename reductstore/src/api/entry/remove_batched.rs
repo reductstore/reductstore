@@ -58,7 +58,7 @@ pub(super) async fn remove_batched_records(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{components, empty_body, headers, path_to_entry_1};
+    use crate::api::tests::{empty_body, headers, keeper, path_to_entry_1};
     use reduct_base::error::{ErrorCode, ReductError};
     use reduct_base::not_found;
     use rstest::rstest;
@@ -66,16 +66,17 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_remove_record_bad_timestamp(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
+        let keeper = keeper.await;
         headers.insert("content-length", "0".parse().unwrap());
         headers.insert("x-reduct-time-yyy", "10".parse().unwrap());
 
         let err = remove_batched_records(
-            State(components.await),
+            State(keeper.clone()),
             headers,
             path_to_entry_1,
             empty_body.await,
@@ -96,17 +97,17 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_remove_batched_records(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
         headers.insert("x-reduct-time-0", "".parse().unwrap());
         headers.insert("x-reduct-time-1", "".parse().unwrap());
 
         let err_map = remove_batched_records(
-            State(Arc::clone(&components)),
+            State(keeper.clone()),
             headers,
             path_to_entry_1,
             empty_body.await,
@@ -114,6 +115,7 @@ mod tests {
         .await
         .unwrap();
 
+        let components = keeper.get_anonymous().await.unwrap();
         let bucket = components
             .storage
             .get_bucket("bucket-1")

@@ -134,7 +134,7 @@ pub(super) async fn write_record(
 mod tests {
     use super::*;
 
-    use crate::api::tests::{components, empty_body, path_to_entry_1};
+    use crate::api::tests::{empty_body, keeper, path_to_entry_1};
 
     use axum_extra::headers::{Authorization, HeaderMapExt};
     use reduct_base::io::ReadRecord;
@@ -144,14 +144,15 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_with_label_ok(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         write_record(
-            State(Arc::clone(&components)),
+            State(keeper),
             headers,
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
@@ -186,17 +187,16 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bucket_not_found(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
         let path = Path(HashMap::from_iter(vec![
             ("bucket_name".to_string(), "XXX".to_string()),
             ("entry_name".to_string(), "entry-1".to_string()),
         ]));
         let err = write_record(
-            State(Arc::clone(&components)),
+            State(keeper.await),
             headers,
             path,
             Query(HashMap::from_iter(vec![(
@@ -215,14 +215,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_write_bad_ts(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
         #[future] empty_body: Body,
     ) {
-        let components = components.await;
         let err = write_record(
-            State(Arc::clone(&components)),
+            State(keeper.await),
             headers,
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(

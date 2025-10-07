@@ -283,7 +283,7 @@ mod tests {
     use crate::api::entry::tests::query;
     use axum::body::to_bytes;
 
-    use crate::api::tests::{components, headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
 
     use crate::ext::ext_repository::create_ext_repository;
     use crate::storage::entry::io::record_reader::tests::MockRecord;
@@ -301,13 +301,14 @@ mod tests {
     #[case("HEAD", "")]
     #[tokio::test]
     async fn test_batched_read(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
         #[case] method: String,
         #[case] _body: String,
     ) {
-        let components = components.await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
         {
             let entry = components
                 .storage
@@ -327,7 +328,7 @@ mod tests {
             }
         }
 
-        let query_id = query(&path_to_entry_1, components.clone()).await;
+        let query_id = query(&path_to_entry_1, keeper.clone()).await;
         let query = Query(HashMap::from_iter(vec![(
             "q".to_string(),
             query_id.to_string(),
@@ -336,7 +337,7 @@ mod tests {
         macro_rules! read_batched_records {
             () => {
                 read_batched_records(
-                    State(components.clone()),
+                    State(keeper.clone()),
                     Path(path_to_entry_1.clone()),
                     query.clone(),
                     headers.clone(),
@@ -409,12 +410,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_batched_no_entry(
-        #[future] components: Arc<Components>,
+        #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
         headers: HeaderMap,
     ) {
-        let components = components.await;
-        let query_id = query(&path_to_entry_1, components.clone()).await;
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let query_id = query(&path_to_entry_1, keeper.clone()).await;
 
         components
             .storage
@@ -427,7 +429,7 @@ mod tests {
             .unwrap();
 
         let err = read_batched_records(
-            State(components.clone()),
+            State(keeper.clone()),
             path_to_entry_1,
             Query(HashMap::from_iter(vec![(
                 "q".to_string(),
@@ -532,8 +534,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn max_records_from_query(#[future] components: Arc<Components>) {
-            let components = components.await;
+        async fn max_records_from_query(#[future] keeper: Arc<StateKeeper>) {
+            let components = keeper.await.get_anonymous().await.unwrap();
             let resp =
                 build_bucket_and_query(components.clone(), json!({"#batch_records": 10})).await;
 
@@ -548,8 +550,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn max_records_from_settings(#[future] components: Arc<Components>) {
-            let components = components.await;
+        async fn max_records_from_settings(#[future] keeper: Arc<StateKeeper>) {
+            let components = keeper.await.get_anonymous().await.unwrap();
             let resp = build_bucket_and_query(components.clone(), json!({})).await;
             let count = resp
                 .into_response()
@@ -562,11 +564,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn max_metadata_size_from_query(#[future] components: Arc<Components>) {
-            let components = components.await;
+        async fn max_metadata_size_from_query(#[future] keeper: Arc<StateKeeper>) {
+            let components = keeper.await.get_anonymous().await.unwrap();
             let resp =
-                build_bucket_and_query(components.clone(), json!({"#batch_metadata_size": 100}))
-                    .await;
+                build_bucket_and_query(components, json!({"#batch_metadata_size": 100})).await;
             let body = to_bytes(resp.into_response().into_body(), usize::MAX)
                 .await
                 .unwrap();
@@ -575,8 +576,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn max_size_from_settings(#[future] components: Arc<Components>) {
-            let components = components.await;
+        async fn max_size_from_settings(#[future] keeper: Arc<StateKeeper>) {
+            let components = keeper.await.get_anonymous().await.unwrap();
             let resp = build_bucket_and_query(components.clone(), json!({})).await;
             let body = to_bytes(resp.into_response().into_body(), usize::MAX)
                 .await

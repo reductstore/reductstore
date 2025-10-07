@@ -340,14 +340,17 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_replications_update_existing(mut env_with_replications: MockEnvGetter) {
-        let storage = StorageEngine::load(
-            Cfg {
-                data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
+        let cfg = Cfg {
+            data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
 
-                ..Default::default()
-            },
-            None,
-        );
+            ..Default::default()
+        };
+
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build();
+
         storage
             .create_bucket("bucket1", Default::default())
             .unwrap();
