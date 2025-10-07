@@ -102,15 +102,19 @@ impl StateKeeper {
             );
         }
 
-        if self.components.read().await.is_none() {
-            let components = self
-                .rx
-                .write()
-                .await
-                .recv()
-                .await
-                .expect("Failed to receive components from channel");
-            self.components.write().await.replace(Arc::new(components));
+        {
+            let mut lock = self.components.write().await;
+            // it's important to check again after acquiring the lock and lock must be exclusive to avoid rice conditions
+            if lock.is_none() {
+                let components = self
+                    .rx
+                    .write()
+                    .await
+                    .recv()
+                    .await
+                    .expect("Failed to receive components from channel");
+                lock.replace(Arc::new(components));
+            }
         }
         Ok(self.components.read().await.as_ref().unwrap().clone())
     }

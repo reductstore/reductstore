@@ -14,8 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `#ext` directive to interact with extensions in conditional query, [PR-932](https://github.com/reductstore/reductstore/pull/932)
 - Implement Query Link API, [PR-938](https://github.com/reductstore/reductstore/pull/938)
 - Support for range requests in query link, [PR-944](https://github.com/reductstore/reductstore/pull/944)
-- Add IO directives to control batching parameters in conditional query and replication tasks, [PR-958](https://github.com/reductstore/reductstore/pull/958)
-- Add `RS_REMOTE_SYNC_INTERVAL` configuration parameter, [PR-961](https://github.com/reductstore/reductstore/pull/961)
+- IO directives to control batching parameters in conditional query and replication tasks, [PR-958](https://github.com/reductstore/reductstore/pull/958)
+- `RS_REMOTE_SYNC_INTERVAL` configuration parameter, [PR-961](https://github.com/reductstore/reductstore/pull/961)
+- Lock file to prevent concurrent access to the same data, [PR-969](https://github.com/reductstore/reductstore/pull/969)
 
 ### Changed
 

@@ -140,7 +140,7 @@ impl LockFileBuilder {
 
         Box::new(ImplLockFile {
             path,
-            stop_on_drop: Arc::new(AtomicBool::new(false)),
+            stop_on_drop,
             handle,
             state,
         })
@@ -175,7 +175,7 @@ impl LockFile for ImplLockFile {
             sleep(Duration::from_millis(100));
         }
 
-        debug!("Releasing lock file: {:?}", self.stop_on_drop);
+        debug!("Releasing lock file: {:?}", self.path);
         let _ = FILE_CACHE.remove(&self.path);
     }
 }
