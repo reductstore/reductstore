@@ -18,11 +18,13 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     ${GCC_COMPILER}
 
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
+RUN curl https://sh.rustup.rs -sSf | sh -s -- -y && \
+    . /root/.cargo/env && \
+    rustup default ${RUST_VERSION} && \
+    rustup target add ${CARGO_TARGET}
+
 # Add .cargo/bin to PATH
 ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup default ${RUST_VERSION}
-RUN rustup target add ${CARGO_TARGET}
 
 WORKDIR /src
 
@@ -51,14 +53,24 @@ FROM ubuntu:22.04
 
 ARG CARGO_TARGET
 ARG BUILD_PROFILE
+
+# Create non-root user
+RUN groupadd --gid 1000 reductstore && \
+    useradd --uid 1000 --gid reductstore --shell /bin/bash --create-home reductstore
+
 COPY --from=builder /usr/local/bin/reductstore /usr/local/bin/reductstore
 COPY --from=builder /usr/local/bin/reduct-cli /usr/local/bin/reduct-cli
 COPY --from=builder /data /data
 COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 
+# Set ownership of data directory to non-root user
+RUN chown -R reductstore:reductstore /data
+
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
+# Switch to non-root user
+USER reductstore
 
 EXPOSE 8383
 
