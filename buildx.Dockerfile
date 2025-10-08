@@ -41,7 +41,7 @@ RUN cargo install --force --locked bindgen-cli
 RUN CARGO_TARGET_DIR=/build/ \
     GIT_COMMIT=${GIT_COMMIT} \
     cargo build --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features
-RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /build
+RUN cargo install --git https://github.com/reductstore/reduct-cli.git --tag v0.9.2 --target ${CARGO_TARGET} --root /build
 
 RUN mkdir /data
 RUN mv /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
