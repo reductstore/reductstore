@@ -162,7 +162,7 @@ impl BackpackBuilder {
                 };
 
                 let settings = remote::RemoteBackendSettings {
-                    connector_type: BackendType::S3,
+                    backend_type: BackendType::S3,
                     cache_path: PathBuf::from(cache_path),
                     endpoint: self.remote_endpoint,
                     access_key,

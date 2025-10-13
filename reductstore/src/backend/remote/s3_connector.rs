@@ -482,7 +482,7 @@ mod tests {
         #[fixture]
         fn settings() -> RemoteBackendSettings {
             RemoteBackendSettings {
-                connector_type: Default::default(),
+                backend_type: Default::default(),
                 cache_path: Default::default(),
                 bucket: "test-bucket".to_string(),
                 region: Some("us-east-1".to_string()),
@@ -619,7 +619,7 @@ mod tests {
         fn settings() -> RemoteBackendSettings {
             let mut env = env::Env::new(StdEnvGetter::default());
             RemoteBackendSettings {
-                connector_type: BackendType::S3,
+                backend_type: BackendType::S3,
                 cache_path: tempdir().unwrap().keep(),
                 bucket: env
                     .get_optional("MINIO_BUCKET")

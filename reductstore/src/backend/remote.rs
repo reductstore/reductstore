@@ -33,7 +33,7 @@ pub(super) trait RemoteStorageConnector {
 
 #[allow(dead_code)]
 pub(crate) struct RemoteBackendSettings {
-    pub connector_type: BackendType,
+    pub backend_type: BackendType,
     pub cache_path: PathBuf,
     pub cache_size: u64,
     pub endpoint: Option<String>,
@@ -52,6 +52,7 @@ pub(crate) struct RemoteBackend {
     cache_path: PathBuf,
     connector: Box<dyn RemoteStorageConnector + Send + Sync>,
     local_cache: Mutex<LocalCache>,
+    backend_type: BackendType,
 }
 
 impl RemoteBackend {
@@ -59,8 +60,9 @@ impl RemoteBackend {
     pub fn new(settings: RemoteBackendSettings) -> Self {
         let cache_path = settings.cache_path.clone();
         let local_cache = Mutex::new(LocalCache::new(cache_path.clone(), settings.cache_size));
+        let backend_type = settings.backend_type.clone();
 
-        let connector = match settings.connector_type {
+        let connector = match settings.backend_type {
             #[cfg(feature = "s3-backend")]
             BackendType::S3 => Box::new(S3Connector::new(settings)),
             #[cfg(feature = "fs-backend")]
@@ -74,6 +76,7 @@ impl RemoteBackend {
             cache_path,
             connector,
             local_cache,
+            backend_type,
         }
     }
 
@@ -89,6 +92,7 @@ impl RemoteBackend {
             cache_path,
             connector,
             local_cache,
+            backend_type: BackendType::S3, // for tests we can assume S3
         }
     }
 }
@@ -99,6 +103,14 @@ impl StorageBackend for RemoteBackend {
     }
 
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        #[cfg(feature = "s3-backend")]
+        if self.backend_type == BackendType::S3 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Renaming in S3 backend is not supported",
+            ));
+        }
+
         let (from_key, to_key) = {
             let cache = &mut self.local_cache.lock().unwrap();
             cache.rename(from, to)?;
