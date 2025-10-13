@@ -106,7 +106,6 @@ impl StorageBackend for RemoteBackend {
     }
 
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
-        #[cfg(feature = "s3-backend")]
         if self.backend_type == BackendType::S3 {
             return Err(io::Error::new(
                 io::ErrorKind::Other,
