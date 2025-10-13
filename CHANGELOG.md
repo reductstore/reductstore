@@ -36,6 +36,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Alive must return 200 even if storage locked, [PR-970](https://github.com/reductstore/reductstore/pull/970)
 - Parsing of empty read\write token permissions, [PR-983](https://github.com/reductstore/reductstore/pull/983)
 - Fix removing records for S3 backend, [PR-984](https://github.com/reductstore/reductstore/pull/984)
+- Fix error message during acquiring lock file, [PR-985](https://github.com/reductstore/reductstore/pull/985)
 
 ### Internal
 

@@ -26,6 +26,8 @@ impl LocalCache {
             }
         }
 
+        fs::create_dir_all(&path).expect("Failed to create local cache directory");
+
         LocalCache {
             path,
             max_size,
@@ -158,13 +160,14 @@ mod tests {
         use std::fs;
 
         #[rstest]
-        fn test_remove_folder_before_create(path: PathBuf) {
+        fn test_clean_folder_before_create(path: PathBuf) {
             fs::create_dir_all(&path).unwrap();
             fs::write(path.join("test_file"), b"test").unwrap();
 
             let _local_cache = LocalCache::new(path.clone(), 1024 * 1024);
 
-            assert!(!path.exists());
+            assert!(path.exists());
+            assert!(!path.join("test_file").exists());
         }
 
         #[rstest]
@@ -172,7 +175,7 @@ mod tests {
             let cache_path = path.join("non_existent_cache");
             let _local_cache = LocalCache::new(cache_path.clone(), 1024 * 1024);
 
-            assert!(!cache_path.exists());
+            assert!(cache_path.exists(), "Cache directory should be created");
         }
     }
 
