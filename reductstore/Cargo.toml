@@ -76,7 +76,7 @@ uuid = { version = "1.18.1", features = ["v4"] }
 
 # optional dependencies for remote backend
 aws-sdk-s3 = { version = "1.107.0", optional = true, features = ["rustls"] }
-aws-config = { version = "1.8.5", optional = true, features = ["rustls"] }
+aws-config = { version = "1.8.7", optional = true, features = ["rustls"] }
 aws-credential-types = { version = "1.2.7", optional = true, features = ["hardcoded-credentials"]}
 rstest = "0.26.1"
 
