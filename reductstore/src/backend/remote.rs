@@ -287,6 +287,7 @@ mod tests {
     mod rename {
         use super::*;
         use mockall::predicate::eq;
+        use mockall::Any;
         use std::fs;
         use std::path::PathBuf;
 
@@ -295,18 +296,6 @@ mod tests {
             let from_key = "file1.txt";
             let to_key = "file2.txt";
 
-            mock_connector
-                .expect_list_objects()
-                .with(eq(from_key), eq(true))
-                .times(1)
-                .returning(|_, _| Ok(vec![]));
-
-            mock_connector
-                .expect_rename_object()
-                .with(eq(from_key), eq(to_key))
-                .times(1)
-                .returning(|_, _| Ok(()));
-
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
             let from = path.join(from_key);
@@ -314,31 +303,16 @@ mod tests {
             fs::create_dir_all(&path).unwrap();
             fs::write(&from, b"test").unwrap();
 
-            remote_backend.rename(&from, &to).unwrap();
+            assert_eq!(
+                remote_backend.rename(&from, &to).err().unwrap().to_string(),
+                "Renaming in S3 backend is not supported"
+            );
         }
 
         #[rstest]
         fn test_rename_directory(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let from_key = "dir1/";
             let to_key = "dir2/";
-
-            mock_connector
-                .expect_list_objects()
-                .with(eq("dir1"), eq(true))
-                .times(1)
-                .returning(|_, _| Ok(vec!["file_in_dir.txt".to_string()]));
-
-            mock_connector
-                .expect_rename_object()
-                .with(eq("dir1/file_in_dir.txt"), eq("dir2/file_in_dir.txt"))
-                .times(1)
-                .returning(|_, _| Ok(()));
-
-            mock_connector
-                .expect_rename_object()
-                .with(eq(from_key), eq(to_key))
-                .times(1)
-                .returning(|_, _| Ok(()));
 
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
@@ -347,7 +321,10 @@ mod tests {
             fs::create_dir_all(&from).unwrap();
             fs::write(from.join("file_in_dir.txt"), b"test").unwrap();
 
-            remote_backend.rename(&from, &to).unwrap();
+            assert_eq!(
+                remote_backend.rename(&from, &to).err().unwrap().to_string(),
+                "Renaming in S3 backend is not supported"
+            );
         }
     }
 

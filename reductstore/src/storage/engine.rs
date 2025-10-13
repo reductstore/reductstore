@@ -6,7 +6,6 @@ use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
-use futures_util::TryFutureExt;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
@@ -255,7 +254,7 @@ impl StorageEngine {
         let cfg = self.cfg.clone();
 
         unique(&task_group, "rename bucket", move || {
-            let mut buckets = &mut buckets.write().unwrap();
+            let buckets = &mut buckets.write().unwrap();
 
             sync_task.wait()?;
             FILE_CACHE.rename(&path, &new_path)?;
