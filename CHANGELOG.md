@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update ros-ext up to v0.3.1 with fixed JPEG convertion, [PR-927](https://github.com/reductstore/reductstore/pull/927)
 - Expiry date of query link is mandatory and timestamp , [PR-939](https://github.com/reductstore/reductstore/pull/939)
 - Add filename to query link endpoints, [PR-940](https://github.com/reductstore/reductstore/pull/940)
+- Optimize integrity check at storage start, [PR-986](https://github.com/reductstore/reductstore/pull/986)
 
 ### Fixed
 
