@@ -52,6 +52,7 @@ pub(crate) struct RemoteBackend {
     cache_path: PathBuf,
     connector: Box<dyn RemoteStorageConnector + Send + Sync>,
     local_cache: Mutex<LocalCache>,
+    #[allow(dead_code)]
     backend_type: BackendType,
 }
 
@@ -69,6 +70,8 @@ impl RemoteBackend {
             BackendType::Filesystem =>
             // panic because we shouldn't be here if filesystem is selected
                 panic!("Filesystem remote storage backend is not supported, falling back to S3 connector"),
+            #[allow(unreachable_patterns)]
+            _ => panic!("Unsupported remote storage backend"),
         };
 
         #[allow(unreachable_code)]
@@ -286,13 +289,11 @@ mod tests {
 
     mod rename {
         use super::*;
-        use mockall::predicate::eq;
-        use mockall::Any;
         use std::fs;
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_rename_file(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        fn test_rename_file(mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let from_key = "file1.txt";
             let to_key = "file2.txt";
 
@@ -310,7 +311,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_rename_directory(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        fn test_rename_directory(mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let from_key = "dir1/";
             let to_key = "dir2/";
 
