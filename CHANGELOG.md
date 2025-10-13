@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix reusing token in ReplicationSettings, [PR-962](https://github.com/reductstore/reductstore/pull/962)
 - Fix empty batch workaround, [PR-963](https://github.com/reductstore/reductstore/pull/963)
 - Alive must return 200 even if storage locked, [PR-970](https://github.com/reductstore/reductstore/pull/970)
+- Parsing of empty read\write token permissions, [PR-983](https://github.com/reductstore/reductstore/pull/983)
 
 ### Internal
 
