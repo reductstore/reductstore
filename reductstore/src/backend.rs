@@ -45,10 +45,8 @@ pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;
 
 #[derive(Default, Clone, Debug, PartialEq)]
 pub enum BackendType {
-    #[cfg(feature = "fs-backend")]
     #[default]
     Filesystem,
-    #[cfg(feature = "s3-backend")]
     S3,
 }
 
@@ -162,7 +160,7 @@ impl BackpackBuilder {
                 };
 
                 let settings = remote::RemoteBackendSettings {
-                    connector_type: BackendType::S3,
+                    backend_type: BackendType::S3,
                     cache_path: PathBuf::from(cache_path),
                     endpoint: self.remote_endpoint,
                     access_key,
@@ -174,6 +172,8 @@ impl BackpackBuilder {
 
                 Box::new(remote::RemoteBackend::new(settings))
             }
+            #[allow(unreachable_patterns)]
+            _ => Err(internal_server_error!("Unsupported backend type"))?,
         };
 
         Ok(Backend {

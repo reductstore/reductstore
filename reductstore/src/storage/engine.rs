@@ -254,19 +254,16 @@ impl StorageEngine {
         let cfg = self.cfg.clone();
 
         unique(&task_group, "rename bucket", move || {
-            let mut buckets = buckets.write().unwrap();
-            match buckets.remove(&old_name) {
-                Some(_) => {
-                    sync_task.wait()?;
-                    FILE_CACHE.discard_recursive(&path)?;
-                    FILE_CACHE.rename(&path, &new_path)?;
-                    let bucket = Bucket::restore(new_path, cfg)?;
-                    buckets.insert(new_name.to_string(), Arc::new(bucket));
-                    debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
-                    Ok(())
-                }
-                None => Err(not_found!("Bucket '{}' is not found", old_name)),
-            }
+            let buckets = &mut buckets.write().unwrap();
+
+            sync_task.wait()?;
+            FILE_CACHE.discard_recursive(&path)?;
+            FILE_CACHE.rename(&path, &new_path)?;
+            buckets.remove(&old_name);
+            let bucket = Bucket::restore(new_path, cfg)?;
+            buckets.insert(new_name.to_string(), Arc::new(bucket));
+            debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
+            Ok(())
         })
     }
 

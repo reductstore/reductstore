@@ -304,9 +304,9 @@ impl Bucket {
                 ));
             }
 
-            entries.write()?.remove(&old_name);
             FILE_CACHE.discard_recursive(&old_path)?; // we need to close all open files
             FILE_CACHE.rename(&old_path, &new_path)?;
+            entries.write()?.remove(&old_name);
 
             let entry = Entry::restore(
                 new_path,

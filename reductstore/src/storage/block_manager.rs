@@ -6,9 +6,12 @@ pub(in crate::storage) mod block_index;
 pub(in crate::storage) mod wal;
 
 mod block_cache;
+
 use log::{debug, error, info, trace, warn};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
+use std::fs;
+use std::fs::OpenOptions;
 
 use crate::core::file_cache::{FileWeak, FILE_CACHE};
 use crate::storage::block_manager::block::Block;
@@ -361,11 +364,19 @@ impl BlockManager {
         let temp_block_path = {
             let mut block = block_ref.write()?;
             let temp_block_path = self.path.join(format!("{}.blk.tmp", block.block_id()));
-            let temp_block_ref = FILE_CACHE
-                .write_or_create(&temp_block_path, SeekFrom::Start(0))?
-                .upgrade()?;
-            let mut temp_block = temp_block_ref.write()?;
-            temp_block.set_len(block.size())?;
+            // create a temporary block file outside of the cache to avoid unnecessary evictions
+            let mut temp_block = OpenOptions::new()
+                .create(true)
+                .write(true)
+                .read(true)
+                .open(&temp_block_path)
+                .map_err(|e| {
+                    internal_server_error!(
+                        "Failed to create temporary block file {:?}: {}",
+                        temp_block_path,
+                        e
+                    )
+                })?;
 
             let mut total_offset = 0;
             let block_id = block.block_id();
@@ -413,9 +424,16 @@ impl BlockManager {
 
         {
             let block = block_ref.read()?;
+            let block_path = self.path_to_data(block.block_id());
 
-            FILE_CACHE.remove(&self.path_to_data(block.block_id()))?;
-            FILE_CACHE.rename(&temp_block_path, &self.path_to_data(block.block_id()))?;
+            // replace the old block file with the new one
+            fs::remove_file(&block_path)?;
+            fs::rename(&temp_block_path, &block_path)?;
+
+            // we have a dangling file in the cache, remove it and reopen
+            FILE_CACHE.discard_recursive(&block_path)?;
+            let block_file = FILE_CACHE.write_or_create(&block_path, SeekFrom::Start(0))?;
+            block_file.upgrade()?.write()?.sync_all()?;
 
             debug!(
                 "Block {:?} is replaced with retained records",

@@ -33,7 +33,7 @@ pub(super) trait RemoteStorageConnector {
 
 #[allow(dead_code)]
 pub(crate) struct RemoteBackendSettings {
-    pub connector_type: BackendType,
+    pub backend_type: BackendType,
     pub cache_path: PathBuf,
     pub cache_size: u64,
     pub endpoint: Option<String>,
@@ -52,6 +52,8 @@ pub(crate) struct RemoteBackend {
     cache_path: PathBuf,
     connector: Box<dyn RemoteStorageConnector + Send + Sync>,
     local_cache: Mutex<LocalCache>,
+    #[allow(dead_code)]
+    backend_type: BackendType,
 }
 
 impl RemoteBackend {
@@ -59,14 +61,17 @@ impl RemoteBackend {
     pub fn new(settings: RemoteBackendSettings) -> Self {
         let cache_path = settings.cache_path.clone();
         let local_cache = Mutex::new(LocalCache::new(cache_path.clone(), settings.cache_size));
+        let backend_type = settings.backend_type.clone();
 
-        let connector = match settings.connector_type {
+        let connector = match settings.backend_type {
             #[cfg(feature = "s3-backend")]
             BackendType::S3 => Box::new(S3Connector::new(settings)),
             #[cfg(feature = "fs-backend")]
             BackendType::Filesystem =>
             // panic because we shouldn't be here if filesystem is selected
                 panic!("Filesystem remote storage backend is not supported, falling back to S3 connector"),
+            #[allow(unreachable_patterns)]
+            _ => panic!("Unsupported remote storage backend"),
         };
 
         #[allow(unreachable_code)]
@@ -74,6 +79,7 @@ impl RemoteBackend {
             cache_path,
             connector,
             local_cache,
+            backend_type,
         }
     }
 
@@ -89,6 +95,7 @@ impl RemoteBackend {
             cache_path,
             connector,
             local_cache,
+            backend_type: BackendType::S3, // for tests we can assume S3
         }
     }
 }
@@ -99,6 +106,13 @@ impl StorageBackend for RemoteBackend {
     }
 
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+        if self.backend_type == BackendType::S3 {
+            return Err(io::Error::new(
+                io::ErrorKind::Other,
+                "Renaming in S3 backend is not supported",
+            ));
+        }
+
         let (from_key, to_key) = {
             let cache = &mut self.local_cache.lock().unwrap();
             cache.rename(from, to)?;
@@ -274,26 +288,13 @@ mod tests {
 
     mod rename {
         use super::*;
-        use mockall::predicate::eq;
         use std::fs;
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_rename_file(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        fn test_rename_file(mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let from_key = "file1.txt";
             let to_key = "file2.txt";
-
-            mock_connector
-                .expect_list_objects()
-                .with(eq(from_key), eq(true))
-                .times(1)
-                .returning(|_, _| Ok(vec![]));
-
-            mock_connector
-                .expect_rename_object()
-                .with(eq(from_key), eq(to_key))
-                .times(1)
-                .returning(|_, _| Ok(()));
 
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
@@ -302,31 +303,16 @@ mod tests {
             fs::create_dir_all(&path).unwrap();
             fs::write(&from, b"test").unwrap();
 
-            remote_backend.rename(&from, &to).unwrap();
+            assert_eq!(
+                remote_backend.rename(&from, &to).err().unwrap().to_string(),
+                "Renaming in S3 backend is not supported"
+            );
         }
 
         #[rstest]
-        fn test_rename_directory(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        fn test_rename_directory(mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let from_key = "dir1/";
             let to_key = "dir2/";
-
-            mock_connector
-                .expect_list_objects()
-                .with(eq("dir1"), eq(true))
-                .times(1)
-                .returning(|_, _| Ok(vec!["file_in_dir.txt".to_string()]));
-
-            mock_connector
-                .expect_rename_object()
-                .with(eq("dir1/file_in_dir.txt"), eq("dir2/file_in_dir.txt"))
-                .times(1)
-                .returning(|_, _| Ok(()));
-
-            mock_connector
-                .expect_rename_object()
-                .with(eq(from_key), eq(to_key))
-                .times(1)
-                .returning(|_, _| Ok(()));
 
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
@@ -335,7 +321,10 @@ mod tests {
             fs::create_dir_all(&from).unwrap();
             fs::write(from.join("file_in_dir.txt"), b"test").unwrap();
 
-            remote_backend.rename(&from, &to).unwrap();
+            assert_eq!(
+                remote_backend.rename(&from, &to).err().unwrap().to_string(),
+                "Renaming in S3 backend is not supported"
+            );
         }
     }
 
