@@ -77,6 +77,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 .unwrap_or_default()
                 .split(",")
                 .map(|s| s.to_string())
+                .filter(|s| !s.is_empty())
                 .collect()
         };
 
@@ -149,6 +150,39 @@ mod tests {
         assert_eq!(permissions.full_access, true);
         assert_eq!(permissions.read, vec!["bucket1", "bucket2"]);
         assert_eq!(permissions.write, vec!["bucket1"]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_tokens_not_full_permissions(mut env_with_tokens: MockEnvGetter) {
+        env_with_tokens
+            .expect_get()
+            .with(eq("RS_TOKEN_1_VALUE"))
+            .return_const(Ok("TOKEN".to_string()));
+        env_with_tokens
+            .expect_get()
+            .with(eq("RS_TOKEN_1_FULL_ACCESS"))
+            .return_const(Ok("true".to_string()));
+        env_with_tokens
+            .expect_get()
+            .with(eq("RS_TOKEN_1_READ"))
+            .return_const(Ok("bucket1,bucket2".to_string()));
+        env_with_tokens
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::from_env(env_with_tokens);
+        let components = cfg.build().unwrap();
+
+        let repo = components.token_repo.read().await;
+        let token1 = repo.get_token("token1").unwrap().clone();
+        assert_eq!(token1.value, "TOKEN");
+        assert!(token1.is_provisioned);
+
+        let permissions = token1.permissions.unwrap();
+        assert_eq!(permissions.full_access, true);
+        assert_eq!(permissions.read, vec!["bucket1", "bucket2"]);
+        assert!(permissions.write.is_empty());
     }
 
     #[rstest]
