@@ -244,11 +244,13 @@ impl EntryLoader {
         block_index: &BlockIndex,
     ) -> Result<(), ReductError> {
         let mut inconsistent_data = false;
+        let file_list = FILE_CACHE.read_dir(&path)?;
+
         for block_id in block_index.tree().iter() {
             let desc_path = path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT));
-            if FILE_CACHE.try_exists(&desc_path)? {
+            if file_list.contains(&desc_path) {
                 let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
-                if !FILE_CACHE.try_exists(&data_path)? {
+                if !file_list.contains(&data_path) {
                     warn!(
                         "Data block {:?} not found. Removing its descriptor",
                         data_path
