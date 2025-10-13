@@ -257,8 +257,8 @@ impl StorageEngine {
             let buckets = &mut buckets.write().unwrap();
 
             sync_task.wait()?;
-            FILE_CACHE.rename(&path, &new_path)?;
             FILE_CACHE.discard_recursive(&path)?;
+            FILE_CACHE.rename(&path, &new_path)?;
             buckets.remove(&old_name);
             let bucket = Bucket::restore(new_path, cfg)?;
             buckets.insert(new_name.to_string(), Arc::new(bucket));
