@@ -1,7 +1,7 @@
 // Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
@@ -54,8 +54,12 @@ impl EntryLoader {
             // integrity check after restoring WAL
             let check_result = || {
                 let bm = entry.block_manager.read()?;
-                Self::check_if_block_files_exist(&path, &bm.index())?;
-                Self::check_descriptor_count(&path, &bm.index())
+                let file_list = FILE_CACHE
+                    .read_dir(&path)?
+                    .into_iter()
+                    .collect::<HashSet<PathBuf>>();
+                Self::check_if_block_files_exist(&path, &file_list, &bm.index())?;
+                Self::check_descriptor_count(&path, &file_list, &bm.index())
             };
 
             if check_result().is_err() {
@@ -216,10 +220,13 @@ impl EntryLoader {
         })
     }
 
-    fn check_descriptor_count(path: &PathBuf, block_index: &BlockIndex) -> Result<(), ReductError> {
-        let number_of_descriptors = FILE_CACHE
-            .read_dir(&path)?
-            .into_iter()
+    fn check_descriptor_count(
+        path: &PathBuf,
+        file_list: &HashSet<PathBuf>,
+        block_index: &BlockIndex,
+    ) -> Result<(), ReductError> {
+        let number_of_descriptors = file_list
+            .iter()
             .filter(|entry|
                 // path maybe a virtual from remote storage
                 entry.to_str().unwrap_or("").ends_with(DESCRIPTOR_FILE_EXT))
@@ -241,11 +248,10 @@ impl EntryLoader {
 
     fn check_if_block_files_exist(
         path: &PathBuf,
+        file_list: &HashSet<PathBuf>,
         block_index: &BlockIndex,
     ) -> Result<(), ReductError> {
         let mut inconsistent_data = false;
-        let file_list = FILE_CACHE.read_dir(&path)?;
-
         for block_id in block_index.tree().iter() {
             let desc_path = path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT));
             if file_list.contains(&desc_path) {
