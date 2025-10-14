@@ -10,15 +10,15 @@ mod s3_connector;
 
 use crate::backend::file::AccessMode;
 use crate::backend::remote::local_cache::LocalCache;
+#[cfg(feature = "s3-backend")]
+use crate::backend::remote::s3_connector::S3Connector;
 use crate::backend::{BackendType, StorageBackend};
 use log::debug;
+use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Instant;
-
-#[cfg(feature = "s3-backend")]
-use crate::backend::remote::s3_connector::S3Connector;
 
 #[allow(dead_code)]
 pub(super) trait RemoteStorageConnector {
@@ -41,6 +41,7 @@ pub(crate) struct RemoteBackendSettings {
     pub secret_key: String,
     pub region: Option<String>,
     pub bucket: String,
+    pub default_storage_class: Option<String>,
 }
 
 struct LocalCacheEntry {

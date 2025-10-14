@@ -251,7 +251,8 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         let mut backend_builder = Backend::builder()
             .backend_type(self.cfg.cs_config.backend_type.clone())
             .local_data_path(self.cfg.data_path.clone())
-            .cache_size(self.cfg.cs_config.cache_size);
+            .cache_size(self.cfg.cs_config.cache_size)
+            .remote_default_storage_class(self.cfg.cs_config.default_storage_class.clone());
 
         if let Some(bucket) = &self.cfg.cs_config.bucket {
             backend_builder = backend_builder.remote_bucket(bucket);

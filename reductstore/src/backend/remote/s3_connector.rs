@@ -9,9 +9,11 @@ use aws_config::{BehaviorVersion, Region};
 use aws_credential_types::Credentials;
 use aws_sdk_s3::error::{DisplayErrorContext, ProvideErrorMetadata, SdkError};
 use aws_sdk_s3::primitives::ByteStream;
+use aws_sdk_s3::types::StorageClass;
 use aws_sdk_s3::Client;
 use log::{debug, error, info};
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
+use std::hash::Hash;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -23,6 +25,7 @@ pub(super) struct S3Connector {
     client: Arc<Client>,
     rt: Arc<Runtime>,
     prefix: &'static str,
+    default_storage_class: Option<StorageClass>,
 }
 
 impl S3Connector {
@@ -64,11 +67,31 @@ impl S3Connector {
 
         let client = Client::from_conf(conf.clone());
 
+        let default_storage_class =
+            match settings.default_storage_class.as_ref().map(|s| s.as_str()) {
+                Some("STANDARD") => Some(StorageClass::Standard),
+                Some("STANDARD_IA") => Some(StorageClass::StandardIa),
+                Some("INTELLIGENT_TIERING") => Some(StorageClass::IntelligentTiering),
+                Some("ONEZONE_IA") => Some(StorageClass::OnezoneIa),
+                Some("EXPRESS_ONEZONE") => Some(StorageClass::ExpressOnezone),
+                Some("GLACIER_IR") => Some(StorageClass::GlacierIr),
+                Some("GLACIER") => Some(StorageClass::Glacier),
+                Some("DEEP_ARCHIVE") => Some(StorageClass::DeepArchive),
+                Some("OUTPOSTS") => Some(StorageClass::Outposts),
+                Some("REDUCED_REDUNDANCY") => Some(StorageClass::ReducedRedundancy),
+                Some(other) => {
+                    error!("Unknown storage class: {}, defaulting to None", other);
+                    None
+                }
+                _ => None,
+            };
+
         S3Connector {
             client: Arc::new(client),
             bucket: settings.bucket,
             rt,
             prefix: "r/",
+            default_storage_class,
         }
     }
 }
@@ -116,6 +139,12 @@ impl RemoteStorageConnector for S3Connector {
         let rt = Arc::clone(&self.rt);
         let key = format!("{}{}", self.prefix, key);
 
+        let storage_class = if key.ends_with(".blk") {
+            self.default_storage_class.clone()
+        } else {
+            None
+        };
+
         block_in_place(move || {
             rt.block_on(async {
                 let stream = ByteStream::from_path(src).await?;
@@ -124,6 +153,7 @@ impl RemoteStorageConnector for S3Connector {
                     .put_object()
                     .bucket(&self.bucket)
                     .key(&key)
+                    .set_storage_class(storage_class)
                     .body(stream)
                     .send()
                     .await
