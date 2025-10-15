@@ -12,8 +12,7 @@ use aws_sdk_s3::primitives::ByteStream;
 use aws_sdk_s3::types::StorageClass;
 use aws_sdk_s3::Client;
 use log::{debug, error, info};
-use std::collections::{HashMap, HashSet};
-use std::hash::Hash;
+use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -520,6 +519,7 @@ mod tests {
                 access_key: "minioadmin".to_string(),
                 secret_key: "minioadmin".to_string(),
                 cache_size: 0,
+                default_storage_class: None,
             }
         }
     }
