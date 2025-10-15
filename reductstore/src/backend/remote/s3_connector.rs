@@ -681,6 +681,7 @@ mod tests {
                     .get_optional("MINIO_SECRET_KEY")
                     .unwrap_or("minioadmin".to_string()),
                 cache_size: 1000,
+                default_storage_class: None,
             }
         }
     }
