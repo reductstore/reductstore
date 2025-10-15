@@ -62,6 +62,7 @@ pub struct BackpackBuilder {
     remote_access_key: Option<String>,
     remote_secret_key: Option<String>,
     remote_cache_size: Option<u64>,
+    remote_default_storage_class: Option<String>,
 }
 
 impl BackpackBuilder {
@@ -111,6 +112,11 @@ impl BackpackBuilder {
 
     pub fn remote_secret_key(mut self, secret_key: &str) -> Self {
         self.remote_secret_key = Some(secret_key.to_string());
+        self
+    }
+
+    pub fn remote_default_storage_class(mut self, storage_class: Option<String>) -> Self {
+        self.remote_default_storage_class = storage_class;
         self
     }
 
@@ -168,6 +174,7 @@ impl BackpackBuilder {
                     region: self.remote_region,
                     bucket,
                     cache_size,
+                    default_storage_class: self.remote_default_storage_class,
                 };
 
                 Box::new(remote::RemoteBackend::new(settings))
