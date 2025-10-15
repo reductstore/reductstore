@@ -559,6 +559,21 @@ mod tests {
 
         #[rstest]
         #[serial]
+        fn upload_object_with_storage_class(connector: S3Connector, path: PathBuf) {
+            let key = "test/uploaded_test.blk";
+            let src = path.join("uploaded_test.blk");
+            fs::write(
+                &src,
+                b"This is a test file for upload with storage class.\n",
+            )
+            .unwrap();
+
+            (connector.upload_object(key, &src).unwrap());
+            assert!(connector.head_object(key).unwrap());
+        }
+
+        #[rstest]
+        #[serial]
         fn create_dir_all(connector: S3Connector) {
             let key = "test/new_dir/";
 

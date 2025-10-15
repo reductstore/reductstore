@@ -14,7 +14,6 @@ use crate::backend::remote::local_cache::LocalCache;
 use crate::backend::remote::s3_connector::S3Connector;
 use crate::backend::{BackendType, StorageBackend};
 use log::debug;
-use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

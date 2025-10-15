@@ -110,6 +110,10 @@ mod tests {
             .expect_get()
             .with(eq("RS_REMOTE_SYNC_INTERVAL"))
             .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_DEFAULT_STORAGE_CLASS"))
+            .return_const(Err(VarError::NotPresent));
 
         let mut env = Env::new(env_getter);
 
@@ -126,6 +130,7 @@ mod tests {
                 cache_path: None,
                 cache_size: ByteSize::gb(1).as_u64(),
                 sync_interval: Duration::from_millis(100),
+                default_storage_class: None,
             }
         );
     }
@@ -170,6 +175,10 @@ mod tests {
             .expect_get()
             .with(eq("RS_REMOTE_SYNC_INTERVAL"))
             .return_const(Ok("60".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REMOTE_DEFAULT_STORAGE_CLASS"))
+            .return_const(Ok("STANDARD".to_string()));
 
         let mut env = Env::new(env_getter);
 
@@ -186,6 +195,7 @@ mod tests {
                 cache_path: Some(PathBuf::from("/tmp/cache")),
                 cache_size: ByteSize::gb(2).as_u64(),
                 sync_interval: Duration::from_secs(60),
+                default_storage_class: Some("STANDARD".to_string()),
             }
         );
     }
