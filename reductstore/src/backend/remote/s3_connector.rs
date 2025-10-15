@@ -412,6 +412,7 @@ mod tests {
     // and that error handling works as expected.
     mod dummy {
         use super::*;
+
         #[rstest]
         fn download_object(connector: S3Connector) {
             let key = "test_download.txt";
@@ -496,6 +497,29 @@ mod tests {
             assert_eq!(connector.rename_object(from, to).err().unwrap().to_string(),
                        "S3 rename_object error bucket=test-bucket, from_key=r/test_rename_from.txt, to_key=r/test_rename_to.txt: connection error"
             );
+        }
+
+        #[rstest]
+        #[case("STANDARD", Some(StorageClass::Standard))]
+        #[case("STANDARD_IA", Some(StorageClass::StandardIa))]
+        #[case("INTELLIGENT_TIERING", Some(StorageClass::IntelligentTiering))]
+        #[case("ONEZONE_IA", Some(StorageClass::OnezoneIa))]
+        #[case("EXPRESS_ONEZONE", Some(StorageClass::ExpressOnezone))]
+        #[case("GLACIER_IR", Some(StorageClass::GlacierIr))]
+        #[case("GLACIER", Some(StorageClass::Glacier))]
+        #[case("DEEP_ARCHIVE", Some(StorageClass::DeepArchive))]
+        #[case("OUTPOSTS", Some(StorageClass::Outposts))]
+        #[case("REDUCED_REDUNDANCY", Some(StorageClass::ReducedRedundancy))]
+        #[case("UNKNOWN_CLASS", None)]
+        fn test_storage_class_mapping(
+            #[case] input: &str,
+            #[case] expected: Option<StorageClass>,
+            settings: RemoteBackendSettings,
+        ) {
+            let mut custom_settings = settings;
+            custom_settings.default_storage_class = Some(input.to_string());
+            let connector = S3Connector::new(custom_settings);
+            assert_eq!(connector.default_storage_class, expected);
         }
 
         #[fixture]
