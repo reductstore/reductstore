@@ -171,7 +171,7 @@ async fn fetch_and_response_batched_records(
         }
 
         if header_size > io_settings.batch_max_metadata_size
-            || body_size > io_settings.batch_max_size
+            || (!empty_body && body_size > io_settings.batch_max_size)
             || readers.len() >= io_settings.batch_max_records
             || start_time.elapsed() > io_settings.batch_timeout
         {
@@ -538,7 +538,8 @@ mod tests {
         async fn max_records_from_query(#[future] keeper: Arc<StateKeeper>) {
             let components = keeper.await.get_anonymous().await.unwrap();
             let resp =
-                build_bucket_and_query(components.clone(), json!({"#batch_records": 10})).await;
+                build_bucket_and_query(components.clone(), json!({"#batch_records": 10}), false)
+                    .await;
 
             let count = resp
                 .into_response()
@@ -553,7 +554,7 @@ mod tests {
         #[tokio::test]
         async fn max_records_from_settings(#[future] keeper: Arc<StateKeeper>) {
             let components = keeper.await.get_anonymous().await.unwrap();
-            let resp = build_bucket_and_query(components.clone(), json!({})).await;
+            let resp = build_bucket_and_query(components.clone(), json!({}), false).await;
             let count = resp
                 .into_response()
                 .headers()
@@ -568,7 +569,8 @@ mod tests {
         async fn max_metadata_size_from_query(#[future] keeper: Arc<StateKeeper>) {
             let components = keeper.await.get_anonymous().await.unwrap();
             let resp =
-                build_bucket_and_query(components, json!({"#batch_metadata_size": 100})).await;
+                build_bucket_and_query(components, json!({"#batch_metadata_size": 100}), false)
+                    .await;
             let body = to_bytes(resp.into_response().into_body(), usize::MAX)
                 .await
                 .unwrap();
@@ -579,16 +581,32 @@ mod tests {
         #[tokio::test]
         async fn max_size_from_settings(#[future] keeper: Arc<StateKeeper>) {
             let components = keeper.await.get_anonymous().await.unwrap();
-            let resp = build_bucket_and_query(components.clone(), json!({})).await;
+            let resp = build_bucket_and_query(components.clone(), json!({}), false).await;
             let body = to_bytes(resp.into_response().into_body(), usize::MAX)
                 .await
                 .unwrap();
             assert!(body.len() <= Cfg::default().io_conf.batch_max_size as usize);
         }
 
+        #[rstest]
+        #[tokio::test]
+        async fn ignore_max_size_if_no_body(#[future] keeper: Arc<StateKeeper>) {
+            let components = keeper.await.get_anonymous().await.unwrap();
+            let resp = build_bucket_and_query(components.clone(), json!({"#batch_size": 1}), true)
+                .await
+                .into_response();
+
+            let header_size: usize = resp.headers().iter().count();
+            let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
+
+            assert_eq!(body.len(), 0);
+            assert_eq!(header_size, 88);
+        }
+
         async fn build_bucket_and_query(
             components: Arc<Components>,
             condition: Value,
+            only_metadata: bool,
         ) -> impl IntoResponse {
             let bucket = components
                 .storage
@@ -611,6 +629,7 @@ mod tests {
                 .query(
                     QueryEntry {
                         when: Some(condition),
+                        only_metadata: Some(only_metadata),
                         ..QueryEntry::default()
                     }
                     .into(),
@@ -622,7 +641,7 @@ mod tests {
                 bucket,
                 "entry-1",
                 query_id,
-                false,
+                only_metadata,
                 &components.ext_repo,
             )
             .await
