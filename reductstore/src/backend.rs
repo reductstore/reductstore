@@ -15,6 +15,7 @@ use crate::backend::file::{AccessMode, OpenOptions};
 use crate::backend::noop::NoopBackend;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use reduct_base::msg::server_api::License;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -63,6 +64,7 @@ pub struct BackpackBuilder {
     remote_secret_key: Option<String>,
     remote_cache_size: Option<u64>,
     remote_default_storage_class: Option<String>,
+    license: Option<License>,
 }
 
 impl BackpackBuilder {
@@ -120,6 +122,11 @@ impl BackpackBuilder {
         self
     }
 
+    pub fn license(mut self, license: License) -> Self {
+        self.license = Some(license);
+        self
+    }
+
     pub fn try_build(self) -> Result<Backend, ReductError> {
         let backend: BoxedBackend = match self.backend_type {
             #[cfg(feature = "fs-backend")]
@@ -135,6 +142,14 @@ impl BackpackBuilder {
 
             #[cfg(feature = "s3-backend")]
             BackendType::S3 => {
+                if self.license.is_none()
+                    || self.license.as_ref().unwrap().expiry_date > chrono::Utc::now()
+                {
+                    return Err(internal_server_error!(
+                        "S3 backend requires a valid commercial license"
+                    ));
+                }
+
                 let Some(bucket) = self.remote_bucket else {
                     Err(internal_server_error!(
                         "remote_bucket is required remote S3 backend"

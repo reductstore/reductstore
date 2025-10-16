@@ -138,7 +138,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens);
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
         let repo = components.token_repo.read().await;
@@ -171,7 +171,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens);
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
         let repo = components.token_repo.read().await;
@@ -196,7 +196,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens);
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
         let repo = components.token_repo.read().await;
@@ -221,7 +221,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens);
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
         let repo = components.token_repo.read().await;
