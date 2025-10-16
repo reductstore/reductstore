@@ -600,7 +600,10 @@ mod tests {
             let body = to_bytes(resp.into_body(), usize::MAX).await.unwrap();
 
             assert_eq!(body.len(), 0);
-            assert_eq!(header_size, 88);
+            assert_eq!(
+                header_size, 88,
+                "should sand 85 records in headers + 3 default headers"
+            );
         }
 
         async fn build_bucket_and_query(
