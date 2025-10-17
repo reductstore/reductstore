@@ -44,25 +44,7 @@ async fn launch_server() {
         env!("BUILD_TIME")
     );
 
-    let git_ref = if version.ends_with("-dev") {
-        env!("COMMIT").to_string()
-    } else {
-        format!("v{}", version)
-    };
-
-    let parser = CfgParser::from_env(StdEnvGetter::default());
-    Logger::init(&parser.cfg.log_level);
-    info!("Configuration: \n {}", parser);
-
-    if let Some(license) = &parser.license {
-        info!("License Information: {}", license);
-    } else {
-        info!(
-            "License: BUSL-1.1 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
-            git_ref
-        );
-    }
-
+    let parser = CfgParser::from_env(StdEnvGetter::default(), version);
     let handle = Handle::new();
     let lock_file = Arc::new(parser.build_lock_file().unwrap());
 
@@ -266,7 +248,7 @@ mod tests {
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
 
         let handle = Handle::new();
-        let cfg = CfgParser::from_env(StdEnvGetter::default()); // init file cache
+        let cfg = CfgParser::from_env(StdEnvGetter::default(), "0.0.0"); // init file cache
         let storage = cfg.build().unwrap().storage;
         let ctx = ContextGuard {
             server_handle: handle.clone(),

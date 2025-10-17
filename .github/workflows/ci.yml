@@ -229,6 +229,9 @@ jobs:
           secret_key: ${{ env.MINIO_SECRET_KEY }}
           bucket_name: ${{ env.MINIO_BUCKET }}
 
+      - name: Create license
+        run: echo '${{secrets.LICENSE_KEY}}' > /tmp/license.lic
+
       - name: Generate code coverage
         env:
           ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}

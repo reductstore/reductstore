@@ -15,6 +15,7 @@ use crate::backend::file::{AccessMode, OpenOptions};
 use crate::backend::noop::NoopBackend;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use reduct_base::msg::server_api::License;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -63,6 +64,7 @@ pub struct BackpackBuilder {
     remote_secret_key: Option<String>,
     remote_cache_size: Option<u64>,
     remote_default_storage_class: Option<String>,
+    license: Option<License>,
 }
 
 impl BackpackBuilder {
@@ -120,6 +122,11 @@ impl BackpackBuilder {
         self
     }
 
+    pub fn license(mut self, license: License) -> Self {
+        self.license = Some(license);
+        self
+    }
+
     pub fn try_build(self) -> Result<Backend, ReductError> {
         let backend: BoxedBackend = match self.backend_type {
             #[cfg(feature = "fs-backend")]
@@ -135,6 +142,16 @@ impl BackpackBuilder {
 
             #[cfg(feature = "s3-backend")]
             BackendType::S3 => {
+                if self
+                    .license
+                    .and_then(|l| Some(l.expiry_date < chrono::Utc::now()))
+                    .unwrap_or(true)
+                {
+                    return Err(internal_server_error!(
+                        "S3 backend requires a valid commercial license"
+                    ));
+                }
+
                 let Some(bucket) = self.remote_bucket else {
                     Err(internal_server_error!(
                         "remote_bucket is required remote S3 backend"
@@ -271,7 +288,7 @@ mod tests {
     mod s3 {
         use super::*;
         #[rstest]
-        fn test_backend_builder_s3() {
+        fn test_backend_builder_s3(license: License) {
             {
                 let backend = Backend::builder()
                     .backend_type(BackendType::S3)
@@ -282,6 +299,7 @@ mod tests {
                     .remote_access_key("access_key")
                     .remote_secret_key("secret_key")
                     .cache_size(1024 * 1024 * 1024) // 1 GB
+                    .license(license)
                     .try_build()
                     .expect("Failed to build S3 backend");
                 assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/cache"));
@@ -289,7 +307,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_bucket_missing() {
+        fn test_backend_builder_s3_bucket_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_cache_path(PathBuf::from("/tmp/cache"))
@@ -298,6 +316,7 @@ mod tests {
                 .remote_access_key("access_key")
                 .remote_secret_key("secret_key")
                 .cache_size(1024 * 1024 * 1024) // 1 GB
+                .license(license)
                 .try_build()
                 .err()
                 .unwrap();
@@ -309,7 +328,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_cache_path_missing() {
+        fn test_backend_builder_s3_cache_path_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -318,6 +337,7 @@ mod tests {
                 .remote_access_key("access_key")
                 .remote_secret_key("secret_key")
                 .cache_size(1024 * 1024 * 1024) // 1 GB
+                .license(license)
                 .try_build()
                 .err()
                 .unwrap();
@@ -329,7 +349,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_region_missing() {
+        fn test_backend_builder_s3_region_missing(license: License) {
             let result = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -339,6 +359,7 @@ mod tests {
                 .remote_access_key("access_key")
                 .remote_secret_key("secret_key")
                 .cache_size(1024 * 1024 * 1024) // 1 GB
+                .license(license)
                 .try_build();
 
             assert!(
@@ -348,7 +369,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_endpoint_missing() {
+        fn test_backend_builder_s3_endpoint_missing(license: License) {
             let result = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -357,6 +378,7 @@ mod tests {
                 .remote_access_key("access_key")
                 .remote_secret_key("secret_key")
                 .cache_size(1024 * 1024 * 1024)
+                .license(license)
                 .try_build();
 
             assert!(
@@ -366,7 +388,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_access_key_missing() {
+        fn test_backend_builder_s3_access_key_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -375,6 +397,7 @@ mod tests {
                 .remote_endpoint("http://localhost:9000")
                 .remote_secret_key("secret_key")
                 .cache_size(1024 * 1024 * 1024)
+                .license(license)
                 .try_build()
                 .err()
                 .unwrap();
@@ -386,7 +409,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_secret_key_missing() {
+        fn test_backend_builder_s3_secret_key_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -395,6 +418,7 @@ mod tests {
                 .remote_endpoint("http://localhost:9000")
                 .remote_access_key("access_key")
                 .cache_size(1024 * 1024 * 1024)
+                .license(license)
                 .try_build()
                 .err()
                 .unwrap();
@@ -406,7 +430,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_cache_size_missing() {
+        fn test_backend_builder_s3_cache_size_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .backend_type(BackendType::S3)
@@ -416,6 +440,7 @@ mod tests {
                 .remote_endpoint("http://localhost:9000")
                 .remote_access_key("access_key")
                 .remote_secret_key("secret_key")
+                .license(license)
                 .try_build()
                 .err()
                 .unwrap();
@@ -423,6 +448,59 @@ mod tests {
             assert_eq!(
                 err,
                 internal_server_error!("remote_cache_size is required for S3 backend")
+            );
+        }
+
+        #[rstest]
+        fn test_backend_builder_s3_license_missing() {
+            let err = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
+                .remote_region("us-east-1")
+                .remote_endpoint("http://localhost:9000")
+                .remote_access_key("access_key")
+                .remote_secret_key("secret_key")
+                .cache_size(1024 * 1024 * 1024)
+                .try_build()
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                internal_server_error!("S3 backend requires a valid commercial license")
+            );
+        }
+
+        #[rstest]
+        fn test_backend_builder_s3_license_expired() {
+            let license = License {
+                licensee: "".to_string(),
+                invoice: "".to_string(),
+                expiry_date: chrono::Utc::now() - chrono::Duration::days(1),
+                plan: "".to_string(),
+                device_number: 0,
+                disk_quota: 0,
+                fingerprint: "".to_string(),
+            };
+
+            let err = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
+                .remote_region("us-east-1")
+                .remote_endpoint("http://localhost:9000")
+                .remote_access_key("access_key")
+                .remote_secret_key("secret_key")
+                .cache_size(1024 * 1024 * 1024)
+                .license(license)
+                .try_build()
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                internal_server_error!("S3 backend requires a valid commercial license")
             );
         }
     }
@@ -602,6 +680,19 @@ mod tests {
     #[fixture]
     fn path() -> PathBuf {
         tempdir().unwrap().keep()
+    }
+
+    #[fixture]
+    fn license() -> License {
+        License {
+            licensee: "".to_string(),
+            invoice: "".to_string(),
+            expiry_date: chrono::Utc::now() + chrono::Duration::days(30),
+            plan: "".to_string(),
+            device_number: 0,
+            disk_quota: 0,
+            fingerprint: "".to_string(),
+        }
     }
 
     fn build_backend(mock_backend: MockBackend) -> Backend {

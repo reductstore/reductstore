@@ -187,7 +187,9 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = CfgParser::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .build()
+            .unwrap();
         let repo = components.replication_repo.read().await;
         let replication = repo.get_replication("replication1").unwrap();
 
@@ -227,7 +229,9 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = CfgParser::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .build()
+            .unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -254,7 +258,9 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = CfgParser::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .build()
+            .unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -280,7 +286,9 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = CfgParser::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .build()
+            .unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -306,7 +314,9 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = CfgParser::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .build()
+            .unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -332,7 +342,9 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = CfgParser::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .build()
+            .unwrap();
         let repo = components.replication_repo.read().await;
         assert_eq!(repo.replications().len(), 0);
     }
@@ -400,7 +412,9 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let components = CfgParser::from_env(env_with_replications).build().unwrap();
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .build()
+            .unwrap();
         let repo = components.replication_repo.read().await;
         let replication = repo.get_replication("replication1").unwrap();
         assert_eq!(

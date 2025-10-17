@@ -25,6 +25,7 @@ use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::ext::ExtSettings;
 use reduct_base::internal_server_error;
+use reduct_base::logger::Logger;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::server_api::License;
@@ -99,7 +100,7 @@ pub struct CfgParser<EnvGetter: GetEnv> {
 }
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub fn from_env(env_getter: EnvGetter) -> Self {
+    pub fn from_env(env_getter: EnvGetter, version: &str) -> Self {
         let mut env = Env::new(env_getter);
 
         let mut api_base_path = env.get("RS_API_BASE_PATH", "/".to_string());
@@ -153,6 +154,25 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 
         let license = parse_license(cfg.license_path.clone());
         let me = Self { cfg, env, license };
+
+        Logger::init(&me.cfg.log_level);
+        info!("Configuration: \n {}", me);
+
+        let git_ref = if version.ends_with("-dev") {
+            env!("COMMIT").to_string()
+        } else {
+            format!("v{}", version)
+        };
+
+        if let Some(license) = &me.license {
+            info!("License Information: {}", license);
+        } else {
+            info!(
+                "License: BUSL-1.1 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
+                git_ref
+            );
+        }
+
         me.init_storage_backend()
             .expect("Failed to initialize storage backend");
         me
@@ -278,16 +298,15 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             backend_builder = backend_builder.remote_cache_path(cache_path.clone());
         }
 
+        if let Some(license) = &self.license {
+            backend_builder = backend_builder.license(license.clone());
+        }
+
         FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
-            internal_server_error!(
-                "Failed to initialize storage backend at {}: {}",
-                self.cfg.data_path.to_str().unwrap(),
-                e
-            )
+            internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?);
 
         FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
-
         Ok(())
     }
 
@@ -368,7 +387,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(parser.cfg.log_level, "INFO");
         assert_eq!(parser.cfg.host, "0.0.0.0");
         assert_eq!(parser.cfg.port, 8383);
@@ -394,7 +413,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(parser.cfg.log_level, "DEBUG");
     }
 
@@ -408,7 +427,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(parser.cfg.host, "127.0.0.1");
     }
 
@@ -422,7 +441,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(parser.cfg.port, 1234);
     }
 
@@ -440,7 +459,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(parser.cfg.api_base_path, "/api/");
     }
 
@@ -457,7 +476,7 @@ mod tests {
             env_getter
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
-            let parser = CfgParser::from_env(env_getter);
+            let parser = CfgParser::from_env(env_getter, "0.0.0");
             assert_eq!(parser.cfg.public_url, "https://example.com/");
         }
 
@@ -471,7 +490,7 @@ mod tests {
             env_getter
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
-            let parser = CfgParser::from_env(env_getter);
+            let parser = CfgParser::from_env(env_getter, "0.0.0");
             assert_eq!(parser.cfg.public_url, "https://example.com/");
         }
 
@@ -495,7 +514,7 @@ mod tests {
             env_getter
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
-            let parser = CfgParser::from_env(env_getter);
+            let parser = CfgParser::from_env(env_getter, "0.0.0");
             assert_eq!(parser.cfg.public_url, "http://example.com/api/");
         }
 
@@ -529,7 +548,7 @@ mod tests {
             env_getter
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
-            let parser = CfgParser::from_env(env_getter);
+            let parser = CfgParser::from_env(env_getter, "0.0.0");
             assert_eq!(parser.cfg.public_url, "https://example.com/api/");
         }
     }
@@ -544,7 +563,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(parser.cfg.data_path, PathBuf::from("/tmp"));
     }
 
@@ -558,7 +577,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(parser.cfg.api_token, "XXX");
     }
 
@@ -572,7 +591,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(parser.cfg.cert_path, Some(PathBuf::from("/tmp/cert.pem")));
     }
 
@@ -586,10 +605,27 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(
             parser.cfg.cert_key_path,
             Some(PathBuf::from("/tmp/cert.key"))
+        );
+    }
+
+    #[rstest]
+    fn test_license_path(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_LICENSE_PATH"))
+            .times(1)
+            .return_const(Ok("/tmp/license.lic".to_string())); // must be created from CI
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        assert_eq!(
+            parser.cfg.license_path,
+            Some("/tmp/license.lic".to_string())
         );
     }
 
@@ -603,7 +639,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(
             parser.cfg.cors_allow_origin,
             vec!["http://localhost", "http://example.com"]
@@ -620,7 +656,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         assert_eq!(parser.cfg.ext_path, Some(PathBuf::from("/tmp/ext")));
     }
 
@@ -665,7 +701,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
         env_getter.expect_all().returning(|| BTreeMap::new());
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
         parser.build().unwrap();
     }
 
@@ -676,7 +712,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
 
         let lock_file = parser.build_lock_file().unwrap();
         assert!(lock_file.is_locked().await);
@@ -693,7 +729,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let parser = CfgParser::from_env(env_getter);
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
 
         let lock_file = parser.build_lock_file().unwrap();
         assert!(lock_file.is_waiting().await);
