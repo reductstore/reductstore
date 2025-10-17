@@ -613,6 +613,23 @@ mod tests {
     }
 
     #[rstest]
+    fn test_license_path(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_LICENSE_PATH"))
+            .times(1)
+            .return_const(Ok("/tmp/license.lic".to_string())); // must be created from CI
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        assert_eq!(
+            parser.cfg.license_path,
+            Some("/tmp/license.lic".to_string())
+        );
+    }
+
+    #[rstest]
     fn test_cors_allow_origin(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
