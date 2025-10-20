@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.0] - 2025-10-20
+
 ### Added
 
 - Integrate S3 Storage Backend, [PR-919](https://github.com/reductstore/reductstore/pull/919)
@@ -1148,7 +1150,8 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.16.3...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.17.0...HEAD
+[1.17.0]: https://github.com/reductstore/reductstore/compare/v1.16.3...v1.17.0
 [1.16.3]: https://github.com/reductstore/reductstore/compare/v1.16.2...v1.16.3
 [1.16.2]: https://github.com/reductstore/reductstore/compare/v1.16.1...v1.16.2
 [1.16.1]: https://github.com/reductstore/reductstore/compare/v1.16.0...v1.16.1
