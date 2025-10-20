@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RS_REMOTE_SYNC_INTERVAL` configuration parameter, [PR-961](https://github.com/reductstore/reductstore/pull/961)
 - Lock file to prevent concurrent access to the same data, [PR-969](https://github.com/reductstore/reductstore/pull/969)
 - Default storage class for S3 backend, [PR-990](https://github.com/reductstore/reductstore/pull/990)
+- Support for Content-Disposition header, [PR-1000](https://github.com/reductstore/reductstore/pull/1000)
 
 ### Changed
 
