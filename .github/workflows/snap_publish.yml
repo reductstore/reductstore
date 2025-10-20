@@ -7,14 +7,12 @@ on:
       - completed
     branches:
       - main
-      - stable
-    tags:
       - "v*"
 jobs:
   build_snap:
     runs-on: ubuntu-latest
     name: Build snap package
-    if: (github.event.workflow_run.head_commit.ref == 'refs/heads/main' || startsWith(github.event.workflow_run.head_commit.ref, 'refs/tags/')) && github.event.workflow_run.conclusion == 'success'
+    if:  github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v4
       - uses: snapcore/action-build@v1

@@ -7,8 +7,6 @@ on:
       - completed
     branches:
       - main
-      - stable
-    tags:
       - "v*"
 
 permissions:
@@ -22,7 +20,7 @@ jobs:
   push_image_dockerhub:
     runs-on: ubuntu-latest
     name: Build imag and push it to DockerHub Registry
-    if: (github.event.workflow_run.head_commit.ref == 'refs/heads/main' || startsWith(github.event.workflow_run.head_commit.ref, 'refs/tags/')) && github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success'
     strategy:
       matrix:
         platform: [ linux/amd64, linux/arm64 ]

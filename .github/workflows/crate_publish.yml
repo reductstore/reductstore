@@ -6,15 +6,12 @@ on:
     types:
       - completed
     branches:
-      - main
-      - stable
-    tags:
       - "v*"
 jobs:
   publish_crate:
     runs-on: ubuntu-latest
     name: Publish crate
-    if: startsWith(github.event.workflow_run.head_commit.ref, 'refs/tags/')  && github.event.workflow_run.conclusion == 'success'
+    if: github.event.workflow_run.conclusion == 'success'
     steps:
       - uses: actions/checkout@v2
       - name: Set up Rust
