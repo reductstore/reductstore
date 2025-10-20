@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Optimize integrity check at storage start, [PR-986](https://github.com/reductstore/reductstore/pull/986)
 - Stop listing entry directory twice at storage start, [PR-988](https://github.com/reductstore/reductstore/pull/988)
 - Update extensions: ros-ext v0.4.0, select v0.6.0, [PR-1001](https://github.com/reductstore/reductstore/pull/1001)
+- Update Web Console up to v1.12.0, [PR-1002](https://github.com/reductstore/reductstore/pull/1002)
 
 ### Fixed
 
