@@ -3,10 +3,13 @@
 
 use crate::api::HttpError;
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
+use axum::http::header::CONTENT_DISPOSITION;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use axum_extra::headers::{ContentLength, HeaderMapExt};
 use bytes::Bytes;
 use futures_util::Future;
 use futures_util::Stream;
+use hyper::header::CONTENT_TYPE;
 use reduct_base::error::ReductError;
 use reduct_base::io::{BoxedReadRecord, RecordMeta};
 use reduct_base::{internal_server_error, unprocessable_entity};
@@ -32,10 +35,14 @@ pub(super) fn make_headers_from_reader(meta: &RecordMeta) -> HeaderMap {
     }
 
     headers.insert(
-        "content-type",
+        CONTENT_TYPE,
         HeaderValue::from_str(meta.content_type()).unwrap(),
     );
-    headers.insert("content-length", HeaderValue::from(meta.content_length()));
+    headers.typed_insert(ContentLength(meta.content_length()));
+    headers.insert(
+        CONTENT_DISPOSITION,
+        HeaderValue::from_str("attachment").unwrap(),
+    );
     headers.insert("x-reduct-time", HeaderValue::from(meta.timestamp()));
     headers
 }
@@ -277,10 +284,59 @@ mod tests {
             let meta = RecordMeta::builder()
                 .timestamp(0)
                 .content_length(len as u64)
-                .content_type("application/octet-stream".to_string())
+                .content_type("application / octet - stream".to_string())
                 .build();
 
             CursorRecord::boxed(Cursor::new(content), meta, 10)
+        }
+    }
+
+    mod make_headers_from_reader {
+        use super::*;
+        use axum::http::header::CONTENT_LENGTH;
+        use reduct_base::io::records::OneShotRecord;
+        use reduct_base::Labels;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_make_headers() {
+            let meta = RecordMeta::builder()
+                .timestamp(1625077800)
+                .content_length(1234)
+                .content_type("application/json".to_string())
+                .labels(Labels::from_iter(vec![
+                    ("key1".to_string(), "value1".to_string()),
+                    ("key2".to_string(), "value2".to_string()),
+                ]))
+                .build();
+
+            let record = OneShotRecord::boxed("".into(), meta.clone());
+            let headers = make_headers_from_reader(record.meta());
+
+            assert_eq!(
+                headers.get("x-reduct-label-key1").unwrap(),
+                &HeaderValue::from_str("value1").unwrap()
+            );
+            assert_eq!(
+                headers.get("x-reduct-label-key2").unwrap(),
+                &HeaderValue::from_str("value2").unwrap()
+            );
+            assert_eq!(
+                headers.get(CONTENT_TYPE).unwrap(),
+                &HeaderValue::from_str("application/json").unwrap()
+            );
+            assert_eq!(
+                headers.get(CONTENT_LENGTH).unwrap(),
+                &HeaderValue::from_str("1234").unwrap()
+            );
+            assert_eq!(
+                headers.get(CONTENT_DISPOSITION).unwrap(),
+                &HeaderValue::from_str("attachment").unwrap()
+            );
+            assert_eq!(
+                headers.get("x-reduct-time").unwrap(),
+                &HeaderValue::from_str("1625077800").unwrap()
+            );
         }
     }
 }
