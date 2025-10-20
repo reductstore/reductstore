@@ -37,7 +37,7 @@ reduct-base = { path = "../reduct_base", version = "1.15.0", features = ["ext"] 
 reduct-macros = { path = "../reduct_macros", version = "1.15.0" }
 
 chrono = { version = "0.4.41", features = ["serde"] }
-zip = "5.0.0"
+zip = "6.0.0"
 tempfile = "3.23.0"
 hex = "0.4.3"
 prost-wkt-types = "0.7.0"
