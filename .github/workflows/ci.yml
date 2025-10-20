@@ -124,14 +124,12 @@ jobs:
         if: github.event_name == 'pull_request'
         env:
           RUSTFLAGS: "-C target-feature=+crt-static"
-          CARGO_TARGET_DIR: target/release/${{ matrix.target }}
         run: cargo build --profile ci -p reductstore --target ${{ matrix.target }} --all-features
 
       - name: Build binary (Release)
         if: github.event_name != 'pull_request'
         env:
           RUSTFLAGS: "-C target-feature=+crt-static"
-          CARGO_TARGET_DIR: target/release/${{ matrix.target }}
         run: cargo build --profile release -p reductstore --target ${{ matrix.target }} --all-features
 
       - name: Upload binary (Release)
@@ -139,7 +137,7 @@ jobs:
         if: github.event_name != 'pull_request'
         with:
           name: reductstore-${{ matrix.target }}
-          path: target/release/${{matrix.target}}/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
+          path: target/${{matrix.target}}/release/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
           if-no-files-found: 'error'
 
 
