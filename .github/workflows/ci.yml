@@ -20,6 +20,7 @@ permissions:
   id-token: write
   contents: read
 
+
 env:
   REGISTRY_IMAGE: reduct/store
 
@@ -633,6 +634,8 @@ jobs:
 
   make_release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     needs:
       - api_tests
       - migration_test
