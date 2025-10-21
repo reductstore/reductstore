@@ -68,6 +68,7 @@ jobs:
           file: buildx.Dockerfile
           labels: ${{ steps.meta.outputs.labels }}
           platforms: ${{ matrix.platform }}
+          tags: ${{  github.workflow_run.head_branch }}
           build-args: |
             GIT_COMMIT=${{env.GITHUB_SHA}}
             CARGO_TARGET=${{matrix.cargo_target}}

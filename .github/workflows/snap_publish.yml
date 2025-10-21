@@ -53,4 +53,4 @@ jobs:
           SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
         with:
           snap: ${{env.SNAP_NAME}}
-          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
+          release: ${{ github.workflow_run.head_branch == 'main' && 'edge' || 'stable' }}
