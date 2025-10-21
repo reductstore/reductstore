@@ -795,7 +795,7 @@ jobs:
 
   push_image_dockerhub:
     runs-on: ubuntu-latest
-    name: Build imag and push it to DockerHub Registry
+    name: Build image and push it to DockerHub Registry
     needs: [ check_tag, api_tests, migration_test, replication_test ]
     if: github.event_name != 'pull_request'
     strategy:
