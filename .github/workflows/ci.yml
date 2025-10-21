@@ -16,6 +16,10 @@ on:
       - README.md
       - CHANGELOG.md
 
+permissions:
+  id-token: write
+  contents: read
+
 env:
   REGISTRY_IMAGE: reduct/store
 
