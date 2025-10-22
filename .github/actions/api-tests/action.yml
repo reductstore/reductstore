@@ -1,0 +1,106 @@
+name: 'Run API Tests'
+description: 'Runs API integration tests for ReductStore.'
+inputs:
+  token:
+    description: 'API token.'
+    required: true
+  cert_path:
+    description: 'Certificate path.'
+    required: true
+  license_path:
+    description: 'License path.'
+    required: true
+  backend:
+    description: 'Backend type (fs or s3).'
+    required: true
+  url:
+    description: 'ReductStore URL.'
+    required: true
+  minio_access_key:
+    description: 'MinIO access key.'
+    required: true
+  minio_secret_key:
+    description: 'MinIO secret key.'
+    required: true
+  minio_bucket:
+    description: 'MinIO bucket.'
+    required: true
+  minio_endpoint:
+    description: 'MinIO endpoint.'
+    required: false
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+
+    - name: Download Docker image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: image
+        path: /tmp/
+
+    - name: Load Docker image
+      shell: bash
+      run: docker load --input /tmp/image.tar
+
+    - name: Create license file
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.license_path }}" ]; then
+          echo '${{ secrets.LICENSE_KEY }}' > .${{ inputs.license_path }}
+        fi
+
+    - name: Run MinIO server and create bucket (if backend is s3)
+      if: ${{ inputs.backend == 's3' }}
+      uses: ./.github/actions/run-minio
+      with:
+        access_key: ${{ inputs.minio_access_key }}
+        secret_key: ${{ inputs.minio_secret_key }}
+        bucket_name: ${{ inputs.minio_bucket }}
+
+    - name: Run ReductStore
+      shell: bash
+      run: |
+        if [ "${{ inputs.backend }}" = "fs" ]; then
+          docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{ inputs.token }} \
+            --name reduct \
+            --env RS_CERT_PATH=${{ inputs.cert_path }} \
+            --env RS_LICENSE_PATH=${{ inputs.license_path }} \
+            --env RS_CERT_KEY_PATH=/misc/privateKey.key \
+            --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
+            -d ${{ github.repository }}
+        else
+          docker run --network=host -v ${PWD}/misc:/misc \
+            --env RS_API_TOKEN=${{ inputs.token }} \
+            --env RS_CERT_PATH=${{ inputs.cert_path }} \
+            --env RS_LICENSE_PATH=${{ inputs.license_path }} \
+            --env RS_CERT_KEY_PATH=/misc/privateKey.key \
+            --env RS_STORAGE_TYPE=s3 \
+            --env RS_REMOTE_BACKEND_ENDPOINT=${{ inputs.minio_endpoint }} \
+            --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }} \
+            --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }} \
+            --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }} \
+            --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
+            --name reduct -d ${{ github.repository }}
+        fi
+        sleep 5
+        docker logs reduct
+
+    - name: Build API tests
+      shell: bash
+      run: |
+        docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+        docker build -t api ./integration_tests/api
+
+    - name: Run API tests
+      shell: bash
+      run: |
+        docker run --network=host \
+          --env API_TOKEN=${{ inputs.token }} \
+          --env LICENSE_PATH=${{ inputs.license_path }} \
+          --env STORAGE_URL=${{ inputs.url }} api
+
+    - name: Print docker logs
+      if: always()
+      shell: bash
+      run: docker logs reduct
