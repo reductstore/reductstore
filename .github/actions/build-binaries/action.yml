@@ -48,7 +48,7 @@ runs:
       run: |
         brew install ${{ inputs.compiler }}
 
-    - uses: ilammy/setup-nasm@v1
+#    - uses: ilammy/setup-nasm@v1
 
     - name: Install cargo-export
       shell: bash

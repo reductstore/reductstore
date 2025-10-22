@@ -175,73 +175,17 @@ jobs:
       MINIO_BUCKET: test
     steps:
       - uses: actions/checkout@v4
-
-      - name: Download artifact
-        uses: actions/download-artifact@v4
+      - uses: ./.github/actions/api-tests
         with:
-          name: image
-          path: /tmp/
-
-      - name: Load image
-        run: |
-          docker load --input /tmp/image.tar
-          docker image ls -a
-
-      - name: Create license
-        run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
-
-      - name: Run ReductStore with FileSystem backend
-        if: ${{matrix.backend == 'fs'}}
-        run: |
-          docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{matrix.token}}  \
-            --name reduct                                     \
-            --env RS_CERT_PATH=${{matrix.cert_path}}          \
-            --env RS_LICENSE_PATH=${{matrix.license_path}}    \
-            --env RS_CERT_KEY_PATH=/misc/privateKey.key       \
-            --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com"  \
-            -d ${{github.repository}}
-          sleep 2
-          docker logs reduct
-
-      - name: Run MinIO server and create bucket
-        if: ${{matrix.backend == 's3'}}
-        uses: ./.github/actions/run-minio
-        with:
-          access_key: ${{ env.MINIO_ACCESS_KEY }}
-          secret_key: ${{ env.MINIO_SECRET_KEY }}
-          bucket_name: ${{ env.MINIO_BUCKET }}
-
-      - name: Run ReductStore with S3 backend
-        if: ${{matrix.backend == 's3'}}
-        run: |
-          docker run --network=host -v ${PWD}/misc:/misc \
-          --env RS_API_TOKEN=${{matrix.token}} \
-          --env RS_CERT_PATH=${{matrix.cert_path}} \
-          --env RS_LICENSE_PATH=${{matrix.license_path}} \
-          --env RS_CERT_KEY_PATH=/misc/privateKey.key \
-          --env RS_STORAGE_TYPE=s3 \
-          --env RS_REMOTE_BACKEND_ENDPOINT=${{ env.MINIO_ENDPOINT }} \
-          --env RS_REMOTE_ACCESS_KEY=${{ env.MINIO_ACCESS_KEY }} \
-          --env RS_REMOTE_SECRET_KEY=${{ env.MINIO_SECRET_KEY }} \
-          --env RS_REMOTE_BUCKET=${{ env.MINIO_BUCKET }} \
-          --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
-          --name reduct -d ${{github.repository}}
-          sleep 5
-
-      - name: Build API tests
-        run: |
-          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
-          docker build -t api ./integration_tests/api
-
-      - name: Run API tests
-        run: docker run --network=host
-          --env API_TOKEN=${{matrix.token}}
-          --env LICENSE_PATH=${{matrix.license_path}}
-          --env STORAGE_URL=${{matrix.url}} api
-
-      - name: Print docker logs
-        if: always()
-        run: docker logs reduct
+          token: ${{ matrix.token }}
+          cert_path: ${{ matrix.cert_path }}
+          license_path: ${{ matrix.license_path }}
+          backend: ${{ matrix.backend }}
+          url: ${{ matrix.url }}
+          minio_access_key: ${{ env.MINIO_ACCESS_KEY }}
+          minio_secret_key: ${{ env.MINIO_SECRET_KEY }}
+          minio_bucket: ${{ env.MINIO_BUCKET }}
+          minio_endpoint: ${{ env.MINIO_ENDPOINT }}
 
   migration_test:
     name: Migration Tests
@@ -880,23 +824,4 @@ jobs:
 
   publish_snap:
     name: Publish snap package
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [ amd64, arm64 ]
-    needs:
-      - build_snap
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: reductstore
-          path: .
-      - name: Save snap name in environment variable
-        run: |
-          echo "SNAP_NAME=$(ls *.snap | cut  -f1 | grep ${{matrix.arch}})" >> $GITHUB_ENV
-      - uses: snapcore/action-publish@master
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
-        with:
-          snap: ${{env.SNAP_NAME}}
-          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
+    runs-on: ubuntu-l
