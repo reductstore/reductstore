@@ -131,6 +131,7 @@ jobs:
       MINIO_BUCKET: test
       MINIO_ENDPOINT: http://127.0.0.1:9000
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/run-minio
         with:
           access_key: ${{ env.MINIO_ACCESS_KEY }}

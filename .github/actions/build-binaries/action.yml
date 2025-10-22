@@ -59,8 +59,7 @@ runs:
       uses: actions/cache/restore@v4
       with:
         path: |
-          target/${{ inputs.target }}/ci/deps
-          target/${{ inputs.target }}/release/deps
+          target/${{ inputs.target }}
         key: ${{ runner.os }}-cargo-${{ inputs.target }}-cargo
 
     - name: Build binary (PR)
@@ -105,6 +104,5 @@ runs:
       uses: actions/cache/save@v4
       with:
         path: |
-          target/${{ inputs.target }}/ci/deps
-          target/${{ inputs.target }}/release/deps
+          target/${{ inputs.target }}
         key: ${{ runner.os }}-cargo-${{ inputs.target }}-cargo
