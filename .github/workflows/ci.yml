@@ -115,44 +115,32 @@ jobs:
 
   coverage:
     name: Generate Code Coverage
-    runs-on: ubuntu-latest
-    timeout-minutes: 30
     needs:
       - rust_fmt
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [ubuntu-24.04]
+        target: [x86_64-unknown-linux-gnu]
+    timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: always
-      RUST_LOG: debug # expand logging
+      RUST_LOG: debug
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: test
       MINIO_ENDPOINT: http://127.0.0.1:9000
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Install Rust
-        run: rustup update stable
-
-      - name: Install cargo-llvm-cov
-        uses: taiki-e/install-action@cargo-llvm-cov
-
-      - uses: arduino/setup-protoc@v3
-        with:
-          version: "26.x"
-          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
-
       - uses: ./.github/actions/run-minio
         with:
           access_key: ${{ env.MINIO_ACCESS_KEY }}
           secret_key: ${{ env.MINIO_SECRET_KEY }}
           bucket_name: ${{ env.MINIO_BUCKET }}
 
-      - name: Create license
-        run: echo '${{secrets.LICENSE_KEY}}' > /tmp/license.lic
-
-      - name: Generate code coverage
-        env:
-          ARTIFACT_SAS_URL: ${{ secrets.ARTIFACT_SAS_URL }}
-        run: cargo llvm-cov --features s3-backend,fs-backend,ci  --workspace --lcov --output-path lcov.info
+      - uses: ./.github/actions/coverage
+        with:
+          os: ${{ matrix.os }}
+          target: ${{ matrix.target }}
 
       - name: Upload coverage to Codecov
         continue-on-error: true
