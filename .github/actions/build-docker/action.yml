@@ -1,0 +1,31 @@
+name: 'Build Docker Image'
+description: 'Builds the Linux Docker image and uploads it as an artifact.'
+inputs:
+  artifact_sas_url:
+    description: 'SAS URL for artifact download.'
+    required: true
+  rust_version:
+    description: 'Minimal Rust version.'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    - name: Build and export
+      uses: docker/build-push-action@v4
+      with:
+        context: .
+        file: buildx.Dockerfile
+        tags: ${{ github.repository }}:latest
+        outputs: type=docker,dest=/tmp/image.tar
+        build-args: |
+          ARTIFACT_SAS_URL=${{ inputs.artifact_sas_url }}
+          RUST_VERSION=${{ inputs.rust_version }}
+          BUILD_PROFILE=ci
+    - name: Upload artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: image
+        path: /tmp/image.tar

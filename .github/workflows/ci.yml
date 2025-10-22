@@ -39,27 +39,10 @@ jobs:
     needs:
       - rust_fmt
     steps:
-      - uses: actions/checkout@v4
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-      - name: Build and export
-        uses: docker/build-push-action@v4
+      - uses: ./.github/actions/build-docker
         with:
-          context: .
-          file: buildx.Dockerfile
-          tags: ${{github.repository}}:latest
-          outputs: type=docker,dest=/tmp/image.tar
-          build-args: |
-            ARTIFACT_SAS_URL=${{ secrets.ARTIFACT_SAS_URL }}
-            RUST_VERSION=${{ vars.MINIMAL_RUST_VERSION }}
-            BUILD_PROFILE=ci
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        id: upload-test-image
-        with:
-          name: image
-          path: /tmp/image.tar
+          artifact_sas_url: ${{ secrets.ARTIFACT_SAS_URL }}
+          rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
 
   build_binaries:
     name: Build Binaries
@@ -92,73 +75,14 @@ jobs:
           - target: "aarch64-apple-darwin"
             os: macos-14
             compiler: "gcc"
-
     steps:
-      - uses: actions/checkout@v4
-      - uses: arduino/setup-protoc@v3
+      - uses: ./.github/actions/build-binaries
         with:
-          version: "26.x"
-          repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: ${{ vars.MINIMAL_RUST_VERSION }}
-
-      - name: Install toolchain
-        run: rustup target add ${{ matrix.target }}
-
-      - name: Install gcc
-        if: ${{ matrix.os == 'ubuntu-24.04' }}
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ matrix.compiler }}
-
-      - name: Install gcc
-        if: ${{ matrix.os == 'macos-latest' }}
-        run: |
-          brew install ${{ matrix.compiler }}
-
-      - uses: ilammy/setup-nasm@v1
-
-      - name: Install cargo-export
-        run: cargo install cargo-export
-
-
-      - name: Build binary (PR)
-        if: github.event_name == 'pull_request'
-        env:
-          RUSTFLAGS: "-C target-feature=+crt-static"
-        run: cargo build --profile ci -p reductstore --target ${{ matrix.target }} --all-features
-
-      - name: Build binary (Release)
-        if: github.event_name != 'pull_request'
-        env:
-          RUSTFLAGS: "-C target-feature=+crt-static"
-        run: cargo build --profile release -p reductstore --target ${{ matrix.target }} --all-features
-
-      - name: Upload binary (Release)
-        uses: actions/upload-artifact@v4
-        if: github.event_name != 'pull_request'
-        with:
-          name: reductstore-${{ matrix.target }}
-          path: target/${{matrix.target}}/release/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
-          if-no-files-found: 'error'
-
-
-      - name: Build and export tests (PR)
-        if: github.event_name == 'pull_request'
-        run: cargo export target/${{ matrix.target }}/tests -- test --profile ci --target ${{ matrix.target }} --lib
-
-      - name: Build and export tests (Release)
-        if: github.event_name != 'pull_request'
-        run: cargo export target/${{ matrix.target }}/tests -- test --profile release --target ${{ matrix.target }} --lib
-
-      - name: Upload tests
-        uses: actions/upload-artifact@v4
-        with:
-          name: reductstore-tests-${{ matrix.target }}
-          path: target/${{ matrix.target }}/tests
+          minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
+          action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
+          target: ${{ matrix.target }}
+          os: ${{ matrix.os }}
+          compiler: ${{ matrix.compiler }}
 
   unit_tests:
     name: Run Unit Tests
@@ -175,31 +99,16 @@ jobs:
             target: x86_64-pc-windows-gnu
           - os: macos-14
             target: aarch64-apple-darwin
-
     runs-on: ${{ matrix.os }}
     timeout-minutes: 5
     env:
       RUST_BACKTRACE: 1
       RUST_LOG: debug
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: ./.github/actions/unit-tests
         with:
-          name: reductstore-tests-${{ matrix.target }}
-          path: ./tmp/tests
-
-      - name: Run tests
-        shell: bash
-        run: |
-          set -e -x
-          for f in ./tmp/tests/*; do
-            # exclude reduct_macros
-            if [[ $f == *"reduct_macros"* ]]; then
-              continue
-            fi
-
-            chmod +x $f
-            $f --nocapture
-          done
+          os: ${{ matrix.os }}
+          target: ${{ matrix.target }}
 
   coverage:
     name: Generate Code Coverage
@@ -979,23 +888,4 @@ jobs:
 
   publish_snap:
     name: Publish snap package
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        arch: [ amd64, arm64 ]
-    needs:
-      - build_snap
-    steps:
-      - uses: actions/download-artifact@v4
-        with:
-          name: reductstore
-          path: .
-      - name: Save snap name in environment variable
-        run: |
-          echo "SNAP_NAME=$(ls *.snap | cut  -f1 | grep ${{matrix.arch}})" >> $GITHUB_ENV
-      - uses: snapcore/action-publish@master
-        env:
-          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
-        with:
-          snap: ${{env.SNAP_NAME}}
-          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
+    runs-on: ubuntu-l

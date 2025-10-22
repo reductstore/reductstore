@@ -1,0 +1,28 @@
+name: 'Run Unit Tests'
+description: 'Downloads and runs unit test binaries for a given target.'
+inputs:
+  os:
+    description: 'Operating system.'
+    required: true
+  target:
+    description: 'Target triple.'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/download-artifact@v4
+      with:
+        name: reductstore-tests-${{ inputs.target }}
+        path: ./tmp/tests
+    - name: Run tests
+      shell: bash
+      run: |
+        set -e -x
+        for f in ./tmp/tests/*; do
+          # exclude reduct_macros
+          if [[ $f == *"reduct_macros"* ]]; then
+            continue
+          fi
+          chmod +x $f
+          $f --nocapture
+        done
