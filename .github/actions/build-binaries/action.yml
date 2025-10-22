@@ -32,22 +32,26 @@ runs:
         toolchain: ${{ inputs.minimal_rust_version }}
 
     - name: Install toolchain
+      shell: bash
       run: rustup target add ${{ inputs.target }}
 
     - name: Install gcc (Linux)
       if: ${{ inputs.os == 'ubuntu-24.04' }}
+      shell: bash
       run: |
         sudo apt-get update
         sudo apt-get install -y ${{ inputs.compiler }}
 
     - name: Install gcc (macOS)
       if: ${{ inputs.os == 'macos-latest' }}
+      shell: bash
       run: |
         brew install ${{ inputs.compiler }}
 
     - uses: ilammy/setup-nasm@v1
 
     - name: Install cargo-export
+      shell: bash
       run: cargo install cargo-export
 
     - name: Restore cache for Cargo
@@ -63,12 +67,14 @@ runs:
       if: github.event_name == 'pull_request'
       env:
         RUSTFLAGS: "-C target-feature=+crt-static"
+      shell: bash
       run: cargo build --profile ci -p reductstore --target ${{ inputs.target }} --all-features
 
     - name: Build binary (Release)
       if: github.event_name != 'pull_request'
       env:
         RUSTFLAGS: "-C target-feature=+crt-static"
+      shell: bash
       run: cargo build --profile release -p reductstore --target ${{ inputs.target }} --all-features
 
     - name: Upload binary (Release)
@@ -81,10 +87,12 @@ runs:
 
     - name: Build and export tests (PR)
       if: github.event_name == 'pull_request'
+      shell: bash
       run: cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --lib
 
     - name: Build and export tests (Release)
       if: github.event_name != 'pull_request'
+      shell: bash
       run: cargo export target/${{ inputs.target }}/tests -- test --profile release --target ${{ inputs.target }} --lib
 
     - name: Upload tests

@@ -11,8 +11,10 @@ runs:
   using: 'composite'
   steps:
     - uses: actions/checkout@v4
+
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
+
     - name: Build and export
       uses: docker/build-push-action@v4
       with:
@@ -24,6 +26,7 @@ runs:
           ARTIFACT_SAS_URL=${{ inputs.artifact_sas_url }}
           RUST_VERSION=${{ inputs.rust_version }}
           BUILD_PROFILE=ci
+
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
