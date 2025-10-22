@@ -50,17 +50,20 @@ runs:
 
     - uses: ilammy/setup-nasm@v1
 
+    - name: Use cache for Cargo
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/${{ inputs.target }}
+        key: ${{ runner.os }}-${{ inputs.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
     - name: Install cargo-export
       shell: bash
       run: cargo install cargo-export
-
-    - name: Restore cache for Cargo
-      id: cargo-cache
-      uses: actions/cache/restore@v4
-      with:
-        path: |
-          target/${{ inputs.target }}
-        key: ${{ runner.os }}-cargo-${{ inputs.target }}-cargo
 
     - name: Build binary (PR)
       if: github.event_name == 'pull_request'
@@ -99,10 +102,3 @@ runs:
       with:
         name: reductstore-tests-${{ inputs.target }}
         path: target/${{ inputs.target }}/tests
-
-    - name: Save cache for Cargo
-      uses: actions/cache/save@v4
-      with:
-        path: |
-          target/${{ inputs.target }}
-        key: ${{ runner.os }}-cargo-${{ inputs.target }}-cargo
