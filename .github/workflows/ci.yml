@@ -888,4 +888,23 @@ jobs:
 
   publish_snap:
     name: Publish snap package
-    runs-on: ubuntu-l
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        arch: [ amd64, arm64 ]
+    needs:
+      - build_snap
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: reductstore
+          path: .
+      - name: Save snap name in environment variable
+        run: |
+          echo "SNAP_NAME=$(ls *.snap | cut  -f1 | grep ${{matrix.arch}})" >> $GITHUB_ENV
+      - uses: snapcore/action-publish@master
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
+        with:
+          snap: ${{env.SNAP_NAME}}
+          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
