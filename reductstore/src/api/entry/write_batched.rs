@@ -3,7 +3,7 @@
 
 use crate::api::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
-use axum::body::Body;
+use axum::body::{Body, BodyDataStream};
 use axum::extract::{Path, State};
 use axum::response::IntoResponse;
 use axum_extra::headers::{Expect, Header, HeaderMap};
@@ -57,80 +57,27 @@ pub(super) async fn write_batched_records(
             timed_headers.push((time, header));
         }
 
-        check_content_length(&headers, &timed_headers)?;
+        let content_length = check_and_get_content_length(&headers, &timed_headers)?;
+        let record_count = timed_headers.len();
 
-        let mut record_count = timed_headers.len();
-        let mut written = 0;
-        let (mut rx_writer, prepare_write_stream) =
+        let (rx_writer, spawn_handler) =
             spawn_getting_writers(&components, &bucket, &entry_name, timed_headers)?;
-        let mut ctx = rx_writer
-            .recv()
-            .await
-            .ok_or(internal_server_error!("No writer found"))?;
 
-        while let Some(chunk) = timeout(components.cfg.io_conf.operation_timeout, stream.next())
-            .await
-            .map_err(|_| internal_server_error!("Timeout while receiving data"))?
-        {
-            let mut chunk = chunk?;
-
-            while !chunk.is_empty() {
-                match write_chunk(
-                    &mut ctx.writer,
-                    chunk,
-                    &mut written,
-                    ctx.header.content_length.clone(),
-                    components.cfg.io_conf.operation_timeout,
-                )
-                .await
-                {
-                    Ok(None) => {
-                        // the chunk is fully written next one
-                        chunk = Bytes::new();
-                    }
-                    Ok(Some(rest)) => {
-                        // finish writing the current record and start a new one
-                        if let Err(err) = ctx
-                            .writer
-                            .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
-                            .await
-                        {
-                            debug!("Timeout while sending EOF: {}", err);
-                        }
-
-                        components.replication_repo.write().await.notify(
-                            TransactionNotification {
-                                bucket: bucket.clone(),
-                                entry: entry_name.clone(),
-                                meta: RecordMeta::builder()
-                                    .timestamp(ctx.time)
-                                    .labels(ctx.header.labels.clone())
-                                    .build(),
-                                event: Transaction::WriteRecord(ctx.time),
-                            },
-                        )?;
-
-                        chunk = rest;
-                        record_count -= 1;
-                        written = 0;
-
-                        ctx = match rx_writer.recv().await {
-                            Some(ctx) => ctx,
-                            None => break, // no more writers - stop the loop
-                        };
-                    }
-                    Err(err) => {
-                        return Err::<ErrorMap, HttpError>(err.into());
-                    }
-                }
-            }
+        if content_length > 0 {
+            receive_body_and_write_records(
+                bucket,
+                entry_name,
+                components,
+                record_count,
+                &mut stream,
+                rx_writer,
+            )
+            .await?;
+        } else {
+            write_only_metadata(bucket, entry_name, components, rx_writer).await?;
         }
 
-        if record_count != 0 {
-            return Err(bad_request!("Content is shorter than expected").into());
-        }
-
-        Ok(prepare_write_stream.await.unwrap())
+        Ok(spawn_handler.await.unwrap())
     };
 
     match process_stream.await {
@@ -153,6 +100,119 @@ pub(super) async fn write_batched_records(
     }
 }
 
+async fn write_only_metadata(
+    bucket: &String,
+    entry_name: String,
+    components: Arc<Components>,
+    mut rx_writer: Receiver<WriteContext>,
+) -> Result<(), ReductError> {
+    while let Some(mut ctx) = rx_writer.recv().await {
+        if let Err(err) = ctx
+            .writer
+            .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
+            .await
+        {
+            debug!("Timeout while sending EOF: {}", err);
+        }
+
+        components
+            .replication_repo
+            .write()
+            .await
+            .notify(TransactionNotification {
+                bucket: bucket.clone(),
+                entry: entry_name.clone(),
+                meta: RecordMeta::builder()
+                    .timestamp(ctx.time)
+                    .labels(ctx.header.labels.clone())
+                    .build(),
+                event: Transaction::WriteRecord(ctx.time),
+            })?;
+    }
+
+    Ok(())
+}
+
+async fn receive_body_and_write_records(
+    bucket: &String,
+    entry_name: String,
+    components: Arc<Components>,
+    mut record_count: usize,
+    stream: &mut BodyDataStream,
+    mut rx_writer: Receiver<WriteContext>,
+) -> Result<(), ReductError> {
+    let mut written = 0;
+    let mut ctx = rx_writer
+        .recv()
+        .await
+        .ok_or(internal_server_error!("No writer found"))?;
+
+    while let Some(chunk) = timeout(components.cfg.io_conf.operation_timeout, stream.next())
+        .await
+        .map_err(|_| internal_server_error!("Timeout while receiving data"))?
+    {
+        let mut chunk =
+            chunk.map_err(|e| bad_request!("Error while receiving data chunk: {}", e))?;
+
+        while !chunk.is_empty() {
+            match write_chunk(
+                &mut ctx.writer,
+                chunk,
+                &mut written,
+                ctx.header.content_length.clone(),
+                components.cfg.io_conf.operation_timeout,
+            )
+            .await
+            {
+                Ok(None) => {
+                    // the chunk is fully written next one
+                    chunk = Bytes::new();
+                }
+                Ok(Some(rest)) => {
+                    // finish writing the current record and start a new one
+                    if let Err(err) = ctx
+                        .writer
+                        .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
+                        .await
+                    {
+                        debug!("Timeout while sending EOF: {}", err);
+                    }
+
+                    components
+                        .replication_repo
+                        .write()
+                        .await
+                        .notify(TransactionNotification {
+                            bucket: bucket.clone(),
+                            entry: entry_name.clone(),
+                            meta: RecordMeta::builder()
+                                .timestamp(ctx.time)
+                                .labels(ctx.header.labels.clone())
+                                .build(),
+                            event: Transaction::WriteRecord(ctx.time),
+                        })?;
+
+                    chunk = rest;
+                    record_count -= 1;
+                    written = 0;
+
+                    ctx = match rx_writer.recv().await {
+                        Some(ctx) => ctx,
+                        None => break, // no more writers - stop the loop
+                    };
+                }
+                Err(err) => return Err(err),
+            }
+        }
+    }
+
+    if record_count != 0 {
+        return Err(bad_request!("Content is shorter than expected"));
+    }
+
+    Ok(())
+}
+
 fn spawn_getting_writers(
     components: &Arc<Components>,
     bucket_name: &str,
@@ -167,10 +227,10 @@ fn spawn_getting_writers(
         .upgrade_and_unwrap();
 
     let entry_name = entry_name.to_string();
-    let prepare_write_stream = tokio::spawn(async move {
+    let spawn_handler = tokio::spawn(async move {
         let mut error_map = BTreeMap::new();
 
-        for (time, header) in timed_headers {
+        for (time, header) in timed_headers.into_iter() {
             let writer =
                 start_writing(&entry_name, bucket.clone(), time, &header, &mut error_map).await;
 
@@ -187,7 +247,7 @@ fn spawn_getting_writers(
         error_map
     });
 
-    Ok((rx_writer, prepare_write_stream))
+    Ok((rx_writer, spawn_handler))
 }
 
 async fn write_chunk(
@@ -210,10 +270,10 @@ async fn write_chunk(
     Ok(rest)
 }
 
-fn check_content_length(
+fn check_and_get_content_length(
     headers: &HeaderMap,
     timed_headers: &Vec<(u64, RecordHeader)>,
-) -> Result<(), ReductError> {
+) -> Result<u64, ReductError> {
     let total_content_length: u64 = timed_headers
         .iter()
         .map(|(_, header)| header.content_length)
@@ -234,7 +294,7 @@ fn check_content_length(
         .into());
     }
 
-    Ok(())
+    Ok(total_content_length)
 }
 
 async fn start_writing(
@@ -417,6 +477,55 @@ mod tests {
             .get_info("api-test")
             .unwrap();
         assert_eq!(info.info.pending_records, 3);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_batched_records_with_empty_bodies(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        headers.insert("content-length", "0".parse().unwrap());
+        headers.insert("x-reduct-time-1", "0,,a=b".parse().unwrap());
+        headers.insert("x-reduct-time-2", "0,,a=d".parse().unwrap());
+
+        let stream = Body::empty();
+
+        write_batched_records(State(Arc::clone(&keeper)), headers, path_to_entry_1, stream)
+            .await
+            .unwrap();
+
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        {
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(1)
+                .await
+                .unwrap();
+            assert_eq!(reader.meta().content_length(), 0);
+            assert_eq!(reader.read_chunk(), None);
+        }
+        {
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(2)
+                .await
+                .unwrap();
+            assert_eq!(reader.meta().content_length(), 0);
+            assert_eq!(reader.read_chunk(), None);
+        }
     }
 
     #[rstest]
