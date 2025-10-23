@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Fix writing batch with empty records¸ [PR-1005](https://github.com/reductstore/reductstore/pull/1005)
+
 ## [1.17.0] - 2025-10-20
 
 ### Added
