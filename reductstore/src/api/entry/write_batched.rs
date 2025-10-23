@@ -77,7 +77,7 @@ pub(super) async fn write_batched_records(
             write_only_metadata(bucket, entry_name, components, rx_writer).await?;
         }
 
-        Ok(spawn_handler.await.unwrap())
+        Ok(spawn_handler.await.map_err(|e| internal_server_error!("Failed to complete write operation: {}", e))?)
     };
 
     match process_stream.await {
