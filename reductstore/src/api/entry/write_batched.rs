@@ -102,6 +102,28 @@ pub(super) async fn write_batched_records(
     }
 }
 
+async fn notify_replication_write(
+    components: &Arc<Components>,
+    bucket: &str,
+    entry_name: &str,
+    ctx: &WriteContext,
+) -> Result<(), ReductError> {
+    components
+        .replication_repo
+        .write()
+        .await
+        .notify(TransactionNotification {
+            bucket: bucket.to_string(),
+            entry: entry_name.to_string(),
+            meta: RecordMeta::builder()
+                .timestamp(ctx.time)
+                .labels(ctx.header.labels.clone())
+                .build(),
+            event: Transaction::WriteRecord(ctx.time),
+        })?;
+    Ok(())
+}
+
 async fn write_only_metadata(
     bucket: &String,
     entry_name: String,
@@ -117,19 +139,7 @@ async fn write_only_metadata(
             debug!("Timeout while sending EOF: {}", err);
         }
 
-        components
-            .replication_repo
-            .write()
-            .await
-            .notify(TransactionNotification {
-                bucket: bucket.clone(),
-                entry: entry_name.clone(),
-                meta: RecordMeta::builder()
-                    .timestamp(ctx.time)
-                    .labels(ctx.header.labels.clone())
-                    .build(),
-                event: Transaction::WriteRecord(ctx.time),
-            })?;
+        notify_replication_write(&components, bucket, &entry_name, &ctx).await?;
     }
 
     Ok(())
@@ -166,10 +176,7 @@ async fn receive_body_and_write_records(
             )
             .await
             {
-                Ok(None) => {
-                    // the chunk is fully written next one
-                    chunk = Bytes::new();
-                }
+                Ok(None) => break, // finished writing the current record
                 Ok(Some(rest)) => {
                     // finish writing the current record and start a new one
                     if let Err(err) = ctx
@@ -180,19 +187,7 @@ async fn receive_body_and_write_records(
                         debug!("Timeout while sending EOF: {}", err);
                     }
 
-                    components
-                        .replication_repo
-                        .write()
-                        .await
-                        .notify(TransactionNotification {
-                            bucket: bucket.clone(),
-                            entry: entry_name.clone(),
-                            meta: RecordMeta::builder()
-                                .timestamp(ctx.time)
-                                .labels(ctx.header.labels.clone())
-                                .build(),
-                            event: Transaction::WriteRecord(ctx.time),
-                        })?;
+                    notify_replication_write(&components, bucket, &entry_name, &ctx).await?;
 
                     chunk = rest;
                     record_count -= 1;
