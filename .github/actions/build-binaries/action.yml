@@ -63,7 +63,7 @@ runs:
 
     - name: Install cargo-export
       shell: bash
-      run: cargo install cargo-export
+      run: cargo install cargo-export --force
 
     - name: Build binary (PR)
       if: github.event_name == 'pull_request'

@@ -29,7 +29,7 @@ jobs:
     runs-on: ubuntu-latest
     name: Rust Linter
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@qv4
       - name: Check code
         run: cargo fmt --all -- --check
 

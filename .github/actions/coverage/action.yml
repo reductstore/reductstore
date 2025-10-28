@@ -27,12 +27,6 @@ runs:
         version: '26.x'
         repo-token: ${{ inputs.action_github_token }}
 
-    - name: Download test binaries
-      uses: actions/download-artifact@v4
-      with:
-        name: reductstore-tests-${{ inputs.target }}
-        path: ./tmp/tests
-
     - name: Run code coverage
       shell: bash
       env:
