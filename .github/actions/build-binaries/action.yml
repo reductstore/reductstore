@@ -61,7 +61,8 @@ runs:
       with:
         aws-access-key-id: ${{ inputs.cache-s3-access-key-id }}
         aws-secret-access-key: ${{ inputs.cache-s3-access-key }}
-        aws-region: us-east-2
+        aws-region: eu-central-1
+
 
     - name: Use cache for Cargo
       uses: runs-on/cache@v4
