@@ -85,6 +85,8 @@ jobs:
           target: ${{ matrix.target }}
           os: ${{ matrix.os }}
           compiler: ${{ matrix.compiler }}
+          cache_s3_access_key_id: ${{ secrets.CACHE_S3_ACCESS_KEY_ID }}
+          cache_s3_access_key: ${{ secrets.CACHE_S3_SECRET_ACCESS_KEY }}
 
   unit_tests:
     name: Run Unit Tests
