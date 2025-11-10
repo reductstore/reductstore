@@ -129,12 +129,23 @@ jobs:
         if: github.event_name == 'pull_request'
         run: cargo build --profile ci -p reductstore --target ${{ matrix.target }} --all-features
 
+      - name: Upload binary (PR)
+        uses: actions/upload-artifact@v4
+        # Only upload Linux binary for PRs for sanity test
+        if: github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu'
+        with:
+          name: reductstore-${{ matrix.target }}
+          path: target/${{matrix.target}}/ci/reductstore
+          if-no-files-found: 'error'
+
       - name: Build binary (Release)
         if: github.event_name != 'pull_request'
         run: cargo build --profile release -p reductstore --target ${{ matrix.target }} --all-features
 
-      - name: Upload binary
+
+      - name: Upload binary (Release)
         uses: actions/upload-artifact@v4
+        if: github.event_name != 'pull_request'
         with:
           name: reductstore-${{ matrix.target }}
           path: target/${{matrix.target}}/release/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
