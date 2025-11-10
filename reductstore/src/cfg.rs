@@ -136,17 +136,12 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             public_url,
             port,
             api_base_path,
-            data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string()))
-                .canonicalize()
-                .unwrap(),
+            data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string())),
             api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
             cert_path,
             cert_key_path,
             license_path: env.get_optional("RS_LICENSE_PATH"),
-            ext_path: env
-                .get_optional::<String>("RS_EXT_PATH")
-                .map(PathBuf::from)
-                .map(|p| p.canonicalize().unwrap()),
+            ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),

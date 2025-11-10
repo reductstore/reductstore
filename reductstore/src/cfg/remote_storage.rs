@@ -48,8 +48,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             },
             cache_path: env
                 .get_optional::<String>("RS_REMOTE_CACHE_PATH")
-                .map(PathBuf::from)
-                .map(|p| p.canonicalize().unwrap_or(p)),
+                .map(PathBuf::from),
             cache_size: env
                 .get_optional::<ByteSize>("RS_REMOTE_CACHE_SIZE")
                 .unwrap_or(ByteSize::gb(1))
