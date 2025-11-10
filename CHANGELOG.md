@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Fixed
+
+- Crash with relative data path, [PR-1025](https://github.com/reductstore/reductstore/pull/1025)
+
 ## [1.17.1] - 2025-10-23
 
 ### Fixed
