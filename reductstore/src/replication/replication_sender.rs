@@ -53,22 +53,16 @@ impl ReplicationSender {
         }
     }
 
-    pub fn run(&mut self) -> SyncState {
-        let entries = match self.log_map.read() {
-            Ok(guard) => guard.keys().cloned().collect::<Vec<_>>(),
-            Err(err) => {
-                error!("Failed to acquire log map read lock: {:?}", err);
-                return SyncState::NoTransactions;
-            }
-        };
+    pub fn run(&mut self) -> Result<SyncState, ReductError> {
+        let entries = self.log_map.read()?.keys().cloned().collect::<Vec<_>>();
 
         let mut counter = Vec::new();
 
         for entry_name in entries.iter() {
             let transactions = {
                 // we can't hold the lock while we read the log
-                if let Some(log) = self.log_map.read().unwrap().get(entry_name) {
-                    log.write().unwrap().front(self.io_config.batch_max_records)
+                if let Some(log) = self.log_map.read()?.get(entry_name) {
+                    log.write()?.front(self.io_config.batch_max_records)
                 } else {
                     // log might be removed
                     continue;
@@ -143,13 +137,11 @@ impl ReplicationSender {
                     // remove processed transactions from the log
                     if let Err(err) = self
                         .log_map
-                        .read()
-                        .unwrap()
+                        .read()?
                         .get(entry_name)
-                        .and_then(|log| {
-                            Some(log.write().unwrap().pop_front(processed_transactions))
-                        })
-                        .unwrap_or(Ok(0))
+                        .unwrap()
+                        .write()?
+                        .pop_front(processed_transactions)
                     {
                         error!("Failed to remove transaction: {:?}", err);
                     }
@@ -157,12 +149,12 @@ impl ReplicationSender {
 
                 Err(err) => {
                     error!("Failed to read transaction: {:?}", err);
-                    return SyncState::BrokenLog(entry_name.clone());
+                    return Ok(SyncState::BrokenLog(entry_name.clone()));
                 }
             };
         }
 
-        if !counter.is_empty() {
+        Ok(if !counter.is_empty() {
             if self.bucket.is_active() {
                 SyncState::SyncedOrRemoved(counter)
             } else {
@@ -170,7 +162,7 @@ impl ReplicationSender {
             }
         } else {
             SyncState::NoTransactions
-        }
+        })
     }
 
     fn read_record(
@@ -264,7 +256,10 @@ mod tests {
         let transaction = Transaction::WriteRecord(10);
         imitate_write_record(&sender, &transaction, 5);
 
-        assert_eq!(sender.run(), SyncState::SyncedOrRemoved(vec![(Ok(()), 1)]));
+        assert_eq!(
+            sender.run().unwrap(),
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
+        );
         assert_eq!(
             sender
                 .log_map
@@ -291,7 +286,7 @@ mod tests {
         imitate_write_record(&sender, &transaction, 5);
 
         assert_eq!(
-            sender.run(),
+            sender.run().unwrap(),
             SyncState::NotAvailable(vec![(Err(timeout!("Timeout")), 1)])
         );
 
@@ -329,7 +324,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            sender.run(),
+            sender.run().unwrap(),
             SyncState::SyncedOrRemoved(vec![
                 (Err(not_found!("Entry 'test' not found in bucket 'src'")), 1),
                 (Ok(()), 0)
@@ -388,7 +383,7 @@ mod tests {
         writer.blocking_send(Ok(Some(Bytes::from("xxxx")))).unwrap();
         writer.blocking_send(Ok(None)).unwrap_or(());
         assert_eq!(
-            handle.join().unwrap(),
+            handle.join().unwrap().unwrap(),
             SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
         );
     }
@@ -431,7 +426,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            sender.run(),
+            sender.run().unwrap(),
             SyncState::SyncedOrRemoved(vec![
                 (
                     Err(too_early!(
@@ -465,7 +460,7 @@ mod tests {
         imitate_write_record(&sender, &transaction, 5);
 
         assert_eq!(
-            sender.run(),
+            sender.run().unwrap(),
             SyncState::SyncedOrRemoved(vec![(Ok(()), 1), (Err(conflict!("AlreadyExists")), 1)])
         );
         assert!(
@@ -500,7 +495,10 @@ mod tests {
             IoConfig::default().batch_max_size + 1,
         );
 
-        assert_eq!(sender.run(), SyncState::SyncedOrRemoved(vec![(Ok(()), 1)]));
+        assert_eq!(
+            sender.run().unwrap(),
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
+        );
         assert!(
             sender
                 .log_map

@@ -170,21 +170,21 @@ impl ReplicationTask {
             while !thr_stop_flag.load(Ordering::Relaxed) {
                 let mut counter = None;
                 match sender.run() {
-                    SyncState::SyncedOrRemoved(c) => {
+                    Ok(SyncState::SyncedOrRemoved(c)) => {
                         thr_is_active.store(true, Ordering::Relaxed);
                         counter = Some(c);
                     }
-                    SyncState::NotAvailable(c) => {
+                    Ok(SyncState::NotAvailable(c)) => {
                         thr_is_active.store(false, Ordering::Relaxed);
                         counter = Some(c);
                         sleep(thr_system_options.remote_bucket_unavailable_timeout);
                     }
-                    SyncState::NoTransactions => {
+                    Ok(SyncState::NoTransactions) => {
                         // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available
                         thr_is_active.store(true, Ordering::Relaxed);
                         sleep(thr_system_options.next_transaction_timeout);
                     }
-                    SyncState::BrokenLog(entry_name) => {
+                    Ok(SyncState::BrokenLog(entry_name)) => {
                         thr_is_active.store(false, Ordering::Relaxed);
 
                         info!("Transaction log is corrupted, dropping the whole log");
@@ -216,12 +216,21 @@ impl ReplicationTask {
                             }
                         }
                     }
+                    Err(err) => {
+                        thr_is_active.store(false, Ordering::Relaxed);
+                        error!("Replication sender error: {:?}", err);
+                        sleep(thr_system_options.next_transaction_timeout);
+                    }
                 }
 
                 if let Some(c) = counter {
-                    let mut diagnostics = thr_hourly_diagnostics.write().unwrap();
-                    for (result, count) in c.into_iter() {
-                        diagnostics.count(result, count);
+                    match thr_hourly_diagnostics.write() {
+                        Ok(mut diagnostics) => {
+                            for (result, count) in c.into_iter() {
+                                diagnostics.count(result, count);
+                            }
+                        }
+                        Err(err) => error!("Failed to acquire hourly diagnostics lock: {:?}", err),
                     }
                 }
             }
