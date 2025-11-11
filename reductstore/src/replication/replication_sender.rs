@@ -1,23 +1,19 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::cfg::io::IoConfig;
+use crate::core::sync::RwLock;
 use crate::replication::remote_bucket::RemoteBucket;
-
 use crate::replication::transaction_log::TransactionLog;
-
+use crate::replication::Transaction;
 use crate::storage::engine::StorageEngine;
-use std::cmp::PartialEq;
-
 use log::{debug, error};
 use reduct_base::error::{ErrorCode, ReductError};
-
-use reduct_base::msg::replication_api::ReplicationSettings;
-use std::collections::HashMap;
-
-use crate::cfg::io::IoConfig;
-use crate::replication::Transaction;
 use reduct_base::io::BoxedReadRecord;
-use std::sync::{Arc, RwLock};
+use reduct_base::msg::replication_api::ReplicationSettings;
+use std::cmp::PartialEq;
+use std::collections::HashMap;
+use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
 
@@ -58,13 +54,13 @@ impl ReplicationSender {
     }
 
     pub fn run(&mut self) -> SyncState {
-        let entries = self
-            .log_map
-            .read()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
+        let entries = match self.log_map.read() {
+            Ok(guard) => guard.keys().cloned().collect::<Vec<_>>(),
+            Err(err) => {
+                error!("Failed to acquire log map read lock: {:?}", err);
+                return SyncState::NoTransactions;
+            }
+        };
 
         let mut counter = Vec::new();
 

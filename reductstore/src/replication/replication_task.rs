@@ -1,18 +1,10 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
-use std::thread::{sleep, spawn};
-use std::time::Duration;
-
-use log::{error, info};
-
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
@@ -20,9 +12,16 @@ use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
 use crate::storage::engine::StorageEngine;
+use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;
 use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::{sleep, spawn};
+use std::time::Duration;
 
 #[derive(Clone)]
 struct ReplicationSystemOptions {
