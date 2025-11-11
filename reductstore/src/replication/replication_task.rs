@@ -1,18 +1,10 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, RwLock};
-use std::thread::{sleep, spawn};
-use std::time::Duration;
-
-use log::{error, info};
-
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
@@ -20,9 +12,16 @@ use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::TransactionLog;
 use crate::replication::TransactionNotification;
 use crate::storage::engine::StorageEngine;
+use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;
 use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::thread::{sleep, spawn};
+use std::time::Duration;
 
 #[derive(Clone)]
 struct ReplicationSystemOptions {
@@ -38,7 +37,7 @@ pub struct ReplicationTask {
     settings: ReplicationSettings,
     system_options: ReplicationSystemOptions,
     io_config: IoConfig,
-    filter_map: Arc<RwLock<HashMap<String, TransactionFilter>>>,
+    filter_map: HashMap<String, TransactionFilter>,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<StorageEngine>,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
@@ -87,7 +86,6 @@ impl ReplicationTask {
             system_options,
             config.io_conf,
             remote_bucket,
-            Arc::new(RwLock::new(HashMap::new())),
             storage,
         )
     }
@@ -97,8 +95,7 @@ impl ReplicationTask {
         settings: ReplicationSettings,
         system_options: ReplicationSystemOptions,
         io_config: IoConfig,
-        remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
-        filter: Arc<RwLock<HashMap<String, TransactionFilter>>>,
+        remote_bucket: Box<dyn RemoteBucket + Send + Sync>,
         storage: Arc<StorageEngine>,
     ) -> Self {
         let log_map = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
@@ -162,30 +159,32 @@ impl ReplicationTask {
                 error!("Failed to initialize transaction logs: {:?}", err);
             }
 
-            let sender = ReplicationSender::new(
+            let mut sender = ReplicationSender::new(
                 thr_log_map.clone(),
                 thr_storage.clone(),
                 thr_settings.clone(),
                 thr_io_config.clone(),
-                thr_hourly_diagnostics,
                 remote_bucket,
             );
 
             while !thr_stop_flag.load(Ordering::Relaxed) {
+                let mut counter = None;
                 match sender.run() {
-                    SyncState::SyncedOrRemoved => {
+                    Ok(SyncState::SyncedOrRemoved(c)) => {
                         thr_is_active.store(true, Ordering::Relaxed);
+                        counter = Some(c);
                     }
-                    SyncState::NotAvailable => {
+                    Ok(SyncState::NotAvailable(c)) => {
                         thr_is_active.store(false, Ordering::Relaxed);
+                        counter = Some(c);
                         sleep(thr_system_options.remote_bucket_unavailable_timeout);
                     }
-                    SyncState::NoTransactions => {
+                    Ok(SyncState::NoTransactions) => {
                         // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available
                         thr_is_active.store(true, Ordering::Relaxed);
                         sleep(thr_system_options.next_transaction_timeout);
                     }
-                    SyncState::BrokenLog(entry_name) => {
+                    Ok(SyncState::BrokenLog(entry_name)) => {
                         thr_is_active.store(false, Ordering::Relaxed);
 
                         info!("Transaction log is corrupted, dropping the whole log");
@@ -217,6 +216,22 @@ impl ReplicationTask {
                             }
                         }
                     }
+                    Err(err) => {
+                        thr_is_active.store(false, Ordering::Relaxed);
+                        error!("Replication sender error: {:?}", err);
+                        sleep(thr_system_options.next_transaction_timeout);
+                    }
+                }
+
+                if let Some(c) = counter {
+                    match thr_hourly_diagnostics.write() {
+                        Ok(mut diagnostics) => {
+                            for (result, count) in c.into_iter() {
+                                diagnostics.count(result, count);
+                            }
+                        }
+                        Err(err) => error!("Failed to acquire hourly diagnostics lock: {:?}", err),
+                    }
                 }
             }
         });
@@ -228,7 +243,7 @@ impl ReplicationTask {
             system_options,
             io_config,
             storage,
-            filter_map: filter,
+            filter_map: HashMap::new(),
             log_map,
             hourly_diagnostics,
             stop_flag,
@@ -240,9 +255,8 @@ impl ReplicationTask {
         // We need to have a filter for each entry
         let entry_name = notification.entry.clone();
         let notifications = {
-            let mut lock = self.filter_map.write()?;
-            if !lock.contains_key(&notification.entry) {
-                lock.insert(
+            if !self.filter_map.contains_key(&notification.entry) {
+                self.filter_map.insert(
                     notification.entry.clone(),
                     TransactionFilter::try_new(
                         self.name(),
@@ -252,7 +266,7 @@ impl ReplicationTask {
                 );
             }
 
-            let filter = lock.get_mut(&entry_name).unwrap();
+            let filter = self.filter_map.get_mut(&entry_name).unwrap();
             filter.filter(notification)
         };
 
@@ -364,6 +378,8 @@ mod tests {
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
 
+    use crate::backend::Backend;
+    use crate::core::sync::RWLOCK_TIMEOUT;
     use crate::storage::bucket::Bucket;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
@@ -661,9 +677,9 @@ mod tests {
         sleep(Duration::from_millis(100));
 
         assert!(
-            !path.exists(),
-            "We could not recover the transaction log, it was removed. However, the replication should continue"
-        );
+                !path.exists(),
+                "We could not recover the transaction log, it was removed. However, the replication should continue"
+            );
 
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         sleep(Duration::from_millis(200));
@@ -672,6 +688,31 @@ mod tests {
             get_entries_from_transaction_log(&mut replication, "test1"),
             vec![],
             "Transaction log recovered"
+        );
+    }
+
+    #[rstest]
+    fn test_sender_error_handling(
+        remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        settings: ReplicationSettings,
+    ) {
+        let path = tempfile::tempdir().unwrap().keep();
+        let mut replication = build_replication(path, remote_bucket, settings.clone());
+        replication.notify(notification.clone()).unwrap();
+        {
+            let _lock = replication.log_map.write().unwrap();
+            sleep(RWLOCK_TIMEOUT + Duration::from_millis(100));
+        }
+
+        assert_eq!(
+            replication.info(),
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: false,
+                is_provisioned: false,
+                pending_records: 1,
+            }
         );
     }
 
@@ -684,6 +725,13 @@ mod tests {
             data_path: path.clone(),
             ..Default::default()
         };
+
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .unwrap(),
+        );
 
         let storage = StorageEngine::builder()
             .with_data_path(path)
@@ -724,8 +772,7 @@ mod tests {
                 log_recovery_timeout: Duration::from_millis(100),
             },
             IoConfig::default(),
-            Arc::new(RwLock::new(remote_bucket)),
-            Arc::new(RwLock::new(HashMap::new())),
+            Box::new(remote_bucket),
             storage,
         );
 

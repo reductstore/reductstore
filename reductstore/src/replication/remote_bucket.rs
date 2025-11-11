@@ -7,8 +7,6 @@ mod states;
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
 use std::collections::BTreeMap;
 
-use std::sync::{Arc, RwLock};
-
 use crate::replication::Transaction;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
@@ -61,12 +59,12 @@ pub(super) fn create_remote_bucket(
     url: &str,
     bucket_name: &str,
     api_token: Option<String>,
-) -> Arc<RwLock<dyn RemoteBucket + Send + Sync>> {
-    Arc::new(RwLock::new(RemoteBucketImpl::new(
+) -> Box<dyn RemoteBucket + Send + Sync> {
+    Box::new(RemoteBucketImpl::new(
         url,
         bucket_name,
         api_token.as_deref().unwrap_or(""),
-    )))
+    ))
 }
 
 #[cfg(test)]
