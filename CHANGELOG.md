@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.2] - 2025-11-11
+
+### Fixed
+
+- Crash with relative data path, [PR-1025](https://github.com/reductstore/reductstore/pull/1025)
+- Broken binaries, [PR-1026](https://github.com/reductstore/reductstore/pull/1026)
+- Fix possible deadlock in replication task, [PR-1027](https://github.com/reductstore/reductstore/pull/1027)
+
 ## [1.17.1] - 2025-10-23
 
 ### Fixed

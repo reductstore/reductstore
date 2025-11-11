@@ -70,7 +70,7 @@ impl StorageEngineBuilder {
         info!("Load {} bucket(s) in {:?}", buckets.len(), time.elapsed());
 
         StorageEngine {
-            data_path,
+            data_path: data_path.canonicalize().unwrap(),
             start_time: Instant::now(),
             buckets: Arc::new(RwLock::new(buckets)),
             license: self.license,
