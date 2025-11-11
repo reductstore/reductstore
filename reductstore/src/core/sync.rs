@@ -3,13 +3,14 @@
 
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::time::Duration;
 
 /// A read-write lock based on parking_lot with embedded timeouts.
 pub struct RwLock<T> {
     inner: parking_lot::RwLock<T>,
 }
 
-const RWLOCK_TIMEOUT_MS: u64 = 10_000; // 10 seconds
+pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(5);
 
 impl<T> RwLock<T> {
     pub fn new(data: T) -> Self {
@@ -20,7 +21,7 @@ impl<T> RwLock<T> {
 
     pub fn read(&self) -> Result<parking_lot::RwLockReadGuard<'_, T>, ReductError> {
         self.inner
-            .try_read_for(std::time::Duration::from_millis(RWLOCK_TIMEOUT_MS))
+            .try_read_for(RWLOCK_TIMEOUT)
             .ok_or(internal_server_error!(
                 "Failed to acquire read lock within timeout"
             ))
@@ -28,7 +29,7 @@ impl<T> RwLock<T> {
 
     pub fn write(&self) -> Result<parking_lot::RwLockWriteGuard<'_, T>, ReductError> {
         self.inner
-            .try_write_for(std::time::Duration::from_millis(RWLOCK_TIMEOUT_MS))
+            .try_write_for(RWLOCK_TIMEOUT)
             .ok_or(internal_server_error!(
                 "Failed to acquire write lock within timeout"
             ))

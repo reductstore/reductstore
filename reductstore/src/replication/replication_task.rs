@@ -378,6 +378,8 @@ mod tests {
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
 
+    use crate::backend::Backend;
+    use crate::core::sync::RWLOCK_TIMEOUT;
     use crate::storage::bucket::Bucket;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
@@ -689,6 +691,31 @@ mod tests {
         );
     }
 
+    #[rstest]
+    fn test_sender_error_handling(
+        remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        settings: ReplicationSettings,
+    ) {
+        let path = tempfile::tempdir().unwrap().keep();
+        let mut replication = build_replication(path, remote_bucket, settings.clone());
+        replication.notify(notification.clone()).unwrap();
+        {
+            let _lock = replication.log_map.write().unwrap();
+            sleep(RWLOCK_TIMEOUT + Duration::from_millis(100));
+        }
+
+        assert_eq!(
+            replication.info(),
+            ReplicationInfo {
+                name: "test".to_string(),
+                is_active: false,
+                is_provisioned: false,
+                pending_records: 1,
+            }
+        );
+    }
+
     fn build_replication(
         path: PathBuf,
         remote_bucket: MockRmBucket,
@@ -698,6 +725,13 @@ mod tests {
             data_path: path.clone(),
             ..Default::default()
         };
+
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .unwrap(),
+        );
 
         let storage = StorageEngine::builder()
             .with_data_path(path)
