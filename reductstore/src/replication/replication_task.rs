@@ -729,8 +729,7 @@ mod tests {
                 log_recovery_timeout: Duration::from_millis(100),
             },
             IoConfig::default(),
-            Arc::new(RwLock::new(remote_bucket)),
-            Arc::new(RwLock::new(HashMap::new())),
+            Box::new(remote_bucket),
             storage,
         );
 

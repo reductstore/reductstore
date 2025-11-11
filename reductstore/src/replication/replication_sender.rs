@@ -110,7 +110,6 @@ impl ReplicationSender {
                                     err
                                 );
                                 counter.push((Err(err), 1));
-                                processed_transactions -= 1;
                             }
                         }
                     }
@@ -118,15 +117,13 @@ impl ReplicationSender {
                     let batch_size = batch.len() as u64;
                     match self.bucket.write_batch(entry_name, batch) {
                         Ok(map) => {
-                            if self.bucket.is_active() {
-                                counter.push((Ok(()), batch_size - map.len() as u64));
-                                for (timestamp, err) in map.into_iter() {
-                                    debug!(
-                                        "Failed to replicate record {}/{}/{}: {:?}",
-                                        self.settings.src_bucket, entry_name, timestamp, err
-                                    );
-                                    counter.push((Err(err), 1));
-                                }
+                            counter.push((Ok(()), batch_size - map.len() as u64));
+                            for (timestamp, err) in map.into_iter() {
+                                debug!(
+                                    "Failed to replicate record {}/{}/{}: {:?}",
+                                    self.settings.src_bucket, entry_name, timestamp, err
+                                );
+                                counter.push((Err(err), 1));
                             }
                         }
                         Err(err) => {
@@ -143,6 +140,7 @@ impl ReplicationSender {
                         break;
                     }
 
+                    // remove processed transactions from the log
                     if let Err(err) = self
                         .log_map
                         .read()
@@ -164,12 +162,12 @@ impl ReplicationSender {
             };
         }
 
-        if !self.bucket.is_active() {
-            return SyncState::NotAvailable(counter);
-        }
-
         if !counter.is_empty() {
-            SyncState::SyncedOrRemoved(counter)
+            if self.bucket.is_active() {
+                SyncState::SyncedOrRemoved(counter)
+            } else {
+                SyncState::NotAvailable(counter)
+            }
         } else {
             SyncState::NoTransactions
         }
@@ -225,19 +223,18 @@ impl ReplicationSender {
 #[cfg(target_os = "linux")] // we need precise timing
 mod tests {
     use super::*;
-
+    use crate::backend::Backend;
+    use crate::cfg::Cfg;
+    use crate::core::file_cache::FILE_CACHE;
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
     use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
-
     use bytes::Bytes;
     use mockall::mock;
     use reduct_base::error::ErrorCode;
-
-    use crate::cfg::Cfg;
+    use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::diagnostics::{DiagnosticsError, DiagnosticsItem};
-    use reduct_base::Labels;
+    use reduct_base::{conflict, not_found, timeout, too_early, Labels};
     use rstest::*;
     use std::thread::spawn;
 
@@ -257,20 +254,17 @@ mod tests {
     }
 
     #[rstest]
-    fn test_replication_ok_not_active(
-        mut remote_bucket: MockRmBucket,
-        settings: ReplicationSettings,
-    ) {
+    fn test_replication_ok(mut remote_bucket: MockRmBucket, settings: ReplicationSettings) {
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
-        remote_bucket.expect_is_active().return_const(false);
-        let sender = build_sender(remote_bucket, settings);
+        remote_bucket.expect_is_active().return_const(true);
+        let mut sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
         imitate_write_record(&sender, &transaction, 5);
 
-        assert_eq!(sender.run(), SyncState::NotAvailable);
+        assert_eq!(sender.run(), SyncState::SyncedOrRemoved(vec![(Ok(()), 1)]));
         assert_eq!(
             sender
                 .log_map
@@ -281,17 +275,7 @@ mod tests {
                 .read()
                 .unwrap()
                 .front(1),
-            Ok(vec![transaction]),
-        );
-
-        assert_eq!(
-            sender.hourly_diagnostics.read().unwrap().diagnostics(),
-            DiagnosticsItem {
-                ok: 0,
-                errored: 0,
-                errors: HashMap::new(),
-            },
-            "should not count errors for non active replication"
+            Ok(vec![]),
         );
     }
 
@@ -301,12 +285,15 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "Timeout")));
         remote_bucket.expect_is_active().return_const(false);
-        let sender = build_sender(remote_bucket, settings());
+        let mut sender = build_sender(remote_bucket, settings());
 
         let transaction = Transaction::WriteRecord(10);
         imitate_write_record(&sender, &transaction, 5);
 
-        assert_eq!(sender.run(), SyncState::NotAvailable);
+        assert_eq!(
+            sender.run(),
+            SyncState::NotAvailable(vec![(Err(timeout!("Timeout")), 1)])
+        );
 
         assert_eq!(
             sender
@@ -320,21 +307,6 @@ mod tests {
                 .front(1),
             Ok(vec![transaction]),
         );
-
-        let diagnostics = sender.hourly_diagnostics.read().unwrap().diagnostics();
-        assert_eq!(diagnostics.ok, 0);
-        assert!(
-            diagnostics.errored > 0,
-            "We have at least one errored transaction",
-        );
-        assert!(
-            diagnostics.errors[&-2].count > 0,
-            "We have at least one timeout error",
-        );
-        assert!(
-            diagnostics.errors[&-2].last_message.contains("Timeout"),
-            "We have at least one timeout error",
-        );
     }
 
     #[rstest]
@@ -343,7 +315,7 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
         imitate_write_record(&sender, &transaction, 5);
@@ -356,7 +328,13 @@ mod tests {
             .wait()
             .unwrap();
 
-        assert_eq!(sender.run(), SyncState::SyncedOrRemoved);
+        assert_eq!(
+            sender.run(),
+            SyncState::SyncedOrRemoved(vec![
+                (Err(not_found!("Entry 'test' not found in bucket 'src'")), 1),
+                (Ok(()), 0)
+            ]),
+        );
         assert!(
             sender
                 .log_map
@@ -369,22 +347,6 @@ mod tests {
                 .is_empty(),
             "We don't keep the transaction for a non existing record"
         );
-
-        let diagnostics = sender.hourly_diagnostics.read().unwrap().diagnostics();
-        assert_eq!(
-            diagnostics,
-            DiagnosticsItem {
-                ok: 0,
-                errored: 60,
-                errors: HashMap::from_iter(vec![(
-                    404,
-                    DiagnosticsError {
-                        count: 1,
-                        last_message: "Entry 'test' not found in bucket 'src'".to_string(),
-                    }
-                )]),
-            }
-        );
     }
 
     #[rstest]
@@ -396,7 +358,7 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings);
 
         sender
             .log_map
@@ -418,25 +380,16 @@ mod tests {
             .wait()
             .unwrap();
 
-        let hourly_diagnostics = sender.hourly_diagnostics.clone();
-
-        spawn(move || {
+        let handle = spawn(move || {
             // we need to spawn a task to check the state in the attempt loop
             sender.run()
         });
 
         writer.blocking_send(Ok(Some(Bytes::from("xxxx")))).unwrap();
         writer.blocking_send(Ok(None)).unwrap_or(());
-        sleep(Duration::from_millis(100));
-
-        let diagnostics = hourly_diagnostics.read().unwrap().diagnostics();
         assert_eq!(
-            diagnostics,
-            DiagnosticsItem {
-                ok: 60,
-                errored: 0,
-                errors: HashMap::new(),
-            }
+            handle.join().unwrap(),
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
         );
     }
 
@@ -449,7 +402,7 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings);
 
         sender
             .log_map
@@ -477,22 +430,17 @@ mod tests {
             .wait()
             .unwrap();
 
-        sender.run();
-
-        let diagnostics = sender.hourly_diagnostics.read().unwrap().diagnostics();
         assert_eq!(
-            diagnostics,
-            DiagnosticsItem {
-                ok: 0,
-                errored: 60,
-                errors: HashMap::from_iter(vec![(
-                    425,
-                    DiagnosticsError {
-                        count: 1,
-                        last_message: "Record with timestamp 20 is still being written".to_string(),
-                    }
-                )]),
-            }
+            sender.run(),
+            SyncState::SyncedOrRemoved(vec![
+                (
+                    Err(too_early!(
+                        "Record with timestamp 20 is still being written"
+                    )),
+                    1
+                ),
+                (Ok(()), 0)
+            ])
         );
     }
 
@@ -508,7 +456,7 @@ mod tests {
             )]))
         });
         remote_bucket.expect_is_active().return_const(true);
-        let sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
         imitate_write_record(&sender, &transaction, 5);
@@ -516,7 +464,10 @@ mod tests {
         let transaction = Transaction::WriteRecord(20);
         imitate_write_record(&sender, &transaction, 5);
 
-        assert_eq!(sender.run(), SyncState::SyncedOrRemoved);
+        assert_eq!(
+            sender.run(),
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1), (Err(conflict!("AlreadyExists")), 1)])
+        );
         assert!(
             sender
                 .log_map
@@ -528,22 +479,6 @@ mod tests {
                 .unwrap()
                 .is_empty(),
             "We remove all errored transactions"
-        );
-
-        let diagnostics = sender.hourly_diagnostics.read().unwrap().diagnostics();
-        assert_eq!(
-            diagnostics,
-            DiagnosticsItem {
-                ok: 60,
-                errored: 60,
-                errors: HashMap::from_iter(vec![(
-                    409,
-                    DiagnosticsError {
-                        count: 1,
-                        last_message: "AlreadyExists".to_string(),
-                    }
-                )]),
-            }
         );
     }
 
@@ -556,7 +491,7 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings);
 
         let transaction = Transaction::WriteRecord(10);
         imitate_write_record(
@@ -565,7 +500,7 @@ mod tests {
             IoConfig::default().batch_max_size + 1,
         );
 
-        assert_eq!(sender.run(), SyncState::SyncedOrRemoved);
+        assert_eq!(sender.run(), SyncState::SyncedOrRemoved(vec![(Ok(()), 1)]));
         assert!(
             sender
                 .log_map
@@ -578,10 +513,6 @@ mod tests {
                 .is_empty(),
             "We remove all errored transactions"
         );
-
-        let diagnostics = sender.hourly_diagnostics.read().unwrap().diagnostics();
-        assert!(diagnostics.ok > 0, "records were replicated");
-        assert_eq!(diagnostics.errored, 0, "no errors happened");
     }
 
     fn imitate_write_record(sender: &ReplicationSender, transaction: &Transaction, size: u64) {
@@ -631,6 +562,14 @@ mod tests {
             data_path: tempfile::tempdir().unwrap().keep(),
             ..Default::default()
         };
+
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(cfg.data_path.clone())
+                .try_build()
+                .unwrap(),
+        );
+
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
             .with_cfg(cfg)
@@ -650,10 +589,7 @@ mod tests {
             storage,
             settings,
             io_config: IoConfig::default(),
-            hourly_diagnostics: Arc::new(RwLock::new(DiagnosticsCounter::new(
-                Duration::from_secs(3600),
-            ))),
-            bucket: Arc::new(RwLock::new(remote_bucket)),
+            bucket: Box::new(remote_bucket),
         }
     }
 
