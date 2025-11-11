@@ -38,7 +38,7 @@ pub struct ReplicationTask {
     settings: ReplicationSettings,
     system_options: ReplicationSystemOptions,
     io_config: IoConfig,
-    filter_map: Arc<RwLock<HashMap<String, TransactionFilter>>>,
+    filter_map: HashMap<String, TransactionFilter>,
     log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
     storage: Arc<StorageEngine>,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
@@ -87,7 +87,6 @@ impl ReplicationTask {
             system_options,
             config.io_conf,
             remote_bucket,
-            Arc::new(RwLock::new(HashMap::new())),
             storage,
         )
     }
@@ -97,8 +96,7 @@ impl ReplicationTask {
         settings: ReplicationSettings,
         system_options: ReplicationSystemOptions,
         io_config: IoConfig,
-        remote_bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
-        filter: Arc<RwLock<HashMap<String, TransactionFilter>>>,
+        remote_bucket: Box<dyn RemoteBucket + Send + Sync>,
         storage: Arc<StorageEngine>,
     ) -> Self {
         let log_map = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
@@ -162,22 +160,24 @@ impl ReplicationTask {
                 error!("Failed to initialize transaction logs: {:?}", err);
             }
 
-            let sender = ReplicationSender::new(
+            let mut sender = ReplicationSender::new(
                 thr_log_map.clone(),
                 thr_storage.clone(),
                 thr_settings.clone(),
                 thr_io_config.clone(),
-                thr_hourly_diagnostics,
                 remote_bucket,
             );
 
             while !thr_stop_flag.load(Ordering::Relaxed) {
+                let mut counter = None;
                 match sender.run() {
-                    SyncState::SyncedOrRemoved => {
+                    SyncState::SyncedOrRemoved(c) => {
                         thr_is_active.store(true, Ordering::Relaxed);
+                        counter = Some(c);
                     }
-                    SyncState::NotAvailable => {
+                    SyncState::NotAvailable(c) => {
                         thr_is_active.store(false, Ordering::Relaxed);
+                        counter = Some(c);
                         sleep(thr_system_options.remote_bucket_unavailable_timeout);
                     }
                     SyncState::NoTransactions => {
@@ -218,6 +218,13 @@ impl ReplicationTask {
                         }
                     }
                 }
+
+                if let Some(c) = counter {
+                    let mut diagnostics = thr_hourly_diagnostics.write().unwrap();
+                    for (result, count) in c.into_iter() {
+                        diagnostics.count(result, count);
+                    }
+                }
             }
         });
 
@@ -228,7 +235,7 @@ impl ReplicationTask {
             system_options,
             io_config,
             storage,
-            filter_map: filter,
+            filter_map: HashMap::new(),
             log_map,
             hourly_diagnostics,
             stop_flag,
@@ -240,9 +247,8 @@ impl ReplicationTask {
         // We need to have a filter for each entry
         let entry_name = notification.entry.clone();
         let notifications = {
-            let mut lock = self.filter_map.write()?;
-            if !lock.contains_key(&notification.entry) {
-                lock.insert(
+            if !self.filter_map.contains_key(&notification.entry) {
+                self.filter_map.insert(
                     notification.entry.clone(),
                     TransactionFilter::try_new(
                         self.name(),
@@ -252,7 +258,7 @@ impl ReplicationTask {
                 );
             }
 
-            let filter = lock.get_mut(&entry_name).unwrap();
+            let filter = self.filter_map.get_mut(&entry_name).unwrap();
             filter.filter(notification)
         };
 
@@ -661,9 +667,9 @@ mod tests {
         sleep(Duration::from_millis(100));
 
         assert!(
-            !path.exists(),
-            "We could not recover the transaction log, it was removed. However, the replication should continue"
-        );
+                !path.exists(),
+                "We could not recover the transaction log, it was removed. However, the replication should continue"
+            );
 
         fs::create_dir_all(path.parent().unwrap()).unwrap();
         sleep(Duration::from_millis(200));

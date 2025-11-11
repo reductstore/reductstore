@@ -11,8 +11,6 @@ use std::cmp::PartialEq;
 use log::{debug, error};
 use reduct_base::error::{ErrorCode, ReductError};
 
-use crate::replication::diagnostics::DiagnosticsCounter;
-
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::collections::HashMap;
 
@@ -29,14 +27,15 @@ pub(super) struct ReplicationSender {
     storage: Arc<StorageEngine>,
     settings: ReplicationSettings,
     io_config: IoConfig,
-    hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
-    bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
+    bucket: Box<dyn RemoteBucket + Send + Sync>,
 }
+
+type ResultResult = (Result<(), ReductError>, u64);
 
 #[derive(Debug, PartialEq)]
 pub(super) enum SyncState {
-    SyncedOrRemoved,
-    NotAvailable,
+    SyncedOrRemoved(Vec<ResultResult>),
+    NotAvailable(Vec<ResultResult>),
     NoTransactions,
     BrokenLog(String),
 }
@@ -47,21 +46,18 @@ impl ReplicationSender {
         storage: Arc<StorageEngine>,
         config: ReplicationSettings,
         io_config: IoConfig,
-        hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
-        bucket: Arc<RwLock<dyn RemoteBucket + Send + Sync>>,
+        bucket: Box<dyn RemoteBucket + Send + Sync>,
     ) -> Self {
         Self {
             log_map,
             storage,
             settings: config,
             io_config,
-            hourly_diagnostics,
             bucket,
         }
     }
 
-    pub fn run(&self) -> SyncState {
-        let mut sync_something = false;
+    pub fn run(&mut self) -> SyncState {
         let entries = self
             .log_map
             .read()
@@ -69,6 +65,8 @@ impl ReplicationSender {
             .keys()
             .cloned()
             .collect::<Vec<_>>();
+
+        let mut counter = Vec::new();
 
         for entry_name in entries.iter() {
             let transactions = {
@@ -80,25 +78,25 @@ impl ReplicationSender {
                     continue;
                 }
             };
-            let state = match transactions {
+            match transactions {
                 Ok(vec) => {
                     if vec.is_empty() {
-                        SyncState::NoTransactions
-                    } else {
-                        sync_something = true;
-                        let mut batch = Vec::new();
-                        let mut total_size = 0;
-                        let mut processed_transactions = 0;
-                        for transaction in vec {
-                            debug!(
-                                "Replicating transaction {}/{}/{:?}",
-                                self.settings.src_bucket, entry_name, transaction
-                            );
+                        continue;
+                    }
+                    let mut batch = Vec::new();
+                    let mut total_size = 0;
+                    let mut processed_transactions = 0;
+                    for transaction in vec {
+                        debug!(
+                            "Replicating transaction {}/{}/{:?}",
+                            self.settings.src_bucket, entry_name, transaction
+                        );
 
-                            let record_to_sync = self.read_record(entry_name, &transaction);
-                            processed_transactions += 1;
+                        let record_to_sync = self.read_record(entry_name, &transaction);
+                        processed_transactions += 1;
 
-                            if let Some(record_to_sync) = record_to_sync {
+                        match record_to_sync {
+                            Ok(record_to_sync) => {
                                 let record_size = record_to_sync.meta().content_length();
                                 total_size += record_size;
                                 batch.push((record_to_sync, transaction));
@@ -107,56 +105,59 @@ impl ReplicationSender {
                                     break;
                                 }
                             }
+                            Err(err) => {
+                                error!(
+                                    "Failed to read record {}/{}/{}: {:?}",
+                                    self.settings.src_bucket,
+                                    entry_name,
+                                    transaction.timestamp(),
+                                    err
+                                );
+                                counter.push((Err(err), 1));
+                                processed_transactions -= 1;
+                            }
                         }
+                    }
 
-                        let mut bucket = self.bucket.write().unwrap();
-                        let batch_size = batch.len() as u64;
-                        match bucket.write_batch(entry_name, batch) {
-                            Ok(map) => {
-                                if bucket.is_active() {
-                                    self.hourly_diagnostics
-                                        .write()
-                                        .unwrap()
-                                        .count(Ok(()), batch_size - map.len() as u64);
-                                    for (timestamp, err) in map {
-                                        debug!(
-                                            "Failed to replicate record {}/{}/{}: {:?}",
-                                            self.settings.src_bucket, entry_name, timestamp, err
-                                        );
-                                        self.hourly_diagnostics.write().unwrap().count(Err(err), 1);
-                                    }
+                    let batch_size = batch.len() as u64;
+                    match self.bucket.write_batch(entry_name, batch) {
+                        Ok(map) => {
+                            if self.bucket.is_active() {
+                                counter.push((Ok(()), batch_size - map.len() as u64));
+                                for (timestamp, err) in map.into_iter() {
+                                    debug!(
+                                        "Failed to replicate record {}/{}/{}: {:?}",
+                                        self.settings.src_bucket, entry_name, timestamp, err
+                                    );
+                                    counter.push((Err(err), 1));
                                 }
                             }
-                            Err(err) => {
-                                debug!(
-                                    "Failed to replicate batch of records from {}/{} {:?}",
-                                    self.settings.src_bucket, entry_name, err
-                                );
-                                self.hourly_diagnostics
-                                    .write()
-                                    .unwrap()
-                                    .count(Err(err), batch_size);
-                            }
                         }
+                        Err(err) => {
+                            debug!(
+                                "Failed to replicate batch of records from {}/{} {:?}",
+                                self.settings.src_bucket, entry_name, err
+                            );
 
-                        if bucket.is_active() {
-                            if let Err(err) = self
-                                .log_map
-                                .read()
-                                .unwrap()
-                                .get(entry_name)
-                                .and_then(|log| {
-                                    Some(log.write().unwrap().pop_front(processed_transactions))
-                                })
-                                .unwrap_or(Ok(0))
-                            {
-                                error!("Failed to remove transaction: {:?}", err);
-                            }
-
-                            SyncState::SyncedOrRemoved
-                        } else {
-                            SyncState::NotAvailable
+                            counter.push((Err(err), batch_size));
                         }
+                    }
+
+                    if !self.bucket.is_active() {
+                        break;
+                    }
+
+                    if let Err(err) = self
+                        .log_map
+                        .read()
+                        .unwrap()
+                        .get(entry_name)
+                        .and_then(|log| {
+                            Some(log.write().unwrap().pop_front(processed_transactions))
+                        })
+                        .unwrap_or(Ok(0))
+                    {
+                        error!("Failed to remove transaction: {:?}", err);
                     }
                 }
 
@@ -165,21 +166,24 @@ impl ReplicationSender {
                     return SyncState::BrokenLog(entry_name.clone());
                 }
             };
-
-            if state == SyncState::NotAvailable {
-                // if the bucket is not active, we don't want to spin the CPU
-                return state;
-            }
         }
 
-        if sync_something {
-            SyncState::SyncedOrRemoved
+        if !self.bucket.is_active() {
+            return SyncState::NotAvailable(counter);
+        }
+
+        if !counter.is_empty() {
+            SyncState::SyncedOrRemoved(counter)
         } else {
             SyncState::NoTransactions
         }
     }
 
-    fn read_record(&self, entry_name: &str, transaction: &Transaction) -> Option<BoxedReadRecord> {
+    fn read_record(
+        &self,
+        entry_name: &str,
+        transaction: &Transaction,
+    ) -> Result<BoxedReadRecord, ReductError> {
         let read_record_from_storage = || {
             let mut atempts = 3;
             loop {
@@ -215,12 +219,8 @@ impl ReplicationSender {
         };
 
         match read_record_from_storage() {
-            Ok(record) => Some(Box::new(record)),
-            Err(err) => {
-                error!("Failed to read record: {}", err);
-                self.hourly_diagnostics.write().unwrap().count(Err(err), 1);
-                None
-            }
+            Ok(record) => Ok(Box::new(record)),
+            Err(err) => Err(err),
         }
     }
 }
