@@ -171,7 +171,7 @@ impl ReplicationSender {
         transaction: &Transaction,
     ) -> Result<BoxedReadRecord, ReductError> {
         let read_record_from_storage = || {
-            let mut atempts = 3;
+            let mut attempts = 3;
             loop {
                 let read_record = || {
                     self.storage
@@ -190,15 +190,15 @@ impl ReplicationSender {
                     }) => {
                         debug!("Transaction is too early, retrying later");
                         sleep(Duration::from_millis(10));
-                        atempts -= 1;
+                        attempts -= 1;
                     }
 
                     _ => {
-                        atempts = 0;
+                        attempts = 0;
                     }
                 }
 
-                if atempts == 0 {
+                if attempts == 0 {
                     break record;
                 }
             }
