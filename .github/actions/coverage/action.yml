@@ -32,7 +32,6 @@ runs:
       with:
         target: ${{ inputs.target }}
 
-
     - name: Run code coverage
       shell: bash
       env:
