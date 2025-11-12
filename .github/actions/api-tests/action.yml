@@ -52,6 +52,10 @@ runs:
         secret_key: ${{ inputs.minio_secret_key }}
         bucket_name: ${{ inputs.minio_bucket }}
 
+    - name: Check dir
+      run: ls -la ./misc
+      shell: bash
+
     - name: Run ReductStore
       shell: bash
       run: |
