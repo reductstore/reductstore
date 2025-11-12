@@ -16,12 +16,6 @@ inputs:
   compiler:
     description: 'Compiler package name.'
     required: true
-  cache_s3_access_key_id:
-    description: 'S3 Access Key ID for cache.'
-    required: false
-  cache_s3_access_key:
-    description: 'S3 Secret Access Key for cache.'
-    required: false
 runs:
   using: 'composite'
   steps:
@@ -56,24 +50,10 @@ runs:
 
     - uses: ilammy/setup-nasm@v1
 
-    - name: Configure AWS credentials via OIDC (org-wide role)
-      uses: aws-actions/configure-aws-credentials@v4
+    - name: AWS Credentials and Cargo Cache
+      uses: ./.github/actions/aws-cargo-cache
       with:
-        role-to-assume: arn:aws:iam::800293099462:role/gha-s3-cache-multi-repo
-        aws-region: us-east-1
-
-    - name: Use cache for Cargo
-      uses: runs-on/cache@v4
-      with:
-        path: |
-          ~/.cargo/bin/
-          ~/.cargo/registry/index/
-          ~/.cargo/registry/cache/
-          ~/.cargo/git/db/
-          ./target/
-        key: ${{ runner.os }}-${{ inputs.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
-      env:
-        RUNS_ON_S3_BUCKET_CACHE: reduct-github-cache
+        target: ${{ inputs.target }}
 
     - name: Install cargo-export
       shell: bash
