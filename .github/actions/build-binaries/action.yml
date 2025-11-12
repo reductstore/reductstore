@@ -62,7 +62,6 @@ runs:
         role-to-assume: arn:aws:iam::800293099462:role/gha-s3-cache-multi-repo
         aws-region: us-east-1
 
-
     - name: Use cache for Cargo
       uses: runs-on/cache@v4
       with:
