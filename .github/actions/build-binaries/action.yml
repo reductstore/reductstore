@@ -70,7 +70,7 @@ runs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/${{ inputs.target }}
+          ./target/
         key: ${{ runner.os }}-${{ inputs.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
       env:
         RUNS_ON_S3_BUCKET_CACHE: reduct-github-cache
