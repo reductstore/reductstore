@@ -43,12 +43,6 @@ runs:
       shell: bash
       run: docker load --input /tmp/image.tar
 
-    - name: Create license file
-      shell: bash
-      run: |
-        if [ -n "${{ inputs.license_path }}" ]; then
-          echo '${{ secrets.LICENSE_KEY }}' > .${{ inputs.license_path }}
-        fi
 
     - name: Run MinIO server and create bucket (if backend is s3)
       if: ${{ inputs.backend == 's3' }}
@@ -89,7 +83,6 @@ runs:
     - name: Build API tests
       shell: bash
       run: |
-        docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
         docker build -t api ./integration_tests/api
 
     - name: Run API tests
