@@ -1,0 +1,46 @@
+name: 'Build and Publish Snap Package'
+description: 'Builds a snap package and publishes it to the Snap Store.'
+inputs:
+  arch:
+    description: 'Architecture (amd64, arm64, etc.)'
+    required: true
+  snapcraft_store_login:
+    description: 'Snapcraft store login credentials.'
+    required: true
+  release:
+    description: 'Release channel (stable/edge)'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+
+    - uses: snapcore/action-build@v1
+      id: build-snap
+      with:
+        snapcraft-args: "--enable-experimental-extensions --verbose"
+
+    - name: Install snap for testing
+      shell: bash
+      run: |
+        sudo snap install --dangerous ${{ steps.build-snap.outputs.snap }}
+        snap services reductstore
+
+    - name: Save snap name in environment variable
+      shell: bash
+      run: |
+        echo "SNAP_NAME=$(ls *.snap | cut -f1 | grep ${{ inputs.arch }})" >> $GITHUB_ENV
+
+    - name: Publish snap package
+      uses: snapcore/action-publish@master
+      env:
+        SNAPCRAFT_STORE_CREDENTIALS: ${{ inputs.snapcraft_store_login }}
+      with:
+        snap: ${{ env.SNAP_NAME }}
+        release: ${{ inputs.release }}
+
+    - name: Upload snap artifact (optional)
+      uses: actions/upload-artifact@v4
+      with:
+        name: reductstore
+        path: "*.snap"

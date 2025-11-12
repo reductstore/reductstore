@@ -1,0 +1,105 @@
+name: 'Build Binaries'
+description: 'Builds binaries for a specific target and uploads them as artifacts.'
+inputs:
+  minimal_rust_version:
+    description: 'Minimal Rust version.'
+    required: true
+  action_github_token:
+    description: 'GitHub token for setup-protoc.'
+    required: true
+  target:
+    description: 'Target triple.'
+    required: true
+  os:
+    description: 'Operating system.'
+    required: true
+  compiler:
+    description: 'Compiler package name.'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+
+    - uses: arduino/setup-protoc@v3
+      with:
+        version: '26.x'
+        repo-token: ${{ inputs.action_github_token }}
+
+    - name: Install Rust
+      uses: dtolnay/rust-toolchain@stable
+      with:
+        toolchain: ${{ inputs.minimal_rust_version }}
+
+    - name: Install toolchain
+      shell: bash
+      run: rustup target add ${{ inputs.target }}
+
+    - name: Install gcc (Linux)
+      if: ${{ inputs.os == 'ubuntu-24.04' }}
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y ${{ inputs.compiler }}
+
+    - name: Install gcc (macOS)
+      if: ${{ inputs.os == 'macos-latest' }}
+      shell: bash
+      run: |
+        brew install ${{ inputs.compiler }}
+
+    - uses: ilammy/setup-nasm@v1
+
+    - name: AWS Credentials and Cargo Cache
+      uses: ./.github/actions/aws-cargo-cache
+      with:
+        target: ${{ inputs.target }}
+
+    - name: Install cargo-export
+      shell: bash
+      run: cargo install cargo-export --force
+
+    - name: Build binary (PR)
+      if: github.event_name == 'pull_request'
+      run: cargo build --profile ci -p reductstore --target ${{ matrix.target }} --all-features
+      shell: bash
+
+    - name: Upload binary (PR)
+      uses: actions/upload-artifact@v4
+      # Only upload Linux binary for PRs for sanity test
+      if: github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu'
+      with:
+        name: reductstore-${{ matrix.target }}
+        path: target/${{matrix.target}}/ci/reductstore
+        if-no-files-found: 'error'
+
+    - name: Build binary (Release)
+      if: github.event_name != 'pull_request'
+      run: cargo build --profile release -p reductstore --target ${{ matrix.target }} --all-features
+      shell: bash
+
+
+    - name: Upload binary (Release)
+      uses: actions/upload-artifact@v4
+      if: github.event_name != 'pull_request'
+      with:
+        name: reductstore-${{ matrix.target }}
+        path: target/${{matrix.target}}/release/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
+        if-no-files-found: 'error'
+
+
+    - name: Build and export tests (PR)
+      if: github.event_name == 'pull_request'
+      run: cargo export target/${{ matrix.target }}/tests -- test --profile ci --target ${{ matrix.target }} --lib
+      shell: bash
+
+    - name: Build and export tests (Release)
+      if: github.event_name != 'pull_request'
+      run: cargo export target/${{ matrix.target }}/tests -- test --profile release --target ${{ matrix.target }} --lib
+      shell: bash
+
+    - name: Upload tests
+      uses: actions/upload-artifact@v4
+      with:
+        name: reductstore-tests-${{ matrix.target }}
+        path: target/${{ matrix.target }}/tests

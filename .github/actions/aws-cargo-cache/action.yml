@@ -1,0 +1,27 @@
+name: 'AWS Credentials and Cargo Cache'
+description: 'Configures AWS credentials via OIDC and sets up Cargo cache.'
+inputs:
+  target:
+    description: 'Target triple.'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Configure AWS credentials via OIDC (org-wide role)
+      uses: aws-actions/configure-aws-credentials@v4
+      with:
+        role-to-assume: arn:aws:iam::800293099462:role/gha-s3-cache-multi-repo
+        aws-region: us-east-1
+
+    - name: Use cache for Cargo
+      uses: runs-on/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          ./target/
+        key: ${{ runner.os }}-${{ inputs.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+      env:
+        RUNS_ON_S3_BUCKET_CACHE: reduct-github-cache

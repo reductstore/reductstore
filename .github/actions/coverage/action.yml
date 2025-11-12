@@ -1,0 +1,52 @@
+name: 'Generate Code Coverage'
+description: 'Downloads and runs test binaries with coverage instrumentation for a given target.'
+inputs:
+  os:
+    description: 'Operating system.'
+    required: true
+  target:
+    description: 'Target triple.'
+    required: true
+  action_github_token:
+    description: 'GitHub token for authentication.'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/checkout@v4
+
+    - name: Install Rust
+      shell: bash
+      run: rustup update stable
+
+    - name: Install cargo-llvm-cov
+      uses: taiki-e/install-action@cargo-llvm-cov
+
+    - uses: arduino/setup-protoc@v3
+      with:
+        version: '26.x'
+        repo-token: ${{ inputs.action_github_token }}
+
+    - name: AWS Credentials and Cargo Cache
+      uses: ./.github/actions/aws-cargo-cache
+      with:
+        target: ${{ inputs.target }}
+
+    - name: Run code coverage
+      shell: bash
+      env:
+        CARGO_TERM_COLOR: always
+        RUST_LOG: debug
+        MINIO_ACCESS_KEY: minioadmin
+        MINIO_SECRET_KEY: minioadmin
+        MINIO_BUCKET: test
+        MINIO_ENDPOINT: http://127.0.0.1:9000
+      run: |
+        set -e -x
+        cargo llvm-cov --features s3-backend,fs-backend,ci --workspace --lcov --output-path lcov.info
+
+    - name: Upload coverage artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: lcov.info
+        path: lcov.info

@@ -1,0 +1,92 @@
+name: 'Benchmarks'
+description: 'Runs benchmarks for ReductStore.'
+inputs:
+  branch:
+    description: 'Branch to benchmark (main or latest).'
+    required: true
+  rs_api_token:
+    description: 'API token for ReductStore.'
+    required: true
+  repository:
+    description: 'GitHub repository.'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Download image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: image
+        path: /tmp/
+
+    - name: Load Docker image
+      shell: bash
+      run: docker load --input /tmp/image.tar
+
+    - name: Run current ReductStore
+      shell: bash
+      run: |
+        docker run -d \
+          --name reductstore \
+          --env RS_DATA_PATH=/data \
+          --env RS_API_TOKEN=${{ inputs.rs_api_token }} \
+          -p 8383:8383 \
+          -v ./data:/data \
+          ${{ inputs.repository }}:latest
+        sleep 5
+        docker logs reductstore
+
+    - name: Install reduct-py
+      shell: bash
+      run: pip install reduct-py>=1.14
+
+    - name: Run python benchmark (current)
+      shell: bash
+      env:
+        RS_API_TOKEN: ${{ inputs.rs_api_token }}
+      run: python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 current.csv
+
+    - name: Stop and remove current container
+      shell: bash
+      run: |
+        docker stop reductstore
+        docker rm reductstore
+
+    - name: Run branch ReductStore
+      shell: bash
+      run: |
+        docker run -d \
+          --name reductstore \
+          --env RS_DATA_PATH=/data \
+          --env RS_API_TOKEN=${{ inputs.rs_api_token }} \
+          --env RS_LOG_LEVEL=INFO \
+          -p 8383:8383 \
+          -v ./data:/data \
+          reduct/store:${{ inputs.branch }}
+        sleep 5
+        docker logs reductstore
+
+    - name: Install reduct-py (branch)
+      shell: bash
+      run: pip install reduct-py>=1.14
+
+    - name: Run python benchmark (branch)
+      shell: bash
+      env:
+        RS_API_TOKEN: ${{ inputs.rs_api_token }}
+      run: python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 ${{ inputs.branch }}.csv
+
+    - name: Check result
+      shell: bash
+      run: python3 integration_tests/benchmarks/check_results.py .github/files/threshold current.csv ${{ inputs.branch }}.csv
+
+    - name: Save docker logs
+      if: always()
+      shell: bash
+      run: docker logs reductstore | zip > /tmp/docker-log.zip
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: docker-log-benchmark-${{ inputs.branch }}
+        path: /tmp/docker-log.zip
