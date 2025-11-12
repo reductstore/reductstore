@@ -35,7 +35,7 @@ jobs:
 
   build:
     name: Build Linux Docker image
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     needs:
       - rust_fmt
     steps:
@@ -154,11 +154,37 @@ jobs:
           fail_ci_if_error: true
           token: ${{ secrets.CODECOV_TOKEN }}
 
+  binary_test:
+    name: Test built binaries
+    runs-on: ubuntu-latest
+    needs:
+      - build_binaries
+    timeout-minutes: 5
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: reductstore-x86_64-unknown-linux-gnu
+
+      - name: Run binary
+        run: |
+          chmod +x reductstore
+          RS_DATA_PATH=./data ./reductstore > log.txt &
+          sleep 2
+
+      - name: Check alive
+        run: |
+          curl http://127.0.0.1:8383/api/v1/info
+
+      - name: Print log
+        if: always()
+        run: cat log.txt
+
   api_tests:
     name: API Tests
     runs-on: ubuntu-latest
     needs:
       - unit_tests
+      - binary_test
       - build
     strategy:
       matrix:
@@ -195,6 +221,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - unit_tests
+      - binary_test
       - build
     strategy:
       matrix:
@@ -286,6 +313,7 @@ jobs:
         cmd: [ "stop", "kill" ]
     needs:
       - unit_tests
+      - binary_test
       - build
     env:
       RS_API_TOKEN: XXXX
@@ -369,6 +397,7 @@ jobs:
     runs-on: ubuntu-latest
     needs:
       - build
+      - binary_test
       - unit_tests
     strategy:
       matrix:

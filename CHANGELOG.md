@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.17.2] - 2025-11-11
+
+### Fixed
+
+- Crash with relative data path, [PR-1025](https://github.com/reductstore/reductstore/pull/1025)
+- Broken binaries, [PR-1026](https://github.com/reductstore/reductstore/pull/1026)
+- Fix possible deadlock in replication task, [PR-1027](https://github.com/reductstore/reductstore/pull/1027)
+
+## [1.17.1] - 2025-10-23
+
+### Fixed
+
+- Fix writing batch with empty records¸ [PR-1005](https://github.com/reductstore/reductstore/pull/1005)
+
 ## [1.17.0] - 2025-10-20
 
 ### Added
@@ -1150,7 +1164,8 @@ reduct-rs: `ReductClient.url`, `ReductClient.token`, `ReductCientBuilder.try_bui
 
 - Initial release with basic HTTP API and FIFO bucket quota
 
-[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.17.0...HEAD
+[Unreleased]: https://github.com/reductstore/reductstore/compare/v1.17.1...HEAD
+[1.17.1]: https://github.com/reductstore/reductstore/compare/v1.17.1...v1.17.1
 [1.17.0]: https://github.com/reductstore/reductstore/compare/v1.16.3...v1.17.0
 [1.16.3]: https://github.com/reductstore/reductstore/compare/v1.16.2...v1.16.3
 [1.16.2]: https://github.com/reductstore/reductstore/compare/v1.16.1...v1.16.2
