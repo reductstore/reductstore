@@ -206,12 +206,8 @@ jobs:
       - name: Login Docker
         run: docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
 
-      - name: Create license file
-        shell: bash
-        run: |
-          if [ -n "${{ matrix.license_path }}" ]; then
-            echo '${{ secrets.LICENSE_KEY }}' > .${{ inputs.license_path }}
-          fi
+      - name: Create license
+        run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
 
       - uses: ./.github/actions/api-tests
         with:
