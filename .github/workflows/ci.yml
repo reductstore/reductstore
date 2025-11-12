@@ -120,8 +120,8 @@ jobs:
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-24.04]
-        target: [x86_64-unknown-linux-gnu]
+        os: [ ubuntu-24.04 ]
+        target: [ x86_64-unknown-linux-gnu ]
     timeout-minutes: 30
     env:
       CARGO_TERM_COLOR: always
@@ -243,71 +243,15 @@ jobs:
             "v1.8.2",
             "v1.7.3",
           ]
-    env:
-      RS_API_TOKEN: XXXX
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: ./.github/actions/migration-test
         with:
-          python-version: 3.12
-
-      - name: Run latest stable ReductStore
-        run: |
-          docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
-          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name latest -d reduct/store:${{matrix.version}}
-          sleep 5
-          docker logs latest
-
-      - name: Upload data
-        run: |
-          pip install -r ./integration_tests/data_check/requirements.txt
-          python3 ./integration_tests/data_check/uploader.py
-
-      - name: Stop latest stable ReductStore
-        run: docker stop latest
-
-      - name: Download artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: image
-          path: /tmp/
-
-      - name: Load image
-        run: |
-          docker load --input /tmp/image.tar
-          docker image ls -a
-
-      - name: Run current ReductStore
-        run: |
-          docker run --network=host -v ./data:/data --env RS_API_TOKEN=${RS_API_TOKEN} --name current -d ${{github.repository}}
-          sleep 5
-          docker logs current
-
-      - name: Check data after migration
-        run: python3 ./integration_tests/data_check/checker.py
-
-      - name: Restart current ReductStore
-        run: |
-          docker restart current
-          sleep 5
-          docker logs current
-
-      - name: Check data after restart
-        run: python3 ./integration_tests/data_check/checker.py
-
-      - name: Save docker logs
-        if: always()
-        run: docker logs current | zip > /tmp/docker-log.zip
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: docker-log-migration-${{matrix.version}}
-          path: /tmp/docker-log.zip
-
-      - name: Show replication report
-        if: always()
-        run: cat ./report.json
+          version: ${{ matrix.version }}
+          rs_api_token: XXXX
+          docker_user: ${{ secrets.DOCKER_USER }}
+          docker_token: ${{ secrets.DOCKER_TOKEN }}
+          repository: ${{ github.repository }}
 
   recovery_test:
     name: Recovery Tests
@@ -840,8 +784,8 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        arch: [amd64, arm64]
-    needs: [check_tag, api_tests, migration_test, replication_test]
+        arch: [ amd64, arm64 ]
+    needs: [ check_tag, api_tests, migration_test, replication_test ]
     if: github.event_name != 'pull_request'
     steps:
       - uses: ./.github/actions/snap-release
