@@ -142,7 +142,7 @@ jobs:
         with:
           os: ${{ matrix.os }}
           target: ${{ matrix.target }}
-          action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}]
+          action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
 
       - name: Upload coverage to Codecov
         continue-on-error: true

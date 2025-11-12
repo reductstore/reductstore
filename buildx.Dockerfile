@@ -32,8 +32,6 @@ COPY reduct_macros reduct_macros
 COPY .cargo /root/.cargo
 COPY Cargo.toml Cargo.toml
 COPY Cargo.lock Cargo.lock
- # Cache compiled dependencies
-COPY target target
 
 ARG GIT_COMMIT=unspecified
 
