@@ -19,10 +19,10 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v4
     - uses: actions/setup-python@v5
       with:
         python-version: 3.12
+
     - name: Run latest stable ReductStore
       shell: bash
       run: |
@@ -32,49 +32,65 @@ runs:
         docker logs latest
     - name: Upload data
       shell: bash
+      env:
+        RS_API_TOKEN: ${{ inputs.rs_api_token }}
       run: |
         pip install -r ./integration_tests/data_check/requirements.txt
         python3 ./integration_tests/data_check/uploader.py
+
     - name: Stop latest stable ReductStore
       shell: bash
       run: docker stop latest
+
     - name: Download artifact
       uses: actions/download-artifact@v4
       with:
         name: image
         path: /tmp/
+
     - name: Load image
       shell: bash
       run: |
         docker load --input /tmp/image.tar
         docker image ls -a
+
     - name: Run current ReductStore
       shell: bash
       run: |
         docker run --network=host -v ./data:/data --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name current -d ${{ inputs.repository }}
         sleep 5
         docker logs current
+
     - name: Check data after migration
       shell: bash
+      env:
+        RS_API_TOKEN: ${{ inputs.rs_api_token }}
       run: python3 ./integration_tests/data_check/checker.py
+
     - name: Restart current ReductStore
       shell: bash
       run: |
         docker restart current
         sleep 5
         docker logs current
+
     - name: Check data after restart
       shell: bash
+      env:
+          RS_API_TOKEN: ${{ inputs.rs_api_token }}
       run: python3 ./integration_tests/data_check/checker.py
+
     - name: Save docker logs
       if: always()
       shell: bash
       run: docker logs current | zip > /tmp/docker-log.zip
+
     - uses: actions/upload-artifact@v4
       if: always()
       with:
         name: docker-log-migration-${{ inputs.version }}
         path: /tmp/docker-log.zip
+
     - name: Show replication report
       if: always()
       shell: bash
