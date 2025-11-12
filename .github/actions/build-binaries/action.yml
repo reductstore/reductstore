@@ -83,6 +83,7 @@ runs:
     - name: Build binary (PR)
       if: github.event_name == 'pull_request'
       run: cargo build --profile ci -p reductstore --target ${{ matrix.target }} --all-features
+      shell: bash
 
     - name: Upload binary (PR)
       uses: actions/upload-artifact@v4
@@ -96,6 +97,7 @@ runs:
     - name: Build binary (Release)
       if: github.event_name != 'pull_request'
       run: cargo build --profile release -p reductstore --target ${{ matrix.target }} --all-features
+      shell: bash
 
 
     - name: Upload binary (Release)
@@ -110,10 +112,12 @@ runs:
     - name: Build and export tests (PR)
       if: github.event_name == 'pull_request'
       run: cargo export target/${{ matrix.target }}/tests -- test --profile ci --target ${{ matrix.target }} --lib
+      shell: bash
 
     - name: Build and export tests (Release)
       if: github.event_name != 'pull_request'
       run: cargo export target/${{ matrix.target }}/tests -- test --profile release --target ${{ matrix.target }} --lib
+      shell: bash
 
     - name: Upload tests
       uses: actions/upload-artifact@v4
