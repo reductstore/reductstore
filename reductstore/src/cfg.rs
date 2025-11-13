@@ -197,6 +197,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 
         let lock_file = LockFileBuilder::new()
             .with_path(&data_path.join(".lock"))
+            .with_role(self.cfg.lock_file_config.role.clone())
             .with_failure_action(self.cfg.lock_file_config.failure_action.clone())
             .with_timeout(self.cfg.lock_file_config.timeout.clone())
             .build();

@@ -26,6 +26,11 @@ RUN rustup target add ${CARGO_TARGET}
 
 WORKDIR /src
 
+RUN cargo install --force --locked bindgen-cli
+
+RUN mv /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
+RUN mv /build/bin/reduct-cli /usr/local/bin/reduct-cli
+
 COPY reductstore reductstore
 COPY reduct_base reduct_base
 COPY reduct_macros reduct_macros
@@ -35,8 +40,6 @@ COPY Cargo.lock Cargo.lock
 
 ARG GIT_COMMIT=unspecified
 
-RUN cargo install --force --locked bindgen-cli
-
 # Use release directory for all builds
 RUN CARGO_TARGET_DIR=/build/ \
     GIT_COMMIT=${GIT_COMMIT} \
@@ -44,8 +47,7 @@ RUN CARGO_TARGET_DIR=/build/ \
 RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /build
 
 RUN mkdir /data
-RUN mv /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
-RUN mv /build/bin/reduct-cli /usr/local/bin/reduct-cli
+
 
 FROM ubuntu:22.04
 

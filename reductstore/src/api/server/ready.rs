@@ -13,8 +13,14 @@ pub(super) async fn ready(
     State(keeper): State<Arc<StateKeeper>>,
     _http_error: HeaderMap,
 ) -> Result<StatusCode, HttpError> {
-    keeper.get_anonymous().await?.storage.info()?;
-    Ok(StatusCode::OK)
+    match keeper.get_anonymous().await {
+        Ok(components) => {
+            components.storage.info()?;
+            Ok(StatusCode::OK)
+        }
+        Err(e) if e.0.status == ErrorCode::ServiceUnavailable => Ok(StatusCode::FORBIDDEN),
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]

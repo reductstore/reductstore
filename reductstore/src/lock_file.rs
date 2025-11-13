@@ -3,7 +3,7 @@
 
 use crate::core::file_cache::FILE_CACHE;
 use async_trait::async_trait;
-use log::{debug, error, warn};
+use log::{debug, error, info, warn};
 use reduct_base::error::ReductError;
 use std::io::SeekFrom::Start;
 use std::io::Write;
@@ -28,6 +28,13 @@ pub enum FailureAction {
     Abort,
 }
 
+#[derive(Debug, PartialEq, Clone, Default)]
+pub enum InstanceRole {
+    #[default]
+    Primary,
+    Secondary,
+}
+
 #[async_trait]
 pub trait LockFile {
     async fn is_locked(&self) -> bool;
@@ -36,6 +43,9 @@ pub trait LockFile {
     fn release(&self);
 }
 pub type BoxedLockFile = Box<dyn LockFile + Sync + Send>;
+
+const WRITE_INTERVAL: Duration = Duration::from_secs(1);
+const READ_INTERVAL: Duration = Duration::from_secs(1);
 
 struct ImplLockFile {
     path: PathBuf,
@@ -49,6 +59,7 @@ pub struct LockFileBuilder {
     path: Option<PathBuf>,
     lock_timeout: Option<Duration>,
     failure_action: FailureAction,
+    role: InstanceRole,
 }
 
 impl LockFileBuilder {
@@ -71,6 +82,11 @@ impl LockFileBuilder {
         self
     }
 
+    pub fn with_role(mut self, role: InstanceRole) -> Self {
+        self.role = role;
+        self
+    }
+
     pub fn build(self) -> BoxedLockFile {
         let Some(path) = self.path else {
             return Box::new(NoopLockFile {});
@@ -83,39 +99,68 @@ impl LockFileBuilder {
         let file_path = path.clone();
         let state = Arc::new(RwLock::new(State::Waiting));
         let state_clone = Arc::clone(&state);
-        let failure_action = self.failure_action.clone();
+        let failure_action = self.failure_action;
+        let role = self.role;
 
         // for future use, we generate a unique id for the lock file
         let unique_id = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
         let handle = tokio::spawn(async move {
-            // Check if the file is already locked
-            let time_start = std::time::Instant::now();
-            while FILE_CACHE.try_exists(&file_path).unwrap()
-                && !stop_flag.load(std::sync::atomic::Ordering::SeqCst)
-            {
-                if time_start.elapsed() > timeout && timeout.as_secs() > 0 {
-                    match failure_action {
-                        FailureAction::Proceed => {
-                            warn!(
-                                "Timeout while waiting for lock file, proceeding anyway: {:?}",
-                                file_path
-                            );
-                            break;
+            // Main loop to acquire and maintain the lock
+            loop {
+                // Check if the file is already locked
+                let time_start = std::time::Instant::now();
+                while FILE_CACHE.try_exists(&file_path).unwrap()
+                    && !stop_flag.load(std::sync::atomic::Ordering::SeqCst)
+                {
+                    if time_start.elapsed() > timeout && timeout.as_secs() > 0 {
+                        match failure_action {
+                            FailureAction::Proceed => {
+                                warn!(
+                                    "Timeout while waiting for lock file, proceeding anyway: {:?}",
+                                    file_path
+                                );
+                                break;
+                            }
+                            FailureAction::Abort => {
+                                error!(
+                                    "Timeout while waiting for lock file, aborting: {:?}",
+                                    file_path
+                                );
+                                *state_clone.write().await = State::Failed;
+                                return;
+                            }
                         }
-                        FailureAction::Abort => {
-                            error!(
-                                "Timeout while waiting for lock file, aborting: {:?}",
-                                file_path
-                            );
-                            *state_clone.write().await = State::Failed;
-                            return;
+                    }
+                    tokio::time::sleep(READ_INTERVAL).await;
+                }
+
+                // Final check to see if we should stop
+                if stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                    break;
+                }
+
+                match role {
+                    InstanceRole::Primary => {
+                        // Primary instance acquires the lock immediately
+                        info!("Primary instance acquiring lock file: {:?}", file_path);
+                        *state_clone.write().await = State::Locked;
+                    }
+                    InstanceRole::Secondary => {
+                        // Secondary instance waits a bit to ensure the primary has created the lock file
+                        tokio::time::sleep(WRITE_INTERVAL * 3).await;
+                        if !FILE_CACHE.try_exists(&file_path).unwrap() {
+                            info!("Secondary instance acquiring lock file: {:?}", file_path);
+                            *state_clone.write().await = State::Locked;
+                        } else {
+                            info!("Secondary instance could not acquire lock file (already held by primary): {:?}", file_path);
                         }
                     }
                 }
-                tokio::time::sleep(Duration::from_millis(100)).await;
-            }
 
-            *state_clone.write().await = State::Locked;
+                if *state_clone.read().await == State::Locked {
+                    break;
+                }
+            }
 
             // we need to sync the file to ensure that the lock is visible to other processes
             // With Blue/Green deployments, the file system is shared between instances
@@ -134,7 +179,7 @@ impl LockFileBuilder {
                     error!("Error while recreating lock file: {}", e);
                 }
 
-                tokio::time::sleep(Duration::from_secs(1)).await;
+                tokio::time::sleep(WRITE_INTERVAL).await;
             }
         });
 

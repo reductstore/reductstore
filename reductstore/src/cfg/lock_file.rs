@@ -3,7 +3,7 @@
 
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
-use crate::lock_file::FailureAction;
+use crate::lock_file::{FailureAction, InstanceRole};
 use std::time::Duration;
 
 const DEFAULT_ACQUIRE_TIMEOUT_S: u64 = 10;
@@ -13,6 +13,8 @@ const DEFAULT_ACQUIRE_TIMEOUT_S: u64 = 10;
 pub struct LockFileConfig {
     /// Whether to enable lock file usage
     pub enabled: bool,
+    /// Instance role
+    pub role: InstanceRole,
     /// Timeout for acquiring the lock file
     /// if set to 0, it will wait indefinitely
     pub timeout: Duration,
@@ -24,8 +26,9 @@ impl Default for LockFileConfig {
     fn default() -> Self {
         LockFileConfig {
             enabled: false,
+            role: InstanceRole::default(),
             timeout: Duration::from_secs(DEFAULT_ACQUIRE_TIMEOUT_S),
-            failure_action: FailureAction::Abort,
+            failure_action: FailureAction::default(),
         }
     }
 }
@@ -36,6 +39,18 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             enabled: env
                 .get_optional::<bool>("RS_LOCK_FILE_ENABLED")
                 .unwrap_or(false),
+            role: match env
+                .get_optional::<String>("RS_LOCK_FILE_ROLE")
+                .unwrap_or("primary".to_string())
+                .to_lowercase()
+                .as_str()
+            {
+                "primary" => InstanceRole::Primary,
+                "secondary" => InstanceRole::Secondary,
+                _ => {
+                    panic!("Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'")
+                }
+            },
             timeout: Duration::from_secs(
                 env.get_optional::<u64>("RS_LOCK_FILE_TIMEOUT")
                     .unwrap_or(DEFAULT_ACQUIRE_TIMEOUT_S),
