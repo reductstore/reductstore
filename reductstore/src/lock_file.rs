@@ -255,7 +255,6 @@ impl LockFile for NoopLockFile {
 mod tests {
     use super::*;
     use crate::backend::Backend;
-    use aes_siv::aead::array::typenum::private::IsLessOrEqualPrivate;
     use rstest::{fixture, rstest};
     use std::fs;
     use tempfile::tempdir;

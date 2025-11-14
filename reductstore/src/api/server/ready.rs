@@ -25,6 +25,7 @@ pub(super) async fn ready(
 mod tests {
     use super::*;
     use crate::api::tests::{headers, keeper, waiting_keeper};
+    use reduct_base::error::ErrorCode;
     use rstest::rstest;
 
     #[rstest]

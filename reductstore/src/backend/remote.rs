@@ -610,7 +610,7 @@ mod tests {
         use mockall::predicate::eq;
         use std::fs;
         use std::path::PathBuf;
-        use std::time::{SystemTime, UNIX_EPOCH};
+        use std::time::SystemTime;
 
         #[rstest]
         fn test_get_stats(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
