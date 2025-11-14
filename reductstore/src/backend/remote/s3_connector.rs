@@ -15,7 +15,6 @@ use aws_sdk_s3::Client;
 use log::{debug, error, info};
 use std::collections::HashSet;
 use std::io;
-use std::io::Error;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::SystemTime;
