@@ -533,10 +533,7 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         tx.send(components).await.unwrap();
 
-        Arc::new(StateKeeper::new(
-            Arc::new(LockFileBuilder::new().build()),
-            rx,
-        ))
+        Arc::new(StateKeeper::new(Arc::new(LockFileBuilder::noop()), rx))
     }
 
     #[fixture]

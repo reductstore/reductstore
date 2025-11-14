@@ -12,7 +12,7 @@ use crate::backend::file::AccessMode;
 use crate::backend::remote::local_cache::LocalCache;
 #[cfg(feature = "s3-backend")]
 use crate::backend::remote::s3_connector::S3Connector;
-use crate::backend::{BackendType, StorageBackend};
+use crate::backend::{BackendType, ObjectMetadata, StorageBackend};
 use log::debug;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,7 +26,7 @@ pub(super) trait RemoteStorageConnector {
     fn create_dir_all(&self, key: &str) -> Result<(), io::Error>;
     fn list_objects(&self, key: &str, recursive: bool) -> Result<Vec<String>, io::Error>;
     fn remove_object(&self, key: &str) -> Result<(), io::Error>;
-    fn head_object(&self, key: &str) -> Result<bool, io::Error>;
+    fn head_object(&self, key: &str) -> Result<Option<ObjectMetadata>, io::Error>;
     fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error>;
 }
 
@@ -221,7 +221,7 @@ impl StorageBackend for RemoteBackend {
         };
 
         debug!("Checking S3 key: {} to local path: {:?}", s3_key, path);
-        self.connector.head_object(&s3_key)
+        Ok(self.connector.head_object(&s3_key)?.is_some())
     }
 
     fn upload(&self, full_path: &Path) -> io::Result<()> {
@@ -261,6 +261,16 @@ impl StorageBackend for RemoteBackend {
         self.connector.download_object(&s3_key, &full_path)?;
         self.local_cache.lock().unwrap().register_file(&full_path)?;
         Ok(())
+    }
+
+    fn get_stats(&self, path: &Path) -> io::Result<Option<ObjectMetadata>> {
+        let s3_key = {
+            let cache = &self.local_cache.lock().unwrap();
+            cache.build_key(path)
+        };
+
+        debug!("Getting stats for S3 key: {}", s3_key);
+        self.connector.head_object(&s3_key)
     }
 
     fn update_local_cache(&self, path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
@@ -467,7 +477,7 @@ mod tests {
                 .expect_head_object()
                 .with(eq(file_key))
                 .times(1)
-                .returning(|_| Ok(true));
+                .returning(|_| Ok(Some(ObjectMetadata::default())));
 
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
@@ -486,7 +496,7 @@ mod tests {
                 .expect_head_object()
                 .with(eq(file_key))
                 .times(1)
-                .returning(|_| Ok(false));
+                .returning(|_| Ok(None));
 
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
@@ -595,6 +605,41 @@ mod tests {
         }
     }
 
+    mod get_stats {
+        use super::*;
+        use mockall::predicate::eq;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::SystemTime;
+
+        #[rstest]
+        fn test_get_stats(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+            let file_key = "file1.txt";
+            let modified_time = Some(SystemTime::now());
+
+            mock_connector
+                .expect_head_object()
+                .with(eq(file_key))
+                .times(1)
+                .returning(move |_| {
+                    Ok(Some(ObjectMetadata {
+                        size: Some(1234),
+                        modified_time,
+                    }))
+                });
+
+            let remote_backend = make_remote_backend(mock_connector, path.clone());
+
+            let file_path = path.join(file_key);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(&file_path, b"test").unwrap();
+
+            let stats = remote_backend.get_stats(&file_path).unwrap().unwrap();
+            assert_eq!(stats.size.unwrap(), 1234);
+            assert_eq!(stats.modified_time, modified_time);
+        }
+    }
+
     mock! {
         pub RemoteStorageConnector {}
 
@@ -604,7 +649,7 @@ mod tests {
             fn create_dir_all(&self, key: &str) -> Result<(), io::Error>;
             fn list_objects(&self, key: &str, recursive: bool) -> Result<Vec<String>, io::Error>;
             fn remove_object(&self, key: &str) -> Result<(), io::Error>;
-            fn head_object(&self, key: &str) -> Result<bool, io::Error>;
+            fn head_object(&self, key: &str) -> Result<std::option::Option<ObjectMetadata>, std::io::Error>;
             fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error>;
         }
     }

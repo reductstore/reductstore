@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::backend::file::{AccessMode, File};
-use crate::backend::Backend;
+use crate::backend::{Backend, ObjectMetadata};
 use crate::core::cache::Cache;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
@@ -354,6 +354,11 @@ impl FileCache {
     pub fn try_exists(&self, path: &PathBuf) -> Result<bool, ReductError> {
         let backpack = self.backpack.read()?;
         Ok(backpack.try_exists(path)?)
+    }
+
+    pub fn get_stats(&self, path: &PathBuf) -> Result<Option<ObjectMetadata>, ReductError> {
+        let backpack = self.backpack.read()?;
+        Ok(backpack.get_stats(path)?)
     }
 
     pub fn force_sync_all(&self) {

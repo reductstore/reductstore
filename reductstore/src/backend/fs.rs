@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::backend::file::AccessMode;
-use crate::backend::StorageBackend;
+use crate::backend::{ObjectMetadata, StorageBackend};
 use std::path::{Path, PathBuf};
 
 pub(crate) struct FileSystemBackend {
@@ -48,6 +48,21 @@ impl StorageBackend for FileSystemBackend {
 
     fn try_exists(&self, path: &Path) -> std::io::Result<bool> {
         path.try_exists()
+    }
+
+    fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
+        match std::fs::metadata(path) {
+            Ok(metadata) => {
+                let modified = metadata.modified().ok();
+                let size = metadata.len();
+                Ok(Some(ObjectMetadata {
+                    size: Some(size as i64),
+                    modified_time: modified,
+                }))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     fn upload(&self, _path: &Path) -> std::io::Result<()> {

@@ -162,7 +162,7 @@ impl Seek for File {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::StorageBackend;
+    use crate::backend::{ObjectMetadata, StorageBackend};
     use mockall::mock;
     use rstest::*;
     use std::fs;
@@ -361,6 +361,7 @@ mod tests {
             fn download(&self, path: &Path) -> std::io::Result<()>;
             fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
             fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+            fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
         }
 
     }

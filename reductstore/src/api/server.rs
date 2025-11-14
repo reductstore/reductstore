@@ -4,6 +4,7 @@
 mod alive;
 mod info;
 mod list;
+mod ready;
 
 use crate::api::StateKeeper;
 
@@ -26,5 +27,7 @@ pub(super) fn create_server_api_routes() -> axum::Router<Arc<StateKeeper>> {
         .route("/info", get(info::info))
         .route("/alive", head(alive::alive))
         .route("/alive", get(alive::alive))
+        .route("/ready", head(ready::ready))
+        .route("/ready", get(ready::ready))
         .route("/me", get(me))
 }

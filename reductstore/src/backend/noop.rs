@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::backend::file::AccessMode;
-use crate::backend::StorageBackend;
+use crate::backend::{ObjectMetadata, StorageBackend};
 use std::path::{Path, PathBuf};
 
 pub(super) struct NoopBackend;
@@ -53,6 +53,10 @@ impl StorageBackend for NoopBackend {
     fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
         vec![]
     }
+
+    fn get_stats(&self, _path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
+        Ok(None)
+    }
 }
 
 impl NoopBackend {
@@ -81,6 +85,7 @@ mod tests {
             .update_local_cache(Path::new("some/path"), &AccessMode::Read)
             .is_ok());
         assert!(backend.invalidate_locally_cached_files().is_empty());
+        assert!(backend.get_stats(Path::new("some/path")).unwrap().is_none());
     }
 
     #[rstest]
