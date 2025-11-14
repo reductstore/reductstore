@@ -13,8 +13,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v4
-
     - uses: snapcore/action-build@v1
       id: build-snap
       with:

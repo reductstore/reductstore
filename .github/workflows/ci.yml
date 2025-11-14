@@ -599,6 +599,7 @@ jobs:
     needs: [ check_tag, api_tests, migration_test, replication_test ]
     if: github.event_name != 'pull_request'
     steps:
+      - uses: actions/checkout@v4
       - uses: ./.github/actions/snap-release
         with:
           arch: ${{ matrix.arch }}
