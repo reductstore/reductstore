@@ -5,6 +5,7 @@
 
 use crate::backend::remote::RemoteBackendSettings;
 use crate::backend::remote::RemoteStorageConnector;
+use crate::backend::ObjectMetadata;
 use aws_config::{BehaviorVersion, Region};
 use aws_credential_types::Credentials;
 use aws_sdk_s3::error::{DisplayErrorContext, ProvideErrorMetadata, SdkError};
@@ -21,6 +22,7 @@ use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 use tokio::task::block_in_place;
+
 pub(super) struct S3Connector {
     bucket: String,
     client: Arc<Client>,
@@ -307,11 +309,10 @@ impl RemoteStorageConnector for S3Connector {
             })
         })
     }
-    fn head_object(&self, key: &str) -> Result<bool, io::Error> {
+    fn head_object(&self, key: &str) -> Result<Option<ObjectMetadata>, io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let key = format!("{}{}", self.prefix, key);
-
         block_in_place(|| {
             rt.block_on(async {
                 let resp = client
@@ -322,12 +323,21 @@ impl RemoteStorageConnector for S3Connector {
                     .await;
 
                 match resp {
-                    Ok(_) => Ok(true),
+                    Ok(output) => {
+                        let metadata = ObjectMetadata {
+                            size: output.content_length(),
+                            last_modified: output.last_modified().map(|dt| {
+                                SystemTime::UNIX_EPOCH
+                                    + std::time::Duration::from_secs(dt.secs() as u64)
+                            }),
+                        };
+                        Ok(Some(metadata))
+                    }
                     Err(e) => {
                         // Inspect the error
                         if let SdkError::ServiceError(err) = &e {
                             if err.err().is_not_found() {
-                                return Ok(false); // Object does not exist
+                                return Ok(None); // Object does not exist
                             }
                         }
                         error!("S3 head_object error: {}", DisplayErrorContext(&e));
@@ -397,57 +407,6 @@ impl RemoteStorageConnector for S3Connector {
                         )
                     })?;
                 Ok(())
-            })
-        })
-    }
-
-    fn last_modified(&self, key: &str) -> Result<Option<SystemTime>, Error> {
-        let client = Arc::clone(&self.client);
-        let rt = Arc::clone(&self.rt);
-        let key = format!("{}{}", self.prefix, key);
-
-        block_in_place(|| {
-            rt.block_on(async {
-                let resp = client
-                    .head_object()
-                    .bucket(&self.bucket)
-                    .key(&key)
-                    .send()
-                    .await;
-
-                match resp {
-                    Ok(output) => {
-                        if let Some(last_modified) = output.last_modified() {
-                            Ok(Some(
-                                SystemTime::UNIX_EPOCH
-                                    + std::time::Duration::from_millis(
-                                        last_modified.to_millis().unwrap() as u64,
-                                    ),
-                            ))
-                        } else {
-                            Ok(None)
-                        }
-                    }
-                    Err(e) => {
-                        // Inspect the error
-                        if let SdkError::ServiceError(err) = &e {
-                            if err.err().is_not_found() {
-                                return Ok(None); // Object does not exist
-                            }
-                        }
-                        error!("S3 head_object error: {}", DisplayErrorContext(&e));
-
-                        Err(io::Error::new(
-                            io::ErrorKind::Other,
-                            format!(
-                                "S3 head_object error bucket={}, key={}: {}",
-                                &self.bucket,
-                                &key,
-                                e.message().unwrap_or("connection error")
-                            ),
-                        ))
-                    }
-                }
             })
         })
     }
@@ -631,7 +590,7 @@ mod tests {
             fs::write(&src, b"This is a test file for upload.\n").unwrap();
 
             (connector.upload_object(key, &src).unwrap());
-            assert!(connector.head_object(key).unwrap());
+            assert!(connector.head_object(key).unwrap().is_some());
         }
 
         #[rstest]
@@ -646,7 +605,7 @@ mod tests {
             .unwrap();
 
             (connector.upload_object(key, &src).unwrap());
-            assert!(connector.head_object(key).unwrap());
+            assert!(connector.head_object(key).unwrap().is_some());
         }
 
         #[rstest]
@@ -655,7 +614,7 @@ mod tests {
             let key = "test/new_dir/";
 
             (connector.create_dir_all(key).unwrap());
-            assert!(connector.head_object(key).unwrap());
+            assert!(connector.head_object(key).unwrap().is_some());
         }
 
         #[rstest]
@@ -689,8 +648,8 @@ mod tests {
             let to = "test/renamed_test.txt";
 
             (connector.rename_object(from, to).unwrap());
-            assert!(!connector.head_object(from).unwrap());
-            assert!(connector.head_object(to).unwrap());
+            assert!(connector.head_object(from).unwrap().is_none());
+            assert!(connector.head_object(to).unwrap().is_some());
         }
 
         #[rstest]
@@ -699,7 +658,7 @@ mod tests {
             let key = "test/uploaded_test.txt";
 
             (connector.remove_object(key).unwrap());
-            assert!(!connector.head_object(key).unwrap());
+            assert!(connector.head_object(key).unwrap().is_none());
         }
 
         #[rstest]
@@ -708,8 +667,8 @@ mod tests {
             let existing_key = "test/test.txt";
             let non_existing_key = "test/non_existing.txt";
 
-            assert!(connector.head_object(existing_key).unwrap());
-            assert!(!connector.head_object(non_existing_key).unwrap());
+            assert!(connector.head_object(existing_key).unwrap().is_some());
+            assert!(connector.head_object(non_existing_key).unwrap().is_none());
         }
 
         #[fixture]

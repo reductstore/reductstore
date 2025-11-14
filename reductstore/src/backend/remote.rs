@@ -12,7 +12,7 @@ use crate::backend::file::AccessMode;
 use crate::backend::remote::local_cache::LocalCache;
 #[cfg(feature = "s3-backend")]
 use crate::backend::remote::s3_connector::S3Connector;
-use crate::backend::{BackendType, StorageBackend};
+use crate::backend::{BackendType, ObjectMetadata, StorageBackend};
 use log::debug;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -26,9 +26,8 @@ pub(super) trait RemoteStorageConnector {
     fn create_dir_all(&self, key: &str) -> Result<(), io::Error>;
     fn list_objects(&self, key: &str, recursive: bool) -> Result<Vec<String>, io::Error>;
     fn remove_object(&self, key: &str) -> Result<(), io::Error>;
-    fn head_object(&self, key: &str) -> Result<bool, io::Error>;
+    fn head_object(&self, key: &str) -> Result<Option<ObjectMetadata>, io::Error>;
     fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error>;
-    fn last_modified(&self, key: &str) -> Result<Option<SystemTime>, io::Error>;
 }
 
 #[allow(dead_code)]
@@ -222,7 +221,7 @@ impl StorageBackend for RemoteBackend {
         };
 
         debug!("Checking S3 key: {} to local path: {:?}", s3_key, path);
-        self.connector.head_object(&s3_key)
+        Ok(self.connector.head_object(&s3_key)?.is_some())
     }
 
     fn upload(&self, full_path: &Path) -> io::Result<()> {
@@ -264,14 +263,14 @@ impl StorageBackend for RemoteBackend {
         Ok(())
     }
 
-    fn last_modified(&self, path: &Path) -> io::Result<Option<SystemTime>> {
+    fn get_stats(&self, path: &Path) -> io::Result<Option<ObjectMetadata>> {
         let s3_key = {
             let cache = &self.local_cache.lock().unwrap();
             cache.build_key(path)
         };
 
-        debug!("Getting last modified for S3 key: {}", s3_key);
-        self.connector.last_modified(&s3_key)
+        debug!("Getting stats for S3 key: {}", s3_key);
+        self.connector.head_object(&s3_key)
     }
 
     fn update_local_cache(&self, path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
@@ -478,7 +477,7 @@ mod tests {
                 .expect_head_object()
                 .with(eq(file_key))
                 .times(1)
-                .returning(|_| Ok(true));
+                .returning(|_| Ok(Some(ObjectMetadata::default())));
 
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
@@ -497,7 +496,7 @@ mod tests {
                 .expect_head_object()
                 .with(eq(file_key))
                 .times(1)
-                .returning(|_| Ok(false));
+                .returning(|_| Ok(None));
 
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
@@ -615,7 +614,7 @@ mod tests {
             fn create_dir_all(&self, key: &str) -> Result<(), io::Error>;
             fn list_objects(&self, key: &str, recursive: bool) -> Result<Vec<String>, io::Error>;
             fn remove_object(&self, key: &str) -> Result<(), io::Error>;
-            fn head_object(&self, key: &str) -> Result<bool, io::Error>;
+            fn head_object(&self, key: &str) -> Result<std::option::Option<ObjectMetadata>, std::io::Error>;
             fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error>;
         }
     }

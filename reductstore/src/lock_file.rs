@@ -119,10 +119,15 @@ impl LockFileBuilder {
                 while FILE_CACHE.try_exists(&file_path).unwrap_or(true)
                     && !stop_flag.load(std::sync::atomic::Ordering::SeqCst)
                 {
-                    if let Some(last_modified) =
-                        FILE_CACHE.last_modified(&file_path).unwrap_or(None)
+                    if let Some(last_modified) = FILE_CACHE
+                        .get_stats(&file_path)
+                        .unwrap_or(None)
+                        .and_then(|meta| meta.last_modified)
                     {
-                        if last_modified.elapsed().unwrap() > ttl && ttl.as_secs() > 0 {
+                        // elapsed can fail if system time is changed backwards, so we default to 0 duration
+                        if last_modified.elapsed().unwrap_or(Duration::from_secs(0)) > ttl
+                            && ttl.as_secs() > 0
+                        {
                             warn!(
                                 "Lock file is stale (last modified over {:?} ago), removing: {:?}",
                                 last_modified.elapsed().unwrap(),

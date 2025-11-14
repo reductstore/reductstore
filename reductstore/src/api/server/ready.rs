@@ -18,7 +18,6 @@ pub(super) async fn ready(
             components.storage.info()?;
             Ok(StatusCode::OK)
         }
-        Err(e) if e.0.status == ErrorCode::ServiceUnavailable => Ok(StatusCode::FORBIDDEN),
         Err(e) => Err(e),
     }
 }

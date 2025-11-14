@@ -18,6 +18,13 @@ use reduct_base::internal_server_error;
 use reduct_base::msg::server_api::License;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
+
+#[derive(Default)]
+pub(super) struct ObjectMetadata {
+    pub size: Option<i64>,
+    pub last_modified: Option<SystemTime>,
+}
 
 pub(crate) trait StorageBackend {
     fn path(&self) -> &PathBuf;
@@ -41,7 +48,7 @@ pub(crate) trait StorageBackend {
 
     fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
 
-    fn last_modified(&self, path: &Path) -> std::io::Result<Option<std::time::SystemTime>>;
+    fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
 }
 
 pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;
@@ -258,11 +265,11 @@ impl Backend {
         self.backend.try_exists(path.as_ref())
     }
 
-    pub fn last_modified<P: AsRef<std::path::Path>>(
+    pub fn get_stats<P: AsRef<std::path::Path>>(
         &self,
         path: P,
-    ) -> std::io::Result<Option<std::time::SystemTime>> {
-        self.backend.last_modified(path.as_ref())
+    ) -> std::io::Result<Option<ObjectMetadata>> {
+        self.backend.get_stats(path.as_ref())
     }
 
     pub fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
@@ -675,6 +682,7 @@ mod tests {
             fn download(&self, path: &Path) -> std::io::Result<()>;
             fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
             fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+            fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
         }
 
     }

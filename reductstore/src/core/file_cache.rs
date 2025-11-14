@@ -2,12 +2,11 @@
 // Licensed under the Business Source License 1.1
 
 use crate::backend::file::{AccessMode, File};
-use crate::backend::Backend;
+use crate::backend::{Backend, ObjectMetadata};
 use crate::core::cache::Cache;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
-use std::alloc::System;
 use std::fs;
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
@@ -357,9 +356,9 @@ impl FileCache {
         Ok(backpack.try_exists(path)?)
     }
 
-    pub fn last_modified(&self, path: &PathBuf) -> Result<Option<SystemTime>, ReductError> {
+    pub fn get_stats(&self, path: &PathBuf) -> Result<Option<ObjectMetadata>, ReductError> {
         let backpack = self.backpack.read()?;
-        Ok(backpack.last_modified(path)?)
+        Ok(backpack.get_stats(path)?)
     }
 
     pub fn force_sync_all(&self) {

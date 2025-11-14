@@ -101,6 +101,14 @@ mod tests {
             .return_const(Ok("20".to_string()));
         env_getter
             .expect_get()
+            .with(eq("RS_LOCK_FILE_ROLE"))
+            .return_const(Ok("primary".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_LOCK_FILE_TTL"))
+            .return_const(Ok("30".to_string()));
+        env_getter
+            .expect_get()
             .with(eq("RS_LOCK_FILE_FAILURE_ACTION"))
             .return_const(Ok("proceed".to_string()));
 
@@ -153,6 +161,14 @@ mod tests {
             .expect_get()
             .with(eq("RS_LOCK_FILE_FAILURE_ACTION"))
             .return_const(Ok("invalid_action".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_LOCK_FILE_ROLE"))
+            .return_const(Ok("primary".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_LOCK_FILE_TTL"))
+            .return_const(Ok("30".to_string()));
 
         CfgParser::<MockEnvGetter>::parse_lock_file_config(&mut Env::new(env_getter));
     }

@@ -4,7 +4,7 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::backend::file::AccessMode;
-use crate::backend::StorageBackend;
+use crate::backend::{ObjectMetadata, StorageBackend};
 use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
@@ -55,7 +55,7 @@ impl StorageBackend for NoopBackend {
         vec![]
     }
 
-    fn last_modified(&self, path: &Path) -> std::io::Result<Option<SystemTime>> {
+    fn get_stats(&self, _path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
         Ok(None)
     }
 }
