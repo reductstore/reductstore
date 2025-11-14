@@ -6,7 +6,8 @@ use crate::core::env::{Env, GetEnv};
 use crate::lock_file::{FailureAction, InstanceRole};
 use std::time::Duration;
 
-const DEFAULT_ACQUIRE_TIMEOUT_S: u64 = 10;
+const DEFAULT_ACQUIRE_TIMEOUT_S: u64 = 60;
+const DEFAULT_LOCK_FILE_TTL_S: u64 = 30;
 
 /// IO configuration
 #[derive(Clone, Debug, PartialEq)]
@@ -18,6 +19,8 @@ pub struct LockFileConfig {
     /// Timeout for acquiring the lock file
     /// if set to 0, it will wait indefinitely
     pub timeout: Duration,
+    /// TTL for the lock file
+    pub ttl: Duration,
     /// Failure action if lock file cannot be acquired
     pub failure_action: FailureAction,
 }
@@ -28,6 +31,7 @@ impl Default for LockFileConfig {
             enabled: false,
             role: InstanceRole::default(),
             timeout: Duration::from_secs(DEFAULT_ACQUIRE_TIMEOUT_S),
+            ttl: Duration::from_secs(DEFAULT_LOCK_FILE_TTL_S),
             failure_action: FailureAction::default(),
         }
     }
@@ -54,6 +58,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             timeout: Duration::from_secs(
                 env.get_optional::<u64>("RS_LOCK_FILE_TIMEOUT")
                     .unwrap_or(DEFAULT_ACQUIRE_TIMEOUT_S),
+            ),
+            ttl: Duration::from_secs(
+                env.get_optional::<u64>("RS_LOCK_FILE_TTL")
+                    .unwrap_or(DEFAULT_LOCK_FILE_TTL_S),
             ),
             failure_action: match env
                 .get_optional::<String>("RS_LOCK_FILE_FAILURE_ACTION")
@@ -99,6 +107,8 @@ mod tests {
         let lock_file_settings = LockFileConfig {
             enabled: true,
             timeout: Duration::from_secs(20),
+            ttl: Duration::from_secs(DEFAULT_LOCK_FILE_TTL_S),
+            role: InstanceRole::default(),
             failure_action: FailureAction::Proceed,
         };
 

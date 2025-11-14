@@ -58,6 +58,7 @@ struct ImplLockFile {
 pub struct LockFileBuilder {
     path: Option<PathBuf>,
     lock_timeout: Option<Duration>,
+    ttl: Option<Duration>,
     failure_action: FailureAction,
     role: InstanceRole,
 }
@@ -87,6 +88,11 @@ impl LockFileBuilder {
         self
     }
 
+    pub fn with_ttl(mut self, ttl: Duration) -> Self {
+        self.ttl = Some(ttl);
+        self
+    }
+
     pub fn build(self) -> BoxedLockFile {
         let Some(path) = self.path else {
             return Box::new(NoopLockFile {});
@@ -101,6 +107,7 @@ impl LockFileBuilder {
         let state_clone = Arc::clone(&state);
         let failure_action = self.failure_action;
         let role = self.role;
+        let ttl = self.ttl.unwrap_or(Duration::from_secs(0));
 
         // for future use, we generate a unique id for the lock file
         let unique_id = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
@@ -109,9 +116,23 @@ impl LockFileBuilder {
             loop {
                 // Check if the file is already locked
                 let time_start = std::time::Instant::now();
-                while FILE_CACHE.try_exists(&file_path).unwrap()
+                while FILE_CACHE.try_exists(&file_path).unwrap_or(true)
                     && !stop_flag.load(std::sync::atomic::Ordering::SeqCst)
                 {
+                    if let Some(last_modified) =
+                        FILE_CACHE.last_modified(&file_path).unwrap_or(None)
+                    {
+                        if last_modified.elapsed().unwrap() > ttl && ttl.as_secs() > 0 {
+                            warn!(
+                                "Lock file is stale (last modified over {:?} ago), removing: {:?}",
+                                last_modified.elapsed().unwrap(),
+                                file_path
+                            );
+                            let _ = FILE_CACHE.remove(&file_path);
+                            break;
+                        }
+                    }
+
                     if time_start.elapsed() > timeout && timeout.as_secs() > 0 {
                         match failure_action {
                             FailureAction::Proceed => {

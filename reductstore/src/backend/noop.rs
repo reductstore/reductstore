@@ -6,6 +6,7 @@
 use crate::backend::file::AccessMode;
 use crate::backend::StorageBackend;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub(super) struct NoopBackend;
 
@@ -52,6 +53,10 @@ impl StorageBackend for NoopBackend {
 
     fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
         vec![]
+    }
+
+    fn last_modified(&self, path: &Path) -> std::io::Result<Option<SystemTime>> {
+        Ok(None)
     }
 }
 

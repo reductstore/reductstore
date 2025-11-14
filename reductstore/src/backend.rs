@@ -40,6 +40,8 @@ pub(crate) trait StorageBackend {
     fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
 
     fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+
+    fn last_modified(&self, path: &Path) -> std::io::Result<Option<std::time::SystemTime>>;
 }
 
 pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;
@@ -254,6 +256,13 @@ impl Backend {
 
     pub fn try_exists<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<bool> {
         self.backend.try_exists(path.as_ref())
+    }
+
+    pub fn last_modified<P: AsRef<std::path::Path>>(
+        &self,
+        path: P,
+    ) -> std::io::Result<Option<std::time::SystemTime>> {
+        self.backend.last_modified(path.as_ref())
     }
 
     pub fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {

@@ -14,8 +14,10 @@ use aws_sdk_s3::Client;
 use log::{debug, error, info};
 use std::collections::HashSet;
 use std::io;
+use std::io::Error;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 use tokio::task::block_in_place;
@@ -395,6 +397,57 @@ impl RemoteStorageConnector for S3Connector {
                         )
                     })?;
                 Ok(())
+            })
+        })
+    }
+
+    fn last_modified(&self, key: &str) -> Result<Option<SystemTime>, Error> {
+        let client = Arc::clone(&self.client);
+        let rt = Arc::clone(&self.rt);
+        let key = format!("{}{}", self.prefix, key);
+
+        block_in_place(|| {
+            rt.block_on(async {
+                let resp = client
+                    .head_object()
+                    .bucket(&self.bucket)
+                    .key(&key)
+                    .send()
+                    .await;
+
+                match resp {
+                    Ok(output) => {
+                        if let Some(last_modified) = output.last_modified() {
+                            Ok(Some(
+                                SystemTime::UNIX_EPOCH
+                                    + std::time::Duration::from_millis(
+                                        last_modified.to_millis().unwrap() as u64,
+                                    ),
+                            ))
+                        } else {
+                            Ok(None)
+                        }
+                    }
+                    Err(e) => {
+                        // Inspect the error
+                        if let SdkError::ServiceError(err) = &e {
+                            if err.err().is_not_found() {
+                                return Ok(None); // Object does not exist
+                            }
+                        }
+                        error!("S3 head_object error: {}", DisplayErrorContext(&e));
+
+                        Err(io::Error::new(
+                            io::ErrorKind::Other,
+                            format!(
+                                "S3 head_object error bucket={}, key={}: {}",
+                                &self.bucket,
+                                &key,
+                                e.message().unwrap_or("connection error")
+                            ),
+                        ))
+                    }
+                }
             })
         })
     }

@@ -17,7 +17,7 @@ use log::debug;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::Instant;
+use std::time::{Instant, SystemTime};
 
 #[allow(dead_code)]
 pub(super) trait RemoteStorageConnector {
@@ -28,6 +28,7 @@ pub(super) trait RemoteStorageConnector {
     fn remove_object(&self, key: &str) -> Result<(), io::Error>;
     fn head_object(&self, key: &str) -> Result<bool, io::Error>;
     fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error>;
+    fn last_modified(&self, key: &str) -> Result<Option<SystemTime>, io::Error>;
 }
 
 #[allow(dead_code)]
@@ -261,6 +262,16 @@ impl StorageBackend for RemoteBackend {
         self.connector.download_object(&s3_key, &full_path)?;
         self.local_cache.lock().unwrap().register_file(&full_path)?;
         Ok(())
+    }
+
+    fn last_modified(&self, path: &Path) -> io::Result<Option<SystemTime>> {
+        let s3_key = {
+            let cache = &self.local_cache.lock().unwrap();
+            cache.build_key(path)
+        };
+
+        debug!("Getting last modified for S3 key: {}", s3_key);
+        self.connector.last_modified(&s3_key)
     }
 
     fn update_local_cache(&self, path: &Path, _mode: &AccessMode) -> std::io::Result<()> {

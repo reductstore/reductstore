@@ -6,6 +6,7 @@
 use crate::backend::file::AccessMode;
 use crate::backend::StorageBackend;
 use std::path::{Path, PathBuf};
+use std::time::SystemTime;
 
 pub(crate) struct FileSystemBackend {
     path: PathBuf,
@@ -48,6 +49,17 @@ impl StorageBackend for FileSystemBackend {
 
     fn try_exists(&self, path: &Path) -> std::io::Result<bool> {
         path.try_exists()
+    }
+
+    fn last_modified(&self, path: &Path) -> std::io::Result<Option<SystemTime>> {
+        match std::fs::metadata(path) {
+            Ok(metadata) => match metadata.modified() {
+                Ok(time) => Ok(Some(time)),
+                Err(_) => Ok(None),
+            },
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
     }
 
     fn upload(&self, _path: &Path) -> std::io::Result<()> {

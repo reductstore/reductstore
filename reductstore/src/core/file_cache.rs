@@ -7,13 +7,14 @@ use crate::core::cache::Cache;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::alloc::System;
 use std::fs;
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, RwLock, RwLockWriteGuard, Weak};
 use std::thread::spawn;
-use std::time::Duration;
+use std::time::{Duration, SystemTime};
 
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
@@ -354,6 +355,11 @@ impl FileCache {
     pub fn try_exists(&self, path: &PathBuf) -> Result<bool, ReductError> {
         let backpack = self.backpack.read()?;
         Ok(backpack.try_exists(path)?)
+    }
+
+    pub fn last_modified(&self, path: &PathBuf) -> Result<Option<SystemTime>, ReductError> {
+        let backpack = self.backpack.read()?;
+        Ok(backpack.last_modified(path)?)
     }
 
     pub fn force_sync_all(&self) {
