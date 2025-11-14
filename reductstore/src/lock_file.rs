@@ -97,7 +97,7 @@ impl LockFileBuilder {
                     if let Some(last_modified) = FILE_CACHE
                         .get_stats(&file_path)
                         .unwrap_or(None)
-                        .and_then(|meta| meta.last_modified)
+                        .and_then(|meta| meta.modified_time)
                     {
                         // elapsed can fail if system time is changed backwards, so we default to 0 duration
                         if last_modified.elapsed().unwrap_or(Duration::from_secs(0)) > cfg.ttl
@@ -255,6 +255,7 @@ impl LockFile for NoopLockFile {
 mod tests {
     use super::*;
     use crate::backend::Backend;
+    use aes_siv::aead::array::typenum::private::IsLessOrEqualPrivate;
     use rstest::{fixture, rstest};
     use std::fs;
     use tempfile::tempdir;
@@ -347,6 +348,74 @@ mod tests {
             "dummy",
             "Lock file must be overwritten"
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_secondary_instance_waits(lock_file_path: PathBuf) {
+        let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
+            .with_config(LockFileConfig {
+                polling_interval: Duration::from_millis(500),
+                role: InstanceRole::Primary,
+                ..Default::default()
+            })
+            .build();
+
+        let secondary_lock_file = LockFileBuilder::new(lock_file_path.clone())
+            .with_config(LockFileConfig {
+                polling_interval: Duration::from_millis(500),
+                role: InstanceRole::Secondary,
+                ..Default::default()
+            })
+            .build();
+
+        // Wait for the primary to acquire the lock
+        let primary_acquired = wait_new_state(&primary_lock_file).await;
+        assert!(
+            primary_acquired.is_ok(),
+            "Primary lock file was acquired in time"
+        );
+        assert!(primary_lock_file.is_locked().await);
+
+        // Wait for the secondary to acquire the lock
+        let secondary_acquired = wait_new_state(&secondary_lock_file).await;
+        assert!(
+            secondary_acquired.is_err(),
+            "Secondary lock file was not acquired in time"
+        );
+        assert!(secondary_lock_file.is_waiting().await);
+
+        // Release primary lock
+        primary_lock_file.release();
+        let secondary_acquired = wait_new_state(&secondary_lock_file).await;
+        assert!(
+            secondary_acquired.is_ok(),
+            "Secondary lock file was acquired in time"
+        );
+        assert!(secondary_lock_file.is_locked().await);
+
+        secondary_lock_file.release();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_ttl_removes_stale_lock(lock_file_path: PathBuf) {
+        let lock_file = LockFileBuilder::new(lock_file_path.clone())
+            .with_config(LockFileConfig {
+                polling_interval: Duration::from_millis(500),
+                ttl: Duration::from_secs(1),
+                ..Default::default()
+            })
+            .build();
+        fs::write(&lock_file_path, "dummy").unwrap();
+
+        // Initially, the lock file should be in waiting state
+        assert!(lock_file.is_waiting().await);
+
+        // Wait for the lock to be acquired after TTL expires
+        let acquired = wait_new_state(&lock_file).await;
+        assert!(acquired.is_ok(), "Lock file was not acquired in time");
+        assert!(lock_file.is_locked().await);
     }
 
     async fn wait_new_state(lock_file: &BoxedLockFile) -> Result<(), Elapsed> {

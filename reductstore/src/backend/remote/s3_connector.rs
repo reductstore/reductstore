@@ -326,7 +326,7 @@ impl RemoteStorageConnector for S3Connector {
                     Ok(output) => {
                         let metadata = ObjectMetadata {
                             size: output.content_length(),
-                            last_modified: output.last_modified().map(|dt| {
+                            modified_time: output.last_modified().map(|dt| {
                                 SystemTime::UNIX_EPOCH
                                     + std::time::Duration::from_secs(dt.secs() as u64)
                             }),

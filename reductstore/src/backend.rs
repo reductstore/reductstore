@@ -23,7 +23,7 @@ use std::time::SystemTime;
 #[derive(Default)]
 pub(super) struct ObjectMetadata {
     pub size: Option<i64>,
-    pub last_modified: Option<SystemTime>,
+    pub modified_time: Option<SystemTime>,
 }
 
 pub(crate) trait StorageBackend {

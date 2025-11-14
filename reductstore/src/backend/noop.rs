@@ -86,6 +86,7 @@ mod tests {
             .update_local_cache(Path::new("some/path"), &AccessMode::Read)
             .is_ok());
         assert!(backend.invalidate_locally_cached_files().is_empty());
+        assert!(backend.get_stats(Path::new("some/path")).unwrap().is_none());
     }
 
     #[rstest]

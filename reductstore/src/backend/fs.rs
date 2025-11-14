@@ -58,7 +58,7 @@ impl StorageBackend for FileSystemBackend {
                 let size = metadata.len();
                 Ok(Some(ObjectMetadata {
                     size: Some(size as i64),
-                    last_modified: modified,
+                    modified_time: modified,
                 }))
             }
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),

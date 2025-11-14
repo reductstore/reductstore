@@ -605,6 +605,41 @@ mod tests {
         }
     }
 
+    mod get_stats {
+        use super::*;
+        use mockall::predicate::eq;
+        use std::fs;
+        use std::path::PathBuf;
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        #[rstest]
+        fn test_get_stats(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+            let file_key = "file1.txt";
+            let modified_time = Some(SystemTime::now());
+
+            mock_connector
+                .expect_head_object()
+                .with(eq(file_key))
+                .times(1)
+                .returning(move |_| {
+                    Ok(Some(ObjectMetadata {
+                        size: Some(1234),
+                        modified_time,
+                    }))
+                });
+
+            let remote_backend = make_remote_backend(mock_connector, path.clone());
+
+            let file_path = path.join(file_key);
+            fs::create_dir_all(&path).unwrap();
+            fs::write(&file_path, b"test").unwrap();
+
+            let stats = remote_backend.get_stats(&file_path).unwrap().unwrap();
+            assert_eq!(stats.size.unwrap(), 1234);
+            assert_eq!(stats.modified_time, modified_time);
+        }
+    }
+
     mock! {
         pub RemoteStorageConnector {}
 
