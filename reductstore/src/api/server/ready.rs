@@ -46,7 +46,7 @@ mod tests {
         assert_eq!(
             err.0.status,
             ErrorCode::ServiceUnavailable,
-            "Ready should return 503i if lock file isn't acquired"
+            "Ready should return 503 if lock file isn't acquired"
         );
     }
 }
