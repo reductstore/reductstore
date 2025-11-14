@@ -6,7 +6,6 @@
 use crate::backend::file::AccessMode;
 use crate::backend::{ObjectMetadata, StorageBackend};
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
 
 pub(crate) struct FileSystemBackend {
     path: PathBuf,

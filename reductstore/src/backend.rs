@@ -22,6 +22,7 @@ use std::time::SystemTime;
 
 #[derive(Default)]
 pub(super) struct ObjectMetadata {
+    #[allow(dead_code)]
     pub size: Option<i64>,
     pub modified_time: Option<SystemTime>,
 }

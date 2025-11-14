@@ -17,7 +17,7 @@ use log::debug;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use std::time::{Instant, SystemTime};
+use std::time::Instant;
 
 #[allow(dead_code)]
 pub(super) trait RemoteStorageConnector {

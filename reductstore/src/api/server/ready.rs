@@ -5,7 +5,6 @@ use crate::api::{HttpError, StateKeeper};
 use axum::extract::State;
 use axum::http::StatusCode;
 use axum_extra::headers::HeaderMap;
-use reduct_base::error::ErrorCode;
 use std::sync::Arc;
 
 // GET | HEAD /ready
