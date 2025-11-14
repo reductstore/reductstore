@@ -189,4 +189,21 @@ mod tests {
 
         CfgParser::<MockEnvGetter>::parse_lock_file_config(&mut Env::new(env_getter));
     }
+
+    #[rstest]
+    #[should_panic(
+        expected = "Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'"
+    )]
+    fn test_invalid_instance_role() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_LOCK_FILE_ENABLED"))
+            .return_const(Ok("true".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_LOCK_FILE_POLLING_INTERVAL"))
+            .return_const(Ok("10".to_string()));
+        CfgParser::<MockEnvGetter>::parse_lock_file_config(&mut Env::new(env_getter));
+    }
 }

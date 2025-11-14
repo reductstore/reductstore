@@ -430,6 +430,34 @@ mod tests {
         acquired
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_drops_lock_file(lock_file_path: PathBuf) {
+        let lock_file = LockFileBuilder::new(lock_file_path.clone())
+            .with_config(LockFileConfig {
+                polling_interval: Duration::from_millis(500),
+                ..Default::default()
+            })
+            .build();
+
+        // Wait for the lock to be acquired
+        let acquired = wait_new_state(&lock_file).await;
+
+        assert!(acquired.is_ok(), "Lock file was not acquired in time");
+        assert!(lock_file.is_locked().await);
+
+        // Drop the lock file, which should trigger release
+        drop(lock_file);
+
+        // Wait a moment to ensure the lock file is released
+        tokio::time::sleep(Duration::from_secs(1)).await;
+
+        assert!(
+            !lock_file_path.exists(),
+            "Lock file must be deleted on drop"
+        );
+    }
+
     #[fixture]
     fn lock_file_path() -> PathBuf {
         let dir = tempdir().unwrap().keep();
