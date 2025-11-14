@@ -202,8 +202,8 @@ mod tests {
             .return_const(Ok("true".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_LOCK_FILE_POLLING_INTERVAL"))
-            .return_const(Ok("10".to_string()));
+            .with(eq("RS_LOCK_FILE_ROLE"))
+            .return_const(Ok("invalid_role".to_string()));
         CfgParser::<MockEnvGetter>::parse_lock_file_config(&mut Env::new(env_getter));
     }
 }
