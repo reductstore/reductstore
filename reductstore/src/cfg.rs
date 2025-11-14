@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 pub mod io;
-mod lock_file;
+pub mod lock_file;
 mod provision;
 pub mod remote_storage;
 pub mod replication;
@@ -192,15 +192,11 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         let data_path = self.get_data_path()?;
 
         if !self.cfg.lock_file_config.enabled {
-            return Ok(LockFileBuilder::new().build());
+            return Ok(LockFileBuilder::noop());
         }
 
-        let lock_file = LockFileBuilder::new()
-            .with_path(&data_path.join(".lock"))
-            .with_role(self.cfg.lock_file_config.role.clone())
-            .with_failure_action(self.cfg.lock_file_config.failure_action.clone())
-            .with_timeout(self.cfg.lock_file_config.timeout.clone())
-            .with_ttl(self.cfg.lock_file_config.ttl.clone())
+        let lock_file = LockFileBuilder::new(data_path.join(".lock"))
+            .with_config(self.cfg.lock_file_config.clone())
             .build();
 
         Ok(lock_file)

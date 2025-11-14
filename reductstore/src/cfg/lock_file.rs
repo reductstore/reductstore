@@ -8,6 +8,7 @@ use std::time::Duration;
 
 const DEFAULT_ACQUIRE_TIMEOUT_S: u64 = 60;
 const DEFAULT_LOCK_FILE_TTL_S: u64 = 30;
+const DEFAULT_POLLING_INTERVAL_S: u64 = 10;
 
 /// IO configuration
 #[derive(Clone, Debug, PartialEq)]
@@ -16,6 +17,8 @@ pub struct LockFileConfig {
     pub enabled: bool,
     /// Instance role
     pub role: InstanceRole,
+    /// Polling interval for checking the lock file
+    pub polling_interval: Duration,
     /// Timeout for acquiring the lock file
     /// if set to 0, it will wait indefinitely
     pub timeout: Duration,
@@ -30,6 +33,7 @@ impl Default for LockFileConfig {
         LockFileConfig {
             enabled: false,
             role: InstanceRole::default(),
+            polling_interval: Duration::from_secs(DEFAULT_POLLING_INTERVAL_S),
             timeout: Duration::from_secs(DEFAULT_ACQUIRE_TIMEOUT_S),
             ttl: Duration::from_secs(DEFAULT_LOCK_FILE_TTL_S),
             failure_action: FailureAction::default(),
@@ -55,6 +59,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                     panic!("Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'")
                 }
             },
+            polling_interval: Duration::from_secs(
+                env.get_optional::<u64>("RS_LOCK_FILE_POLLING_INTERVAL")
+                    .unwrap_or(DEFAULT_POLLING_INTERVAL_S),
+            ),
             timeout: Duration::from_secs(
                 env.get_optional::<u64>("RS_LOCK_FILE_TIMEOUT")
                     .unwrap_or(DEFAULT_ACQUIRE_TIMEOUT_S),
@@ -97,6 +105,10 @@ mod tests {
             .return_const(Ok("true".to_string()));
         env_getter
             .expect_get()
+            .with(eq("RS_LOCK_FILE_POLLING_INTERVAL"))
+            .return_const(Ok("15".to_string()));
+        env_getter
+            .expect_get()
             .with(eq("RS_LOCK_FILE_TIMEOUT"))
             .return_const(Ok("20".to_string()));
         env_getter
@@ -114,6 +126,7 @@ mod tests {
 
         let lock_file_settings = LockFileConfig {
             enabled: true,
+            polling_interval: Duration::from_secs(15),
             timeout: Duration::from_secs(20),
             ttl: Duration::from_secs(DEFAULT_LOCK_FILE_TTL_S),
             role: InstanceRole::default(),
@@ -153,6 +166,10 @@ mod tests {
             .expect_get()
             .with(eq("RS_LOCK_FILE_ENABLED"))
             .return_const(Ok("true".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_LOCK_FILE_POLLING_INTERVAL"))
+            .return_const(Ok("10".to_string()));
         env_getter
             .expect_get()
             .with(eq("RS_LOCK_FILE_TIMEOUT"))
