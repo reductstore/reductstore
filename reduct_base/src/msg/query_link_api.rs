@@ -23,6 +23,8 @@ pub struct QueryLinkCreateRequest {
     /// Expiration time
     #[serde(deserialize_with = "as_ts", serialize_with = "to_ts")]
     pub expire_at: DateTime<Utc>,
+    ///  Optimal base URL for the link (optional)
+    pub base_url: Option<String>,
 }
 
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
