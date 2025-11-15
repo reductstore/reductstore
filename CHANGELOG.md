@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## Added
+
+- Add base url to create query link parameters, [PR-1031](https://github.com/reductstore/reductstore/pull/1031)
+
 ## [1.17.2] - 2025-11-11
 
 ### Fixed
