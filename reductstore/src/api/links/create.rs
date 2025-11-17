@@ -43,6 +43,9 @@ pub(super) async fn create(
         return Err(unprocessable_entity!("Only 'Query' type is supported for query links").into());
     }
 
+    // check and normalize base URL if provided
+    let url = check_and_normalize_base_url(&params, components.cfg.public_url.clone())?;
+
     // find current token
     let token = components.token_repo.read().await.validate_token(
         headers
@@ -86,7 +89,7 @@ pub(super) async fn create(
 
     let link = format!(
         "{}api/v1/links/{}?ct={}&s={}&i={}&n={}&r={}",
-        components.cfg.public_url,
+        url,
         file_name,
         ct_b64,
         salt_b64,
@@ -95,6 +98,30 @@ pub(super) async fn create(
         params.0.index.unwrap_or(0)
     );
     Ok(QueryLinkCreateResponse { link }.into())
+}
+
+fn check_and_normalize_base_url(
+    params: &QueryLinkCreateRequestAxum,
+    default_url: String,
+) -> Result<String, HttpError> {
+    let Some(url) = &params.0.base_url else {
+        return Ok(default_url);
+    };
+
+    let parsed_url = url::Url::parse(url)
+        .map_err(|e| unprocessable_entity!("Invalid base_url provided for query link: {}", e))?;
+    if !parsed_url.has_host() {
+        return Err(unprocessable_entity!(
+            "Invalid base_url provided for query link: missing host"
+        )
+        .into());
+    }
+
+    if !url.ends_with('/') {
+        Ok(format!("{}/", url))
+    } else {
+        Ok(url.clone())
+    }
 }
 
 #[cfg(test)]
@@ -157,5 +184,60 @@ mod tests {
             err.0,
             unprocessable_entity!("Only 'Query' type is supported for query links")
         );
+    }
+
+    mod check_and_normalize_base_url {
+        use super::*;
+        use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
+
+        #[rstest]
+        fn test_valid_base_url() {
+            let params = QueryLinkCreateRequestAxum(QueryLinkCreateRequest {
+                base_url: Some("https://example.com/base/".to_string()),
+                ..Default::default()
+            });
+            let result =
+                check_and_normalize_base_url(&params, "https://default.com/".to_string()).unwrap();
+            assert_eq!(result, "https://example.com/base/");
+        }
+
+        #[rstest]
+        fn test_base_url_missing_trailing_slash() {
+            let params = QueryLinkCreateRequestAxum(QueryLinkCreateRequest {
+                base_url: Some("https://example.com/base".to_string()),
+                ..Default::default()
+            });
+            let result =
+                check_and_normalize_base_url(&params, "https://default.com/".to_string()).unwrap();
+            assert_eq!(result, "https://example.com/base/");
+        }
+
+        #[rstest]
+        fn test_invalid_base_url() {
+            let params = QueryLinkCreateRequestAxum(QueryLinkCreateRequest {
+                base_url: Some("ht!tp://invalid-url".to_string()),
+                ..Default::default()
+            });
+            let err = check_and_normalize_base_url(&params, "https://default.com/".to_string())
+                .err()
+                .unwrap();
+            assert_eq!(
+                err.0,
+                unprocessable_entity!(
+                    "Invalid base_url provided for query link: relative URL without a base"
+                )
+            );
+        }
+
+        #[rstest]
+        fn test_base_url_default() {
+            let params = QueryLinkCreateRequestAxum(QueryLinkCreateRequest {
+                base_url: None,
+                ..Default::default()
+            });
+            let result =
+                check_and_normalize_base_url(&params, "https://default.com/".to_string()).unwrap();
+            assert_eq!(result, "https://default.com/");
+        }
     }
 }
