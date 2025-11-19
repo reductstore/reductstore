@@ -27,7 +27,7 @@ runs:
     - name: Save snap name in environment variable
       shell: bash
       run: |
-        echo "SNAP_NAME=$(ls *.snap | cut -f1 | grep ${{ inputs.arch }})" >> $GITHUB_ENV
+        echo "SNAP_NAME=$(ls *_${{ inputs.arch }}.snap | cut -f1 | grep ${{ inputs.arch }})" >> $GITHUB_ENV
 
     - name: Publish snap package
       uses: snapcore/action-publish@master
