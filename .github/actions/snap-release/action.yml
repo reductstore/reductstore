@@ -16,7 +16,7 @@ runs:
     - uses: snapcore/action-build@v1
       id: build-snap
       with:
-        snapcraft-args: "--enable-experimental-extensions --verbose"
+        snapcraft-args: "--enable-experimental-extensions --verbose --target-arch=${{ inputs.arch }}"
 
     - name: Install snap for testing
       shell: bash
@@ -27,7 +27,7 @@ runs:
     - name: Save snap name in environment variable
       shell: bash
       run: |
-        echo "SNAP_NAME=$(ls *_${{ inputs.arch }}.snap | cut -f1 | grep ${{ inputs.arch }})" >> $GITHUB_ENV
+        echo "SNAP_NAME=$(ls *.snap | cut -f1 | grep ${{ inputs.arch }})" >> $GITHUB_ENV
 
     - name: Publish snap package
       uses: snapcore/action-publish@master
@@ -41,4 +41,4 @@ runs:
       uses: actions/upload-artifact@v4
       with:
         name: reductstore
-        path: "*_${{ inputs.arch }}.snap"
+        path: "*.snap"
