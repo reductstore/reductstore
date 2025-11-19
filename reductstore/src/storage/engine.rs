@@ -19,6 +19,11 @@ use std::time::Instant;
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
 
+enum InstanceMode {
+    FullAccess,
+    ReadOnly,
+}
+
 pub struct StorageEngineBuilder {
     cfg: Option<Cfg>,
     license: Option<License>,
@@ -107,7 +112,7 @@ impl StorageEngine {
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
 
-        let buckets = self.buckets.read().unwrap();
+        let buckets = self.buckets.read()?;
         for bucket in buckets.values() {
             let bucket = bucket.info()?.info;
             usage += bucket.size;
