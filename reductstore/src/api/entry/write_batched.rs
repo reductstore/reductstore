@@ -517,7 +517,6 @@ mod tests {
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
-        #[future] body_stream: Body,
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
@@ -545,7 +544,7 @@ mod tests {
             .upgrade_and_unwrap();
 
         {
-            let mut reader = bucket
+            let reader = bucket
                 .get_entry("entry-1")
                 .unwrap()
                 .upgrade_and_unwrap()
@@ -566,7 +565,7 @@ mod tests {
             assert_eq!(reader.read_chunk(), None);
         }
         {
-            let mut reader = bucket
+            let reader = bucket
                 .get_entry("entry-1")
                 .unwrap()
                 .upgrade_and_unwrap()
