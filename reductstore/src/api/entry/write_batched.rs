@@ -571,6 +571,7 @@ mod tests {
         let components = keeper.get_anonymous().await.unwrap();
         headers.insert("content-length", "1000000".parse().unwrap());
         headers.insert("x-reduct-time-1", "500000,text/plain,a=b".parse().unwrap());
+        headers.insert("x-reduct-time-2", "0,text/plain,a=c".parse().unwrap());
         headers.insert("x-reduct-time-3", "500000,text/plain,a=c".parse().unwrap());
         headers.insert("x-reduct-time-4", "0,text/plain,a=c".parse().unwrap());
 
@@ -579,35 +580,55 @@ mod tests {
         write_batched_records(State(Arc::clone(&keeper)), headers, path_to_entry_1, stream)
             .await
             .unwrap();
-        //
-        // let bucket = components
-        //     .storage
-        //     .get_bucket("bucket-1")
-        //     .unwrap()
-        //     .upgrade_and_unwrap();
-        //
-        // {
-        //     let mut reader = bucket
-        //         .get_entry("entry-1")
-        //         .unwrap()
-        //         .upgrade_and_unwrap()
-        //         .begin_read(1)
-        //         .await
-        //         .unwrap();
-        //     assert_eq!(reader.meta().content_length(), 10);
-        //     assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("1234567890")));
-        // }
-        // {
-        //     let mut reader = bucket
-        //         .get_entry("entry-1")
-        //         .unwrap()
-        //         .upgrade_and_unwrap()
-        //         .begin_read(2)
-        //         .await
-        //         .unwrap();
-        //     assert_eq!(reader.meta().content_length(), 0);
-        //     assert_eq!(reader.read_chunk(), None);
-        // }
+
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        {
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(1)
+                .await
+                .unwrap();
+            assert_eq!(reader.meta().content_length(), 500000);
+        }
+        {
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(2)
+                .await
+                .unwrap();
+            assert_eq!(reader.meta().content_length(), 0);
+            assert_eq!(reader.read_chunk(), None);
+        }
+        {
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(3)
+                .await
+                .unwrap();
+            assert_eq!(reader.meta().content_length(), 500000);
+        }
+        {
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(4)
+                .await
+                .unwrap();
+            assert_eq!(reader.meta().content_length(), 0);
+            assert_eq!(reader.read_chunk(), None);
+        }
     }
 
     #[rstest]
