@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Fix writing batch v2, [PR-1033](https://github.com/reductstore/reductstore/pull/1033)
+- Fix replication log syncronization, [PR-1034](https://github.com/reductstore/reductstore/pull/1034)
 
 ## 1.17.3 - 2025-11-17
 
