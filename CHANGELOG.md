@@ -15,6 +15,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Refactor CI workflow and use S3 cache for Rust dependencies, [PR-1003](https://github.com/reductstore/reductstore/pull/1003)
 
+## 1.17.4 - 2025-11-19
+
+### Fixed
+
+- Fix writing batch v2, [PR-1033](https://github.com/reductstore/reductstore/pull/1033)
+
 ## 1.17.3 - 2025-11-17
 
 ### Added
