@@ -185,6 +185,7 @@ impl TransactionLog {
 
             file.seek(SeekFrom::Start(0))?;
             file.write_all(&self.write_pos.to_be_bytes())?;
+            file.sync_all()?;
         }
 
         if self.write_pos == self.read_pos {
@@ -281,6 +282,7 @@ impl TransactionLog {
                 .upgrade()?;
             let mut file = file.write()?;
             file.write_all(&self.read_pos.to_be_bytes())?;
+            file.sync_all()?;
         }
 
         Ok(())
