@@ -192,55 +192,6 @@ async fn receive_body_and_write_records(
         }
     }
 
-    //
-    // while let Some(chunk) = timeout(components.cfg.io_conf.operation_timeout, stream.next())
-    //     .await
-    //     .map_err(|_| internal_server_error!("Timeout while receiving data"))?
-    // {
-    //     let mut chunk =
-    //         chunk.map_err(|e| bad_request!("Error while receiving data chunk: {}", e))?;
-    //
-    //     while !chunk.is_empty() {
-    //         match write_chunk(
-    //             &mut ctx.writer,
-    //             chunk,
-    //             &mut written,
-    //             ctx.header.content_length.clone(),
-    //             components.cfg.io_conf.operation_timeout,
-    //         )
-    //         .await
-    //         {
-    //             Ok(None) => break, // finished writing the current record
-    //             Ok(Some(rest)) => {
-    //                 // finish writing the current record and start a new one
-    //                 if let Err(err) = ctx
-    //                     .writer
-    //                     .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
-    //                     .await
-    //                 {
-    //                     debug!("Timeout while sending EOF: {}", err);
-    //                 }
-    //
-    //                 notify_replication_write(&components, bucket, &entry_name, &ctx).await?;
-    //
-    //                 chunk = rest;
-    //                 record_count -= 1;
-    //                 written = 0;
-    //
-    //                 ctx = match rx_writer.recv().await {
-    //                     Some(ctx) => ctx,
-    //                     None => break, // no more writers - stop the loop
-    //                 };
-    //             }
-    //             Err(err) => return Err(err),
-    //         }
-    //     }
-    // }
-    //
-    // if record_count != 0 {
-    //     return Err(bad_request!("Content is shorter than expected"));
-    // }
-
     Ok(())
 }
 
@@ -364,6 +315,7 @@ mod tests {
     use crate::api::tests::{headers, keeper, path_to_entry_1};
 
     use axum_extra::headers::HeaderValue;
+    use futures_util::stream;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
@@ -561,7 +513,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_write_batched_records_with_last_empty_body(
+    async fn test_write_batched_records_complex(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
         path_to_entry_1: Path<HashMap<String, String>>,
@@ -575,7 +527,12 @@ mod tests {
         headers.insert("x-reduct-time-3", "500000,text/plain,a=c".parse().unwrap());
         headers.insert("x-reduct-time-4", "0,text/plain,a=c".parse().unwrap());
 
-        let stream = Body::from(Bytes::from(vec![0; 1000000]));
+        // the body will be split into 3 parts: 600000, 300000, 100000
+        let stream = Body::from_stream(stream::iter(vec![
+            Ok::<Bytes, ReductError>(Bytes::from(vec![0; 600000])),
+            Ok(Bytes::from(vec![0; 300000])),
+            Ok(Bytes::from(vec![0; 100000])),
+        ]));
 
         write_batched_records(State(Arc::clone(&keeper)), headers, path_to_entry_1, stream)
             .await
