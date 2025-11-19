@@ -127,10 +127,10 @@ async fn receive_body_and_write_records(
 ) -> Result<(), ReductError> {
     let mut chunk = Bytes::new();
 
-    let mut read_chunk = async || -> Result<Option<Bytes>, ReductError> {
+    let mut read_chunk = async || -> Result<Bytes, ReductError> {
         if total_content_len == 0 {
             // it makes the code simpler to handle the last empty chunk case and empty records
-            return Ok(Some(Bytes::new()));
+            return Ok(Bytes::new());
         }
         match timeout(components.cfg.io_conf.operation_timeout, stream.next())
             .await
@@ -138,10 +138,12 @@ async fn receive_body_and_write_records(
         {
             Some(Ok(data_chunk)) => {
                 total_content_len -= data_chunk.len() as i64;
-                Ok(Some(data_chunk))
+                Ok(data_chunk)
             }
             Some(Err(e)) => Err(bad_request!("Error while receiving data chunk: {}", e)),
-            None => Ok(None),
+            None => Err(bad_request!(
+                "Content is shorter than expected: no more data to read"
+            )),
         }
     };
 
@@ -149,9 +151,7 @@ async fn receive_body_and_write_records(
         let mut written = 0;
 
         if chunk.is_empty() {
-            chunk = read_chunk().await?.ok_or_else(|| {
-                bad_request!("Content is shorter than expected: no more data to read")
-            })?;
+            chunk = read_chunk().await?
         }
 
         loop {
@@ -166,10 +166,7 @@ async fn receive_body_and_write_records(
             {
                 Ok(None) => {
                     // chunk is written but record is not finished yet
-                    chunk = read_chunk().await?.ok_or_else(|| {
-                        bad_request!("Content is shorter than expected: no more data to read")
-                    })?;
-
+                    chunk = read_chunk().await?;
                     continue;
                 }
                 Ok(Some(rest)) => {
@@ -651,6 +648,63 @@ mod tests {
                 Ok(Bytes::from("ef1234567890abcdef"))
             );
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_batched_records_content_length_mismatch(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", "60".parse().unwrap());
+        headers.insert("x-reduct-time-1", "40,text/plain,a=b".parse().unwrap());
+        headers.insert("x-reduct-time-2", "20,text/plain,c=d".parse().unwrap());
+        let stream = Body::from("123456");
+        let err = write_batched_records(
+            State(Arc::clone(&keeper.await)),
+            headers,
+            path_to_entry_1,
+            stream,
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(
+            err.0,
+            bad_request!("Content is shorter than expected: no more data to read")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_batched_records_errored_chunk(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", "30".parse().unwrap());
+        headers.insert("x-reduct-time-1", "10,text/plain,a=b".parse().unwrap());
+        headers.insert("x-reduct-time-2", "20,text/plain,c=d".parse().unwrap());
+        let stream = Body::from_stream(stream::iter(vec![
+            Ok::<Bytes, ReductError>(Bytes::from("12345")),
+            Err(bad_request!("Simulated chunk error")),
+        ]));
+        let err = write_batched_records(
+            State(Arc::clone(&keeper.await)),
+            headers,
+            path_to_entry_1,
+            stream,
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(
+            err.0,
+            bad_request!("Error while receiving data chunk: [BadRequest] Simulated chunk error")
+        );
     }
 
     #[fixture]
