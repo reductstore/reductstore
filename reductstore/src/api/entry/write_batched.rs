@@ -58,24 +58,17 @@ pub(super) async fn write_batched_records(
         }
 
         let content_length = check_and_get_content_length(&headers, &timed_headers)?;
-        let record_count = timed_headers.len();
-
         let (rx_writer, spawn_handler) =
             spawn_getting_writers(&components, &bucket, &entry_name, timed_headers)?;
-
-        if content_length > 0 {
-            receive_body_and_write_records(
-                bucket,
-                entry_name,
-                components,
-                record_count,
-                &mut stream,
-                rx_writer,
-            )
-            .await?;
-        } else {
-            write_only_metadata(bucket, entry_name, components, rx_writer).await?;
-        }
+        receive_body_and_write_records(
+            bucket,
+            entry_name,
+            components,
+            content_length as i64,
+            &mut stream,
+            rx_writer,
+        )
+        .await?;
 
         Ok(spawn_handler
             .await
@@ -124,49 +117,44 @@ async fn notify_replication_write(
     Ok(())
 }
 
-async fn write_only_metadata(
-    bucket: &String,
-    entry_name: String,
-    components: Arc<Components>,
-    mut rx_writer: Receiver<WriteContext>,
-) -> Result<(), ReductError> {
-    while let Some(mut ctx) = rx_writer.recv().await {
-        if let Err(err) = ctx
-            .writer
-            .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
-            .await
-        {
-            debug!("Timeout while sending EOF: {}", err);
-        }
-
-        notify_replication_write(&components, bucket, &entry_name, &ctx).await?;
-    }
-
-    Ok(())
-}
-
 async fn receive_body_and_write_records(
     bucket: &String,
     entry_name: String,
     components: Arc<Components>,
-    mut record_count: usize,
+    mut total_content_len: i64,
     stream: &mut BodyDataStream,
     mut rx_writer: Receiver<WriteContext>,
 ) -> Result<(), ReductError> {
-    let mut written = 0;
-    let mut ctx = rx_writer
-        .recv()
-        .await
-        .ok_or(internal_server_error!("No writer found"))?;
+    let mut chunk = Bytes::new();
 
-    while let Some(chunk) = timeout(components.cfg.io_conf.operation_timeout, stream.next())
-        .await
-        .map_err(|_| internal_server_error!("Timeout while receiving data"))?
-    {
-        let mut chunk =
-            chunk.map_err(|e| bad_request!("Error while receiving data chunk: {}", e))?;
+    let mut read_chunk = async || -> Result<Bytes, ReductError> {
+        if total_content_len == 0 {
+            // it makes the code simpler to handle the last empty chunk case and empty records
+            return Ok(Bytes::new());
+        }
+        match timeout(components.cfg.io_conf.operation_timeout, stream.next())
+            .await
+            .map_err(|_| bad_request!("Timeout while receiving data"))?
+        {
+            Some(Ok(data_chunk)) => {
+                total_content_len -= data_chunk.len() as i64;
+                Ok(data_chunk)
+            }
+            Some(Err(e)) => Err(bad_request!("Error while receiving data chunk: {}", e)),
+            None => Err(bad_request!(
+                "Content is shorter than expected: no more data to read"
+            )),
+        }
+    };
 
-        while !chunk.is_empty() {
+    while let Some(mut ctx) = rx_writer.recv().await {
+        let mut written = 0;
+
+        if chunk.is_empty() {
+            chunk = read_chunk().await?
+        }
+
+        loop {
             match write_chunk(
                 &mut ctx.writer,
                 chunk,
@@ -176,9 +164,14 @@ async fn receive_body_and_write_records(
             )
             .await
             {
-                Ok(None) => break, // finished writing the current record
+                Ok(None) => {
+                    // chunk is written but record is not finished yet
+                    chunk = read_chunk().await?;
+                    continue;
+                }
                 Ok(Some(rest)) => {
                     // finish writing the current record and start a new one
+                    // finished writing the current record
                     if let Err(err) = ctx
                         .writer
                         .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
@@ -188,23 +181,12 @@ async fn receive_body_and_write_records(
                     }
 
                     notify_replication_write(&components, bucket, &entry_name, &ctx).await?;
-
                     chunk = rest;
-                    record_count -= 1;
-                    written = 0;
-
-                    ctx = match rx_writer.recv().await {
-                        Some(ctx) => ctx,
-                        None => break, // no more writers - stop the loop
-                    };
+                    break;
                 }
                 Err(err) => return Err(err),
             }
         }
-    }
-
-    if record_count != 0 {
-        return Err(bad_request!("Content is shorter than expected"));
     }
 
     Ok(())
@@ -330,6 +312,7 @@ mod tests {
     use crate::api::tests::{headers, keeper, path_to_entry_1};
 
     use axum_extra::headers::HeaderValue;
+    use futures_util::stream;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
@@ -527,6 +510,82 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_write_batched_records_complex(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        headers.insert("content-length", "1000000".parse().unwrap());
+        headers.insert("x-reduct-time-1", "500000,text/plain,a=b".parse().unwrap());
+        headers.insert("x-reduct-time-2", "0,text/plain,a=c".parse().unwrap());
+        headers.insert("x-reduct-time-3", "500000,text/plain,a=c".parse().unwrap());
+        headers.insert("x-reduct-time-4", "0,text/plain,a=c".parse().unwrap());
+
+        // the body will be split into 3 parts: 600000, 300000, 100000
+        let stream = Body::from_stream(stream::iter(vec![
+            Ok::<Bytes, ReductError>(Bytes::from(vec![0; 600000])),
+            Ok(Bytes::from(vec![0; 300000])),
+            Ok(Bytes::from(vec![0; 100000])),
+        ]));
+
+        write_batched_records(State(Arc::clone(&keeper)), headers, path_to_entry_1, stream)
+            .await
+            .unwrap();
+
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        {
+            let reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(1)
+                .await
+                .unwrap();
+            assert_eq!(reader.meta().content_length(), 500000);
+        }
+        {
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(2)
+                .await
+                .unwrap();
+            assert_eq!(reader.meta().content_length(), 0);
+            assert_eq!(reader.read_chunk(), None);
+        }
+        {
+            let reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(3)
+                .await
+                .unwrap();
+            assert_eq!(reader.meta().content_length(), 500000);
+        }
+        {
+            let mut reader = bucket
+                .get_entry("entry-1")
+                .unwrap()
+                .upgrade_and_unwrap()
+                .begin_read(4)
+                .await
+                .unwrap();
+            assert_eq!(reader.meta().content_length(), 0);
+            assert_eq!(reader.read_chunk(), None);
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_write_batched_records_error(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
@@ -589,6 +648,63 @@ mod tests {
                 Ok(Bytes::from("ef1234567890abcdef"))
             );
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_batched_records_content_length_mismatch(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", "60".parse().unwrap());
+        headers.insert("x-reduct-time-1", "40,text/plain,a=b".parse().unwrap());
+        headers.insert("x-reduct-time-2", "20,text/plain,c=d".parse().unwrap());
+        let stream = Body::from("123456");
+        let err = write_batched_records(
+            State(Arc::clone(&keeper.await)),
+            headers,
+            path_to_entry_1,
+            stream,
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(
+            err.0,
+            bad_request!("Content is shorter than expected: no more data to read")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_batched_records_errored_chunk(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", "30".parse().unwrap());
+        headers.insert("x-reduct-time-1", "10,text/plain,a=b".parse().unwrap());
+        headers.insert("x-reduct-time-2", "20,text/plain,c=d".parse().unwrap());
+        let stream = Body::from_stream(stream::iter(vec![
+            Ok::<Bytes, ReductError>(Bytes::from("12345")),
+            Err(bad_request!("Simulated chunk error")),
+        ]));
+        let err = write_batched_records(
+            State(Arc::clone(&keeper.await)),
+            headers,
+            path_to_entry_1,
+            stream,
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(
+            err.0,
+            bad_request!("Error while receiving data chunk: [BadRequest] Simulated chunk error")
+        );
     }
 
     #[fixture]
