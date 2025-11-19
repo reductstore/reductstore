@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.17.4 - 2025-11-19
+
 ### Fixed
 
 - Fix writing batch v2, [PR-1033](https://github.com/reductstore/reductstore/pull/1033)
