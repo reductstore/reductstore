@@ -2,27 +2,24 @@
 // Licensed under the Business Source License 1.1
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
 use crate::core::weak::Weak;
+use crate::lock_file::InstanceRole;
 use crate::storage::bucket::Bucket;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
-use reduct_base::{conflict, not_found, unprocessable_entity};
-use std::collections::BTreeMap;
+use reduct_base::{conflict, forbidden, not_found, unprocessable_entity};
+use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Instant;
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
-
-enum InstanceMode {
-    FullAccess,
-    ReadOnly,
-}
 
 pub struct StorageEngineBuilder {
     cfg: Option<Cfg>,
@@ -108,6 +105,8 @@ impl StorageEngine {
     ///
     /// * `ServerInfo` - The reductstore info or an HTTPError
     pub fn info(&self) -> Result<ServerInfo, ReductError> {
+        self.update_bucket_list()?;
+
         let mut usage = 0u64;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
@@ -142,6 +141,8 @@ impl StorageEngine {
         name: &str,
         settings: BucketSettings,
     ) -> Result<Weak<Bucket>, ReductError> {
+        self.check_mode()?;
+
         check_name_convention(name)?;
         let mut buckets = self.buckets.write()?;
         if buckets.contains_key(name) {
@@ -169,6 +170,7 @@ impl StorageEngine {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     pub(crate) fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
+        self.update_bucket_list()?;
         let buckets = self.buckets.read()?;
         match buckets.get(name) {
             Some(bucket) => Ok(Arc::clone(bucket).into()),
@@ -188,6 +190,10 @@ impl StorageEngine {
     ///
     /// * HTTPError - An error if the bucket doesn't exist
     pub(crate) fn remove_bucket(&self, name: &str) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(err) = self.check_mode() {
+            return TaskHandle::from(Err(err));
+        }
+
         let task_group = [self.data_path.file_name().unwrap().to_str().unwrap(), name].join("/");
 
         let path = self.data_path.join(name);
@@ -220,6 +226,10 @@ impl StorageEngine {
         old_name: &str,
         new_name: &str,
     ) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(err) = self.check_mode() {
+            return TaskHandle::from(Err(err));
+        }
+
         let check_and_prepare_bucket = || {
             check_name_convention(new_name)?;
             let buckets = self.buckets.read().unwrap();
@@ -273,8 +283,9 @@ impl StorageEngine {
     }
 
     pub(crate) fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
+        self.update_bucket_list()?;
         let mut buckets = Vec::new();
-        for bucket in self.buckets.read().unwrap().values() {
+        for bucket in self.buckets.read()?.values() {
             buckets.push(bucket.info()?.info);
         }
 
@@ -282,6 +293,10 @@ impl StorageEngine {
     }
 
     pub fn sync_fs(&self) -> Result<(), ReductError> {
+        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+            return Ok(());
+        }
+
         let mut handlers = vec![];
         let buckets = self.buckets.read()?.clone();
         for (name, bucket) in buckets {
@@ -299,6 +314,53 @@ impl StorageEngine {
         }
 
         FILE_CACHE.force_sync_all()?;
+        Ok(())
+    }
+
+    fn check_mode(&self) -> Result<(), ReductError> {
+        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+            return Err(forbidden!("Can't rename bucket in read-only instance"));
+        }
+        Ok(())
+    }
+
+    /// List directory and update bucket list
+    fn update_bucket_list(&self) -> Result<(), ReductError> {
+        if self.cfg.lock_file_config.role != InstanceRole::ReadOnly {
+            // Only read-only instances need to update bucket list from backend
+            return Ok(());
+        }
+
+        let mut new_buckets = BTreeMap::new();
+        let current_bucket_paths = self
+            .buckets
+            .read()?
+            .values()
+            .map(|b| b.path().clone())
+            .collect::<HashSet<_>>();
+        for path in FILE_CACHE.read_dir(&self.data_path)? {
+            if !path.is_dir() {
+                continue;
+            }
+
+            if current_bucket_paths.contains(&path) {
+                continue;
+            }
+
+            // Restore new bucket
+            match Bucket::restore(path.clone(), self.cfg.clone()) {
+                Ok(bucket) => {
+                    let bucket = Arc::new(bucket);
+                    new_buckets.insert(bucket.name().to_string(), bucket);
+                }
+                Err(e) => {
+                    panic!("Failed to load bucket from {:?}: {}", path, e);
+                }
+            }
+        }
+
+        let mut buckets = self.buckets.write()?;
+        buckets.extend(new_buckets);
         Ok(())
     }
 

@@ -379,6 +379,10 @@ impl Bucket {
         &self.name
     }
 
+    pub fn path(&self) -> &PathBuf {
+        &self.path
+    }
+
     /// Mark bucket as provisioned to protect
     pub fn set_provisioned(&self, provisioned: bool) {
         self.is_provisioned
