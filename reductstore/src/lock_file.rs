@@ -34,6 +34,7 @@ pub enum InstanceRole {
     #[default]
     Primary,
     Secondary,
+    ReadOnly,
 }
 
 #[async_trait]
@@ -83,6 +84,23 @@ impl LockFileBuilder {
         let file_path = path.clone();
         let state = Arc::new(RwLock::new(State::Waiting));
         let state_clone = Arc::clone(&state);
+
+        let mut this = Box::new(ImplLockFile {
+            path,
+            stop_on_drop,
+            handle: tokio::spawn(async {}),
+            state,
+        });
+
+        if cfg.role == InstanceRole::ReadOnly {
+            // ReadOnly instances do not acquire locks
+            info!(
+                "ReadOnly instance, not acquiring lock file: {:?}",
+                file_path
+            );
+            this.state = Arc::new(RwLock::new(State::Locked));
+            return this;
+        }
 
         // for future use, we generate a unique id for the lock file
         let unique_id = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
@@ -156,6 +174,9 @@ impl LockFileBuilder {
                             info!("Secondary instance could not acquire lock file (already held by primary): {:?}", file_path);
                         }
                     }
+                    InstanceRole::ReadOnly => {
+                        panic!("ReadOnly instances cannot acquire lock files");
+                    }
                 }
 
                 if *state_clone.read().await == State::Locked {
@@ -184,12 +205,8 @@ impl LockFileBuilder {
             }
         });
 
-        Box::new(ImplLockFile {
-            path,
-            stop_on_drop,
-            handle,
-            state,
-        })
+        this.handle = handle;
+        this
     }
 }
 

@@ -148,6 +148,14 @@ impl LocalCache {
 
         removed_files
     }
+
+    pub fn invalidate_file(&mut self, path: &Path) -> io::Result<()> {
+        if let Some(entry) = self.entries.remove(path) {
+            self.current_size -= entry.size;
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]

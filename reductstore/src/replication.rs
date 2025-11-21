@@ -137,11 +137,4 @@ pub trait ManageReplications {
     fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
 }
 
-/// Create a new replication repository
-/// A factory method to create a new replication repository and return it as a trait object.
-pub(crate) fn create_replication_repo(
-    storage: Arc<StorageEngine>,
-    config: Cfg,
-) -> Box<dyn ManageReplications + Send + Sync> {
-    Box::new(replication_repository::ReplicationRepository::load_or_create(storage, config))
-}
+pub(crate) use replication_repository::ReplicationRepoBuilder;

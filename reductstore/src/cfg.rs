@@ -20,7 +20,7 @@ use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
 use crate::ext::ext_repository::create_ext_repository;
 use crate::license::parse_license;
-use crate::lock_file::{BoxedLockFile, LockFileBuilder};
+use crate::lock_file::{BoxedLockFile, InstanceRole, LockFileBuilder};
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::ext::ExtSettings;
@@ -303,8 +303,8 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?);
-
         FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
+        FILE_CACHE.set_read_only(self.cfg.lock_file_config.role == InstanceRole::ReadOnly);
         Ok(())
     }
 

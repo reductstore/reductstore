@@ -3,11 +3,11 @@
 
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
-use crate::replication::{create_replication_repo, ManageReplications};
+use crate::replication::{ManageReplications, ReplicationRepoBuilder};
 use crate::storage::engine::StorageEngine;
 use log::{error, info, warn};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::replication_api::ReplicationSettings;
+use reduct_base::msg::replication_api::{ReplicationList, ReplicationSettings};
 use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -17,7 +17,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         &self,
         storage: Arc<StorageEngine>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = create_replication_repo(Arc::clone(&storage), self.cfg.clone());
+        let mut repo = ReplicationRepoBuilder::new(self.cfg.clone()).build(Arc::clone(&storage));
         for (name, settings) in &self.cfg.replications {
             if let Err(e) = repo.create_replication(&name, settings.clone()) {
                 if e.status() == ErrorCode::Conflict {
@@ -39,6 +39,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         }
         Ok(repo)
     }
+
     pub(in crate::cfg) fn parse_replications(
         env: &mut Env<EnvGetter>,
     ) -> HashMap<String, ReplicationSettings> {

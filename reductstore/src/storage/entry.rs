@@ -55,7 +55,7 @@ pub(crate) struct Entry {
     block_manager: Arc<RwLock<BlockManager>>,
     queries: QueryHandleMapRef,
     path: PathBuf,
-    cfg: Cfg,
+    cfg: Arc<Cfg>,
 }
 
 #[derive(PartialEq)]
@@ -77,7 +77,7 @@ impl Entry {
         name: &str,
         path: PathBuf,
         settings: EntrySettings,
-        cfg: Cfg,
+        cfg: Arc<Cfg>,
     ) -> Result<Self, ReductError> {
         FILE_CACHE.create_dir_all(&path.join(name))?;
         let path = path.join(name);
@@ -95,6 +95,7 @@ impl Entry {
             block_manager: Arc::new(RwLock::new(BlockManager::new(
                 path.clone(),
                 BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                cfg.clone(),
             ))),
             queries: Arc::new(RwLock::new(HashMap::new())),
             path,
@@ -105,7 +106,7 @@ impl Entry {
     pub(crate) fn restore(
         path: PathBuf,
         options: EntrySettings,
-        cfg: Cfg,
+        cfg: Arc<Cfg>,
     ) -> TaskHandle<Result<Entry, ReductError>> {
         unique_child(
             &group_from_path(&path, GroupDepth::ENTRY),
@@ -203,24 +204,24 @@ impl Entry {
 
     /// Returns stats about the entry.
     pub fn info(&self) -> Result<EntryInfo, ReductError> {
-        let bm = self.block_manager.read()?;
-        let index_tree = bm.index().tree();
-        let (oldest_record, latest_record) = if index_tree.is_empty() {
+        let mut bm = self.block_manager.write()?;
+        let index = bm.update_and_index()?;
+        let (oldest_record, latest_record) = if index.tree().is_empty() {
             (0, 0)
         } else {
-            let latest_block_id = index_tree.last().unwrap();
-            let latest_record = match bm.index().get_block(*latest_block_id) {
+            let latest_block_id = index.tree().last().unwrap();
+            let latest_record = match index.get_block(*latest_block_id) {
                 Some(block) => ts_to_us(&block.latest_record_time.as_ref().unwrap()),
                 None => 0,
             };
-            (*index_tree.first().unwrap(), latest_record)
+            (*index.tree().first().unwrap(), latest_record)
         };
 
         Ok(EntryInfo {
             name: self.name.clone(),
-            size: bm.index().size(),
-            record_count: bm.index().record_count(),
-            block_count: index_tree.len() as u64,
+            size: index.size(),
+            record_count: index.record_count(),
+            block_count: index.tree().len() as u64,
             oldest_record,
             latest_record,
         })

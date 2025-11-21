@@ -55,6 +55,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             {
                 "primary" => InstanceRole::Primary,
                 "secondary" => InstanceRole::Secondary,
+                "readonly" => InstanceRole::ReadOnly,
                 _ => {
                     panic!("Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'")
                 }

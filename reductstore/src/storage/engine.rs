@@ -298,8 +298,7 @@ impl StorageEngine {
             }
         }
 
-        FILE_CACHE.force_sync_all();
-
+        FILE_CACHE.force_sync_all()?;
         Ok(())
     }
 

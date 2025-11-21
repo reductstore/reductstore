@@ -32,21 +32,21 @@ impl EntryLoader {
     pub fn restore_entry(
         path: PathBuf,
         options: EntrySettings,
-        cfg: Cfg,
+        cfg: Arc<Cfg>,
     ) -> Result<Entry, ReductError> {
         let start_time = Instant::now();
-
-        let mut entry = match Self::try_restore_entry_from_index(path.clone(), options.clone()) {
-            Ok(entry) => Ok(entry),
-            Err(err) => {
-                warn!(
-                    "Failed to restore from block index {:?}: {}",
-                    path, err.message
-                );
-                info!("Rebuilding the block index {:?} from blocks", path);
-                Self::restore_entry_from_blocks(path.clone(), options.clone())
-            }
-        }?;
+        let mut entry =
+            match Self::try_restore_entry_from_index(path.clone(), options.clone(), cfg.clone()) {
+                Ok(entry) => Ok(entry),
+                Err(err) => {
+                    warn!(
+                        "Failed to restore from block index {:?}: {}",
+                        path, err.message
+                    );
+                    info!("Rebuilding the block index {:?} from blocks", path);
+                    Self::restore_entry_from_blocks(path.clone(), options.clone(), cfg.clone())
+                }
+            }?;
 
         Self::restore_uncommitted_changes(path.clone(), &mut entry)?;
 
@@ -64,7 +64,7 @@ impl EntryLoader {
 
             if check_result().is_err() {
                 warn!("Block index is inconsistent. Rebuilding the block index from blocks");
-                Self::restore_entry_from_blocks(path.clone(), options)?
+                Self::restore_entry_from_blocks(path.clone(), options, cfg.clone())?
             } else {
                 entry
             }
@@ -81,7 +81,6 @@ impl EntryLoader {
             );
         }
 
-        entry.cfg = cfg;
         Ok(entry)
     }
 
@@ -89,6 +88,7 @@ impl EntryLoader {
     fn restore_entry_from_blocks(
         path: PathBuf,
         options: EntrySettings,
+        cfg: Arc<Cfg>,
     ) -> Result<Entry, ReductError> {
         let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
         for path in FILE_CACHE.read_dir(&path)? {
@@ -185,10 +185,14 @@ impl EntryLoader {
             name,
             bucket_name,
             settings: RwLock::new(options),
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path.clone(), block_index))),
+            block_manager: Arc::new(RwLock::new(BlockManager::new(
+                path.clone(),
+                block_index,
+                cfg.clone(),
+            ))),
             queries: Arc::new(RwLock::new(HashMap::new())),
             path,
-            cfg: Cfg::default(),
+            cfg,
         })
     }
 
@@ -196,6 +200,7 @@ impl EntryLoader {
     fn try_restore_entry_from_index(
         path: PathBuf,
         options: EntrySettings,
+        cfg: Arc<Cfg>,
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))?;
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
@@ -213,10 +218,14 @@ impl EntryLoader {
             name,
             bucket_name,
             settings: RwLock::new(options),
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path.clone(), block_index))),
+            block_manager: Arc::new(RwLock::new(BlockManager::new(
+                path.clone(),
+                block_index,
+                cfg.clone(),
+            ))),
             queries: Arc::new(RwLock::new(HashMap::new())),
             path,
-            cfg: Cfg::default(),
+            cfg,
         })
     }
 

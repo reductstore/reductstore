@@ -50,6 +50,8 @@ pub(crate) trait StorageBackend {
     fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
 
     fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
+
+    fn remove_only_locally(&self, path: &Path) -> std::io::Result<()>;
 }
 
 pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;
@@ -238,23 +240,19 @@ impl Backend {
         OpenOptions::new(Arc::clone(&self.backend))
     }
 
-    pub fn rename<P: AsRef<std::path::Path>, Q: AsRef<std::path::Path>>(
-        &self,
-        from: P,
-        to: Q,
-    ) -> std::io::Result<()> {
+    pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> std::io::Result<()> {
         self.backend.rename(from.as_ref(), to.as_ref())
     }
 
-    pub fn remove<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
+    pub fn remove<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
         self.backend.remove(path.as_ref())
     }
 
-    pub fn remove_dir_all<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
+    pub fn remove_dir_all<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
         self.backend.remove_dir_all(path.as_ref())
     }
 
-    pub fn create_dir_all<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
+    pub fn create_dir_all<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
         self.backend.create_dir_all(path.as_ref())
     }
 
@@ -262,19 +260,22 @@ impl Backend {
         self.backend.read_dir(path)
     }
 
-    pub fn try_exists<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<bool> {
+    pub fn try_exists<P: AsRef<Path>>(&self, path: P) -> std::io::Result<bool> {
         self.backend.try_exists(path.as_ref())
     }
 
-    pub fn get_stats<P: AsRef<std::path::Path>>(
-        &self,
-        path: P,
-    ) -> std::io::Result<Option<ObjectMetadata>> {
+    pub fn get_stats<P: AsRef<Path>>(&self, path: P) -> std::io::Result<Option<ObjectMetadata>> {
         self.backend.get_stats(path.as_ref())
     }
 
     pub fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
         self.backend.invalidate_locally_cached_files()
+    }
+
+    /// Remove the file only from local cache, without affecting remote storage.
+    /// This is useful for initiating re-download of the file on next access.
+    pub fn remove_only_locally<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        self.backend.remove_only_locally(path.as_ref())
     }
 }
 

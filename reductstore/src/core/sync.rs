@@ -10,7 +10,7 @@ pub struct RwLock<T> {
     inner: parking_lot::RwLock<T>,
 }
 
-pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(5);
+pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(60);
 
 impl<T> RwLock<T> {
     pub fn new(data: T) -> Self {
@@ -33,6 +33,21 @@ impl<T> RwLock<T> {
             .ok_or(internal_server_error!(
                 "Failed to acquire write lock within timeout"
             ))
+    }
+
+    pub fn try_read(&self) -> Option<parking_lot::RwLockReadGuard<'_, T>> {
+        self.inner.try_read()
+    }
+
+    pub fn try_write(&self) -> Option<parking_lot::RwLockWriteGuard<'_, T>> {
+        self.inner.try_write()
+    }
+
+    pub fn read_blocking(&self) -> parking_lot::RwLockReadGuard<'_, T> {
+        self.inner.read()
+    }
+    pub fn write_blocking(&self) -> parking_lot::RwLockWriteGuard<'_, T> {
+        self.inner.write()
     }
 }
 

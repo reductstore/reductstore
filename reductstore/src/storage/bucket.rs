@@ -36,7 +36,7 @@ pub(crate) struct Bucket {
     path: PathBuf,
     entries: Arc<RwLock<BTreeMap<String, Arc<Entry>>>>,
     settings: RwLock<BucketSettings>,
-    cfg: Cfg,
+    cfg: Arc<Cfg>,
     is_provisioned: AtomicBool,
 }
 
@@ -69,7 +69,7 @@ impl Bucket {
             entries: Arc::new(RwLock::new(BTreeMap::new())),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
-            cfg,
+            cfg: Arc::new(cfg),
         };
 
         bucket.save_settings().wait()?;
@@ -96,6 +96,7 @@ impl Bucket {
             buf
         };
 
+        let cfg = Arc::new(cfg);
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf))
             .map_err(|e| internal_server_error!("Failed to decode settings: {}", e))?;
 

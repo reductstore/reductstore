@@ -57,6 +57,10 @@ impl StorageBackend for NoopBackend {
     fn get_stats(&self, _path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
         Ok(None)
     }
+
+    fn remove_only_locally(&self, _path: &Path) -> std::io::Result<()> {
+        Ok(())
+    }
 }
 
 impl NoopBackend {

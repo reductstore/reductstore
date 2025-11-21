@@ -281,6 +281,11 @@ impl StorageBackend for RemoteBackend {
         let mut cache = self.local_cache.lock().unwrap();
         cache.invalidate_old_files()
     }
+
+    fn remove_only_locally(&self, path: &Path) -> io::Result<()> {
+        let cache = &mut self.local_cache.lock().unwrap();
+        cache.remove(&path)
+    }
 }
 
 #[cfg(test)]

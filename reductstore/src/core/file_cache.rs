@@ -4,14 +4,16 @@
 use crate::backend::file::{AccessMode, File};
 use crate::backend::{Backend, ObjectMetadata};
 use crate::core::cache::Cache;
+use crate::core::sync::RwLock;
 use log::{debug, warn};
+use parking_lot::RwLockWriteGuard;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::fs;
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock, RwLock, RwLockWriteGuard, Weak};
+use std::sync::{Arc, LazyLock, Weak};
 use std::thread::spawn;
 use std::time::Duration;
 
@@ -67,8 +69,9 @@ pub(crate) type FileRc = Arc<RwLock<File>>;
 pub(crate) struct FileCache {
     cache: Arc<RwLock<Cache<PathBuf, FileRc>>>,
     stop_sync_worker: Arc<AtomicBool>,
-    backpack: Arc<RwLock<Backend>>,
+    backend: Arc<RwLock<Backend>>,
     sync_interval: Arc<RwLock<Duration>>,
+    read_only: Arc<AtomicBool>,
 }
 
 impl FileCache {
@@ -88,37 +91,57 @@ impl FileCache {
         let backpack_clone = Arc::clone(&backpack);
         let sync_interval = Arc::new(RwLock::new(sync_interval));
         let sync_interval_clone = Some(Arc::clone(&sync_interval));
+        let read_only = Arc::new(AtomicBool::new(false));
+        let read_only_clone = Arc::clone(&read_only);
 
         spawn(move || {
             // Periodically sync files from cache to disk
             while !stop_sync_worker.load(Ordering::Relaxed) {
                 std::thread::sleep(Duration::from_millis(100));
-                Self::sync_rw_and_unused_files(&backpack_clone, &cache, &sync_interval_clone);
+
+                if let Err(err) = Self::sync_rw_and_unused_files(
+                    &read_only_clone,
+                    &backpack_clone,
+                    &cache,
+                    &sync_interval_clone,
+                ) {
+                    warn!(
+                        "Failed to sync files from descriptor cache to disk: {}",
+                        err
+                    );
+                }
             }
         });
 
         FileCache {
             cache: cache_clone,
             stop_sync_worker: stop_sync_worker_clone,
-            backpack,
+            backend: backpack,
             sync_interval,
+            read_only,
         }
     }
 
     fn sync_rw_and_unused_files(
+        read_only: &Arc<AtomicBool>,
         backend: &Arc<RwLock<Backend>>,
         cache: &Arc<RwLock<Cache<PathBuf, FileRc>>>,
         sync_interval: &Option<Arc<RwLock<Duration>>>,
-    ) {
-        let mut cache = cache.write().unwrap();
+    ) -> Result<(), ReductError> {
+        if read_only.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
+        let mut cache = cache.write()?;
+
         let force = sync_interval.is_none();
         let sync_interval = sync_interval
             .as_ref()
-            .map_or(FILE_CACHE_SYNC_INTERVAL, |si| *si.read().unwrap());
-        let invalidated_files = backend.read().unwrap().invalidate_locally_cached_files();
+            .map_or(FILE_CACHE_SYNC_INTERVAL, |si| *si.read_blocking());
+        let invalidated_files = backend.read()?.invalidate_locally_cached_files();
         for path in invalidated_files {
             if let Some(file) = cache.remove(&path) {
-                if let Err(err) = file.write().unwrap().sync_all() {
+                if let Err(err) = file.write()?.sync_all() {
                     warn!("Failed to sync invalidated file {:?}: {}", path, err);
                 }
             }
@@ -130,10 +153,10 @@ impl FileCache {
         for (path, file) in cache.iter_mut() {
             let mut file_lock = if force {
                 // force sync, we need to get a write lock and wait for it
-                file.write().unwrap()
+                file.write()?
             } else {
                 // if the file is used by other threads, sync it next time
-                let Some(file) = file.try_write().ok() else {
+                let Some(file) = file.try_write() else {
                     continue;
                 };
                 file
@@ -155,16 +178,23 @@ impl FileCache {
                 continue;
             }
         }
+
+        Ok(())
     }
 
     /// Set the storage backend
     pub fn set_storage_backend(&self, backpack: Backend) {
-        *self.backpack.write().unwrap() = backpack;
+        *self.backend.write_blocking() = backpack;
     }
 
     /// Set sync interval
     pub fn set_sync_interval(&self, interval: Duration) {
-        *self.sync_interval.write().unwrap() = interval;
+        *self.sync_interval.write_blocking() = interval;
+    }
+
+    /// Set read-only mode
+    pub fn set_read_only(&self, read_only: bool) {
+        self.read_only.store(read_only, Ordering::Relaxed);
     }
 
     /// Get a file descriptor for reading
@@ -182,7 +212,7 @@ impl FileCache {
     pub fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
         let mut cache = self.cache.write()?;
         let open_file = |cache| -> Result<FileRc, ReductError> {
-            let file = self.backpack.read()?.open_options().read(true).open(path)?;
+            let file = self.backend.read()?.open_options().read(true).open(path)?;
             let file = Arc::new(RwLock::new(file));
             Self::save_in_cache_and_sync_discarded(path.clone(), cache, &file);
             Ok(file)
@@ -214,10 +244,16 @@ impl FileCache {
     ///
     /// A file reference
     pub fn write_or_create(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
+        if self.read_only.load(Ordering::Relaxed) {
+            return Err(internal_server_error!(
+                "Cannot open file {} for writing in read-only mode",
+                path.display()
+            ));
+        }
         let mut cache = self.cache.write()?;
         let open_file = |cache, create| -> Result<FileRc, ReductError> {
             let file = self
-                .backpack
+                .backend
                 .read()?
                 .open_options()
                 .create(create)
@@ -267,6 +303,13 @@ impl FileCache {
     /// This function will return an error if the file does not exist or if there is an issue
     /// removing the file from the file system.
     pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
+        if self.read_only.load(Ordering::Relaxed) {
+            return Err(internal_server_error!(
+                "Cannot remove file {} in read-only mode",
+                path.display()
+            ));
+        }
+
         let mut cache = self.cache.write()?;
         if let Some(file) = cache.remove(path) {
             if Arc::strong_count(&file) > 1 {
@@ -278,27 +321,41 @@ impl FileCache {
             }
         }
 
-        self.backpack.read()?.remove(path)?;
+        self.backend.read()?.remove(path)?;
 
         Ok(())
     }
 
     pub fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
+        if self.read_only.load(Ordering::Relaxed) {
+            return Err(internal_server_error!(
+                "Cannot remove directory {} in read-only mode",
+                path.display()
+            ));
+        }
+
         self.discard_recursive(path)?;
         if path.try_exists()? {
-            self.backpack.read()?.remove_dir_all(path)?;
+            self.backend.read()?.remove_dir_all(path)?;
         }
 
         Ok(())
     }
 
     pub fn create_dir_all(&self, path: &PathBuf) -> Result<(), ReductError> {
-        self.backpack.read()?.create_dir_all(path)?;
+        if self.read_only.load(Ordering::Relaxed) {
+            return Err(internal_server_error!(
+                "Cannot create directory {} in read-only mode",
+                path.display()
+            ));
+        }
+
+        self.backend.read()?.create_dir_all(path)?;
         Ok(())
     }
 
     pub fn read_dir(&self, path: &PathBuf) -> Result<Vec<PathBuf>, ReductError> {
-        Ok(self.backpack.read()?.read_dir(path)?)
+        Ok(self.backend.read()?.read_dir(path)?)
     }
 
     /// Discards all files in the cache that are under the specified path.
@@ -325,6 +382,8 @@ impl FileCache {
                         warn!("Failed to sync file {}: {}", file_path.display(), err);
                     }
                 }
+                // Remove the file only locally from the storage backend
+                self.backend.write()?.remove_only_locally(&file_path)?;
             }
         }
 
@@ -345,24 +404,31 @@ impl FileCache {
     ///
     /// A `Result` which is `Ok` if the file was successfully renamed, or an `Err` containing
     pub fn rename(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<(), ReductError> {
+        if self.read_only.load(Ordering::Relaxed) {
+            return Err(internal_server_error!(
+                "Cannot rename file {} in read-only mode",
+                old_path.display()
+            ));
+        }
+
         let mut cache = self.cache.write()?;
         cache.remove(old_path);
-        self.backpack.read()?.rename(old_path, new_path)?;
+        self.backend.read()?.rename(old_path, new_path)?;
         Ok(())
     }
 
     pub fn try_exists(&self, path: &PathBuf) -> Result<bool, ReductError> {
-        let backpack = self.backpack.read()?;
+        let backpack = self.backend.read()?;
         Ok(backpack.try_exists(path)?)
     }
 
     pub fn get_stats(&self, path: &PathBuf) -> Result<Option<ObjectMetadata>, ReductError> {
-        let backpack = self.backpack.read()?;
+        let backpack = self.backend.read()?;
         Ok(backpack.get_stats(path)?)
     }
 
-    pub fn force_sync_all(&self) {
-        Self::sync_rw_and_unused_files(&self.backpack, &self.cache, &None);
+    pub fn force_sync_all(&self) -> Result<(), ReductError> {
+        Self::sync_rw_and_unused_files(&self.read_only, &self.backend, &self.cache, &None)
     }
 
     /// Saves a file descriptor in the cache and syncs any discarded files.

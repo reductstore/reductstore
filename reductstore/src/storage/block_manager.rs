@@ -13,7 +13,9 @@ use prost::Message;
 use std::fs;
 use std::fs::OpenOptions;
 
+use crate::cfg::Cfg;
 use crate::core::file_cache::{FileWeak, FILE_CACHE};
+use crate::lock_file::InstanceRole;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
@@ -44,6 +46,7 @@ pub(in crate::storage) struct BlockManager {
     block_index: BlockIndex,
     block_cache: BlockCache,
     wal: Box<dyn Wal + Sync + Send>,
+    cfg: Arc<Cfg>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -60,7 +63,8 @@ impl BlockManager {
     ///
     /// * `path` - Path to the block manager directory.
     /// * `index` - Block index to use.
-    pub(crate) fn new(path: PathBuf, index: BlockIndex) -> Self {
+    /// * `cfg` - Configuration.
+    pub(crate) fn new(path: PathBuf, index: BlockIndex, cfg: Arc<Cfg>) -> Self {
         let (bucket, entry) = {
             let mut parts = path.iter().rev();
             let entry = parts.next().unwrap().to_str().unwrap().to_string();
@@ -74,11 +78,20 @@ impl BlockManager {
             entry,
             block_index: index,
             block_cache: BlockCache::new(
-                WRITE_BLOCK_CACHE_SIZE,
-                READ_BLOCK_CACHE_SIZE,
+                if cfg.lock_file_config.role == InstanceRole::ReadOnly {
+                    0
+                } else {
+                    WRITE_BLOCK_CACHE_SIZE
+                },
+                if cfg.lock_file_config.role == InstanceRole::ReadOnly {
+                    1 // we need only one for read-only instances to update from block
+                } else {
+                    READ_BLOCK_CACHE_SIZE
+                },
                 Duration::from_secs(30),
             ),
             wal: wal::create_wal(path.clone()),
+            cfg,
         }
     }
 
@@ -95,6 +108,11 @@ impl BlockManager {
     }
 
     pub fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
+        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+            // we need to update the index from disk for read-only instances
+            self.block_index.update_from_disc()?;
+        }
+
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
             start_block_id.unwrap().clone()
@@ -549,6 +567,27 @@ impl BlockManager {
         &self.block_index
     }
 
+    pub fn update_and_index(&mut self) -> Result<&BlockIndex, ReductError> {
+        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+            // TODO: don't do it for every call
+            // we need to update the index from disk and chaned blocks for read-only instances
+            let previeous_state = self.block_index.info().clone();
+            self.block_index.update_from_disc()?;
+
+            for (block_id, new_block_info) in self.block_index.info().iter() {
+                if let Some(previous_block_info) = previeous_state.get(block_id) {
+                    if previous_block_info.crc64 != new_block_info.crc64 {
+                        // block changed, we need to reload it
+                        FILE_CACHE.discard_recursive(&self.path_to_desc(*block_id))?;
+                        FILE_CACHE.discard_recursive(&self.path_to_data(*block_id))?;
+                    }
+                }
+            }
+        }
+
+        Ok(&self.block_index)
+    }
+
     pub fn bucket_name(&self) -> &String {
         &self.bucket
     }
@@ -571,6 +610,10 @@ impl BlockManager {
     }
 
     fn save_block_on_disk(&mut self, block_ref: Arc<RwLock<Block>>) -> Result<(), ReductError> {
+        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+            return Ok(());
+        }
+
         debug!(
             "Saving block {}/{}/{} on disk and updating index",
             self.bucket,
