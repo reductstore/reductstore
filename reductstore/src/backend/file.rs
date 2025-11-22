@@ -24,6 +24,7 @@ pub struct File {
     last_synced: Instant,
     is_synced: bool,
     mode: AccessMode,
+    ignore_write: bool, // read-only mode, write operations are ignored
 }
 
 pub struct OpenOptions {
@@ -31,6 +32,7 @@ pub struct OpenOptions {
     backend: Arc<BoxedBackend>,
     create: bool,
     mode: AccessMode,
+    ignore_write: bool,
 }
 
 impl OpenOptions {
@@ -40,6 +42,7 @@ impl OpenOptions {
             backend,
             create: false,
             mode: AccessMode::Read,
+            ignore_write: false,
         }
     }
 
@@ -53,6 +56,11 @@ impl OpenOptions {
         if write {
             self.mode = AccessMode::ReadWrite;
         }
+        self
+    }
+
+    pub fn ignore_write(&mut self, ignor_write: bool) -> &mut Self {
+        self.ignore_write = ignor_write;
         self
     }
 
@@ -87,12 +95,17 @@ impl OpenOptions {
             last_synced: Instant::now(),
             is_synced: true,
             mode: self.mode.clone(),
+            ignore_write: self.ignore_write,
         })
     }
 }
 
 impl File {
     pub fn sync_all(&mut self) -> std::io::Result<()> {
+        if self.ignore_write {
+            return Ok(());
+        }
+
         if self.is_synced() {
             return Ok(());
         }
@@ -110,6 +123,10 @@ impl File {
     }
 
     pub fn set_len(&mut self, size: u64) -> std::io::Result<()> {
+        if self.ignore_write {
+            return Ok(());
+        }
+
         self.is_synced = false;
         self.inner.set_len(size)
     }
@@ -144,11 +161,17 @@ impl Read for File {
 
 impl Write for File {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        if self.ignore_write {
+            return Ok(buf.len());
+        }
         self.is_synced = false;
         self.inner.write(buf)
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
+        if self.ignore_write {
+            return Ok(());
+        }
         self.inner.flush()
     }
 }

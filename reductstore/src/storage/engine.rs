@@ -319,7 +319,9 @@ impl StorageEngine {
 
     fn check_mode(&self) -> Result<(), ReductError> {
         if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
-            return Err(forbidden!("Can't rename bucket in read-only instance"));
+            return Err(forbidden!(
+                "Cannot perform this operation in read-only mode"
+            ));
         }
         Ok(())
     }
@@ -338,6 +340,7 @@ impl StorageEngine {
             .values()
             .map(|b| b.path().clone())
             .collect::<HashSet<_>>();
+
         for path in FILE_CACHE.read_dir(&self.data_path)? {
             if !path.is_dir() {
                 continue;

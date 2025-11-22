@@ -274,7 +274,7 @@ impl Backend {
 
     /// Remove the file only from local cache, without affecting remote storage.
     /// This is useful for initiating re-download of the file on next access.
-    pub fn remove_only_locally<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+    pub fn remove_from_local_cache<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
         self.backend.remove_only_locally(path.as_ref())
     }
 }

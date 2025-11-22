@@ -212,7 +212,13 @@ impl FileCache {
     pub fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
         let mut cache = self.cache.write()?;
         let open_file = |cache| -> Result<FileRc, ReductError> {
-            let file = self.backend.read()?.open_options().read(true).open(path)?;
+            let file = self
+                .backend
+                .read()?
+                .open_options()
+                .read(true)
+                .ignore_write(self.read_only.load(Ordering::Relaxed))
+                .open(path)?;
             let file = Arc::new(RwLock::new(file));
             Self::save_in_cache_and_sync_discarded(path.clone(), cache, &file);
             Ok(file)
@@ -244,12 +250,6 @@ impl FileCache {
     ///
     /// A file reference
     pub fn write_or_create(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileWeak, ReductError> {
-        if self.read_only.load(Ordering::Relaxed) {
-            return Err(internal_server_error!(
-                "Cannot open file {} for writing in read-only mode",
-                path.display()
-            ));
-        }
         let mut cache = self.cache.write()?;
         let open_file = |cache, create| -> Result<FileRc, ReductError> {
             let file = self
@@ -258,6 +258,7 @@ impl FileCache {
                 .open_options()
                 .create(create)
                 .write(true)
+                .ignore_write(self.read_only.load(Ordering::Relaxed))
                 .read(true)
                 .open(path)?;
             let file = Arc::new(RwLock::new(file));
@@ -304,10 +305,7 @@ impl FileCache {
     /// removing the file from the file system.
     pub fn remove(&self, path: &PathBuf) -> Result<(), ReductError> {
         if self.read_only.load(Ordering::Relaxed) {
-            return Err(internal_server_error!(
-                "Cannot remove file {} in read-only mode",
-                path.display()
-            ));
+            return Ok(());
         }
 
         let mut cache = self.cache.write()?;
@@ -328,10 +326,7 @@ impl FileCache {
 
     pub fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
         if self.read_only.load(Ordering::Relaxed) {
-            return Err(internal_server_error!(
-                "Cannot remove directory {} in read-only mode",
-                path.display()
-            ));
+            return Ok(());
         }
 
         self.discard_recursive(path)?;
@@ -344,10 +339,7 @@ impl FileCache {
 
     pub fn create_dir_all(&self, path: &PathBuf) -> Result<(), ReductError> {
         if self.read_only.load(Ordering::Relaxed) {
-            return Err(internal_server_error!(
-                "Cannot create directory {} in read-only mode",
-                path.display()
-            ));
+            return Ok(());
         }
 
         self.backend.read()?.create_dir_all(path)?;
@@ -383,7 +375,7 @@ impl FileCache {
                     }
                 }
                 // Remove the file only locally from the storage backend
-                self.backend.write()?.remove_only_locally(&file_path)?;
+                self.backend.write()?.remove_from_local_cache(&file_path)?;
             }
         }
 
@@ -405,10 +397,7 @@ impl FileCache {
     /// A `Result` which is `Ok` if the file was successfully renamed, or an `Err` containing
     pub fn rename(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<(), ReductError> {
         if self.read_only.load(Ordering::Relaxed) {
-            return Err(internal_server_error!(
-                "Cannot rename file {} in read-only mode",
-                old_path.display()
-            ));
+            return Ok(());
         }
 
         let mut cache = self.cache.write()?;

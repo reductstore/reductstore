@@ -6,8 +6,10 @@ pub(super) mod settings;
 
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use crate::core::thread_pool::{group_from_path, shared, unique, GroupDepth, TaskHandle};
 use crate::core::weak::Weak;
+use crate::lock_file::InstanceRole;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
 use crate::storage::bucket::settings::{
@@ -23,12 +25,12 @@ use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::entry_api::EntryInfo;
-use reduct_base::{conflict, internal_server_error, not_found, Labels};
-use std::collections::BTreeMap;
+use reduct_base::{conflict, forbidden, internal_server_error, not_found, Labels};
+use std::collections::{BTreeMap, HashSet};
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 /// Bucket is a single storage bucket.
 pub(crate) struct Bucket {
@@ -122,8 +124,9 @@ impl Bucket {
         }
 
         for task in task_set {
-            let entry = task.wait()?;
-            entries.insert(entry.name().to_string(), entry);
+            if let Some(entry) = task.wait()? {
+                entries.insert(entry.name().to_string(), entry);
+            }
         }
 
         Ok(Bucket {
@@ -150,6 +153,7 @@ impl Bucket {
     pub fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
         check_name_convention(key)?;
         if !self.entries.read()?.contains_key(key) {
+            self.check_mode()?;
             let settings = self.settings.read()?;
             let entry = Entry::try_new(
                 &key,
@@ -178,7 +182,8 @@ impl Bucket {
     ///
     /// * `&Entry` - The entry or an HTTPError
     pub fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
-        let entries = self.entries.read().unwrap();
+        self.update_entry_list()?;
+        let entries = self.entries.read()?;
         let entry = entries.get(name).ok_or_else(|| {
             ReductError::not_found(&format!(
                 "Entry '{}' not found in bucket '{}'",
@@ -190,6 +195,8 @@ impl Bucket {
 
     /// Return bucket stats
     pub fn info(&self) -> Result<FullBucketInfo, ReductError> {
+        self.update_entry_list()?;
+
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
@@ -241,6 +248,10 @@ impl Bucket {
         content_type: String,
         labels: Labels,
     ) -> TaskHandle<Result<Box<dyn WriteRecord + Sync + Send>, ReductError>> {
+        if let Err(e) = self.check_mode() {
+            return Err(e).into();
+        }
+
         let get_entry = || {
             self.keep_quota_for(content_size)?;
             self.get_or_create_entry(name)?.upgrade()
@@ -276,6 +287,10 @@ impl Bucket {
         old_name: &str,
         new_name: &str,
     ) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(e) = self.check_mode() {
+            return Err(e).into();
+        }
+
         let old_path = self.path.join(old_name);
         let new_path = self.path.join(new_name);
         let bucket_name = self.name.clone();
@@ -309,7 +324,7 @@ impl Bucket {
             FILE_CACHE.rename(&old_path, &new_path)?;
             entries.write()?.remove(&old_name);
 
-            let entry = Entry::restore(
+            if let Some(entry) = Entry::restore(
                 new_path,
                 EntrySettings {
                     max_block_size: settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
@@ -317,11 +332,12 @@ impl Bucket {
                 },
                 cfg.clone(),
             )
-            .wait()?;
-
-            entries
-                .write()?
-                .insert(new_name.to_string(), Arc::new(entry));
+            .wait()?
+            {
+                entries
+                    .write()?
+                    .insert(new_name.to_string(), Arc::new(entry));
+            }
             Ok(())
         })
     }
@@ -336,6 +352,10 @@ impl Bucket {
     ///
     /// * `HTTPError` - The error if any.
     pub fn remove_entry(&self, name: &str) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(e) = self.check_mode() {
+            return Err(e).into();
+        }
+
         if let Err(e) = self.get_entry(name) {
             return Err(e).into();
         }
@@ -361,6 +381,10 @@ impl Bucket {
 
     /// Sync all entries to the file system
     pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
+        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+            return Ok(()).into();
+        }
+
         if let Err(e) = self.save_settings().wait() {
             return Err(e).into();
         }
@@ -393,6 +417,70 @@ impl Bucket {
     pub fn is_provisioned(&self) -> bool {
         self.is_provisioned
             .load(std::sync::atomic::Ordering::Relaxed)
+    }
+
+    fn check_mode(&self) -> Result<(), ReductError> {
+        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+            return Err(forbidden!(
+                "Cannot perform this operation in read-only mode"
+            ));
+        }
+        Ok(())
+    }
+
+    /// List directory and update bucket list
+    fn update_entry_list(&self) -> Result<(), ReductError> {
+        if self.cfg.lock_file_config.role != InstanceRole::ReadOnly {
+            // Only read-only instances need to update bucket list from backend
+            return Ok(());
+        }
+
+        let mut task_set = vec![];
+
+        let current_bucket_paths = self
+            .entries
+            .read()?
+            .values()
+            .map(|b| b.path().clone())
+            .collect::<HashSet<_>>();
+        for path in FILE_CACHE.read_dir(&self.path)? {
+            if !path.is_dir() {
+                continue;
+            }
+
+            if current_bucket_paths.contains(&path) {
+                continue;
+            }
+
+            // Restore new bucket
+            let settings = self.settings.read()?;
+            let handler = Entry::restore(
+                path,
+                EntrySettings {
+                    max_block_size: settings.max_block_size.unwrap(),
+                    max_block_records: settings.max_block_records.unwrap(),
+                },
+                self.cfg.clone(),
+            );
+
+            task_set.push(handler);
+        }
+
+        let mut new_buckets = BTreeMap::new();
+        for task in task_set {
+            if let Some(entry) = task.wait()? {
+                new_buckets.insert(entry.name().to_string(), Arc::new(entry));
+            }
+        }
+
+        if !new_buckets.is_empty() {
+            let mut entries = self.entries.write()?;
+            for (name, entry) in new_buckets {
+                entries.insert(name, entry);
+            }
+        }
+
+        Ok(())
     }
 
     fn task_group(&self) -> String {

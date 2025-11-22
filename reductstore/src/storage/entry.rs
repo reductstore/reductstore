@@ -17,7 +17,7 @@ use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
@@ -33,8 +33,10 @@ use crate::core::thread_pool::{
     group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
 };
 use crate::core::weak::Weak;
+use crate::lock_file::InstanceRole;
+use crate::storage::bucket::Bucket;
 pub(crate) use io::record_reader::RecordReader;
-use reduct_base::{internal_server_error, not_found};
+use reduct_base::{forbidden, internal_server_error, not_found};
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,
@@ -107,7 +109,7 @@ impl Entry {
         path: PathBuf,
         options: EntrySettings,
         cfg: Arc<Cfg>,
-    ) -> TaskHandle<Result<Entry, ReductError>> {
+    ) -> TaskHandle<Result<Option<Entry>, ReductError>> {
         unique_child(
             &group_from_path(&path, GroupDepth::ENTRY),
             "restore entry",
@@ -116,6 +118,11 @@ impl Entry {
                 Ok(entry)
             },
         )
+    }
+
+    pub(crate) fn restore_uncommitted_changes(&self) -> Result<(), ReductError> {
+        let mut block_manager = self.block_manager.write()?;
+        block_manager.restore_uncommitted_changes()
     }
 
     /// Query records for a time range.
@@ -291,7 +298,6 @@ impl Entry {
         *self.settings.write().unwrap() = settings;
     }
 
-    #[cfg(test)]
     pub fn path(&self) -> &PathBuf {
         &self.path
     }

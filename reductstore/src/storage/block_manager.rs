@@ -18,8 +18,9 @@ use crate::core::file_cache::{FileWeak, FILE_CACHE};
 use crate::lock_file::InstanceRole;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
-use crate::storage::block_manager::wal::{Wal, WalEntry};
+use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
+use crate::storage::entry::Entry;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
 use block_index::BlockIndex;
 use crc64fast::Digest;
@@ -78,16 +79,8 @@ impl BlockManager {
             entry,
             block_index: index,
             block_cache: BlockCache::new(
-                if cfg.lock_file_config.role == InstanceRole::ReadOnly {
-                    0
-                } else {
-                    WRITE_BLOCK_CACHE_SIZE
-                },
-                if cfg.lock_file_config.role == InstanceRole::ReadOnly {
-                    1 // we need only one for read-only instances to update from block
-                } else {
-                    READ_BLOCK_CACHE_SIZE
-                },
+                WRITE_BLOCK_CACHE_SIZE,
+                READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
             ),
             wal: wal::create_wal(path.clone()),
@@ -111,6 +104,8 @@ impl BlockManager {
         if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
             // we need to update the index from disk for read-only instances
             self.block_index.update_from_disc()?;
+            FILE_CACHE.discard_recursive(&self.path.join("wal"))?;
+            self.restore_uncommitted_changes()?;
         }
 
         let start_block_id = self.block_index.tree().range(start..).next();
@@ -302,10 +297,106 @@ impl BlockManager {
         Ok(())
     }
 
+    pub fn restore_uncommitted_changes(&mut self) -> Result<(), ReductError> {
+        // There are uncommitted changes in the WALs
+        let wal_blocks = self.wal.list()?;
+        if !wal_blocks.is_empty() {
+            warn!(
+                "Recovering uncommitted changes from WALs for entry: {:?}",
+                self.path
+            );
+
+            for block_id in wal_blocks {
+                let wal_entries = self.wal.read(block_id);
+                if let Err(err) = wal_entries {
+                    error!("Failed to read WAL for block {}: {}", block_id, err);
+                    self.wal.remove(block_id)?;
+                    continue;
+                }
+
+                let block_ref = if self.exist(block_id)? {
+                    debug!(
+                        "Loading block {}/{} from block manager",
+                        self.entry_name(),
+                        block_id
+                    );
+                    match self.load_block(block_id) {
+                        Ok(block_ref) => block_ref,
+                        Err(err) => {
+                            warn!(
+                                "Failed to load block {}/{}: {}",
+                                self.entry_name(),
+                                block_id,
+                                err
+                            );
+                            info!("Creating block {}/{} from WAL", self.entry_name(), block_id);
+                            Arc::new(RwLock::new(Block::new(block_id)))
+                        }
+                    }
+                } else {
+                    debug!("Creating block {}/{} from WAL", self.entry_name(), block_id);
+                    Arc::new(RwLock::new(Block::new(block_id)))
+                };
+
+                let mut block_removed = false;
+                {
+                    let mut block = block_ref.write()?;
+                    for wal_entry in wal_entries? {
+                        match wal_entry {
+                            WalEntry::WriteRecord(record) => {
+                                trace!(
+                                    "Write record to block {}/{}: {:?}",
+                                    self.entry_name(),
+                                    block_id,
+                                    record
+                                );
+                                block.insert_or_update_record(record);
+                            }
+                            WalEntry::UpdateRecord(record) => {
+                                trace!(
+                                    "Update record to block {}/{}: {:?}",
+                                    self.entry_name(),
+                                    block_id,
+                                    record
+                                );
+                                block.insert_or_update_record(record);
+                            }
+                            WalEntry::RemoveBlock => {
+                                debug!("Remove block {}/{}", self.entry_name(), block_id);
+                                block_removed = true;
+                                break;
+                            }
+                            WalEntry::RemoveRecord(timestamp) => {
+                                trace!(
+                                    "Remove record from block {}/{}: {}",
+                                    self.entry_name(),
+                                    block_id,
+                                    timestamp
+                                );
+                                block.remove_record(timestamp);
+                            }
+                        }
+                    }
+                }
+
+                if block_removed {
+                    self.remove_block(block_id)?;
+                } else {
+                    self.save_block(block_ref.clone())?;
+                    self.finish_block(block_ref)?;
+                }
+            }
+
+            self.save_cache_on_disk()?;
+        }
+
+        Ok(())
+    }
+
     /// Check if a block exists on disk.
     pub fn exist(&self, block_id: u64) -> Result<bool, ReductError> {
         let path = self.path_to_desc(block_id);
-        Ok(path.try_exists()?)
+        Ok(FILE_CACHE.try_exists(&path)?)
     }
 
     /// Update records in a block and save it on disk.
@@ -610,10 +701,6 @@ impl BlockManager {
     }
 
     fn save_block_on_disk(&mut self, block_ref: Arc<RwLock<Block>>) -> Result<(), ReductError> {
-        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
-            return Ok(());
-        }
-
         debug!(
             "Saving block {}/{}/{} on disk and updating index",
             self.bucket,
