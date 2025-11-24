@@ -31,6 +31,7 @@ use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::time::Instant;
 
 /// Bucket is a single storage bucket.
 pub(crate) struct Bucket {
@@ -39,6 +40,7 @@ pub(crate) struct Bucket {
     entries: Arc<RwLock<BTreeMap<String, Arc<Entry>>>>,
     settings: RwLock<BucketSettings>,
     cfg: Arc<Cfg>,
+    last_replica_sync: RwLock<Instant>,
     is_provisioned: AtomicBool,
 }
 
@@ -72,6 +74,7 @@ impl Bucket {
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
             cfg: Arc::new(cfg),
+            last_replica_sync: RwLock::new(Instant::now()),
         };
 
         bucket.save_settings().wait()?;
@@ -137,6 +140,7 @@ impl Bucket {
             )),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
+            last_replica_sync: RwLock::new(Instant::now()),
             cfg,
         })
     }
@@ -430,10 +434,14 @@ impl Bucket {
 
     /// List directory and update bucket list
     fn update_entry_list(&self) -> Result<(), ReductError> {
-        if self.cfg.lock_file_config.role != InstanceRole::ReadOnly {
+        let mut last_sync = self.last_replica_sync.write()?;
+        if self.cfg.lock_file_config.role != InstanceRole::ReadOnly
+            || last_sync.elapsed() < self.cfg.cs_config.sync_interval
+        {
             // Only read-only instances need to update bucket list from backend
             return Ok(());
         }
+        *last_sync = Instant::now();
 
         let mut task_set = vec![];
 
@@ -443,12 +451,15 @@ impl Bucket {
             .values()
             .map(|b| b.path().clone())
             .collect::<HashSet<_>>();
+
+        let mut entries_to_retain = vec![];
         for path in FILE_CACHE.read_dir(&self.path)? {
             if !path.is_dir() {
                 continue;
             }
 
             if current_bucket_paths.contains(&path) {
+                entries_to_retain.push(path);
                 continue;
             }
 
@@ -466,19 +477,16 @@ impl Bucket {
             task_set.push(handler);
         }
 
-        let mut new_buckets = BTreeMap::new();
+        let mut new_entries = BTreeMap::new();
         for task in task_set {
             if let Some(entry) = task.wait()? {
-                new_buckets.insert(entry.name().to_string(), Arc::new(entry));
+                new_entries.insert(entry.name().to_string(), Arc::new(entry));
             }
         }
 
-        if !new_buckets.is_empty() {
-            let mut entries = self.entries.write()?;
-            for (name, entry) in new_buckets {
-                entries.insert(name, entry);
-            }
-        }
+        let mut entries = self.entries.write()?;
+        entries.retain(|_, v| entries_to_retain.contains(v.path()));
+        entries.extend(new_entries.into_iter());
 
         Ok(())
     }

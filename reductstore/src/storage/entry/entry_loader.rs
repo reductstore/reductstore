@@ -15,7 +15,7 @@ use prost::Message;
 
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
-use crate::lock_file::InstanceRole;
+use crate::lock_file::InstanceRole::ReadOnly;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
@@ -36,25 +36,25 @@ impl EntryLoader {
         cfg: Arc<Cfg>,
     ) -> Result<Option<Entry>, ReductError> {
         let start_time = Instant::now();
+
         let mut entry =
             match Self::try_restore_entry_from_index(path.clone(), options.clone(), cfg.clone()) {
                 Ok(entry) => Ok(entry),
                 Err(err) => {
+                    if cfg.lock_file_config.role == ReadOnly {
+                        return Ok(None);
+                    }
+
                     warn!(
                         "Failed to restore from block index {:?}: {}",
                         path, err.message
                     );
-
-                    if cfg.lock_file_config.role == InstanceRole::ReadOnly {
-                        return Ok(None);
-                    }
-
                     info!("Rebuilding the block index {:?} from blocks", path);
                     Self::restore_entry_from_blocks(path.clone(), options.clone(), cfg.clone())
                 }
             }?;
 
-        entry.restore_uncommitted_changes()?;
+        Self::restore_uncommitted_changes(path.clone(), &mut entry)?;
 
         let mut entry = {
             // integrity check after restoring WAL
@@ -87,6 +87,7 @@ impl EntryLoader {
             );
         }
 
+        entry.cfg = cfg;
         Ok(Some(entry))
     }
 
@@ -290,6 +291,105 @@ impl EntryLoader {
         } else {
             Ok(())
         }
+    }
+
+    fn restore_uncommitted_changes(
+        entry_path: PathBuf,
+        entry: &mut Entry,
+    ) -> Result<(), ReductError> {
+        let wal = create_wal(entry_path.clone());
+        // There are uncommitted changes in the WALs
+        let wal_blocks = wal.list()?;
+        if !wal_blocks.is_empty() {
+            warn!(
+                "Recovering uncommitted changes from WALs for entry: {:?}",
+                entry_path
+            );
+
+            let mut block_manager = entry.block_manager.write()?;
+            for block_id in wal_blocks {
+                let wal_entries = wal.read(block_id);
+                if let Err(err) = wal_entries {
+                    error!("Failed to read WAL for block {}: {}", block_id, err);
+                    wal.remove(block_id)?;
+                    continue;
+                }
+
+                let block_ref = if block_manager.exist(block_id)? {
+                    debug!(
+                        "Loading block {}/{} from block manager",
+                        entry.name, block_id
+                    );
+                    match block_manager.load_block(block_id) {
+                        Ok(block_ref) => block_ref,
+                        Err(err) => {
+                            warn!("Failed to load block {}/{}: {}", entry.name, block_id, err);
+                            info!("Creating block {}/{} from WAL", entry.name, block_id);
+                            Arc::new(RwLock::new(
+                                crate::storage::block_manager::block::Block::new(block_id),
+                            ))
+                        }
+                    }
+                } else {
+                    debug!("Creating block {}/{} from WAL", entry.name, block_id);
+                    Arc::new(RwLock::new(
+                        crate::storage::block_manager::block::Block::new(block_id),
+                    ))
+                };
+
+                let mut block_removed = false;
+                {
+                    let mut block = block_ref.write()?;
+                    for wal_entry in wal_entries? {
+                        match wal_entry {
+                            WalEntry::WriteRecord(record) => {
+                                trace!(
+                                    "Write record to block {}/{}: {:?}",
+                                    entry.name,
+                                    block_id,
+                                    record
+                                );
+                                block.insert_or_update_record(record);
+                            }
+                            WalEntry::UpdateRecord(record) => {
+                                trace!(
+                                    "Update record to block {}/{}: {:?}",
+                                    entry.name,
+                                    block_id,
+                                    record
+                                );
+                                block.insert_or_update_record(record);
+                            }
+                            WalEntry::RemoveBlock => {
+                                debug!("Remove block {}/{}", entry.name, block_id);
+                                block_removed = true;
+                                break;
+                            }
+                            WalEntry::RemoveRecord(timestamp) => {
+                                trace!(
+                                    "Remove record from block {}/{}: {}",
+                                    entry.name,
+                                    block_id,
+                                    timestamp
+                                );
+                                block.remove_record(timestamp);
+                            }
+                        }
+                    }
+                }
+
+                if block_removed {
+                    block_manager.remove_block(block_id)?;
+                } else {
+                    block_manager.save_block(block_ref.clone())?;
+                    block_manager.finish_block(block_ref)?;
+                }
+            }
+
+            block_manager.save_cache_on_disk()?;
+        }
+
+        Ok(())
     }
 }
 

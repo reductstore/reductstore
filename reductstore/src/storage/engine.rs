@@ -77,6 +77,7 @@ impl StorageEngineBuilder {
             buckets: Arc::new(RwLock::new(buckets)),
             license: self.license,
             cfg,
+            last_replica_sync: RwLock::new(Instant::now()),
         }
     }
 }
@@ -88,6 +89,7 @@ pub struct StorageEngine {
     buckets: Arc<RwLock<BTreeMap<String, Arc<Bucket>>>>,
     license: Option<License>,
     cfg: Cfg,
+    last_replica_sync: RwLock<Instant>,
 }
 
 impl StorageEngine {
@@ -317,6 +319,30 @@ impl StorageEngine {
         Ok(())
     }
 
+    pub fn sync_fs2(&self) -> Result<(), ReductError> {
+        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+            return Ok(());
+        }
+
+        let mut handlers = vec![];
+        let buckets = self.buckets.read()?.clone();
+        for (name, bucket) in buckets {
+            info!("Sync bucket '{}'", name);
+            handlers.push(bucket.sync_fs());
+        }
+
+        for handler in handlers {
+            match handler.wait() {
+                Ok(_) => {}
+                Err(e) => {
+                    error!("Failed to sync bucket: {}", e);
+                }
+            }
+        }
+
+        Ok(())
+    }
+
     fn check_mode(&self) -> Result<(), ReductError> {
         if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
             return Err(forbidden!(
@@ -328,10 +354,15 @@ impl StorageEngine {
 
     /// List directory and update bucket list
     fn update_bucket_list(&self) -> Result<(), ReductError> {
-        if self.cfg.lock_file_config.role != InstanceRole::ReadOnly {
+        let mut last_sync = self.last_replica_sync.write()?;
+        if self.cfg.lock_file_config.role != InstanceRole::ReadOnly
+            || last_sync.elapsed() < self.cfg.cs_config.sync_interval
+        {
             // Only read-only instances need to update bucket list from backend
             return Ok(());
         }
+
+        *last_sync = Instant::now();
 
         let mut new_buckets = BTreeMap::new();
         let current_bucket_paths = self
@@ -341,12 +372,14 @@ impl StorageEngine {
             .map(|b| b.path().clone())
             .collect::<HashSet<_>>();
 
+        let mut buckets_to_retain = vec![];
         for path in FILE_CACHE.read_dir(&self.data_path)? {
             if !path.is_dir() {
                 continue;
             }
 
             if current_bucket_paths.contains(&path) {
+                buckets_to_retain.push(path);
                 continue;
             }
 
@@ -363,6 +396,7 @@ impl StorageEngine {
         }
 
         let mut buckets = self.buckets.write()?;
+        buckets.retain(|_, b| buckets_to_retain.contains(&b.path()));
         buckets.extend(new_buckets);
         Ok(())
     }

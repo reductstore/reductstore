@@ -73,7 +73,12 @@ impl OpenOptions {
         self
     }
 
-    pub fn open<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<File> {
+    pub fn open<P: AsRef<std::path::Path>>(&mut self, path: P) -> std::io::Result<File> {
+        if self.ignore_write {
+            self.inner.write(false);
+            self.inner.create(false);
+        }
+
         let full_path = self.backend.path().join(path.as_ref());
         if !full_path.exists() {
             // the call initiates downloading the file from remote storage if needed

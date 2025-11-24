@@ -120,11 +120,6 @@ impl Entry {
         )
     }
 
-    pub(crate) fn restore_uncommitted_changes(&self) -> Result<(), ReductError> {
-        let mut block_manager = self.block_manager.write()?;
-        block_manager.restore_uncommitted_changes()
-    }
-
     /// Query records for a time range.
     ///
     /// # Arguments
