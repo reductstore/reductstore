@@ -4,12 +4,11 @@
 mod quotas;
 pub(super) mod settings;
 
-use crate::cfg::Cfg;
+use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::RwLock;
 use crate::core::thread_pool::{group_from_path, shared, unique, GroupDepth, TaskHandle};
 use crate::core::weak::Weak;
-use crate::lock_file::InstanceRole;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
 use crate::storage::bucket::settings::{
@@ -315,7 +314,7 @@ impl Bucket {
             }
 
             if let Some(entry) = entries.read()?.get(&old_name) {
-                entry.sync_fs()?;
+                entry.compact()?;
             } else {
                 return Err(not_found!(
                     "Entry '{}' not found in bucket '{}'",
@@ -385,7 +384,7 @@ impl Bucket {
 
     /// Sync all entries to the file system
     pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
-        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+        if self.cfg.role == InstanceRole::ReadOnly {
             return Ok(()).into();
         }
 
@@ -397,7 +396,7 @@ impl Bucket {
         // use shared task to avoid locking in graceful shutdown
         shared(&self.task_group(), "sync entries", move || {
             for entry in entries.values() {
-                entry.sync_fs()?;
+                entry.compact()?;
             }
             Ok(())
         })
@@ -424,7 +423,7 @@ impl Bucket {
     }
 
     fn check_mode(&self) -> Result<(), ReductError> {
-        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+        if self.cfg.role == InstanceRole::ReadOnly {
             return Err(forbidden!(
                 "Cannot perform this operation in read-only mode"
             ));
@@ -435,7 +434,7 @@ impl Bucket {
     /// List directory and update bucket list
     fn update_entry_list(&self) -> Result<(), ReductError> {
         let mut last_sync = self.last_replica_sync.write()?;
-        if self.cfg.lock_file_config.role != InstanceRole::ReadOnly
+        if self.cfg.role != InstanceRole::ReadOnly
             || last_sync.elapsed() < self.cfg.cs_config.sync_interval
         {
             // Only read-only instances need to update bucket list from backend

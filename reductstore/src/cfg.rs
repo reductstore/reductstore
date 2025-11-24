@@ -6,7 +6,7 @@ pub mod lock_file;
 mod provision;
 pub mod remote_storage;
 pub mod replication;
-
+mod storage_engine;
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
@@ -15,12 +15,13 @@ use crate::cfg::io::IoConfig;
 use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
+use crate::cfg::storage_engine::StorageEngineConfig;
 use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
 use crate::ext::ext_repository::create_ext_repository;
 use crate::license::parse_license;
-use crate::lock_file::{BoxedLockFile, InstanceRole, LockFileBuilder};
+use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::ext::ExtSettings;
@@ -43,6 +44,14 @@ pub const DEFAULT_PORT: u16 = 8383;
 pub const DEFAULT_CACHED_QUERIES: usize = 8;
 pub const DEFAULT_CACHED_QUERIES_TTL: u64 = 600; // seconds
 
+#[derive(Debug, PartialEq, Clone, Default)]
+pub enum InstanceRole {
+    #[default]
+    Primary,
+    Secondary,
+    ReadOnly,
+}
+
 #[derive(Clone)]
 pub struct Cfg {
     pub log_level: String,
@@ -57,6 +66,8 @@ pub struct Cfg {
     pub license_path: Option<String>,
     pub ext_path: Option<PathBuf>,
     pub cors_allow_origin: Vec<String>,
+    pub role: InstanceRole,
+
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ReplicationSettings>,
@@ -64,6 +75,7 @@ pub struct Cfg {
     pub replication_conf: ReplicationConfig,
     pub cs_config: RemoteStorageConfig,
     pub lock_file_config: LockFileConfig,
+    pub engine_config: StorageEngineConfig,
 }
 
 impl Default for Cfg {
@@ -81,6 +93,7 @@ impl Default for Cfg {
             license_path: None,
             ext_path: None,
             cors_allow_origin: vec![],
+            role: InstanceRole::Primary,
             buckets: HashMap::new(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
@@ -88,6 +101,7 @@ impl Default for Cfg {
             replication_conf: ReplicationConfig::default(),
             cs_config: RemoteStorageConfig::default(),
             lock_file_config: LockFileConfig::default(),
+            engine_config: StorageEngineConfig::default(),
         }
     }
 }
@@ -117,6 +131,20 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             .and_then(|p| if p.is_empty() { None } else { Some(p) })
             .map(PathBuf::from);
 
+        let role = match env
+            .get_optional::<String>("RS_LOCK_FILE_ROLE")
+            .unwrap_or("primary".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "primary" => InstanceRole::Primary,
+            "secondary" => InstanceRole::Secondary,
+            "readonly" => InstanceRole::ReadOnly,
+            _ => {
+                panic!("Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'")
+            }
+        };
+
         let protocol = if cert_path.is_none() { "http" } else { "https" };
 
         let default_public_url = if port == 80 || port == 443 {
@@ -140,6 +168,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
             cert_path,
             cert_key_path,
+            role,
             license_path: env.get_optional("RS_LICENSE_PATH"),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
@@ -150,6 +179,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             replication_conf: Self::parse_replication_config(&mut env, port),
             cs_config: Self::parse_remote_storage_cfg(&mut env),
             lock_file_config: Self::parse_lock_file_config(&mut env),
+            engine_config: Self::parse_storage_engine_config(&mut env),
         };
 
         let license = parse_license(cfg.license_path.clone());
@@ -191,12 +221,12 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub fn build_lock_file(&self) -> Result<BoxedLockFile, ReductError> {
         let data_path = self.get_data_path()?;
 
-        if !self.cfg.lock_file_config.enabled {
+        if self.cfg.role == InstanceRole::ReadOnly {
             return Ok(LockFileBuilder::noop());
         }
 
         let lock_file = LockFileBuilder::new(data_path.join(".lock"))
-            .with_config(self.cfg.lock_file_config.clone())
+            .with_config(self.cfg.clone())
             .build();
 
         Ok(lock_file)
@@ -204,14 +234,12 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 
     pub fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
-
         let storage = Arc::new(self.provision_buckets(&data_path));
         let token_repo = self.provision_tokens(&data_path);
         let console = create_asset_manager(load_console());
         let select_ext = create_asset_manager(load_select_ext());
         let ros_ext = create_asset_manager(load_ros_ext());
         let replication_engine = self.provision_replication_repo(Arc::clone(&storage))?;
-
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
                 internal_server_error!(
@@ -304,7 +332,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?);
         FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
-        FILE_CACHE.set_read_only(self.cfg.lock_file_config.role == InstanceRole::ReadOnly);
+        FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::ReadOnly);
         Ok(())
     }
 

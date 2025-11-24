@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::lock_file::LockFileConfig;
+use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
@@ -29,14 +30,6 @@ pub enum FailureAction {
     Abort,
 }
 
-#[derive(Debug, PartialEq, Clone, Default)]
-pub enum InstanceRole {
-    #[default]
-    Primary,
-    Secondary,
-    ReadOnly,
-}
-
 #[async_trait]
 pub trait LockFile {
     async fn is_locked(&self) -> bool;
@@ -54,7 +47,7 @@ struct ImplLockFile {
 
 pub(crate) struct LockFileBuilder {
     path_buf: PathBuf,
-    config: LockFileConfig,
+    config: Cfg,
 }
 impl LockFileBuilder {
     pub fn noop() -> BoxedLockFile {
@@ -64,11 +57,11 @@ impl LockFileBuilder {
     pub fn new(path_buf: PathBuf) -> Self {
         Self {
             path_buf,
-            config: LockFileConfig::default(),
+            config: Cfg::default(),
         }
     }
 
-    pub fn with_config(mut self, config: LockFileConfig) -> Self {
+    pub fn with_config(mut self, config: Cfg) -> Self {
         self.config = config;
         self
     }
@@ -77,7 +70,10 @@ impl LockFileBuilder {
         Self::from_config(self.path_buf, self.config)
     }
 
-    fn from_config(path: PathBuf, cfg: LockFileConfig) -> BoxedLockFile {
+    fn from_config(path: PathBuf, mut cfg: Cfg) -> BoxedLockFile {
+        let role = cfg.role;
+        let cfg = cfg.lock_file_config;
+
         // Atomic flag to signal the background task to stop
         let stop_on_drop = Arc::new(AtomicBool::new(false));
         let stop_flag = Arc::clone(&stop_on_drop);
@@ -91,16 +87,6 @@ impl LockFileBuilder {
             handle: tokio::spawn(async {}),
             state,
         });
-
-        if cfg.role == InstanceRole::ReadOnly {
-            // ReadOnly instances do not acquire locks
-            info!(
-                "ReadOnly instance, not acquiring lock file: {:?}",
-                file_path
-            );
-            this.state = Arc::new(RwLock::new(State::Locked));
-            return this;
-        }
 
         // for future use, we generate a unique id for the lock file
         let unique_id = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
@@ -158,7 +144,7 @@ impl LockFileBuilder {
                     break;
                 }
 
-                match cfg.role {
+                match role {
                     InstanceRole::Primary => {
                         // Primary instance acquires the lock immediately
                         info!("Primary instance acquiring lock file: {:?}", file_path);

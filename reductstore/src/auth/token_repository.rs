@@ -8,8 +8,7 @@ mod repo;
 use crate::auth::token_repository::disabled::NoAuthRepository;
 use crate::auth::token_repository::read_only::ReadOnlyTokenRepository;
 use crate::auth::token_repository::repo::TokenRepository;
-use crate::cfg::Cfg;
-use crate::lock_file::InstanceRole;
+use crate::cfg::{Cfg, InstanceRole};
 use chrono::{DateTime, Utc};
 use log::warn;
 use prost::Message;
@@ -220,7 +219,7 @@ impl TokenRepositoryBuilder {
     }
 
     pub fn build(self, config_path: PathBuf) -> BoxedTokenRepository {
-        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+        if self.cfg.role == InstanceRole::ReadOnly {
             return Box::new(ReadOnlyTokenRepository::new(
                 config_path,
                 self.cfg.api_token,

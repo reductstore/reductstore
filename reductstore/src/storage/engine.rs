@@ -1,12 +1,12 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 use crate::cfg::Cfg;
+use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::RwLock;
-use crate::core::thread_pool::GroupDepth::BUCKET;
+use crate::core::thread_pool::GroupDepth::{BUCKET, STORAGE};
 use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
 use crate::core::weak::Weak;
-use crate::lock_file::InstanceRole;
 use crate::storage::bucket::Bucket;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
@@ -17,6 +17,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::spawn;
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
@@ -295,56 +296,46 @@ impl StorageEngine {
     }
 
     pub fn sync_fs(&self) -> Result<(), ReductError> {
-        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
-            return Ok(());
-        }
-
-        let mut handlers = vec![];
-        let buckets = self.buckets.read()?.clone();
-        for (name, bucket) in buckets {
-            info!("Sync bucket '{}'", name);
-            handlers.push(bucket.sync_fs());
-        }
-
-        for handler in handlers {
-            match handler.wait() {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("Failed to sync bucket: {}", e);
-                }
-            }
-        }
-
+        self.compact().wait()?;
         FILE_CACHE.force_sync_all()?;
         Ok(())
     }
 
-    pub fn sync_fs2(&self) -> Result<(), ReductError> {
-        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
-            return Ok(());
+    /// Update index from WALs and remove them
+    pub fn compact(&self) -> TaskHandle<Result<(), ReductError>> {
+        if self.cfg.role == InstanceRole::ReadOnly {
+            return Ok(()).into();
         }
 
         let mut handlers = vec![];
-        let buckets = self.buckets.read()?.clone();
-        for (name, bucket) in buckets {
+        let Ok(buckets) = self.buckets.read() else {
+            return Ok(()).into();
+        };
+
+        for (name, bucket) in buckets.iter() {
             info!("Sync bucket '{}'", name);
             handlers.push(bucket.sync_fs());
         }
 
-        for handler in handlers {
-            match handler.wait() {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("Failed to sync bucket: {}", e);
+        unique(
+            &group_from_path(&self.data_path, STORAGE),
+            "compact storage",
+            move || {
+                for handler in handlers {
+                    match handler.wait() {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Failed to sync bucket: {}", e);
+                        }
+                    }
                 }
-            }
-        }
-
-        Ok(())
+                Ok(())
+            },
+        )
     }
 
     fn check_mode(&self) -> Result<(), ReductError> {
-        if self.cfg.lock_file_config.role == InstanceRole::ReadOnly {
+        if self.cfg.role == InstanceRole::ReadOnly {
             return Err(forbidden!(
                 "Cannot perform this operation in read-only mode"
             ));
@@ -355,7 +346,7 @@ impl StorageEngine {
     /// List directory and update bucket list
     fn update_bucket_list(&self) -> Result<(), ReductError> {
         let mut last_sync = self.last_replica_sync.write()?;
-        if self.cfg.lock_file_config.role != InstanceRole::ReadOnly
+        if self.cfg.role != InstanceRole::ReadOnly
             || last_sync.elapsed() < self.cfg.cs_config.sync_interval
         {
             // Only read-only instances need to update bucket list from backend

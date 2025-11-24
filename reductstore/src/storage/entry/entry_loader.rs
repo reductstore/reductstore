@@ -14,8 +14,8 @@ use log::{debug, error, info, trace, warn};
 use prost::Message;
 
 use crate::cfg::Cfg;
+use crate::cfg::InstanceRole::ReadOnly;
 use crate::core::file_cache::FILE_CACHE;
-use crate::lock_file::InstanceRole::ReadOnly;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
@@ -41,7 +41,7 @@ impl EntryLoader {
             match Self::try_restore_entry_from_index(path.clone(), options.clone(), cfg.clone()) {
                 Ok(entry) => Ok(entry),
                 Err(err) => {
-                    if cfg.lock_file_config.role == ReadOnly {
+                    if cfg.role == ReadOnly {
                         return Ok(None);
                     }
 
@@ -578,7 +578,7 @@ mod tests {
         let mut entry = entry(entry_settings.clone(), path.clone());
         write_stub_record(&mut entry, 1);
         write_stub_record(&mut entry, 2000010);
-        entry.sync_fs().unwrap(); // sync WALs
+        entry.compact().unwrap(); // sync WALs
 
         {
             let block_file_index = path.join(&entry.name).join(BLOCK_INDEX_FILE);
@@ -697,7 +697,7 @@ mod tests {
     fn test_recovery_with_orphan_block(path: PathBuf, entry_settings: EntrySettings) {
         let mut entry = entry(entry_settings.clone(), path.clone());
         write_stub_record(&mut entry, 1);
-        entry.sync_fs().unwrap();
+        entry.compact().unwrap();
 
         // Create a new block but don't add it to the index
         let mut bm = entry.block_manager.write().unwrap();

@@ -70,7 +70,10 @@ async fn launch_server() {
             lock_file: config_lock.clone(),
         };
 
-        tokio::spawn(periodical_sync_storage(components.storage.clone()));
+        tokio::spawn(periodical_compact_storage(
+            components.storage.clone(),
+            cfg.engine_config.compaction_interval,
+        ));
         tokio::spawn(shutdown_ctrl_c(ctx.clone()));
         #[cfg(unix)]
         tokio::spawn(shutdown_signal(ctx));
@@ -157,11 +160,10 @@ async fn shutdown_signal(ctx: ContextGuard) {
     ctx.shutdown()
 }
 
-async fn periodical_sync_storage(storage: Arc<StorageEngine>) {
-    let sync_interval = Duration::from_secs(30);
+async fn periodical_compact_storage(storage: Arc<StorageEngine>, sync_interval: Duration) {
     loop {
         tokio::time::sleep(sync_interval).await;
-        if let Err(e) = storage.sync_fs2() {
+        if let Err(e) = storage.compact().await {
             log::error!("Failed to sync storage: {}", e);
         }
     }

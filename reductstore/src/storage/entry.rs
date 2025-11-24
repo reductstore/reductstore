@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod entry_loader;
@@ -8,24 +8,6 @@ mod remove_records;
 pub(crate) mod update_labels;
 mod write_record;
 
-use crate::storage::block_manager::block_index::BlockIndex;
-use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
-use crate::storage::entry::entry_loader::EntryLoader;
-use crate::storage::proto::ts_to_us;
-use crate::storage::query::base::QueryOptions;
-use crate::storage::query::{build_query, spawn_query_task, QueryRx};
-use log::debug;
-use reduct_base::error::ReductError;
-use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
-use std::collections::{BTreeMap, HashMap, HashSet};
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock as AsyncRwLock;
-
-pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
-
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
@@ -33,10 +15,25 @@ use crate::core::thread_pool::{
     group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
 };
 use crate::core::weak::Weak;
-use crate::lock_file::InstanceRole;
+use crate::storage::block_manager::block_index::BlockIndex;
+use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
 use crate::storage::bucket::Bucket;
+use crate::storage::entry::entry_loader::EntryLoader;
+use crate::storage::proto::ts_to_us;
+use crate::storage::query::base::QueryOptions;
+use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 pub(crate) use io::record_reader::RecordReader;
+pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
+use log::debug;
+use reduct_base::error::ReductError;
+use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::{forbidden, internal_server_error, not_found};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock as AsyncRwLock;
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,
@@ -272,7 +269,8 @@ impl Entry {
         }
     }
 
-    pub fn sync_fs(&self) -> Result<(), ReductError> {
+    // Compacts the entry by saving the block manager cache on disk and update index from WALs
+    pub fn compact(&self) -> Result<(), ReductError> {
         let mut bm = self.block_manager.write()?;
         bm.save_cache_on_disk()
     }
