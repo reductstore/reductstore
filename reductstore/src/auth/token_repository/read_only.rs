@@ -2,21 +2,16 @@
 // Licensed under the Business Source License 1.1
 
 use crate::auth::proto::TokenRepo;
-use crate::auth::token_repository::repo::TokenRepository;
 use crate::auth::token_repository::TokenRepoCommon;
-use crate::auth::token_repository::{
-    parse_bearer_token, ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME,
-};
+use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
 use crate::core::file_cache::FILE_CACHE;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::{debug, error};
 use prost::Message;
-use rand::Rng;
 use reduct_base::error::ReductError;
+use reduct_base::forbidden;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
-use reduct_base::{conflict, forbidden, not_found, unauthorized, unprocessable_entity};
-use regex::Regex;
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;

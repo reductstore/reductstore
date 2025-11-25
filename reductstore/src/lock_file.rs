@@ -1,7 +1,6 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use async_trait::async_trait;
@@ -70,7 +69,7 @@ impl LockFileBuilder {
         Self::from_config(self.path_buf, self.config)
     }
 
-    fn from_config(path: PathBuf, mut cfg: Cfg) -> BoxedLockFile {
+    fn from_config(path: PathBuf, cfg: Cfg) -> BoxedLockFile {
         let role = cfg.role;
         let cfg = cfg.lock_file_config;
 
@@ -258,6 +257,7 @@ impl LockFile for NoopLockFile {
 mod tests {
     use super::*;
     use crate::backend::Backend;
+    use crate::cfg::lock_file::LockFileConfig;
     use crate::cfg::{Cfg, InstanceRole};
     use rstest::{fixture, rstest};
     use std::fs;

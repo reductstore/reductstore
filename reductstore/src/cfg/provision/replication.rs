@@ -7,7 +7,7 @@ use crate::replication::{ManageReplications, ReplicationRepoBuilder};
 use crate::storage::engine::StorageEngine;
 use log::{error, info, warn};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::replication_api::{ReplicationList, ReplicationSettings};
+use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;

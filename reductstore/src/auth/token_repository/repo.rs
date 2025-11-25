@@ -2,25 +2,22 @@
 // Licensed under the Business Source License 1.1
 
 use crate::auth::proto::TokenRepo;
-use crate::auth::token_repository::{parse_bearer_token, TokenRepoCommon};
+use crate::auth::token_repository::TokenRepoCommon;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
 use crate::core::file_cache::FILE_CACHE;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use log::{debug, warn};
+use log::debug;
 use prost::Message;
-use prost_wkt_types::Timestamp;
 use rand::Rng;
 use reduct_base::error::ReductError;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
-use reduct_base::{
-    bad_request, conflict, internal_server_error, not_found, unauthorized, unprocessable_entity,
-};
+use reduct_base::{conflict, internal_server_error, not_found, unprocessable_entity};
 use regex::Regex;
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::SystemTime;
 
 /// The TokenRepository trait is used to store and retrieve tokens.
 pub(super) struct TokenRepository {
@@ -464,6 +461,7 @@ mod tests {
 
     mod validate_token {
         use super::*;
+        use reduct_base::unauthorized;
         #[rstest]
         fn test_validate_token(mut repo: BoxedTokenRepository) {
             let value = repo

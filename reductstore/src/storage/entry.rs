@@ -17,7 +17,6 @@ use crate::core::thread_pool::{
 use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
-use crate::storage::bucket::Bucket;
 use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
@@ -27,8 +26,8 @@ pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
-use reduct_base::{forbidden, internal_server_error, not_found};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use reduct_base::{internal_server_error, not_found};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};

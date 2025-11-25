@@ -11,7 +11,6 @@ use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
-use crate::storage::entry::Entry;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
 use block_index::BlockIndex;
 use crc64fast::Digest;
