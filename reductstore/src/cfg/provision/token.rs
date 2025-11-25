@@ -205,8 +205,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_override_token(mut env_with_tokens: MockEnvGetter) {
-        let mut auth_repo =
-            create_token_repository(env_with_tokens.get("RS_DATA_PATH").unwrap().into(), "XXX");
+        let mut auth_repo = TokenRepositoryBuilder::new(Default::default())
+            .build(env_with_tokens.get("RS_DATA_PATH").unwrap().into());
         let _ = auth_repo
             .generate_token("token1", Permissions::default())
             .unwrap();

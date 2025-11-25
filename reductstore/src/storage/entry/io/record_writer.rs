@@ -265,6 +265,7 @@ mod tests {
 
     mod record_writer {
         use super::*;
+        use crate::cfg::Cfg;
         use crate::core::thread_pool::find_task_group;
         use crate::storage::block_manager::block_index::BlockIndex;
         use crate::storage::entry::tests::get_task_group;
@@ -429,6 +430,7 @@ mod tests {
             Arc::new(RwLock::new(BlockManager::new(
                 path.clone(),
                 BlockIndex::new(path.clone()),
+                Cfg::default().into(),
             )))
         }
 

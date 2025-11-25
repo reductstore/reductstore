@@ -85,7 +85,7 @@ impl StorageBackend for FileSystemBackend {
         vec![]
     }
 
-    fn remove_only_locally(&self, path: &Path) -> std::io::Result<()> {
+    fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()> {
         // do nothing because filesystem backend does not have a cache
         Ok(())
     }

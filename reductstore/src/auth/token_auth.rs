@@ -53,7 +53,9 @@ impl TokenAuthorization {
 mod tests {
     use super::*;
     use crate::auth::policy::{AnonymousPolicy, FullAccessPolicy};
-    use crate::auth::token_repository::create_token_repository;
+    use crate::auth::token_repository::BoxedTokenRepository;
+    use crate::auth::token_repository::TokenRepositoryBuilder;
+    use crate::cfg::Cfg;
     use tempfile::tempdir;
 
     #[test]
@@ -90,8 +92,12 @@ mod tests {
         assert!(result.is_ok());
     }
 
-    fn setup() -> (Box<dyn ManageTokens>, TokenAuthorization) {
-        let repo = create_token_repository(tempdir().unwrap().keep(), "test");
+    fn setup() -> (BoxedTokenRepository, TokenAuthorization) {
+        let cfg = Cfg {
+            api_token: "test".to_string(),
+            ..Cfg::default()
+        };
+        let repo = TokenRepositoryBuilder::new(cfg).build(tempdir().unwrap().keep());
         let auth = TokenAuthorization::new("test");
 
         (repo, auth)

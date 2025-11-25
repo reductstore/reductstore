@@ -58,7 +58,7 @@ impl StorageBackend for NoopBackend {
         Ok(None)
     }
 
-    fn remove_only_locally(&self, _path: &Path) -> std::io::Result<()> {
+    fn remove_from_local_cache(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 }

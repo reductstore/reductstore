@@ -116,6 +116,7 @@ impl Default for QueryOptions {
 pub(crate) mod tests {
     use super::*;
     use crate::backend::Backend;
+    use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::record::{Label, State as RecordState};
@@ -137,7 +138,11 @@ pub(crate) mod tests {
                 .try_build()
                 .unwrap(),
         );
-        let mut block_manager = BlockManager::new(dir.clone(), BlockIndex::new(dir.join("index")));
+        let mut block_manager = BlockManager::new(
+            dir.clone(),
+            BlockIndex::new(dir.join("index")),
+            Cfg::default().into(),
+        );
         let block_ref = block_manager.start_new_block(0, 10).unwrap();
 
         {

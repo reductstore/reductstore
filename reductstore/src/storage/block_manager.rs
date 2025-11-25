@@ -1154,7 +1154,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let mut bm = BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE)));
+        let mut bm = BlockManager::new(
+            path.clone(),
+            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            Cfg::default().into(),
+        );
         let block_ref = bm.start_new_block(block_id, 1024).unwrap().clone();
         {
             let mut block = block_ref.write().unwrap();

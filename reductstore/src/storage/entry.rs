@@ -391,10 +391,11 @@ mod tests {
             );
 
             bm.save_cache_on_disk().unwrap();
-            let entry = Entry::restore(path.join(entry.name), entry_settings, Cfg::default())
-                .wait()
-                .unwrap();
-
+            let entry =
+                Entry::restore(path.join(entry.name), entry_settings, Cfg::default().into())
+                    .wait()
+                    .unwrap()
+                    .unwrap();
             let info = entry.info().unwrap();
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
@@ -605,7 +606,7 @@ mod tests {
                     max_block_size: 100000,
                     max_block_records: 2,
                 },
-                Cfg::default(),
+                Cfg::default().into(),
             )
             .unwrap();
 
@@ -640,7 +641,7 @@ mod tests {
 
     #[fixture]
     pub(super) fn entry(entry_settings: EntrySettings, path: PathBuf) -> Entry {
-        Entry::try_new("entry", path.clone(), entry_settings, Cfg::default()).unwrap()
+        Entry::try_new("entry", path.clone(), entry_settings, Cfg::default().into()).unwrap()
     }
 
     #[fixture]

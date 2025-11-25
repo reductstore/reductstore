@@ -390,6 +390,7 @@ mod tests {
             fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
             fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
             fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
+            fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
         }
 
     }

@@ -258,6 +258,7 @@ impl LockFile for NoopLockFile {
 mod tests {
     use super::*;
     use crate::backend::Backend;
+    use crate::cfg::{Cfg, InstanceRole};
     use rstest::{fixture, rstest};
     use std::fs;
     use tempfile::tempdir;
@@ -297,11 +298,14 @@ mod tests {
     #[tokio::test]
     async fn test_lock_file_timeout_abort(lock_file_path: PathBuf) {
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                timeout: Duration::from_secs(2),
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    timeout: Duration::from_secs(2),
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
             .build();
         fs::write(&lock_file_path, "dummy").unwrap();
 
@@ -326,12 +330,15 @@ mod tests {
     #[tokio::test]
     async fn test_lock_file_timeout_proceed(lock_file_path: PathBuf) {
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                timeout: Duration::from_secs(2),
-                failure_action: FailureAction::Proceed,
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    timeout: Duration::from_secs(2),
+                    failure_action: FailureAction::Proceed,
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
             .build();
         fs::write(&lock_file_path, "dummy").unwrap();
 
@@ -356,19 +363,23 @@ mod tests {
     #[tokio::test]
     async fn test_secondary_instance_waits(lock_file_path: PathBuf) {
         let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                role: InstanceRole::Primary,
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
             .build();
 
         let secondary_lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                role: InstanceRole::Secondary,
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    ..Default::default()
+                },
+                InstanceRole::Secondary,
+            ))
             .build();
 
         // Wait for the primary to acquire the lock
@@ -403,11 +414,14 @@ mod tests {
     #[tokio::test]
     async fn test_ttl_removes_stale_lock(lock_file_path: PathBuf) {
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                ttl: Duration::from_secs(1),
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    ttl: Duration::from_secs(1),
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
             .build();
         fs::write(&lock_file_path, "dummy").unwrap();
 
@@ -437,10 +451,13 @@ mod tests {
     #[tokio::test]
     async fn test_drops_lock_file(lock_file_path: PathBuf) {
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
             .build();
 
         // Wait for the lock to be acquired
@@ -473,5 +490,13 @@ mod tests {
 
         let filepath = dir.join("test.lock");
         filepath
+    }
+
+    fn test_cfg(lock_file_config: LockFileConfig, role: InstanceRole) -> Cfg {
+        Cfg {
+            lock_file_config,
+            role,
+            ..Default::default()
+        }
     }
 }

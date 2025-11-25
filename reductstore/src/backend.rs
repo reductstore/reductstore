@@ -51,7 +51,7 @@ pub(crate) trait StorageBackend {
 
     fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
 
-    fn remove_only_locally(&self, path: &Path) -> std::io::Result<()>;
+    fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
 }
 
 pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;
@@ -275,7 +275,7 @@ impl Backend {
     /// Remove the file only from local cache, without affecting remote storage.
     /// This is useful for initiating re-download of the file on next access.
     pub fn remove_from_local_cache<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
-        self.backend.remove_only_locally(path.as_ref())
+        self.backend.remove_from_local_cache(path.as_ref())
     }
 }
 
@@ -685,6 +685,7 @@ mod tests {
             fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
             fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
             fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
+            fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
         }
 
     }

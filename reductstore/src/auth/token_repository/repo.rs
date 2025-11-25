@@ -267,13 +267,13 @@ impl ManageTokens for TokenRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-
+    use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
     use reduct_base::{bad_request, conflict, unprocessable_entity};
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_init_token(repo: Box<dyn ManageTokens>) {
+    fn test_init_token(repo: BoxedTokenRepository) {
         let token = repo.validate_token(Some("Bearer init-token")).unwrap();
         assert_eq!(token.name, "init-token");
         assert_eq!(token.value, "init-token");
@@ -288,7 +288,7 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_create_empty_token(mut repo: Box<dyn ManageTokens>) {
+        fn test_create_empty_token(mut repo: BoxedTokenRepository) {
             let token = repo.generate_token(
                 "",
                 Permissions {
@@ -305,7 +305,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_create_existing_token(mut repo: Box<dyn ManageTokens>) {
+        fn test_create_existing_token(mut repo: BoxedTokenRepository) {
             let token = repo.generate_token(
                 "test",
                 Permissions {
@@ -319,7 +319,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_create_token(mut repo: Box<dyn ManageTokens>) {
+        fn test_create_token(mut repo: BoxedTokenRepository) {
             let token = repo
                 .generate_token(
                     "test-1",
@@ -338,7 +338,7 @@ mod tests {
 
         #[rstest]
         fn test_create_token_persistent(path: PathBuf) {
-            let mut repo = create_token_repository(path.clone(), "test");
+            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
             repo.generate_token(
                 "test",
                 Permissions {
@@ -349,12 +349,12 @@ mod tests {
             )
             .unwrap();
 
-            let repo = create_token_repository(path.clone(), "test");
+            let repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
             assert_eq!(repo.get_token("test").unwrap().name, "test");
         }
 
         #[rstest]
-        fn test_create_token_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
+        fn test_create_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
             let token = disabled_repo.generate_token(
                 "test",
                 Permissions {
@@ -374,7 +374,7 @@ mod tests {
         #[case("bucket-*", None)]
         #[case("%!", Some(unprocessable_entity!("Permission can contain only bucket names or wildcard '*', got '%!'")))]
         fn test_create_token_check_format_read(
-            mut repo: Box<dyn ManageTokens>,
+            mut repo: BoxedTokenRepository,
             #[case] bucket: &str,
             #[case] expected: Option<ReductError>,
         ) {
@@ -397,7 +397,7 @@ mod tests {
         #[case("bucket-*", None)]
         #[case("%!", Some(unprocessable_entity!("Permission can contain only bucket names or wildcard '*', got '%!'")))]
         fn test_create_token_check_format_write(
-            mut repo: Box<dyn ManageTokens>,
+            mut repo: BoxedTokenRepository,
             #[case] bucket: &str,
             #[case] expected: Option<ReductError>,
         ) {
@@ -417,20 +417,20 @@ mod tests {
     mod find_token {
         use super::*;
         #[rstest]
-        fn test_find_by_name(repo: Box<dyn ManageTokens>) {
+        fn test_find_by_name(repo: BoxedTokenRepository) {
             let token = repo.get_token("test").unwrap();
             assert_eq!(token.name, "test");
             assert!(token.value.starts_with("test-"));
         }
 
         #[rstest]
-        fn test_find_by_name_not_found(repo: Box<dyn ManageTokens>) {
+        fn test_find_by_name_not_found(repo: BoxedTokenRepository) {
             let token = repo.get_token("test-1");
             assert_eq!(token, Err(not_found!("Token 'test-1' doesn't exist")));
         }
 
         #[rstest]
-        fn test_find_by_name_no_init_token(disabled_repo: Box<dyn ManageTokens>) {
+        fn test_find_by_name_no_init_token(disabled_repo: BoxedTokenRepository) {
             let token = disabled_repo.get_token("test");
             assert_eq!(token, Err(bad_request!("Authentication is disabled")));
         }
@@ -439,7 +439,7 @@ mod tests {
     mod token_list {
         use super::*;
         #[rstest]
-        fn test_get_token_list(repo: Box<dyn ManageTokens>) {
+        fn test_get_token_list(repo: BoxedTokenRepository) {
             let token_list = repo.get_token_list().unwrap();
 
             assert_eq!(token_list.len(), 2);
@@ -456,7 +456,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_get_token_list_no_init_token(disabled_repo: Box<dyn ManageTokens>) {
+        fn test_get_token_list_no_init_token(disabled_repo: BoxedTokenRepository) {
             let token_list = disabled_repo.get_token_list().unwrap();
             assert_eq!(token_list, vec![]);
         }
@@ -465,7 +465,7 @@ mod tests {
     mod validate_token {
         use super::*;
         #[rstest]
-        fn test_validate_token(mut repo: Box<dyn ManageTokens>) {
+        fn test_validate_token(mut repo: BoxedTokenRepository) {
             let value = repo
                 .generate_token(
                     "test-1",
@@ -498,13 +498,13 @@ mod tests {
             );
 
             #[rstest]
-            fn test_validate_token_not_found(repo: Box<dyn ManageTokens>) {
+            fn test_validate_token_not_found(repo: BoxedTokenRepository) {
                 let token = repo.validate_token(Some("Bearer invalid-value"));
                 assert_eq!(token, Err(unauthorized!("Invalid token")));
             }
 
             #[rstest]
-            fn test_validate_token_no_init_token(disabled_repo: Box<dyn ManageTokens>) {
+            fn test_validate_token_no_init_token(disabled_repo: BoxedTokenRepository) {
                 let placeholder = disabled_repo.validate_token(Some("invalid-value")).unwrap();
 
                 assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
@@ -517,13 +517,13 @@ mod tests {
     mod remove_token {
         use super::*;
         #[rstest]
-        fn test_remove_token(mut repo: Box<dyn ManageTokens>) {
+        fn test_remove_token(mut repo: BoxedTokenRepository) {
             let token = repo.remove_token("test").unwrap();
             assert_eq!(token, ());
         }
 
         #[rstest]
-        fn test_remove_init_token(mut repo: Box<dyn ManageTokens>) {
+        fn test_remove_init_token(mut repo: BoxedTokenRepository) {
             let token = repo.remove_token("init-token");
             assert_eq!(
                 token,
@@ -532,14 +532,15 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_token_not_found(mut repo: Box<dyn ManageTokens>) {
+        fn test_remove_token_not_found(mut repo: BoxedTokenRepository) {
             let token = repo.remove_token("test-1");
             assert_eq!(token, Err(not_found!("Token 'test-1' doesn't exist")));
         }
 
         #[rstest]
         fn test_remove_token_persistent(path: PathBuf, init_token: &str) {
-            let mut repo = create_token_repository(path.clone(), init_token);
+            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+            let _ = repo.generate_token(init_token, Permissions::default());
             repo.generate_token(
                 "test",
                 Permissions {
@@ -552,20 +553,20 @@ mod tests {
 
             repo.remove_token("test").unwrap();
 
-            let repo = create_token_repository(path, init_token);
+            let repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
             let token = repo.get_token("test");
 
             assert_eq!(token, Err(not_found!("Token 'test' doesn't exist")));
         }
 
         #[rstest]
-        fn test_remove_token_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
+        fn test_remove_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
             let token = disabled_repo.remove_token("test");
             assert_eq!(token, Ok(()));
         }
 
         #[rstest]
-        fn test_remove_provisioned_token(mut repo: Box<dyn ManageTokens>) {
+        fn test_remove_provisioned_token(mut repo: BoxedTokenRepository) {
             let token = repo.get_mut_token("test").unwrap();
             token.is_provisioned = true;
 
@@ -578,7 +579,7 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_rename_bucket(mut repo: Box<dyn ManageTokens>) {
+        fn test_rename_bucket(mut repo: BoxedTokenRepository) {
             repo.generate_token(
                 "test-2",
                 Permissions {
@@ -599,7 +600,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_rename_bucket_not_exit(mut repo: Box<dyn ManageTokens>) {
+        fn test_rename_bucket_not_exit(mut repo: BoxedTokenRepository) {
             repo.rename_bucket("bucket-1", "bucket-2").unwrap();
 
             let token = repo.get_token("test").unwrap();
@@ -611,7 +612,8 @@ mod tests {
 
         #[rstest]
         fn test_rename_bucket_persistent(path: PathBuf, init_token: &str) {
-            let mut repo = create_token_repository(path.clone(), init_token);
+            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+            let _ = repo.generate_token(init_token, Permissions::default());
             repo.generate_token(
                 "test-2",
                 Permissions {
@@ -624,7 +626,7 @@ mod tests {
 
             repo.rename_bucket("bucket-1", "bucket-2").unwrap();
 
-            let repo = create_token_repository(path.clone(), init_token);
+            let repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
             let token = repo.get_token("test-2").unwrap();
             let permissions = token.permissions.as_ref().unwrap();
 
@@ -633,7 +635,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_rename_bucket_no_init_token(mut disabled_repo: Box<dyn ManageTokens>) {
+        fn test_rename_bucket_no_init_token(mut disabled_repo: BoxedTokenRepository) {
             let result = disabled_repo.rename_bucket("bucket-1", "bucket-2");
             assert!(result.is_ok());
         }
@@ -650,22 +652,29 @@ mod tests {
     }
 
     #[fixture]
-    fn repo(path: PathBuf, init_token: &str) -> Box<dyn ManageTokens> {
-        let mut repo = create_token_repository(path, init_token);
-        repo.generate_token(
+    fn repo(path: PathBuf, init_token: &str) -> BoxedTokenRepository {
+        let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+        let _ = repo.generate_token(
+            init_token,
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        );
+        let _ = repo.generate_token(
             "test",
             Permissions {
                 full_access: true,
                 read: vec![],
                 write: vec![],
             },
-        )
-        .unwrap();
+        );
         repo
     }
 
     #[fixture]
-    fn disabled_repo(path: PathBuf) -> Box<dyn ManageTokens> {
-        create_token_repository(path, "")
+    fn disabled_repo(path: PathBuf) -> BoxedTokenRepository {
+        TokenRepositoryBuilder::new(Default::default()).build(path.clone())
     }
 }
