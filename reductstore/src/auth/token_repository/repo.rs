@@ -270,7 +270,7 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_init_token(repo: BoxedTokenRepository) {
+    fn test_init_token(mut repo: BoxedTokenRepository) {
         let token = repo.validate_token(Some("Bearer init-token")).unwrap();
         assert_eq!(token.name, "init-token");
         assert_eq!(token.value, "init-token");
@@ -346,7 +346,7 @@ mod tests {
             )
             .unwrap();
 
-            let repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
             assert_eq!(repo.get_token("test").unwrap().name, "test");
         }
 
@@ -414,20 +414,20 @@ mod tests {
     mod find_token {
         use super::*;
         #[rstest]
-        fn test_find_by_name(repo: BoxedTokenRepository) {
+        fn test_find_by_name(mut repo: BoxedTokenRepository) {
             let token = repo.get_token("test").unwrap();
             assert_eq!(token.name, "test");
             assert!(token.value.starts_with("test-"));
         }
 
         #[rstest]
-        fn test_find_by_name_not_found(repo: BoxedTokenRepository) {
+        fn test_find_by_name_not_found(mut repo: BoxedTokenRepository) {
             let token = repo.get_token("test-1");
             assert_eq!(token, Err(not_found!("Token 'test-1' doesn't exist")));
         }
 
         #[rstest]
-        fn test_find_by_name_no_init_token(disabled_repo: BoxedTokenRepository) {
+        fn test_find_by_name_no_init_token(mut disabled_repo: BoxedTokenRepository) {
             let token = disabled_repo.get_token("test");
             assert_eq!(token, Err(bad_request!("Authentication is disabled")));
         }
@@ -436,7 +436,7 @@ mod tests {
     mod token_list {
         use super::*;
         #[rstest]
-        fn test_get_token_list(repo: BoxedTokenRepository) {
+        fn test_get_token_list(mut repo: BoxedTokenRepository) {
             let token_list = repo.get_token_list().unwrap();
 
             assert_eq!(token_list.len(), 2);
@@ -453,7 +453,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_get_token_list_no_init_token(disabled_repo: BoxedTokenRepository) {
+        fn test_get_token_list_no_init_token(mut disabled_repo: BoxedTokenRepository) {
             let token_list = disabled_repo.get_token_list().unwrap();
             assert_eq!(token_list, vec![]);
         }
@@ -496,13 +496,13 @@ mod tests {
             );
 
             #[rstest]
-            fn test_validate_token_not_found(repo: BoxedTokenRepository) {
+            fn test_validate_token_not_found(mut repo: BoxedTokenRepository) {
                 let token = repo.validate_token(Some("Bearer invalid-value"));
                 assert_eq!(token, Err(unauthorized!("Invalid token")));
             }
 
             #[rstest]
-            fn test_validate_token_no_init_token(disabled_repo: BoxedTokenRepository) {
+            fn test_validate_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
                 let placeholder = disabled_repo.validate_token(Some("invalid-value")).unwrap();
 
                 assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
@@ -551,7 +551,7 @@ mod tests {
 
             repo.remove_token("test").unwrap();
 
-            let repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
             let token = repo.get_token("test");
 
             assert_eq!(token, Err(not_found!("Token 'test' doesn't exist")));
@@ -624,7 +624,7 @@ mod tests {
 
             repo.rename_bucket("bucket-1", "bucket-2").unwrap();
 
-            let repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
             let token = repo.get_token("test-2").unwrap();
             let permissions = token.permissions.as_ref().unwrap();
 

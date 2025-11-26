@@ -139,7 +139,7 @@ mod tests {
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
-        let repo = components.token_repo.read().await;
+        let mut repo = components.token_repo.write().await;
         let token1 = repo.get_token("token1").unwrap().clone();
         assert_eq!(token1.value, "TOKEN");
         assert!(token1.is_provisioned);
@@ -172,7 +172,7 @@ mod tests {
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
-        let repo = components.token_repo.read().await;
+        let mut repo = components.token_repo.write().await;
         let token1 = repo.get_token("token1").unwrap().clone();
         assert_eq!(token1.value, "TOKEN");
         assert!(token1.is_provisioned);
@@ -197,7 +197,7 @@ mod tests {
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
-        let repo = components.token_repo.read().await;
+        let mut repo = components.token_repo.write().await;
         let err = repo.get_token("token1").err().unwrap();
         assert_eq!(err, not_found!("Token 'token1' doesn't exist"));
     }
@@ -222,7 +222,7 @@ mod tests {
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
-        let repo = components.token_repo.read().await;
+        let mut repo = components.token_repo.write().await;
         let token = repo.get_token("token1").unwrap();
         assert_eq!(token.value, "TOKEN");
     }

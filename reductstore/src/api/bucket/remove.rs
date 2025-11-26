@@ -68,7 +68,7 @@ mod tests {
         let components = keeper.get_anonymous().await.unwrap();
         let token = components
             .token_repo
-            .read()
+            .write()
             .await
             .get_token("test")
             .unwrap()
@@ -89,7 +89,7 @@ mod tests {
         let components = keeper.get_anonymous().await.unwrap();
         let token = components
             .token_repo
-            .read()
+            .write()
             .await
             .get_token("test")
             .unwrap()

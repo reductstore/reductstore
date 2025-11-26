@@ -60,23 +60,23 @@ mod tests {
 
     #[test]
     fn test_anonymous_policy() {
-        let (repo, auth) = setup();
-        let result = auth.check(Some("invalid"), repo.as_ref(), AnonymousPolicy {});
+        let (mut repo, auth) = setup();
+        let result = auth.check(Some("invalid"), repo.as_mut(), AnonymousPolicy {});
 
         assert!(result.is_ok());
 
-        let result = auth.check(Some("Bearer invalid"), repo.as_ref(), AnonymousPolicy {});
+        let result = auth.check(Some("Bearer invalid"), repo.as_mut(), AnonymousPolicy {});
 
         assert!(result.is_ok());
 
-        let result = auth.check(Some("Bearer test"), repo.as_ref(), AnonymousPolicy {});
+        let result = auth.check(Some("Bearer test"), repo.as_mut(), AnonymousPolicy {});
         assert!(result.is_ok());
     }
 
     #[test]
     fn test_full_access_policy() {
-        let (repo, auth) = setup();
-        let result = auth.check(Some("invalid"), repo.as_ref(), FullAccessPolicy {});
+        let (mut repo, auth) = setup();
+        let result = auth.check(Some("invalid"), repo.as_mut(), FullAccessPolicy {});
 
         assert_eq!(
             result,
@@ -85,10 +85,10 @@ mod tests {
             ))
         );
 
-        let result = auth.check(Some("Bearer invalid"), repo.as_ref(), FullAccessPolicy {});
+        let result = auth.check(Some("Bearer invalid"), repo.as_mut(), FullAccessPolicy {});
         assert_eq!(result, Err(ReductError::unauthorized("Invalid token")));
 
-        let result = auth.check(Some("Bearer test"), repo.as_ref(), FullAccessPolicy {});
+        let result = auth.check(Some("Bearer test"), repo.as_mut(), FullAccessPolicy {});
         assert!(result.is_ok());
     }
 

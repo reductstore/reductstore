@@ -58,6 +58,7 @@ impl ReadOnlyTokenRepository {
     fn load_repo(&self) -> Result<HashMap<String, Token>, ReductError> {
         let api_token = self.cfg.api_token.clone();
 
+        FILE_CACHE.discard_recursive(&self.config_path)?; // ensure we update it from backend
         let lock = FILE_CACHE.read(&self.config_path, SeekFrom::Start(0));
         let mut repo = HashMap::new();
         match lock {
