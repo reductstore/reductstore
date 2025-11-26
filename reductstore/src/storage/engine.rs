@@ -4,7 +4,7 @@ use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::RwLock;
-use crate::core::thread_pool::GroupDepth::{BUCKET, STORAGE};
+use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, try_unique, unique, TaskHandle};
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
