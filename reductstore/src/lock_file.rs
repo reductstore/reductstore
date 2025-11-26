@@ -159,9 +159,7 @@ impl LockFileBuilder {
                             info!("Secondary instance could not acquire lock file (already held by primary): {:?}", file_path);
                         }
                     }
-                    InstanceRole::ReadOnly => {
-                        panic!("ReadOnly instances cannot acquire lock files");
-                    }
+                    InstanceRole::ReadOnly | InstanceRole::Standalone => {}
                 }
 
                 if *state_clone.read().await == State::Locked {

@@ -106,6 +106,7 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
     /// # Returns
     ///
     /// The number of entries in the cache.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.store.len()
     }

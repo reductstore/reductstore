@@ -15,7 +15,6 @@ use prost_wkt_types::Timestamp;
 use reduct_base::error::ReductError;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
 use reduct_base::{not_found, unauthorized};
-use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
 

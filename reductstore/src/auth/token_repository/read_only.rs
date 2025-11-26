@@ -133,8 +133,8 @@ impl TokenRepoCommon for ReadOnlyTokenRepository {
 impl ManageTokens for ReadOnlyTokenRepository {
     fn generate_token(
         &mut self,
-        name: &str,
-        permissions: Permissions,
+        _name: &str,
+        _permissions: Permissions,
     ) -> Result<TokenCreateResponse, ReductError> {
         Err(forbidden!("Cannot generate token in read-only mode"))
     }
@@ -144,7 +144,7 @@ impl ManageTokens for ReadOnlyTokenRepository {
         TokenRepoCommon::get_token(self, name)
     }
 
-    fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError> {
+    fn get_mut_token(&mut self, _name: &str) -> Result<&mut Token, ReductError> {
         Err(forbidden!("Cannot generate token in read-only mode"))
     }
 
@@ -160,15 +160,15 @@ impl ManageTokens for ReadOnlyTokenRepository {
         TokenRepoCommon::validate_token(self, header)
     }
 
-    fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
+    fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
         Err(forbidden!("Cannot generate token in read-only mode"))
     }
 
-    fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError> {
+    fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
         Err(forbidden!("Cannot generate token in read-only mode"))
     }
 
-    fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
+    fn rename_bucket(&mut self, _old_name: &str, _new_name: &str) -> Result<(), ReductError> {
         Err(forbidden!("Cannot generate token in read-only mode"))
     }
 }

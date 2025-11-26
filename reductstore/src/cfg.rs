@@ -47,6 +47,7 @@ pub const DEFAULT_CACHED_QUERIES_TTL: u64 = 600; // seconds
 #[derive(Debug, PartialEq, Clone, Default)]
 pub enum InstanceRole {
     #[default]
+    Standalone,
     Primary,
     Secondary,
     ReadOnly,
@@ -137,6 +138,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             .to_lowercase()
             .as_str()
         {
+            "standalone" => InstanceRole::Standalone,
             "primary" => InstanceRole::Primary,
             "secondary" => InstanceRole::Secondary,
             "readonly" => InstanceRole::ReadOnly,
@@ -221,7 +223,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub fn build_lock_file(&self) -> Result<BoxedLockFile, ReductError> {
         let data_path = self.get_data_path()?;
 
-        if self.cfg.role == InstanceRole::ReadOnly {
+        if self.cfg.role == InstanceRole::ReadOnly || self.cfg.role == InstanceRole::Standalone {
             return Ok(LockFileBuilder::noop());
         }
 
@@ -729,19 +731,6 @@ mod tests {
         env_getter.expect_all().returning(|| BTreeMap::new());
         let parser = CfgParser::from_env(env_getter, "0.0.0");
         parser.build().unwrap();
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_build_lock_file_disabled(mut env_getter: MockEnvGetter) {
-        env_getter
-            .expect_get()
-            .return_const(Err(VarError::NotPresent));
-
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
-
-        let lock_file = parser.build_lock_file().unwrap();
-        assert!(lock_file.is_locked().await);
     }
 
     #[rstest]

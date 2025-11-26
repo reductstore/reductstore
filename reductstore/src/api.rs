@@ -447,7 +447,7 @@ mod tests {
     pub(crate) async fn keeper() -> Arc<StateKeeper> {
         let cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
-            api_token: "inti-token".to_string(),
+            api_token: "init-token".to_string(),
             ..Cfg::default()
         };
 

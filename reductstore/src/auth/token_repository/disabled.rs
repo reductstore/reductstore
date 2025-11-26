@@ -64,3 +64,68 @@ impl ManageTokens for NoAuthRepository {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
+    use reduct_base::bad_request;
+    use rstest::{fixture, rstest};
+    use std::path::PathBuf;
+    use tempfile::tempdir;
+
+    #[rstest]
+    fn test_create_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
+        let token = disabled_repo.generate_token(
+            "test",
+            Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            },
+        );
+        assert_eq!(token, Err(bad_request!("Authentication is disabled")));
+    }
+
+    #[rstest]
+    fn test_find_by_name_no_init_token(mut disabled_repo: BoxedTokenRepository) {
+        let token = disabled_repo.get_token("test");
+        assert_eq!(token, Err(bad_request!("Authentication is disabled")));
+    }
+
+    #[rstest]
+    fn test_get_token_list_no_init_token(mut disabled_repo: BoxedTokenRepository) {
+        let token_list = disabled_repo.get_token_list().unwrap();
+        assert_eq!(token_list, vec![]);
+    }
+
+    #[rstest]
+    fn test_validate_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
+        let placeholder = disabled_repo.validate_token(Some("invalid-value")).unwrap();
+        assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
+        assert_eq!(placeholder.value, "");
+        assert_eq!(placeholder.permissions.unwrap().full_access, true);
+    }
+
+    #[rstest]
+    fn test_remove_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
+        let token = disabled_repo.remove_token("test");
+        assert_eq!(token, Ok(()));
+    }
+
+    #[rstest]
+    fn test_rename_bucket_no_init_token(mut disabled_repo: BoxedTokenRepository) {
+        let result = disabled_repo.rename_bucket("bucket-1", "bucket-2");
+        assert!(result.is_ok());
+    }
+
+    #[fixture]
+    fn path() -> PathBuf {
+        tempdir().unwrap().keep()
+    }
+
+    #[fixture]
+    fn disabled_repo(path: PathBuf) -> BoxedTokenRepository {
+        TokenRepositoryBuilder::new(Default::default()).build(path.clone())
+    }
+}

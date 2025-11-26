@@ -265,6 +265,8 @@ impl ManageTokens for TokenRepository {
 mod tests {
     use super::*;
     use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
+    use crate::backend::Backend;
+    use crate::cfg::Cfg;
     use reduct_base::{bad_request, conflict, unprocessable_entity};
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
@@ -334,8 +336,12 @@ mod tests {
         }
 
         #[rstest]
-        fn test_create_token_persistent(path: PathBuf) {
-            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+        fn test_create_token_persistent(path: PathBuf, init_token: &str) {
+            let cfg = Cfg {
+                api_token: init_token.to_string(),
+                ..Default::default()
+            };
+            let mut repo = TokenRepositoryBuilder::new(cfg.clone()).build(path.clone());
             repo.generate_token(
                 "test",
                 Permissions {
@@ -346,22 +352,8 @@ mod tests {
             )
             .unwrap();
 
-            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+            let mut repo = TokenRepositoryBuilder::new(cfg).build(path.clone());
             assert_eq!(repo.get_token("test").unwrap().name, "test");
-        }
-
-        #[rstest]
-        fn test_create_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-            let token = disabled_repo.generate_token(
-                "test",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
-                },
-            );
-
-            assert_eq!(token, Err(bad_request!("Authentication is disabled")));
         }
 
         #[rstest]
@@ -425,12 +417,6 @@ mod tests {
             let token = repo.get_token("test-1");
             assert_eq!(token, Err(not_found!("Token 'test-1' doesn't exist")));
         }
-
-        #[rstest]
-        fn test_find_by_name_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-            let token = disabled_repo.get_token("test");
-            assert_eq!(token, Err(bad_request!("Authentication is disabled")));
-        }
     }
 
     mod token_list {
@@ -450,12 +436,6 @@ mod tests {
                     write: vec![],
                 })
             );
-        }
-
-        #[rstest]
-        fn test_get_token_list_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-            let token_list = disabled_repo.get_token_list().unwrap();
-            assert_eq!(token_list, vec![]);
         }
     }
 
@@ -500,15 +480,6 @@ mod tests {
                 let token = repo.validate_token(Some("Bearer invalid-value"));
                 assert_eq!(token, Err(unauthorized!("Invalid token")));
             }
-
-            #[rstest]
-            fn test_validate_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-                let placeholder = disabled_repo.validate_token(Some("invalid-value")).unwrap();
-
-                assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
-                assert_eq!(placeholder.value, "");
-                assert_eq!(placeholder.permissions.unwrap().full_access, true);
-            }
         }
     }
 
@@ -536,8 +507,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_token_persistent(path: PathBuf, init_token: &str) {
-            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+        fn test_remove_token_persistent(path: PathBuf, init_token: &str, cfg: Cfg) {
+            let mut repo = TokenRepositoryBuilder::new(cfg.clone()).build(path.clone());
             let _ = repo.generate_token(init_token, Permissions::default());
             repo.generate_token(
                 "test",
@@ -551,16 +522,10 @@ mod tests {
 
             repo.remove_token("test").unwrap();
 
-            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+            let mut repo = TokenRepositoryBuilder::new(cfg).build(path.clone());
             let token = repo.get_token("test");
 
             assert_eq!(token, Err(not_found!("Token 'test' doesn't exist")));
-        }
-
-        #[rstest]
-        fn test_remove_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-            let token = disabled_repo.remove_token("test");
-            assert_eq!(token, Ok(()));
         }
 
         #[rstest]
@@ -609,8 +574,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_rename_bucket_persistent(path: PathBuf, init_token: &str) {
-            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+        fn test_rename_bucket_persistent(path: PathBuf, init_token: &str, cfg: Cfg) {
+            let mut repo = TokenRepositoryBuilder::new(cfg.clone()).build(path.clone());
             let _ = repo.generate_token(init_token, Permissions::default());
             repo.generate_token(
                 "test-2",
@@ -624,18 +589,12 @@ mod tests {
 
             repo.rename_bucket("bucket-1", "bucket-2").unwrap();
 
-            let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+            let mut repo = TokenRepositoryBuilder::new(cfg).build(path.clone());
             let token = repo.get_token("test-2").unwrap();
             let permissions = token.permissions.as_ref().unwrap();
 
             assert_eq!(permissions.read, vec!["bucket-2".to_string()]);
             assert_eq!(permissions.write, vec!["bucket-2".to_string()]);
-        }
-
-        #[rstest]
-        fn test_rename_bucket_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-            let result = disabled_repo.rename_bucket("bucket-1", "bucket-2");
-            assert!(result.is_ok());
         }
     }
 
@@ -650,16 +609,33 @@ mod tests {
     }
 
     #[fixture]
-    fn repo(path: PathBuf, init_token: &str) -> BoxedTokenRepository {
-        let mut repo = TokenRepositoryBuilder::new(Default::default()).build(path.clone());
+    fn cfg(init_token: &str) -> Cfg {
+        Cfg {
+            api_token: init_token.to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[fixture]
+    fn repo(path: PathBuf, cfg: Cfg) -> BoxedTokenRepository {
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .unwrap(),
+        );
+
+        let mut repo = TokenRepositoryBuilder::new(cfg.clone()).build(path.clone());
+
         let _ = repo.generate_token(
-            init_token,
+            cfg.api_token.as_str(),
             Permissions {
                 full_access: true,
                 read: vec![],
                 write: vec![],
             },
         );
+
         let _ = repo.generate_token(
             "test",
             Permissions {
@@ -668,11 +644,7 @@ mod tests {
                 write: vec![],
             },
         );
-        repo
-    }
 
-    #[fixture]
-    fn disabled_repo(path: PathBuf) -> BoxedTokenRepository {
-        TokenRepositoryBuilder::new(Default::default()).build(path.clone())
+        repo
     }
 }

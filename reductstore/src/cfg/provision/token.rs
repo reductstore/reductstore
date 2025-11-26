@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::auth::token_repository::{BoxedTokenRepository, ManageTokens, TokenRepositoryBuilder};
+use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use log::{error, info, warn};
@@ -105,6 +105,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 mod tests {
     use super::*;
     use crate::cfg::tests::MockEnvGetter;
+    use crate::cfg::Cfg;
     use mockall::predicate::eq;
     use reduct_base::error::ReductError;
     use reduct_base::not_found;
@@ -205,8 +206,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_override_token(mut env_with_tokens: MockEnvGetter) {
-        let mut auth_repo = TokenRepositoryBuilder::new(Default::default())
-            .build(env_with_tokens.get("RS_DATA_PATH").unwrap().into());
+        let mut auth_repo = TokenRepositoryBuilder::new(Cfg {
+            api_token: "init".to_string(),
+            ..Default::default()
+        })
+        .build(env_with_tokens.get("RS_DATA_PATH").unwrap().into());
         let _ = auth_repo
             .generate_token("token1", Permissions::default())
             .unwrap();

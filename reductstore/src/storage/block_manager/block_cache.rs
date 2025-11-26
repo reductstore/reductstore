@@ -60,6 +60,7 @@ impl BlockCache {
         values
     }
 
+    #[allow(dead_code)]
     pub fn write_len(&self) -> usize {
         self.write_cache.write().unwrap().len()
     }
