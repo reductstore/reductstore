@@ -132,21 +132,6 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             .and_then(|p| if p.is_empty() { None } else { Some(p) })
             .map(PathBuf::from);
 
-        let role = match env
-            .get_optional::<String>("RS_INSTANCE_ROLE")
-            .unwrap_or("primary".to_string())
-            .to_lowercase()
-            .as_str()
-        {
-            "standalone" => InstanceRole::Standalone,
-            "primary" => InstanceRole::Primary,
-            "secondary" => InstanceRole::Secondary,
-            "readonly" => InstanceRole::ReadOnly,
-            _ => {
-                panic!("Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'")
-            }
-        };
-
         let protocol = if cert_path.is_none() { "http" } else { "https" };
 
         let default_public_url = if port == 80 || port == 443 {
@@ -159,6 +144,20 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         if !public_url.ends_with('/') {
             public_url.push('/');
         }
+
+        let role = match env
+            .get::<String>("RS_INSTANCE_ROLE", "STANDALONE".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "standalone" => InstanceRole::Standalone,
+            "primary" => InstanceRole::Primary,
+            "secondary" => InstanceRole::Secondary,
+            "readonly" => InstanceRole::ReadOnly,
+            _ => {
+                panic!("Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'")
+            }
+        };
 
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
