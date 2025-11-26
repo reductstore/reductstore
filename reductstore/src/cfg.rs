@@ -132,7 +132,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             .map(PathBuf::from);
 
         let role = match env
-            .get_optional::<String>("RS_LOCK_FILE_ROLE")
+            .get_optional::<String>("RS_INSTANCE_ROLE")
             .unwrap_or("primary".to_string())
             .to_lowercase()
             .as_str()

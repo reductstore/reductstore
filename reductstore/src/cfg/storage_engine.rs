@@ -8,14 +8,17 @@ use std::time::Duration;
 #[derive(Clone, Debug, PartialEq)]
 pub struct StorageEngineConfig {
     pub compaction_interval: Duration,
+    pub replica_update_interval: Duration,
 }
 
 const DEFAULT_COMPACTION_INTERVAL_SECS: u64 = 60;
+const DEFAULT_REPLICA_UPDATE_INTERVAL_SECS: u64 = 60;
 
 impl Default for StorageEngineConfig {
     fn default() -> Self {
         StorageEngineConfig {
-            compaction_interval: Duration::from_secs(DEFAULT_COMPACTION_INTERVAL_SECS), // default to 1 hour
+            compaction_interval: Duration::from_secs(DEFAULT_COMPACTION_INTERVAL_SECS),
+            replica_update_interval: Duration::from_secs(DEFAULT_REPLICA_UPDATE_INTERVAL_SECS),
         }
     }
 }
@@ -26,6 +29,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             compaction_interval: Duration::from_secs(
                 env.get_optional::<u64>("RS_ENGINE_COMPACTION_INTERVAL")
                     .unwrap_or(DEFAULT_COMPACTION_INTERVAL_SECS),
+            ),
+            replica_update_interval: Duration::from_secs(
+                env.get_optional::<u64>("RS_ENGINE_REPLICA_UPDATE_INTERVAL")
+                    .unwrap_or(DEFAULT_REPLICA_UPDATE_INTERVAL_SECS),
             ),
         }
     }

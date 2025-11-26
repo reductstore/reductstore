@@ -94,15 +94,7 @@ impl BlockManager {
     }
 
     pub fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
-        let mut last_sync = self.last_replica_sync;
-        if self.cfg.role == InstanceRole::ReadOnly
-            && last_sync.elapsed() > self.cfg.cs_config.sync_interval
-        {
-            // we need to update the index from disk for read-only instances
-            self.block_index.update_from_disc()?;
-            FILE_CACHE.discard_recursive(&self.path.join("wal"))?;
-            last_sync = Instant::now();
-        }
+        self.update_and_index()?;
 
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
@@ -193,10 +185,6 @@ impl BlockManager {
     }
 
     pub fn save_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
-        if self.cfg.role == InstanceRole::ReadOnly {
-            return self.save_block_on_disk(block);
-        }
-
         // save the current block in cache and write on the disk the evicted one
         let id = block.read()?.block_id();
         for (_, block) in self.block_cache.insert_write(id, block.clone()) {
@@ -566,7 +554,7 @@ impl BlockManager {
 
     pub fn update_and_index(&mut self) -> Result<&BlockIndex, ReductError> {
         if self.cfg.role == InstanceRole::ReadOnly
-            && self.last_replica_sync.elapsed() > self.cfg.cs_config.sync_interval
+            && self.last_replica_sync.elapsed() > self.cfg.engine_config.replica_update_interval
         {
             // we need to update the index from disk and chaned blocks for read-only instances
             let previous_state = self.block_index.info().clone();

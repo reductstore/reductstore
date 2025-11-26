@@ -5,7 +5,7 @@ use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::RwLock;
 use crate::core::thread_pool::GroupDepth::{BUCKET, STORAGE};
-use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
+use crate::core::thread_pool::{group_from_path, try_unique, unique, TaskHandle};
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use log::{debug, error, info};
@@ -16,7 +16,7 @@ use reduct_base::{conflict, forbidden, not_found, unprocessable_entity};
 use std::collections::{BTreeMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
@@ -316,9 +316,10 @@ impl StorageEngine {
             handlers.push(bucket.sync_fs());
         }
 
-        unique(
-            &group_from_path(&self.data_path, STORAGE),
+        try_unique(
+            "compact_storage",
             "compact storage",
+            Duration::from_secs(1),
             move || {
                 for handler in handlers {
                     match handler.wait() {
@@ -331,6 +332,7 @@ impl StorageEngine {
                 Ok(())
             },
         )
+        .unwrap_or(Ok(()).into()) // skip if previous task is still running
     }
 
     fn check_mode(&self) -> Result<(), ReductError> {
@@ -346,7 +348,7 @@ impl StorageEngine {
     fn update_bucket_list(&self) -> Result<(), ReductError> {
         let mut last_sync = self.last_replica_sync.write()?;
         if self.cfg.role != InstanceRole::ReadOnly
-            || last_sync.elapsed() < self.cfg.cs_config.sync_interval
+            || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
         {
             // Only read-only instances need to update bucket list from backend
             return Ok(());

@@ -192,7 +192,7 @@ impl ManageTokens for TokenRepository {
         Ok(TokenCreateResponse { value, created_at })
     }
 
-    fn get_token(&self, name: &str) -> Result<&Token, ReductError> {
+    fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
         TokenRepoCommon::get_token(self, name)
     }
 
@@ -203,11 +203,11 @@ impl ManageTokens for TokenRepository {
         }
     }
 
-    fn get_token_list(&self) -> Result<Vec<Token>, ReductError> {
+    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
         TokenRepoCommon::get_token_list(self)
     }
 
-    fn validate_token(&self, header: Option<&str>) -> Result<Token, ReductError> {
+    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
         TokenRepoCommon::validate_token(self, header)
     }
 

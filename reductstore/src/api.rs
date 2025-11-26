@@ -88,7 +88,7 @@ impl StateKeeper {
             headers
                 .get("Authorization")
                 .map(|header| header.to_str().unwrap_or("")),
-            components.token_repo.read().await.as_ref(),
+            components.token_repo.write().await.as_mut(),
             policy,
         )?;
 

@@ -435,7 +435,7 @@ impl Bucket {
     fn update_entry_list(&self) -> Result<(), ReductError> {
         let mut last_sync = self.last_replica_sync.write()?;
         if self.cfg.role != InstanceRole::ReadOnly
-            || last_sync.elapsed() < self.cfg.cs_config.sync_interval
+            || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
         {
             // Only read-only instances need to update bucket list from backend
             return Ok(());

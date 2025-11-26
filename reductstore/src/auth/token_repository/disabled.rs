@@ -26,7 +26,7 @@ impl ManageTokens for NoAuthRepository {
         Err(bad_request!("Authentication is disabled"))
     }
 
-    fn get_token(&self, _name: &str) -> Result<&Token, ReductError> {
+    fn get_token(&mut self, _name: &str) -> Result<&Token, ReductError> {
         Err(bad_request!("Authentication is disabled"))
     }
 
@@ -34,11 +34,11 @@ impl ManageTokens for NoAuthRepository {
         Err(bad_request!("Authentication is disabled"))
     }
 
-    fn get_token_list(&self) -> Result<Vec<Token>, ReductError> {
+    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
         Ok(vec![])
     }
 
-    fn validate_token(&self, _header: Option<&str>) -> Result<Token, ReductError> {
+    fn validate_token(&mut self, _header: Option<&str>) -> Result<Token, ReductError> {
         Ok(Token {
             name: "AUTHENTICATION-DISABLED".to_string(),
             value: "".to_string(),

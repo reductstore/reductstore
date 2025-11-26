@@ -4,7 +4,9 @@
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::TokenRepoCommon;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
+use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::{debug, error};
@@ -16,10 +18,13 @@ use std::collections::HashMap;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::time::SystemTime;
+use tokio::time::Instant;
 
 pub(super) struct ReadOnlyTokenRepository {
     config_path: PathBuf,
     repo: HashMap<String, Token>,
+    cfg: Cfg,
+    last_replica_sync: RwLock<Instant>,
 }
 
 impl ReadOnlyTokenRepository {
@@ -28,45 +33,57 @@ impl ReadOnlyTokenRepository {
     /// # Arguments
     ///
     /// * `data_path` - The path to the data directory
-    /// * `api_token` - The API token with read access to all buckets
+    /// * `cfg` - The configuration
     ///
     /// # Returns
     ///
     /// The repository
-    pub fn new(data_path: PathBuf, api_token: String) -> Self {
+    pub fn new(data_path: PathBuf, cfg: Cfg) -> Self {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
-        let repo = HashMap::new();
 
-        let mut token_repository = Self { config_path, repo };
+        let mut token_repository = Self {
+            config_path,
+            repo: HashMap::new(),
+            last_replica_sync: RwLock::new(Instant::now()),
+            cfg,
+        };
+        let repo = token_repository
+            .load_repo()
+            .expect("Could not load token repository");
 
-        let lock = FILE_CACHE.read(&token_repository.config_path, SeekFrom::Start(0));
+        token_repository.repo = repo;
+        token_repository
+    }
+
+    fn load_repo(&self) -> Result<HashMap<String, Token>, ReductError> {
+        let api_token = self.cfg.api_token.clone();
+
+        let lock = FILE_CACHE.read(&self.config_path, SeekFrom::Start(0));
+        let mut repo = HashMap::new();
         match lock {
             Ok(lock) => {
                 debug!(
                     "Loading token repository from {}",
-                    token_repository.config_path.as_path().display()
+                    self.config_path.as_path().display()
                 );
 
                 let mut buf = Vec::new();
-                lock.upgrade()
-                    .unwrap()
-                    .write()
-                    .unwrap()
-                    .read_to_end(&mut buf)
-                    .expect("Could not read token repository");
+                lock.upgrade()?.write()?.read_to_end(&mut buf)?;
 
-                let proto_repo = TokenRepo::decode(&mut Bytes::from(buf))
-                    .expect("Could not decode token repository");
+                let proto_repo = TokenRepo::decode(&mut Bytes::from(buf)).map_err(|e| {
+                    ReductError::internal_server_error(&format!(
+                        "Could not decode token repository: {}",
+                        e
+                    ))
+                })?;
                 for token in proto_repo.tokens {
-                    token_repository
-                        .repo
-                        .insert(token.name.clone(), token.into());
+                    repo.insert(token.name.clone(), token.into());
                 }
             }
             Err(_) => {
                 error!(
                     "Token repository not found at {}, creating",
-                    token_repository.config_path.as_path().display()
+                    self.config_path.as_path().display()
                 );
             }
         };
@@ -84,16 +101,30 @@ impl ReadOnlyTokenRepository {
                 is_provisioned: true,
             };
 
-            token_repository
-                .repo
-                .insert(init_token.name.clone(), init_token);
+            repo.insert(init_token.name.clone(), init_token);
         }
-        token_repository
+
+        Ok(repo)
+    }
+
+    fn update_repo(&mut self) -> Result<(), ReductError> {
+        let mut last_sync = self.last_replica_sync.write()?;
+        if self.cfg.role != InstanceRole::ReadOnly
+            || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
+        {
+            // Only read-only instances need to update bucket list from backend
+            return Ok(());
+        }
+
+        *last_sync = Instant::now();
+        self.repo = self.load_repo()?;
+
+        Ok(())
     }
 }
 
 impl TokenRepoCommon for ReadOnlyTokenRepository {
-    fn repo(&self) -> &std::collections::HashMap<String, Token> {
+    fn repo(&self) -> &HashMap<String, Token> {
         &self.repo
     }
 }
@@ -107,7 +138,8 @@ impl ManageTokens for ReadOnlyTokenRepository {
         Err(forbidden!("Cannot generate token in read-only mode"))
     }
 
-    fn get_token(&self, name: &str) -> Result<&Token, ReductError> {
+    fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
+        self.update_repo()?;
         TokenRepoCommon::get_token(self, name)
     }
 
@@ -115,11 +147,15 @@ impl ManageTokens for ReadOnlyTokenRepository {
         Err(forbidden!("Cannot generate token in read-only mode"))
     }
 
-    fn get_token_list(&self) -> Result<Vec<Token>, ReductError> {
+    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
+        self.update_repo()?;
+
         TokenRepoCommon::get_token_list(self)
     }
 
-    fn validate_token(&self, header: Option<&str>) -> Result<Token, ReductError> {
+    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
+        self.update_repo()?;
+
         TokenRepoCommon::validate_token(self, header)
     }
 

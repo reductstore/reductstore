@@ -112,7 +112,7 @@ pub(crate) trait ManageTokens {
     ///
     /// # Returns
     /// The token without value
-    fn get_token(&self, name: &str) -> Result<&Token, ReductError>;
+    fn get_token(&mut self, name: &str) -> Result<&Token, ReductError>;
 
     /// Get a token by name (mutable)
     ///
@@ -128,7 +128,7 @@ pub(crate) trait ManageTokens {
     ///
     /// # Returns
     /// The token list, it the authentication is disabled, it returns an empty list
-    fn get_token_list(&self) -> Result<Vec<Token>, ReductError>;
+    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError>;
 
     /// Validate a token
     ///
@@ -138,7 +138,7 @@ pub(crate) trait ManageTokens {
     /// # Returns
     ///
     /// Token with given value
-    fn validate_token(&self, header: Option<&str>) -> Result<Token, ReductError>;
+    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError>;
 
     /// Remove a token
     ///
@@ -218,10 +218,7 @@ impl TokenRepositoryBuilder {
 
     pub fn build(self, config_path: PathBuf) -> BoxedTokenRepository {
         if self.cfg.role == InstanceRole::ReadOnly {
-            return Box::new(ReadOnlyTokenRepository::new(
-                config_path,
-                self.cfg.api_token,
-            ));
+            return Box::new(ReadOnlyTokenRepository::new(config_path, self.cfg.clone()));
         }
 
         if !self.cfg.api_token.is_empty() {

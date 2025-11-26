@@ -47,7 +47,7 @@ pub(super) async fn create(
     let url = check_and_normalize_base_url(&params, components.cfg.public_url.clone())?;
 
     // find current token
-    let token = components.token_repo.read().await.validate_token(
+    let token = components.token_repo.write().await.validate_token(
         headers
             .get(AUTHORIZATION.as_str())
             .map(|header| header.to_str().unwrap_or("invalid-token")),

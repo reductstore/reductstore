@@ -33,7 +33,7 @@ impl TokenAuthorization {
     pub fn check<Plc>(
         &self,
         authorization_header: Option<&str>,
-        repo: &dyn ManageTokens,
+        repo: &mut dyn ManageTokens,
         policy: Plc,
     ) -> Result<(), ReductError>
     where
