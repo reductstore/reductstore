@@ -289,7 +289,6 @@ impl AxumAppBuilder {
 mod tests {
     use super::*;
     use crate::asset::asset_manager::create_asset_manager;
-    use crate::auth::proto::TokenRepo;
     use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::backend::Backend;
     use crate::core::file_cache::FILE_CACHE;

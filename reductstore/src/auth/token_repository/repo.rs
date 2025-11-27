@@ -143,18 +143,6 @@ impl AccessTokens for TokenRepository {
     fn repo(&self) -> &HashMap<String, Token> {
         &self.repo
     }
-
-    fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
-        AccessTokens::get_token(self, name)
-    }
-
-    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
-        AccessTokens::get_token_list(self)
-    }
-
-    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
-        AccessTokens::validate_token(self, header)
-    }
 }
 
 impl ManageTokens for TokenRepository {
@@ -279,7 +267,7 @@ mod tests {
     use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
     use crate::backend::Backend;
     use crate::cfg::Cfg;
-    use reduct_base::{bad_request, conflict, unprocessable_entity};
+    use reduct_base::{conflict, unprocessable_entity};
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 

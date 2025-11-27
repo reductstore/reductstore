@@ -26,6 +26,20 @@ pub struct StorageEngineBuilder {
     license: Option<License>,
     data_path: Option<PathBuf>,
 }
+pub(super) trait ReadOnlyMode {
+    fn cfg(&self) -> &Cfg;
+
+    fn reload(&self) -> Result<(), ReductError>;
+
+    fn check_mode(&self) -> Result<(), ReductError> {
+        if self.cfg().role == InstanceRole::ReadOnly {
+            return Err(forbidden!(
+                "Cannot perform this operation in read-only mode"
+            ));
+        }
+        Ok(())
+    }
+}
 
 impl StorageEngineBuilder {
     pub fn with_cfg(mut self, cfg: Cfg) -> Self {

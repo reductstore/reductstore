@@ -15,7 +15,7 @@ use reduct_base::error::ReductError;
 use reduct_base::forbidden;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
 use std::collections::HashMap;
-use std::io::{Read, SeekFrom, Write};
+use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::time::SystemTime;
 use tokio::time::Instant;
@@ -180,14 +180,11 @@ impl ManageTokens for ReadOnlyTokenRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::auth::token_repository::{
-        AccessTokens, BoxedTokenRepository, ManageTokens, INIT_TOKEN_NAME,
-    };
+    use crate::auth::token_repository::{BoxedTokenRepository, INIT_TOKEN_NAME};
     use crate::backend::Backend;
     use crate::cfg::{Cfg, InstanceRole};
     use reduct_base::msg::token_api::Permissions;
     use rstest::{fixture, rstest};
-    use std::io::Write;
     use std::path::PathBuf;
     use tempfile::tempdir;
 

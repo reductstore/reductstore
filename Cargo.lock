@@ -2854,6 +2854,7 @@ dependencies = [
  "crossbeam-channel",
  "dlopen2",
  "flate2",
+ "futures",
  "futures-util",
  "hex",
  "hyper 1.7.0",

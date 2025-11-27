@@ -6,7 +6,8 @@ pub mod lock_file;
 mod provision;
 pub mod remote_storage;
 pub mod replication;
-mod storage_engine;
+pub mod storage_engine;
+
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;

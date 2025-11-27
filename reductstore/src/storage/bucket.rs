@@ -1,7 +1,8 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod quotas;
+mod read_only;
 pub(super) mod settings;
 
 use crate::cfg::{Cfg, InstanceRole};
@@ -14,7 +15,7 @@ pub use crate::storage::block_manager::RecordTx;
 use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
-use crate::storage::engine::check_name_convention;
+use crate::storage::engine::{check_name_convention, ReadOnlyMode};
 use crate::storage::entry::{Entry, EntrySettings, RecordReader};
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::debug;
@@ -24,8 +25,8 @@ use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::entry_api::EntryInfo;
-use reduct_base::{conflict, forbidden, internal_server_error, not_found, Labels};
-use std::collections::{BTreeMap, HashSet};
+use reduct_base::{conflict, internal_server_error, not_found, Labels};
+use std::collections::BTreeMap;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
@@ -185,7 +186,7 @@ impl Bucket {
     ///
     /// * `&Entry` - The entry or an HTTPError
     pub fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
-        self.update_entry_list()?;
+        self.reload()?;
         let entries = self.entries.read()?;
         let entry = entries.get(name).ok_or_else(|| {
             ReductError::not_found(&format!(
@@ -198,7 +199,7 @@ impl Bucket {
 
     /// Return bucket stats
     pub fn info(&self) -> Result<FullBucketInfo, ReductError> {
-        self.update_entry_list()?;
+        self.reload()?;
 
         let mut size = 0;
         let mut oldest_record = u64::MAX;
@@ -420,74 +421,6 @@ impl Bucket {
     pub fn is_provisioned(&self) -> bool {
         self.is_provisioned
             .load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    fn check_mode(&self) -> Result<(), ReductError> {
-        if self.cfg.role == InstanceRole::ReadOnly {
-            return Err(forbidden!(
-                "Cannot perform this operation in read-only mode"
-            ));
-        }
-        Ok(())
-    }
-
-    /// List directory and update bucket list
-    fn update_entry_list(&self) -> Result<(), ReductError> {
-        let mut last_sync = self.last_replica_sync.write()?;
-        if self.cfg.role != InstanceRole::ReadOnly
-            || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
-        {
-            // Only read-only instances need to update bucket list from backend
-            return Ok(());
-        }
-        *last_sync = Instant::now();
-
-        let mut task_set = vec![];
-
-        let current_bucket_paths = self
-            .entries
-            .read()?
-            .values()
-            .map(|b| b.path().clone())
-            .collect::<HashSet<_>>();
-
-        let mut entries_to_retain = vec![];
-        for path in FILE_CACHE.read_dir(&self.path)? {
-            if !path.is_dir() {
-                continue;
-            }
-
-            if current_bucket_paths.contains(&path) {
-                entries_to_retain.push(path);
-                continue;
-            }
-
-            // Restore new bucket
-            let settings = self.settings.read()?;
-            let handler = Entry::restore(
-                path,
-                EntrySettings {
-                    max_block_size: settings.max_block_size.unwrap(),
-                    max_block_records: settings.max_block_records.unwrap(),
-                },
-                self.cfg.clone(),
-            );
-
-            task_set.push(handler);
-        }
-
-        let mut new_entries = BTreeMap::new();
-        for task in task_set {
-            if let Some(entry) = task.wait()? {
-                new_entries.insert(entry.name().to_string(), Arc::new(entry));
-            }
-        }
-
-        let mut entries = self.entries.write()?;
-        entries.retain(|_, v| entries_to_retain.contains(v.path()));
-        entries.extend(new_entries.into_iter());
-
-        Ok(())
     }
 
     fn task_group(&self) -> String {

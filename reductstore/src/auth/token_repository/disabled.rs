@@ -1,12 +1,11 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::auth::token_repository::{AccessTokens, ManageTokens};
+use crate::auth::token_repository::ManageTokens;
 use chrono::{DateTime, Utc};
 use reduct_base::bad_request;
 use reduct_base::error::ReductError;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
-use std::collections::HashMap;
 use std::time::SystemTime;
 
 /// A repository that doesn't require authentication
