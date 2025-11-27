@@ -385,7 +385,7 @@ impl Bucket {
 
     /// Sync all entries to the file system
     pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
-        if self.cfg.role == InstanceRole::ReadOnly {
+        if self.cfg.role == InstanceRole::Replica {
             return Ok(()).into();
         }
 

@@ -51,7 +51,7 @@ pub enum InstanceRole {
     Standalone,
     Primary,
     Secondary,
-    ReadOnly,
+    Replica,
 }
 
 #[derive(Clone)]
@@ -154,7 +154,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             "standalone" => InstanceRole::Standalone,
             "primary" => InstanceRole::Primary,
             "secondary" => InstanceRole::Secondary,
-            "readonly" => InstanceRole::ReadOnly,
+            "replica" => InstanceRole::Replica,
             _ => {
                 panic!("Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'")
             }
@@ -223,7 +223,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub fn build_lock_file(&self) -> Result<BoxedLockFile, ReductError> {
         let data_path = self.get_data_path()?;
 
-        if self.cfg.role == InstanceRole::ReadOnly || self.cfg.role == InstanceRole::Standalone {
+        if self.cfg.role == InstanceRole::Replica || self.cfg.role == InstanceRole::Standalone {
             return Ok(LockFileBuilder::noop());
         }
 
@@ -334,7 +334,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?);
         FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
-        FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::ReadOnly);
+        FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::Replica);
         Ok(())
     }
 
@@ -735,13 +735,12 @@ mod tests {
 
     mod role {
         use super::*;
-        use std::fs;
 
         #[rstest]
         #[case("STANDALONE", InstanceRole::Standalone)]
         #[case("PRIMARY", InstanceRole::Primary)]
         #[case("SECONDARY", InstanceRole::Secondary)]
-        #[case("READONLY", InstanceRole::ReadOnly)]
+        #[case("REPLICA", InstanceRole::Replica)]
         fn test_instance_role(
             mut env_getter: MockEnvGetter,
             #[case] input: &str,
@@ -778,7 +777,7 @@ mod tests {
 
         #[rstest]
         #[case(InstanceRole::Standalone, true)]
-        #[case(InstanceRole::ReadOnly, true)]
+        #[case(InstanceRole::Replica, true)]
         #[case(InstanceRole::Primary, false)]
         #[case(InstanceRole::Secondary, false)]
         #[tokio::test]

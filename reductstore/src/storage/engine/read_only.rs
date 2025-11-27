@@ -17,7 +17,7 @@ impl ReadOnlyMode for StorageEngine {
 
     fn reload(&self) -> Result<(), ReductError> {
         let mut last_sync = self.last_replica_sync.write()?;
-        if self.cfg.role != InstanceRole::ReadOnly
+        if self.cfg.role != InstanceRole::Replica
             || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
         {
             // Only read-only instances need to update bucket list from backend
@@ -80,7 +80,7 @@ mod tests {
     fn test_reload_new_bucket(primary_engine: StorageEngine) {
         // Create read-only engine
         let mut cfg = primary_engine.cfg().clone();
-        cfg.role = InstanceRole::ReadOnly;
+        cfg.role = InstanceRole::Replica;
         let read_only_engine = StorageEngine::builder()
             .with_cfg(cfg.clone())
             .with_data_path(cfg.data_path.clone())
@@ -120,7 +120,7 @@ mod tests {
     #[rstest]
     fn test_remove_bucket(primary_engine: StorageEngine) {
         let mut cfg = primary_engine.cfg().clone();
-        cfg.role = InstanceRole::ReadOnly;
+        cfg.role = InstanceRole::Replica;
         let read_only_engine = StorageEngine::builder()
             .with_cfg(cfg.clone())
             .with_data_path(cfg.data_path.clone())
@@ -154,7 +154,7 @@ mod tests {
         #[rstest]
         fn test_prohibited_operations_on_read_only_engine(primary_engine: StorageEngine) {
             let mut cfg = primary_engine.cfg().clone();
-            cfg.role = InstanceRole::ReadOnly;
+            cfg.role = InstanceRole::Replica;
             let read_only_engine = StorageEngine::builder()
                 .with_cfg(cfg.clone())
                 .with_data_path(cfg.data_path.clone())
@@ -179,7 +179,7 @@ mod tests {
         #[rstest]
         fn test_reload_before_access_buckets(primary_engine: StorageEngine) {
             let mut cfg = primary_engine.cfg().clone();
-            cfg.role = InstanceRole::ReadOnly;
+            cfg.role = InstanceRole::Replica;
             let read_only_engine = StorageEngine::builder()
                 .with_cfg(cfg.clone())
                 .with_data_path(cfg.data_path.clone())

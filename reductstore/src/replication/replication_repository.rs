@@ -5,7 +5,7 @@ mod read_only;
 mod repo;
 
 use crate::cfg::Cfg;
-use crate::cfg::InstanceRole::ReadOnly;
+use crate::cfg::InstanceRole::Replica;
 use crate::replication::ManageReplications;
 use crate::storage::engine::StorageEngine;
 use read_only::ReadOnlyReplicationRepository;
@@ -24,7 +24,7 @@ impl ReplicationRepoBuilder {
     }
 
     pub fn build(self, storage: Arc<StorageEngine>) -> BoxedReplicationRepository {
-        if self.cfg.role == ReadOnly {
+        if self.cfg.role == Replica {
             Box::new(ReadOnlyReplicationRepository::new())
         } else {
             Box::new(ReplicationRepository::load_or_create(storage, self.cfg))

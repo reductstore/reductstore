@@ -13,7 +13,7 @@ use log::{debug, error, info, trace, warn};
 use prost::Message;
 
 use crate::cfg::Cfg;
-use crate::cfg::InstanceRole::ReadOnly;
+use crate::cfg::InstanceRole::Replica;
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
@@ -40,7 +40,7 @@ impl EntryLoader {
             match Self::try_restore_entry_from_index(path.clone(), options.clone(), cfg.clone()) {
                 Ok(entry) => Ok(entry),
                 Err(err) => {
-                    if cfg.role == ReadOnly {
+                    if cfg.role == Replica {
                         return Ok(None);
                     }
 

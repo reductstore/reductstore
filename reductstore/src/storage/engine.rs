@@ -34,7 +34,7 @@ pub(super) trait ReadOnlyMode {
     fn reload(&self) -> Result<(), ReductError>;
 
     fn check_mode(&self) -> Result<(), ReductError> {
-        if self.cfg().role == InstanceRole::ReadOnly {
+        if self.cfg().role == InstanceRole::Replica {
             return Err(forbidden!(
                 "Cannot perform this operation in read-only mode"
             ));
@@ -318,7 +318,7 @@ impl StorageEngine {
 
     /// Update index from WALs and remove them
     pub fn compact(&self) -> TaskHandle<Result<(), ReductError>> {
-        if self.cfg.role == InstanceRole::ReadOnly {
+        if self.cfg.role == InstanceRole::Replica {
             return Ok(()).into();
         }
 

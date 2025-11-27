@@ -8,7 +8,7 @@ use std::time::Instant;
 
 impl BlockManager {
     pub(super) fn reload_if_readonly(&mut self) -> Result<(), reduct_base::error::ReductError> {
-        if self.cfg.role == InstanceRole::ReadOnly
+        if self.cfg.role == InstanceRole::Replica
             && self.last_replica_sync.elapsed() > self.cfg.engine_config.replica_update_interval
         {
             // we need to update the index from disk and chaned blocks for read-only instances
@@ -54,7 +54,7 @@ mod tests {
     #[rstest]
     fn test_reload_if_readonly(path: PathBuf) {
         let cfg = Cfg {
-            role: InstanceRole::ReadOnly,
+            role: InstanceRole::Replica,
             data_path: path.clone(),
             engine_config: StorageEngineConfig {
                 replica_update_interval: Duration::from_millis(100),

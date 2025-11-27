@@ -19,7 +19,7 @@ impl ReadOnlyMode for Bucket {
     /// List directory and update bucket list
     fn reload(&self) -> Result<(), ReductError> {
         let mut last_sync = self.last_replica_sync.write()?;
-        if self.cfg().role != InstanceRole::ReadOnly
+        if self.cfg().role != InstanceRole::Replica
             || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
         {
             // Only read-only instances need to update bucket list from backend
@@ -92,7 +92,7 @@ mod tests {
     async fn test_reload_new_entry(mut primary_bucket: Bucket) {
         // Create read-only bucket
         let mut cfg = primary_bucket.cfg().clone();
-        cfg.role = InstanceRole::ReadOnly;
+        cfg.role = InstanceRole::Replica;
         let read_only_bucket = Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap();
 
         // Initially, read-only bucket has one entry
@@ -134,7 +134,7 @@ mod tests {
     async fn test_remove_entry(primary_bucket: Bucket) {
         // Create read-only bucket
         let mut cfg = primary_bucket.cfg().clone();
-        cfg.role = InstanceRole::ReadOnly;
+        cfg.role = InstanceRole::Replica;
         let read_only_bucket = Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap();
 
         // Initially, read-only bucket has one entry
@@ -175,7 +175,7 @@ mod tests {
         async fn test_prohibited_operations_on_read_only_bucket(primary_bucket: Bucket) {
             // Create read-only bucket
             let mut cfg = primary_bucket.cfg().clone();
-            cfg.role = InstanceRole::ReadOnly;
+            cfg.role = InstanceRole::Replica;
             let read_only_bucket =
                 Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap();
 
@@ -201,7 +201,7 @@ mod tests {
         #[tokio::test]
         async fn test_reload_before_access_entries(mut primary_bucket: Bucket) {
             let mut cfg = primary_bucket.cfg().clone();
-            cfg.role = InstanceRole::ReadOnly;
+            cfg.role = InstanceRole::Replica;
             let read_only_bucket =
                 Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap();
 

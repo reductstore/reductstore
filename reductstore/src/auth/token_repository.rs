@@ -216,7 +216,7 @@ impl TokenRepositoryBuilder {
     }
 
     pub fn build(self, config_path: PathBuf) -> BoxedTokenRepository {
-        if self.cfg.role == InstanceRole::ReadOnly {
+        if self.cfg.role == InstanceRole::Replica {
             return Box::new(ReadOnlyTokenRepository::new(config_path, self.cfg.clone()));
         }
 

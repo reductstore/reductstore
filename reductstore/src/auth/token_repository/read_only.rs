@@ -103,7 +103,7 @@ impl ReadOnlyTokenRepository {
 
     fn update_repo(&mut self) -> Result<(), ReductError> {
         let mut last_sync = self.last_replica_sync.write()?;
-        if self.cfg.role != InstanceRole::ReadOnly
+        if self.cfg.role != InstanceRole::Replica
             || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
         {
             // Only read-only instances need to update bucket list from backend
@@ -358,7 +358,7 @@ mod tests {
         fn cfg_fixture() -> Cfg {
             let mut cfg = Cfg::default();
             cfg.api_token = "test_token".to_string();
-            cfg.role = InstanceRole::ReadOnly;
+            cfg.role = InstanceRole::Replica;
             cfg.engine_config.replica_update_interval = std::time::Duration::from_millis(100);
             cfg
         }

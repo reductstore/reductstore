@@ -598,7 +598,7 @@ impl BlockManager {
 
         trace!("Writing block descriptor {:?}", path);
 
-        if self.cfg.role != InstanceRole::ReadOnly {
+        if self.cfg.role != InstanceRole::Replica {
             // overwrite the file
 
             let file = FILE_CACHE
@@ -618,7 +618,7 @@ impl BlockManager {
         self.block_index
             .insert_or_update_with_crc(proto, crc.sum64());
 
-        if self.cfg.role != InstanceRole::ReadOnly {
+        if self.cfg.role != InstanceRole::Replica {
             self.block_index.save()?;
 
             trace!("Block {}/{}/{} saved", self.bucket, self.entry, block_id);
