@@ -733,6 +733,82 @@ mod tests {
         parser.build().unwrap();
     }
 
+    mod role {
+        use super::*;
+        use std::fs;
+
+        #[rstest]
+        #[case("STANDALONE", InstanceRole::Standalone)]
+        #[case("PRIMARY", InstanceRole::Primary)]
+        #[case("SECONDARY", InstanceRole::Secondary)]
+        #[case("READONLY", InstanceRole::ReadOnly)]
+        fn test_instance_role(
+            mut env_getter: MockEnvGetter,
+            #[case] input: &str,
+            #[case] expected: InstanceRole,
+        ) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_INSTANCE_ROLE"))
+                .times(1)
+                .return_const(Ok(input.to_string()));
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+            let parser = CfgParser::from_env(env_getter, "0.0.0");
+            assert_eq!(parser.cfg.role, expected);
+        }
+
+        #[rstest]
+        #[case("invalid")]
+        fn test_instance_role_invalid(mut env_getter: MockEnvGetter, #[case] input: &str) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_INSTANCE_ROLE"))
+                .times(1)
+                .return_const(Ok(input.to_string()));
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+            let result = std::panic::catch_unwind(|| {
+                CfgParser::from_env(env_getter, "0.0.0");
+            });
+            assert!(result.is_err());
+        }
+
+        #[rstest]
+        #[case(InstanceRole::Standalone, true)]
+        #[case(InstanceRole::ReadOnly, true)]
+        #[case(InstanceRole::Primary, false)]
+        #[case(InstanceRole::Secondary, false)]
+        #[tokio::test]
+        async fn test_build_no_lock_file(
+            #[case] role: InstanceRole,
+            #[case] expected_lock: bool,
+            mut env_getter: MockEnvGetter,
+        ) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_DATA_PATH"))
+                .return_const(Ok(tempfile::tempdir()
+                    .unwrap()
+                    .keep()
+                    .to_str()
+                    .unwrap()
+                    .to_string()));
+
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let mut parser = CfgParser::from_env(env_getter, "0.0.0");
+            parser.cfg.role = role;
+            let lock_file = parser.build_lock_file().unwrap();
+
+            assert_eq!(lock_file.is_locked().await, expected_lock);
+        }
+    }
+
     #[fixture]
     fn env_getter() -> MockEnvGetter {
         let mut mock_getter = MockEnvGetter::new();

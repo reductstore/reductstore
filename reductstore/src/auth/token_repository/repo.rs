@@ -12,7 +12,7 @@ use prost::Message;
 use rand::Rng;
 use reduct_base::error::ReductError;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
-use reduct_base::{conflict, internal_server_error, not_found, unprocessable_entity};
+use reduct_base::{conflict, not_found, unprocessable_entity};
 use regex::Regex;
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom, Write};
@@ -40,10 +40,6 @@ impl TokenRepository {
     pub fn new(data_path: PathBuf, api_token: String) -> TokenRepository {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
         let repo = HashMap::new();
-
-        if api_token.is_empty() {
-            panic!("API must be set");
-        }
 
         // Load the token repository from the file system
         let permission_regex =
@@ -126,14 +122,7 @@ impl TokenRepository {
 
         let mut file = lock.write()?;
         file.set_len(0)?;
-        file.write_all(&buf).map_err(|err| {
-            internal_server_error!(
-                "Could not write token repository to {}: {}",
-                self.config_path.as_path().display(),
-                err
-            )
-        })?;
-
+        file.write_all(&buf)?;
         file.sync_all()?;
         Ok(())
     }
