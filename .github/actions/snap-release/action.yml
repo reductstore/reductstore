@@ -28,17 +28,3 @@ runs:
       shell: bash
       run: |
         echo "SNAP_NAME=$(ls *.snap | cut -f1 | grep ${{ inputs.arch }})" >> $GITHUB_ENV
-
-    - name: Publish snap package
-      uses: snapcore/action-publish@master
-      env:
-        SNAPCRAFT_STORE_CREDENTIALS: ${{ inputs.snapcraft_store_login }}
-      with:
-        snap: ${{ env.SNAP_NAME }}
-        release: ${{ inputs.release }}
-
-    - name: Upload snap artifact (optional)
-      uses: actions/upload-artifact@v4
-      with:
-        name: reductstore
-        path: "*.snap"

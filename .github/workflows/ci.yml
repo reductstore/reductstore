@@ -605,3 +605,17 @@ jobs:
           arch: ${{ matrix.arch }}
           snapcraft_store_login: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
           release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
+
+      - name: Publish snap package
+        uses: snapcore/action-publish@master
+        env:
+          SNAPCRAFT_STORE_CREDENTIALS: ${{ secrets.SNAPCRAFT_STORE_LOGIN }}
+        with:
+          snap: ${{ env.SNAP_NAME }}
+          release: ${{ startsWith(github.ref, 'refs/tags/') && 'stable' || 'edge'}}
+
+      - name: Upload snap artifact (optional)
+        uses: actions/upload-artifact@v4
+        with:
+          name: reductstore
+          path: "*.snap"
