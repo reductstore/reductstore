@@ -54,7 +54,7 @@ futures-util = "0.3.31"
 futures = "0.3"
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 mime_guess = "2.0.5"
-bytesize = "2.0.1"
+bytesize = "2.3.1"
 async-trait = "0.1.89"
 url = { version = "2.5.4", features = ["serde"] }
 jsonwebtoken = "9.3.1"
