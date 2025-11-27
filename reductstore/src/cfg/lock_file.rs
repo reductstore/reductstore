@@ -3,7 +3,7 @@
 
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
-use crate::lock_file::{FailureAction, InstanceRole};
+use crate::lock_file::FailureAction;
 use std::time::Duration;
 
 const DEFAULT_ACQUIRE_TIMEOUT_S: u64 = 60;
@@ -13,10 +13,6 @@ const DEFAULT_POLLING_INTERVAL_S: u64 = 10;
 /// IO configuration
 #[derive(Clone, Debug, PartialEq)]
 pub struct LockFileConfig {
-    /// Whether to enable lock file usage
-    pub enabled: bool,
-    /// Instance role
-    pub role: InstanceRole,
     /// Polling interval for checking the lock file
     pub polling_interval: Duration,
     /// Timeout for acquiring the lock file
@@ -31,8 +27,6 @@ pub struct LockFileConfig {
 impl Default for LockFileConfig {
     fn default() -> Self {
         LockFileConfig {
-            enabled: false,
-            role: InstanceRole::default(),
             polling_interval: Duration::from_secs(DEFAULT_POLLING_INTERVAL_S),
             timeout: Duration::from_secs(DEFAULT_ACQUIRE_TIMEOUT_S),
             ttl: Duration::from_secs(DEFAULT_LOCK_FILE_TTL_S),
@@ -44,21 +38,6 @@ impl Default for LockFileConfig {
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(super) fn parse_lock_file_config(env: &mut Env<EnvGetter>) -> LockFileConfig {
         LockFileConfig {
-            enabled: env
-                .get_optional::<bool>("RS_LOCK_FILE_ENABLED")
-                .unwrap_or(false),
-            role: match env
-                .get_optional::<String>("RS_LOCK_FILE_ROLE")
-                .unwrap_or("primary".to_string())
-                .to_lowercase()
-                .as_str()
-            {
-                "primary" => InstanceRole::Primary,
-                "secondary" => InstanceRole::Secondary,
-                _ => {
-                    panic!("Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'")
-                }
-            },
             polling_interval: Duration::from_secs(
                 env.get_optional::<u64>("RS_LOCK_FILE_POLLING_INTERVAL")
                     .unwrap_or(DEFAULT_POLLING_INTERVAL_S),
@@ -125,11 +104,9 @@ mod tests {
             .return_const(Ok("proceed".to_string()));
 
         let lock_file_settings = LockFileConfig {
-            enabled: true,
             polling_interval: Duration::from_secs(15),
             timeout: Duration::from_secs(20),
             ttl: Duration::from_secs(DEFAULT_LOCK_FILE_TTL_S),
-            role: InstanceRole::default(),
             failure_action: FailureAction::Proceed,
         };
 
@@ -187,23 +164,6 @@ mod tests {
             .with(eq("RS_LOCK_FILE_TTL"))
             .return_const(Ok("30".to_string()));
 
-        CfgParser::<MockEnvGetter>::parse_lock_file_config(&mut Env::new(env_getter));
-    }
-
-    #[rstest]
-    #[should_panic(
-        expected = "Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'"
-    )]
-    fn test_invalid_instance_role() {
-        let mut env_getter = MockEnvGetter::new();
-        env_getter
-            .expect_get()
-            .with(eq("RS_LOCK_FILE_ENABLED"))
-            .return_const(Ok("true".to_string()));
-        env_getter
-            .expect_get()
-            .with(eq("RS_LOCK_FILE_ROLE"))
-            .return_const(Ok("invalid_role".to_string()));
         CfgParser::<MockEnvGetter>::parse_lock_file_config(&mut Env::new(env_getter));
     }
 }

@@ -51,6 +51,7 @@ axum-extra = { version = "0.10.3", features = ["default", "typed-header"] }
 tokio = { version = "1.48.0", features = ["full"] }
 hyper = { version = "1.7.0", features = ["full"] }
 futures-util = "0.3.31"
+futures = "0.3"
 axum-server = { version = "0.7.1", features = ["tls-rustls"] }
 mime_guess = "2.0.5"
 bytesize = "2.0.1"

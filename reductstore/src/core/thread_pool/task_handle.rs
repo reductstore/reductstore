@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crossbeam_channel::internal::SelectHandle;
@@ -6,7 +6,7 @@ use crossbeam_channel::Receiver;
 use reduct_base::error::ReductError;
 use std::future::Future;
 
-pub(crate) struct TaskHandle<T> {
+pub struct TaskHandle<T> {
     rx: Receiver<T>,
     rx_start: Receiver<()>,
 }

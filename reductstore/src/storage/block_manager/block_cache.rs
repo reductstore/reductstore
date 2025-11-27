@@ -60,6 +60,7 @@ impl BlockCache {
         values
     }
 
+    #[allow(dead_code)]
     pub fn write_len(&self) -> usize {
         self.write_cache.write().unwrap().len()
     }
@@ -67,5 +68,10 @@ impl BlockCache {
     pub fn remove(&self, block_id: &u64) {
         self.write_cache.write().unwrap().remove(block_id);
         self.read_cache.write().unwrap().remove(block_id);
+    }
+
+    pub(crate) fn clear(&self) {
+        self.write_cache.write().unwrap().clear();
+        self.read_cache.write().unwrap().clear();
     }
 }

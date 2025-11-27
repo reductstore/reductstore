@@ -1,32 +1,32 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 pub(in crate::storage) mod block;
+mod block_cache;
 pub(in crate::storage) mod block_index;
+mod read_only;
 pub(in crate::storage) mod wal;
 
-mod block_cache;
-
-use log::{debug, error, info, trace, warn};
-use prost::bytes::{Bytes, BytesMut};
-use prost::Message;
-use std::fs;
-use std::fs::OpenOptions;
-
+use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::{FileWeak, FILE_CACHE};
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
-use crate::storage::block_manager::wal::{Wal, WalEntry};
+use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
 use block_index::BlockIndex;
 use crc64fast::Digest;
+use log::{debug, error, info, trace, warn};
+use prost::bytes::{Bytes, BytesMut};
+use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::fs;
+use std::fs::OpenOptions;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::{Arc, RwLock};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 pub(crate) type BlockRef = Arc<RwLock<Block>>;
@@ -44,6 +44,8 @@ pub(in crate::storage) struct BlockManager {
     block_index: BlockIndex,
     block_cache: BlockCache,
     wal: Box<dyn Wal + Sync + Send>,
+    cfg: Arc<Cfg>,
+    last_replica_sync: Instant,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -60,7 +62,8 @@ impl BlockManager {
     ///
     /// * `path` - Path to the block manager directory.
     /// * `index` - Block index to use.
-    pub(crate) fn new(path: PathBuf, index: BlockIndex) -> Self {
+    /// * `cfg` - Configuration.
+    pub(crate) fn new(path: PathBuf, index: BlockIndex, cfg: Arc<Cfg>) -> Self {
         let (bucket, entry) = {
             let mut parts = path.iter().rev();
             let entry = parts.next().unwrap().to_str().unwrap().to_string();
@@ -78,15 +81,13 @@ impl BlockManager {
                 READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
             ),
-            wal: wal::create_wal(path.clone()),
+            wal: create_wal(path.clone()),
+            cfg,
+            last_replica_sync: Instant::now(),
         }
     }
 
     pub fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
-        if self.block_cache.write_len() == 0 {
-            return Ok(());
-        }
-
         for block in self.block_cache.write_values() {
             self.save_block_on_disk(block)?;
         }
@@ -95,6 +96,8 @@ impl BlockManager {
     }
 
     pub fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
+        self.update_and_get_index()?;
+
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
             start_block_id.unwrap().clone()
@@ -185,10 +188,8 @@ impl BlockManager {
 
     pub fn save_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
         // save the current block in cache and write on the disk the evicted one
-        for (_, block) in self
-            .block_cache
-            .insert_write(block.read()?.block_id(), block.clone())
-        {
+        let id = block.read()?.block_id();
+        for (_, block) in self.block_cache.insert_write(id, block.clone()) {
             self.save_block_on_disk(block)?;
         }
 
@@ -287,7 +288,7 @@ impl BlockManager {
     /// Check if a block exists on disk.
     pub fn exist(&self, block_id: u64) -> Result<bool, ReductError> {
         let path = self.path_to_desc(block_id);
-        Ok(path.try_exists()?)
+        Ok(FILE_CACHE.try_exists(&path)?)
     }
 
     /// Update records in a block and save it on disk.
@@ -549,6 +550,11 @@ impl BlockManager {
         &self.block_index
     }
 
+    pub fn update_and_get_index(&mut self) -> Result<&BlockIndex, ReductError> {
+        self.reload_if_readonly()?;
+        Ok(&self.block_index)
+    }
+
     pub fn bucket_name(&self) -> &String {
         &self.bucket
     }
@@ -588,21 +594,21 @@ impl BlockManager {
         proto.encode(&mut buf).map_err(|e| {
             internal_server_error!("Failed to encode block descriptor {:?}: {}", path, e)
         })?;
+        let len = buf.len() as u64;
 
         trace!("Writing block descriptor {:?}", path);
 
-        // overwrite the file
-        let len = {
+        if self.cfg.role != InstanceRole::Replica {
+            // overwrite the file
+
             let file = FILE_CACHE
                 .write_or_create(&path, SeekFrom::Start(0))?
                 .upgrade()?;
             let mut lock = file.write()?;
-            let len = buf.len() as u64;
             lock.set_len(len)?;
             lock.write_all(&buf)?;
             lock.sync_all()?; // fix https://github.com/reductstore/reductstore/issues/642
-            len
-        };
+        }
 
         trace!("Updating block index");
         // update index with block crc
@@ -611,11 +617,14 @@ impl BlockManager {
         proto.metadata_size = len; // update metadata size because it changed
         self.block_index
             .insert_or_update_with_crc(proto, crc.sum64());
-        self.block_index.save()?;
 
-        trace!("Block {}/{}/{} saved", self.bucket, self.entry, block_id);
-        // clean WAL
-        self.wal.remove(block_id)?;
+        if self.cfg.role != InstanceRole::Replica {
+            self.block_index.save()?;
+
+            trace!("Block {}/{}/{} saved", self.bucket, self.entry, block_id);
+            // clean WAL
+            self.wal.remove(block_id)?;
+        }
         Ok(())
     }
 }
@@ -1112,7 +1121,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let mut bm = BlockManager::new(path.clone(), BlockIndex::new(path.join(BLOCK_INDEX_FILE)));
+        let mut bm = BlockManager::new(
+            path.clone(),
+            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            Cfg::default().into(),
+        );
         let block_ref = bm.start_new_block(block_id, 1024).unwrap().clone();
         {
             let mut block = block_ref.write().unwrap();

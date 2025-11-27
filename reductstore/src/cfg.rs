@@ -6,6 +6,7 @@ pub mod lock_file;
 mod provision;
 pub mod remote_storage;
 pub mod replication;
+pub mod storage_engine;
 
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
@@ -15,6 +16,7 @@ use crate::cfg::io::IoConfig;
 use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
+use crate::cfg::storage_engine::StorageEngineConfig;
 use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
@@ -43,6 +45,15 @@ pub const DEFAULT_PORT: u16 = 8383;
 pub const DEFAULT_CACHED_QUERIES: usize = 8;
 pub const DEFAULT_CACHED_QUERIES_TTL: u64 = 600; // seconds
 
+#[derive(Debug, PartialEq, Clone, Default)]
+pub enum InstanceRole {
+    #[default]
+    Standalone,
+    Primary,
+    Secondary,
+    Replica,
+}
+
 #[derive(Clone)]
 pub struct Cfg {
     pub log_level: String,
@@ -57,6 +68,8 @@ pub struct Cfg {
     pub license_path: Option<String>,
     pub ext_path: Option<PathBuf>,
     pub cors_allow_origin: Vec<String>,
+    pub role: InstanceRole,
+
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ReplicationSettings>,
@@ -64,6 +77,7 @@ pub struct Cfg {
     pub replication_conf: ReplicationConfig,
     pub cs_config: RemoteStorageConfig,
     pub lock_file_config: LockFileConfig,
+    pub engine_config: StorageEngineConfig,
 }
 
 impl Default for Cfg {
@@ -81,6 +95,7 @@ impl Default for Cfg {
             license_path: None,
             ext_path: None,
             cors_allow_origin: vec![],
+            role: InstanceRole::Primary,
             buckets: HashMap::new(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
@@ -88,6 +103,7 @@ impl Default for Cfg {
             replication_conf: ReplicationConfig::default(),
             cs_config: RemoteStorageConfig::default(),
             lock_file_config: LockFileConfig::default(),
+            engine_config: StorageEngineConfig::default(),
         }
     }
 }
@@ -130,6 +146,20 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             public_url.push('/');
         }
 
+        let role = match env
+            .get::<String>("RS_INSTANCE_ROLE", "STANDALONE".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "standalone" => InstanceRole::Standalone,
+            "primary" => InstanceRole::Primary,
+            "secondary" => InstanceRole::Secondary,
+            "replica" => InstanceRole::Replica,
+            _ => {
+                panic!("Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'")
+            }
+        };
+
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
             host,
@@ -140,6 +170,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
             cert_path,
             cert_key_path,
+            role,
             license_path: env.get_optional("RS_LICENSE_PATH"),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
@@ -150,6 +181,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             replication_conf: Self::parse_replication_config(&mut env, port),
             cs_config: Self::parse_remote_storage_cfg(&mut env),
             lock_file_config: Self::parse_lock_file_config(&mut env),
+            engine_config: Self::parse_storage_engine_config(&mut env),
         };
 
         let license = parse_license(cfg.license_path.clone());
@@ -191,12 +223,12 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub fn build_lock_file(&self) -> Result<BoxedLockFile, ReductError> {
         let data_path = self.get_data_path()?;
 
-        if !self.cfg.lock_file_config.enabled {
+        if self.cfg.role == InstanceRole::Replica || self.cfg.role == InstanceRole::Standalone {
             return Ok(LockFileBuilder::noop());
         }
 
         let lock_file = LockFileBuilder::new(data_path.join(".lock"))
-            .with_config(self.cfg.lock_file_config.clone())
+            .with_config(self.cfg.clone())
             .build();
 
         Ok(lock_file)
@@ -204,14 +236,12 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 
     pub fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
-
         let storage = Arc::new(self.provision_buckets(&data_path));
         let token_repo = self.provision_tokens(&data_path);
         let console = create_asset_manager(load_console());
         let select_ext = create_asset_manager(load_select_ext());
         let ros_ext = create_asset_manager(load_ros_ext());
         let replication_engine = self.provision_replication_repo(Arc::clone(&storage))?;
-
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
                 internal_server_error!(
@@ -303,8 +333,8 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?);
-
         FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
+        FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::Replica);
         Ok(())
     }
 
@@ -703,34 +733,79 @@ mod tests {
         parser.build().unwrap();
     }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_build_lock_file_disabled(mut env_getter: MockEnvGetter) {
-        env_getter
-            .expect_get()
-            .return_const(Err(VarError::NotPresent));
+    mod role {
+        use super::*;
 
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        #[rstest]
+        #[case("STANDALONE", InstanceRole::Standalone)]
+        #[case("PRIMARY", InstanceRole::Primary)]
+        #[case("SECONDARY", InstanceRole::Secondary)]
+        #[case("REPLICA", InstanceRole::Replica)]
+        fn test_instance_role(
+            mut env_getter: MockEnvGetter,
+            #[case] input: &str,
+            #[case] expected: InstanceRole,
+        ) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_INSTANCE_ROLE"))
+                .times(1)
+                .return_const(Ok(input.to_string()));
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+            let parser = CfgParser::from_env(env_getter, "0.0.0");
+            assert_eq!(parser.cfg.role, expected);
+        }
 
-        let lock_file = parser.build_lock_file().unwrap();
-        assert!(lock_file.is_locked().await);
-    }
+        #[rstest]
+        #[case("invalid")]
+        fn test_instance_role_invalid(mut env_getter: MockEnvGetter, #[case] input: &str) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_INSTANCE_ROLE"))
+                .times(1)
+                .return_const(Ok(input.to_string()));
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+            let result = std::panic::catch_unwind(|| {
+                CfgParser::from_env(env_getter, "0.0.0");
+            });
+            assert!(result.is_err());
+        }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_build_lock_file_enabled(mut env_getter: MockEnvGetter) {
-        env_getter
-            .expect_get()
-            .with(eq("RS_LOCK_FILE_ENABLED"))
-            .return_const(Ok("true".to_string()));
-        env_getter
-            .expect_get()
-            .return_const(Err(VarError::NotPresent));
+        #[rstest]
+        #[case(InstanceRole::Standalone, true)]
+        #[case(InstanceRole::Replica, true)]
+        #[case(InstanceRole::Primary, false)]
+        #[case(InstanceRole::Secondary, false)]
+        #[tokio::test]
+        async fn test_build_no_lock_file(
+            #[case] role: InstanceRole,
+            #[case] expected_lock: bool,
+            mut env_getter: MockEnvGetter,
+        ) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_DATA_PATH"))
+                .return_const(Ok(tempfile::tempdir()
+                    .unwrap()
+                    .keep()
+                    .to_str()
+                    .unwrap()
+                    .to_string()));
 
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
 
-        let lock_file = parser.build_lock_file().unwrap();
-        assert!(lock_file.is_waiting().await);
+            let mut parser = CfgParser::from_env(env_getter, "0.0.0");
+            parser.cfg.role = role;
+            let lock_file = parser.build_lock_file().unwrap();
+
+            assert_eq!(lock_file.is_locked().await, expected_lock);
+        }
     }
 
     #[fixture]

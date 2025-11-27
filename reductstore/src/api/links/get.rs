@@ -115,7 +115,7 @@ async fn decrypt_query(
         .parse::<u64>()
         .map_err(|e| unprocessable_entity!("Invalid 'r' parameter: {}", e))?;
 
-    let token_repo = components.token_repo.read().await;
+    let mut token_repo = components.token_repo.write().await;
     let token = if token_repo.get_token_list()?.is_empty() {
         // Authentication is disabled, use empty token
         ""

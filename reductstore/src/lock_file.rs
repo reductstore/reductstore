@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::lock_file::LockFileConfig;
+use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
@@ -29,13 +29,6 @@ pub enum FailureAction {
     Abort,
 }
 
-#[derive(Debug, PartialEq, Clone, Default)]
-pub enum InstanceRole {
-    #[default]
-    Primary,
-    Secondary,
-}
-
 #[async_trait]
 pub trait LockFile {
     async fn is_locked(&self) -> bool;
@@ -53,7 +46,7 @@ struct ImplLockFile {
 
 pub(crate) struct LockFileBuilder {
     path_buf: PathBuf,
-    config: LockFileConfig,
+    config: Cfg,
 }
 impl LockFileBuilder {
     pub fn noop() -> BoxedLockFile {
@@ -63,11 +56,11 @@ impl LockFileBuilder {
     pub fn new(path_buf: PathBuf) -> Self {
         Self {
             path_buf,
-            config: LockFileConfig::default(),
+            config: Cfg::default(),
         }
     }
 
-    pub fn with_config(mut self, config: LockFileConfig) -> Self {
+    pub fn with_config(mut self, config: Cfg) -> Self {
         self.config = config;
         self
     }
@@ -76,13 +69,23 @@ impl LockFileBuilder {
         Self::from_config(self.path_buf, self.config)
     }
 
-    fn from_config(path: PathBuf, cfg: LockFileConfig) -> BoxedLockFile {
+    fn from_config(path: PathBuf, cfg: Cfg) -> BoxedLockFile {
+        let role = cfg.role;
+        let cfg = cfg.lock_file_config;
+
         // Atomic flag to signal the background task to stop
         let stop_on_drop = Arc::new(AtomicBool::new(false));
         let stop_flag = Arc::clone(&stop_on_drop);
         let file_path = path.clone();
         let state = Arc::new(RwLock::new(State::Waiting));
         let state_clone = Arc::clone(&state);
+
+        let mut this = Box::new(ImplLockFile {
+            path,
+            stop_on_drop,
+            handle: tokio::spawn(async {}),
+            state,
+        });
 
         // for future use, we generate a unique id for the lock file
         let unique_id = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
@@ -140,7 +143,7 @@ impl LockFileBuilder {
                     break;
                 }
 
-                match cfg.role {
+                match role {
                     InstanceRole::Primary => {
                         // Primary instance acquires the lock immediately
                         info!("Primary instance acquiring lock file: {:?}", file_path);
@@ -156,6 +159,7 @@ impl LockFileBuilder {
                             info!("Secondary instance could not acquire lock file (already held by primary): {:?}", file_path);
                         }
                     }
+                    InstanceRole::Replica | InstanceRole::Standalone => {}
                 }
 
                 if *state_clone.read().await == State::Locked {
@@ -184,12 +188,8 @@ impl LockFileBuilder {
             }
         });
 
-        Box::new(ImplLockFile {
-            path,
-            stop_on_drop,
-            handle,
-            state,
-        })
+        this.handle = handle;
+        this
     }
 }
 
@@ -255,6 +255,8 @@ impl LockFile for NoopLockFile {
 mod tests {
     use super::*;
     use crate::backend::Backend;
+    use crate::cfg::lock_file::LockFileConfig;
+    use crate::cfg::{Cfg, InstanceRole};
     use rstest::{fixture, rstest};
     use std::fs;
     use tempfile::tempdir;
@@ -294,11 +296,14 @@ mod tests {
     #[tokio::test]
     async fn test_lock_file_timeout_abort(lock_file_path: PathBuf) {
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                timeout: Duration::from_secs(2),
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    timeout: Duration::from_secs(2),
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
             .build();
         fs::write(&lock_file_path, "dummy").unwrap();
 
@@ -323,12 +328,15 @@ mod tests {
     #[tokio::test]
     async fn test_lock_file_timeout_proceed(lock_file_path: PathBuf) {
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                timeout: Duration::from_secs(2),
-                failure_action: FailureAction::Proceed,
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    timeout: Duration::from_secs(2),
+                    failure_action: FailureAction::Proceed,
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
             .build();
         fs::write(&lock_file_path, "dummy").unwrap();
 
@@ -353,19 +361,23 @@ mod tests {
     #[tokio::test]
     async fn test_secondary_instance_waits(lock_file_path: PathBuf) {
         let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                role: InstanceRole::Primary,
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
             .build();
 
         let secondary_lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                role: InstanceRole::Secondary,
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    ..Default::default()
+                },
+                InstanceRole::Secondary,
+            ))
             .build();
 
         // Wait for the primary to acquire the lock
@@ -400,11 +412,14 @@ mod tests {
     #[tokio::test]
     async fn test_ttl_removes_stale_lock(lock_file_path: PathBuf) {
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                ttl: Duration::from_secs(1),
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    ttl: Duration::from_secs(1),
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
             .build();
         fs::write(&lock_file_path, "dummy").unwrap();
 
@@ -434,10 +449,13 @@ mod tests {
     #[tokio::test]
     async fn test_drops_lock_file(lock_file_path: PathBuf) {
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(LockFileConfig {
-                polling_interval: Duration::from_millis(500),
-                ..Default::default()
-            })
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
             .build();
 
         // Wait for the lock to be acquired
@@ -470,5 +488,13 @@ mod tests {
 
         let filepath = dir.join("test.lock");
         filepath
+    }
+
+    fn test_cfg(lock_file_config: LockFileConfig, role: InstanceRole) -> Cfg {
+        Cfg {
+            lock_file_config,
+            role,
+            ..Default::default()
+        }
     }
 }

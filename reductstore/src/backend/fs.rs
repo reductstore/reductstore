@@ -84,6 +84,11 @@ impl StorageBackend for FileSystemBackend {
         // do nothing because filesystem backend does not have a cache
         vec![]
     }
+
+    fn remove_from_local_cache(&self, _path: &Path) -> std::io::Result<()> {
+        // do nothing because filesystem backend does not have a cache
+        Ok(())
+    }
 }
 
 #[cfg(test)]

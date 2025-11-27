@@ -88,7 +88,7 @@ impl StateKeeper {
             headers
                 .get("Authorization")
                 .map(|header| header.to_str().unwrap_or("")),
-            components.token_repo.read().await.as_ref(),
+            components.token_repo.write().await.as_mut(),
             policy,
         )?;
 
@@ -289,12 +289,12 @@ impl AxumAppBuilder {
 mod tests {
     use super::*;
     use crate::asset::asset_manager::create_asset_manager;
-    use crate::auth::token_repository::create_token_repository;
+    use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::backend::Backend;
     use crate::core::file_cache::FILE_CACHE;
     use crate::ext::ext_repository::create_ext_repository;
     use crate::lock_file::{LockFile, LockFileBuilder};
-    use crate::replication::create_replication_repo;
+    use crate::replication::ReplicationRepoBuilder;
     use axum::body::Body;
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
@@ -446,6 +446,7 @@ mod tests {
     pub(crate) async fn keeper() -> Arc<StateKeeper> {
         let cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
+            api_token: "init-token".to_string(),
             ..Cfg::default()
         };
 
@@ -460,7 +461,7 @@ mod tests {
             .with_data_path(cfg.data_path.clone())
             .with_cfg(cfg.clone())
             .build();
-        let mut token_repo = create_token_repository(cfg.data_path.clone(), "init-token");
+        let mut token_repo = TokenRepositoryBuilder::new(cfg.clone()).build(cfg.data_path.clone());
 
         storage
             .create_bucket("bucket-1", BucketSettings::default())
@@ -492,7 +493,8 @@ mod tests {
         token_repo.generate_token("test", permissions).unwrap();
 
         let storage = Arc::new(storage);
-        let mut replication_repo = create_replication_repo(Arc::clone(&storage), cfg.clone());
+        let mut replication_repo =
+            ReplicationRepoBuilder::new(cfg.clone()).build(Arc::clone(&storage));
         replication_repo
             .create_replication(
                 "api-test",

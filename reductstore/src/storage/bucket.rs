@@ -1,11 +1,13 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod quotas;
+mod read_only;
 pub(super) mod settings;
 
-use crate::cfg::Cfg;
+use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use crate::core::thread_pool::{group_from_path, shared, unique, GroupDepth, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
@@ -13,7 +15,7 @@ pub use crate::storage::block_manager::RecordTx;
 use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
-use crate::storage::engine::check_name_convention;
+use crate::storage::engine::{check_name_convention, ReadOnlyMode};
 use crate::storage::entry::{Entry, EntrySettings, RecordReader};
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::debug;
@@ -28,7 +30,8 @@ use std::collections::BTreeMap;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
+use std::time::Instant;
 
 /// Bucket is a single storage bucket.
 pub(crate) struct Bucket {
@@ -36,7 +39,8 @@ pub(crate) struct Bucket {
     path: PathBuf,
     entries: Arc<RwLock<BTreeMap<String, Arc<Entry>>>>,
     settings: RwLock<BucketSettings>,
-    cfg: Cfg,
+    cfg: Arc<Cfg>,
+    last_replica_sync: RwLock<Instant>,
     is_provisioned: AtomicBool,
 }
 
@@ -69,7 +73,8 @@ impl Bucket {
             entries: Arc::new(RwLock::new(BTreeMap::new())),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
-            cfg,
+            cfg: Arc::new(cfg),
+            last_replica_sync: RwLock::new(Instant::now()),
         };
 
         bucket.save_settings().wait()?;
@@ -96,6 +101,7 @@ impl Bucket {
             buf
         };
 
+        let cfg = Arc::new(cfg);
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf))
             .map_err(|e| internal_server_error!("Failed to decode settings: {}", e))?;
 
@@ -121,8 +127,9 @@ impl Bucket {
         }
 
         for task in task_set {
-            let entry = task.wait()?;
-            entries.insert(entry.name().to_string(), entry);
+            if let Some(entry) = task.wait()? {
+                entries.insert(entry.name().to_string(), entry);
+            }
         }
 
         Ok(Bucket {
@@ -133,6 +140,7 @@ impl Bucket {
             )),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
+            last_replica_sync: RwLock::new(Instant::now()),
             cfg,
         })
     }
@@ -149,6 +157,7 @@ impl Bucket {
     pub fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
         check_name_convention(key)?;
         if !self.entries.read()?.contains_key(key) {
+            self.check_mode()?;
             let settings = self.settings.read()?;
             let entry = Entry::try_new(
                 &key,
@@ -177,7 +186,8 @@ impl Bucket {
     ///
     /// * `&Entry` - The entry or an HTTPError
     pub fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
-        let entries = self.entries.read().unwrap();
+        self.reload()?;
+        let entries = self.entries.read()?;
         let entry = entries.get(name).ok_or_else(|| {
             ReductError::not_found(&format!(
                 "Entry '{}' not found in bucket '{}'",
@@ -189,6 +199,8 @@ impl Bucket {
 
     /// Return bucket stats
     pub fn info(&self) -> Result<FullBucketInfo, ReductError> {
+        self.reload()?;
+
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
@@ -240,6 +252,10 @@ impl Bucket {
         content_type: String,
         labels: Labels,
     ) -> TaskHandle<Result<Box<dyn WriteRecord + Sync + Send>, ReductError>> {
+        if let Err(e) = self.check_mode() {
+            return Err(e).into();
+        }
+
         let get_entry = || {
             self.keep_quota_for(content_size)?;
             self.get_or_create_entry(name)?.upgrade()
@@ -275,6 +291,10 @@ impl Bucket {
         old_name: &str,
         new_name: &str,
     ) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(e) = self.check_mode() {
+            return Err(e).into();
+        }
+
         let old_path = self.path.join(old_name);
         let new_path = self.path.join(new_name);
         let bucket_name = self.name.clone();
@@ -295,7 +315,7 @@ impl Bucket {
             }
 
             if let Some(entry) = entries.read()?.get(&old_name) {
-                entry.sync_fs()?;
+                entry.compact()?;
             } else {
                 return Err(not_found!(
                     "Entry '{}' not found in bucket '{}'",
@@ -308,7 +328,7 @@ impl Bucket {
             FILE_CACHE.rename(&old_path, &new_path)?;
             entries.write()?.remove(&old_name);
 
-            let entry = Entry::restore(
+            if let Some(entry) = Entry::restore(
                 new_path,
                 EntrySettings {
                     max_block_size: settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
@@ -316,11 +336,12 @@ impl Bucket {
                 },
                 cfg.clone(),
             )
-            .wait()?;
-
-            entries
-                .write()?
-                .insert(new_name.to_string(), Arc::new(entry));
+            .wait()?
+            {
+                entries
+                    .write()?
+                    .insert(new_name.to_string(), Arc::new(entry));
+            }
             Ok(())
         })
     }
@@ -335,6 +356,10 @@ impl Bucket {
     ///
     /// * `HTTPError` - The error if any.
     pub fn remove_entry(&self, name: &str) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(e) = self.check_mode() {
+            return Err(e).into();
+        }
+
         if let Err(e) = self.get_entry(name) {
             return Err(e).into();
         }
@@ -360,6 +385,10 @@ impl Bucket {
 
     /// Sync all entries to the file system
     pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
+        if self.cfg.role == InstanceRole::Replica {
+            return Ok(()).into();
+        }
+
         if let Err(e) = self.save_settings().wait() {
             return Err(e).into();
         }
@@ -368,7 +397,7 @@ impl Bucket {
         // use shared task to avoid locking in graceful shutdown
         shared(&self.task_group(), "sync entries", move || {
             for entry in entries.values() {
-                entry.sync_fs()?;
+                entry.compact()?;
             }
             Ok(())
         })
@@ -376,6 +405,10 @@ impl Bucket {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn path(&self) -> &PathBuf {
+        &self.path
     }
 
     /// Mark bucket as provisioned to protect

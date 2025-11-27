@@ -8,12 +8,12 @@ use std::sync::{Arc, RwLock};
 use std::time::Instant;
 
 use bytes::Bytes;
-use bytesize::ByteSize;
 use crc64fast::Digest;
 use log::{debug, error, info, trace, warn};
 use prost::Message;
 
 use crate::cfg::Cfg;
+use crate::cfg::InstanceRole::Replica;
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
@@ -32,21 +32,26 @@ impl EntryLoader {
     pub fn restore_entry(
         path: PathBuf,
         options: EntrySettings,
-        cfg: Cfg,
-    ) -> Result<Entry, ReductError> {
+        cfg: Arc<Cfg>,
+    ) -> Result<Option<Entry>, ReductError> {
         let start_time = Instant::now();
 
-        let mut entry = match Self::try_restore_entry_from_index(path.clone(), options.clone()) {
-            Ok(entry) => Ok(entry),
-            Err(err) => {
-                warn!(
-                    "Failed to restore from block index {:?}: {}",
-                    path, err.message
-                );
-                info!("Rebuilding the block index {:?} from blocks", path);
-                Self::restore_entry_from_blocks(path.clone(), options.clone())
-            }
-        }?;
+        let mut entry =
+            match Self::try_restore_entry_from_index(path.clone(), options.clone(), cfg.clone()) {
+                Ok(entry) => Ok(entry),
+                Err(err) => {
+                    if cfg.role == Replica {
+                        return Ok(None);
+                    }
+
+                    warn!(
+                        "Failed to restore from block index {:?}: {}",
+                        path, err.message
+                    );
+                    info!("Rebuilding the block index {:?} from blocks", path);
+                    Self::restore_entry_from_blocks(path.clone(), options.clone(), cfg.clone())
+                }
+            }?;
 
         Self::restore_uncommitted_changes(path.clone(), &mut entry)?;
 
@@ -64,7 +69,7 @@ impl EntryLoader {
 
             if check_result().is_err() {
                 warn!("Block index is inconsistent. Rebuilding the block index from blocks");
-                Self::restore_entry_from_blocks(path.clone(), options)?
+                Self::restore_entry_from_blocks(path.clone(), options, cfg.clone())?
             } else {
                 entry
             }
@@ -76,19 +81,20 @@ impl EntryLoader {
                 "Restored entry `{}` in {}ms: size={}, records={}",
                 entry.name,
                 start_time.elapsed().as_millis(),
-                ByteSize::b(bm.index().size()),
+                bm.index().size(),
                 bm.index().record_count()
             );
         }
 
         entry.cfg = cfg;
-        Ok(entry)
+        Ok(Some(entry))
     }
 
     /// Restore the entry from blocks and create a new block index
     fn restore_entry_from_blocks(
         path: PathBuf,
         options: EntrySettings,
+        cfg: Arc<Cfg>,
     ) -> Result<Entry, ReductError> {
         let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
         for path in FILE_CACHE.read_dir(&path)? {
@@ -185,10 +191,14 @@ impl EntryLoader {
             name,
             bucket_name,
             settings: RwLock::new(options),
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path.clone(), block_index))),
+            block_manager: Arc::new(RwLock::new(BlockManager::new(
+                path.clone(),
+                block_index,
+                cfg.clone(),
+            ))),
             queries: Arc::new(RwLock::new(HashMap::new())),
             path,
-            cfg: Cfg::default(),
+            cfg,
         })
     }
 
@@ -196,6 +206,7 @@ impl EntryLoader {
     fn try_restore_entry_from_index(
         path: PathBuf,
         options: EntrySettings,
+        cfg: Arc<Cfg>,
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))?;
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
@@ -213,10 +224,14 @@ impl EntryLoader {
             name,
             bucket_name,
             settings: RwLock::new(options),
-            block_manager: Arc::new(RwLock::new(BlockManager::new(path.clone(), block_index))),
+            block_manager: Arc::new(RwLock::new(BlockManager::new(
+                path.clone(),
+                block_index,
+                cfg.clone(),
+            ))),
             queries: Arc::new(RwLock::new(HashMap::new())),
             path,
-            cfg: Cfg::default(),
+            cfg,
         })
     }
 
@@ -432,10 +447,13 @@ mod tests {
         );
 
         bm.save_cache_on_disk().unwrap();
-        let entry =
-            EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default())
-                .unwrap();
-
+        let entry = EntryLoader::restore_entry(
+            path.join(entry.name),
+            entry_settings,
+            Cfg::default().into(),
+        )
+        .unwrap()
+        .unwrap();
         let info = entry.info().unwrap();
         assert_eq!(entry.name, "entry");
         assert_eq!(info.record_count, 2);
@@ -472,11 +490,12 @@ mod tests {
         fs::write(data_path.clone(), b"bad data").unwrap();
 
         let entry =
-            EntryLoader::restore_entry(path.join("entry"), entry_settings, Cfg::default()).unwrap();
+            EntryLoader::restore_entry(path.join("entry"), entry_settings, Cfg::default().into())
+                .unwrap()
+                .unwrap();
         let info = entry.info().unwrap();
         assert_eq!(info.name, "entry");
         assert_eq!(info.record_count, 0);
-
         assert!(!meta_path.exists(), "should remove meta block");
         assert!(!data_path.exists(), "should remove data block");
     }
@@ -496,6 +515,7 @@ mod tests {
         let mut block_manager = BlockManager::new(
             path.clone(),
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
+            Cfg::default().into(),
         );
         {
             let block_v1_8_ref = block_manager.start_new_block(1, 100).unwrap();
@@ -539,8 +559,9 @@ mod tests {
             .unwrap();
 
         // repack the block
-        let entry =
-            EntryLoader::restore_entry(path.clone(), entry_settings, Cfg::default()).unwrap();
+        let entry = EntryLoader::restore_entry(path.clone(), entry_settings, Cfg::default().into())
+            .unwrap()
+            .unwrap();
         let info = entry.info().unwrap();
 
         assert_eq!(info.size, 88);
@@ -550,7 +571,7 @@ mod tests {
         assert_eq!(info.latest_record, 2000010);
 
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
-        let mut block_manager = BlockManager::new(path.clone(), block_index); // reload the block manager
+        let mut block_manager = BlockManager::new(path.clone(), block_index, Cfg::default().into());
         let block_v1_9 = block_manager.load_block(1).unwrap().read().unwrap().clone();
         assert_eq!(block_v1_9.record_count(), 2);
         assert_eq!(block_v1_9.size(), 20);
@@ -562,7 +583,7 @@ mod tests {
         let mut entry = entry(entry_settings.clone(), path.clone());
         write_stub_record(&mut entry, 1);
         write_stub_record(&mut entry, 2000010);
-        entry.sync_fs().unwrap(); // sync WALs
+        entry.compact().unwrap(); // sync WALs
 
         {
             let block_file_index = path.join(&entry.name).join(BLOCK_INDEX_FILE);
@@ -576,9 +597,13 @@ mod tests {
             file.sync_all().unwrap();
         }
 
-        let entry =
-            EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default())
-                .unwrap();
+        let entry = EntryLoader::restore_entry(
+            path.join(entry.name),
+            entry_settings,
+            Cfg::default().into(),
+        )
+        .unwrap()
+        .unwrap();
         let info = entry.info().unwrap();
         assert_eq!(info.record_count, 2);
     }
@@ -595,7 +620,9 @@ mod tests {
             .save_cache_on_disk()
             .unwrap();
 
-        EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default()).unwrap();
+        EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default().into())
+            .unwrap()
+            .unwrap();
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
         assert_eq!(block_index_path.exists(), true, "should create block index");
@@ -619,8 +646,9 @@ mod tests {
         EntryLoader::restore_entry(
             path.join(entry.name.clone()),
             entry_settings.clone(),
-            Cfg::default(),
+            Cfg::default().into(),
         )
+        .unwrap()
         .unwrap();
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
@@ -636,7 +664,8 @@ mod tests {
         file.write_all(&block_index.encode_to_vec()).unwrap();
         file.sync_all().unwrap();
 
-        EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default()).unwrap();
+        EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default().into())
+            .unwrap();
 
         let buf = fs::read(block_index_path).unwrap();
         let block_index = BlockIndexProto::decode(Bytes::from(buf)).unwrap();
@@ -655,8 +684,9 @@ mod tests {
         let entry = EntryLoader::restore_entry(
             path.join(entry.name.clone()),
             entry_settings.clone(),
-            Cfg::default(),
+            Cfg::default().into(),
         )
+        .unwrap()
         .unwrap();
         assert!(
             entry.block_manager.write().unwrap().load_block(1).is_ok(),
@@ -666,7 +696,8 @@ mod tests {
         fs::remove_file(path.join("entry/1.meta")).unwrap();
         fs::remove_file(path.join("entry/1.blk")).unwrap();
 
-        EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default()).unwrap();
+        EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default().into())
+            .unwrap();
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
         let buf = fs::read(block_index_path).unwrap();
@@ -681,7 +712,7 @@ mod tests {
     fn test_recovery_with_orphan_block(path: PathBuf, entry_settings: EntrySettings) {
         let mut entry = entry(entry_settings.clone(), path.clone());
         write_stub_record(&mut entry, 1);
-        entry.sync_fs().unwrap();
+        entry.compact().unwrap();
 
         // Create a new block but don't add it to the index
         let mut bm = entry.block_manager.write().unwrap();
@@ -694,8 +725,9 @@ mod tests {
         let entry = EntryLoader::restore_entry(
             path.join(entry.name.clone()),
             entry.settings(),
-            Cfg::default(),
+            Cfg::default().into(),
         )
+        .unwrap()
         .unwrap();
         assert_eq!(
             entry.block_manager.read().unwrap().index().tree().len(),
@@ -726,7 +758,9 @@ mod tests {
                 .unwrap();
 
             let entry =
-                EntryLoader::restore_entry(path.clone(), entry.settings(), Cfg::default()).unwrap();
+                EntryLoader::restore_entry(path.clone(), entry.settings(), Cfg::default().into())
+                    .unwrap()
+                    .unwrap();
 
             let block_ref = entry
                 .block_manager
@@ -760,7 +794,9 @@ mod tests {
                 .unwrap();
 
             let entry =
-                EntryLoader::restore_entry(path.clone(), entry.settings(), Cfg::default()).unwrap();
+                EntryLoader::restore_entry(path.clone(), entry.settings(), Cfg::default().into())
+                    .unwrap()
+                    .unwrap();
 
             let block_ref = entry.block_manager.write().unwrap().load_block(1).unwrap();
 
@@ -783,7 +819,9 @@ mod tests {
             // Record #1 was removed
             wal.append(1, WalEntry::RemoveRecord(0)).unwrap();
 
-            let entry = EntryLoader::restore_entry(path, entry.settings(), Cfg::default()).unwrap();
+            let entry = EntryLoader::restore_entry(path, entry.settings(), Cfg::default().into())
+                .unwrap()
+                .unwrap();
 
             let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
             let block = block.read().unwrap();
@@ -799,7 +837,9 @@ mod tests {
 
             // Block #1 was removed
             wal.append(1, WalEntry::RemoveBlock).unwrap();
-            let entry = EntryLoader::restore_entry(path, entry.settings(), Cfg::default()).unwrap();
+            let entry = EntryLoader::restore_entry(path, entry.settings(), Cfg::default().into())
+                .unwrap()
+                .unwrap();
 
             let block = entry.block_manager.write().unwrap().load_block(1).clone();
             assert_eq!(block.err().unwrap().status, InternalServerError,);
@@ -810,7 +850,8 @@ mod tests {
             let (entry, path) = entry_fix;
 
             fs::write(path.join("wal/1.wal"), b"bad data").unwrap();
-            let entry = EntryLoader::restore_entry(path.clone(), entry.settings(), Cfg::default());
+            let entry =
+                EntryLoader::restore_entry(path.clone(), entry.settings(), Cfg::default().into());
             assert!(entry.is_ok());
             assert!(
                 !path.join("wal/1.wal").exists(),
@@ -845,7 +886,9 @@ mod tests {
 
             // Restore the entry
             let entry =
-                EntryLoader::restore_entry(path.clone(), entry.settings(), Cfg::default()).unwrap();
+                EntryLoader::restore_entry(path.clone(), entry.settings(), Cfg::default().into())
+                    .unwrap()
+                    .unwrap();
             let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
             let block = block.read().unwrap();
 

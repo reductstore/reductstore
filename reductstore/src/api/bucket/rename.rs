@@ -87,7 +87,7 @@ mod tests {
 
         let token = components
             .token_repo
-            .read()
+            .write()
             .await
             .get_token("test-1")
             .unwrap()

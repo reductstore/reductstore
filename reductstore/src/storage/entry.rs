@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod entry_loader;
@@ -8,24 +8,6 @@ mod remove_records;
 pub(crate) mod update_labels;
 mod write_record;
 
-use crate::storage::block_manager::block_index::BlockIndex;
-use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
-use crate::storage::entry::entry_loader::EntryLoader;
-use crate::storage::proto::ts_to_us;
-use crate::storage::query::base::QueryOptions;
-use crate::storage::query::{build_query, spawn_query_task, QueryRx};
-use log::debug;
-use reduct_base::error::ReductError;
-use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
-use std::collections::HashMap;
-use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
-use std::time::{Duration, Instant};
-use tokio::sync::RwLock as AsyncRwLock;
-
-pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
-
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
@@ -33,8 +15,24 @@ use crate::core::thread_pool::{
     group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
 };
 use crate::core::weak::Weak;
+use crate::storage::block_manager::block_index::BlockIndex;
+use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
+use crate::storage::entry::entry_loader::EntryLoader;
+use crate::storage::proto::ts_to_us;
+use crate::storage::query::base::QueryOptions;
+use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 pub(crate) use io::record_reader::RecordReader;
+pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
+use log::debug;
+use reduct_base::error::ReductError;
+use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::{internal_server_error, not_found};
+use std::collections::HashMap;
+use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, RwLock};
+use std::time::{Duration, Instant};
+use tokio::sync::RwLock as AsyncRwLock;
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,
@@ -55,7 +53,7 @@ pub(crate) struct Entry {
     block_manager: Arc<RwLock<BlockManager>>,
     queries: QueryHandleMapRef,
     path: PathBuf,
-    cfg: Cfg,
+    cfg: Arc<Cfg>,
 }
 
 #[derive(PartialEq)]
@@ -77,7 +75,7 @@ impl Entry {
         name: &str,
         path: PathBuf,
         settings: EntrySettings,
-        cfg: Cfg,
+        cfg: Arc<Cfg>,
     ) -> Result<Self, ReductError> {
         FILE_CACHE.create_dir_all(&path.join(name))?;
         let path = path.join(name);
@@ -95,6 +93,7 @@ impl Entry {
             block_manager: Arc::new(RwLock::new(BlockManager::new(
                 path.clone(),
                 BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                cfg.clone(),
             ))),
             queries: Arc::new(RwLock::new(HashMap::new())),
             path,
@@ -105,8 +104,8 @@ impl Entry {
     pub(crate) fn restore(
         path: PathBuf,
         options: EntrySettings,
-        cfg: Cfg,
-    ) -> TaskHandle<Result<Entry, ReductError>> {
+        cfg: Arc<Cfg>,
+    ) -> TaskHandle<Result<Option<Entry>, ReductError>> {
         unique_child(
             &group_from_path(&path, GroupDepth::ENTRY),
             "restore entry",
@@ -203,24 +202,24 @@ impl Entry {
 
     /// Returns stats about the entry.
     pub fn info(&self) -> Result<EntryInfo, ReductError> {
-        let bm = self.block_manager.read()?;
-        let index_tree = bm.index().tree();
-        let (oldest_record, latest_record) = if index_tree.is_empty() {
+        let mut bm = self.block_manager.write()?;
+        let index = bm.update_and_get_index()?;
+        let (oldest_record, latest_record) = if index.tree().is_empty() {
             (0, 0)
         } else {
-            let latest_block_id = index_tree.last().unwrap();
-            let latest_record = match bm.index().get_block(*latest_block_id) {
+            let latest_block_id = index.tree().last().unwrap();
+            let latest_record = match index.get_block(*latest_block_id) {
                 Some(block) => ts_to_us(&block.latest_record_time.as_ref().unwrap()),
                 None => 0,
             };
-            (*index_tree.first().unwrap(), latest_record)
+            (*index.tree().first().unwrap(), latest_record)
         };
 
         Ok(EntryInfo {
             name: self.name.clone(),
-            size: bm.index().size(),
-            record_count: bm.index().record_count(),
-            block_count: index_tree.len() as u64,
+            size: index.size(),
+            record_count: index.record_count(),
+            block_count: index.tree().len() as u64,
             oldest_record,
             latest_record,
         })
@@ -269,7 +268,8 @@ impl Entry {
         }
     }
 
-    pub fn sync_fs(&self) -> Result<(), ReductError> {
+    // Compacts the entry by saving the block manager cache on disk and update index from WALs
+    pub fn compact(&self) -> Result<(), ReductError> {
         let mut bm = self.block_manager.write()?;
         bm.save_cache_on_disk()
     }
@@ -290,7 +290,6 @@ impl Entry {
         *self.settings.write().unwrap() = settings;
     }
 
-    #[cfg(test)]
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
@@ -391,10 +390,11 @@ mod tests {
             );
 
             bm.save_cache_on_disk().unwrap();
-            let entry = Entry::restore(path.join(entry.name), entry_settings, Cfg::default())
-                .wait()
-                .unwrap();
-
+            let entry =
+                Entry::restore(path.join(entry.name), entry_settings, Cfg::default().into())
+                    .wait()
+                    .unwrap()
+                    .unwrap();
             let info = entry.info().unwrap();
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
@@ -605,7 +605,7 @@ mod tests {
                     max_block_size: 100000,
                     max_block_records: 2,
                 },
-                Cfg::default(),
+                Cfg::default().into(),
             )
             .unwrap();
 
@@ -640,7 +640,7 @@ mod tests {
 
     #[fixture]
     pub(super) fn entry(entry_settings: EntrySettings, path: PathBuf) -> Entry {
-        Entry::try_new("entry", path.clone(), entry_settings, Cfg::default()).unwrap()
+        Entry::try_new("entry", path.clone(), entry_settings, Cfg::default().into()).unwrap()
     }
 
     #[fixture]

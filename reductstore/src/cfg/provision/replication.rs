@@ -3,7 +3,7 @@
 
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
-use crate::replication::{create_replication_repo, ManageReplications};
+use crate::replication::{ManageReplications, ReplicationRepoBuilder};
 use crate::storage::engine::StorageEngine;
 use log::{error, info, warn};
 use reduct_base::error::{ErrorCode, ReductError};
@@ -17,7 +17,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         &self,
         storage: Arc<StorageEngine>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = create_replication_repo(Arc::clone(&storage), self.cfg.clone());
+        let mut repo = ReplicationRepoBuilder::new(self.cfg.clone()).build(Arc::clone(&storage));
         for (name, settings) in &self.cfg.replications {
             if let Err(e) = repo.create_replication(&name, settings.clone()) {
                 if e.status() == ErrorCode::Conflict {
@@ -39,6 +39,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         }
         Ok(repo)
     }
+
     pub(in crate::cfg) fn parse_replications(
         env: &mut Env<EnvGetter>,
     ) -> HashMap<String, ReplicationSettings> {
@@ -158,12 +159,23 @@ mod tests {
     use crate::cfg::replication::ReplicationConfig;
     use crate::cfg::tests::MockEnvGetter;
     use crate::cfg::Cfg;
+    use crate::replication::{ManageReplications, ReplicationRepoBuilder};
+    use crate::storage::engine::StorageEngine;
     use mockall::predicate::eq;
     use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
     use std::env::VarError;
     use std::path::PathBuf;
+    use std::sync::Arc;
     use test_log::test as log_test;
+
+    // Local helper to create a replication repo for tests
+    fn create_replication_repo(
+        storage: Arc<StorageEngine>,
+        cfg: Cfg,
+    ) -> Box<dyn ManageReplications + Send + Sync> {
+        ReplicationRepoBuilder::new(cfg).build(storage)
+    }
 
     #[log_test(rstest)]
     #[tokio::test]
@@ -354,15 +366,12 @@ mod tests {
     async fn test_replications_update_existing(mut env_with_replications: MockEnvGetter) {
         let cfg = Cfg {
             data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
-
             ..Default::default()
         };
-
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
-            .with_cfg(cfg)
+            .with_cfg(cfg.clone())
             .build();
-
         storage
             .create_bucket("bucket1", Default::default())
             .unwrap();

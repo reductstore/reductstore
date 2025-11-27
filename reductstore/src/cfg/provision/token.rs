@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::auth::token_repository::{create_token_repository, ManageTokens};
+use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use log::{error, info, warn};
@@ -11,11 +11,9 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub(in crate::cfg) fn provision_tokens(
-        &self,
-        data_path: &PathBuf,
-    ) -> Box<dyn ManageTokens + Send + Sync> {
-        let mut token_repo = create_token_repository(PathBuf::from(data_path), &self.cfg.api_token);
+    pub(in crate::cfg) fn provision_tokens(&self, data_path: &PathBuf) -> BoxedTokenRepository {
+        let mut token_repo =
+            TokenRepositoryBuilder::new(self.cfg.clone()).build(PathBuf::from(data_path));
 
         for (name, token) in &self.cfg.tokens {
             let is_generated = match token_repo
@@ -107,6 +105,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 mod tests {
     use super::*;
     use crate::cfg::tests::MockEnvGetter;
+    use crate::cfg::Cfg;
     use mockall::predicate::eq;
     use reduct_base::error::ReductError;
     use reduct_base::not_found;
@@ -141,7 +140,7 @@ mod tests {
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
-        let repo = components.token_repo.read().await;
+        let mut repo = components.token_repo.write().await;
         let token1 = repo.get_token("token1").unwrap().clone();
         assert_eq!(token1.value, "TOKEN");
         assert!(token1.is_provisioned);
@@ -174,7 +173,7 @@ mod tests {
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
-        let repo = components.token_repo.read().await;
+        let mut repo = components.token_repo.write().await;
         let token1 = repo.get_token("token1").unwrap().clone();
         assert_eq!(token1.value, "TOKEN");
         assert!(token1.is_provisioned);
@@ -199,7 +198,7 @@ mod tests {
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
-        let repo = components.token_repo.read().await;
+        let mut repo = components.token_repo.write().await;
         let err = repo.get_token("token1").err().unwrap();
         assert_eq!(err, not_found!("Token 'token1' doesn't exist"));
     }
@@ -207,8 +206,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_override_token(mut env_with_tokens: MockEnvGetter) {
-        let mut auth_repo =
-            create_token_repository(env_with_tokens.get("RS_DATA_PATH").unwrap().into(), "XXX");
+        let mut auth_repo = TokenRepositoryBuilder::new(Cfg {
+            api_token: "init".to_string(),
+            ..Default::default()
+        })
+        .build(env_with_tokens.get("RS_DATA_PATH").unwrap().into());
         let _ = auth_repo
             .generate_token("token1", Permissions::default())
             .unwrap();
@@ -224,7 +226,7 @@ mod tests {
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
         let components = cfg.build().unwrap();
 
-        let repo = components.token_repo.read().await;
+        let mut repo = components.token_repo.write().await;
         let token = repo.get_token("token1").unwrap();
         assert_eq!(token.value, "TOKEN");
     }

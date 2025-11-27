@@ -158,6 +158,14 @@ impl BlockIndex {
         Ok(block_index)
     }
 
+    pub fn update_from_disc(&mut self) -> Result<(), ReductError> {
+        FILE_CACHE.discard_recursive(&self.path_buf)?;
+
+        let updated_index = BlockIndex::try_load(self.path_buf.clone())?;
+        *self = updated_index;
+        Ok(())
+    }
+
     pub fn from_proto(path: PathBuf, value: BlockIndexProto) -> Result<Self, ReductError> {
         let mut block_index = BlockIndex {
             path_buf: path.clone(),
@@ -260,6 +268,10 @@ impl BlockIndex {
 
     pub fn tree(&self) -> &BTreeSet<u64> {
         &self.index
+    }
+
+    pub fn info(&self) -> &HashMap<u64, BlockEntry> {
+        &self.index_info
     }
 
     fn insert(&mut self, block: BlockEntry) {

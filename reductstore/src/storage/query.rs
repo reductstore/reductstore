@@ -193,6 +193,7 @@ impl QueryWatcher {
 mod tests {
     use super::*;
     use crate::backend::Backend;
+    use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
@@ -346,8 +347,11 @@ mod tests {
                 .unwrap(),
         );
 
-        let mut block_manager =
-            BlockManager::new(path.clone(), BlockIndex::new(path.join("index")));
+        let mut block_manager = BlockManager::new(
+            path.clone(),
+            BlockIndex::new(path.join("index")),
+            Cfg::default().into(),
+        );
         let block_ref = block_manager.start_new_block(0, 10).unwrap();
         block_ref.write().unwrap().insert_or_update_record(Record {
             timestamp: Some(Timestamp {

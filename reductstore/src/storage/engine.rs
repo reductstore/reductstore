@@ -1,20 +1,24 @@
+mod read_only;
+
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 use crate::cfg::Cfg;
+use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use crate::core::thread_pool::GroupDepth::BUCKET;
-use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
+use crate::core::thread_pool::{group_from_path, try_unique, unique, TaskHandle};
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
-use reduct_base::{conflict, not_found, unprocessable_entity};
+use reduct_base::{conflict, forbidden, not_found, unprocessable_entity};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
-use std::time::Instant;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
@@ -23,6 +27,20 @@ pub struct StorageEngineBuilder {
     cfg: Option<Cfg>,
     license: Option<License>,
     data_path: Option<PathBuf>,
+}
+pub(super) trait ReadOnlyMode {
+    fn cfg(&self) -> &Cfg;
+
+    fn reload(&self) -> Result<(), ReductError>;
+
+    fn check_mode(&self) -> Result<(), ReductError> {
+        if self.cfg().role == InstanceRole::Replica {
+            return Err(forbidden!(
+                "Cannot perform this operation in read-only mode"
+            ));
+        }
+        Ok(())
+    }
 }
 
 impl StorageEngineBuilder {
@@ -75,6 +93,7 @@ impl StorageEngineBuilder {
             buckets: Arc::new(RwLock::new(buckets)),
             license: self.license,
             cfg,
+            last_replica_sync: RwLock::new(Instant::now()),
         }
     }
 }
@@ -86,6 +105,7 @@ pub struct StorageEngine {
     buckets: Arc<RwLock<BTreeMap<String, Arc<Bucket>>>>,
     license: Option<License>,
     cfg: Cfg,
+    last_replica_sync: RwLock<Instant>,
 }
 
 impl StorageEngine {
@@ -103,11 +123,13 @@ impl StorageEngine {
     ///
     /// * `ServerInfo` - The reductstore info or an HTTPError
     pub fn info(&self) -> Result<ServerInfo, ReductError> {
+        self.reload()?;
+
         let mut usage = 0u64;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
 
-        let buckets = self.buckets.read().unwrap();
+        let buckets = self.buckets.read()?;
         for bucket in buckets.values() {
             let bucket = bucket.info()?.info;
             usage += bucket.size;
@@ -137,6 +159,8 @@ impl StorageEngine {
         name: &str,
         settings: BucketSettings,
     ) -> Result<Weak<Bucket>, ReductError> {
+        self.check_mode()?;
+
         check_name_convention(name)?;
         let mut buckets = self.buckets.write()?;
         if buckets.contains_key(name) {
@@ -164,6 +188,7 @@ impl StorageEngine {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     pub(crate) fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
+        self.reload()?;
         let buckets = self.buckets.read()?;
         match buckets.get(name) {
             Some(bucket) => Ok(Arc::clone(bucket).into()),
@@ -183,6 +208,10 @@ impl StorageEngine {
     ///
     /// * HTTPError - An error if the bucket doesn't exist
     pub(crate) fn remove_bucket(&self, name: &str) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(err) = self.check_mode() {
+            return TaskHandle::from(Err(err));
+        }
+
         let task_group = [self.data_path.file_name().unwrap().to_str().unwrap(), name].join("/");
 
         let path = self.data_path.join(name);
@@ -215,6 +244,10 @@ impl StorageEngine {
         old_name: &str,
         new_name: &str,
     ) -> TaskHandle<Result<(), ReductError>> {
+        if let Err(err) = self.check_mode() {
+            return TaskHandle::from(Err(err));
+        }
+
         let check_and_prepare_bucket = || {
             check_name_convention(new_name)?;
             let buckets = self.buckets.read().unwrap();
@@ -268,8 +301,9 @@ impl StorageEngine {
     }
 
     pub(crate) fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
+        self.reload()?;
         let mut buckets = Vec::new();
-        for bucket in self.buckets.read().unwrap().values() {
+        for bucket in self.buckets.read()?.values() {
             buckets.push(bucket.info()?.info);
         }
 
@@ -277,25 +311,44 @@ impl StorageEngine {
     }
 
     pub fn sync_fs(&self) -> Result<(), ReductError> {
+        self.compact().wait()?;
+        FILE_CACHE.force_sync_all()?;
+        Ok(())
+    }
+
+    /// Update index from WALs and remove them
+    pub fn compact(&self) -> TaskHandle<Result<(), ReductError>> {
+        if self.cfg.role == InstanceRole::Replica {
+            return Ok(()).into();
+        }
+
         let mut handlers = vec![];
-        let buckets = self.buckets.read()?.clone();
-        for (name, bucket) in buckets {
+        let Ok(buckets) = self.buckets.read() else {
+            return Ok(()).into();
+        };
+
+        for (name, bucket) in buckets.iter() {
             info!("Sync bucket '{}'", name);
             handlers.push(bucket.sync_fs());
         }
 
-        for handler in handlers {
-            match handler.wait() {
-                Ok(_) => {}
-                Err(e) => {
-                    error!("Failed to sync bucket: {}", e);
+        try_unique(
+            "compact_storage",
+            "compact storage",
+            Duration::from_secs(1),
+            move || {
+                for handler in handlers {
+                    match handler.wait() {
+                        Ok(_) => {}
+                        Err(e) => {
+                            error!("Failed to sync bucket: {}", e);
+                        }
+                    }
                 }
-            }
-        }
-
-        FILE_CACHE.force_sync_all();
-
-        Ok(())
+                Ok(())
+            },
+        )
+        .unwrap_or(Ok(()).into()) // skip if previous task is still running
     }
 
     pub fn data_path(&self) -> &PathBuf {

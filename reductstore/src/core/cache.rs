@@ -106,6 +106,7 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
     /// # Returns
     ///
     /// The number of entries in the cache.
+    #[allow(dead_code)]
     pub fn len(&self) -> usize {
         self.store.len()
     }
@@ -182,6 +183,10 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
         }
 
         removed
+    }
+
+    pub fn clear(&mut self) {
+        self.store.clear();
     }
 }
 
@@ -276,5 +281,14 @@ mod tests {
         assert_eq!(cache.get(&1), None);
         assert_eq!(cache.get(&2), Some(&2));
         assert_eq!(cache.get(&3), Some(&3));
+    }
+
+    #[test]
+    fn test_clear() {
+        let mut cache = Cache::new(2, Duration::from_secs(1));
+        cache.insert(1, 1);
+        cache.insert(2, 2);
+        cache.clear();
+        assert_eq!(cache.len(), 0);
     }
 }

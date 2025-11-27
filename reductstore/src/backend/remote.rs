@@ -233,6 +233,7 @@ impl StorageBackend for RemoteBackend {
         };
 
         let full_path = self.cache_path.join(full_path);
+        let time_now = Instant::now();
         debug!(
             "Syncing local file {} to S3 key: {}",
             full_path.display(),
@@ -240,6 +241,13 @@ impl StorageBackend for RemoteBackend {
         );
         self.connector
             .upload_object(&s3_key, &full_path.to_path_buf())?;
+
+        debug!(
+            "Uploaded file {} to S3 key: {} in {:?}",
+            full_path.display(),
+            s3_key,
+            time_now.elapsed()
+        );
 
         Ok(())
     }
@@ -254,12 +262,20 @@ impl StorageBackend for RemoteBackend {
         };
 
         let full_path = self.cache_path.join(path);
+        let time_now = Instant::now();
         debug!(
             "Downloading S3 key: {} to local path: {:?}",
             s3_key, full_path
         );
         self.connector.download_object(&s3_key, &full_path)?;
         self.local_cache.lock().unwrap().register_file(&full_path)?;
+
+        debug!(
+            "Downloaded S3 key: {} to local path: {:?} in {:?}",
+            s3_key,
+            full_path,
+            time_now.elapsed()
+        );
         Ok(())
     }
 
@@ -280,6 +296,11 @@ impl StorageBackend for RemoteBackend {
     fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
         let mut cache = self.local_cache.lock().unwrap();
         cache.invalidate_old_files()
+    }
+
+    fn remove_from_local_cache(&self, path: &Path) -> io::Result<()> {
+        let cache = &mut self.local_cache.lock().unwrap();
+        cache.remove(&path)
     }
 }
 
