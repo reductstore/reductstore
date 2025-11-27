@@ -689,6 +689,100 @@ mod tests {
         }
     }
 
+    mod test_read_only {
+        use super::*;
+
+        #[rstest]
+        fn test_write(read_only_cache: FileCache, tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("test_read_only_mode.txt");
+            fs::write(&file_path, b"test").unwrap();
+
+            let rc = read_only_cache
+                .read(&file_path, SeekFrom::Start(0))
+                .unwrap()
+                .upgrade()
+                .unwrap();
+            let mut file = rc.write().unwrap();
+            let mut data = String::new();
+            file.read_to_string(&mut data).unwrap();
+            assert_eq!(data, "test", "should read from beginning");
+
+            file.write_all(b"new data").unwrap();
+            file.read_to_string(&mut data).unwrap();
+
+            assert_eq!(data, "test", "should not write in read-only mode");
+        }
+
+        #[rstest]
+        fn test_remove(read_only_cache: FileCache, tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("test_remove_in_read_only_mode.txt");
+            fs::write(&file_path, b"test").unwrap();
+
+            read_only_cache.remove(&file_path).unwrap();
+
+            assert_eq!(
+                file_path.exists(),
+                true,
+                "file should not be removed in read-only mode"
+            );
+        }
+
+        #[rstest]
+        fn test_rename(read_only_cache: FileCache, tmp_dir: PathBuf) {
+            let old_file_path = tmp_dir.join("test_rename_in_read_only_mode_old.txt");
+            let new_file_path = tmp_dir.join("test_rename_in_read_only_mode_new.txt");
+
+            fs::write(&old_file_path, b"test").unwrap();
+
+            read_only_cache
+                .rename(&old_file_path, &new_file_path)
+                .unwrap();
+
+            assert_eq!(
+                old_file_path.exists(),
+                true,
+                "old file should not be renamed in read-only mode"
+            );
+            assert_eq!(
+                new_file_path.exists(),
+                false,
+                "new file should not be created in read-only mode"
+            );
+        }
+
+        #[rstest]
+        fn test_create_dir(read_only_cache: FileCache, tmp_dir: PathBuf) {
+            let dir_path = tmp_dir.join("test_create_dir_in_read_only_mode");
+
+            read_only_cache.create_dir_all(&dir_path).unwrap();
+
+            assert_eq!(
+                dir_path.exists(),
+                false,
+                "directory should not be created in read-only mode"
+            );
+        }
+
+        #[rstest]
+        fn test_remove_dir(read_only_cache: FileCache, tmp_dir: PathBuf) {
+            let dir_path = tmp_dir.join("test_remove_dir_in_read_only_mode");
+            fs::create_dir_all(&dir_path).unwrap();
+
+            read_only_cache.remove_dir(&dir_path).unwrap();
+
+            assert_eq!(
+                dir_path.exists(),
+                true,
+                "directory should not be removed in read-only mode"
+            );
+        }
+
+        #[fixture]
+        fn read_only_cache(cache: FileCache) -> FileCache {
+            cache.set_read_only(true);
+            cache
+        }
+    }
     #[fixture]
     fn cache() -> FileCache {
         let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));

@@ -12,8 +12,8 @@ use chrono::{DateTime, Utc};
 use log::{debug, error};
 use prost::Message;
 use reduct_base::error::ReductError;
-use reduct_base::forbidden;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
+use reduct_base::{forbidden, internal_server_error};
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
@@ -72,21 +72,14 @@ impl ReadOnlyTokenRepository {
                 lock.upgrade()?.write()?.read_to_end(&mut buf)?;
 
                 let proto_repo = TokenRepo::decode(&mut Bytes::from(buf)).map_err(|e| {
-                    ReductError::internal_server_error(&format!(
-                        "Could not decode token repository: {}",
-                        e
-                    ))
+                    internal_server_error!("Could not decode token repository: {}", e)
                 })?;
+
                 for token in proto_repo.tokens {
                     repo.insert(token.name.clone(), token.into());
                 }
             }
-            Err(_) => {
-                error!(
-                    "Token repository not found at {}, creating",
-                    self.config_path.as_path().display()
-                );
-            }
+            Err(_) => error!("Token repository not found at {:?}", self.config_path),
         };
 
         if !api_token.is_empty() {

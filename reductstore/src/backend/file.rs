@@ -374,6 +374,38 @@ mod tests {
         }
     }
 
+    mod read_only {
+        use super::*;
+        use std::io::Write;
+
+        #[rstest]
+        fn test_file_write_ignored(mut mock_backend: MockBackend) {
+            let path = mock_backend.path().to_path_buf();
+
+            // no upload expected because write is ignored
+            mock_backend.expect_upload().times(0);
+
+            let mut file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .read(true)
+                .write(true)
+                .create(true)
+                .ignore_write(true)
+                .open("test.txt")
+                .unwrap();
+
+            assert!(file.is_synced());
+            let bytes_written = file.write(b" more").unwrap();
+            assert_eq!(bytes_written, 5);
+            assert!(file.is_synced());
+            file.sync_all().unwrap();
+            assert!(file.is_synced());
+
+            // check that the file content is unchanged
+            let content = fs::read_to_string(path.join("test.txt")).unwrap();
+            assert_eq!(content, "content");
+        }
+    }
+
     mock! {
         pub Backend {}
 

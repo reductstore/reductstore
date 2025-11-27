@@ -94,6 +94,12 @@ mod tests {
     }
 
     #[rstest]
+    fn test_find_mut_by_name_no_init_token(mut disabled_repo: BoxedTokenRepository) {
+        let token = disabled_repo.get_mut_token("test");
+        assert_eq!(token, Err(bad_request!("Authentication is disabled")));
+    }
+
+    #[rstest]
     fn test_get_token_list_no_init_token(mut disabled_repo: BoxedTokenRepository) {
         let token_list = disabled_repo.get_token_list().unwrap();
         assert_eq!(token_list, vec![]);
@@ -116,6 +122,12 @@ mod tests {
     #[rstest]
     fn test_rename_bucket_no_init_token(mut disabled_repo: BoxedTokenRepository) {
         let result = disabled_repo.rename_bucket("bucket-1", "bucket-2");
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn test_remove_bucket_from_tokens_no_init_token(mut disabled_repo: BoxedTokenRepository) {
+        let result = disabled_repo.remove_bucket_from_tokens("bucket-1");
         assert!(result.is_ok());
     }
 
