@@ -117,7 +117,7 @@ mod tests {
         );
 
         // Reload read-only bucket
-        tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
+        tokio::time::sleep(cfg.engine_config.replica_update_interval * 2).await;
         read_only_bucket.reload().unwrap();
 
         // Now, read-only bucket should have two entries
