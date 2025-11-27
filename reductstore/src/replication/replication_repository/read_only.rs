@@ -57,5 +57,100 @@ impl ManageReplications for ReadOnlyReplicationRepository {
     fn notify(&mut self, _notification: TransactionNotification) -> Result<(), ReductError> {
         Err(forbidden!("Cannot notify replication in read-only mode"))
     }
-    // Implement required methods with no-op behavior
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::replication::TransactionNotification;
+    use rstest::{fixture, rstest};
+
+    #[fixture]
+    fn repo() -> ReadOnlyReplicationRepository {
+        ReadOnlyReplicationRepository::new()
+    }
+
+    mod create {
+        use super::*;
+        #[rstest]
+        fn test_create_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
+            let settings = ReplicationSettings::default();
+            let result = repo.create_replication("test", settings);
+            assert_eq!(
+                result.err().unwrap(),
+                forbidden!("Cannot create replication in read-only mode")
+            );
+        }
+    }
+
+    mod update {
+        use super::*;
+        #[rstest]
+        fn test_update_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
+            let settings = ReplicationSettings::default();
+            let result = repo.update_replication("test", settings);
+            assert_eq!(
+                result.err().unwrap(),
+                forbidden!("Cannot update replication in read-only mode")
+            );
+        }
+    }
+
+    mod replications {
+        use super::*;
+        #[rstest]
+        fn test_replications_empty(repo: ReadOnlyReplicationRepository) {
+            let reps = repo.replications();
+            assert!(reps.is_empty());
+        }
+    }
+
+    mod get_info {
+        use super::*;
+        #[rstest]
+        fn test_get_info_forbidden(repo: ReadOnlyReplicationRepository) {
+            let result = repo.get_info("test");
+            assert_eq!(
+                result.err().unwrap(),
+                forbidden!("Cannot get replication info in read-only mode")
+            );
+        }
+    }
+
+    mod get_replication {
+        use super::*;
+        #[rstest]
+        fn test_get_replication_forbidden(repo: ReadOnlyReplicationRepository) {
+            let err = repo.get_replication("test").err().unwrap();
+            assert_eq!(err, forbidden!("Cannot get replication in read-only mode"));
+        }
+    }
+
+    mod get_mut_replication {
+        use super::*;
+        #[rstest]
+        fn test_get_mut_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
+            let err = repo.get_mut_replication("test").err().unwrap();
+            assert_eq!(err, forbidden!("Cannot get replication in read-only mode"));
+        }
+    }
+
+    mod notify {
+        use super::*;
+        use reduct_base::io::RecordMeta;
+        #[rstest]
+        fn test_notify_forbidden(mut repo: ReadOnlyReplicationRepository) {
+            let notification = TransactionNotification {
+                bucket: "bucket".to_string(),
+                entry: "entry".to_string(),
+                meta: RecordMeta::builder().timestamp(0).build(),
+                event: crate::replication::Transaction::WriteRecord(0),
+            };
+            let err = repo.notify(notification).err().unwrap();
+            assert_eq!(
+                err,
+                forbidden!("Cannot notify replication in read-only mode")
+            );
+        }
+    }
 }

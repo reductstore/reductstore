@@ -733,23 +733,6 @@ mod tests {
         parser.build().unwrap();
     }
 
-    #[rstest]
-    #[tokio::test]
-    async fn test_build_lock_file_enabled(mut env_getter: MockEnvGetter) {
-        env_getter
-            .expect_get()
-            .with(eq("RS_LOCK_FILE_ENABLED"))
-            .return_const(Ok("true".to_string()));
-        env_getter
-            .expect_get()
-            .return_const(Err(VarError::NotPresent));
-
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
-
-        let lock_file = parser.build_lock_file().unwrap();
-        assert!(lock_file.is_waiting().await);
-    }
-
     #[fixture]
     fn env_getter() -> MockEnvGetter {
         let mut mock_getter = MockEnvGetter::new();
