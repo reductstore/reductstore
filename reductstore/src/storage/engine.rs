@@ -1,3 +1,5 @@
+mod read_only;
+
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 use crate::cfg::Cfg;
@@ -13,7 +15,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
 use reduct_base::{conflict, forbidden, not_found, unprocessable_entity};
-use std::collections::{BTreeMap, HashSet};
+use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -121,7 +123,7 @@ impl StorageEngine {
     ///
     /// * `ServerInfo` - The reductstore info or an HTTPError
     pub fn info(&self) -> Result<ServerInfo, ReductError> {
-        self.update_bucket_list()?;
+        self.reload()?;
 
         let mut usage = 0u64;
         let mut oldest_record = u64::MAX;
@@ -186,7 +188,7 @@ impl StorageEngine {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     pub(crate) fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
-        self.update_bucket_list()?;
+        self.reload()?;
         let buckets = self.buckets.read()?;
         match buckets.get(name) {
             Some(bucket) => Ok(Arc::clone(bucket).into()),
@@ -299,7 +301,7 @@ impl StorageEngine {
     }
 
     pub(crate) fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
-        self.update_bucket_list()?;
+        self.reload()?;
         let mut buckets = Vec::new();
         for bucket in self.buckets.read()?.values() {
             buckets.push(bucket.info()?.info);
@@ -347,64 +349,6 @@ impl StorageEngine {
             },
         )
         .unwrap_or(Ok(()).into()) // skip if previous task is still running
-    }
-
-    fn check_mode(&self) -> Result<(), ReductError> {
-        if self.cfg.role == InstanceRole::ReadOnly {
-            return Err(forbidden!(
-                "Cannot perform this operation in read-only mode"
-            ));
-        }
-        Ok(())
-    }
-
-    /// List directory and update bucket list
-    fn update_bucket_list(&self) -> Result<(), ReductError> {
-        let mut last_sync = self.last_replica_sync.write()?;
-        if self.cfg.role != InstanceRole::ReadOnly
-            || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
-        {
-            // Only read-only instances need to update bucket list from backend
-            return Ok(());
-        }
-
-        *last_sync = Instant::now();
-
-        let mut new_buckets = BTreeMap::new();
-        let current_bucket_paths = self
-            .buckets
-            .read()?
-            .values()
-            .map(|b| b.path().clone())
-            .collect::<HashSet<_>>();
-
-        let mut buckets_to_retain = vec![];
-        for path in FILE_CACHE.read_dir(&self.data_path)? {
-            if !path.is_dir() {
-                continue;
-            }
-
-            if current_bucket_paths.contains(&path) {
-                buckets_to_retain.push(path);
-                continue;
-            }
-
-            // Restore new bucket
-            match Bucket::restore(path.clone(), self.cfg.clone()) {
-                Ok(bucket) => {
-                    let bucket = Arc::new(bucket);
-                    new_buckets.insert(bucket.name().to_string(), bucket);
-                }
-                Err(e) => {
-                    panic!("Failed to load bucket from {:?}: {}", path, e);
-                }
-            }
-        }
-
-        let mut buckets = self.buckets.write()?;
-        buckets.retain(|_, b| buckets_to_retain.contains(&b.path()));
-        buckets.extend(new_buckets);
-        Ok(())
     }
 
     pub fn data_path(&self) -> &PathBuf {
