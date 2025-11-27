@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## Added
 
 - Support for Active/Passive deployment, [PR-1028](https://github.com/reductstore/reductstore/pull/1028)
+- Implement concurrent read-only access to data, [PR-1034](https://github.com/reductstore/reductstore/pull/1034)
 
 ### Internal
 
