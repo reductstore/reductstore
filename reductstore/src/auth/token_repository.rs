@@ -172,16 +172,16 @@ pub(crate) trait ManageTokens {
     fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError>;
 }
 
-pub(crate) trait TokenRepoCommon {
+pub(super) trait AccessTokens {
     fn repo(&self) -> &std::collections::HashMap<String, Token>;
 
-    fn get_token(&self, name: &str) -> Result<&Token, ReductError> {
+    fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
         self.repo()
             .get(name)
             .ok_or_else(|| not_found!("Token '{}' doesn't exist", name))
     }
 
-    fn get_token_list(&self) -> Result<Vec<Token>, ReductError> {
+    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
         let mut sorted: Vec<_> = self.repo().iter().collect();
         sorted.sort_by_key(|item| item.0);
         Ok(sorted
@@ -194,7 +194,7 @@ pub(crate) trait TokenRepoCommon {
             .collect())
     }
 
-    fn validate_token(&self, header: Option<&str>) -> Result<Token, ReductError> {
+    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
         let value = parse_bearer_token(header.unwrap_or(""))?;
         self.repo()
             .values()

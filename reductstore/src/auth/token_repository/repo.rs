@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::auth::proto::TokenRepo;
-use crate::auth::token_repository::TokenRepoCommon;
+use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
 use crate::core::file_cache::FILE_CACHE;
 use bytes::Bytes;
@@ -139,9 +139,21 @@ impl TokenRepository {
     }
 }
 
-impl TokenRepoCommon for TokenRepository {
+impl AccessTokens for TokenRepository {
     fn repo(&self) -> &HashMap<String, Token> {
         &self.repo
+    }
+
+    fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
+        AccessTokens::get_token(self, name)
+    }
+
+    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
+        AccessTokens::get_token_list(self)
+    }
+
+    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
+        AccessTokens::validate_token(self, header)
     }
 }
 
@@ -193,7 +205,7 @@ impl ManageTokens for TokenRepository {
     }
 
     fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
-        TokenRepoCommon::get_token(self, name)
+        AccessTokens::get_token(self, name)
     }
 
     fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError> {
@@ -204,11 +216,11 @@ impl ManageTokens for TokenRepository {
     }
 
     fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
-        TokenRepoCommon::get_token_list(self)
+        AccessTokens::get_token_list(self)
     }
 
     fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
-        TokenRepoCommon::validate_token(self, header)
+        AccessTokens::validate_token(self, header)
     }
 
     fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
