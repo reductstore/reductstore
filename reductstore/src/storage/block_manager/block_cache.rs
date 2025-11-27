@@ -69,4 +69,9 @@ impl BlockCache {
         self.write_cache.write().unwrap().remove(block_id);
         self.read_cache.write().unwrap().remove(block_id);
     }
+
+    pub(crate) fn clear(&self) {
+        self.write_cache.write().unwrap().clear();
+        self.read_cache.write().unwrap().clear();
+    }
 }

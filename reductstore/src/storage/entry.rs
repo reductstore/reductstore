@@ -203,7 +203,7 @@ impl Entry {
     /// Returns stats about the entry.
     pub fn info(&self) -> Result<EntryInfo, ReductError> {
         let mut bm = self.block_manager.write()?;
-        let index = bm.update_and_index()?;
+        let index = bm.update_and_get_index()?;
         let (oldest_record, latest_record) = if index.tree().is_empty() {
             (0, 0)
         } else {

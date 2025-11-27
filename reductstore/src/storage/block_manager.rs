@@ -1,10 +1,12 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 pub(in crate::storage) mod block;
 mod block_cache;
 pub(in crate::storage) mod block_index;
+mod read_only;
 pub(in crate::storage) mod wal;
+
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::{FileWeak, FILE_CACHE};
 use crate::storage::block_manager::block::Block;
@@ -94,7 +96,7 @@ impl BlockManager {
     }
 
     pub fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
-        self.update_and_index()?;
+        self.update_and_get_index()?;
 
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
@@ -229,10 +231,6 @@ impl BlockManager {
     ///
     /// * `ReductError` - If file system operation failed.
     pub fn finish_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
-        if self.cfg.role == InstanceRole::ReadOnly {
-            return Ok(());
-        }
-
         let block = block.read()?;
         /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block.block_id());
@@ -552,26 +550,8 @@ impl BlockManager {
         &self.block_index
     }
 
-    pub fn update_and_index(&mut self) -> Result<&BlockIndex, ReductError> {
-        if self.cfg.role == InstanceRole::ReadOnly
-            && self.last_replica_sync.elapsed() > self.cfg.engine_config.replica_update_interval
-        {
-            // we need to update the index from disk and chaned blocks for read-only instances
-            let previous_state = self.block_index.info().clone();
-            self.block_index.update_from_disc()?;
-
-            for (block_id, new_block_info) in self.block_index.info().iter() {
-                if let Some(previous_block_info) = previous_state.get(block_id) {
-                    if previous_block_info.crc64 != new_block_info.crc64 {
-                        // block changed, we need to reload it
-                        FILE_CACHE.discard_recursive(&self.path_to_desc(*block_id))?;
-                        FILE_CACHE.discard_recursive(&self.path_to_data(*block_id))?;
-                    }
-                }
-            }
-            self.last_replica_sync = Instant::now();
-        }
-
+    pub fn update_and_get_index(&mut self) -> Result<&BlockIndex, ReductError> {
+        self.reload_if_readonly()?;
         Ok(&self.block_index)
     }
 
