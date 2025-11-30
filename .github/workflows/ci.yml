@@ -618,4 +618,4 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: reductstore
-          path: "*.snap"
+          path: "*_${{ matrix.arch }}.snap"
