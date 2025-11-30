@@ -232,7 +232,7 @@ mod tests {
             data_path: path,
             role: InstanceRole::Primary,
             engine_config: StorageEngineConfig {
-                replica_update_interval: std::time::Duration::from_millis(100),
+                replica_update_interval: std::time::Duration::from_millis(300),
                 ..StorageEngineConfig::default()
             },
             ..Cfg::default()
