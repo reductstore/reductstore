@@ -19,6 +19,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .compile_protos(
             &[
                 "src/proto/auth.proto",
+                "src/proto/remote.proto",
                 "src/proto/storage.proto",
                 "src/proto/replication.proto",
             ],

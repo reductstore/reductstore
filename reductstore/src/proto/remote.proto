@@ -1,0 +1,11 @@
+// Copyright 2025 ReductStore
+// Licensed under the Business Source License 1.1
+syntax = "proto3";
+
+package reduct.proto.remote;
+
+
+message FolderListing {
+  repeated string entries = 1; // list of entries in the directory
+  uint64 crc64 = 2;            // CRC64 checksum of the listing
+}

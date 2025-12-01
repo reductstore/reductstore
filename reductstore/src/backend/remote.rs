@@ -1,19 +1,22 @@
 // Copyright 2025 ReductSoftware UG
-// This Source Code Form is subject to the terms of the Mozilla Public
-//    License, v. 2.0. If a copy of the MPL was not distributed with this
-//    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Licensed under the Business Source License 1.1
 
 mod local_cache;
 
+mod folder_list;
+mod proto;
 #[cfg(feature = "s3-backend")]
 mod s3_connector;
 
 use crate::backend::file::AccessMode;
+use crate::backend::remote::folder_list::{
+    add_folder_to_list, list_folders, remove_folder_from_list,
+};
 use crate::backend::remote::local_cache::LocalCache;
 #[cfg(feature = "s3-backend")]
 use crate::backend::remote::s3_connector::S3Connector;
 use crate::backend::{BackendType, ObjectMetadata, StorageBackend};
-use log::debug;
+use log::{debug, info};
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -168,7 +171,34 @@ impl StorageBackend for RemoteBackend {
                 .remove_object(&format!("{}/{}", s3_key, key))?;
         }
 
-        self.connector.remove_object(&format!("{}/", s3_key))
+        self.connector.remove_object(&format!("{}/", s3_key))?;
+
+        let path_to_list = path
+            .parent()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "Parent folder list not found for removing directory",
+                )
+            })?
+            .join(".folder");
+
+        match self.download(&path_to_list) {
+            Ok(_) => {
+                remove_folder_from_list(
+                    &path_to_list,
+                    path.file_name().unwrap().to_str().unwrap(),
+                )?;
+                self.upload(&path_to_list)
+            }
+            Err(e) => {
+                debug!(
+                    "Failed to upload .folder file after removing directory {:?}: {}",
+                    path, e
+                );
+                Err(e)
+            }
+        }
     }
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
@@ -182,30 +212,78 @@ impl StorageBackend for RemoteBackend {
             return Ok(());
         }
 
-        self.connector.create_dir_all(&s3_key)
+        self.connector.create_dir_all(&s3_key)?;
+
+        let path_to_list = path
+            .parent()
+            .ok_or_else(|| {
+                io::Error::new(
+                    io::ErrorKind::NotFound,
+                    "Parent folder list not found for creating directory",
+                )
+            })?
+            .join(".folder");
+
+        if self.try_exists(&path_to_list)? {
+            self.download(&path_to_list)?;
+        }
+
+        folder_list::add_folder_to_list(
+            &path_to_list,
+            path.file_name().unwrap().to_str().unwrap(),
+        )?;
+        self.upload(&path_to_list)
     }
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
-        let cache = &self.local_cache.lock().unwrap();
-        let s3_key = cache.build_key(path);
+        let s3_key = {
+            let cache = &self.local_cache.lock().unwrap();
+            cache.build_key(path)
+        };
+
+        let path_to_list = path.join(".folder");
+
+        let list = if self.try_exists(&path_to_list)? {
+            self.download(&path_to_list)?;
+            list_folders(&path_to_list)?
+                .iter()
+                .map(|folder_name| format!("{}/{}/", s3_key, folder_name))
+                .collect::<Vec<String>>()
+        } else {
+            self.connector.list_objects(&s3_key, false)?
+        };
 
         let mut paths = vec![];
-        for key in self.connector.list_objects(&s3_key, false)? {
-            if key == s3_key {
-                continue;
-            }
+        let mut has_folders = false;
+        {
+            let cache = &mut self.local_cache.lock().unwrap();
+            for key in list {
+                if key == s3_key {
+                    continue;
+                }
 
-            let local_path = self.cache_path.join(path).join(&key);
-            if key.ends_with('/') {
-                debug!(
-                    "Creating local directory {:?} for S3 key: {}",
-                    local_path, key
-                );
-                cache.create_dir_all(&local_path)?;
-            }
+                let local_path = self.cache_path.join(path).join(&key);
+                if key.ends_with('/') {
+                    info!(
+                        "Creating local directory {:?} for S3 key: {}",
+                        local_path, key
+                    );
+                    cache.create_dir_all(&local_path)?;
+                    add_folder_to_list(
+                        &path_to_list,
+                        &local_path.file_name().unwrap().to_str().unwrap(),
+                    )?;
+                    has_folders = true;
+                }
 
-            paths.push(local_path);
+                paths.push(local_path);
+            }
         }
+
+        if has_folders {
+            self.upload(&path_to_list)?;
+        }
+
         Ok(paths)
     }
 
