@@ -246,6 +246,10 @@ mod tests {
         );
 
         cfg.role = InstanceRole::Primary;
+
+        FILE_CACHE
+            .create_dir_all(&cfg.data_path.join("bucket"))
+            .unwrap();
         let mut bucket = Bucket::new(
             "bucket",
             &cfg.data_path.clone(),

@@ -5,7 +5,6 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::RwLock;
 use crate::storage::proto::folder_map::Item;
 use crate::storage::proto::FolderMap;
-use parking_lot::RwLockWriteGuard;
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
@@ -13,15 +12,15 @@ use std::io::SeekFrom::Start;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
-/// A simple folder browser that lists and manages folders using a protobuf file for mapping.
+/// A simple folder keeper that maintains a list of folders in a `.folder` file.
 ///
 /// Mostly needed for S3 compatible storage backends that do not support listing folders natively.
-pub(super) struct FolderBrowser {
+pub(super) struct FolderKeeper {
     path: PathBuf,
     mapper: RwLock<FolderMap>,
 }
 
-impl FolderBrowser {
+impl FolderKeeper {
     pub fn new(path: PathBuf) -> Self {
         let list_path = path.join(".folder");
         let proto = if FILE_CACHE.try_exists(&list_path).unwrap_or(false) {
@@ -51,23 +50,11 @@ impl FolderBrowser {
                 }
             }
 
-            let mut buf = Vec::with_capacity(proto.encoded_len());
-            proto.encode(&mut buf).unwrap();
-            let file = FILE_CACHE
-                .write_or_create(&list_path, Start(0))
-                .unwrap()
-                .upgrade()
-                .unwrap();
-
-            let mut lock = file.write().unwrap();
-            lock.write_all(&buf).unwrap();
-            lock.flush().unwrap();
-            lock.sync_all().unwrap();
-
+            Self::save_static(&list_path, &proto).unwrap();
             proto
         };
 
-        FolderBrowser {
+        FolderKeeper {
             path,
             mapper: RwLock::new(proto),
         }
@@ -113,16 +100,37 @@ impl FolderBrowser {
         self.save()
     }
 
+    pub fn rename_folder(&self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
+        let old_path = self.path.join(old_name);
+        let new_path = self.path.join(new_name);
+        FILE_CACHE.discard_recursive(&old_path)?; // we need to close all open files
+        FILE_CACHE.rename(&old_path, &new_path)?;
+        {
+            let mut mapper = self.mapper.write()?;
+            if let Some(item) = mapper
+                .items
+                .iter_mut()
+                .find(|item| item.folder_name == old_name)
+            {
+                item.name = new_name.to_string();
+                item.folder_name = new_name.to_string();
+            }
+        }
+        self.save()
+    }
+
     fn save(&self) -> Result<(), ReductError> {
         let mapper = self.mapper.read()?;
+        Self::save_static(&self.path.join(".folder"), &mapper)?;
+        Ok(())
+    }
+
+    fn save_static(path: &PathBuf, mapper: &FolderMap) -> Result<(), ReductError> {
         let mut buf = Vec::new();
         mapper
             .encode(&mut buf)
             .map_err(|e| internal_server_error!("Failed to encode folder map: {}", e))?;
-        let list_path = self.path.join(".folder");
-        let file = FILE_CACHE
-            .write_or_create(&list_path, Start(0))?
-            .upgrade()?;
+        let file = FILE_CACHE.write_or_create(path, Start(0))?.upgrade()?;
         let mut lock = file.write()?;
         lock.write_all(&buf)?;
         lock.flush()?;

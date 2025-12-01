@@ -17,6 +17,7 @@ use crate::storage::bucket::settings::{
 };
 use crate::storage::engine::{check_name_convention, ReadOnlyMode};
 use crate::storage::entry::{Entry, EntrySettings, RecordReader};
+use crate::storage::folder_keeper::FolderKeeper;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::debug;
 use prost::bytes::Bytes;
@@ -39,6 +40,7 @@ pub(crate) struct Bucket {
     path: PathBuf,
     entries: Arc<RwLock<BTreeMap<String, Arc<Entry>>>>,
     settings: RwLock<BucketSettings>,
+    folder_keeper: Arc<FolderKeeper>,
     cfg: Arc<Cfg>,
     last_replica_sync: RwLock<Instant>,
     is_provisioned: AtomicBool,
@@ -65,6 +67,7 @@ impl Bucket {
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         let settings = Self::fill_settings(settings, Self::defaults());
+        let folder_keeper = FolderKeeper::new(path.clone());
 
         let bucket = Bucket {
             name: name.to_string(),
@@ -74,6 +77,7 @@ impl Bucket {
             is_provisioned: AtomicBool::new(false),
             cfg: Arc::new(cfg),
             last_replica_sync: RwLock::new(Instant::now()),
+            folder_keeper: Arc::new(folder_keeper),
         };
 
         bucket.save_settings().wait()?;
@@ -109,20 +113,19 @@ impl Bucket {
 
         let mut entries = BTreeMap::new();
         let mut task_set = Vec::new();
+        let folder_keeper = FolderKeeper::new(path.clone());
 
-        for path in FILE_CACHE.read_dir(&path)? {
-            if path.is_dir() {
-                let handler = Entry::restore(
-                    path,
-                    EntrySettings {
-                        max_block_size: settings.max_block_size.unwrap(),
-                        max_block_records: settings.max_block_records.unwrap(),
-                    },
-                    cfg.clone(),
-                );
+        for path in folder_keeper.list_folders()? {
+            let handler = Entry::restore(
+                path,
+                EntrySettings {
+                    max_block_size: settings.max_block_size.unwrap(),
+                    max_block_records: settings.max_block_records.unwrap(),
+                },
+                cfg.clone(),
+            );
 
-                task_set.push(handler);
-            }
+            task_set.push(handler);
         }
 
         for task in task_set {
@@ -141,6 +144,7 @@ impl Bucket {
             is_provisioned: AtomicBool::new(false),
             last_replica_sync: RwLock::new(Instant::now()),
             cfg,
+            folder_keeper: Arc::new(folder_keeper),
         })
     }
 
@@ -158,6 +162,7 @@ impl Bucket {
         if !self.entries.read()?.contains_key(key) {
             self.check_mode()?;
             let settings = self.settings.read()?;
+            self.folder_keeper.add_folder(key)?;
             let entry = Entry::try_new(
                 &key,
                 self.path.clone(),
@@ -294,7 +299,6 @@ impl Bucket {
             return Err(e).into();
         }
 
-        let old_path = self.path.join(old_name);
         let new_path = self.path.join(new_name);
         let bucket_name = self.name.clone();
         let entries = self.entries.clone();
@@ -302,6 +306,7 @@ impl Bucket {
         let new_name = new_name.to_string();
         let settings = self.settings();
         let cfg = self.cfg.clone();
+        let folder_keeper = self.folder_keeper.clone();
 
         unique(&self.task_group(), "rename entry", move || {
             check_name_convention(&new_name)?;
@@ -323,8 +328,7 @@ impl Bucket {
                 ));
             }
 
-            FILE_CACHE.discard_recursive(&old_path)?; // we need to close all open files
-            FILE_CACHE.rename(&old_path, &new_path)?;
+            folder_keeper.rename_folder(&old_name, &new_name)?;
             entries.write()?.remove(&old_name);
 
             if let Some(entry) = Entry::restore(
@@ -367,9 +371,10 @@ impl Bucket {
         let path = self.path.join(name);
         let bucket_name = self.name.clone();
         let entry_name = name.to_string();
+        let folder_keeper = self.folder_keeper.clone();
 
         unique(&self.task_group(), "remove entry", move || {
-            FILE_CACHE.remove_dir(&path)?;
+            folder_keeper.remove_folder(&entry_name)?;
             debug!(
                 "Remove entry '{}' from bucket '{}' and folder '{}'",
                 entry_name,
@@ -431,6 +436,7 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::Backend;
     use reduct_base::conflict;
     use reduct_base::io::ReadRecord;
     use reduct_base::msg::bucket_api::QuotaType;
@@ -635,16 +641,25 @@ mod tests {
 
     #[fixture]
     pub fn path() -> PathBuf {
-        tempdir().unwrap().keep()
+        let path = tempdir().unwrap().keep();
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .unwrap(),
+        );
+        path
     }
 
     #[fixture]
     pub fn bucket(settings: BucketSettings, path: PathBuf) -> Bucket {
+        FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
         Bucket::new("test", &path, settings, Cfg::default()).unwrap()
     }
 
     #[fixture]
     pub fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Bucket {
+        FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
         let bucket = Bucket::new("test", &path, settings, Cfg::default()).unwrap();
         bucket.set_provisioned(true);
         bucket

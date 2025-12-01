@@ -70,7 +70,6 @@ mod tests {
     use crate::backend::Backend;
     use crate::cfg::storage_engine::StorageEngineConfig;
     use crate::core::file_cache::FILE_CACHE;
-    use crate::storage::bucket::Bucket;
     use crate::storage::engine::StorageEngine;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::{fixture, rstest};
@@ -94,13 +93,9 @@ mod tests {
         }
 
         // Create new bucket in primary engine
-        let _ = Bucket::new(
-            "bucket-2",
-            &primary_engine.cfg.data_path,
-            BucketSettings::default(),
-            primary_engine.cfg.clone(),
-        )
-        .unwrap();
+        let _ = primary_engine
+            .create_bucket("bucket-2", BucketSettings::default())
+            .unwrap();
         read_only_engine.reload().unwrap();
         assert_eq!(
             read_only_engine.buckets.read().unwrap().len(),
@@ -190,13 +185,9 @@ mod tests {
                 assert!(buckets.contains_key("bucket-1"));
             }
             // Add new bucket to primary engine
-            let _ = Bucket::new(
-                "bucket-2",
-                &primary_engine.cfg.data_path,
-                BucketSettings::default(),
-                primary_engine.cfg.clone(),
-            )
-            .unwrap();
+            let _ = primary_engine
+                .create_bucket("bucket-2", BucketSettings::default())
+                .unwrap();
             {
                 std::thread::sleep(primary_engine.cfg.engine_config.replica_update_interval);
                 let buckets = read_only_engine.buckets.read().unwrap();
@@ -230,13 +221,10 @@ mod tests {
             .with_cfg(cfg.clone())
             .with_data_path(cfg.data_path.clone())
             .build();
-        let _ = Bucket::new(
-            "bucket-1",
-            &cfg.data_path,
-            BucketSettings::default(),
-            cfg.clone(),
-        )
-        .unwrap();
+
+        let _ = engine
+            .create_bucket("bucket-1", BucketSettings::default())
+            .unwrap();
         engine
     }
 }

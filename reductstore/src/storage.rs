@@ -6,5 +6,5 @@ pub mod entry;
 pub mod proto;
 
 mod block_manager;
-mod folder_browser;
+mod folder_keeper;
 pub mod query;

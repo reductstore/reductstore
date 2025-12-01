@@ -437,6 +437,9 @@ mod tests {
             FILE_CACHE
                 .remove_dir(&path.join(&settings.src_bucket))
                 .unwrap();
+            FILE_CACHE
+                .create_dir_all(&path.join(&settings.src_bucket))
+                .unwrap();
             Bucket::new(
                 &settings.src_bucket,
                 &path,
