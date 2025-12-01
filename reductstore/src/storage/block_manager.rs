@@ -152,6 +152,8 @@ impl BlockManager {
                     if block_crc != crc.sum64() {
                         error!("Block descriptor {:?} is corrupted: index CRC {} mismatch with calculated CRC {}.\
                      Remove it and its data block, then restart the database", path, block_crc, crc.sum64());
+
+                        self.block_index.remove_block(block_id);
                         return Err(internal_server_error!(
                             "Block descriptor {:?} is corrupted",
                             path

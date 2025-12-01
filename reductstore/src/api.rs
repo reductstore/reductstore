@@ -106,6 +106,14 @@ impl StateKeeper {
             let mut lock = self.components.write().await;
             // it's important to check again after acquiring the lock and lock must be exclusive to avoid rice conditions
             if lock.is_none() {
+                // check if there are components in the channel
+                if self.rx.read().await.capacity() != 0 {
+                    return Err(service_unavailable!(
+                        "The server is starting up, please try again later"
+                    )
+                    .into());
+                }
+
                 let components = self
                     .rx
                     .write()
