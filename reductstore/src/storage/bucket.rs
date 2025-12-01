@@ -64,7 +64,6 @@ impl Bucket {
         cfg: Cfg,
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
-        FILE_CACHE.create_dir_all(&path)?;
         let settings = Self::fill_settings(settings, Self::defaults());
 
         let bucket = Bucket {

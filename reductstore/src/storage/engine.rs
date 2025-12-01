@@ -1,7 +1,6 @@
-mod read_only;
-
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
+mod read_only;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
@@ -10,15 +9,21 @@ use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, try_unique, unique, TaskHandle};
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
+use crate::storage::folder_browser::FolderBrowser;
+use crate::storage::proto::FolderMap;
 use log::{debug, error, info};
+use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
 use reduct_base::{conflict, forbidden, not_found, unprocessable_entity};
 use std::collections::BTreeMap;
+use std::io::SeekFrom::Start;
+use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
+use url::form_urlencoded::Target;
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
@@ -71,16 +76,16 @@ impl StorageEngineBuilder {
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
-        for path in FILE_CACHE.read_dir(&data_path).unwrap() {
-            if path.is_dir() {
-                match Bucket::restore(path.clone(), cfg.clone()) {
-                    Ok(bucket) => {
-                        let bucket = Arc::new(bucket);
-                        buckets.insert(bucket.name().to_string(), bucket);
-                    }
-                    Err(e) => {
-                        panic!("Failed to load bucket from {:?}: {}", path, e);
-                    }
+        let browser = FolderBrowser::new(data_path.clone());
+
+        for path in browser.list_folders().expect("Failed to list folders") {
+            match Bucket::restore(data_path.join(&path), cfg.clone()) {
+                Ok(bucket) => {
+                    let bucket = Arc::new(bucket);
+                    buckets.insert(bucket.name().to_string(), bucket);
+                }
+                Err(e) => {
+                    panic!("Failed to load bucket from {:?}: {}", path, e);
                 }
             }
         }
@@ -94,6 +99,7 @@ impl StorageEngineBuilder {
             license: self.license,
             cfg,
             last_replica_sync: RwLock::new(Instant::now()),
+            browser: Arc::new(browser),
         }
     }
 }
@@ -106,6 +112,7 @@ pub struct StorageEngine {
     license: Option<License>,
     cfg: Cfg,
     last_replica_sync: RwLock<Instant>,
+    browser: Arc<FolderBrowser>,
 }
 
 impl StorageEngine {
@@ -167,6 +174,7 @@ impl StorageEngine {
             return Err(conflict!("Bucket '{}' already exists", name));
         }
 
+        self.browser.add_folder(name)?;
         let bucket = Arc::new(Bucket::new(
             name,
             &self.data_path,
@@ -217,6 +225,7 @@ impl StorageEngine {
         let path = self.data_path.join(name);
         let buckets = self.buckets.clone();
         let name = name.to_string();
+        let browser = self.browser.clone();
         unique(&task_group, "remove bucket", move || {
             let mut buckets = buckets.write().unwrap();
             if let Some(bucket) = buckets.get(&name) {
@@ -230,7 +239,7 @@ impl StorageEngine {
 
             match buckets.remove(&name) {
                 Some(_) => {
-                    FILE_CACHE.remove_dir(&path)?;
+                    browser.remove_folder(&name)?;
                     debug!("Bucket '{}' and folder {:?} are removed", name, path);
                     Ok(())
                 }

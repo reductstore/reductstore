@@ -267,6 +267,11 @@ impl StorageBackend for RemoteBackend {
             "Downloading S3 key: {} to local path: {:?}",
             s3_key, full_path
         );
+
+        if full_path.parent().unwrap().exists() == false {
+            self.create_dir_all(full_path.parent().unwrap())?;
+        }
+
         self.connector.download_object(&s3_key, &full_path)?;
         self.local_cache.lock().unwrap().register_file(&full_path)?;
 
