@@ -2,3 +2,4 @@
 target
 src/asset/console.zip
 /venv/
+.cache
