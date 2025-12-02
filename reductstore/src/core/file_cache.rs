@@ -370,7 +370,13 @@ impl FileCache {
     ) -> () {
         let discarded_files = cache.insert(path.clone(), Arc::clone(file));
 
-        for (_, file) in discarded_files {
+        for (path, file) in discarded_files {
+            if Arc::weak_count(&file) > 0 {
+                // keep descriptor alive while weak references exist
+                cache.insert(path, Arc::clone(&file));
+                continue;
+            }
+
             if let Err(err) = file.write().unwrap().sync_all() {
                 warn!("Failed to sync file {:?}: {}", path, err);
             }
@@ -513,6 +519,39 @@ mod tests {
         let mut inner_cache = cache.cache.write().unwrap();
         assert_eq!(inner_cache.len(), 2);
         assert!(inner_cache.get(&file_path1).is_none());
+    }
+
+    #[rstest]
+    fn test_cache_keeps_entries_with_weak_refs(tmp_dir: PathBuf) {
+        let cache = {
+            let cache = FileCache::new(1, Duration::from_secs(60), Duration::from_millis(100));
+            cache.set_storage_backend(
+                Backend::builder()
+                    .local_data_path(tempfile::tempdir().unwrap().keep())
+                    .try_build()
+                    .unwrap(),
+            );
+            cache
+        };
+
+        let file_path1 = tmp_dir.join("test_cache_keep_weak1.txt");
+        let weak_ref = cache
+            .write_or_create(&file_path1, SeekFrom::Start(0))
+            .unwrap();
+
+        let file_path2 = tmp_dir.join("test_cache_keep_weak2.txt");
+        cache
+            .write_or_create(&file_path2, SeekFrom::Start(0))
+            .unwrap();
+
+        assert!(
+            weak_ref.upgrade().is_ok(),
+            "descriptor with weak references should not be evicted"
+        );
+        assert!(
+            cache.cache.read().unwrap().len() >= 1,
+            "cache should still contain descriptors after reinserting protected ones"
+        );
     }
 
     #[rstest]
