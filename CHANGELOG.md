@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.17.5 - 2025-12-02
+
 ### Fixed
 
 - Prevent eviction of cached files with weak refs during writes, [PR-1047](https://github.com/reductstore/reductstore/pull/1047)
