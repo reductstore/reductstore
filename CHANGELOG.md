@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Prevent eviction of cached files with weak refs during writes, [PR-1047](https://github.com/reductstore/reductstore/pull/1047)
+- Replication log corruption on shutdown, [PR-1049](https://github.com/reductstore/reductstore/pull/1049)
 
 ## 1.17.4 - 2025-11-19
 
