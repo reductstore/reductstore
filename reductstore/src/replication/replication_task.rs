@@ -124,14 +124,11 @@ impl ReplicationTask {
     }
 
     pub fn start(&mut self) {
-        if self.worker_handle.is_some() {
+        if self.is_running() {
             return;
         }
 
-        let Some(remote_bucket) = self.worker_bucket.take() else {
-            return;
-        };
-
+        let remote_bucket = self.worker_bucket.take().unwrap();
         let replication_name = self.name.clone();
         let thr_settings = self.settings.clone();
         let thr_io_config = self.io_config.clone();
@@ -350,6 +347,10 @@ impl ReplicationTask {
 
     pub fn set_provisioned(&mut self, provisioned: bool) {
         self.is_provisioned = provisioned;
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.worker_handle.is_some()
     }
 
     pub fn info(&self) -> ReplicationInfo {
@@ -784,6 +785,21 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_millis(500),
             "Shutdown should not wait for full remote_bucket_unavailable_timeout"
+        );
+    }
+
+    #[rstest]
+    fn test_double_start(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
+        let path = tempfile::tempdir().unwrap().keep();
+        let mut replication = build_replication(path, remote_bucket, settings);
+
+        let handle_before = replication.worker_handle.as_ref().unwrap().thread().id();
+        replication.start();
+        let handle_after = replication.worker_handle.as_ref().unwrap().thread().id();
+
+        assert_eq!(
+            handle_before, handle_after,
+            "Starting an already started replication should have no effect"
         );
     }
 

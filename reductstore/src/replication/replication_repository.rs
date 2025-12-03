@@ -814,6 +814,36 @@ mod tests {
         }
     }
 
+    mod start {
+        use super::*;
+
+        #[rstest]
+        fn test_start_all(mut repo: ReplicationRepository, settings: ReplicationSettings) {
+            repo.create_replication("test-1", settings.clone()).unwrap();
+            repo.create_replication("test-2", settings.clone()).unwrap();
+
+            repo.start();
+
+            let repl1 = repo.get_replication("test-1").unwrap();
+            let repl2 = repo.get_replication("test-2").unwrap();
+
+            assert!(repl1.is_running(), "Replication 'test-1' should be running");
+            assert!(repl2.is_running(), "Replication 'test-2' should be running");
+        }
+
+        #[rstest]
+        fn test_double_start(mut repo: ReplicationRepository, settings: ReplicationSettings) {
+            repo.create_replication("test-1", settings.clone()).unwrap();
+
+            repo.start();
+            repo.start(); // second start should have no effect
+
+            let repl1 = repo.get_replication("test-1").unwrap();
+
+            assert!(repl1.is_running(), "Replication 'test-1' should be running");
+        }
+    }
+
     #[fixture]
     fn settings() -> ReplicationSettings {
         ReplicationSettings {
