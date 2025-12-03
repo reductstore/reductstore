@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Start replications after HTTP server is ready, [PR-1050](https://github.com/reductstore/reductstore/pull/1050)
+
 ## 1.17.5 - 2025-12-02
 
 ### Fixed

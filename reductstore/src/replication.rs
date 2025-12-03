@@ -135,6 +135,9 @@ pub trait ManageReplications {
     ///
     /// A `ReductError` is returned if the notification fails.
     fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
+
+    /// Start background workers if they are not running yet.
+    fn start(&mut self);
 }
 
 /// Create a new replication repository
