@@ -72,8 +72,12 @@ impl ReplicationTask {
             ..
         } = settings.clone();
 
-        let remote_bucket =
-            create_remote_bucket(remote_host.as_str(), remote_bucket.as_str(), remote_token);
+        let remote_bucket = create_remote_bucket(
+            remote_host.as_str(),
+            remote_bucket.as_str(),
+            remote_token,
+            config.replication_conf.connection_timeout,
+        );
 
         let system_options = ReplicationSystemOptions {
             transaction_log_size: config.replication_conf.replication_log_size,

@@ -12,8 +12,53 @@ use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
 use std::collections::BTreeMap;
+use std::future::Future;
 use std::str::FromStr;
 use std::sync::Arc;
+use tokio::runtime::Handle;
+
+/// Minimal executor wrapper that prefers the current Tokio runtime handle.
+/// If no runtime is available, it falls back to an owned current-thread runtime.
+#[derive(Clone)]
+enum ClientRuntime {
+    Handle(Handle),
+    Owned(Arc<tokio::runtime::Runtime>),
+}
+
+impl ClientRuntime {
+    fn new() -> Self {
+        if let Ok(handle) = Handle::try_current() {
+            ClientRuntime::Handle(handle)
+        } else {
+            ClientRuntime::Owned(Arc::new(
+                tokio::runtime::Builder::new_current_thread()
+                    .enable_all()
+                    .build()
+                    .unwrap(),
+            ))
+        }
+    }
+
+    fn block_on<F: Future>(&self, future: F) -> F::Output {
+        match self {
+            ClientRuntime::Handle(handle) => handle.block_on(future),
+            ClientRuntime::Owned(rt) => rt.block_on(future),
+        }
+    }
+}
+
+impl Drop for ClientRuntime {
+    fn drop(&mut self) {
+        if let ClientRuntime::Owned(rt) = self {
+            // Dropping a runtime inside an async context can panic; hand it off to a thread
+            // when this is the last reference and we're currently on a Tokio runtime.
+            if Arc::strong_count(rt) == 1 && Handle::try_current().is_ok() {
+                let rt = rt.clone();
+                std::thread::spawn(move || drop(rt));
+            }
+        }
+    }
+}
 
 // A wrapper around the Reduct client API to make it easier to mock.
 pub(super) trait ReductClientApi {
@@ -48,7 +93,7 @@ pub(super) type BoxedBucketApi = Box<dyn ReductBucketApi + Sync + Send>;
 struct ReductClient {
     client: Client,
     server_url: String,
-    rt: Arc<tokio::runtime::Runtime>,
+    rt: ClientRuntime,
 }
 
 static API_PATH: &str = "api/v1";
@@ -76,14 +121,10 @@ impl ReductClient {
             url.to_string()
         };
 
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
         Self {
             client,
             server_url,
-            rt: Arc::new(rt),
+            rt: ClientRuntime::new(),
         }
     }
 }
@@ -92,7 +133,7 @@ struct BucketWrapper {
     server_url: String,
     bucket_name: String,
     client: Client,
-    rt: Arc<tokio::runtime::Runtime>,
+    rt: ClientRuntime,
 }
 
 impl BucketWrapper {
