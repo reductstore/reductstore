@@ -452,6 +452,17 @@ mod tests {
                 )
             );
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_wait_components_returns_503_if_no_components(
+            #[future] not_ready_keeper: Arc<StateKeeper>,
+        ) {
+            // Channel has capacity but no components yet; should return 503 quickly.
+            let err = not_ready_keeper.await.get_anonymous().await.err().unwrap();
+            let err: BaseHttpError = err.into();
+            assert_eq!(err.status(), ErrorCode::ServiceUnavailable);
+        }
     }
 
     #[fixture]
@@ -558,6 +569,16 @@ mod tests {
     }
 
     #[fixture]
+    pub(crate) async fn not_ready_keeper() -> Arc<StateKeeper> {
+        // Channel without components; lock file is acquired but indicates startup is still in progress.
+        let (_tx, rx) = tokio::sync::mpsc::channel(1);
+        Arc::new(StateKeeper::new(
+            Arc::new(Box::new(NotReadyLockFile {})),
+            rx,
+        ))
+    }
+
+    #[fixture]
     pub(crate) fn headers() -> HeaderMap {
         let mut headers = HeaderMap::new();
         headers.typed_insert(Authorization::bearer("init-token").unwrap());
@@ -584,6 +605,25 @@ mod tests {
     impl LockFile for WaitingLockFile {
         async fn is_locked(&self) -> bool {
             false
+        }
+
+        async fn is_failed(&self) -> bool {
+            false
+        }
+
+        async fn is_waiting(&self) -> bool {
+            true
+        }
+
+        fn release(&self) {}
+    }
+
+    struct NotReadyLockFile {}
+
+    #[async_trait::async_trait]
+    impl LockFile for NotReadyLockFile {
+        async fn is_locked(&self) -> bool {
+            true
         }
 
         async fn is_failed(&self) -> bool {
