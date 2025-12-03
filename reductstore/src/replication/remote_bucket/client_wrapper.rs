@@ -1,6 +1,7 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::fallback_runtime::FallbackRuntime;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use async_stream::stream;
 use axum::http::HeaderName;
@@ -13,7 +14,6 @@ use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
 use std::collections::BTreeMap;
 use std::str::FromStr;
-use std::sync::Arc;
 
 // A wrapper around the Reduct client API to make it easier to mock.
 pub(super) trait ReductClientApi {
@@ -48,7 +48,7 @@ pub(super) type BoxedBucketApi = Box<dyn ReductBucketApi + Sync + Send>;
 struct ReductClient {
     client: Client,
     server_url: String,
-    rt: Arc<tokio::runtime::Runtime>,
+    rt: FallbackRuntime,
 }
 
 static API_PATH: &str = "api/v1";
@@ -76,14 +76,10 @@ impl ReductClient {
             url.to_string()
         };
 
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
         Self {
             client,
             server_url,
-            rt: Arc::new(rt),
+            rt: FallbackRuntime::new(),
         }
     }
 }
@@ -92,7 +88,7 @@ struct BucketWrapper {
     server_url: String,
     bucket_name: String,
     client: Client,
-    rt: Arc<tokio::runtime::Runtime>,
+    rt: FallbackRuntime,
 }
 
 impl BucketWrapper {
