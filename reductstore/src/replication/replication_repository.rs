@@ -112,6 +112,7 @@ pub(crate) struct ReplicationRepository {
     storage: Arc<StorageEngine>,
     repo_path: PathBuf,
     config: Cfg,
+    started: bool,
 }
 
 impl ManageReplications for ReplicationRepository {
@@ -209,6 +210,10 @@ impl ManageReplications for ReplicationRepository {
         }
         Ok(())
     }
+
+    fn start(&mut self) {
+        self.start_all();
+    }
 }
 
 impl ReplicationRepository {
@@ -220,6 +225,7 @@ impl ReplicationRepository {
             storage,
             repo_path,
             config,
+            started: false,
         };
 
         let read_conf_file = || {
@@ -357,8 +363,25 @@ impl ReplicationRepository {
 
         let replication =
             ReplicationTask::new(name.to_string(), settings, conf, Arc::clone(&self.storage));
+        let mut replication = replication;
+        if self.started {
+            replication.start();
+        }
         self.replications.insert(name.to_string(), replication);
         self.save_repo()
+    }
+}
+
+impl ReplicationRepository {
+    pub(crate) fn start_all(&mut self) {
+        if self.started {
+            return;
+        }
+
+        for (_, task) in self.replications.iter_mut() {
+            task.start();
+        }
+        self.started = true;
     }
 }
 

@@ -113,6 +113,8 @@ impl StateKeeper {
                     .recv()
                     .await
                     .expect("Failed to receive components from channel");
+                // ensure background services (like replication) start after HTTP is ready to accept connections
+                components.replication_repo.write().await.start();
                 lock.replace(Arc::new(components));
             }
         }

@@ -44,6 +44,7 @@ pub struct ReplicationTask {
     stop_flag: Arc<AtomicBool>,
     is_active: Arc<AtomicBool>,
     worker_handle: Option<JoinHandle<()>>,
+    worker_bucket: Option<Box<dyn RemoteBucket + Send + Sync>>,
 }
 
 impl Default for ReplicationSystemOptions {
@@ -72,12 +73,8 @@ impl ReplicationTask {
             ..
         } = settings.clone();
 
-        let remote_bucket = create_remote_bucket(
-            remote_host.as_str(),
-            remote_bucket.as_str(),
-            remote_token,
-            config.replication_conf.connection_timeout,
-        );
+        let remote_bucket =
+            create_remote_bucket(remote_host.as_str(), remote_bucket.as_str(), remote_token);
 
         let system_options = ReplicationSystemOptions {
             transaction_log_size: config.replication_conf.replication_log_size,
@@ -109,18 +106,43 @@ impl ReplicationTask {
         )));
         let stop_flag = Arc::new(AtomicBool::new(false));
         let is_active = Arc::new(AtomicBool::new(true));
+        Self {
+            name,
+            is_provisioned: false,
+            settings,
+            system_options,
+            io_config,
+            storage,
+            filter_map: HashMap::new(),
+            log_map,
+            hourly_diagnostics,
+            stop_flag,
+            is_active,
+            worker_handle: None,
+            worker_bucket: Some(remote_bucket),
+        }
+    }
 
-        let replication_name = name.clone();
-        let thr_settings = settings.clone();
-        let thr_io_config = io_config.clone();
-        let thr_log_map = Arc::clone(&log_map);
-        let thr_storage = Arc::clone(&storage);
-        let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
-        let thr_system_options = system_options.clone();
-        let thr_stop_flag = Arc::clone(&stop_flag);
-        let thr_is_active = Arc::clone(&is_active);
+    pub fn start(&mut self) {
+        if self.worker_handle.is_some() {
+            return;
+        }
 
-        let worker_handle = spawn(move || {
+        let Some(remote_bucket) = self.worker_bucket.take() else {
+            return;
+        };
+
+        let replication_name = self.name.clone();
+        let thr_settings = self.settings.clone();
+        let thr_io_config = self.io_config.clone();
+        let thr_log_map = Arc::clone(&self.log_map);
+        let thr_storage = Arc::clone(&self.storage);
+        let thr_hourly_diagnostics = Arc::clone(&self.hourly_diagnostics);
+        let thr_system_options = self.system_options.clone();
+        let thr_stop_flag = Arc::clone(&self.stop_flag);
+        let thr_is_active = Arc::clone(&self.is_active);
+
+        let handle = spawn(move || {
             let init_transaction_logs = || {
                 let mut logs = thr_log_map.write()?;
                 for entry in thr_storage
@@ -253,20 +275,7 @@ impl ReplicationTask {
             }
         });
 
-        Self {
-            name,
-            is_provisioned: false,
-            settings,
-            system_options,
-            io_config,
-            storage,
-            filter_map: HashMap::new(),
-            log_map,
-            hourly_diagnostics,
-            stop_flag,
-            is_active,
-            worker_handle: Some(worker_handle),
-        }
+        self.worker_handle = Some(handle);
     }
 
     pub fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
@@ -824,7 +833,7 @@ mod tests {
             time += 10;
         }
 
-        let repl = ReplicationTask::build(
+        let mut repl = ReplicationTask::build(
             "test".to_string(),
             settings,
             ReplicationSystemOptions {
@@ -838,6 +847,7 @@ mod tests {
             storage,
         );
 
+        repl.start();
         sleep(Duration::from_millis(10)); // wait for the transaction log to be initialized in worker
         repl
     }
