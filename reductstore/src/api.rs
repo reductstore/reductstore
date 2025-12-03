@@ -114,6 +114,8 @@ impl StateKeeper {
                     .await
                     .expect("Failed to receive components from channel");
                 // ensure background services (like replication) start after HTTP is ready to accept connections
+                // however, in tests we want to control when these services start
+                #[cfg(not(test))]
                 components.replication_repo.write().await.start();
                 lock.replace(Arc::new(components));
             }
