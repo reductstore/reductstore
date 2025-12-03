@@ -16,6 +16,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Refactor CI workflow and use S3 cache for Rust dependencies, [PR-1003](https://github.com/reductstore/reductstore/pull/1003)
 
+## 1.17.6 - 2025-12-03
+
+### Fixed
+
+- Start replications after HTTP server is ready, [PR-1050](https://github.com/reductstore/reductstore/pull/1050)
+
+## 1.17.5 - 2025-12-02
+
+### Fixed
+
+- Prevent eviction of cached files with weak refs during writes, [PR-1047](https://github.com/reductstore/reductstore/pull/1047)
+- Replication log corruption on shutdown, [PR-1049](https://github.com/reductstore/reductstore/pull/1049)
+
 ## 1.17.4 - 2025-11-19
 
 ### Fixed

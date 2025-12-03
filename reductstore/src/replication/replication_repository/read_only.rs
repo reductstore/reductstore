@@ -57,6 +57,10 @@ impl ManageReplications for ReadOnlyReplicationRepository {
     fn notify(&mut self, _notification: TransactionNotification) -> Result<(), ReductError> {
         Err(forbidden!("Cannot notify replication in read-only mode"))
     }
+
+    fn start(&mut self) {
+        // No-op
+    }
 }
 
 #[cfg(test)]

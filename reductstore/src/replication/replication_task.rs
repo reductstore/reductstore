@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::thread::{sleep, spawn};
+use std::thread::{sleep, spawn, JoinHandle};
 use std::time::Duration;
 
 #[derive(Clone)]
@@ -43,6 +43,8 @@ pub struct ReplicationTask {
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
     stop_flag: Arc<AtomicBool>,
     is_active: Arc<AtomicBool>,
+    worker_handle: Option<JoinHandle<()>>,
+    worker_bucket: Option<Box<dyn RemoteBucket + Send + Sync>>,
 }
 
 impl Default for ReplicationSystemOptions {
@@ -104,18 +106,40 @@ impl ReplicationTask {
         )));
         let stop_flag = Arc::new(AtomicBool::new(false));
         let is_active = Arc::new(AtomicBool::new(true));
+        Self {
+            name,
+            is_provisioned: false,
+            settings,
+            system_options,
+            io_config,
+            storage,
+            filter_map: HashMap::new(),
+            log_map,
+            hourly_diagnostics,
+            stop_flag,
+            is_active,
+            worker_handle: None,
+            worker_bucket: Some(remote_bucket),
+        }
+    }
 
-        let replication_name = name.clone();
-        let thr_settings = settings.clone();
-        let thr_io_config = io_config.clone();
-        let thr_log_map = Arc::clone(&log_map);
-        let thr_storage = Arc::clone(&storage);
-        let thr_hourly_diagnostics = Arc::clone(&hourly_diagnostics);
-        let thr_system_options = system_options.clone();
-        let thr_stop_flag = Arc::clone(&stop_flag);
-        let thr_is_active = Arc::clone(&is_active);
+    pub fn start(&mut self) {
+        if self.is_running() {
+            return;
+        }
 
-        spawn(move || {
+        let remote_bucket = self.worker_bucket.take().unwrap();
+        let replication_name = self.name.clone();
+        let thr_settings = self.settings.clone();
+        let thr_io_config = self.io_config.clone();
+        let thr_log_map = Arc::clone(&self.log_map);
+        let thr_storage = Arc::clone(&self.storage);
+        let thr_hourly_diagnostics = Arc::clone(&self.hourly_diagnostics);
+        let thr_system_options = self.system_options.clone();
+        let thr_stop_flag = Arc::clone(&self.stop_flag);
+        let thr_is_active = Arc::clone(&self.is_active);
+
+        let handle = spawn(move || {
             let init_transaction_logs = || {
                 let mut logs = thr_log_map.write()?;
                 for entry in thr_storage
@@ -177,12 +201,18 @@ impl ReplicationTask {
                     Ok(SyncState::NotAvailable(c)) => {
                         thr_is_active.store(false, Ordering::Relaxed);
                         counter = Some(c);
-                        sleep(thr_system_options.remote_bucket_unavailable_timeout);
+                        ReplicationTask::sleep_with_stop(
+                            &thr_stop_flag,
+                            thr_system_options.remote_bucket_unavailable_timeout,
+                        );
                     }
                     Ok(SyncState::NoTransactions) => {
                         // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available
                         thr_is_active.store(true, Ordering::Relaxed);
-                        sleep(thr_system_options.next_transaction_timeout);
+                        ReplicationTask::sleep_with_stop(
+                            &thr_stop_flag,
+                            thr_system_options.next_transaction_timeout,
+                        );
                     }
                     Ok(SyncState::BrokenLog(entry_name)) => {
                         thr_is_active.store(false, Ordering::Relaxed);
@@ -212,14 +242,20 @@ impl ReplicationTask {
 
                             Err(err) => {
                                 error!("Failed to create transaction log: {:?}", err);
-                                sleep(thr_system_options.log_recovery_timeout);
+                                ReplicationTask::sleep_with_stop(
+                                    &thr_stop_flag,
+                                    thr_system_options.log_recovery_timeout,
+                                );
                             }
                         }
                     }
                     Err(err) => {
                         thr_is_active.store(false, Ordering::Relaxed);
                         error!("Replication sender error: {:?}", err);
-                        sleep(thr_system_options.next_transaction_timeout);
+                        ReplicationTask::sleep_with_stop(
+                            &thr_stop_flag,
+                            thr_system_options.next_transaction_timeout,
+                        );
                     }
                 }
 
@@ -236,19 +272,7 @@ impl ReplicationTask {
             }
         });
 
-        Self {
-            name,
-            is_provisioned: false,
-            settings,
-            system_options,
-            io_config,
-            storage,
-            filter_map: HashMap::new(),
-            log_map,
-            hourly_diagnostics,
-            stop_flag,
-            is_active,
-        }
+        self.worker_handle = Some(handle);
     }
 
     pub fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
@@ -325,6 +349,10 @@ impl ReplicationTask {
         self.is_provisioned = provisioned;
     }
 
+    pub fn is_running(&self) -> bool {
+        self.worker_handle.is_some()
+    }
+
     pub fn info(&self) -> ReplicationInfo {
         let mut pending_records = 0;
         for (_, log) in self.log_map.read().unwrap().iter() {
@@ -345,6 +373,16 @@ impl ReplicationTask {
         }
     }
 
+    fn sleep_with_stop(stop_flag: &Arc<AtomicBool>, duration: Duration) {
+        const SLICE: Duration = Duration::from_millis(50);
+        let mut remaining = duration;
+        while remaining > Duration::ZERO && !stop_flag.load(Ordering::Relaxed) {
+            let step = remaining.min(SLICE);
+            sleep(step);
+            remaining = remaining.saturating_sub(step);
+        }
+    }
+
     fn build_path_to_transaction_log(
         storage_path: &PathBuf,
         bucket: &str,
@@ -357,8 +395,12 @@ impl ReplicationTask {
 
 impl Drop for ReplicationTask {
     fn drop(&mut self) {
-        // stop the replication thread
         self.stop_flag.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.worker_handle.take() {
+            if let Err(err) = handle.join() {
+                error!("Failed to stop replication task '{}': {:?}", self.name, err);
+            }
+        }
     }
 }
 
@@ -369,6 +411,7 @@ mod tests {
     use bytes::Bytes;
     use std::fs;
     use std::io::Write;
+    use std::time::Instant;
 
     use crate::core::file_cache::FILE_CACHE;
     use mockall::mock;
@@ -696,10 +739,15 @@ mod tests {
 
     #[rstest]
     fn test_sender_error_handling(
-        remote_bucket: MockRmBucket,
+        mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
     ) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+
         let path = tempfile::tempdir().unwrap().keep();
         let mut replication = build_replication(path, remote_bucket, settings.clone());
         replication.notify(notification.clone()).unwrap();
@@ -716,6 +764,45 @@ mod tests {
                 is_provisioned: false,
                 pending_records: 1,
             }
+        );
+    }
+
+    #[rstest]
+    fn test_stop_interrupts_long_sleep(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(false);
+
+        let mut replication = build_replication(path, remote_bucket, settings);
+        replication.notify(notification).unwrap();
+        sleep(Duration::from_millis(100)); // allow worker to start processing
+
+        let start = Instant::now();
+        drop(replication);
+        assert!(
+            start.elapsed() < Duration::from_millis(500),
+            "Shutdown should not wait for full remote_bucket_unavailable_timeout"
+        );
+    }
+
+    #[rstest]
+    fn test_double_start(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
+        let path = tempfile::tempdir().unwrap().keep();
+        let mut replication = build_replication(path, remote_bucket, settings);
+
+        let handle_before = replication.worker_handle.as_ref().unwrap().thread().id();
+        replication.start();
+        let handle_after = replication.worker_handle.as_ref().unwrap().thread().id();
+
+        assert_eq!(
+            handle_before, handle_after,
+            "Starting an already started replication should have no effect"
         );
     }
 
@@ -765,7 +852,7 @@ mod tests {
             time += 10;
         }
 
-        let repl = ReplicationTask::build(
+        let mut repl = ReplicationTask::build(
             "test".to_string(),
             settings,
             ReplicationSystemOptions {
@@ -779,6 +866,7 @@ mod tests {
             storage,
         );
 
+        repl.start();
         sleep(Duration::from_millis(10)); // wait for the transaction log to be initialized in worker
         repl
     }
