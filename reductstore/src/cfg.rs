@@ -156,7 +156,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             "secondary" => InstanceRole::Secondary,
             "replica" => InstanceRole::Replica,
             _ => {
-                panic!("Invalid value for RS_LOCK_FILE_ROLE: must be 'primary' or 'secondary'")
+                panic!("Invalid value for RS_INSTANCE_ROLE: must be one of STANDALONE, PRIMARY, SECONDARY, REPLICA")
             }
         };
 

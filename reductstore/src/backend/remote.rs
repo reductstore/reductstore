@@ -269,7 +269,7 @@ impl StorageBackend for RemoteBackend {
         );
 
         if !full_path.parent().unwrap().exists() {
-            self.create_dir_all(full_path.parent().unwrap())?;
+            std::fs::create_dir_all(full_path.parent().unwrap())?;
         }
 
         self.connector.download_object(&s3_key, &full_path)?;
@@ -581,6 +581,30 @@ mod tests {
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
             remote_backend.download(&file_path).unwrap();
+        }
+
+        #[rstest]
+        fn test_download_file_with_creating_directory(
+            mut mock_connector: MockRemoteStorageConnector,
+            path: PathBuf,
+        ) {
+            let file_key = "subdir/file1.txt";
+            let file_path = path.join(file_key);
+
+            mock_connector
+                .expect_download_object()
+                .with(eq(file_key), eq(path.join(file_key).to_path_buf()))
+                .times(1)
+                .returning(|_, path| {
+                    fs::create_dir_all(path.parent().unwrap()).unwrap();
+                    fs::write(path.clone(), b"test").unwrap(); // we need to create the file to register it in cache
+                    Ok(())
+                });
+            let remote_backend = make_remote_backend(mock_connector, path.clone());
+
+            remote_backend.download(&file_path).unwrap();
+
+            assert!(file_path.exists());
         }
     }
 
