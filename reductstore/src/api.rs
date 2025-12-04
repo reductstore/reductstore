@@ -104,7 +104,7 @@ impl StateKeeper {
 
         {
             let mut lock = self.components.write().await;
-            // it's important to check again after acquiring the lock and lock must be exclusive to avoid rice conditions
+            // it's important to check again after acquiring the lock and lock must be exclusive to avoid race conditions
             if lock.is_none() {
                 // check if there are components in the channel
                 if self.rx.read().await.capacity() != 0 {
