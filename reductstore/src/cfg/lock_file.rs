@@ -92,7 +92,7 @@ mod tests {
             .return_const(Ok("20".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_LOCK_FILE_ROLE"))
+            .with(eq("RS_INSTANCE_ROLE"))
             .return_const(Ok("primary".to_string()));
         env_getter
             .expect_get()
@@ -157,7 +157,7 @@ mod tests {
             .return_const(Ok("invalid_action".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_LOCK_FILE_ROLE"))
+            .with(eq("RS_INSTANCE_ROLE"))
             .return_const(Ok("primary".to_string()));
         env_getter
             .expect_get()

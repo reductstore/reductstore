@@ -269,7 +269,7 @@ impl StorageBackend for RemoteBackend {
         );
 
         if !full_path.parent().unwrap().exists() {
-            self.create_dir_all(full_path.parent().unwrap())?;
+            std::fs::create_dir_all(full_path.parent().unwrap())?;
         }
 
         self.connector.download_object(&s3_key, &full_path)?;
