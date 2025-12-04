@@ -40,11 +40,11 @@ impl FolderKeeper {
                         "Failed to decode folder map at {:?}: {}. Rebuilding cache.",
                         list_path, err
                     );
-                    Self::build_from_fs(&path, &list_path)
+                    Self::build_from_fs(&path)
                 }
             }
         } else {
-            let proto = Self::build_from_fs(&path, &list_path);
+            let proto = Self::build_from_fs(&path);
             Self::save_static(&list_path, &proto).unwrap();
             proto
         };
@@ -131,7 +131,7 @@ impl FolderKeeper {
         Ok(())
     }
 
-    fn build_from_fs(path: &PathBuf, list_path: &PathBuf) -> FolderMap {
+    fn build_from_fs(path: &PathBuf) -> FolderMap {
         let mut proto = FolderMap { items: vec![] };
         for path in FILE_CACHE.read_dir(path).unwrap() {
             if path.is_dir() {
