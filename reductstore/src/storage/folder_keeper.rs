@@ -5,6 +5,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::RwLock;
 use crate::storage::proto::folder_map::Item;
 use crate::storage::proto::FolderMap;
+use log::warn;
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
@@ -24,32 +25,26 @@ impl FolderKeeper {
     pub fn new(path: PathBuf) -> Self {
         let list_path = path.join(".folder");
         let proto = if FILE_CACHE.try_exists(&list_path).unwrap_or(false) {
-            let file = FILE_CACHE
-                .read(&list_path, Start(0))
-                .unwrap()
-                .upgrade()
-                .unwrap();
+            let read_and_encode = || {
+                let file = FILE_CACHE.read(&list_path, Start(0))?.upgrade()?;
+                let mut lock = file.write()?;
+                let mut buf = Vec::new();
+                lock.read_to_end(&mut buf)?;
+                FolderMap::decode(&buf[..]).map_err(|err| internal_server_error!("{}", err))
+            };
 
-            let mut lock = file.write().unwrap();
-            let mut buf = Vec::new();
-            lock.read_to_end(&mut buf).unwrap();
-
-            FolderMap::decode(&buf[..]).unwrap()
-        } else {
-            let mut proto = FolderMap { items: vec![] };
-            for path in FILE_CACHE.read_dir(&path).unwrap() {
-                if path.is_dir() {
-                    if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                        if !name.starts_with('.') {
-                            proto.items.push(Item {
-                                name: name.to_string(),
-                                folder_name: name.to_string(),
-                            });
-                        }
-                    }
+            match read_and_encode() {
+                Ok(mapper) => mapper,
+                Err(err) => {
+                    warn!(
+                        "Failed to decode folder map at {:?}: {}. Rebuilding cache.",
+                        list_path, err
+                    );
+                    Self::build_from_fs(&path)
                 }
             }
-
+        } else {
+            let proto = Self::build_from_fs(&path);
             Self::save_static(&list_path, &proto).unwrap();
             proto
         };
@@ -134,5 +129,65 @@ impl FolderKeeper {
         lock.write_all(&buf)?;
         lock.flush()?;
         Ok(())
+    }
+
+    fn build_from_fs(path: &PathBuf) -> FolderMap {
+        let mut proto = FolderMap { items: vec![] };
+        for path in FILE_CACHE.read_dir(path).unwrap() {
+            if path.is_dir() {
+                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
+                    if !name.starts_with('.') {
+                        proto.items.push(Item {
+                            name: name.to_string(),
+                            folder_name: name.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+
+        proto
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::backend::Backend;
+    use crate::core::file_cache::FILE_CACHE;
+    use rstest::{fixture, rstest};
+    use std::io::SeekFrom;
+    use tempfile::tempdir;
+
+    #[fixture]
+    pub fn path() -> PathBuf {
+        let path = tempdir().unwrap().keep();
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .unwrap(),
+        );
+        path
+    }
+
+    #[rstest]
+    fn ignores_invalid_folder_map(path: PathBuf) {
+        let base_path = path.join("bucket");
+        FILE_CACHE.create_dir_all(&base_path).unwrap();
+
+        let list_path = base_path.join(".folder");
+        let file = FILE_CACHE
+            .write_or_create(&list_path, SeekFrom::Start(0))
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut lock = file.write().unwrap();
+        lock.write_all(b"invalid-folder-map").unwrap();
+        lock.flush().unwrap();
+
+        let keeper = FolderKeeper::new(base_path.clone());
+        let folders = keeper.list_folders().unwrap();
+        assert!(folders.is_empty());
     }
 }
