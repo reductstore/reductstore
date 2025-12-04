@@ -268,7 +268,7 @@ impl StorageBackend for RemoteBackend {
             s3_key, full_path
         );
 
-        if full_path.parent().unwrap().exists() == false {
+        if !full_path.parent().unwrap().exists() {
             self.create_dir_all(full_path.parent().unwrap())?;
         }
 
