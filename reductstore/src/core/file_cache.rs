@@ -400,6 +400,7 @@ impl FileCache {
             return Ok(());
         }
 
+        self.discard_recursive(&old_path)?; // we need to close all open files
         let mut cache = self.cache.write()?;
         cache.remove(old_path);
         self.backend.read()?.rename(old_path, new_path)?;

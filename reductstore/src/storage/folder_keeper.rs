@@ -103,7 +103,6 @@ impl FolderKeeper {
     pub fn rename_folder(&self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
         let old_path = self.path.join(old_name);
         let new_path = self.path.join(new_name);
-        FILE_CACHE.discard_recursive(&old_path)?; // we need to close all open files
         FILE_CACHE.rename(&old_path, &new_path)?;
         {
             let mut mapper = self.mapper.write()?;
