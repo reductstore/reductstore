@@ -85,3 +85,12 @@ message BlockIndex {
   repeated Block blocks = 1;
   uint64 crc64 = 2;  // integrity check
 }
+
+// List of folders in the bucket or entry
+message FolderMap {
+  message Item {
+    string name = 1;
+    string folder_name = 2;
+  }
+  repeated Item items = 1;
+}

@@ -10,7 +10,6 @@ mod write_record;
 
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
-use crate::core::file_cache::FILE_CACHE;
 use crate::core::thread_pool::{
     group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
 };
@@ -77,7 +76,6 @@ impl Entry {
         settings: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Self, ReductError> {
-        FILE_CACHE.create_dir_all(&path.join(name))?;
         let path = path.join(name);
         Ok(Self {
             name: name.to_string(),

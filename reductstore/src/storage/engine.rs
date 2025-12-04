@@ -1,7 +1,6 @@
-mod read_only;
-
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
+mod read_only;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
@@ -10,6 +9,7 @@ use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, try_unique, unique, TaskHandle};
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
+use crate::storage::folder_keeper::FolderKeeper;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
@@ -71,16 +71,19 @@ impl StorageEngineBuilder {
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
-        for path in FILE_CACHE.read_dir(&data_path).unwrap() {
-            if path.is_dir() {
-                match Bucket::restore(path.clone(), cfg.clone()) {
-                    Ok(bucket) => {
-                        let bucket = Arc::new(bucket);
-                        buckets.insert(bucket.name().to_string(), bucket);
-                    }
-                    Err(e) => {
-                        panic!("Failed to load bucket from {:?}: {}", path, e);
-                    }
+        let folder_keeper = FolderKeeper::new(data_path.clone());
+
+        for path in folder_keeper
+            .list_folders()
+            .expect("Failed to list folders")
+        {
+            match Bucket::restore(data_path.join(&path), cfg.clone()) {
+                Ok(bucket) => {
+                    let bucket = Arc::new(bucket);
+                    buckets.insert(bucket.name().to_string(), bucket);
+                }
+                Err(e) => {
+                    panic!("Failed to load bucket from {:?}: {}", path, e);
                 }
             }
         }
@@ -94,6 +97,7 @@ impl StorageEngineBuilder {
             license: self.license,
             cfg,
             last_replica_sync: RwLock::new(Instant::now()),
+            folder_keeper: Arc::new(folder_keeper),
         }
     }
 }
@@ -106,6 +110,7 @@ pub struct StorageEngine {
     license: Option<License>,
     cfg: Cfg,
     last_replica_sync: RwLock<Instant>,
+    folder_keeper: Arc<FolderKeeper>,
 }
 
 impl StorageEngine {
@@ -167,6 +172,7 @@ impl StorageEngine {
             return Err(conflict!("Bucket '{}' already exists", name));
         }
 
+        self.folder_keeper.add_folder(name)?;
         let bucket = Arc::new(Bucket::new(
             name,
             &self.data_path,
@@ -217,6 +223,7 @@ impl StorageEngine {
         let path = self.data_path.join(name);
         let buckets = self.buckets.clone();
         let name = name.to_string();
+        let folder_keeper = self.folder_keeper.clone();
         unique(&task_group, "remove bucket", move || {
             let mut buckets = buckets.write().unwrap();
             if let Some(bucket) = buckets.get(&name) {
@@ -230,7 +237,7 @@ impl StorageEngine {
 
             match buckets.remove(&name) {
                 Some(_) => {
-                    FILE_CACHE.remove_dir(&path)?;
+                    folder_keeper.remove_folder(&name)?;
                     debug!("Bucket '{}' and folder {:?} are removed", name, path);
                     Ok(())
                 }
@@ -280,18 +287,18 @@ impl StorageEngine {
 
         let task_group = group_from_path(&self.data_path.join(old_name), BUCKET);
         let buckets = self.buckets.clone();
-        let path = self.data_path.join(old_name);
         let new_path = self.data_path.join(new_name);
         let old_name = old_name.to_string();
         let new_name = new_name.to_string();
         let cfg = self.cfg.clone();
+        let folder_keeper = self.folder_keeper.clone();
 
         unique(&task_group, "rename bucket", move || {
             let buckets = &mut buckets.write().unwrap();
 
             sync_task.wait()?;
-            FILE_CACHE.discard_recursive(&path)?;
-            FILE_CACHE.rename(&path, &new_path)?;
+            folder_keeper.rename_folder(&old_name, &new_name)?;
+
             buckets.remove(&old_name);
             let bucket = Bucket::restore(new_path, cfg)?;
             buckets.insert(new_name.to_string(), Arc::new(bucket));
@@ -328,7 +335,7 @@ impl StorageEngine {
         };
 
         for (name, bucket) in buckets.iter() {
-            info!("Sync bucket '{}'", name);
+            debug!("Sync bucket '{}'", name);
             handlers.push(bucket.sync_fs());
         }
 
@@ -674,6 +681,8 @@ mod tests {
                 .await
                 .unwrap();
             writer.send(Ok(None)).await.unwrap();
+            // Ensure writer is dropped before renaming so Windows can release file handles
+            drop(writer);
 
             let result = storage.rename_bucket("test", "new").wait();
             assert_eq!(result, Ok(()));
