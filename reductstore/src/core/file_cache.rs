@@ -358,10 +358,16 @@ impl FileCache {
     ///
     pub fn discard_recursive(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write()?;
+        let normalized_path = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
         let files_to_remove = cache
             .keys()
             .iter()
-            .filter(|file_path| file_path.starts_with(path))
+            .filter(|file_path| {
+                file_path.starts_with(path)
+                    || fs::canonicalize(file_path)
+                        .map(|p| p.starts_with(&normalized_path))
+                        .unwrap_or(false)
+            })
             .map(|file_path| (*file_path).clone())
             .collect::<Vec<PathBuf>>();
 

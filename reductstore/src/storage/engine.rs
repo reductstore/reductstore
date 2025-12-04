@@ -681,6 +681,8 @@ mod tests {
                 .await
                 .unwrap();
             writer.send(Ok(None)).await.unwrap();
+            // Ensure writer is dropped before renaming so Windows can release file handles
+            drop(writer);
 
             let result = storage.rename_bucket("test", "new").wait();
             assert_eq!(result, Ok(()));
