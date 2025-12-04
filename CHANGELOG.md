@@ -11,11 +11,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support for Active/Passive deployment, [PR-1028](https://github.com/reductstore/reductstore/pull/1028)
 - Implement concurrent read-only access to data, [PR-1034](https://github.com/reductstore/reductstore/pull/1034)
-- Cache directory tree
+- Cache buckets and entries in .folder file for S3 listing, [PR-1052](https://github.com/reductstore/reductstore/pull/1052)
 
 ### Internal
 
 - Refactor CI workflow and use S3 cache for Rust dependencies, [PR-1003](https://github.com/reductstore/reductstore/pull/1003)
+
+### Fixed
+
+- Fix replica crash at the start without write permissions, [PR-1054](https://github.com/reductstore/reductstore/pull/1054)
+
 
 ## 1.17.6 - 2025-12-03
 
