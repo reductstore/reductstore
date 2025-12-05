@@ -78,6 +78,7 @@ mod tests {
     use crate::backend::Backend;
     use crate::cfg::storage_engine::StorageEngineConfig;
     use crate::storage::bucket::tests::write;
+    use crate::storage::bucket::FILE_CACHE;
     use futures::executor::block_on;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::{fixture, rstest};

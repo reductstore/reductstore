@@ -21,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix replica crash at the start without write permissions, [PR-1054](https://github.com/reductstore/reductstore/pull/1054)
 - Handle encode error in folder keeper, [PR-1055](https://github.com/reductstore/reductstore/pull/1055)
+- Fix writing folder cache and read only mode, [PR-1056](https://github.com/reductstore/reductstore/pull/1056)
 
 ## 1.17.6 - 2025-12-03
 
