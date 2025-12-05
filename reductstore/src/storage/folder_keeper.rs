@@ -1,6 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::RwLock;
 use crate::storage::proto::folder_map::Item;
@@ -18,12 +19,24 @@ use std::path::PathBuf;
 /// Mostly needed for S3 compatible storage backends that do not support listing folders natively.
 pub(super) struct FolderKeeper {
     path: PathBuf,
-    mapper: RwLock<FolderMap>,
+    full_access: bool,
+    map: RwLock<FolderMap>,
 }
 
 impl FolderKeeper {
-    pub fn new(path: PathBuf) -> Self {
+    pub fn new(path: PathBuf, cfg: &Cfg) -> Self {
         let list_path = path.join(".folder");
+        let full_access = cfg.role != InstanceRole::Replica;
+        let proto = Self::read_or_build_map(&path, &list_path, full_access);
+
+        FolderKeeper {
+            path,
+            full_access,
+            map: RwLock::new(proto),
+        }
+    }
+
+    fn read_or_build_map(path: &PathBuf, list_path: &PathBuf, save_on_change: bool) -> FolderMap {
         let proto = if FILE_CACHE.try_exists(&list_path).unwrap_or(false) {
             let read_and_encode = || {
                 let file = FILE_CACHE.read(&list_path, Start(0))?.upgrade()?;
@@ -34,7 +47,7 @@ impl FolderKeeper {
             };
 
             match read_and_encode() {
-                Ok(mapper) => mapper,
+                Ok(map) => map,
                 Err(err) => {
                     warn!(
                         "Failed to decode folder map at {:?}: {}. Rebuilding cache.",
@@ -45,19 +58,17 @@ impl FolderKeeper {
             }
         } else {
             let proto = Self::build_from_fs(&path);
-            Self::save_static(&list_path, &proto).unwrap();
+            if save_on_change {
+                Self::save_static(&list_path, &proto).unwrap();
+            }
             proto
         };
-
-        FolderKeeper {
-            path,
-            mapper: RwLock::new(proto),
-        }
+        proto
     }
 
     pub fn list_folders(&self) -> Result<Vec<PathBuf>, ReductError> {
         let mut folders = Vec::new();
-        for item in &self.mapper.read()?.items {
+        for item in &self.map.read()?.items {
             let folder_path = self.path.join(&item.folder_name);
             folders.push(folder_path);
         }
@@ -68,14 +79,10 @@ impl FolderKeeper {
         let folder_path = self.path.join(folder_name);
         FILE_CACHE.create_dir_all(&folder_path)?;
         {
-            let mut mapper = self.mapper.write()?;
+            let mut map = self.map.write()?;
 
-            if !mapper
-                .items
-                .iter()
-                .any(|item| item.folder_name == folder_name)
-            {
-                mapper.items.push(Item {
+            if !map.items.iter().any(|item| item.folder_name == folder_name) {
+                map.items.push(Item {
                     name: folder_name.to_string(),
                     folder_name: folder_name.to_string(),
                 });
@@ -89,8 +96,8 @@ impl FolderKeeper {
         let folder_path = self.path.join(folder_name);
         FILE_CACHE.remove_dir(&folder_path)?;
         {
-            let mut mapper = self.mapper.write()?;
-            mapper.items.retain(|item| item.folder_name != folder_name);
+            let mut map = self.map.write()?;
+            map.items.retain(|item| item.folder_name != folder_name);
         }
         self.save()
     }
@@ -100,8 +107,8 @@ impl FolderKeeper {
         let new_path = self.path.join(new_name);
         FILE_CACHE.rename(&old_path, &new_path)?;
         {
-            let mut mapper = self.mapper.write()?;
-            if let Some(item) = mapper
+            let mut map = self.map.write()?;
+            if let Some(item) = map
                 .items
                 .iter_mut()
                 .find(|item| item.folder_name == old_name)
@@ -113,21 +120,36 @@ impl FolderKeeper {
         self.save()
     }
 
-    fn save(&self) -> Result<(), ReductError> {
-        let mapper = self.mapper.read()?;
-        Self::save_static(&self.path.join(".folder"), &mapper)?;
+    /// Reload the folder map from the filesystem, discarding any cached version.
+    /// Used in ReadOnly mode to sync folder list from backend storage.
+    pub fn reload(&self) -> Result<(), ReductError> {
+        let file_path = self.path.join(".folder"); // remove cached file
+        FILE_CACHE.discard_recursive(&file_path)?;
+        let proto = Self::read_or_build_map(&self.path, &self.path.join(".folder"), false);
+        let mut map = self.map.write()?;
+        *map = proto;
         Ok(())
     }
 
-    fn save_static(path: &PathBuf, mapper: &FolderMap) -> Result<(), ReductError> {
+    fn save(&self) -> Result<(), ReductError> {
+        if !self.full_access {
+            return Ok(());
+        }
+
+        let map = self.map.read()?;
+        Self::save_static(&self.path.join(".folder"), &map)?;
+        Ok(())
+    }
+
+    fn save_static(path: &PathBuf, map: &FolderMap) -> Result<(), ReductError> {
         let mut buf = Vec::new();
-        mapper
-            .encode(&mut buf)
+        map.encode(&mut buf)
             .map_err(|e| internal_server_error!("Failed to encode folder map: {}", e))?;
         let file = FILE_CACHE.write_or_create(path, Start(0))?.upgrade()?;
         let mut lock = file.write()?;
+        lock.set_len(0)?; // truncate the file before writing
         lock.write_all(&buf)?;
-        lock.flush()?;
+        lock.sync_all()?;
         Ok(())
     }
 
@@ -154,6 +176,7 @@ impl FolderKeeper {
 mod tests {
     use super::*;
     use crate::backend::Backend;
+    use crate::cfg::{Cfg, InstanceRole};
     use crate::core::file_cache::FILE_CACHE;
     use rstest::{fixture, rstest};
     use std::io::SeekFrom;
@@ -186,8 +209,26 @@ mod tests {
         lock.write_all(b"invalid-folder-map").unwrap();
         lock.flush().unwrap();
 
-        let keeper = FolderKeeper::new(base_path.clone());
+        let cfg = Cfg::default();
+        let keeper = FolderKeeper::new(base_path.clone(), &cfg);
         let folders = keeper.list_folders().unwrap();
         assert!(folders.is_empty());
+    }
+
+    #[rstest]
+    fn does_not_persist_folder_map_in_replica_mode(path: PathBuf) {
+        let base_path = path.join("replica_bucket");
+        FILE_CACHE.create_dir_all(&base_path).unwrap();
+
+        let mut cfg = Cfg::default();
+        cfg.role = InstanceRole::Replica;
+
+        let _ = FolderKeeper::new(base_path.clone(), &cfg);
+
+        let list_path = base_path.join(".folder");
+        assert!(
+            !FILE_CACHE.try_exists(&list_path).unwrap_or(false),
+            ".folder should not be created in replica mode"
+        );
     }
 }
