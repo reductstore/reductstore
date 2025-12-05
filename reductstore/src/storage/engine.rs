@@ -71,7 +71,7 @@ impl StorageEngineBuilder {
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
-        let folder_keeper = FolderKeeper::new(data_path.clone());
+        let folder_keeper = FolderKeeper::new(data_path.clone(), &cfg);
 
         for path in folder_keeper
             .list_folders()

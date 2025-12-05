@@ -134,13 +134,17 @@ impl BlockIndex {
                 ));
             };
 
-            let has_block_descriptors = FILE_CACHE
-                .read_dir(&path.parent().unwrap().into())?
-                .iter()
-                .any(|path| path.ends_with(DESCRIPTOR_FILE_EXT));
+            if lock.metadata()?.len() == 0 {
+                // If the index file is empty, check if there are any block descriptors.
+                // If there are, the index file is corrupted.
+                let has_block_descriptors = FILE_CACHE
+                    .read_dir(&path.parent().unwrap().into())?
+                    .iter()
+                    .any(|path| path.ends_with(DESCRIPTOR_FILE_EXT));
 
-            if lock.metadata()?.len() == 0 && has_block_descriptors {
-                return Err(internal_server_error!("Block index {:?} is empty", path));
+                if has_block_descriptors {
+                    return Err(internal_server_error!("Block index {:?} is empty", path));
+                }
             }
 
             BlockIndexProto::decode(Bytes::from(buf))

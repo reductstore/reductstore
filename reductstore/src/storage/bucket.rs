@@ -67,7 +67,7 @@ impl Bucket {
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         let settings = Self::fill_settings(settings, Self::defaults());
-        let folder_keeper = FolderKeeper::new(path.clone());
+        let folder_keeper = FolderKeeper::new(path.clone(), &cfg);
 
         let bucket = Bucket {
             name: name.to_string(),
@@ -113,7 +113,7 @@ impl Bucket {
 
         let mut entries = BTreeMap::new();
         let mut task_set = Vec::new();
-        let folder_keeper = FolderKeeper::new(path.clone());
+        let folder_keeper = FolderKeeper::new(path.clone(), &cfg);
 
         for path in folder_keeper.list_folders()? {
             let handler = Entry::restore(

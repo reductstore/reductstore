@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::{Cfg, InstanceRole};
-use crate::core::file_cache::FILE_CACHE;
 use crate::storage::bucket::Bucket;
 use crate::storage::engine::{ReadOnlyMode, StorageEngine};
 use reduct_base::error::ReductError;
@@ -35,11 +34,8 @@ impl ReadOnlyMode for StorageEngine {
             .collect::<HashSet<_>>();
 
         let mut buckets_to_retain = vec![];
-        for path in FILE_CACHE.read_dir(&self.data_path)? {
-            if !path.is_dir() {
-                continue;
-            }
-
+        self.folder_keeper.reload()?;
+        for path in self.folder_keeper.list_folders()? {
             if current_bucket_paths.contains(&path) {
                 buckets_to_retain.push(path);
                 continue;
@@ -128,8 +124,8 @@ mod tests {
         }
 
         // Remove bucket in primary engine
-        let bucket_path = primary_engine.cfg.data_path.join("bucket-1");
-        std::fs::remove_dir_all(&bucket_path).unwrap();
+        primary_engine.remove_bucket("bucket-1").wait().unwrap();
+        primary_engine.sync_fs().unwrap();
         read_only_engine.reload().unwrap();
         assert_eq!(
             read_only_engine.buckets.read().unwrap().len(),
