@@ -124,8 +124,8 @@ mod tests {
         }
 
         // Remove bucket in primary engine
-        let bucket_path = primary_engine.cfg.data_path.join("bucket-1");
-        std::fs::remove_dir_all(&bucket_path).unwrap();
+        primary_engine.remove_bucket("bucket-1").wait().unwrap();
+        primary_engine.sync_fs().unwrap();
         read_only_engine.reload().unwrap();
         assert_eq!(
             read_only_engine.buckets.read().unwrap().len(),
