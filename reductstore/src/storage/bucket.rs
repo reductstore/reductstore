@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod quotas;
@@ -6,6 +6,7 @@ pub(super) mod settings;
 
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use crate::core::thread_pool::{group_from_path, shared, unique, GroupDepth, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
@@ -28,7 +29,7 @@ use std::collections::BTreeMap;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 /// Bucket is a single storage bucket.
 pub(crate) struct Bucket {

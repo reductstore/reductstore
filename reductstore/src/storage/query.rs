@@ -9,6 +9,7 @@ mod historical;
 mod limited;
 
 use crate::cfg::io::IoConfig;
+use crate::core::sync::RwLock;
 use crate::core::thread_pool::{shared, shared_isolated, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
@@ -18,7 +19,7 @@ use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::cmp::{max, min};
-use std::sync::{Arc, Mutex, RwLock};
+use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
@@ -82,10 +83,10 @@ pub(super) fn spawn_query_task(
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
     // we spawn a new task to run the query outside hierarchical task group to avoid deadlocks
-    let query = Arc::new(Mutex::new(query));
+    let query = Arc::new(RwLock::new(query));
     let handle = shared_isolated("spawn_query_task", "spawn query task", move || {
         trace!("Query task for '{}' id={} running", task_group, id);
-        let watcher = Arc::new(Mutex::new(QueryWatcher::new()));
+        let watcher = Arc::new(RwLock::new(QueryWatcher::new()));
 
         loop {
             let group = task_group.clone();
@@ -97,7 +98,17 @@ pub(super) fn spawn_query_task(
             // the task return None if the loop must be stopped
             // we do it for each iteration so we don't need to take the whole worker for a long query
             let task = shared(&group.clone(), "query iteration", move || {
-                let mut watcher = watcher.lock().unwrap();
+                let mut watcher = match watcher.write() {
+                    Ok(guard) => guard,
+                    Err(_) => {
+                        warn!(
+                            "Error acquiring watcher lock for query '{}' id={}",
+                            group, id
+                        );
+                        return None;
+                    }
+                };
+
                 if tx.is_closed() {
                     debug!("Query '{}' id={} task channel closed", group, id);
                     return None;
@@ -116,7 +127,14 @@ pub(super) fn spawn_query_task(
                     return Some(timeout);
                 }
 
-                let next_result = query.lock().unwrap().next(block_manager.clone());
+                let next_result = match query.write() {
+                    Ok(mut guard) => guard.next(block_manager.clone()),
+                    Err(_) => {
+                        warn!("Error acquiring query lock for query '{}' id={}", group, id);
+                        return None;
+                    }
+                };
+
                 let query_err = next_result.as_ref().err().cloned();
 
                 let send_result = tx.blocking_send(next_result);
@@ -194,6 +212,7 @@ mod tests {
     use super::*;
     use crate::backend::Backend;
     use crate::core::file_cache::FILE_CACHE;
+    use crate::core::sync::RwLock;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;

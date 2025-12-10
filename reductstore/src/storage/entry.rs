@@ -8,6 +8,14 @@ mod remove_records;
 pub(crate) mod update_labels;
 mod write_record;
 
+use crate::cfg::io::IoConfig;
+use crate::cfg::Cfg;
+use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
+use crate::core::thread_pool::{
+    group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
+};
+use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
 use crate::storage::entry::entry_loader::EntryLoader;
@@ -17,24 +25,16 @@ use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
+use reduct_base::{internal_server_error, not_found};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::RwLock as AsyncRwLock;
 
-pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
-
-use crate::cfg::io::IoConfig;
-use crate::cfg::Cfg;
-use crate::core::file_cache::FILE_CACHE;
-use crate::core::thread_pool::{
-    group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
-};
-use crate::core::weak::Weak;
 pub(crate) use io::record_reader::RecordReader;
-use reduct_base::{internal_server_error, not_found};
+pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,

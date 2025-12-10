@@ -4,7 +4,7 @@
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Instant;
 
 use bytes::Bytes;
@@ -15,6 +15,7 @@ use prost::Message;
 
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{

@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use crate::core::thread_pool::GroupDepth::BUCKET;
 use crate::core::thread_pool::{group_from_path, unique, TaskHandle};
 use crate::core::weak::Weak;
@@ -13,7 +14,7 @@ use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo
 use reduct_base::{conflict, not_found, unprocessable_entity};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Instant;
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
