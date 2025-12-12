@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FileWeak;
+use crate::core::sync::RwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::Record;
@@ -14,7 +15,7 @@ use std::cmp::min;
 use std::io;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {

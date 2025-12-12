@@ -23,6 +23,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Handle encode error in folder keeper, [PR-1055](https://github.com/reductstore/reductstore/pull/1055)
 - Fix writing folder cache and read only mode, [PR-1056](https://github.com/reductstore/reductstore/pull/1056)
 
+## 1.17.7 - 2025-12-12
+
+### Fixed
+
+- Fix deadlock in storage engine, using RwLock with timeout, [PR-1059](https://github.com/reductstore/reductstore/pull/1059)
+
 ## 1.17.6 - 2025-12-03
 
 ### Fixed

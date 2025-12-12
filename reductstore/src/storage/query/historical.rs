@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
+use crate::core::sync::RwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::record;
@@ -14,7 +15,7 @@ use crate::storage::query::filters::{
 };
 use reduct_base::error::ReductError;
 use std::collections::{HashMap, VecDeque};
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 impl FilterRecord for Record {
     fn state(&self) -> i32 {

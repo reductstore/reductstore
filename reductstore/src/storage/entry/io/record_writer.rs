@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FileWeak;
+use crate::core::sync::RwLock;
 use crate::core::thread_pool::GroupDepth::BLOCK;
 use crate::core::thread_pool::{group_from_path, shared_child_isolated};
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
@@ -16,7 +17,7 @@ use reduct_base::{bad_request, internal_server_error};
 use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{channel, Receiver};
 

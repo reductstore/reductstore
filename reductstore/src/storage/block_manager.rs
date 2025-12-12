@@ -9,6 +9,7 @@ pub(in crate::storage) mod wal;
 
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::{FileWeak, FILE_CACHE};
+use crate::core::sync::RwLock;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
@@ -25,7 +26,7 @@ use std::fs;
 use std::fs::OpenOptions;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Receiver, Sender};
 
