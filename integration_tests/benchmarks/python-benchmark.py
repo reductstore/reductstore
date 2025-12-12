@@ -121,9 +121,9 @@ async def bench(url: str, record_size: int, record_num: int) -> Result:
         # Remove
         start_time = datetime.now()
         removed_records = await bucket.remove_query(
-            "python-bench", start=0, stop=record_num
+            "python-bench", start=0, stop=record_num, when={"$each_n": 2}
         )
-        assert removed_records == record_num
+        assert removed_records == record_num / 2
 
         # Save result
         delta = (datetime.now() - start_time).total_seconds()
