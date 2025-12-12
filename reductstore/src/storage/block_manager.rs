@@ -14,6 +14,7 @@ use std::fs;
 use std::fs::OpenOptions;
 
 use crate::core::file_cache::{FileWeak, FILE_CACHE};
+use crate::core::sync::RwLock;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::wal::{Wal, WalEntry};
@@ -25,7 +26,7 @@ use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 

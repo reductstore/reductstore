@@ -1,15 +1,15 @@
-// Copyright 2023 ReductSoftware UG
+// Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::cfg::io::IoConfig;
+use crate::core::sync::RwLock;
 use crate::storage::block_manager::BlockManager;
+use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
-
-use crate::cfg::io::IoConfig;
-use crate::storage::entry::RecordReader;
 use reduct_base::error::ReductError;
 use reduct_base::no_content;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 /// A query that is limited to a certain number of records.
 pub(crate) struct LimitedQuery {

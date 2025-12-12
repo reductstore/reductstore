@@ -1,6 +1,7 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::sync::RwLock;
 use crate::core::thread_pool::{shared, unique, unique_child, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
@@ -10,7 +11,7 @@ use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::not_found;
 use std::collections::BTreeMap;
-use std::sync::{Arc, RwLock};
+use std::sync::Arc;
 
 impl Entry {
     /// Remove multiple records.
