@@ -68,7 +68,7 @@ impl EntryLoader {
                 Self::check_descriptor_count(&path, &file_list, &bm.index())
             };
 
-            if check_result().is_err() {
+            if cfg.engine_config.enable_integrity_checks && check_result().is_err() {
                 warn!("Block index is inconsistent. Rebuilding the block index from blocks");
                 Self::restore_entry_from_blocks(path.clone(), options, cfg.clone())?
             } else {
