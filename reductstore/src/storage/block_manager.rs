@@ -327,7 +327,7 @@ impl BlockManager {
             }
         }
 
-        self.save_block_on_disk(block_ref)
+        self.save_block(block_ref)
     }
 
     /// Remove records from a block and save it on disk.
