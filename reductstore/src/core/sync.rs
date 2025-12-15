@@ -28,11 +28,15 @@ impl<T> RwLock<T> {
     }
 
     pub fn write(&self) -> Result<parking_lot::RwLockWriteGuard<'_, T>, ReductError> {
-        self.inner
-            .try_write_for(RWLOCK_TIMEOUT)
-            .ok_or(internal_server_error!(
-                "Failed to acquire write lock within timeout"
-            ))
+        match self.inner.try_write_for(RWLOCK_TIMEOUT) {
+            Some(guard) => Ok(guard),
+            None => {
+                print!("");
+                Err(internal_server_error!(
+                    "Failed to acquire write lock within timeout"
+                ))
+            }
+        }
     }
 }
 
