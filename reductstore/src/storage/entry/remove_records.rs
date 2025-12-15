@@ -140,11 +140,10 @@ impl Entry {
         let mut records_per_block = BTreeMap::new();
 
         {
-            let mut bm = block_manager.write()?;
             for time in timestamps {
                 // Find the block that contains the record
                 // TODO: Try to avoid the lookup for each record
-                match bm.find_block(time) {
+                match block_manager.write()?.find_block(time) {
                     Ok(block_ref) => {
                         // Check if the record exists
                         let block = block_ref.read()?;

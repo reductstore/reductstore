@@ -330,7 +330,7 @@ impl BlockManager {
             }
         }
 
-        self.save_block_on_disk(block_ref)
+        self.save_block(block_ref)
     }
 
     /// Remove records from a block and save it on disk.
@@ -901,6 +901,7 @@ mod tests {
             };
 
             bm.update_records(block_id, vec![record]).unwrap();
+            bm.save_cache_on_disk().unwrap();
             let block_index_proto = BlockIndexProto::decode(
                 std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
                     .unwrap()

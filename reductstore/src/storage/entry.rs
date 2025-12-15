@@ -225,9 +225,9 @@ impl Entry {
         })
     }
 
-    pub fn size(&self) -> u64 {
-        let bm = self.block_manager.read().unwrap();
-        bm.index().size()
+    pub fn size(&self) -> Result<u64, ReductError> {
+        let bm = self.block_manager.read()?;
+        Ok(bm.index().size())
     }
 
     /// Try to remove the oldest block.
@@ -236,7 +236,10 @@ impl Entry {
     ///
     /// HTTTPError - The error if any.
     pub fn try_remove_oldest_block(&self) -> TaskHandle<Result<(), ReductError>> {
-        let bm = self.block_manager.read().unwrap();
+        let bm = match self.block_manager.read() {
+            Ok(bm) => bm,
+            Err(e) => return Err(e).into(),
+        };
 
         let index_tree = bm.index().tree();
         if index_tree.is_empty() {
@@ -245,12 +248,14 @@ impl Entry {
 
         let oldest_block_id = *index_tree.first().unwrap();
         let block_manager = Arc::clone(&self.block_manager);
+        drop(bm); // release read lock before acquiring write lock
+
         match try_unique(
             &format!("{}/{}", self.task_group(), oldest_block_id),
             "try to remove oldest block",
             Duration::from_millis(5),
             move || {
-                let mut bm = block_manager.write().unwrap();
+                let mut bm = block_manager.write()?;
                 bm.remove_block(oldest_block_id)?;
                 debug!(
                     "Removing the oldest block {}.blk",
