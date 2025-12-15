@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.17.8 - 2025-12-15
+
 ### Changed
 
 - Speed up label updates, [PR-1063](https://github.com/reductstore/reductstore/pull/1063)

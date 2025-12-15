@@ -2805,7 +2805,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-base"
-version = "1.17.7"
+version = "1.17.8"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2825,7 +2825,7 @@ dependencies = [
 
 [[package]]
 name = "reduct-macros"
-version = "1.17.7"
+version = "1.17.8"
 dependencies = [
  "quote",
  "syn 2.0.106",
@@ -2833,7 +2833,7 @@ dependencies = [
 
 [[package]]
 name = "reductstore"
-version = "1.17.7"
+version = "1.17.8"
 dependencies = [
  "aes-siv",
  "argon2",
