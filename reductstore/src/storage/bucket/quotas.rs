@@ -27,19 +27,16 @@ impl Bucket {
 
     fn remove_oldest_block(&self, content_size: u64, quota_size: u64) -> Result<(), ReductError> {
         let get_bucket_size = || {
-            self.entries
-                .read()
-                .map(|entries| {
-                    entries
-                        .values()
-                        .map(|e| e.size())
-                        .reduce(|acc, e| acc + e)
-                        .unwrap_or(0)
-                })
-                .unwrap_or(0)
+            let entries = self.entries.read()?;
+
+            let mut total_size = 0u64;
+            for entry in entries.values() {
+                total_size += entry.size()?;
+            }
+            Ok::<u64, ReductError>(total_size)
         };
 
-        let mut size = get_bucket_size() + content_size as u64;
+        let mut size = get_bucket_size()? + content_size as u64;
         while size > quota_size {
             let mut success = false;
 
@@ -83,7 +80,7 @@ impl Bucket {
                 ));
             }
 
-            size = get_bucket_size() + content_size as u64;
+            size = get_bucket_size()? + content_size;
         }
 
         // Remove empty entries
