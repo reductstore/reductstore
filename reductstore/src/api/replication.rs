@@ -27,10 +27,10 @@ use reduct_base::msg::replication_api::{
 use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;
 
-#[derive(IntoResponse, Twin)]
+#[derive(IntoResponse, Twin, Debug)]
 pub struct ReplicationSettingsAxum(ReplicationSettings);
 
-#[derive(IntoResponse, Twin)]
+#[derive(IntoResponse, Twin, Debug)]
 pub struct ReplicationModePayloadAxum(ReplicationModePayload);
 
 impl<S> FromRequest<S> for ReplicationModePayloadAxum
@@ -113,6 +113,40 @@ mod tests {
             each_s: None,
             when: None,
             mode: ReplicationMode::Enabled,
+        }
+    }
+
+    mod from_request {
+        use super::*;
+        use crate::api::replication::ReplicationModePayloadAxum;
+        use axum::body::Body;
+        use axum::extract::FromRequest;
+        use axum::http::Request;
+        use reduct_base::error::ErrorCode::UnprocessableEntity;
+        use rstest::rstest;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_replication_mode_payload_ok() {
+            let req = Request::builder()
+                .body(Body::from(r#"{"mode":"paused"}"#))
+                .unwrap();
+
+            let payload = ReplicationModePayloadAxum::from_request(req, &())
+                .await
+                .expect("parse payload");
+            assert_eq!(payload.0.mode, ReplicationMode::Paused);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_replication_mode_payload_invalid_json() {
+            let req = Request::builder().body(Body::from("{bad json")).unwrap();
+
+            let err = ReplicationModePayloadAxum::from_request(req, &())
+                .await
+                .expect_err("should fail");
+            assert_eq!(err.0.status, UnprocessableEntity);
         }
     }
 }
