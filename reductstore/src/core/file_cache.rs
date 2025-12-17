@@ -30,6 +30,21 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
         FILE_CACHE_SYNC_INTERVAL,
     );
 
+    #[cfg(test)]
+    {
+        // Use an isolated filesystem backend for tests to avoid relying on
+        // other tests to initialise the global cache.
+        let temp_dir = tempfile::tempdir()
+            .expect("Failed to create temporary directory for FILE_CACHE")
+            .keep();
+        cache.set_storage_backend(
+            Backend::builder()
+                .local_data_path(temp_dir)
+                .try_build()
+                .expect("Failed to initialise FILE_CACHE backend for tests"),
+        );
+    }
+
     cache
 });
 

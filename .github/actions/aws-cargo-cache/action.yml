@@ -7,6 +7,12 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Detect rust minor version
+      shell: bash
+      run: |
+        minor=$(rustc --version --verbose | sed -ne 's/^release: \([0-9]*\.[0-9]*\).*/\1/p')
+        echo "RUST_MINOR=${minor:-unknown}" >> "$GITHUB_ENV"
+
     - name: Configure AWS credentials via OIDC (org-wide role)
       uses: aws-actions/configure-aws-credentials@v4
       with:
@@ -21,7 +27,10 @@ runs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          ./target/
-        key: ${{ runner.os }}-${{ inputs.target }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          target/${{ inputs.target }}/
+        key: ${{ runner.os }}-${{ inputs.target }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.target }}-cargo-rust${{ env.RUST_MINOR }}-
+          ${{ runner.os }}-${{ inputs.target }}-cargo-
       env:
         RUNS_ON_S3_BUCKET_CACHE: reduct-github-cache

@@ -5,8 +5,8 @@ use crate::cfg::{Cfg, DEFAULT_PORT};
 use crate::core::file_cache::FILE_CACHE;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
-    Label as ProtoLabel, ReplicationRepo as ProtoReplicationRepo,
-    ReplicationSettings as ProtoReplicationSettings,
+    Label as ProtoLabel, ReplicationMode as ProtoReplicationMode,
+    ReplicationRepo as ProtoReplicationRepo, ReplicationSettings as ProtoReplicationSettings,
 };
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
@@ -18,10 +18,11 @@ use log::{debug, error};
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
-    FullReplicationInfo, ReplicationInfo, ReplicationSettings,
+    FullReplicationInfo, ReplicationInfo, ReplicationMode, ReplicationSettings,
 };
 use reduct_base::{not_found, unprocessable_entity};
 use std::collections::HashMap;
+use std::convert::TryFrom;
 use std::io::SeekFrom::Start;
 use std::io::{Read, Write};
 use std::path::PathBuf;
@@ -51,6 +52,7 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
             each_s: settings.each_s.unwrap_or(0.0),
             each_n: settings.each_n.unwrap_or(0),
             when: settings.when.map(|value| value.to_string()),
+            mode: ProtoReplicationMode::from(&settings.mode) as i32,
         }
     }
 }
@@ -101,6 +103,29 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
             } else {
                 None
             },
+            mode: ProtoReplicationMode::try_from(settings.mode)
+                .unwrap_or(ProtoReplicationMode::Enabled)
+                .into(),
+        }
+    }
+}
+
+impl From<&ReplicationMode> for ProtoReplicationMode {
+    fn from(mode: &ReplicationMode) -> Self {
+        match mode {
+            ReplicationMode::Enabled => ProtoReplicationMode::Enabled,
+            ReplicationMode::Paused => ProtoReplicationMode::Paused,
+            ReplicationMode::Disabled => ProtoReplicationMode::Disabled,
+        }
+    }
+}
+
+impl From<ProtoReplicationMode> for ReplicationMode {
+    fn from(mode: ProtoReplicationMode) -> Self {
+        match mode {
+            ProtoReplicationMode::Enabled => ReplicationMode::Enabled,
+            ProtoReplicationMode::Paused => ReplicationMode::Paused,
+            ProtoReplicationMode::Disabled => ReplicationMode::Disabled,
         }
     }
 }
@@ -197,6 +222,12 @@ impl ManageReplications for ReplicationRepository {
             )));
         }
         self.replications.remove(name);
+        self.save_repo()
+    }
+
+    fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
+        let replication = self.get_mut_replication(name)?;
+        replication.set_mode(mode);
         self.save_repo()
     }
 
@@ -812,6 +843,26 @@ mod tests {
             let restored_settings = ReplicationSettings::from(proto_settings);
             assert!(restored_settings.when.is_none());
         }
+
+        #[rstest]
+        fn test_from_mode_proto(settings: ReplicationSettings) {
+            let mut settings = settings;
+            settings.mode = ReplicationMode::Paused;
+            let proto_settings = ProtoReplicationSettings::from(settings.clone());
+            assert_eq!(proto_settings.mode, ProtoReplicationMode::Paused as i32);
+
+            let restored_settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(restored_settings.mode, ReplicationMode::Paused);
+        }
+
+        #[rstest]
+        fn test_from_mode_proto_disabled(settings: ReplicationSettings) {
+            let mut proto_settings = ProtoReplicationSettings::from(settings.clone());
+            proto_settings.mode = ProtoReplicationMode::Disabled as i32;
+
+            let restored_settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(restored_settings.mode, ReplicationMode::Disabled);
+        }
     }
 
     mod start {
@@ -844,6 +895,21 @@ mod tests {
         }
     }
 
+    mod set_mode {
+        use super::*;
+
+        #[rstest]
+        fn test_set_mode(mut repo: ReplicationRepository, settings: ReplicationSettings) {
+            repo.create_replication("test-1", settings.clone()).unwrap();
+            repo.set_mode("test-1", ReplicationMode::Paused).unwrap();
+
+            assert_eq!(
+                repo.get_replication("test-1").unwrap().mode(),
+                ReplicationMode::Paused
+            );
+        }
+    }
+
     #[fixture]
     fn settings() -> ReplicationSettings {
         ReplicationSettings {
@@ -857,6 +923,7 @@ mod tests {
             each_n: None,
             each_s: None,
             when: None,
+            mode: ReplicationMode::Enabled,
         }
     }
 

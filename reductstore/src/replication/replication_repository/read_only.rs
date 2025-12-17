@@ -6,7 +6,7 @@ use crate::replication::{ManageReplications, TransactionNotification};
 use reduct_base::error::ReductError;
 use reduct_base::forbidden;
 use reduct_base::msg::replication_api::{
-    FullReplicationInfo, ReplicationInfo, ReplicationSettings,
+    FullReplicationInfo, ReplicationInfo, ReplicationMode, ReplicationSettings,
 };
 
 pub(super) struct ReadOnlyReplicationRepository;
@@ -56,6 +56,12 @@ impl ManageReplications for ReadOnlyReplicationRepository {
 
     fn notify(&mut self, _notification: TransactionNotification) -> Result<(), ReductError> {
         Err(forbidden!("Cannot notify replication in read-only mode"))
+    }
+
+    fn set_mode(&mut self, _name: &str, _mode: ReplicationMode) -> Result<(), ReductError> {
+        Err(forbidden!(
+            "Cannot update replication mode in read-only mode"
+        ))
     }
 
     fn start(&mut self) {
@@ -154,6 +160,21 @@ mod tests {
             assert_eq!(
                 err,
                 forbidden!("Cannot notify replication in read-only mode")
+            );
+        }
+    }
+
+    mod set_mode {
+        use super::*;
+        #[rstest]
+        fn test_set_mode_forbidden(mut repo: ReadOnlyReplicationRepository) {
+            let err = repo
+                .set_mode("test", ReplicationMode::Paused)
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                forbidden!("Cannot update replication mode in read-only mode")
             );
         }
     }

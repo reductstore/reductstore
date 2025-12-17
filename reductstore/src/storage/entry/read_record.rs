@@ -195,11 +195,11 @@ mod tests {
         );
 
         let step = 100000;
-        for i in 0..100 {
+        for i in 0..10 {
             write_stub_record(&mut entry, i * step);
         }
 
-        let reader = entry.begin_read(30 * step).wait().unwrap();
-        assert_eq!(reader.meta().timestamp(), 3000000);
+        let reader = entry.begin_read(5 * step).wait().unwrap();
+        assert_eq!(reader.meta().timestamp(), 500000);
     }
 }

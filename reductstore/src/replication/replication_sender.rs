@@ -226,6 +226,7 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::msg::replication_api::ReplicationMode;
     use reduct_base::{conflict, not_found, timeout, too_early, Labels};
     use rstest::*;
     use std::thread::spawn;
@@ -610,6 +611,7 @@ mod tests {
             each_n: None,
             each_s: None,
             when: None,
+            mode: ReplicationMode::Enabled,
         }
     }
 }

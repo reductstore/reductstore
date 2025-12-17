@@ -15,10 +15,10 @@ use crate::storage::engine::StorageEngine;
 use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;
-use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationSettings};
+use reduct_base::msg::replication_api::{ReplicationInfo, ReplicationMode, ReplicationSettings};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::thread::{sleep, spawn, JoinHandle};
 use std::time::Duration;
@@ -43,6 +43,7 @@ pub struct ReplicationTask {
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
     stop_flag: Arc<AtomicBool>,
     is_active: Arc<AtomicBool>,
+    mode: Arc<AtomicU8>,
     worker_handle: Option<JoinHandle<()>>,
     worker_bucket: Option<Box<dyn RemoteBucket + Send + Sync>>,
 }
@@ -105,7 +106,11 @@ impl ReplicationTask {
             Duration::from_secs(3600),
         )));
         let stop_flag = Arc::new(AtomicBool::new(false));
-        let is_active = Arc::new(AtomicBool::new(true));
+        let mode = Arc::new(AtomicU8::new(settings.mode as u8));
+        let is_active = Arc::new(AtomicBool::new(matches!(
+            ReplicationTask::load_mode_from(&mode),
+            ReplicationMode::Enabled
+        )));
         Self {
             name,
             is_provisioned: false,
@@ -118,6 +123,7 @@ impl ReplicationTask {
             hourly_diagnostics,
             stop_flag,
             is_active,
+            mode,
             worker_handle: None,
             worker_bucket: Some(remote_bucket),
         }
@@ -138,6 +144,7 @@ impl ReplicationTask {
         let thr_system_options = self.system_options.clone();
         let thr_stop_flag = Arc::clone(&self.stop_flag);
         let thr_is_active = Arc::clone(&self.is_active);
+        let thr_mode = Arc::clone(&self.mode);
 
         let handle = spawn(move || {
             let init_transaction_logs = || {
@@ -192,6 +199,26 @@ impl ReplicationTask {
             );
 
             while !thr_stop_flag.load(Ordering::Relaxed) {
+                match ReplicationTask::load_mode_from(&thr_mode) {
+                    ReplicationMode::Disabled => {
+                        thr_is_active.store(false, Ordering::Relaxed);
+                        ReplicationTask::sleep_with_stop(
+                            &thr_stop_flag,
+                            thr_system_options.next_transaction_timeout,
+                        );
+                        continue;
+                    }
+                    ReplicationMode::Paused => {
+                        thr_is_active.store(false, Ordering::Relaxed);
+                        ReplicationTask::sleep_with_stop(
+                            &thr_stop_flag,
+                            thr_system_options.next_transaction_timeout,
+                        );
+                        continue;
+                    }
+                    ReplicationMode::Enabled => {}
+                }
+
                 let mut counter = None;
                 match sender.run() {
                     Ok(SyncState::SyncedOrRemoved(c)) => {
@@ -276,6 +303,9 @@ impl ReplicationTask {
     }
 
     pub fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
+        if matches!(self.load_mode(), ReplicationMode::Disabled) {
+            return Ok(());
+        }
         // We need to have a filter for each entry
         let entry_name = notification.entry.clone();
         let notifications = {
@@ -333,6 +363,7 @@ impl ReplicationTask {
     pub fn masked_settings(&self) -> ReplicationSettings {
         ReplicationSettings {
             dst_token: None,
+            mode: self.load_mode(),
             ..self.settings.clone()
         }
     }
@@ -349,6 +380,15 @@ impl ReplicationTask {
         self.is_provisioned = provisioned;
     }
 
+    pub fn set_mode(&mut self, mode: ReplicationMode) {
+        self.settings.mode = mode.clone();
+        self.mode.store(mode as u8, Ordering::Relaxed);
+    }
+
+    pub fn mode(&self) -> ReplicationMode {
+        self.load_mode()
+    }
+
     pub fn is_running(&self) -> bool {
         self.worker_handle.is_some()
     }
@@ -361,7 +401,9 @@ impl ReplicationTask {
 
         ReplicationInfo {
             name: self.name.clone(),
-            is_active: self.is_active.load(Ordering::Relaxed),
+            mode: self.load_mode(),
+            is_active: matches!(self.load_mode(), ReplicationMode::Enabled)
+                && self.is_active.load(Ordering::Relaxed),
             is_provisioned: self.is_provisioned,
             pending_records,
         }
@@ -390,6 +432,18 @@ impl ReplicationTask {
         name: &str,
     ) -> PathBuf {
         storage_path.join(format!("{}/{}/{}.log", bucket, entry, name))
+    }
+
+    fn load_mode(&self) -> ReplicationMode {
+        Self::load_mode_from(&self.mode)
+    }
+
+    fn load_mode_from(mode: &Arc<AtomicU8>) -> ReplicationMode {
+        match mode.load(Ordering::Relaxed) {
+            x if x == ReplicationMode::Paused as u8 => ReplicationMode::Paused,
+            x if x == ReplicationMode::Disabled as u8 => ReplicationMode::Disabled,
+            _ => ReplicationMode::Enabled,
+        }
     }
 }
 
@@ -546,6 +600,7 @@ mod tests {
             replication.info(),
             ReplicationInfo {
                 name: "test".to_string(),
+                mode: ReplicationMode::Enabled,
                 is_active: true,
                 is_provisioned: false,
                 pending_records: 0,
@@ -573,6 +628,7 @@ mod tests {
             replication.info(),
             ReplicationInfo {
                 name: "test".to_string(),
+                mode: ReplicationMode::Enabled,
                 is_active: true,
                 is_provisioned: false,
                 pending_records: 0,
@@ -610,6 +666,7 @@ mod tests {
             replication.info(),
             ReplicationInfo {
                 name: "test".to_string(),
+                mode: ReplicationMode::Enabled,
                 is_active: false,
                 is_provisioned: false,
                 pending_records: 1,
@@ -625,6 +682,38 @@ mod tests {
                 }
             }
         )
+    }
+
+    #[rstest]
+    fn test_replication_paused_mode(
+        remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        mut settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        settings.mode = ReplicationMode::Paused;
+        let mut replication = build_replication(path, remote_bucket, settings);
+
+        replication.notify(notification).unwrap();
+        sleep(Duration::from_millis(100));
+        assert_eq!(replication.info().is_active, false);
+        assert_eq!(replication.info().pending_records, 1);
+    }
+
+    #[rstest]
+    fn test_replication_disabled_mode(
+        remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        mut settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        settings.mode = ReplicationMode::Disabled;
+        let mut replication = build_replication(path, remote_bucket, settings);
+
+        replication.notify(notification).unwrap();
+        sleep(Duration::from_millis(100));
+        assert_eq!(replication.info().pending_records, 0);
+        assert_eq!(replication.info().is_active, false);
     }
 
     #[rstest]
@@ -760,6 +849,7 @@ mod tests {
             replication.info(),
             ReplicationInfo {
                 name: "test".to_string(),
+                mode: ReplicationMode::Enabled,
                 is_active: false,
                 is_provisioned: false,
                 pending_records: 1,
@@ -900,6 +990,7 @@ mod tests {
             each_n: None,
             each_s: None,
             when: None,
+            mode: ReplicationMode::Enabled,
         }
     }
 

@@ -21,6 +21,13 @@ message  ReplicationSettings {
   uint64 each_n = 9;          // replicate each Nth record
   double each_s = 10;         // replicate each record every N seconds
   optional string when = 11;           // condition to replicate
+  ReplicationMode mode = 12;  // replication mode
+}
+
+enum ReplicationMode {
+  ENABLED = 0;
+  PAUSED = 1;
+  DISABLED = 2;
 }
 
 message ReplicationRepo {

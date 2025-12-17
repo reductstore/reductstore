@@ -33,6 +33,7 @@ mod tests {
     use std::sync::Arc;
 
     use crate::api::tests::{headers, keeper};
+    use reduct_base::msg::replication_api::ReplicationMode;
 
     use super::*;
 
@@ -46,6 +47,7 @@ mod tests {
 
         assert_eq!(list.replications.len(), 1);
         assert_eq!(list.replications[0].name, "api-test");
+        assert_eq!(list.replications[0].mode, ReplicationMode::Enabled);
         assert_eq!(list.replications[0].is_active, true);
         assert_eq!(list.replications[0].is_provisioned, false);
     }

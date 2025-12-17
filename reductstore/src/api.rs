@@ -313,7 +313,7 @@ mod tests {
     use bytes::Bytes;
     use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::replication_api::ReplicationSettings;
+    use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::msg::token_api::Permissions;
     use rstest::fixture;
@@ -532,15 +532,21 @@ mod tests {
                     each_n: None,
                     each_s: None,
                     when: None,
+                    mode: ReplicationMode::Enabled,
                 },
             )
             .unwrap();
+
+        #[cfg(feature = "web-console")]
+        let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
+        #[cfg(not(feature = "web-console"))]
+        let console_bytes: &[u8] = &[];
 
         let components = Components {
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
-            console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
+            console: create_asset_manager(console_bytes),
             replication_repo: RwLock::new(replication_repo),
             ext_repo: create_ext_repository(
                 None,
