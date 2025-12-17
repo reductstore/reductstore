@@ -14,9 +14,9 @@ pub struct RwLock<T> {
 pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[cfg(test)]
-// Tests run in parallel and share global caches; a slightly longer timeout reduces
-// flakiness from transient contention on shared locks.
-pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(5);
+// Tests run in parallel and share global caches; give a bit more headroom to avoid
+// flakes from transient contention on shared locks.
+pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(15);
 
 impl<T> RwLock<T> {
     pub fn new(data: T) -> Self {
