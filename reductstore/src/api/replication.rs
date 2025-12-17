@@ -120,10 +120,13 @@ mod tests {
         use super::*;
         use crate::api::replication::ReplicationModePayloadAxum;
         use axum::body::Body;
+        use axum::body::Bytes;
         use axum::extract::FromRequest;
         use axum::http::Request;
+        use futures_util::stream;
         use reduct_base::error::ErrorCode::UnprocessableEntity;
         use rstest::rstest;
+        use std::io;
 
         #[rstest]
         #[tokio::test]
@@ -147,6 +150,21 @@ mod tests {
                 .await
                 .expect_err("should fail");
             assert_eq!(err.0.status, UnprocessableEntity);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_replication_mode_payload_body_error() {
+            let stream = stream::once(async {
+                Err::<Bytes, _>(io::Error::new(io::ErrorKind::Other, "boom"))
+            });
+            let req = Request::builder().body(Body::from_stream(stream)).unwrap();
+
+            let err = ReplicationModePayloadAxum::from_request(req, &())
+                .await
+                .expect_err("should fail");
+            assert_eq!(err.0.status, UnprocessableEntity);
+            assert_eq!(err.0.message, "Invalid body");
         }
     }
 }
