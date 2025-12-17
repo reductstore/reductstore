@@ -1,10 +1,8 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use reqwest::{
-    blocking::{get, Client},
-    StatusCode, Url,
-};
+use reqwest::blocking::get;
+use reqwest::{blocking::Client, StatusCode, Url};
 use std::path::Path;
 use std::time::SystemTime;
 use std::{env, fs};

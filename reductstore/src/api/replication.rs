@@ -22,13 +22,38 @@ use axum::http::Request;
 use axum::routing::{delete, get, patch, post, put};
 use bytes::Bytes;
 use reduct_base::msg::replication_api::{
-    FullReplicationInfo, ReplicationList, ReplicationSettings,
+    FullReplicationInfo, ReplicationList, ReplicationModePayload, ReplicationSettings,
 };
 use reduct_macros::{IntoResponse, Twin};
 use std::sync::Arc;
 
 #[derive(IntoResponse, Twin)]
 pub struct ReplicationSettingsAxum(ReplicationSettings);
+
+#[derive(IntoResponse, Twin)]
+pub struct ReplicationModePayloadAxum(ReplicationModePayload);
+
+impl<S> FromRequest<S> for ReplicationModePayloadAxum
+where
+    Bytes: FromRequest<S>,
+    S: Send + Sync,
+{
+    type Rejection = HttpError;
+
+    async fn from_request(req: Request<Body>, state: &S) -> Result<Self, Self::Rejection> {
+        let bytes = Bytes::from_request(req, state).await.map_err(|_| {
+            HttpError::new(
+                reduct_base::error::ErrorCode::UnprocessableEntity,
+                "Invalid body",
+            )
+        })?;
+        let response = match serde_json::from_slice::<ReplicationModePayload>(&*bytes) {
+            Ok(x) => Ok(ReplicationModePayloadAxum::from(x)),
+            Err(e) => Err(crate::api::HttpError::from(e)),
+        };
+        response
+    }
+}
 
 impl<S> FromRequest<S> for ReplicationSettingsAxum
 where

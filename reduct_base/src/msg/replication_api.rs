@@ -74,6 +74,12 @@ pub struct ReplicationInfo {
     pub pending_records: u64,
 }
 
+/// Payload for updating replication mode
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReplicationModePayload {
+    pub mode: ReplicationMode,
+}
+
 /// Replication list
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct ReplicationList {

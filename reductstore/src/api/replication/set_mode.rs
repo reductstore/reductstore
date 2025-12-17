@@ -1,26 +1,19 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::api::replication::ReplicationModePayloadAxum;
 use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
-use axum::Json;
 use axum_extra::headers::HeaderMap;
-use reduct_base::msg::replication_api::ReplicationMode;
-use serde::Deserialize;
 use std::sync::Arc;
-
-#[derive(Deserialize)]
-pub(super) struct ReplicationModePayload {
-    pub mode: ReplicationMode,
-}
 
 // PATCH /api/v1/replications/:replication_name/mode
 pub(super) async fn set_mode(
     State(keeper): State<Arc<StateKeeper>>,
     Path(replication_name): Path<String>,
     headers: HeaderMap,
-    Json(payload): Json<ReplicationModePayload>,
+    payload: ReplicationModePayloadAxum,
 ) -> Result<(), HttpError> {
     let components = keeper
         .get_with_permissions(&headers, FullAccessPolicy {})
@@ -30,7 +23,7 @@ pub(super) async fn set_mode(
         .replication_repo
         .write()
         .await
-        .set_mode(&replication_name, payload.mode)?;
+        .set_mode(&replication_name, payload.0.mode)?;
     Ok(())
 }
 
@@ -39,7 +32,9 @@ mod tests {
     use super::*;
     use crate::api::replication::tests::settings;
     use crate::api::tests::{headers, keeper};
-    use reduct_base::msg::replication_api::ReplicationSettings;
+    use reduct_base::msg::replication_api::{
+        ReplicationMode, ReplicationModePayload, ReplicationSettings,
+    };
     use rstest::rstest;
     use std::sync::Arc;
 
@@ -63,9 +58,10 @@ mod tests {
             State(Arc::clone(&keeper)),
             Path("test".to_string()),
             headers,
-            Json(ReplicationModePayload {
+            ReplicationModePayload {
                 mode: ReplicationMode::Paused,
-            }),
+            }
+            .into(),
         )
         .await
         .unwrap();
