@@ -4,6 +4,7 @@ mod create;
 mod get;
 mod list;
 mod remove;
+mod set_mode;
 mod update;
 
 use crate::api::{HttpError, StateKeeper};
@@ -13,11 +14,12 @@ use crate::api::replication::create::create_replication;
 use crate::api::replication::get::get_replication;
 use crate::api::replication::list::list_replications;
 use crate::api::replication::remove::remove_replication;
+use crate::api::replication::set_mode::set_mode;
 use crate::api::replication::update::update_replication;
 use axum::body::Body;
 use axum::extract::FromRequest;
 use axum::http::Request;
-use axum::routing::{delete, get, post, put};
+use axum::routing::{delete, get, patch, post, put};
 use bytes::Bytes;
 use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationList, ReplicationSettings,
@@ -62,12 +64,13 @@ pub(super) fn create_replication_api_routes() -> axum::Router<Arc<StateKeeper>> 
         .route("/{replication_name}", get(get_replication))
         .route("/{replication_name}", post(create_replication))
         .route("/{replication_name}", put(update_replication))
+        .route("/{replication_name}/mode", patch(set_mode))
         .route("/{replication_name}", delete(remove_replication))
 }
 
 #[cfg(test)]
 mod tests {
-    use reduct_base::msg::replication_api::ReplicationSettings;
+    use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
     use reduct_base::Labels;
     use rstest::fixture;
 
@@ -84,6 +87,7 @@ mod tests {
             each_n: None,
             each_s: None,
             when: None,
+            mode: ReplicationMode::Enabled,
         }
     }
 }

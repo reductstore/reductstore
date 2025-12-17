@@ -39,6 +39,7 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "is_active": True,
             "is_provisioned": False,
             "name": replication_name,
+            "mode": "enabled",
             "pending_records": 0,
         },
         "settings": {
@@ -52,6 +53,7 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "each_n": 10,
             "each_s": 0.5,
             "when": {"$eq": ["&key1", "value1"]},
+            "mode": "enabled",
         },
     }
 
@@ -108,6 +110,7 @@ def test__update_replication_ok(base_url, session, bucket_name, replication_name
             "is_active": True,
             "is_provisioned": False,
             "name": replication_name,
+            "mode": "enabled",
             "pending_records": 0,
         },
         "settings": {
@@ -121,8 +124,34 @@ def test__update_replication_ok(base_url, session, bucket_name, replication_name
             "each_s": None,
             "src_bucket": bucket_name,
             "when": None,
+            "mode": "enabled",
         },
     }
+
+
+@pytest.mark.usefixtures("bucket")
+def test__set_replication_mode(base_url, session, bucket_name, replication_name):
+    """Should update replication mode without overriding settings"""
+
+    resp = session.post(
+        f"{base_url}/replications/{replication_name}",
+        json={
+            "src_bucket": bucket_name,
+            "dst_bucket": bucket_name,
+            "dst_host": "http://localhost:9000",
+        },
+    )
+    assert resp.status_code == 200
+
+    resp = session.patch(
+        f"{base_url}/replications/{replication_name}/mode",
+        json={"mode": "paused"},
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/replications/{replication_name}")
+    assert resp.status_code == 200
+    assert resp.json()["info"]["mode"] == "paused"
 
 
 @pytest.mark.usefixtures("bucket")

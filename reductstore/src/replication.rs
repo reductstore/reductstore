@@ -5,7 +5,7 @@ use crate::replication::replication_task::ReplicationTask;
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::{
-    FullReplicationInfo, ReplicationInfo, ReplicationSettings,
+    FullReplicationInfo, ReplicationInfo, ReplicationMode, ReplicationSettings,
 };
 
 mod diagnostics;
@@ -121,6 +121,9 @@ pub trait ManageReplications {
 
     /// Remove a replication task
     fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
+
+    /// Update replication mode
+    fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError>;
 
     /// Notify replication task about a new transaction.
     ///

@@ -7,7 +7,7 @@ use crate::replication::{ManageReplications, ReplicationRepoBuilder};
 use crate::storage::engine::StorageEngine;
 use log::{error, info, warn};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::replication_api::ReplicationSettings;
+use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
 use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -56,6 +56,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 each_n: None,
                 each_s: None,
                 when: None,
+                mode: ReplicationMode::Enabled,
             };
             replications.insert(id, (name, replication));
         }
@@ -399,6 +400,7 @@ mod tests {
                 each_n: None,
                 each_s: None,
                 when: None,
+                mode: ReplicationMode::Enabled,
             },
         )
         .unwrap();
