@@ -7,13 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<<<<<<< HEAD
 ### Added
 
 - Support for Active/Passive deployment, [PR-1028](https://github.com/reductstore/reductstore/pull/1028)
 - Implement concurrent read-only access to data, [PR-1034](https://github.com/reductstore/reductstore/pull/1034)
 - Cache buckets and entries in .folder file for S3 listing, [PR-1052](https://github.com/reductstore/reductstore/pull/1052)
 - `RS_ENGINE_ENABLE_INTEGRITY_CHECKS` option to enable/disable integrity checks, [PR-1060](https://github.com/reductstore/reductstore/pull/1060)
+- Implement `DISABLE`,`PAUSE` and `DISABLED` modes for replication tasks, [PR-1065](https://github.com/reductstore/reductstore/pull/1065)
 
 ### Internal
 
