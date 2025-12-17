@@ -537,11 +537,16 @@ mod tests {
             )
             .unwrap();
 
+        #[cfg(feature = "web-console")]
+        let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
+        #[cfg(not(feature = "web-console"))]
+        let console_bytes: &[u8] = &[];
+
         let components = Components {
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("inti-token"),
             token_repo: RwLock::new(token_repo),
-            console: create_asset_manager(include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"))),
+            console: create_asset_manager(console_bytes),
             replication_repo: RwLock::new(replication_repo),
             ext_repo: create_ext_repository(
                 None,

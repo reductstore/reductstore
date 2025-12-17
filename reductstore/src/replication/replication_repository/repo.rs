@@ -843,6 +843,26 @@ mod tests {
             let restored_settings = ReplicationSettings::from(proto_settings);
             assert!(restored_settings.when.is_none());
         }
+
+        #[rstest]
+        fn test_from_mode_proto(settings: ReplicationSettings) {
+            let mut settings = settings;
+            settings.mode = ReplicationMode::Paused;
+            let proto_settings = ProtoReplicationSettings::from(settings.clone());
+            assert_eq!(proto_settings.mode, ProtoReplicationMode::Paused as i32);
+
+            let restored_settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(restored_settings.mode, ReplicationMode::Paused);
+        }
+
+        #[rstest]
+        fn test_from_mode_proto_disabled(settings: ReplicationSettings) {
+            let mut proto_settings = ProtoReplicationSettings::from(settings.clone());
+            proto_settings.mode = ProtoReplicationMode::Disabled as i32;
+
+            let restored_settings = ReplicationSettings::from(proto_settings);
+            assert_eq!(restored_settings.mode, ReplicationMode::Disabled);
+        }
     }
 
     mod start {
