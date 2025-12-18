@@ -26,6 +26,7 @@ use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::entry_api::EntryInfo;
+use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found, Labels};
 use std::collections::BTreeMap;
 use std::io::{Read, SeekFrom};
@@ -44,6 +45,7 @@ pub(crate) struct Bucket {
     cfg: Arc<Cfg>,
     last_replica_sync: RwLock<Instant>,
     is_provisioned: AtomicBool,
+    status: RwLock<ResourceStatus>,
 }
 
 impl Bucket {
@@ -75,6 +77,7 @@ impl Bucket {
             entries: Arc::new(RwLock::new(BTreeMap::new())),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
+            status: RwLock::new(ResourceStatus::Ready),
             cfg: Arc::new(cfg),
             last_replica_sync: RwLock::new(Instant::now()),
             folder_keeper: Arc::new(folder_keeper),
@@ -142,6 +145,7 @@ impl Bucket {
             )),
             settings: RwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
+            status: RwLock::new(ResourceStatus::Ready),
             last_replica_sync: RwLock::new(Instant::now()),
             cfg,
             folder_keeper: Arc::new(folder_keeper),
@@ -159,6 +163,8 @@ impl Bucket {
     /// * `&mut Entry` - The entry or an HTTPError
     pub fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
         check_name_convention(key)?;
+        self.ensure_not_deleting()?;
+
         if !self.entries.read()?.contains_key(key) {
             self.check_mode()?;
             let settings = self.settings.read()?;
@@ -177,7 +183,9 @@ impl Bucket {
                 .insert(key.to_string(), Arc::new(entry));
         }
 
-        Ok(self.entries.read()?.get(key).unwrap().clone().into())
+        let entry = self.entries.read()?.get(key).unwrap().clone();
+        entry.ensure_not_deleting()?;
+        Ok(entry.into())
     }
 
     /// Get an entry in the bucket
@@ -198,6 +206,7 @@ impl Bucket {
                 name, self.name
             ))
         })?;
+        entry.ensure_not_deleting()?;
         Ok(entry.clone().into())
     }
 
@@ -228,6 +237,7 @@ impl Bucket {
                 is_provisioned: self
                     .is_provisioned
                     .load(std::sync::atomic::Ordering::Relaxed),
+                status: self.status()?,
             },
             settings: self.settings.read()?.clone(),
             entries,
@@ -319,6 +329,7 @@ impl Bucket {
             }
 
             if let Some(entry) = entries.read()?.get(&old_name) {
+                entry.ensure_not_deleting()?;
                 entry.compact()?;
             } else {
                 return Err(not_found!(
@@ -358,33 +369,35 @@ impl Bucket {
     /// # Returns
     ///
     /// * `HTTPError` - The error if any.
-    pub fn remove_entry(&self, name: &str) -> TaskHandle<Result<(), ReductError>> {
-        if let Err(e) = self.check_mode() {
-            return Err(e).into();
-        }
+    pub fn remove_entry(&self, name: &str) -> Result<(), ReductError> {
+        self.ensure_not_deleting()?;
+        self.check_mode()?;
 
-        if let Err(e) = self.get_entry(name) {
-            return Err(e).into();
-        }
+        let entry = self.get_entry(name)?.upgrade()?;
+        entry.mark_deleting()?;
 
         let entries = self.entries.clone();
         let path = self.path.join(name);
         let bucket_name = self.name.clone();
         let entry_name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
+        let task_group = self.task_group();
 
-        unique(&self.task_group(), "remove entry", move || {
-            folder_keeper.remove_folder(&entry_name)?;
-            debug!(
-                "Remove entry '{}' from bucket '{}' and folder '{}'",
-                entry_name,
-                bucket_name,
-                path.display()
-            );
+        let _: TaskHandle<Result<(), ReductError>> =
+            unique(&task_group, "remove entry", move || {
+                folder_keeper.remove_folder(&entry_name)?;
+                debug!(
+                    "Remove entry '{}' from bucket '{}' and folder '{}'",
+                    entry_name,
+                    bucket_name,
+                    path.display()
+                );
 
-            entries.write()?.remove(&entry_name);
-            Ok(())
-        })
+                entries.write()?.remove(&entry_name);
+                Ok(())
+            });
+
+        Ok(())
     }
 
     /// Sync all entries to the file system
@@ -427,6 +440,26 @@ impl Bucket {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
+    pub(crate) fn status(&self) -> Result<ResourceStatus, ReductError> {
+        Ok(*self.status.read()?)
+    }
+
+    pub(crate) fn mark_deleting(&self) -> Result<(), ReductError> {
+        *self.status.write()? = ResourceStatus::Deleting;
+        for entry in self.entries.read()?.values() {
+            entry.mark_deleting()?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn ensure_not_deleting(&self) -> Result<(), ReductError> {
+        if self.status()? == ResourceStatus::Deleting {
+            Err(conflict!("Bucket '{}' is being deleted", self.name))
+        } else {
+            Ok(())
+        }
+    }
+
     fn task_group(&self) -> String {
         // use folder hierarchy as task group to protect resources
         group_from_path(&self.path, GroupDepth::BUCKET)
@@ -440,6 +473,7 @@ mod tests {
     use reduct_base::conflict;
     use reduct_base::io::ReadRecord;
     use reduct_base::msg::bucket_api::QuotaType;
+    use reduct_base::msg::status::ResourceStatus;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 
@@ -474,12 +508,12 @@ mod tests {
         async fn test_remove_entry(mut bucket: Bucket) {
             write(&mut bucket, "test-1", 1, b"test").await.unwrap();
 
-            bucket.remove_entry("test-1").await.unwrap();
-            assert_eq!(
-                bucket.get_entry("test-1").err(),
-                Some(ReductError::not_found(
-                    "Entry 'test-1' not found in bucket 'test'"
-                ))
+            bucket.remove_entry("test-1").unwrap();
+            let err = bucket.get_entry("test-1").err().unwrap();
+            assert!(
+                err == ReductError::conflict("Entry 'test-1' in bucket 'test' is being deleted")
+                    || err == ReductError::not_found("Entry 'test-1' not found in bucket 'test'"),
+                "Should report deleting or already removed"
             );
         }
 
@@ -487,7 +521,7 @@ mod tests {
         #[tokio::test]
         async fn test_remove_entry_not_found(bucket: Bucket) {
             assert_eq!(
-                bucket.remove_entry("test-1").await.err(),
+                bucket.remove_entry("test-1").err(),
                 Some(ReductError::not_found(
                     "Entry 'test-1' not found in bucket 'test'"
                 ))
@@ -571,6 +605,41 @@ mod tests {
 
             let mut reader = bucket.begin_read("test-2", 1).await.unwrap();
             assert_eq!(reader.read_chunk().unwrap().unwrap(), Bytes::from("test"));
+        }
+    }
+
+    mod status {
+        use super::*;
+
+        #[rstest]
+        fn test_bucket_info_has_status(bucket: Bucket) {
+            let info = bucket.info().unwrap();
+            assert_eq!(info.info.status, ResourceStatus::Ready);
+            assert!(info
+                .entries
+                .iter()
+                .all(|entry| entry.status == ResourceStatus::Ready));
+        }
+
+        #[rstest]
+        fn test_bucket_deleting_rejects_operations(bucket: Bucket) {
+            bucket.mark_deleting().unwrap();
+            let err = bucket.get_or_create_entry("new-entry").err().unwrap();
+            assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_entry_deleting_rejects_operations(mut bucket: Bucket) {
+            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
+            let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
+            entry.mark_deleting().unwrap();
+
+            let err = bucket.begin_read("test-1", 1).await.err().unwrap();
+            assert_eq!(
+                err,
+                conflict!("Entry 'test-1' in bucket 'test' is being deleted")
+            );
         }
     }
 

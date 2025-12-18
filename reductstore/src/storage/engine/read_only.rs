@@ -123,8 +123,9 @@ mod tests {
             assert!(buckets.contains_key("bucket-1"));
         }
 
-        // Remove bucket in primary engine
-        primary_engine.remove_bucket("bucket-1").wait().unwrap();
+        // Remove bucket in primary engine (fire-and-forget) and wait briefly for completion
+        primary_engine.remove_bucket("bucket-1").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
         primary_engine.sync_fs().unwrap();
         read_only_engine.reload().unwrap();
         assert_eq!(
@@ -155,7 +156,7 @@ mod tests {
             let result = read_only_engine.create_bucket("new-bucket", BucketSettings::default());
             assert_eq!(result.err().unwrap(), err);
 
-            let result = read_only_engine.remove_bucket("bucket-1").wait();
+            let result = read_only_engine.remove_bucket("bucket-1");
             assert_eq!(result.err().unwrap(), err);
 
             let result = read_only_engine

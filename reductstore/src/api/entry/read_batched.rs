@@ -425,7 +425,6 @@ mod tests {
             .upgrade()
             .unwrap()
             .remove_entry(path_to_entry_1.get("entry_name").unwrap())
-            .await
             .unwrap();
 
         let err = read_batched_records(

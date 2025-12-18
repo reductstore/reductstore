@@ -142,7 +142,7 @@ mod tests {
         }
 
         // Remove entry in primary bucket
-        primary_bucket.remove_entry("test-1").await.unwrap();
+        primary_bucket.remove_entry("test-1").unwrap();
         primary_bucket.sync_fs().await.unwrap();
         read_only_bucket.reload().unwrap();
 
@@ -182,7 +182,7 @@ mod tests {
             let write_result = read_only_bucket.get_or_create_entry("new-entry");
             assert_eq!(write_result.err().unwrap(), err);
 
-            let remove_result = read_only_bucket.remove_entry("test-1").await;
+            let remove_result = read_only_bucket.remove_entry("test-1");
             assert_eq!(remove_result.err().unwrap(), err);
 
             let compact_result = read_only_bucket.rename_entry("test-1", "new-name").await;

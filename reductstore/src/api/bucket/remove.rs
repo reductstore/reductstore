@@ -19,7 +19,7 @@ pub(super) async fn remove_bucket(
     let components = keeper
         .get_with_permissions(&headers, FullAccessPolicy {})
         .await?;
-    components.storage.remove_bucket(&bucket_name).await?;
+    components.storage.remove_bucket(&bucket_name)?;
     components
         .token_repo
         .write()

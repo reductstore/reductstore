@@ -24,7 +24,8 @@ use crate::storage::query::{build_query, spawn_query_task, QueryRx};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
-use reduct_base::{internal_server_error, not_found};
+use reduct_base::msg::status::ResourceStatus;
+use reduct_base::{conflict, internal_server_error, not_found};
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -53,6 +54,7 @@ pub(crate) struct Entry {
     settings: RwLock<EntrySettings>,
     block_manager: Arc<RwLock<BlockManager>>,
     queries: QueryHandleMapRef,
+    status: RwLock<ResourceStatus>,
     path: PathBuf,
     cfg: Arc<Cfg>,
 }
@@ -96,6 +98,7 @@ impl Entry {
                 cfg.clone(),
             ))),
             queries: Arc::new(RwLock::new(HashMap::new())),
+            status: RwLock::new(ResourceStatus::Ready),
             path,
             cfg,
         })
@@ -222,7 +225,29 @@ impl Entry {
             block_count: index.tree().len() as u64,
             oldest_record,
             latest_record,
+            status: self.status()?,
         })
+    }
+
+    pub(crate) fn status(&self) -> Result<ResourceStatus, ReductError> {
+        Ok(*self.status.read()?)
+    }
+
+    pub(crate) fn mark_deleting(&self) -> Result<(), ReductError> {
+        *self.status.write()? = ResourceStatus::Deleting;
+        Ok(())
+    }
+
+    pub(crate) fn ensure_not_deleting(&self) -> Result<(), ReductError> {
+        if self.status()? == ResourceStatus::Deleting {
+            Err(conflict!(
+                "Entry '{}' in bucket '{}' is being deleted",
+                self.name,
+                self.bucket_name
+            ))
+        } else {
+            Ok(())
+        }
     }
 
     pub fn size(&self) -> Result<u64, ReductError> {

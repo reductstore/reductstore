@@ -3,6 +3,7 @@ use std::collections::HashMap;
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+use crate::msg::status::ResourceStatus;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -21,6 +22,9 @@ pub struct EntryInfo {
     pub oldest_record: u64,
     /// Latest record in entry
     pub latest_record: u64,
+    /// Status of the entry
+    #[serde(default)]
+    pub status: ResourceStatus,
 }
 
 /// Query Info

@@ -321,7 +321,6 @@ mod tests {
             .unwrap()
             .upgrade_and_unwrap()
             .remove_entry("test")
-            .wait()
             .unwrap();
 
         assert_eq!(

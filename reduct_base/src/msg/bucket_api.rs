@@ -3,6 +3,7 @@
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 use crate::msg::entry_api::EntryInfo;
+use crate::msg::status::ResourceStatus;
 use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use std::str::FromStr;
@@ -82,6 +83,9 @@ pub struct BucketInfo {
     pub latest_record: u64,
     /// Provisioned
     pub is_provisioned: bool,
+    /// Status of the bucket
+    #[serde(default)]
+    pub status: ResourceStatus,
 }
 
 /// Full bucket information
