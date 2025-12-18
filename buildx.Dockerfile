@@ -47,15 +47,17 @@ RUN --mount=type=cache,id=cargo-registry-${CARGO_TARGET}-${BUILD_PROFILE}-${CACH
     --mount=type=cache,id=cargo-target-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/build \
     CARGO_TARGET_DIR=/build/ \
     GIT_COMMIT=${GIT_COMMIT} \
-    cargo build --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features
+    cargo build --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features \
+    && cp /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
 RUN --mount=type=cache,id=cargo-registry-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/root/.cargo/registry \
     --mount=type=cache,id=cargo-git-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/root/.cargo/git \
     --mount=type=cache,id=cargo-target-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/build \
-    cargo install reduct-cli --target ${CARGO_TARGET} --root /build
+    cargo install reduct-cli --target ${CARGO_TARGET} --root /build \
+    && cp /build/bin/reduct-cli /usr/local/bin/reduct-cli
 
 RUN mkdir /data
-RUN mv /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
-RUN mv /build/bin/reduct-cli /usr/local/bin/reduct-cli
+RUN cp /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
+RUN cp /build/bin/reduct-cli /usr/local/bin/reduct-cli
 
 FROM ubuntu:22.04
 
