@@ -65,6 +65,7 @@ pub struct ReplicationInfo {
     /// Replication name
     pub name: String,
     /// Replication mode
+    #[serde(default)] // for backward compatibility with older versions of reduct-rs
     pub mode: ReplicationMode,
     /// Remote instance is available and replication is active
     pub is_active: bool,
