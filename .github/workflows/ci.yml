@@ -38,6 +38,10 @@ jobs:
     runs-on: ubuntu-22.04
     needs:
       - rust_fmt
+    permissions:
+      contents: read
+      id-token: write
+      actions: write
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/build-docker

@@ -1,4 +1,4 @@
-# syntax=docker/dockerfile:1
+# syntax=docker/dockerfile:1.5
 ARG CARGO_TARGET=x86_64-unknown-linux-gnu
 
 FROM --platform=${BUILDPLATFORM} ubuntu:22.04 AS  builder
@@ -35,13 +35,21 @@ COPY Cargo.lock Cargo.lock
 
 ARG GIT_COMMIT=unspecified
 
-RUN cargo install --force --locked bindgen-cli
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    cargo install --force --locked bindgen-cli
 
 # Use release directory for all builds
-RUN CARGO_TARGET_DIR=/build/ \
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/build \
+    CARGO_TARGET_DIR=/build/ \
     GIT_COMMIT=${GIT_COMMIT} \
     cargo build --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features
-RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /build
+RUN --mount=type=cache,target=/root/.cargo/registry \
+    --mount=type=cache,target=/root/.cargo/git \
+    --mount=type=cache,target=/build \
+    cargo install reduct-cli --target ${CARGO_TARGET} --root /build
 
 RUN mkdir /data
 RUN mv /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore

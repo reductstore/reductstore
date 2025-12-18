@@ -7,6 +7,14 @@ inputs:
   rust_version:
     description: 'Minimal Rust version.'
     required: true
+  cargo_target:
+    description: 'Rust target triple to build for.'
+    required: false
+    default: 'x86_64-unknown-linux-gnu'
+  build_profile:
+    description: 'Cargo profile used for Docker build.'
+    required: false
+    default: 'ci'
 runs:
   using: 'composite'
   steps:
@@ -22,11 +30,13 @@ runs:
         file: buildx.Dockerfile
         tags: ${{ github.repository }}:latest
         outputs: type=docker,dest=/tmp/image.tar
-
         build-args: |
           ARTIFACT_SAS_URL=${{ inputs.artifact_sas_url }}
           RUST_VERSION=${{ inputs.rust_version }}
-          BUILD_PROFILE=ci
+          CARGO_TARGET=${{ inputs.cargo_target }}
+          BUILD_PROFILE=${{ inputs.build_profile }}
+        cache-from: type=gha,scope=cargo-docker-${{ inputs.cargo_target }}-${{ inputs.build_profile }}-${{ inputs.rust_version }}
+        cache-to: type=gha,scope=cargo-docker-${{ inputs.cargo_target }}-${{ inputs.build_profile }}-${{ inputs.rust_version }},mode=max
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
