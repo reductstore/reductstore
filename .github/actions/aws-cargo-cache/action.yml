@@ -4,6 +4,10 @@ inputs:
   target:
     description: 'Target triple.'
     required: true
+  profile:
+    description: 'Cargo profile used for the build.'
+    required: false
+    default: 'ci'
 runs:
   using: 'composite'
   steps:
@@ -28,9 +32,9 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           target/${{ inputs.target }}/
-        key: ${{ runner.os }}-${{ inputs.target }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
         restore-keys: |
-          ${{ runner.os }}-${{ inputs.target }}-cargo-rust${{ env.RUST_MINOR }}-
-          ${{ runner.os }}-${{ inputs.target }}-cargo-
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-
       env:
         RUNS_ON_S3_BUCKET_CACHE: reduct-github-cache

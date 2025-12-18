@@ -31,6 +31,7 @@ runs:
       uses: ./.github/actions/aws-cargo-cache
       with:
         target: ${{ inputs.target }}
+        profile: coverage
 
     - name: Run code coverage
       shell: bash

@@ -54,6 +54,7 @@ runs:
       uses: ./.github/actions/aws-cargo-cache
       with:
         target: ${{ inputs.target }}
+        profile: ${{ github.event_name == 'pull_request' && 'ci' || 'release' }}
 
     - name: Install cargo-export
       shell: bash
