@@ -14,8 +14,12 @@ runs:
     - name: Detect rust minor version
       shell: bash
       run: |
-        minor=$(rustc --version --verbose | sed -ne 's/^release: \([0-9]*\.[0-9]*\).*/\1/p')
-        echo "RUST_MINOR=${minor:-unknown}" >> "$GITHUB_ENV"
+        if [[ -z "${RUST_MINOR:-}" ]]; then
+          minor=$(rustc --version --verbose | sed -ne 's/^release: \([0-9]*\.[0-9]*\).*/\1/p')
+          echo "RUST_MINOR=${minor:-unknown}" >> "$GITHUB_ENV"
+        else
+          echo "Using preset RUST_MINOR=${RUST_MINOR}"
+        fi
 
     - name: Configure AWS credentials via OIDC (org-wide role)
       uses: aws-actions/configure-aws-credentials@v4
@@ -31,7 +35,7 @@ runs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/${{ inputs.target }}/
+          target/
         key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
         restore-keys: |
           ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-

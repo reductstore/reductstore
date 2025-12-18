@@ -15,10 +15,37 @@ inputs:
     description: 'Cargo profile used for Docker build.'
     required: false
     default: 'ci'
+  cache_id_suffix:
+    description: 'Extra suffix for cache IDs (e.g. rust minor).'
+    required: false
+    default: ''
 runs:
   using: 'composite'
   steps:
     - uses: actions/checkout@v4
+
+    - name: Set rust minor for cache keys
+      shell: bash
+      run: |
+        minor=$(echo "${{ inputs.rust_version }}" | sed -E 's/^([0-9]+\.[0-9]+).*/\1/')
+        echo "RUST_MINOR=${minor:-${{ inputs.rust_version }}}" >> "$GITHUB_ENV"
+
+    - name: AWS Credentials and Cargo Cache
+      uses: ./.github/actions/aws-cargo-cache
+      with:
+        target: ${{ inputs.cargo_target }}
+        profile: ${{ inputs.build_profile }}
+
+    - name: Prepare buildx cache (S3)
+      uses: runs-on/cache@v4
+      with:
+        path: /tmp/.buildx-cache
+        key: docker-buildx-${{ runner.os }}-${{ inputs.cargo_target }}-${{ inputs.build_profile }}-rust${{ env.RUST_MINOR }}-${{ github.sha }}
+        restore-keys: |
+          docker-buildx-${{ runner.os }}-${{ inputs.cargo_target }}-${{ inputs.build_profile }}-rust${{ env.RUST_MINOR }}-
+          docker-buildx-${{ runner.os }}-${{ inputs.cargo_target }}-${{ inputs.build_profile }}-
+      env:
+        RUNS_ON_S3_BUCKET_CACHE: reduct-github-cache
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
@@ -35,8 +62,9 @@ runs:
           RUST_VERSION=${{ inputs.rust_version }}
           CARGO_TARGET=${{ inputs.cargo_target }}
           BUILD_PROFILE=${{ inputs.build_profile }}
-        cache-from: type=gha,scope=cargo-docker-${{ inputs.cargo_target }}-${{ inputs.build_profile }}-${{ inputs.rust_version }}
-        cache-to: type=gha,scope=cargo-docker-${{ inputs.cargo_target }}-${{ inputs.build_profile }}-${{ inputs.rust_version }},mode=max
+          CACHE_ID_SUFFIX=${{ inputs.cache_id_suffix || env.RUST_MINOR }}
+        cache-from: type=local,src=/tmp/.buildx-cache
+        cache-to: type=local,dest=/tmp/.buildx-cache,mode=max
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4

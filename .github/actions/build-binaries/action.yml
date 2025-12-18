@@ -62,21 +62,21 @@ runs:
 
     - name: Build binary (PR)
       if: github.event_name == 'pull_request'
-      run: cargo build --profile ci -p reductstore --target ${{ matrix.target }} --all-features
+      run: cargo build --profile ci -p reductstore --target ${{ inputs.target }} --all-features
       shell: bash
 
     - name: Upload binary (PR)
       uses: actions/upload-artifact@v4
       # Only upload Linux binary for PRs for sanity test
-      if: github.event_name == 'pull_request' && matrix.target == 'x86_64-unknown-linux-gnu'
+      if: github.event_name == 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
       with:
-        name: reductstore-${{ matrix.target }}
-        path: target/${{matrix.target}}/ci/reductstore
+        name: reductstore-${{ inputs.target }}
+        path: target/${{inputs.target}}/ci/reductstore
         if-no-files-found: 'error'
 
     - name: Build binary (Release)
       if: github.event_name != 'pull_request'
-      run: cargo build --profile release -p reductstore --target ${{ matrix.target }} --all-features
+      run: cargo build --profile release -p reductstore --target ${{ inputs.target }} --all-features
       shell: bash
 
 
@@ -84,23 +84,23 @@ runs:
       uses: actions/upload-artifact@v4
       if: github.event_name != 'pull_request'
       with:
-        name: reductstore-${{ matrix.target }}
-        path: target/${{matrix.target}}/release/reductstore${{ matrix.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
+        name: reductstore-${{ inputs.target }}
+        path: target/${{inputs.target}}/release/reductstore${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
         if-no-files-found: 'error'
 
 
     - name: Build and export tests (PR)
       if: github.event_name == 'pull_request'
-      run: cargo export target/${{ matrix.target }}/tests -- test --profile ci --target ${{ matrix.target }} --lib
+      run: cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --lib
       shell: bash
 
     - name: Build and export tests (Release)
       if: github.event_name != 'pull_request'
-      run: cargo export target/${{ matrix.target }}/tests -- test --profile release --target ${{ matrix.target }} --lib
+      run: cargo export target/${{ inputs.target }}/tests -- test --profile release --target ${{ inputs.target }} --lib
       shell: bash
 
     - name: Upload tests
       uses: actions/upload-artifact@v4
       with:
-        name: reductstore-tests-${{ matrix.target }}
-        path: target/${{ matrix.target }}/tests
+        name: reductstore-tests-${{ inputs.target }}
+        path: target/${{ inputs.target }}/tests
