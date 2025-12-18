@@ -323,6 +323,8 @@ mod tests {
             .remove_entry("test")
             .unwrap();
 
+        sleep(Duration::from_millis(50)); // ensure the deletion is fully processed
+
         assert_eq!(
             sender.run().unwrap(),
             SyncState::SyncedOrRemoved(vec![
