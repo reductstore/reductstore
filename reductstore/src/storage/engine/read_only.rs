@@ -69,9 +69,11 @@ mod tests {
     use crate::storage::engine::StorageEngine;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::{fixture, rstest};
+    use serial_test::serial;
     use tempfile::tempdir;
 
     #[rstest]
+    #[serial]
     fn test_reload_new_bucket(primary_engine: StorageEngine) {
         // Create read-only engine
         let mut cfg = primary_engine.cfg().clone();
@@ -109,6 +111,7 @@ mod tests {
     }
 
     #[rstest]
+    #[serial]
     fn test_remove_bucket(primary_engine: StorageEngine) {
         let mut cfg = primary_engine.cfg().clone();
         cfg.role = InstanceRole::Replica;
@@ -144,6 +147,7 @@ mod tests {
         use super::*;
         use reduct_base::forbidden;
         #[rstest]
+        #[serial]
         fn test_prohibited_operations_on_read_only_engine(primary_engine: StorageEngine) {
             let mut cfg = primary_engine.cfg().clone();
             cfg.role = InstanceRole::Replica;
@@ -169,6 +173,7 @@ mod tests {
     mod reload_before {
         use super::*;
         #[rstest]
+        #[serial]
         fn test_reload_before_access_buckets(primary_engine: StorageEngine) {
             let mut cfg = primary_engine.cfg().clone();
             cfg.role = InstanceRole::Replica;
