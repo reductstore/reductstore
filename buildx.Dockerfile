@@ -56,8 +56,6 @@ RUN --mount=type=cache,id=cargo-registry-${CARGO_TARGET}-${BUILD_PROFILE}-${CACH
     && cp /build/bin/reduct-cli /usr/local/bin/reduct-cli
 
 RUN mkdir /data
-RUN cp /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
-RUN cp /build/bin/reduct-cli /usr/local/bin/reduct-cli
 
 FROM ubuntu:22.04
 
