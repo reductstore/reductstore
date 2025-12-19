@@ -10,7 +10,11 @@ pub struct RwLock<T> {
     inner: parking_lot::RwLock<T>,
 }
 
+#[cfg(not(test))]
 pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(60);
+
+#[cfg(test)]
+pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl<T> RwLock<T> {
     pub fn new(data: T) -> Self {

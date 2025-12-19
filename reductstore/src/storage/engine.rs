@@ -245,14 +245,16 @@ impl StorageEngine {
         let task_group = [self.data_path.file_name().unwrap().to_str().unwrap(), &name].join("/");
 
         let _ = unique(&task_group, "remove bucket", move || {
-            let mut buckets = buckets.write()?;
-            match buckets.remove(&name) {
-                Some(_) => {
-                    folder_keeper.remove_folder(&name)?;
-                    debug!("Bucket '{}' and folder {:?} are removed", name, path);
-                    Ok(())
-                }
-                None => Err(not_found!("Bucket '{}' is not found", name)),
+            let remove_bucket_from_backend = || {
+                let mut buckets = buckets.write()?;
+                folder_keeper.remove_folder(&name)?;
+                debug!("Bucket '{}' and folder {:?} are removed", name, path);
+                buckets.remove(&name);
+                Ok::<(), ReductError>(())
+            };
+
+            if let Err(err) = remove_bucket_from_backend() {
+                error!("Failed to sync bucket '{}': {}", name, err);
             }
         });
 

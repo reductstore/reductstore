@@ -19,7 +19,7 @@ use crate::storage::engine::{check_name_convention, ReadOnlyMode};
 use crate::storage::entry::{Entry, EntrySettings, RecordReader};
 use crate::storage::folder_keeper::FolderKeeper;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
-use log::debug;
+use log::{debug, error};
 use prost::bytes::Bytes;
 use prost::Message;
 use reduct_base::error::ReductError;
@@ -383,8 +383,8 @@ impl Bucket {
         let folder_keeper = self.folder_keeper.clone();
         let task_group = self.task_group();
 
-        let _: TaskHandle<Result<(), ReductError>> =
-            unique(&task_group, "remove entry", move || {
+        let _ = unique(&task_group, "remove entry", move || {
+            let remove_bucket_from_backend = || {
                 folder_keeper.remove_folder(&entry_name)?;
                 debug!(
                     "Remove entry '{}' from bucket '{}' and folder '{}'",
@@ -394,8 +394,16 @@ impl Bucket {
                 );
 
                 entries.write()?.remove(&entry_name);
-                Ok(())
-            });
+                Ok::<(), ReductError>(())
+            };
+
+            if let Err(err) = remove_bucket_from_backend() {
+                error!(
+                    "Failed to remove entry '{}' from bucket '{}': {}",
+                    entry_name, bucket_name, err
+                );
+            }
+        });
 
         Ok(())
     }
