@@ -1,6 +1,5 @@
-# syntax=docker/dockerfile:1.5
+# syntax=docker/dockerfile:1
 ARG CARGO_TARGET=x86_64-unknown-linux-gnu
-ARG CACHE_ID_SUFFIX=default
 
 FROM --platform=${BUILDPLATFORM} ubuntu:22.04 AS  builder
 ARG TARGETPLATFORM
@@ -9,7 +8,6 @@ ARG CARGO_TARGET
 ARG GCC_COMPILER=gcc-11
 ARG RUST_VERSION
 ARG BUILD_PROFILE=release
-ARG CACHE_ID_SUFFIX
 
 RUN apt-get update && apt-get install -y \
     cmake \
@@ -37,25 +35,18 @@ COPY Cargo.lock Cargo.lock
 
 ARG GIT_COMMIT=unspecified
 
-RUN --mount=type=cache,id=cargo-registry-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/root/.cargo/registry \
-    --mount=type=cache,id=cargo-git-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/root/.cargo/git \
-    cargo install --force --locked bindgen-cli
+RUN cargo install --force --locked bindgen-cli
 
 # Use release directory for all builds
-RUN --mount=type=cache,id=cargo-registry-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/root/.cargo/registry \
-    --mount=type=cache,id=cargo-git-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/root/.cargo/git \
-    --mount=type=cache,id=cargo-target-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/build \
-    CARGO_TARGET_DIR=/build/ \
+RUN CARGO_TARGET_DIR=/build/ \
     GIT_COMMIT=${GIT_COMMIT} \
-    cargo build --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features \
-    && cp /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
-RUN --mount=type=cache,id=cargo-registry-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/root/.cargo/registry \
-    --mount=type=cache,id=cargo-git-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/root/.cargo/git \
-    --mount=type=cache,id=cargo-target-${CARGO_TARGET}-${BUILD_PROFILE}-${CACHE_ID_SUFFIX},target=/build \
-    cargo install reduct-cli --target ${CARGO_TARGET} --root /build \
-    && cp /build/bin/reduct-cli /usr/local/bin/reduct-cli
+    cargo build --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features
+RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /build
 
 RUN mkdir /data
+RUN mv /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
+RUN mv /build/bin/reduct-cli /usr/local/bin/reduct-cli
+
 FROM ubuntu:22.04
 
 ARG CARGO_TARGET
