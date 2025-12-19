@@ -10,6 +10,10 @@ def test_remove_entry(base_url, session, bucket):
     resp = session.delete(f"{base_url}/b/{bucket}/entry")
     assert resp.status_code == 200
 
+    # Deletion is async; allow cleanup to finish before asserting absence
+    from time import sleep
+
+    sleep(0.1)
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts={ts}")
     assert resp.status_code == 404
 

@@ -231,6 +231,8 @@ def test__remove_bucket_ok(base_url, session, bucket_name):
     resp = session.delete(f"{base_url}/b/{bucket_name}")
     assert resp.status_code == 200
 
+    # Deletion is async; allow cleanup to finish before asserting absence
+    sleep(0.1)
     resp = session.get(f"{base_url}/b/{bucket_name}")
     assert resp.status_code == 404
 
