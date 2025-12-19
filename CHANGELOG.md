@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Internal
 
 - Refactor CI workflow and use S3 cache for Rust dependencies, [PR-1003](https://github.com/reductstore/reductstore/pull/1003)
+- Revert Docker image build caching in Dockerfile and CI action to use the non-cache flow.
 
 ### Fixed
 
