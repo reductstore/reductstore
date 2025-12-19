@@ -68,6 +68,8 @@ impl StorageEngineBuilder {
             FILE_CACHE.create_dir_all(&data_path).unwrap();
         }
 
+        let data_path = data_path.canonicalize().unwrap();
+
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
@@ -91,7 +93,7 @@ impl StorageEngineBuilder {
         info!("Load {} bucket(s) in {:?}", buckets.len(), time.elapsed());
 
         StorageEngine {
-            data_path: data_path.canonicalize().unwrap(),
+            data_path,
             start_time: Instant::now(),
             buckets: Arc::new(RwLock::new(buckets)),
             license: self.license,
