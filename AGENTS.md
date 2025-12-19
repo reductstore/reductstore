@@ -43,6 +43,7 @@
   console screenshots or API traces when UI/API is touched.
 - Ensure `cargo fmt`, `cargo check`, and relevant tests pass locally before opening a PR.
 - Use GitHub CLI to create a PR with the following tempate https://github.com/reductstore/.github/blob/main/.github/pull_request_template.md.
+- Do not commit or push changes without explicit user approval.
 
 ## Security & Configuration
 
