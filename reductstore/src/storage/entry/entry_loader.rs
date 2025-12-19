@@ -25,6 +25,7 @@ use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use reduct_base::msg::status::ResourceStatus;
 
 pub(super) struct EntryLoader {}
 
@@ -198,6 +199,7 @@ impl EntryLoader {
                 cfg.clone(),
             ))),
             queries: Arc::new(RwLock::new(HashMap::new())),
+            status: RwLock::new(ResourceStatus::Ready),
             path,
             cfg,
         })
@@ -231,6 +233,7 @@ impl EntryLoader {
                 cfg.clone(),
             ))),
             queries: Arc::new(RwLock::new(HashMap::new())),
+            status: RwLock::new(ResourceStatus::Ready),
             path,
             cfg,
         })

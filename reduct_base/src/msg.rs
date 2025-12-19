@@ -8,4 +8,5 @@ pub mod entry_api;
 pub mod query_link_api;
 pub mod replication_api;
 pub mod server_api;
+pub mod status;
 pub mod token_api;

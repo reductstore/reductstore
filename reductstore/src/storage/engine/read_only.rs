@@ -69,9 +69,11 @@ mod tests {
     use crate::storage::engine::StorageEngine;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::{fixture, rstest};
+    use serial_test::serial;
     use tempfile::tempdir;
 
     #[rstest]
+    #[serial]
     fn test_reload_new_bucket(primary_engine: StorageEngine) {
         // Create read-only engine
         let mut cfg = primary_engine.cfg().clone();
@@ -109,6 +111,7 @@ mod tests {
     }
 
     #[rstest]
+    #[serial]
     fn test_remove_bucket(primary_engine: StorageEngine) {
         let mut cfg = primary_engine.cfg().clone();
         cfg.role = InstanceRole::Replica;
@@ -123,8 +126,9 @@ mod tests {
             assert!(buckets.contains_key("bucket-1"));
         }
 
-        // Remove bucket in primary engine
-        primary_engine.remove_bucket("bucket-1").wait().unwrap();
+        // Remove bucket in primary engine (fire-and-forget) and wait briefly for completion
+        primary_engine.remove_bucket("bucket-1").unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
         primary_engine.sync_fs().unwrap();
         read_only_engine.reload().unwrap();
         assert_eq!(
@@ -143,6 +147,7 @@ mod tests {
         use super::*;
         use reduct_base::forbidden;
         #[rstest]
+        #[serial]
         fn test_prohibited_operations_on_read_only_engine(primary_engine: StorageEngine) {
             let mut cfg = primary_engine.cfg().clone();
             cfg.role = InstanceRole::Replica;
@@ -155,7 +160,7 @@ mod tests {
             let result = read_only_engine.create_bucket("new-bucket", BucketSettings::default());
             assert_eq!(result.err().unwrap(), err);
 
-            let result = read_only_engine.remove_bucket("bucket-1").wait();
+            let result = read_only_engine.remove_bucket("bucket-1");
             assert_eq!(result.err().unwrap(), err);
 
             let result = read_only_engine
@@ -168,6 +173,7 @@ mod tests {
     mod reload_before {
         use super::*;
         #[rstest]
+        #[serial]
         fn test_reload_before_access_buckets(primary_engine: StorageEngine) {
             let mut cfg = primary_engine.cfg().clone();
             cfg.role = InstanceRole::Replica;
@@ -202,7 +208,7 @@ mod tests {
             data_path: path,
             role: InstanceRole::Primary,
             engine_config: StorageEngineConfig {
-                replica_update_interval: std::time::Duration::from_millis(100),
+                replica_update_interval: std::time::Duration::from_millis(500),
                 ..StorageEngineConfig::default()
             },
             ..Cfg::default()

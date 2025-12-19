@@ -266,7 +266,10 @@ mod tests {
                 .err()
                 .unwrap();
 
-            assert_eq!(err.status(), ErrorCode::NotFound);
+            assert!(
+                matches!(err.status(), ErrorCode::NotFound | ErrorCode::Conflict),
+                "Entry should be gone or marked deleting"
+            );
         }
 
         #[rstest]

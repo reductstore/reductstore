@@ -68,6 +68,8 @@ impl StorageEngineBuilder {
             FILE_CACHE.create_dir_all(&data_path).unwrap();
         }
 
+        let data_path = data_path.canonicalize().unwrap();
+
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
@@ -91,7 +93,7 @@ impl StorageEngineBuilder {
         info!("Load {} bucket(s) in {:?}", buckets.len(), time.elapsed());
 
         StorageEngine {
-            data_path: data_path.canonicalize().unwrap(),
+            data_path,
             start_time: Instant::now(),
             buckets: Arc::new(RwLock::new(buckets)),
             license: self.license,
@@ -197,7 +199,10 @@ impl StorageEngine {
         self.reload()?;
         let buckets = self.buckets.read()?;
         match buckets.get(name) {
-            Some(bucket) => Ok(Arc::clone(bucket).into()),
+            Some(bucket) => {
+                bucket.ensure_not_deleting()?;
+                Ok(Arc::clone(bucket).into())
+            }
             None => Err(ReductError::not_found(
                 format!("Bucket '{}' is not found", name).as_str(),
             )),
@@ -213,28 +218,34 @@ impl StorageEngine {
     /// # Returns
     ///
     /// * HTTPError - An error if the bucket doesn't exist
-    pub(crate) fn remove_bucket(&self, name: &str) -> TaskHandle<Result<(), ReductError>> {
-        if let Err(err) = self.check_mode() {
-            return TaskHandle::from(Err(err));
+    pub(crate) fn remove_bucket(&self, name: &str) -> Result<(), ReductError> {
+        self.check_mode()?;
+
+        let buckets = self.buckets.clone();
+        let bucket = {
+            let buckets = buckets.read()?;
+            buckets
+                .get(name)
+                .cloned()
+                .ok_or_else(|| not_found!("Bucket '{}' is not found", name))?
+        };
+
+        if bucket.is_provisioned() {
+            return Err(conflict!(
+                "Can't remove provisioned bucket '{}'",
+                bucket.name()
+            ));
         }
 
-        let task_group = [self.data_path.file_name().unwrap().to_str().unwrap(), name].join("/");
+        bucket.mark_deleting()?;
 
         let path = self.data_path.join(name);
-        let buckets = self.buckets.clone();
         let name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
-        unique(&task_group, "remove bucket", move || {
-            let mut buckets = buckets.write().unwrap();
-            if let Some(bucket) = buckets.get(&name) {
-                if bucket.is_provisioned() {
-                    return Err(conflict!(
-                        "Can't remove provisioned bucket '{}'",
-                        bucket.name()
-                    ));
-                }
-            }
+        let task_group = [self.data_path.file_name().unwrap().to_str().unwrap(), &name].join("/");
 
+        let _ = unique(&task_group, "remove bucket", move || {
+            let mut buckets = buckets.write()?;
             match buckets.remove(&name) {
                 Some(_) => {
                     folder_keeper.remove_folder(&name)?;
@@ -243,7 +254,9 @@ impl StorageEngine {
                 }
                 None => Err(not_found!("Bucket '{}' is not found", name)),
             }
-        })
+        });
+
+        Ok(())
     }
 
     pub(crate) fn rename_bucket(
@@ -623,16 +636,21 @@ mod tests {
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
 
-            let result = storage.remove_bucket("test").wait();
+            let result = storage.remove_bucket("test");
             assert_eq!(result, Ok(()));
 
             let result = storage.get_bucket("test");
-            assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
+            let err = result.err().unwrap();
+            assert!(
+                err == conflict!("Bucket 'test' is being deleted")
+                    || err == not_found!("Bucket 'test' is not found"),
+                "Bucket should be deleting or removed"
+            );
         }
 
         #[rstest]
         fn test_remove_bucket_with_non_existing_name(storage: StorageEngine) {
-            let result = storage.remove_bucket("test").wait();
+            let result = storage.remove_bucket("test");
             assert_eq!(result, Err(not_found!("Bucket 'test' is not found")));
         }
 
@@ -644,7 +662,7 @@ mod tests {
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
 
-            let result = storage.remove_bucket("test").wait();
+            let result = storage.remove_bucket("test");
             assert_eq!(result, Ok(()));
 
             let storage = StorageEngine::builder()
@@ -766,7 +784,7 @@ mod tests {
             .unwrap()
             .upgrade_and_unwrap();
         bucket.set_provisioned(true);
-        let err = storage.remove_bucket("test").wait().err().unwrap();
+        let err = storage.remove_bucket("test").err().unwrap();
         assert_eq!(
             err,
             ReductError::conflict("Can't remove provisioned bucket 'test'")

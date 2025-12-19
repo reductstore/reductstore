@@ -425,8 +425,9 @@ mod tests {
             .upgrade()
             .unwrap()
             .remove_entry(path_to_entry_1.get("entry_name").unwrap())
-            .await
             .unwrap();
+
+        sleep(Duration::from_millis(100)).await;
 
         let err = read_batched_records(
             State(keeper.clone()),

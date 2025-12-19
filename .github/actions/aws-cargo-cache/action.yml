@@ -4,14 +4,22 @@ inputs:
   target:
     description: 'Target triple.'
     required: true
+  profile:
+    description: 'Cargo profile used for the build.'
+    required: false
+    default: 'ci'
 runs:
   using: 'composite'
   steps:
     - name: Detect rust minor version
       shell: bash
       run: |
-        minor=$(rustc --version --verbose | sed -ne 's/^release: \([0-9]*\.[0-9]*\).*/\1/p')
-        echo "RUST_MINOR=${minor:-unknown}" >> "$GITHUB_ENV"
+        if [[ -z "${RUST_MINOR:-}" ]]; then
+          minor=$(rustc --version --verbose | sed -ne 's/^release: \([0-9]*\.[0-9]*\).*/\1/p')
+          echo "RUST_MINOR=${minor:-unknown}" >> "$GITHUB_ENV"
+        else
+          echo "Using preset RUST_MINOR=${RUST_MINOR}"
+        fi
 
     - name: Configure AWS credentials via OIDC (org-wide role)
       uses: aws-actions/configure-aws-credentials@v4
@@ -27,10 +35,10 @@ runs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/${{ inputs.target }}/
-        key: ${{ runner.os }}-${{ inputs.target }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock') }}
+          target/
+        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
         restore-keys: |
-          ${{ runner.os }}-${{ inputs.target }}-cargo-rust${{ env.RUST_MINOR }}-
-          ${{ runner.os }}-${{ inputs.target }}-cargo-
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-
       env:
         RUNS_ON_S3_BUCKET_CACHE: reduct-github-cache

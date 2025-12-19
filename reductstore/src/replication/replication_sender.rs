@@ -321,8 +321,9 @@ mod tests {
             .unwrap()
             .upgrade_and_unwrap()
             .remove_entry("test")
-            .wait()
             .unwrap();
+
+        sleep(Duration::from_millis(50)); // ensure the deletion is fully processed
 
         assert_eq!(
             sender.run().unwrap(),

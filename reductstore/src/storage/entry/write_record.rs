@@ -174,9 +174,11 @@ mod tests {
     use reduct_base::error::ReductError;
     use reduct_base::Labels;
     use rstest::rstest;
+    use serial_test::serial;
     use std::path::PathBuf;
 
     #[rstest]
+    #[serial]
     fn test_begin_write_new_block_size(path: PathBuf) {
         let mut entry = entry(
             EntrySettings {
@@ -228,6 +230,7 @@ mod tests {
     }
 
     #[rstest]
+    #[serial]
     fn test_begin_write_new_block_records(path: PathBuf) {
         let mut entry = entry(
             EntrySettings {
@@ -282,6 +285,7 @@ mod tests {
     }
 
     #[rstest]
+    #[serial]
     fn test_begin_write_belated_record(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000);
         write_stub_record(&mut entry, 3000000);
@@ -311,6 +315,7 @@ mod tests {
     }
 
     #[rstest]
+    #[serial]
     fn test_begin_write_belated_first(mut entry: Entry) {
         write_stub_record(&mut entry, 3000000);
         write_stub_record(&mut entry, 1000000);
@@ -331,6 +336,7 @@ mod tests {
     }
 
     #[rstest]
+    #[serial]
     fn test_begin_write_existing_record(mut entry: Entry) {
         write_stub_record(&mut entry, 1000000);
         write_stub_record(&mut entry, 2000000);
@@ -346,6 +352,7 @@ mod tests {
     }
 
     #[rstest]
+    #[serial]
     fn test_begin_write_existing_record_belated(mut entry: Entry) {
         write_stub_record(&mut entry, 2000000);
         write_stub_record(&mut entry, 1000000);
@@ -361,6 +368,7 @@ mod tests {
     }
 
     #[rstest]
+    #[serial]
     #[tokio::test]
     async fn test_begin_override_errored(entry: Entry) {
         let mut sender = entry
@@ -402,6 +410,7 @@ mod tests {
     }
 
     #[rstest]
+    #[serial]
     #[tokio::test]
     async fn test_begin_not_override_if_different_size(entry: Entry) {
         let mut sender = entry

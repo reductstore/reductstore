@@ -20,6 +20,7 @@ def test__create_bucket_ok(base_url, session, bucket_name):
         "quota_size": 0,
     }
     assert data["info"]["name"] == bucket_name
+    assert data["info"]["status"] == "READY"
     assert len(data["entries"]) == 0
 
     assert resp.headers["Content-Type"] == "application/json"
@@ -138,6 +139,7 @@ def test__get_bucket_stats(base_url, session, bucket_name):
             "oldest_record": 1000000,
             "record_count": 1,
             "size": 40,
+            "status": "READY",
         },
         {
             "block_count": 1,
@@ -146,6 +148,7 @@ def test__get_bucket_stats(base_url, session, bucket_name):
             "oldest_record": 2000000,
             "record_count": 1,
             "size": 43,
+            "status": "READY",
         },
     ]
     assert data["info"] == dict(
@@ -155,6 +158,7 @@ def test__get_bucket_stats(base_url, session, bucket_name):
         latest_record=2000000,
         oldest_record=1000000,
         is_provisioned=False,
+        status="READY",
     )
 
 
@@ -227,6 +231,8 @@ def test__remove_bucket_ok(base_url, session, bucket_name):
     resp = session.delete(f"{base_url}/b/{bucket_name}")
     assert resp.status_code == 200
 
+    # Deletion is async; allow cleanup to finish before asserting absence
+    sleep(0.1)
     resp = session.get(f"{base_url}/b/{bucket_name}")
     assert resp.status_code == 404
 
