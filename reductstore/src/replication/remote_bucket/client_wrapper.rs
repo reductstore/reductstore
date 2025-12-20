@@ -330,16 +330,16 @@ pub(super) fn create_client(url: &str, api_token: &str) -> BoxedClientApi {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use crate::core::sync::RwLock;
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{us_to_ts, Record};
+    use crossbeam_channel::{Receiver, Sender};
     use futures_util::StreamExt;
     use hyper::http;
     use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use rstest::*;
     use std::io::{Read, Seek, SeekFrom};
     use std::pin::pin;
-    use std::sync::mpsc::{Receiver, Sender};
-    use std::sync::Mutex;
 
     #[rstest]
     #[tokio::test]
@@ -498,7 +498,7 @@ pub(super) mod tests {
 
     pub struct MockRecordReader {
         meta: RecordMeta,
-        rx: Mutex<Receiver<Result<Bytes, ReductError>>>,
+        rx: RwLock<Receiver<Result<Bytes, ReductError>>>,
     }
 
     impl MockRecordReader {
@@ -508,7 +508,7 @@ pub(super) mod tests {
         ) -> BoxedReadRecord {
             Box::new(Self {
                 meta: record.into(),
-                rx: Mutex::new(rx),
+                rx: RwLock::new(rx),
             })
         }
     }
@@ -527,7 +527,7 @@ pub(super) mod tests {
 
     impl ReadRecord for MockRecordReader {
         fn read_chunk(&mut self) -> ReadChunk {
-            match self.rx.lock().unwrap().recv() {
+            match self.rx.write().unwrap().recv() {
                 Ok(chunk) => Some(chunk),
                 Err(_) => None,
             }
@@ -574,8 +574,8 @@ pub(super) mod tests {
             state: 0,
         };
 
-        let (tx1, rx1) = std::sync::mpsc::channel();
-        let (tx2, rx2) = std::sync::mpsc::channel();
+        let (tx1, rx1) = crossbeam_channel::unbounded();
+        let (tx2, rx2) = crossbeam_channel::unbounded();
 
         (
             vec![
