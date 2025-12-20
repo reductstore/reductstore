@@ -160,6 +160,7 @@ mod tests {
         bucket, client, MockReductBucketApi, MockReductClientApi,
     };
     use crate::storage::proto::{us_to_ts, Record};
+    use crossbeam_channel::unbounded;
     use mockall::predicate;
     use reduct_base::error::{ErrorCode, ReductError};
     use rstest::{fixture, rstest};
@@ -380,7 +381,7 @@ mod tests {
 
     #[fixture]
     fn record_to_write() -> (BoxedReadRecord, Transaction) {
-        let (_, rx) = std::sync::mpsc::channel();
+        let (_, rx) = unbounded();
         (
             MockRecordReader::form_record_with_rx(
                 rx,
@@ -399,7 +400,7 @@ mod tests {
 
     #[fixture]
     fn record_to_update() -> (BoxedReadRecord, Transaction) {
-        let (_, rx) = std::sync::mpsc::channel();
+        let (_, rx) = unbounded();
         (
             MockRecordReader::form_record_with_rx(
                 rx,

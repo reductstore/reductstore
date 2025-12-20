@@ -3,6 +3,7 @@
 
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::cfg::io::IoConfig;
+use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::{ExtRepository, ExtensionApi, IoExtMap};
 use dlopen2::wrapper::Container;
 use log::{error, info};
@@ -12,7 +13,6 @@ use reduct_base::internal_server_error;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock as AsyncRwLock;
 
 impl ExtRepository {
     pub(super) fn try_load(
@@ -93,7 +93,8 @@ mod tests {
             .extension_map
             .get("test-ext")
             .unwrap()
-            .blocking_read();
+            .blocking_read()
+            .unwrap();
         let info = ext.info().clone();
         assert_eq!(
             info,

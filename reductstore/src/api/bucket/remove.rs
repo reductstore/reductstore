@@ -24,6 +24,7 @@ pub(super) async fn remove_bucket(
         .token_repo
         .write()
         .await
+        .unwrap()
         .remove_bucket_from_tokens(&bucket_name)?;
     Ok(())
 }
@@ -70,6 +71,7 @@ mod tests {
             .token_repo
             .write()
             .await
+            .unwrap()
             .get_token("test")
             .unwrap()
             .clone();
@@ -91,6 +93,7 @@ mod tests {
             .token_repo
             .write()
             .await
+            .unwrap()
             .get_token("test")
             .unwrap()
             .clone();

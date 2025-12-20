@@ -21,7 +21,7 @@ pub(super) async fn get_token(
     let mut token = components
         .token_repo
         .write()
-        .await
+        .await?
         .get_token(&token_name)?
         .clone();
     token.value.clear();

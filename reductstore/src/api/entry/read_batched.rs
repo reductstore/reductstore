@@ -14,6 +14,7 @@ use bytes::Bytes;
 use futures_util::Stream;
 
 use crate::api::StateKeeper;
+use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::query::QueryRx;
 use log::debug;
@@ -26,7 +27,6 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::timeout;
 
 // GET /:bucket/:entry/batch?q=<number>

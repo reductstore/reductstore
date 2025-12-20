@@ -2,9 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
 use crate::replication::remote_bucket::RemoteBucket;
-use crate::replication::transaction_log::{TransactionLog, TransactionLogMap, TransactionLogRef};
+use crate::replication::transaction_log::TransactionLogMap;
 use crate::replication::Transaction;
 use crate::storage::engine::StorageEngine;
 use log::{debug, error};
@@ -12,7 +11,6 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::cmp::PartialEq;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
@@ -212,7 +210,10 @@ mod tests {
     use crate::backend::Backend;
     use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
+    use crate::core::sync::RwLock;
     use crate::replication::remote_bucket::ErrorRecordMap;
+    use crate::replication::transaction_log::TransactionLog;
+    use crate::replication::transaction_log::TransactionLogRef;
     use crate::replication::Transaction;
     use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
     use bytes::Bytes;
@@ -223,6 +224,7 @@ mod tests {
     use reduct_base::msg::replication_api::ReplicationMode;
     use reduct_base::{conflict, not_found, timeout, too_early, Labels};
     use rstest::*;
+    use std::collections::HashMap;
     use std::thread::spawn;
 
     mock! {

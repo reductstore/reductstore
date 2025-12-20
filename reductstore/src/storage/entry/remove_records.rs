@@ -85,7 +85,7 @@ impl Entry {
 
                 // Receive a batch of records to remove
                 while records_to_remove.len() < max_block_records as usize && continue_query {
-                    let result = rx.upgrade()?.blocking_write().blocking_recv();
+                    let result = rx.upgrade()?.blocking_write()?.blocking_recv();
                     match result {
                         Some(Ok(rec)) => {
                             records_to_remove.push(rec.meta().timestamp());
@@ -172,7 +172,7 @@ impl Entry {
                 "remove records from block",
                 move || {
                     // TODO: we don't parallelize the removal of records in different blocks
-                    let mut bm = local_block_manager.write().unwrap();
+                    let mut bm = local_block_manager.write()?;
                     bm.remove_records(block_id, timestamps)
                 },
             );

@@ -20,6 +20,7 @@ use crate::cfg::storage_engine::StorageEngineConfig;
 use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::create_ext_repository;
 use crate::license::parse_license;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
@@ -258,10 +259,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 
         Ok(Components {
             storage,
-            token_repo: tokio::sync::RwLock::new(token_repo),
+            token_repo: AsyncRwLock::new(token_repo),
             auth: TokenAuthorization::new(&self.cfg.api_token),
             console,
-            replication_repo: tokio::sync::RwLock::new(replication_engine),
+            replication_repo: AsyncRwLock::new(replication_engine),
             ext_repo: create_ext_repository(
                 ext_path,
                 vec![select_ext, ros_ext],
@@ -271,7 +272,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                     .build(),
                 self.cfg.io_conf.clone(),
             )?,
-            query_link_cache: tokio::sync::RwLock::new(Cache::new(
+            query_link_cache: AsyncRwLock::new(Cache::new(
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),

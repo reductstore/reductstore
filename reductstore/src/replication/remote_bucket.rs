@@ -201,7 +201,7 @@ pub(super) mod tests {
     }
 
     fn write_record(remote_bucket: &mut RemoteBucketImpl) -> Result<ErrorRecordMap, ReductError> {
-        let (_tx, rx) = std::sync::mpsc::channel();
+        let (_tx, rx) = crossbeam_channel::unbounded();
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());
         let record = MockRecordReader::form_record_with_rx(rx, rec);

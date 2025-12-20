@@ -21,7 +21,7 @@ pub(super) async fn get_replication(
     let info = components
         .replication_repo
         .read()
-        .await
+        .await?
         .get_info(&replication_name)?;
     Ok(info.into())
 }
@@ -50,6 +50,7 @@ mod tests {
             .replication_repo
             .write()
             .await
+            .unwrap()
             .create_replication("test", settings)
             .unwrap();
 
@@ -61,7 +62,7 @@ mod tests {
         .await
         .unwrap();
 
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         let repl = repo.get_replication("test").unwrap();
 
         assert_eq!(

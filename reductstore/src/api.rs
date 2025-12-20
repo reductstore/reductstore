@@ -18,6 +18,7 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::cfg::Cfg;
 use crate::core::cache::Cache;
+use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::lock_file::BoxedLockFile;
 use crate::replication::ManageReplications;
@@ -44,32 +45,32 @@ use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use token::create_token_api_routes;
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
 pub struct Components {
     pub storage: Arc<StorageEngine>,
     pub(crate) auth: TokenAuthorization,
-    pub(crate) token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
+    pub(crate) token_repo: AsyncRwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub(crate) console: Box<dyn ManageStaticAsset + Send + Sync>,
-    pub(crate) replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
+    pub(crate) replication_repo: AsyncRwLock<Box<dyn ManageReplications + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
-    pub(crate) query_link_cache: RwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
+    pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
 
     pub(crate) cfg: Cfg,
 }
 
 pub struct StateKeeper {
-    rx: RwLock<Receiver<Components>>,
-    components: RwLock<Option<Arc<Components>>>,
+    rx: AsyncRwLock<Receiver<Components>>,
+    components: AsyncRwLock<Option<Arc<Components>>>,
     lock_file: Arc<BoxedLockFile>,
 }
 
 impl StateKeeper {
     pub fn new(lock_file: Arc<BoxedLockFile>, rx: Receiver<Components>) -> Self {
         StateKeeper {
-            rx: RwLock::new(rx),
-            components: RwLock::new(None),
+            rx: AsyncRwLock::new(rx),
+            components: AsyncRwLock::new(None),
             lock_file,
         }
     }
@@ -88,7 +89,7 @@ impl StateKeeper {
             headers
                 .get("Authorization")
                 .map(|header| header.to_str().unwrap_or("")),
-            components.token_repo.write().await.as_mut(),
+            components.token_repo.write().await?.as_mut(),
             policy,
         )?;
 
@@ -103,11 +104,11 @@ impl StateKeeper {
         }
 
         {
-            let mut lock = self.components.write().await;
+            let mut lock = self.components.write().await?;
             // it's important to check again after acquiring the lock and lock must be exclusive to avoid race conditions
             if lock.is_none() {
                 // check if there are components in the channel
-                if self.rx.read().await.capacity() != 0 {
+                if self.rx.read().await?.capacity() != 0 {
                     return Err(service_unavailable!(
                         "The server is starting up, please try again later"
                     )
@@ -117,18 +118,24 @@ impl StateKeeper {
                 let components = self
                     .rx
                     .write()
-                    .await
+                    .await?
                     .recv()
                     .await
                     .expect("Failed to receive components from channel");
                 // ensure background services (like replication) start after HTTP is ready to accept connections
                 // however, in tests we want to control when these services start
                 #[cfg(not(test))]
-                components.replication_repo.write().await.start();
+                components.replication_repo.write().await?.start();
                 lock.replace(Arc::new(components));
             }
         }
-        Ok(self.components.read().await.as_ref().unwrap().clone())
+        let components = self.components.read().await?;
+        let components = components.as_ref().cloned().ok_or_else(|| {
+            HttpError(service_unavailable!(
+                "The server is starting up, please try again later"
+            ))
+        })?;
+        Ok(components)
     }
 
     pub async fn get_anonymous(&self) -> Result<Arc<Components>, HttpError> {
@@ -545,9 +552,9 @@ mod tests {
         let components = Components {
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("inti-token"),
-            token_repo: RwLock::new(token_repo),
+            token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: RwLock::new(replication_repo),
+            replication_repo: AsyncRwLock::new(replication_repo),
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -558,7 +565,7 @@ mod tests {
             )
             .expect("Failed to create extension repo"),
             cfg: Cfg::default(),
-            query_link_cache: RwLock::new(Cache::new(8, Duration::from_secs(60))),
+            query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
         };
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);

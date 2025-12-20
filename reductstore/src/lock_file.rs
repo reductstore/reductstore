@@ -3,6 +3,7 @@
 
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::AsyncRwLock;
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
 use reduct_base::error::ReductError;
@@ -13,7 +14,6 @@ use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
-use tokio::sync::RwLock;
 
 #[derive(Debug, PartialEq)]
 pub enum State {
@@ -41,7 +41,7 @@ struct ImplLockFile {
     path: PathBuf,
     stop_on_drop: Arc<AtomicBool>,
     handle: tokio::task::JoinHandle<()>,
-    state: Arc<RwLock<State>>,
+    state: Arc<AsyncRwLock<State>>,
 }
 
 pub(crate) struct LockFileBuilder {
@@ -77,7 +77,7 @@ impl LockFileBuilder {
         let stop_on_drop = Arc::new(AtomicBool::new(false));
         let stop_flag = Arc::clone(&stop_on_drop);
         let file_path = path.clone();
-        let state = Arc::new(RwLock::new(State::Waiting));
+        let state = Arc::new(AsyncRwLock::new(State::Waiting));
         let state_clone = Arc::clone(&state);
 
         let mut this = Box::new(ImplLockFile {
@@ -130,7 +130,11 @@ impl LockFileBuilder {
                                     "Timeout while waiting for lock file, aborting: {:?}",
                                     file_path
                                 );
-                                *state_clone.write().await = State::Failed;
+                                if let Ok(mut state) = state_clone.write().await {
+                                    *state = State::Failed;
+                                } else {
+                                    error!("Failed to set lock file state to Failed");
+                                }
                                 return;
                             }
                         }
@@ -147,14 +151,24 @@ impl LockFileBuilder {
                     InstanceRole::Primary => {
                         // Primary instance acquires the lock immediately
                         info!("Primary instance acquiring lock file: {:?}", file_path);
-                        *state_clone.write().await = State::Locked;
+                        if let Ok(mut state) = state_clone.write().await {
+                            *state = State::Locked;
+                        } else {
+                            error!("Failed to set lock file state to Locked");
+                            return;
+                        }
                     }
                     InstanceRole::Secondary => {
                         // Secondary instance waits a bit to ensure the primary has created the lock file
                         tokio::time::sleep(cfg.polling_interval * 3).await;
                         if !FILE_CACHE.try_exists(&file_path).unwrap() {
                             info!("Secondary instance acquiring lock file: {:?}", file_path);
-                            *state_clone.write().await = State::Locked;
+                            if let Ok(mut state) = state_clone.write().await {
+                                *state = State::Locked;
+                            } else {
+                                error!("Failed to set lock file state to Locked");
+                                return;
+                            }
                         } else {
                             info!("Secondary instance could not acquire lock file (already held by primary): {:?}", file_path);
                         }
@@ -162,7 +176,7 @@ impl LockFileBuilder {
                     InstanceRole::Replica | InstanceRole::Standalone => {}
                 }
 
-                if *state_clone.read().await == State::Locked {
+                if matches!(state_clone.read().await, Ok(state) if *state == State::Locked) {
                     break;
                 }
             }
@@ -198,18 +212,15 @@ impl ImplLockFile {}
 #[async_trait]
 impl LockFile for ImplLockFile {
     async fn is_locked(&self) -> bool {
-        let state = self.state.read().await;
-        *state == State::Locked
+        matches!(self.state.read().await, Ok(state) if *state == State::Locked)
     }
 
     async fn is_failed(&self) -> bool {
-        let state = self.state.read().await;
-        *state == State::Failed
+        matches!(self.state.read().await, Ok(state) if *state == State::Failed)
     }
 
     async fn is_waiting(&self) -> bool {
-        let state = self.state.read().await;
-        *state == State::Waiting
+        matches!(self.state.read().await, Ok(state) if *state == State::Waiting)
     }
 
     fn release(&self) {

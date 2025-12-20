@@ -22,7 +22,7 @@ pub(super) async fn set_mode(
     components
         .replication_repo
         .write()
-        .await
+        .await?
         .set_mode(&replication_name, payload.0.mode)?;
     Ok(())
 }
@@ -51,6 +51,7 @@ mod tests {
             .replication_repo
             .write()
             .await
+            .unwrap()
             .create_replication("test", settings)
             .unwrap();
 
@@ -66,7 +67,7 @@ mod tests {
         .await
         .unwrap();
 
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         let repl = repo.get_replication("test").unwrap();
         assert_eq!(repl.mode(), ReplicationMode::Paused);
     }

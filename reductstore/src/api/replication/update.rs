@@ -21,7 +21,7 @@ pub(super) async fn update_replication(
     components
         .replication_repo
         .write()
-        .await
+        .await?
         .update_replication(&replication_name, settings.into())?;
     Ok(())
 }
@@ -60,6 +60,7 @@ mod tests {
                 .replication_repo
                 .read()
                 .await
+                .unwrap()
                 .get_replication("test")
                 .unwrap()
                 .settings()
@@ -99,6 +100,7 @@ mod tests {
             .replication_repo
             .write()
             .await
+            .unwrap()
             .create_replication("test", settings)
             .unwrap();
         keeper

@@ -27,7 +27,7 @@ pub(super) async fn rename_bucket(
     components
         .token_repo
         .write()
-        .await
+        .await?
         .rename_bucket(&bucket_name, &request.new_name)?;
     Ok(())
 }
@@ -56,6 +56,7 @@ mod tests {
             .token_repo
             .write()
             .await
+            .unwrap()
             .generate_token(
                 "test-1",
                 Permissions {
@@ -89,6 +90,7 @@ mod tests {
             .token_repo
             .write()
             .await
+            .unwrap()
             .get_token("test-1")
             .unwrap()
             .clone();

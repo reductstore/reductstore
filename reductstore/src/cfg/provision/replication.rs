@@ -28,14 +28,23 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 }
             }
 
-            let replication = repo.get_mut_replication(&name).unwrap();
-            replication.set_provisioned(true);
+            match repo.get_mut_replication(&name) {
+                Ok(replication) => {
+                    replication.set_provisioned(true);
 
-            info!(
-                "Provisioned replication '{}' with {:?}",
-                name,
-                replication.masked_settings()
-            );
+                    info!(
+                        "Provisioned replication '{}' with {:?}",
+                        name,
+                        replication.masked_settings()
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        "Failed to mark replication '{}' as provisioned: {}",
+                        name, err
+                    );
+                }
+            }
         }
         Ok(repo)
     }
@@ -203,7 +212,7 @@ mod tests {
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
             .unwrap();
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication("replication1").unwrap();
 
         assert_eq!(replication.settings().src_bucket, "bucket1");
@@ -245,7 +254,7 @@ mod tests {
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
             .unwrap();
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         assert_eq!(repo.replications().len(), 0);
     }
 
@@ -274,7 +283,7 @@ mod tests {
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
             .unwrap();
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         assert_eq!(repo.replications().len(), 0);
     }
 
@@ -302,7 +311,7 @@ mod tests {
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
             .unwrap();
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         assert_eq!(repo.replications().len(), 0);
     }
 
@@ -330,7 +339,7 @@ mod tests {
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
             .unwrap();
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         assert_eq!(repo.replications().len(), 0);
     }
 
@@ -358,7 +367,7 @@ mod tests {
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
             .unwrap();
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         assert_eq!(repo.replications().len(), 0);
     }
 
@@ -426,7 +435,7 @@ mod tests {
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
             .unwrap();
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication("replication1").unwrap();
         assert_eq!(
             replication.settings().when,

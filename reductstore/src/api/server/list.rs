@@ -66,6 +66,7 @@ mod tests {
             .token_repo
             .write()
             .await
+            .unwrap()
             .generate_token(
                 "with-one-bucket",
                 Permissions {

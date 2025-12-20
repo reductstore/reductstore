@@ -14,6 +14,7 @@ use axum_extra::headers::HeaderMap;
 use crate::api::entry::common::check_and_extract_ts_or_query_id;
 use crate::api::utils::{make_headers_from_reader, RecordStream};
 use crate::api::StateKeeper;
+use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
@@ -21,7 +22,7 @@ use reduct_base::bad_request;
 use reduct_base::io::ReadRecord;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock as AsyncRwLock};
+use tokio::sync::Mutex;
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
 pub(super) async fn read_record(
@@ -94,7 +95,7 @@ async fn next_record_reader(
     let rc = rx
         .upgrade()
         .map_err(|_| bad_request!("Query '{}' was closed", query_path))?;
-    let mut rx = rc.write().await;
+    let mut rx = rc.write().await?;
     if let Some(reader) = rx.recv().await {
         reader.map_err(|e| HttpError::from(e))
     } else {
