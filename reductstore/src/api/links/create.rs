@@ -180,8 +180,9 @@ mod tests {
         .await
         .err()
         .unwrap();
+        let err: ReductError = err.into();
         assert_eq!(
-            err.0,
+            err,
             unprocessable_entity!("Only 'Query' type is supported for query links")
         );
     }
@@ -221,8 +222,9 @@ mod tests {
             let err = check_and_normalize_base_url(&params, "https://default.com/".to_string())
                 .err()
                 .unwrap();
+            let err: ReductError = err.into();
             assert_eq!(
-                err.0,
+                err,
                 unprocessable_entity!(
                     "Invalid base_url provided for query link: relative URL without a base"
                 )

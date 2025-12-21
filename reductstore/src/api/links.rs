@@ -129,7 +129,8 @@ pub(super) mod tests {
             .await
             .err()
             .unwrap();
-        assert_eq!(err.0, unprocessable_entity!("Invalid JSON: unknown variant `INVALID_TYPE`, expected `QUERY` or `REMOVE` at line 6 column 44"));
+        let err: ReductError = err.into();
+        assert_eq!(err, unprocessable_entity!("Invalid JSON: unknown variant `INVALID_TYPE`, expected `QUERY` or `REMOVE` at line 6 column 44"));
     }
 
     pub(super) async fn create_query_link(

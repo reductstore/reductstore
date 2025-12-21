@@ -34,10 +34,8 @@ use log::{error, warn};
 use middleware::{default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
-use reduct_base::error::ReductError as BaseHttpError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::service_unavailable;
-use reduct_macros::Twin;
 use replication::create_replication_api_routes;
 use serde::de::StdError;
 use server::create_server_api_routes;
@@ -104,9 +102,10 @@ impl StateKeeper {
             .map_err(|err| HttpError::new(ErrorCode::InternalServerError, &err.to_string()))?;
 
         if !locked {
-            return Err(
-                service_unavailable!("The server is starting up, please try again later").into(),
-            );
+            return Err(HttpError::from(service_unavailable!(
+                "The server is starting up, please try again later"
+            ))
+            .with_log_hint(LogHint::SkipErrorLogging));
         }
 
         {
@@ -150,24 +149,61 @@ impl StateKeeper {
     }
 }
 
-#[derive(Twin, PartialEq)]
-pub struct HttpError(BaseHttpError);
+#[derive(PartialEq, Clone, Copy, Debug, Eq)]
+pub enum LogHint {
+    Default,
+    SkipErrorLogging,
+}
+
+#[derive(PartialEq, Clone)]
+pub struct HttpError {
+    inner: ReductError,
+    log_hint: LogHint,
+}
 
 impl HttpError {
     pub fn new(status: ErrorCode, message: &str) -> Self {
-        HttpError(BaseHttpError::new(status, message))
+        HttpError {
+            inner: ReductError::new(status, message),
+            log_hint: LogHint::Default,
+        }
+    }
+
+    pub fn with_log_hint(mut self, log_hint: LogHint) -> Self {
+        self.log_hint = log_hint;
+        self
+    }
+
+    pub fn status(&self) -> ErrorCode {
+        self.inner.status
+    }
+
+    pub fn message(&self) -> &str {
+        &self.inner.message
+    }
+
+    pub fn log_hint(&self) -> LogHint {
+        self.log_hint
+    }
+
+    pub fn into_inner(self) -> ReductError {
+        self.inner
+    }
+
+    pub fn inner(&self) -> &ReductError {
+        &self.inner
     }
 }
 
 impl Debug for HttpError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
+        write!(f, "{:?}", self.inner)
     }
 }
 
 impl Display for HttpError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{:?}", self.0)
+        write!(f, "{:?}", self.inner)
     }
 }
 
@@ -179,7 +215,8 @@ impl StdError for HttpError {
 
 impl IntoResponse for HttpError {
     fn into_response(self) -> Response {
-        let err: BaseHttpError = self.into();
+        let log_hint = self.log_hint;
+        let err: ReductError = self.into();
         let converted_quotes = err.message.to_string().replace("\"", "'");
         let body = format!("{{\"detail\": \"{}\"}}", converted_quotes);
 
@@ -201,13 +238,34 @@ impl IntoResponse for HttpError {
         resp.headers_mut()
             .insert("content-type", "application/json".parse().unwrap());
         resp.headers_mut().insert("x-reduct-error", err_msg);
+        if log_hint == LogHint::SkipErrorLogging {
+            resp.headers_mut().insert(
+                "x-reduct-log-hint",
+                HeaderValue::from_static("skip-error-log"),
+            );
+        }
         resp
+    }
+}
+
+impl From<ReductError> for HttpError {
+    fn from(st: ReductError) -> Self {
+        Self {
+            inner: st,
+            log_hint: LogHint::Default,
+        }
+    }
+}
+
+impl From<HttpError> for ReductError {
+    fn from(err: HttpError) -> ReductError {
+        err.inner
     }
 }
 
 impl From<axum::Error> for HttpError {
     fn from(err: axum::Error) -> Self {
-        HttpError::from(BaseHttpError::bad_request(&format!("{}", err)))
+        HttpError::from(ReductError::bad_request(&format!("{}", err)))
     }
 }
 
@@ -325,6 +383,7 @@ mod tests {
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
     use bytes::Bytes;
+    use reduct_base::error::ReductError as BaseHttpError;
     use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
@@ -430,7 +489,7 @@ mod tests {
                 .err()
                 .unwrap();
             let http_err: HttpError = err.into();
-            assert_eq!(http_err.0.status, ErrorCode::UnprocessableEntity);
+            assert_eq!(http_err.status(), ErrorCode::UnprocessableEntity);
         }
 
         #[rstest]
@@ -444,6 +503,23 @@ mod tests {
                 "ReductError { status: BadRequest, message: \"boom\" }"
             );
             assert!(StdError::source(&err).is_none());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_skip_log_header() {
+            let err = HttpError::new(ErrorCode::ServiceUnavailable, "starting up")
+                .with_log_hint(LogHint::SkipErrorLogging);
+
+            assert_eq!(err.inner().message, "starting up");
+
+            let resp = err.into_response();
+            assert_eq!(
+                resp.headers()
+                    .get("x-reduct-log-hint")
+                    .map(HeaderValue::as_bytes),
+                Some("skip-error-log".as_bytes())
+            );
         }
     }
 
@@ -617,13 +693,8 @@ mod tests {
         async fn test_wait_components_locked(#[future] waiting_keeper: Arc<StateKeeper>) {
             let keeper = waiting_keeper.await;
             let err = keeper.get_anonymous().await.err().unwrap();
-            assert_eq!(
-                err,
-                HttpError::new(
-                    ErrorCode::ServiceUnavailable,
-                    "The server is starting up, please try again later"
-                )
-            );
+            assert_eq!(err.status(), ErrorCode::ServiceUnavailable);
+            assert_eq!(err.log_hint(), LogHint::SkipErrorLogging);
         }
 
         #[rstest]

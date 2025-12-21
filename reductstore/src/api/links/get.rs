@@ -393,10 +393,8 @@ mod tests {
             Query(params),
         )
         .await;
-        assert_eq!(
-            result.err().unwrap().0,
-            not_found!("Record number out of range")
-        );
+        let err: ReductError = result.err().unwrap().into();
+        assert_eq!(err, not_found!("Record number out of range"));
     }
 
     #[rstest]
@@ -429,7 +427,8 @@ mod tests {
         .await
         .err()
         .unwrap();
-        assert_eq!(err.0, unprocessable_entity!("Query link has expired"));
+        let err: ReductError = err.into();
+        assert_eq!(err, unprocessable_entity!("Query link has expired"));
     }
 
     #[rstest]
@@ -521,7 +520,7 @@ mod tests {
             assert!(result
                 .err()
                 .unwrap()
-                .0
+                .into_inner()
                 .to_string()
                 .contains(&format!("Invalid base64 in '{}' parameter", key)));
         }
@@ -566,10 +565,8 @@ mod tests {
                 Query(modified_params),
             )
             .await;
-            assert_eq!(
-                result.err().unwrap().0,
-                unprocessable_entity!("Missing '{}' parameter", key)
-            );
+            let err: ReductError = result.err().unwrap().into();
+            assert_eq!(err, unprocessable_entity!("Missing '{}' parameter", key));
         }
     }
 

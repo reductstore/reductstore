@@ -23,13 +23,9 @@ pub(super) async fn redirect_to_index(
     let components = match components.get_anonymous().await {
         Ok(c) => c,
         Err(err) => {
-            return (
-                StatusCode::from_u16(err.0.status().int_value() as u16)
-                    .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR),
-                HeaderMap::new(),
-                err.0.message,
-            )
-                .into_response();
+            let status = StatusCode::from_u16(err.status().int_value() as u16)
+                .unwrap_or(StatusCode::INTERNAL_SERVER_ERROR);
+            return (status, HeaderMap::new(), err.message().to_string()).into_response();
         }
     };
 

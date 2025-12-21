@@ -149,7 +149,7 @@ mod tests {
             let err = ReplicationModePayloadAxum::from_request(req, &())
                 .await
                 .expect_err("should fail");
-            assert_eq!(err.0.status, UnprocessableEntity);
+            assert_eq!(err.status(), UnprocessableEntity);
         }
 
         #[rstest]
@@ -163,8 +163,8 @@ mod tests {
             let err = ReplicationModePayloadAxum::from_request(req, &())
                 .await
                 .expect_err("should fail");
-            assert_eq!(err.0.status, UnprocessableEntity);
-            assert_eq!(err.0.message, "Invalid body");
+            assert_eq!(err.status(), UnprocessableEntity);
+            assert_eq!(err.message(), "Invalid body");
         }
     }
 }

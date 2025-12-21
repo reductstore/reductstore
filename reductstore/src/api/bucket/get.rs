@@ -92,6 +92,6 @@ mod tests {
             .await
             .err()
             .unwrap();
-        assert_eq!(err.0.status(), ErrorCode::Forbidden);
+        assert_eq!(err.status(), ErrorCode::Forbidden);
     }
 }

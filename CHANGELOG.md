@@ -28,6 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Handle encode error in folder keeper, [PR-1055](https://github.com/reductstore/reductstore/pull/1055)
 - Fix writing folder cache and read only mode, [PR-1056](https://github.com/reductstore/reductstore/pull/1056)
 - Enforce timeouts on async read/write locks to avoid deadlocks, [PR-1070](https://github.com/reductstore/reductstore/pull/1070)
+- Avoid error-level log spam when a passive node serves 503 during lock wait, [PR-1071](https://github.com/reductstore/reductstore/pull/1071)
 
 ## 1.17.8 - 2025-12-15
 

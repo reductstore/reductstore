@@ -116,6 +116,6 @@ mod tests {
         )
         .await;
         let err = result.unwrap_err();
-        assert_eq!(err.0.status, ErrorCode::NotFound);
+        assert_eq!(err.status(), ErrorCode::NotFound);
     }
 }
