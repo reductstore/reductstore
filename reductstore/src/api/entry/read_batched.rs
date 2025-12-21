@@ -444,7 +444,7 @@ mod tests {
         .unwrap();
 
         assert!(
-            err.0.status() == ErrorCode::NotFound || err.0.status() == ErrorCode::Conflict,
+            err.status() == ErrorCode::NotFound || err.status() == ErrorCode::Conflict,
             "should return NotFound if the entry is deleted"
         );
     }

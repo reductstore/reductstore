@@ -81,6 +81,6 @@ mod tests {
             .err()
             .unwrap();
 
-        assert_eq!(err.0.status, NotFound, "Should handle errors");
+        assert_eq!(err.status(), NotFound, "Should handle errors");
     }
 }

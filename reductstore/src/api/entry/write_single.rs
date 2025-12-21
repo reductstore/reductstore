@@ -93,7 +93,7 @@ pub(super) async fn write_record(
                     Ok(chunk) => Ok(Some(chunk)),
                     Err(e) => {
                         error!("Error while receiving data: {}", e);
-                        let err = HttpError::from(e).0;
+                        let err = HttpError::from(e).into_inner();
                         send_chunk!(Err(err.clone()));
                         return Err(err.into());
                     }

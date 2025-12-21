@@ -672,8 +672,9 @@ mod tests {
         .err()
         .unwrap();
 
+        let err: ReductError = err.into();
         assert_eq!(
-            err.0,
+            err,
             bad_request!("Content is shorter than expected: no more data to read")
         );
     }
@@ -702,8 +703,9 @@ mod tests {
         .err()
         .unwrap();
 
+        let err: ReductError = err.into();
         assert_eq!(
-            err.0,
+            err,
             bad_request!("Error while receiving data chunk: [BadRequest] Simulated chunk error")
         );
     }

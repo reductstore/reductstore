@@ -18,7 +18,7 @@ pub(super) async fn alive(
             components.storage.info()?;
             Ok(StatusCode::OK)
         }
-        Err(e) if e.0.status == ErrorCode::ServiceUnavailable => Ok(StatusCode::OK),
+        Err(e) if e.status() == ErrorCode::ServiceUnavailable => Ok(StatusCode::OK),
         Err(e) => Err(e),
     }
 }

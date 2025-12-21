@@ -86,6 +86,6 @@ mod tests {
             ("entry_name".to_string(), "entry-1".to_string()),
         ]);
         let result = remove_entry(State(keeper.clone()), Path(path), headers.clone()).await;
-        assert_eq!(result.unwrap_err().0.status(), ErrorCode::NotFound);
+        assert_eq!(result.unwrap_err().status(), ErrorCode::NotFound);
     }
 }

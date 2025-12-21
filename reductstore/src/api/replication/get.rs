@@ -83,6 +83,6 @@ mod tests {
             .err()
             .unwrap();
 
-        assert_eq!(err.0.status, NotFound);
+        assert_eq!(err.status(), NotFound);
     }
 }

@@ -51,11 +51,40 @@ pub async fn print_statuses(
         None => "",
     };
 
-    if response.status().as_u16() >= 500 {
+    let skip_error_log = response
+        .headers()
+        .get("x-reduct-log-hint")
+        .is_some_and(|v| v == "skip-error-log");
+
+    if response.status().is_server_error() && !skip_error_log {
         error!("{} [{}] {}", msg, response.status(), err_msg);
     } else {
         debug!("{} [{}] {}", msg, response.status(), err_msg);
     }
 
     Ok(response)
+}
+
+#[cfg(test)]
+mod tests {
+    use axum::http::HeaderMap;
+    use axum::http::HeaderValue;
+
+    #[test]
+    fn detects_skip_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "x-reduct-log-hint",
+            HeaderValue::from_static("skip-error-log"),
+        );
+        assert!(headers
+            .get("x-reduct-log-hint")
+            .is_some_and(|v| v == "skip-error-log"));
+
+        let mut headers = HeaderMap::new();
+        headers.insert("x-reduct-log-hint", HeaderValue::from_static("keep"));
+        assert!(!headers
+            .get("x-reduct-log-hint")
+            .is_some_and(|v| v == "skip-error-log"));
+    }
 }
