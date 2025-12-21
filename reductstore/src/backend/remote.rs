@@ -705,6 +705,13 @@ mod tests {
         }
     }
 
+    #[test]
+    fn test_lock_error_maps_to_io_error() {
+        let io_err = RemoteBackend::lock_error(reduct_base::internal_server_error!("oops"));
+        assert_eq!(io_err.kind(), std::io::ErrorKind::Other);
+        assert!(io_err.to_string().contains("oops"));
+    }
+
     mock! {
         pub RemoteStorageConnector {}
 

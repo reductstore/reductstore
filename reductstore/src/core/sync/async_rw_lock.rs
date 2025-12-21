@@ -93,4 +93,20 @@ mod tests {
         assert!(res.is_err());
         handle.await.unwrap();
     }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn test_async_rwlock_try_and_blocking() {
+        let lock = AsyncRwLock::new(5);
+        assert_eq!(*lock.try_read().unwrap(), 5);
+        {
+            let mut guard = lock.try_write().unwrap();
+            *guard = 8;
+        }
+
+        let mut guard = lock.blocking_write().unwrap();
+        *guard = 11;
+        drop(guard);
+
+        assert_eq!(*lock.blocking_read().unwrap(), 11);
+    }
 }

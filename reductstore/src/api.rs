@@ -97,7 +97,13 @@ impl StateKeeper {
     }
 
     async fn wait_components(&self) -> Result<Arc<Components>, HttpError> {
-        if !self.lock_file.is_locked().await {
+        let locked = self
+            .lock_file
+            .is_locked()
+            .await
+            .map_err(|err| HttpError::new(ErrorCode::InternalServerError, &err.to_string()))?;
+
+        if !locked {
             return Err(
                 service_unavailable!("The server is starting up, please try again later").into(),
             );
@@ -616,16 +622,16 @@ mod tests {
 
     #[async_trait::async_trait]
     impl LockFile for WaitingLockFile {
-        async fn is_locked(&self) -> bool {
-            false
+        async fn is_locked(&self) -> Result<bool, ReductError> {
+            Ok(false)
         }
 
-        async fn is_failed(&self) -> bool {
-            false
+        async fn is_failed(&self) -> Result<bool, ReductError> {
+            Ok(false)
         }
 
-        async fn is_waiting(&self) -> bool {
-            true
+        async fn is_waiting(&self) -> Result<bool, ReductError> {
+            Ok(true)
         }
 
         fn release(&self) {}
@@ -635,16 +641,16 @@ mod tests {
 
     #[async_trait::async_trait]
     impl LockFile for NotReadyLockFile {
-        async fn is_locked(&self) -> bool {
-            true
+        async fn is_locked(&self) -> Result<bool, ReductError> {
+            Ok(true)
         }
 
-        async fn is_failed(&self) -> bool {
-            false
+        async fn is_failed(&self) -> Result<bool, ReductError> {
+            Ok(false)
         }
 
-        async fn is_waiting(&self) -> bool {
-            true
+        async fn is_waiting(&self) -> Result<bool, ReductError> {
+            Ok(true)
         }
 
         fn release(&self) {}

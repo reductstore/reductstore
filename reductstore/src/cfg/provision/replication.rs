@@ -28,23 +28,14 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 }
             }
 
-            match repo.get_mut_replication(&name) {
-                Ok(replication) => {
-                    replication.set_provisioned(true);
+            let replication = repo.get_mut_replication(&name)?;
+            replication.set_provisioned(true);
 
-                    info!(
-                        "Provisioned replication '{}' with {:?}",
-                        name,
-                        replication.masked_settings()
-                    );
-                }
-                Err(err) => {
-                    error!(
-                        "Failed to mark replication '{}' as provisioned: {}",
-                        name, err
-                    );
-                }
-            }
+            info!(
+                "Provisioned replication '{}' with {:?}",
+                name,
+                replication.masked_settings()
+            );
         }
         Ok(repo)
     }

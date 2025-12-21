@@ -805,7 +805,7 @@ mod tests {
             parser.cfg.role = role;
             let lock_file = parser.build_lock_file().unwrap();
 
-            assert_eq!(lock_file.is_locked().await, expected_lock);
+            assert_eq!(lock_file.is_locked().await.unwrap(), expected_lock);
         }
     }
 

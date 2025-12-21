@@ -32,20 +32,16 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             if let Err(err) = is_generated {
                 error!("Failed to provision token '{}': {}", name, err);
             } else {
-                match token_repo.get_mut_token(&name) {
-                    Ok(update_token) => {
-                        update_token.clone_from(token);
-                        update_token.is_provisioned = true;
+                let update_token = token_repo
+                    .get_mut_token(&name)
+                    .expect("Token must exist after generation");
+                update_token.clone_from(token);
+                update_token.is_provisioned = true;
 
-                        info!(
-                            "Provisioned token '{}' with {:?}",
-                            update_token.name, update_token.permissions
-                        );
-                    }
-                    Err(err) => {
-                        error!("Failed to fetch token '{}' after generation: {}", name, err);
-                    }
-                }
+                info!(
+                    "Provisioned token '{}' with {:?}",
+                    update_token.name, update_token.permissions
+                );
             }
         }
         token_repo

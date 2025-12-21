@@ -76,4 +76,35 @@ mod tests {
         let read_guard = lock.read().unwrap();
         assert_eq!(*read_guard, 10);
     }
+
+    #[test]
+    fn test_rwlock_try_and_blocking() {
+        let lock = RwLock::new(5);
+        assert_eq!(*lock.try_read().unwrap(), 5);
+        {
+            let mut guard = lock.try_write().unwrap();
+            *guard = 7;
+        }
+
+        assert_eq!(*lock.read_blocking(), 7);
+        let mut guard = lock.write_blocking();
+        *guard = 9;
+        drop(guard);
+        assert_eq!(*lock.read_blocking(), 9);
+    }
+
+    #[test]
+    fn test_rwlock_timeout_panics() {
+        let lock = Arc::new(RwLock::new(5));
+        let write_guard = lock.write_blocking();
+
+        let lock_clone = Arc::clone(&lock);
+        let handle = thread::spawn(move || {
+            let _ = lock_clone.read();
+        });
+
+        thread::sleep(Duration::from_millis(1200));
+        drop(write_guard);
+        assert!(handle.join().is_err());
+    }
 }

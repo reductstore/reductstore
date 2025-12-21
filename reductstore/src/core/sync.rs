@@ -25,3 +25,19 @@ pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(60);
 
 #[cfg(test)]
 pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(1);
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    #[should_panic(expected = "boom")]
+    fn test_lock_timeout_error_panics() {
+        lock_timeout_error("boom");
+    }
+
+    #[test]
+    fn test_test_timeout_value() {
+        assert_eq!(RWLOCK_TIMEOUT, Duration::from_secs(1));
+    }
+}

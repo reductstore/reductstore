@@ -31,9 +31,9 @@ pub enum FailureAction {
 
 #[async_trait]
 pub trait LockFile {
-    async fn is_locked(&self) -> bool;
-    async fn is_failed(&self) -> bool;
-    async fn is_waiting(&self) -> bool;
+    async fn is_locked(&self) -> Result<bool, ReductError>;
+    async fn is_failed(&self) -> Result<bool, ReductError>;
+    async fn is_waiting(&self) -> Result<bool, ReductError>;
     fn release(&self);
 }
 pub type BoxedLockFile = Box<dyn LockFile + Sync + Send>;
@@ -87,123 +87,125 @@ impl LockFileBuilder {
             state,
         });
 
-        // for future use, we generate a unique id for the lock file
-        let unique_id = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
         let handle = tokio::spawn(async move {
-            // Main loop to acquire and maintain the lock
-            loop {
-                // Check if the file is already locked
-                let time_start = std::time::Instant::now();
-                while FILE_CACHE.try_exists(&file_path).unwrap_or(true)
-                    && !stop_flag.load(std::sync::atomic::Ordering::SeqCst)
-                {
-                    if let Some(last_modified) = FILE_CACHE
-                        .get_stats(&file_path)
-                        .unwrap_or(None)
-                        .and_then(|meta| meta.modified_time)
-                    {
-                        // elapsed can fail if system time is changed backwards, so we default to 0 duration
-                        if last_modified.elapsed().unwrap_or(Duration::from_secs(0)) > cfg.ttl
-                            && cfg.ttl.as_secs() > 0
-                        {
-                            warn!(
-                                "Lock file is stale (last modified over {:?} ago), removing: {:?}",
-                                last_modified.elapsed().unwrap(),
-                                file_path
-                            );
-                            let _ = FILE_CACHE.remove(&file_path);
-                            break;
-                        }
-                    }
-
-                    if time_start.elapsed() > cfg.timeout && cfg.timeout.as_secs() > 0 {
-                        match cfg.failure_action {
-                            FailureAction::Proceed => {
-                                warn!(
-                                    "Timeout while waiting for lock file, proceeding anyway: {:?}",
-                                    file_path
-                                );
-                                break;
-                            }
-                            FailureAction::Abort => {
-                                error!(
-                                    "Timeout while waiting for lock file, aborting: {:?}",
-                                    file_path
-                                );
-                                if let Ok(mut state) = state_clone.write().await {
-                                    *state = State::Failed;
-                                } else {
-                                    error!("Failed to set lock file state to Failed");
-                                }
-                                return;
-                            }
-                        }
-                    }
-                    tokio::time::sleep(cfg.polling_interval).await;
-                }
-
-                // Final check to see if we should stop
-                if stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
-                    break;
-                }
-
-                match role {
-                    InstanceRole::Primary => {
-                        // Primary instance acquires the lock immediately
-                        info!("Primary instance acquiring lock file: {:?}", file_path);
-                        if let Ok(mut state) = state_clone.write().await {
-                            *state = State::Locked;
-                        } else {
-                            error!("Failed to set lock file state to Locked");
-                            return;
-                        }
-                    }
-                    InstanceRole::Secondary => {
-                        // Secondary instance waits a bit to ensure the primary has created the lock file
-                        tokio::time::sleep(cfg.polling_interval * 3).await;
-                        if !FILE_CACHE.try_exists(&file_path).unwrap() {
-                            info!("Secondary instance acquiring lock file: {:?}", file_path);
-                            if let Ok(mut state) = state_clone.write().await {
-                                *state = State::Locked;
-                            } else {
-                                error!("Failed to set lock file state to Locked");
-                                return;
-                            }
-                        } else {
-                            info!("Secondary instance could not acquire lock file (already held by primary): {:?}", file_path);
-                        }
-                    }
-                    InstanceRole::Replica | InstanceRole::Standalone => {}
-                }
-
-                if matches!(state_clone.read().await, Ok(state) if *state == State::Locked) {
-                    break;
-                }
-            }
-
-            // we need to sync the file to ensure that the lock is visible to other processes
-            // With Blue/Green deployments, the file system is shared between instances
-            // so we need to keep the file locked as long as the process is running and recreate it if it gets deleted
-            // during deployments
-            while !stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
-                let recreate = async {
-                    let rc = FILE_CACHE.write_or_create(&file_path, Start(0))?;
-                    let file = rc.upgrade()?;
-                    file.write()?.write_all(unique_id.as_bytes())?;
-                    file.write()?.sync_all()?;
-                    Ok::<(), ReductError>(())
-                };
-
-                if let Err(e) = recreate.await {
-                    error!("Error while recreating lock file: {}", e);
-                }
-
-                tokio::time::sleep(cfg.polling_interval).await;
+            if let Err(err) =
+                Self::run_lock_task(file_path, cfg, role, state_clone, stop_flag).await
+            {
+                error!("Lock file task failed: {}", err);
             }
         });
 
         this.handle = handle;
         this
+    }
+
+    async fn run_lock_task(
+        file_path: PathBuf,
+        cfg: crate::cfg::lock_file::LockFileConfig,
+        role: InstanceRole,
+        state: Arc<AsyncRwLock<State>>,
+        stop_flag: Arc<AtomicBool>,
+    ) -> Result<(), ReductError> {
+        // for future use, we generate a unique id for the lock file
+        let unique_id = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
+
+        // Main loop to acquire and maintain the lock
+        loop {
+            // Check if the file is already locked
+            let time_start = std::time::Instant::now();
+            while FILE_CACHE.try_exists(&file_path).unwrap_or(true)
+                && !stop_flag.load(std::sync::atomic::Ordering::SeqCst)
+            {
+                if let Some(last_modified) = FILE_CACHE
+                    .get_stats(&file_path)?
+                    .and_then(|meta| meta.modified_time)
+                {
+                    // elapsed can fail if system time is changed backwards, so we default to 0 duration
+                    if last_modified.elapsed().unwrap_or(Duration::from_secs(0)) > cfg.ttl
+                        && cfg.ttl.as_secs() > 0
+                    {
+                        warn!(
+                            "Lock file is stale (last modified over {:?} ago), removing: {:?}",
+                            last_modified.elapsed().unwrap(),
+                            file_path
+                        );
+                        let _ = FILE_CACHE.remove(&file_path);
+                        break;
+                    }
+                }
+
+                if time_start.elapsed() > cfg.timeout && cfg.timeout.as_secs() > 0 {
+                    match cfg.failure_action {
+                        FailureAction::Proceed => {
+                            warn!(
+                                "Timeout while waiting for lock file, proceeding anyway: {:?}",
+                                file_path
+                            );
+                            break;
+                        }
+                        FailureAction::Abort => {
+                            error!(
+                                "Timeout while waiting for lock file, aborting: {:?}",
+                                file_path
+                            );
+                            *state.write().await? = State::Failed;
+                            return Ok(());
+                        }
+                    }
+                }
+                tokio::time::sleep(cfg.polling_interval).await;
+            }
+
+            // Final check to see if we should stop
+            if stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
+                break;
+            }
+
+            match role {
+                InstanceRole::Primary => {
+                    // Primary instance acquires the lock immediately
+                    info!("Primary instance acquiring lock file: {:?}", file_path);
+                    *state.write().await? = State::Locked;
+                }
+                InstanceRole::Secondary => {
+                    // Secondary instance waits a bit to ensure the primary has created the lock file
+                    tokio::time::sleep(cfg.polling_interval * 3).await;
+                    if !FILE_CACHE.try_exists(&file_path)? {
+                        info!("Secondary instance acquiring lock file: {:?}", file_path);
+                        *state.write().await? = State::Locked;
+                    } else {
+                        info!("Secondary instance could not acquire lock file (already held by primary): {:?}", file_path);
+                    }
+                }
+                InstanceRole::Replica | InstanceRole::Standalone => {}
+            }
+
+            if *state.read().await? == State::Locked {
+                break;
+            }
+        }
+
+        // we need to sync the file to ensure that the lock is visible to other processes
+        // With Blue/Green deployments, the file system is shared between instances
+        // so we need to keep the file locked as long as the process is running and recreate it if it gets deleted
+        // during deployments
+        while !stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
+            let recreate = async {
+                let rc = FILE_CACHE.write_or_create(&file_path, Start(0))?;
+                let file = rc.upgrade()?;
+                file.write()?.write_all(unique_id.as_bytes())?;
+                file.write()?.sync_all()?;
+                Ok::<(), ReductError>(())
+            };
+
+            if let Err(e) = recreate.await {
+                error!("Error while recreating lock file: {}", e);
+            }
+
+            tokio::time::sleep(cfg.polling_interval).await;
+        }
+
+        Ok(())
     }
 }
 
@@ -211,16 +213,16 @@ impl ImplLockFile {}
 
 #[async_trait]
 impl LockFile for ImplLockFile {
-    async fn is_locked(&self) -> bool {
-        matches!(self.state.read().await, Ok(state) if *state == State::Locked)
+    async fn is_locked(&self) -> Result<bool, ReductError> {
+        Ok(*self.state.read().await? == State::Locked)
     }
 
-    async fn is_failed(&self) -> bool {
-        matches!(self.state.read().await, Ok(state) if *state == State::Failed)
+    async fn is_failed(&self) -> Result<bool, ReductError> {
+        Ok(*self.state.read().await? == State::Failed)
     }
 
-    async fn is_waiting(&self) -> bool {
-        matches!(self.state.read().await, Ok(state) if *state == State::Waiting)
+    async fn is_waiting(&self) -> Result<bool, ReductError> {
+        Ok(*self.state.read().await? == State::Waiting)
     }
 
     fn release(&self) {
@@ -247,16 +249,16 @@ struct NoopLockFile;
 
 #[async_trait]
 impl LockFile for NoopLockFile {
-    async fn is_locked(&self) -> bool {
-        true
+    async fn is_locked(&self) -> Result<bool, ReductError> {
+        Ok(true)
     }
 
-    async fn is_failed(&self) -> bool {
-        false
+    async fn is_failed(&self) -> Result<bool, ReductError> {
+        Ok(false)
     }
 
-    async fn is_waiting(&self) -> bool {
-        false
+    async fn is_waiting(&self) -> Result<bool, ReductError> {
+        Ok(false)
     }
 
     fn release(&self) {}
@@ -280,15 +282,15 @@ mod tests {
         let lock_file = LockFileBuilder::new(lock_file_path.clone()).build();
 
         // Initially, the lock file should be in waiting state
-        assert!(lock_file.is_waiting().await);
+        assert!(lock_file.is_waiting().await.unwrap());
 
         // Wait for the lock to be acquired
         let acquired = wait_new_state(&lock_file).await;
 
         assert!(acquired.is_ok(), "Lock file was not acquired in time");
-        assert!(lock_file.is_locked().await);
-        assert!(!lock_file.is_failed().await);
-        assert!(!lock_file.is_waiting().await);
+        assert!(lock_file.is_locked().await.unwrap());
+        assert!(!lock_file.is_failed().await.unwrap());
+        assert!(!lock_file.is_waiting().await.unwrap());
 
         assert_ne!(
             fs::read_to_string(&lock_file_path).unwrap(),
@@ -319,14 +321,14 @@ mod tests {
         fs::write(&lock_file_path, "dummy").unwrap();
 
         // Initially, the lock file should be in waiting state
-        assert!(lock_file.is_waiting().await);
+        assert!(lock_file.is_waiting().await.unwrap());
 
         // Wait for the lock to fail due to timeout
         let failed = wait_new_state(&lock_file).await;
         assert!(failed.is_ok(), "Lock file did not fail in time");
-        assert!(lock_file.is_failed().await);
-        assert!(!lock_file.is_locked().await);
-        assert!(!lock_file.is_waiting().await);
+        assert!(lock_file.is_failed().await.unwrap());
+        assert!(!lock_file.is_locked().await.unwrap());
+        assert!(!lock_file.is_waiting().await.unwrap());
 
         assert_eq!(
             fs::read_to_string(&lock_file_path).unwrap(),
@@ -352,14 +354,14 @@ mod tests {
         fs::write(&lock_file_path, "dummy").unwrap();
 
         // Initially, the lock file should be in waiting state
-        assert!(lock_file.is_waiting().await);
+        assert!(lock_file.is_waiting().await.unwrap());
 
         // Wait for the lock to be acquired despite the timeout
         let acquired = wait_new_state(&lock_file).await;
         assert!(acquired.is_ok(), "Lock file was not acquired in time");
-        assert!(lock_file.is_locked().await);
-        assert!(!lock_file.is_failed().await);
-        assert!(!lock_file.is_waiting().await);
+        assert!(lock_file.is_locked().await.unwrap());
+        assert!(!lock_file.is_failed().await.unwrap());
+        assert!(!lock_file.is_waiting().await.unwrap());
 
         assert_ne!(
             fs::read_to_string(&lock_file_path).unwrap(),
@@ -397,7 +399,7 @@ mod tests {
             primary_acquired.is_ok(),
             "Primary lock file was acquired in time"
         );
-        assert!(primary_lock_file.is_locked().await);
+        assert!(primary_lock_file.is_locked().await.unwrap());
 
         // Wait for the secondary to acquire the lock
         let secondary_acquired = wait_new_state(&secondary_lock_file).await;
@@ -405,7 +407,7 @@ mod tests {
             secondary_acquired.is_err(),
             "Secondary lock file was not acquired in time"
         );
-        assert!(secondary_lock_file.is_waiting().await);
+        assert!(secondary_lock_file.is_waiting().await.unwrap());
 
         // Release primary lock
         primary_lock_file.release();
@@ -414,7 +416,7 @@ mod tests {
             secondary_acquired.is_ok(),
             "Secondary lock file was acquired in time"
         );
-        assert!(secondary_lock_file.is_locked().await);
+        assert!(secondary_lock_file.is_locked().await.unwrap());
 
         secondary_lock_file.release();
     }
@@ -435,18 +437,18 @@ mod tests {
         fs::write(&lock_file_path, "dummy").unwrap();
 
         // Initially, the lock file should be in waiting state
-        assert!(lock_file.is_waiting().await);
+        assert!(lock_file.is_waiting().await.unwrap());
 
         // Wait for the lock to be acquired after TTL expires
         let acquired = wait_new_state(&lock_file).await;
         assert!(acquired.is_ok(), "Lock file was not acquired in time");
-        assert!(lock_file.is_locked().await);
+        assert!(lock_file.is_locked().await.unwrap());
     }
 
     async fn wait_new_state(lock_file: &BoxedLockFile) -> Result<(), Elapsed> {
         let acquired = timeout(Duration::from_secs(10), async {
             loop {
-                if !lock_file.is_waiting().await {
+                if !lock_file.is_waiting().await.unwrap() {
                     break;
                 }
                 tokio::time::sleep(Duration::from_millis(100)).await;
@@ -473,7 +475,7 @@ mod tests {
         let acquired = wait_new_state(&lock_file).await;
 
         assert!(acquired.is_ok(), "Lock file was not acquired in time");
-        assert!(lock_file.is_locked().await);
+        assert!(lock_file.is_locked().await.unwrap());
 
         // Drop the lock file, which should trigger release
         drop(lock_file);
