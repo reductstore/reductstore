@@ -504,6 +504,23 @@ mod tests {
             );
             assert!(StdError::source(&err).is_none());
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_skip_log_header() {
+            let err = HttpError::new(ErrorCode::ServiceUnavailable, "starting up")
+                .with_log_hint(LogHint::SkipErrorLogging);
+
+            assert_eq!(err.inner().message, "starting up");
+
+            let resp = err.into_response();
+            assert_eq!(
+                resp.headers()
+                    .get("x-reduct-log-hint")
+                    .map(HeaderValue::as_bytes),
+                Some("skip-error-log".as_bytes())
+            );
+        }
     }
 
     mod axum_builder {
