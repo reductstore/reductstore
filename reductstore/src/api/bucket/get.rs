@@ -73,6 +73,7 @@ mod tests {
             .token_repo
             .write()
             .await
+            .unwrap()
             .generate_token(
                 "test-token",
                 Permissions {

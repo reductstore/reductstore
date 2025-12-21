@@ -93,6 +93,7 @@ mockall = "0.13.1"
 rstest = "0.26.1"
 serial_test = "3.2.0"
 test-log = "0.2.19"
+tower = "0.5.2"
 reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls", "blocking"] }
 
 [package.metadata.docs.rs]

@@ -55,11 +55,11 @@ async fn launch_server() {
     let cfg = parser.cfg.clone();
     let (tx, rx) = mpsc::channel(1);
     tokio::spawn(async move {
-        while config_lock.is_waiting().await {
+        while config_lock.is_waiting().await.unwrap_or(false) {
             tokio::time::sleep(Duration::from_millis(100)).await;
         }
 
-        if config_lock.is_failed().await {
+        if config_lock.is_failed().await.unwrap_or(true) {
             panic!("Another ReductStore instance is holding the lock. Exiting.");
         }
 

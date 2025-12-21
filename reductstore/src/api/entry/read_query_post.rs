@@ -46,6 +46,7 @@ pub(super) async fn read_query_json(
 mod tests {
     use super::*;
     use crate::api::tests::{headers, keeper, path_to_entry_1};
+    use crate::core::sync::AsyncRwLock as RwLock;
     use crate::core::weak::Weak;
     use crate::storage::query::QueryRx;
     use reduct_base::error::{ErrorCode, ReductError};
@@ -53,7 +54,6 @@ mod tests {
     use rstest::*;
     use serde_json::json;
     use std::sync::Arc;
-    use tokio::sync::RwLock;
 
     #[rstest]
     #[tokio::test]
@@ -74,7 +74,7 @@ mod tests {
             .unwrap()
             .upgrade()
             .unwrap();
-        let mut rx = rx.write().await;
+        let mut rx = rx.write().await.unwrap();
         assert!(rx.recv().await.unwrap().is_ok());
         assert_eq!(
             rx.recv().await.unwrap().err().unwrap().status,
@@ -104,7 +104,7 @@ mod tests {
             .unwrap()
             .upgrade()
             .unwrap();
-        let mut rx = rx.write().await;
+        let mut rx = rx.write().await.unwrap();
         assert_eq!(
             rx.recv().await.unwrap().err().unwrap().to_string(),
             "[NotFound] Reference 'NOT_EXIST' not found"

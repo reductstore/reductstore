@@ -2878,6 +2878,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "tokio",
+ "tower",
  "tower-http",
  "url",
  "uuid",

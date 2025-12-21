@@ -20,7 +20,7 @@ pub(super) async fn list_replications(
         .await?;
     let mut list = ReplicationListAxum::default();
 
-    for x in components.replication_repo.read().await.replications() {
+    for x in components.replication_repo.read().await?.replications() {
         list.0.replications.push((x).clone());
     }
 

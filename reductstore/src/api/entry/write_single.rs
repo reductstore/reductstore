@@ -109,7 +109,7 @@ pub(super) async fn write_record(
             components
                 .replication_repo
                 .write()
-                .await
+                .await?
                 .notify(TransactionNotification {
                     bucket: bucket.clone(),
                     entry: path.get("entry_name").unwrap().to_string(),
@@ -179,6 +179,7 @@ mod tests {
             .replication_repo
             .read()
             .await
+            .unwrap()
             .get_info("api-test")
             .unwrap();
         assert_eq!(info.info.pending_records, 1);

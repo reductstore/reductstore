@@ -104,7 +104,7 @@ async fn notify_replication_write(
     components
         .replication_repo
         .write()
-        .await
+        .await?
         .notify(TransactionNotification {
             bucket: bucket.to_string(),
             entry: entry_name.to_string(),
@@ -454,6 +454,7 @@ mod tests {
             .replication_repo
             .read()
             .await
+            .unwrap()
             .get_info("api-test")
             .unwrap();
         assert_eq!(info.info.pending_records, 3);

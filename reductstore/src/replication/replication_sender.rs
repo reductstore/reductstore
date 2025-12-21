@@ -2,9 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
 use crate::replication::remote_bucket::RemoteBucket;
-use crate::replication::transaction_log::TransactionLog;
+use crate::replication::transaction_log::TransactionLogMap;
 use crate::replication::Transaction;
 use crate::storage::engine::StorageEngine;
 use log::{debug, error};
@@ -12,14 +11,13 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::cmp::PartialEq;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
 
 /// Internal worker for replication to process a sole iteration of the replication loop.
 pub(super) struct ReplicationSender {
-    log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
+    log_map: TransactionLogMap,
     storage: Arc<StorageEngine>,
     settings: ReplicationSettings,
     io_config: IoConfig,
@@ -38,7 +36,7 @@ pub(super) enum SyncState {
 
 impl ReplicationSender {
     pub fn new(
-        log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
+        log_map: TransactionLogMap,
         storage: Arc<StorageEngine>,
         config: ReplicationSettings,
         io_config: IoConfig,
@@ -59,15 +57,16 @@ impl ReplicationSender {
         let mut counter = Vec::new();
 
         for entry_name in entries.iter() {
-            let transactions = {
-                // we can't hold the lock while we read the log
-                if let Some(log) = self.log_map.read()?.get(entry_name) {
-                    log.write()?.front(self.io_config.batch_max_records)
-                } else {
-                    // log might be removed
-                    continue;
+            let log = {
+                // Take only the handle, drop the map lock before touching the log itself.
+                let map = self.log_map.read()?;
+                match map.get(entry_name) {
+                    Some(log) => Arc::clone(log),
+                    None => continue, // log might be removed
                 }
             };
+
+            let transactions = log.write()?.front(self.io_config.batch_max_records);
             match transactions {
                 Ok(vec) => {
                     if vec.is_empty() {
@@ -135,14 +134,7 @@ impl ReplicationSender {
                     }
 
                     // remove processed transactions from the log
-                    if let Err(err) = self
-                        .log_map
-                        .read()?
-                        .get(entry_name)
-                        .unwrap()
-                        .write()?
-                        .pop_front(processed_transactions)
-                    {
+                    if let Err(err) = log.write()?.pop_front(processed_transactions) {
                         error!("Failed to remove transaction: {:?}", err);
                     }
                 }
@@ -218,7 +210,10 @@ mod tests {
     use crate::backend::Backend;
     use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
+    use crate::core::sync::RwLock;
     use crate::replication::remote_bucket::ErrorRecordMap;
+    use crate::replication::transaction_log::TransactionLog;
+    use crate::replication::transaction_log::TransactionLogRef;
     use crate::replication::Transaction;
     use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
     use bytes::Bytes;
@@ -229,6 +224,7 @@ mod tests {
     use reduct_base::msg::replication_api::ReplicationMode;
     use reduct_base::{conflict, not_found, timeout, too_early, Labels};
     use rstest::*;
+    use std::collections::HashMap;
     use std::thread::spawn;
 
     mock! {
@@ -515,6 +511,47 @@ mod tests {
         );
     }
 
+    #[rstest]
+    fn test_skips_removed_log_entry(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
+        let cfg = Cfg {
+            data_path: tempfile::tempdir().unwrap().keep(),
+            ..Default::default()
+        };
+
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(cfg.data_path.clone())
+                .try_build()
+                .unwrap(),
+        );
+
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build();
+        let storage = Arc::new(storage);
+
+        let log_map: TransactionLogMap = Arc::new(RwLock::new(HashMap::new()));
+        log_map.write().unwrap().insert(
+            "gone".to_string(),
+            Arc::new(RwLock::new(
+                TransactionLog::try_load_or_create(&storage.data_path().join("gone.log"), 10)
+                    .unwrap(),
+            )),
+        );
+        log_map.write().unwrap().remove("gone");
+
+        let mut sender = ReplicationSender::new(
+            log_map,
+            storage,
+            settings,
+            IoConfig::default(),
+            Box::new(remote_bucket),
+        );
+
+        assert_eq!(sender.run().unwrap(), SyncState::NoTransactions);
+    }
+
     fn imitate_write_record(sender: &ReplicationSender, transaction: &Transaction, size: u64) {
         sender
             .log_map
@@ -576,11 +613,11 @@ mod tests {
             .build();
         let storage = Arc::new(storage);
 
-        let log_map = Arc::new(RwLock::new(HashMap::new()));
-        let log = RwLock::new(
+        let log_map: TransactionLogMap = Arc::new(RwLock::new(HashMap::new()));
+        let log: TransactionLogRef = Arc::new(RwLock::new(
             TransactionLog::try_load_or_create(&storage.data_path().join("test.log"), 1000)
                 .unwrap(),
-        );
+        ));
 
         log_map.write().unwrap().insert("test".to_string(), log);
 

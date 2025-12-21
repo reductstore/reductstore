@@ -199,15 +199,17 @@ mod tests {
         let base_path = path.join("bucket");
         FILE_CACHE.create_dir_all(&base_path).unwrap();
 
-        let list_path = base_path.join(".folder");
-        let file = FILE_CACHE
-            .write_or_create(&list_path, SeekFrom::Start(0))
-            .unwrap()
-            .upgrade()
-            .unwrap();
-        let mut lock = file.write().unwrap();
-        lock.write_all(b"invalid-folder-map").unwrap();
-        lock.flush().unwrap();
+        {
+            let list_path = base_path.join(".folder");
+            let file = FILE_CACHE
+                .write_or_create(&list_path, SeekFrom::Start(0))
+                .unwrap()
+                .upgrade()
+                .unwrap();
+            let mut lock = file.write().unwrap();
+            lock.write_all(b"invalid-folder-map").unwrap();
+            lock.flush().unwrap()
+        };
 
         let cfg = Cfg::default();
         let keeper = FolderKeeper::new(base_path.clone(), &cfg);

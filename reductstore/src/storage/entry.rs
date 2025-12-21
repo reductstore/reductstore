@@ -10,7 +10,7 @@ mod write_record;
 
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::core::thread_pool::{
     group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
 };
@@ -31,7 +31,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
-use tokio::sync::RwLock as AsyncRwLock;
 
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
@@ -234,6 +233,7 @@ impl Entry {
     }
 
     pub(crate) fn mark_deleting(&self) -> Result<(), ReductError> {
+        self.ensure_not_deleting()?;
         *self.status.write()? = ResourceStatus::Deleting;
         Ok(())
     }
@@ -332,7 +332,7 @@ impl Entry {
             }
 
             // check if query task is finished and receiver is empty or closed
-            if let Ok(rx) = handle.rx.try_read() {
+            if let Some(rx) = handle.rx.try_read() {
                 if rx.is_empty() && handle.query_task_handle.is_finished() {
                     debug!("Query {}/{} finished", entry_path, id);
                     return false;
@@ -370,11 +370,28 @@ impl Entry {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use reduct_base::Labels;
+    use reduct_base::{conflict, Labels};
     use rstest::{fixture, rstest};
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile;
+
+    mod deleting {
+        use super::*;
+
+        #[rstest]
+        fn mark_deleting_returns_conflict_when_already_deleting(entry: Entry) {
+            entry.mark_deleting().unwrap();
+            assert_eq!(
+                entry.mark_deleting(),
+                Err(conflict!(
+                    "Entry '{}' in bucket '{}' is being deleted",
+                    entry.name(),
+                    entry.bucket_name()
+                ))
+            );
+        }
+    }
 
     mod restore {
         use super::*;
@@ -458,7 +475,7 @@ mod tests {
             {
                 let (rx, _) = entry.get_query_receiver(id).unwrap();
                 let rx = rx.upgrade_and_unwrap();
-                let mut rx = rx.blocking_write();
+                let mut rx = rx.blocking_write().unwrap();
 
                 {
                     let reader = rx.blocking_recv().unwrap().unwrap();
@@ -503,7 +520,7 @@ mod tests {
             {
                 let (rx, _) = entry.get_query_receiver(id).unwrap();
                 let rx = rx.upgrade_and_unwrap();
-                let mut rx = rx.blocking_write();
+                let mut rx = rx.blocking_write().unwrap();
                 let reader = rx.blocking_recv().unwrap().unwrap();
                 assert_eq!(reader.meta().timestamp(), 1000000);
                 assert_eq!(
@@ -516,7 +533,7 @@ mod tests {
             {
                 let (rx, _) = entry.get_query_receiver(id).unwrap();
                 let rc = rx.upgrade_and_unwrap();
-                let mut rx = rc.blocking_write();
+                let mut rx = rc.blocking_write().unwrap();
                 let reader = loop {
                     let reader = rx.blocking_recv().unwrap();
                     match reader {

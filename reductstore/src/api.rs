@@ -18,6 +18,7 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::cfg::Cfg;
 use crate::core::cache::Cache;
+use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::lock_file::BoxedLockFile;
 use crate::replication::ManageReplications;
@@ -44,32 +45,32 @@ use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use token::create_token_api_routes;
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 use tower_http::cors::{Any, CorsLayer};
 
 pub struct Components {
     pub storage: Arc<StorageEngine>,
     pub(crate) auth: TokenAuthorization,
-    pub(crate) token_repo: RwLock<Box<dyn ManageTokens + Send + Sync>>,
+    pub(crate) token_repo: AsyncRwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub(crate) console: Box<dyn ManageStaticAsset + Send + Sync>,
-    pub(crate) replication_repo: RwLock<Box<dyn ManageReplications + Send + Sync>>,
+    pub(crate) replication_repo: AsyncRwLock<Box<dyn ManageReplications + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
-    pub(crate) query_link_cache: RwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
+    pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
 
     pub(crate) cfg: Cfg,
 }
 
 pub struct StateKeeper {
-    rx: RwLock<Receiver<Components>>,
-    components: RwLock<Option<Arc<Components>>>,
+    rx: AsyncRwLock<Receiver<Components>>,
+    components: AsyncRwLock<Option<Arc<Components>>>,
     lock_file: Arc<BoxedLockFile>,
 }
 
 impl StateKeeper {
     pub fn new(lock_file: Arc<BoxedLockFile>, rx: Receiver<Components>) -> Self {
         StateKeeper {
-            rx: RwLock::new(rx),
-            components: RwLock::new(None),
+            rx: AsyncRwLock::new(rx),
+            components: AsyncRwLock::new(None),
             lock_file,
         }
     }
@@ -88,7 +89,7 @@ impl StateKeeper {
             headers
                 .get("Authorization")
                 .map(|header| header.to_str().unwrap_or("")),
-            components.token_repo.write().await.as_mut(),
+            components.token_repo.write().await?.as_mut(),
             policy,
         )?;
 
@@ -96,39 +97,52 @@ impl StateKeeper {
     }
 
     async fn wait_components(&self) -> Result<Arc<Components>, HttpError> {
-        if !self.lock_file.is_locked().await {
+        let locked = self
+            .lock_file
+            .is_locked()
+            .await
+            .map_err(|err| HttpError::new(ErrorCode::InternalServerError, &err.to_string()))?;
+
+        if !locked {
             return Err(
                 service_unavailable!("The server is starting up, please try again later").into(),
             );
         }
 
         {
-            let mut lock = self.components.write().await;
+            let mut lock = self.components.write().await?;
             // it's important to check again after acquiring the lock and lock must be exclusive to avoid race conditions
             if lock.is_none() {
                 // check if there are components in the channel
-                if self.rx.read().await.capacity() != 0 {
+                if self.rx.read().await?.capacity() != 0 {
                     return Err(service_unavailable!(
                         "The server is starting up, please try again later"
                     )
                     .into());
                 }
 
-                let components = self
-                    .rx
-                    .write()
-                    .await
-                    .recv()
-                    .await
-                    .expect("Failed to receive components from channel");
+                let components = match self.rx.write().await?.recv().await {
+                    Some(cmp) => cmp,
+                    None => {
+                        return Err(service_unavailable!(
+                            "The server is starting up, please try again later"
+                        )
+                        .into())
+                    }
+                };
                 // ensure background services (like replication) start after HTTP is ready to accept connections
                 // however, in tests we want to control when these services start
                 #[cfg(not(test))]
-                components.replication_repo.write().await.start();
+                components.replication_repo.write().await?.start();
                 lock.replace(Arc::new(components));
             }
         }
-        Ok(self.components.read().await.as_ref().unwrap().clone())
+        let components = self.components.read().await?;
+        let components = components
+            .as_ref()
+            .cloned()
+            .expect("Components must be initialized before use");
+        Ok(components)
     }
 
     pub async fn get_anonymous(&self) -> Result<Arc<Components>, HttpError> {
@@ -391,11 +405,110 @@ mod tests {
                 HeaderValue::from_static("Unparsable message")
             );
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_negative_status() {
+            let error = HttpError::new(ErrorCode::Unknown, "neg");
+            let resp = error.into_response();
+            assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_from_axum_error() {
+            let axum_err = axum::Error::new(std::io::Error::new(std::io::ErrorKind::Other, "boom"));
+            let http_err: HttpError = axum_err.into();
+            let resp = http_err.into_response();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_from_serde_json() {
+            let err = serde_json::from_str::<serde_json::Value>("not json")
+                .err()
+                .unwrap();
+            let http_err: HttpError = err.into();
+            assert_eq!(http_err.0.status, ErrorCode::UnprocessableEntity);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_display_debug_and_source() {
+            let err = HttpError::new(ErrorCode::BadRequest, "boom");
+            let debug = format!("{err:?}");
+            assert!(debug.contains("BadRequest"));
+            assert_eq!(
+                format!("{err}"),
+                "ReductError { status: BadRequest, message: \"boom\" }"
+            );
+            assert!(StdError::source(&err).is_none());
+        }
+    }
+
+    mod axum_builder {
+        use super::*;
+        use axum::http::{Request, StatusCode};
+        use tower::ServiceExt;
+
+        #[test]
+        #[should_panic(expected = "Components and Cfg must be set before building the app")]
+        fn test_builder_panics_without_state() {
+            let _ = AxumAppBuilder::new().build();
+        }
+
+        #[test]
+        fn test_configure_cors_any() {
+            let _ = AxumAppBuilder::configure_cors(&vec!["*".into()]);
+        }
+
+        #[test]
+        fn test_configure_cors_specific() {
+            let _ = AxumAppBuilder::configure_cors(&vec!["http://example.com".into()]);
+        }
+
+        #[test]
+        fn test_configure_cors_ignores_invalid_origins() {
+            let _ = AxumAppBuilder::configure_cors(&vec![
+                "not-a-uri".into(),
+                "http://example.com".into(),
+            ]);
+        }
+
+        #[tokio::test]
+        async fn test_builder_builds_and_redirects_to_ui() {
+            let cfg = Cfg {
+                data_path: tempfile::tempdir().unwrap().keep(),
+                api_token: "init-token".to_string(),
+                api_base_path: "/".to_string(),
+                ..Cfg::default()
+            };
+
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            tx.send(test_components(cfg.clone())).await.unwrap();
+
+            let app = AxumAppBuilder::new()
+                .with_cfg(cfg)
+                .with_lock_file(Arc::new(LockFileBuilder::noop()))
+                .with_component_receiver(rx)
+                .build();
+
+            let response = app
+                .oneshot(Request::get("/").body(Body::empty()).unwrap())
+                .await
+                .unwrap();
+
+            assert_eq!(response.status(), StatusCode::FOUND);
+            assert_eq!(response.headers().get("location").unwrap(), "/ui/");
+        }
     }
 
     mod state_keeper {
         use super::*;
-        use crate::auth::policy::FullAccessPolicy;
+        use crate::auth::policy::{
+            AuthenticatedPolicy, FullAccessPolicy, ReadAccessPolicy, WriteAccessPolicy,
+        };
         use rstest::rstest;
         use tokio;
 
@@ -419,6 +532,66 @@ mod tests {
                 .await
                 .unwrap();
             assert!(components.storage.info().is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_with_permissions_authenticated_policy(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let keeper = keeper.await;
+            let components = keeper
+                .get_with_permissions(&headers, AuthenticatedPolicy {})
+                .await
+                .unwrap();
+            assert!(components.storage.info().is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_with_permissions_read_policy(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let keeper = keeper.await;
+            let components = keeper
+                .get_with_permissions(&headers, ReadAccessPolicy { bucket: "bucket-1" })
+                .await
+                .unwrap();
+            assert!(components.storage.info().is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_with_permissions_write_policy(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let keeper = keeper.await;
+            let components = keeper
+                .get_with_permissions(&headers, WriteAccessPolicy { bucket: "bucket-1" })
+                .await
+                .unwrap();
+            assert!(components.storage.info().is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_with_permissions_missing_header(#[future] keeper: Arc<StateKeeper>) {
+            let keeper = keeper.await;
+            let headers = HeaderMap::new();
+
+            let err = keeper
+                .get_with_permissions(&headers, AuthenticatedPolicy {})
+                .await
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err,
+                HttpError::new(ErrorCode::Unauthorized, "No bearer token in request header")
+            );
         }
 
         #[rstest]
@@ -462,6 +635,139 @@ mod tests {
             let err = not_ready_keeper.await.get_anonymous().await.err().unwrap();
             let err: BaseHttpError = err.into();
             assert_eq!(err.status(), ErrorCode::ServiceUnavailable);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_wait_components_lockfile_err() {
+            struct ErrLockFile;
+            #[async_trait::async_trait]
+            impl LockFile for ErrLockFile {
+                async fn is_locked(&self) -> Result<bool, ReductError> {
+                    Err(ReductError::internal_server_error("boom"))
+                }
+                async fn is_failed(&self) -> Result<bool, ReductError> {
+                    Err(ReductError::internal_server_error("boom"))
+                }
+                async fn is_waiting(&self) -> Result<bool, ReductError> {
+                    Err(ReductError::internal_server_error("boom"))
+                }
+                fn release(&self) {}
+            }
+
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            let err_lock: Arc<BoxedLockFile> = Arc::new(Box::new(ErrLockFile));
+            // Cover all lock methods for coverage completeness.
+            assert!(err_lock.is_failed().await.is_err());
+            assert!(err_lock.is_waiting().await.is_err());
+            let keeper = Arc::new(StateKeeper::new(err_lock, rx));
+            let err = keeper.get_anonymous().await.err().unwrap();
+            let err: BaseHttpError = err.into();
+            assert_eq!(err.status(), ErrorCode::InternalServerError);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_wait_components_channel_closed() {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            drop(_tx);
+
+            let keeper = Arc::new(StateKeeper::new(
+                Arc::new(Box::new(NotReadyLockFile {})),
+                rx,
+            ));
+            let err = keeper.get_anonymous().await.err().unwrap();
+            let err: BaseHttpError = err.into();
+            assert_eq!(err.status(), ErrorCode::ServiceUnavailable);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_wait_components_recv_none_when_channel_closed_and_capacity_zero() {
+            let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
+            drop(_tx);
+            rx.close();
+
+            let keeper = Arc::new(StateKeeper::new(
+                Arc::new(Box::new(NotReadyLockFile {})),
+                rx,
+            ));
+
+            let err = keeper.get_anonymous().await.err().unwrap();
+            let err: BaseHttpError = err.into();
+            assert_eq!(err.status(), ErrorCode::ServiceUnavailable);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_wait_components_unlocked() {
+            struct UnlockedLockFile;
+            #[async_trait::async_trait]
+            impl LockFile for UnlockedLockFile {
+                async fn is_locked(&self) -> Result<bool, ReductError> {
+                    Ok(false)
+                }
+                async fn is_failed(&self) -> Result<bool, ReductError> {
+                    Ok(false)
+                }
+                async fn is_waiting(&self) -> Result<bool, ReductError> {
+                    Ok(true)
+                }
+                fn release(&self) {}
+            }
+
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            let unlocked: Arc<BoxedLockFile> = Arc::new(Box::new(UnlockedLockFile));
+            assert!(!unlocked.is_failed().await.unwrap());
+            assert!(unlocked.is_waiting().await.unwrap());
+            let keeper = Arc::new(StateKeeper::new(unlocked, rx));
+            let err = keeper.get_anonymous().await.err().unwrap();
+            let err: BaseHttpError = err.into();
+            assert_eq!(err.status(), ErrorCode::ServiceUnavailable);
+        }
+    }
+
+    fn test_components(cfg: Cfg) -> Components {
+        let cfg_for_storage = cfg.clone();
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(cfg_for_storage.data_path.clone())
+                .try_build()
+                .unwrap(),
+        );
+
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg_for_storage.data_path.clone())
+                .with_cfg(cfg_for_storage.clone())
+                .build(),
+        );
+
+        let token_repo = TokenRepositoryBuilder::new(cfg.clone()).build(cfg.data_path.clone());
+        let replication_repo = ReplicationRepoBuilder::new(cfg.clone()).build(Arc::clone(&storage));
+
+        #[cfg(feature = "web-console")]
+        let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
+        #[cfg(not(feature = "web-console"))]
+        let console_bytes: &[u8] = &[];
+
+        Components {
+            storage,
+            auth: TokenAuthorization::new("init-token"),
+            token_repo: AsyncRwLock::new(token_repo),
+            console: create_asset_manager(console_bytes),
+            replication_repo: AsyncRwLock::new(replication_repo),
+            ext_repo: create_ext_repository(
+                None,
+                vec![],
+                ExtSettings::builder()
+                    .server_info(ServerInfo::default())
+                    .build(),
+                cfg.io_conf.clone(),
+            )
+            .expect("Failed to create extension repo"),
+            cfg,
+            query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
         }
     }
 
@@ -545,9 +851,9 @@ mod tests {
         let components = Components {
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("inti-token"),
-            token_repo: RwLock::new(token_repo),
+            token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: RwLock::new(replication_repo),
+            replication_repo: AsyncRwLock::new(replication_repo),
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -558,7 +864,7 @@ mod tests {
             )
             .expect("Failed to create extension repo"),
             cfg: Cfg::default(),
-            query_link_cache: RwLock::new(Cache::new(8, Duration::from_secs(60))),
+            query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
         };
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
@@ -609,16 +915,16 @@ mod tests {
 
     #[async_trait::async_trait]
     impl LockFile for WaitingLockFile {
-        async fn is_locked(&self) -> bool {
-            false
+        async fn is_locked(&self) -> Result<bool, ReductError> {
+            Ok(false)
         }
 
-        async fn is_failed(&self) -> bool {
-            false
+        async fn is_failed(&self) -> Result<bool, ReductError> {
+            Ok(false)
         }
 
-        async fn is_waiting(&self) -> bool {
-            true
+        async fn is_waiting(&self) -> Result<bool, ReductError> {
+            Ok(true)
         }
 
         fn release(&self) {}
@@ -628,16 +934,16 @@ mod tests {
 
     #[async_trait::async_trait]
     impl LockFile for NotReadyLockFile {
-        async fn is_locked(&self) -> bool {
-            true
+        async fn is_locked(&self) -> Result<bool, ReductError> {
+            Ok(true)
         }
 
-        async fn is_failed(&self) -> bool {
-            false
+        async fn is_failed(&self) -> Result<bool, ReductError> {
+            Ok(false)
         }
 
-        async fn is_waiting(&self) -> bool {
-            true
+        async fn is_waiting(&self) -> Result<bool, ReductError> {
+            Ok(true)
         }
 
         fn release(&self) {}

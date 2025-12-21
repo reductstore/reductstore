@@ -9,7 +9,7 @@ use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
-use crate::replication::transaction_log::TransactionLog;
+use crate::replication::transaction_log::{TransactionLog, TransactionLogMap, TransactionLogRef};
 use crate::replication::TransactionNotification;
 use crate::storage::engine::StorageEngine;
 use log::{error, info};
@@ -38,7 +38,7 @@ pub struct ReplicationTask {
     system_options: ReplicationSystemOptions,
     io_config: IoConfig,
     filter_map: HashMap<String, TransactionFilter>,
-    log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
+    log_map: TransactionLogMap,
     storage: Arc<StorageEngine>,
     hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
     stop_flag: Arc<AtomicBool>,
@@ -101,7 +101,8 @@ impl ReplicationTask {
         remote_bucket: Box<dyn RemoteBucket + Send + Sync>,
         storage: Arc<StorageEngine>,
     ) -> Self {
-        let log_map = Arc::new(RwLock::new(HashMap::<String, RwLock<TransactionLog>>::new()));
+        let log_map: TransactionLogMap =
+            Arc::new(RwLock::new(HashMap::<String, TransactionLogRef>::new()));
         let hourly_diagnostics = Arc::new(RwLock::new(DiagnosticsCounter::new(
             Duration::from_secs(3600),
         )));
@@ -180,7 +181,7 @@ impl ReplicationTask {
                         }
                     };
 
-                    logs.insert(entry.name, RwLock::new(log));
+                    logs.insert(entry.name, Arc::new(RwLock::new(log)));
                 }
 
                 Ok::<(), ReductError>(())
@@ -264,7 +265,7 @@ impl ReplicationTask {
                                 thr_log_map
                                     .write()
                                     .unwrap()
-                                    .insert(entry_name, RwLock::new(log));
+                                    .insert(entry_name, Arc::new(RwLock::new(log)));
                             }
 
                             Err(err) => {
@@ -326,24 +327,26 @@ impl ReplicationTask {
 
         // NOTE: very important not to lock the log_map for too long
         // because it is used by the replication thread
-        if !self.log_map.read()?.contains_key(&entry_name) {
+        let exists = { self.log_map.read()?.contains_key(&entry_name) };
+        if !exists {
+            let log = TransactionLog::try_load_or_create(
+                &Self::build_path_to_transaction_log(
+                    self.storage.data_path(),
+                    &self.settings.src_bucket,
+                    &entry_name,
+                    &self.name,
+                ),
+                self.system_options.transaction_log_size,
+            )?;
             let mut map = self.log_map.write()?;
-            map.insert(
-                entry_name.clone(),
-                RwLock::new(TransactionLog::try_load_or_create(
-                    &Self::build_path_to_transaction_log(
-                        self.storage.data_path(),
-                        &self.settings.src_bucket,
-                        &entry_name,
-                        &self.name,
-                    ),
-                    self.system_options.transaction_log_size,
-                )?),
-            );
+            map.entry(entry_name.clone())
+                .or_insert_with(|| Arc::new(RwLock::new(log)));
         };
 
-        let log_map = self.log_map.read()?;
-        let log = log_map.get(&entry_name).unwrap();
+        let log = {
+            let map = self.log_map.read()?;
+            Arc::clone(map.get(&entry_name).unwrap())
+        };
 
         for notification in notifications.into_iter() {
             if let Some(_) = log.write()?.push_back(notification.event)? {
@@ -827,6 +830,7 @@ mod tests {
     }
 
     #[rstest]
+    #[should_panic] // because RWLock timeout is exceeded and test thread panics
     fn test_sender_error_handling(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,

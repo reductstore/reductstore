@@ -17,7 +17,7 @@ pub(super) async fn list_tokens(
     let components = keeper
         .get_with_permissions(&headers, FullAccessPolicy {})
         .await?;
-    let mut token_repo = components.token_repo.write().await;
+    let mut token_repo = components.token_repo.write().await?;
 
     let mut list = TokenListAxum::default();
     for token in token_repo.get_token_list()?.iter() {

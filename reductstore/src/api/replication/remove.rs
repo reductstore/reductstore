@@ -19,7 +19,7 @@ pub(super) async fn remove_replication(
     components
         .replication_repo
         .write()
-        .await
+        .await?
         .remove_replication(&replication_name)?;
     Ok(())
 }
@@ -47,6 +47,7 @@ mod tests {
             .replication_repo
             .write()
             .await
+            .unwrap()
             .create_replication("test", settings)
             .unwrap();
 
@@ -63,6 +64,7 @@ mod tests {
                 .replication_repo
                 .read()
                 .await
+                .unwrap()
                 .get_replication("test")
                 .err()
                 .unwrap()

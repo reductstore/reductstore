@@ -5,6 +5,7 @@ mod create;
 mod load;
 
 use crate::asset::asset_manager::ManageStaticAsset;
+use crate::core::sync::AsyncRwLock;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{Parser, Value};
 use crate::storage::query::QueryRx;
@@ -22,7 +23,6 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::RwLock as AsyncRwLock;
 
 type IoExtRef = Arc<AsyncRwLock<Box<dyn IoExtension + Send + Sync>>>;
 type IoExtMap = HashMap<String, IoExtRef>;
@@ -106,7 +106,7 @@ impl ManageExtensions for ExtRepository {
         entry_name: &str,
         mut query_request: QueryEntry,
     ) -> Result<(), ReductError> {
-        let mut query_map = self.query_map.write().await;
+        let mut query_map = self.query_map.write().await?;
 
         let ext_directive = {
             if let Some(when) = &query_request.when {
@@ -166,7 +166,7 @@ impl ManageExtensions for ExtRepository {
                     query_request.ext = Some(serde_json::Value::Object(ext_query.clone()));
                     let (processor, commiter) =
                         ext.write()
-                            .await
+                            .await?
                             .query(bucket_name, entry_name, &query_request)?;
                     Some((processor, commiter, condition))
                 } else {
@@ -230,16 +230,20 @@ impl ManageExtensions for ExtRepository {
     ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
         // TODO: The code is awkward, we need to refactor it
         // unfortunately stream! macro does not work here and crashes compiler
-        let mut lock = self.query_map.write().await;
+        let mut lock = match self.query_map.write().await {
+            Ok(lock) => lock,
+            Err(err) => return Some(vec![Err(err)]),
+        };
         let query = match lock.get_mut(&query_id) {
             Some(query) => query,
             None => {
-                let result = query_rx
-                    .write()
-                    .await
-                    .recv()
-                    .await
-                    .map(|record| record.map(|r| vec![Box::new(r) as BoxedReadRecord]));
+                let result = match query_rx.write().await {
+                    Ok(mut rx) => rx
+                        .recv()
+                        .await
+                        .map(|record| record.map(|r| vec![Box::new(r) as BoxedReadRecord])),
+                    Err(err) => return Some(vec![Err(err)]),
+                };
 
                 if result.is_none() {
                     // If no record is available, return a no content error to finish the query.
@@ -295,7 +299,10 @@ impl ManageExtensions for ExtRepository {
             }
         }
 
-        let Some(record) = query_rx.write().await.recv().await else {
+        let Some(record) = (match query_rx.write().await {
+            Ok(mut rx) => rx.recv().await,
+            Err(err) => return Some(vec![Err(err)]),
+        }) else {
             return Some(vec![Err(no_content!("No content"))]);
         };
 
@@ -374,7 +381,7 @@ pub(super) mod tests {
                 .await
                 .is_ok());
 
-            let query_map = mocked_ext_repo.query_map.read().await;
+            let query_map = mocked_ext_repo.query_map.read().await.unwrap();
             assert_eq!(
                 query_map.len(),
                 0,
@@ -408,7 +415,7 @@ pub(super) mod tests {
                 .await
                 .is_ok());
 
-            let query_map = mocked_ext_repo.query_map.read().await;
+            let query_map = mocked_ext_repo.query_map.read().await.unwrap();
             assert_eq!(
                 query_map.len(),
                 1,
@@ -443,7 +450,7 @@ pub(super) mod tests {
                 .is_ok(),);
 
             // make sure we parsed condition correctly
-            let mut query_map = mocked_ext_repo.query_map.write().await;
+            let mut query_map = mocked_ext_repo.query_map.write().await.unwrap();
             assert_eq!(query_map.len(), 1, "Query should be registered");
             let query_context = query_map.get_mut(&1).unwrap();
             assert_eq!(
@@ -491,7 +498,7 @@ pub(super) mod tests {
                 .is_ok());
 
             {
-                let query_map = mocked_ext_repo.query_map.read().await;
+                let query_map = mocked_ext_repo.query_map.read().await.unwrap();
                 assert_eq!(query_map.len(), 2);
             }
 
@@ -501,7 +508,7 @@ pub(super) mod tests {
                 .await
                 .is_ok());
             {
-                let query_map = mocked_ext_repo.query_map.read().await;
+                let query_map = mocked_ext_repo.query_map.read().await.unwrap();
                 assert_eq!(query_map.len(), 1,);
 
                 assert!(query_map.get(&1).is_none(), "Query 1 should be expired");

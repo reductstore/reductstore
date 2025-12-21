@@ -33,6 +33,7 @@
 - Integration runs: set `STORAGE_URL` to a live instance; use `misc/certificate.crt` only for local TLS checks.
 - When adding endpoints/storage behaviors, update Rust unit tests and pytest suites; avoid coverage regressions.
 - Use GitHub CLI for runnig and checking tests: `gh run list`, `gh run view <run-id> --log`.
+- Run coverage locally with ` cargo llvm-cov --workspace --lcov --output-path lcov.info`.
 
 ## Commit & Pull Request Guidelines
 

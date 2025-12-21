@@ -453,6 +453,7 @@ impl Bucket {
     }
 
     pub(crate) fn mark_deleting(&self) -> Result<(), ReductError> {
+        self.ensure_not_deleting()?;
         *self.status.write()? = ResourceStatus::Deleting;
         for entry in self.entries.read()?.values() {
             entry.mark_deleting()?;
@@ -637,6 +638,15 @@ mod tests {
         }
 
         #[rstest]
+        fn bucket_mark_deleting_returns_conflict_when_already_deleting(bucket: Bucket) {
+            bucket.mark_deleting().unwrap();
+            assert_eq!(
+                bucket.mark_deleting(),
+                Err(conflict!("Bucket 'test' is being deleted"))
+            );
+        }
+
+        #[rstest]
         #[tokio::test]
         async fn test_entry_deleting_rejects_operations(mut bucket: Bucket) {
             write(&mut bucket, "test-1", 1, b"test").await.unwrap();
@@ -647,6 +657,35 @@ mod tests {
             assert_eq!(
                 err,
                 conflict!("Entry 'test-1' in bucket 'test' is being deleted")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn entry_mark_deleting_returns_conflict_when_already_deleting(mut bucket: Bucket) {
+            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
+            let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
+            entry.mark_deleting().unwrap();
+            assert_eq!(
+                entry.mark_deleting(),
+                Err(conflict!(
+                    "Entry 'test-1' in bucket 'test' is being deleted"
+                ))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn remove_entry_returns_conflict_when_entry_is_being_deleted(mut bucket: Bucket) {
+            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
+            let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
+            entry.mark_deleting().unwrap();
+
+            assert_eq!(
+                bucket.remove_entry("test-1"),
+                Err(conflict!(
+                    "Entry 'test-1' in bucket 'test' is being deleted"
+                ))
             );
         }
     }

@@ -78,7 +78,7 @@ pub(super) async fn update_batched_records(
                 err_to_batched_header(&mut headers, time, &err);
             }
             Ok(new_labels) => {
-                let mut replication_repo = components.replication_repo.write().await;
+                let mut replication_repo = components.replication_repo.write().await?;
                 replication_repo.notify(TransactionNotification {
                     bucket: bucket_name.clone(),
                     entry: entry_name.clone(),
@@ -207,6 +207,7 @@ mod tests {
             .replication_repo
             .read()
             .await
+            .unwrap()
             .get_info("api-test")
             .unwrap();
         assert_eq!(info.info.pending_records, 1);

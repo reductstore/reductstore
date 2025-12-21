@@ -657,6 +657,22 @@ mod tests {
         }
 
         #[rstest]
+        fn remove_bucket_returns_conflict_when_bucket_is_already_deleting(storage: StorageEngine) {
+            storage
+                .create_bucket("test", BucketSettings::default())
+                .unwrap()
+                .upgrade_and_unwrap();
+
+            let bucket = storage.buckets.read().unwrap().get("test").unwrap().clone();
+            bucket.mark_deleting().unwrap();
+
+            assert_eq!(
+                storage.remove_bucket("test"),
+                Err(conflict!("Bucket 'test' is being deleted"))
+            );
+        }
+
+        #[rstest]
         fn test_remove_bucket_persistent(cfg: Cfg, storage: StorageEngine) {
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())

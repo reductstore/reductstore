@@ -5,6 +5,7 @@ use crate::api::links::derive_key_from_secret;
 use crate::api::utils::{make_headers_from_reader, RangeRecordStream, RecordStream};
 use crate::api::{Components, HttpError, StateKeeper};
 use crate::auth::policy::ReadAccessPolicy;
+use crate::core::sync::AsyncRwLock as RwLock;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::storage::query::QueryRx;
 use aes_siv::aead::{Aead, KeyInit};
@@ -27,7 +28,7 @@ use std::collections::{Bound, HashMap, VecDeque};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::ops::Bound::Included;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock};
+use tokio::sync::Mutex;
 
 // GET /api/v1/links/:file_name&ct=...&s=...&i=...&r=...
 pub(super) async fn get(
@@ -56,7 +57,7 @@ pub(super) async fn get(
         None
     };
 
-    let mut cache_lock = components.query_link_cache.write().await;
+    let mut cache_lock = components.query_link_cache.write().await?;
     let key = params.get("ct").unwrap();
 
     if let Some(cached) = cache_lock.get(key) {
@@ -115,7 +116,7 @@ async fn decrypt_query(
         .parse::<u64>()
         .map_err(|e| unprocessable_entity!("Invalid 'r' parameter: {}", e))?;
 
-    let mut token_repo = components.token_repo.write().await;
+    let mut token_repo = components.token_repo.write().await?;
     let token = if token_repo.get_token_list()?.is_empty() {
         // Authentication is disabled, use empty token
         ""
@@ -294,6 +295,7 @@ mod tests {
                 .query_link_cache
                 .write()
                 .await
+                .unwrap()
                 .get(
                     url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
                         .into_owned()
@@ -339,7 +341,7 @@ mod tests {
         let params = &url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
             .into_owned()
             .collect();
-        components.query_link_cache.write().await.insert(
+        components.query_link_cache.write().await.unwrap().insert(
             get_ct_from_params(params),
             Arc::new(Mutex::new(Box::new(mock))),
         );

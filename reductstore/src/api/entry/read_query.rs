@@ -80,7 +80,7 @@ mod tests {
 
         let (rx, _) = entry.get_query_receiver(query.id).unwrap();
         let rx = rx.upgrade().unwrap();
-        let mut rx = rx.write().await;
+        let mut rx = rx.write().await.unwrap();
         assert!(rx.recv().await.unwrap().is_ok());
 
         assert_eq!(

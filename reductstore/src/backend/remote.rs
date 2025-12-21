@@ -13,10 +13,11 @@ use crate::backend::remote::local_cache::LocalCache;
 #[cfg(feature = "s3-backend")]
 use crate::backend::remote::s3_connector::S3Connector;
 use crate::backend::{BackendType, ObjectMetadata, StorageBackend};
+use crate::core::sync::RwLock;
 use log::debug;
+use reduct_base::error::ReductError;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
 use std::time::Instant;
 
 #[allow(dead_code)]
@@ -51,7 +52,7 @@ struct LocalCacheEntry {
 pub(crate) struct RemoteBackend {
     cache_path: PathBuf,
     connector: Box<dyn RemoteStorageConnector + Send + Sync>,
-    local_cache: Mutex<LocalCache>,
+    local_cache: RwLock<LocalCache>,
     #[allow(dead_code)]
     backend_type: BackendType,
 }
@@ -60,7 +61,7 @@ impl RemoteBackend {
     #[allow(dead_code, unused_variables)]
     pub fn new(settings: RemoteBackendSettings) -> Self {
         let cache_path = settings.cache_path.clone();
-        let local_cache = Mutex::new(LocalCache::new(cache_path.clone(), settings.cache_size));
+        let local_cache = RwLock::new(LocalCache::new(cache_path.clone(), settings.cache_size));
         let backend_type = settings.backend_type.clone();
 
         let connector = match settings.backend_type {
@@ -89,7 +90,7 @@ impl RemoteBackend {
         cache_path: PathBuf,
         cache_size: u64,
     ) -> Self {
-        let local_cache = Mutex::new(LocalCache::new(cache_path.clone(), cache_size));
+        let local_cache = RwLock::new(LocalCache::new(cache_path.clone(), cache_size));
 
         RemoteBackend {
             cache_path,
@@ -97,6 +98,10 @@ impl RemoteBackend {
             local_cache,
             backend_type: BackendType::S3, // for tests we can assume S3
         }
+    }
+
+    fn lock_error(err: ReductError) -> io::Error {
+        io::Error::new(io::ErrorKind::Other, err.to_string())
     }
 }
 
@@ -114,7 +119,7 @@ impl StorageBackend for RemoteBackend {
         }
 
         let (from_key, to_key) = {
-            let cache = &mut self.local_cache.lock().unwrap();
+            let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
             cache.rename(from, to)?;
             let from_key = cache.build_key(from);
             let to_key = cache.build_key(to);
@@ -145,7 +150,7 @@ impl StorageBackend for RemoteBackend {
 
     fn remove(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
-            let cache = &mut self.local_cache.lock().unwrap();
+            let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
             cache.remove(&path)?;
             cache.build_key(path)
         };
@@ -156,7 +161,7 @@ impl StorageBackend for RemoteBackend {
 
     fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
-            let cache = &mut self.local_cache.lock().unwrap();
+            let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
             cache.remove_all(&path)?;
             cache.build_key(path)
         };
@@ -173,7 +178,7 @@ impl StorageBackend for RemoteBackend {
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
-            let cache = &self.local_cache.lock().unwrap();
+            let cache = self.local_cache.read().map_err(Self::lock_error)?;
             cache.create_dir_all(&path)?;
             cache.build_key(path)
         };
@@ -186,7 +191,7 @@ impl StorageBackend for RemoteBackend {
     }
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
-        let cache = &self.local_cache.lock().unwrap();
+        let cache = self.local_cache.read().map_err(Self::lock_error)?;
         let s3_key = cache.build_key(path);
 
         let mut paths = vec![];
@@ -212,7 +217,7 @@ impl StorageBackend for RemoteBackend {
     fn try_exists(&self, path: &Path) -> io::Result<bool> {
         // check cache first and then load from remote if not in cache
         let s3_key = {
-            let cache = &self.local_cache.lock().unwrap();
+            let cache = self.local_cache.read().map_err(Self::lock_error)?;
             if cache.try_exists(path)? {
                 return Ok(true);
             }
@@ -227,7 +232,7 @@ impl StorageBackend for RemoteBackend {
     fn upload(&self, full_path: &Path) -> io::Result<()> {
         // upload to remote
         let s3_key = {
-            let cache = &mut self.local_cache.lock().unwrap();
+            let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
             cache.register_file(full_path)?;
             cache.build_key(full_path)
         };
@@ -254,7 +259,7 @@ impl StorageBackend for RemoteBackend {
 
     fn download(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
-            let cache = &mut self.local_cache.lock().unwrap();
+            let cache = self.local_cache.read().map_err(Self::lock_error)?;
             if cache.try_exists(path)? {
                 return Ok(());
             }
@@ -273,7 +278,10 @@ impl StorageBackend for RemoteBackend {
         }
 
         self.connector.download_object(&s3_key, &full_path)?;
-        self.local_cache.lock().unwrap().register_file(&full_path)?;
+        self.local_cache
+            .write()
+            .map_err(Self::lock_error)?
+            .register_file(&full_path)?;
 
         debug!(
             "Downloaded S3 key: {} to local path: {:?} in {:?}",
@@ -286,7 +294,7 @@ impl StorageBackend for RemoteBackend {
 
     fn get_stats(&self, path: &Path) -> io::Result<Option<ObjectMetadata>> {
         let s3_key = {
-            let cache = &self.local_cache.lock().unwrap();
+            let cache = self.local_cache.read().map_err(Self::lock_error)?;
             cache.build_key(path)
         };
 
@@ -295,16 +303,23 @@ impl StorageBackend for RemoteBackend {
     }
 
     fn update_local_cache(&self, path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
-        self.local_cache.lock().unwrap().access_file(path)
+        self.local_cache
+            .write()
+            .map_err(Self::lock_error)?
+            .access_file(path)
     }
 
     fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
-        let mut cache = self.local_cache.lock().unwrap();
+        let mut cache = self
+            .local_cache
+            .write()
+            .map_err(Self::lock_error)
+            .expect("Failed to acquire local cache write lock");
         cache.invalidate_old_files()
     }
 
     fn remove_from_local_cache(&self, path: &Path) -> io::Result<()> {
-        let cache = &mut self.local_cache.lock().unwrap();
+        let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
         cache.remove(&path)
     }
 }
@@ -688,6 +703,13 @@ mod tests {
             assert_eq!(stats.size.unwrap(), 1234);
             assert_eq!(stats.modified_time, modified_time);
         }
+    }
+
+    #[test]
+    fn test_lock_error_maps_to_io_error() {
+        let io_err = RemoteBackend::lock_error(reduct_base::internal_server_error!("oops"));
+        assert_eq!(io_err.kind(), std::io::ErrorKind::Other);
+        assert!(io_err.to_string().contains("oops"));
     }
 
     mock! {
