@@ -370,11 +370,28 @@ impl Entry {
 mod tests {
     use super::*;
     use bytes::Bytes;
-    use reduct_base::Labels;
+    use reduct_base::{conflict, Labels};
     use rstest::{fixture, rstest};
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile;
+
+    mod deleting {
+        use super::*;
+
+        #[rstest]
+        fn mark_deleting_returns_conflict_when_already_deleting(entry: Entry) {
+            entry.mark_deleting().unwrap();
+            assert_eq!(
+                entry.mark_deleting(),
+                Err(conflict!(
+                    "Entry '{}' in bucket '{}' is being deleted",
+                    entry.name(),
+                    entry.bucket_name()
+                ))
+            );
+        }
+    }
 
     mod restore {
         use super::*;
