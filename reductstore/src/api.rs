@@ -121,13 +121,15 @@ impl StateKeeper {
                     .into());
                 }
 
-                let components = self
-                    .rx
-                    .write()
-                    .await?
-                    .recv()
-                    .await
-                    .expect("Failed to receive components from channel");
+                let components = match self.rx.write().await?.recv().await {
+                    Some(cmp) => cmp,
+                    None => {
+                        return Err(service_unavailable!(
+                            "The server is starting up, please try again later"
+                        )
+                        .into())
+                    }
+                };
                 // ensure background services (like replication) start after HTTP is ready to accept connections
                 // however, in tests we want to control when these services start
                 #[cfg(not(test))]
@@ -136,11 +138,10 @@ impl StateKeeper {
             }
         }
         let components = self.components.read().await?;
-        let components = components.as_ref().cloned().ok_or_else(|| {
-            HttpError(service_unavailable!(
-                "The server is starting up, please try again later"
-            ))
-        })?;
+        let components = components
+            .as_ref()
+            .cloned()
+            .expect("Components must be initialized before use");
         Ok(components)
     }
 
@@ -404,6 +405,66 @@ mod tests {
                 HeaderValue::from_static("Unparsable message")
             );
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_negative_status() {
+            let error = HttpError::new(ErrorCode::Unknown, "neg");
+            let resp = error.into_response();
+            assert_eq!(resp.status(), StatusCode::INTERNAL_SERVER_ERROR);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_from_axum_error() {
+            let axum_err = axum::Error::new(std::io::Error::new(std::io::ErrorKind::Other, "boom"));
+            let http_err: HttpError = axum_err.into();
+            let resp = http_err.into_response();
+            assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_from_serde_json() {
+            let err = serde_json::from_str::<serde_json::Value>("not json")
+                .err()
+                .unwrap();
+            let http_err: HttpError = err.into();
+            assert_eq!(http_err.0.status, ErrorCode::UnprocessableEntity);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_http_error_display_debug_and_source() {
+            let err = HttpError::new(ErrorCode::BadRequest, "boom");
+            let debug = format!("{err:?}");
+            assert!(debug.contains("BadRequest"));
+            assert_eq!(
+                format!("{err}"),
+                "ReductError { status: BadRequest, message: \"boom\" }"
+            );
+            assert!(StdError::source(&err).is_none());
+        }
+    }
+
+    mod axum_builder {
+        use super::*;
+
+        #[test]
+        #[should_panic(expected = "Components and Cfg must be set before building the app")]
+        fn test_builder_panics_without_state() {
+            let _ = AxumAppBuilder::new().build();
+        }
+
+        #[test]
+        fn test_configure_cors_any() {
+            let _ = AxumAppBuilder::configure_cors(&vec!["*".into()]);
+        }
+
+        #[test]
+        fn test_configure_cors_specific() {
+            let _ = AxumAppBuilder::configure_cors(&vec!["http://example.com".into()]);
+        }
     }
 
     mod state_keeper {
@@ -496,10 +557,57 @@ mod tests {
             }
 
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
-            let keeper = Arc::new(StateKeeper::new(Arc::new(Box::new(ErrLockFile)), rx));
+            let err_lock: Arc<BoxedLockFile> = Arc::new(Box::new(ErrLockFile));
+            // Cover all lock methods for coverage completeness.
+            assert!(err_lock.is_failed().await.is_err());
+            assert!(err_lock.is_waiting().await.is_err());
+            let keeper = Arc::new(StateKeeper::new(err_lock, rx));
             let err = keeper.get_anonymous().await.err().unwrap();
             let err: BaseHttpError = err.into();
             assert_eq!(err.status(), ErrorCode::InternalServerError);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_wait_components_channel_closed() {
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            drop(_tx);
+
+            let keeper = Arc::new(StateKeeper::new(
+                Arc::new(Box::new(NotReadyLockFile {})),
+                rx,
+            ));
+            let err = keeper.get_anonymous().await.err().unwrap();
+            let err: BaseHttpError = err.into();
+            assert_eq!(err.status(), ErrorCode::ServiceUnavailable);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_wait_components_unlocked() {
+            struct UnlockedLockFile;
+            #[async_trait::async_trait]
+            impl LockFile for UnlockedLockFile {
+                async fn is_locked(&self) -> Result<bool, ReductError> {
+                    Ok(false)
+                }
+                async fn is_failed(&self) -> Result<bool, ReductError> {
+                    Ok(false)
+                }
+                async fn is_waiting(&self) -> Result<bool, ReductError> {
+                    Ok(true)
+                }
+                fn release(&self) {}
+            }
+
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            let unlocked: Arc<BoxedLockFile> = Arc::new(Box::new(UnlockedLockFile));
+            assert!(!unlocked.is_failed().await.unwrap());
+            assert!(unlocked.is_waiting().await.unwrap());
+            let keeper = Arc::new(StateKeeper::new(unlocked, rx));
+            let err = keeper.get_anonymous().await.err().unwrap();
+            let err: BaseHttpError = err.into();
+            assert_eq!(err.status(), ErrorCode::ServiceUnavailable);
         }
     }
 
