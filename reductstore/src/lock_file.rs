@@ -445,6 +445,25 @@ mod tests {
         assert!(lock_file.is_locked().await.unwrap());
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_secondary_acquires_if_file_missing(lock_file_path: PathBuf) {
+        let lock_file = LockFileBuilder::new(lock_file_path.clone())
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(100),
+                    ..Default::default()
+                },
+                InstanceRole::Secondary,
+            ))
+            .build();
+
+        // Secondary should grab the lock if file does not exist after grace period.
+        let acquired = wait_new_state(&lock_file).await;
+        assert!(acquired.is_ok(), "Secondary failed to acquire lock");
+        assert!(lock_file.is_locked().await.unwrap());
+    }
+
     async fn wait_new_state(lock_file: &BoxedLockFile) -> Result<(), Elapsed> {
         let acquired = timeout(Duration::from_secs(10), async {
             loop {

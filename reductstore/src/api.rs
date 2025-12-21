@@ -476,6 +476,31 @@ mod tests {
             let err: BaseHttpError = err.into();
             assert_eq!(err.status(), ErrorCode::ServiceUnavailable);
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_wait_components_lockfile_err() {
+            struct ErrLockFile;
+            #[async_trait::async_trait]
+            impl LockFile for ErrLockFile {
+                async fn is_locked(&self) -> Result<bool, ReductError> {
+                    Err(ReductError::internal_server_error("boom"))
+                }
+                async fn is_failed(&self) -> Result<bool, ReductError> {
+                    Err(ReductError::internal_server_error("boom"))
+                }
+                async fn is_waiting(&self) -> Result<bool, ReductError> {
+                    Err(ReductError::internal_server_error("boom"))
+                }
+                fn release(&self) {}
+            }
+
+            let (_tx, rx) = tokio::sync::mpsc::channel(1);
+            let keeper = Arc::new(StateKeeper::new(Arc::new(Box::new(ErrLockFile)), rx));
+            let err = keeper.get_anonymous().await.err().unwrap();
+            let err: BaseHttpError = err.into();
+            assert_eq!(err.status(), ErrorCode::InternalServerError);
+        }
     }
 
     #[fixture]

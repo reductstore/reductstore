@@ -109,4 +109,15 @@ mod tests {
 
         assert_eq!(*lock.blocking_read().unwrap(), 11);
     }
+
+    #[tokio::test]
+    async fn test_async_rwlock_try_none() {
+        let lock = AsyncRwLock::new(5);
+        let _guard = lock.write().await.unwrap();
+        assert!(lock.try_read().is_none());
+
+        drop(_guard);
+        let _read = lock.read().await.unwrap();
+        assert!(lock.try_write().is_none());
+    }
 }

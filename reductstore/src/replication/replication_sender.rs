@@ -511,6 +511,47 @@ mod tests {
         );
     }
 
+    #[rstest]
+    fn test_skips_removed_log_entry(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
+        let cfg = Cfg {
+            data_path: tempfile::tempdir().unwrap().keep(),
+            ..Default::default()
+        };
+
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(cfg.data_path.clone())
+                .try_build()
+                .unwrap(),
+        );
+
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build();
+        let storage = Arc::new(storage);
+
+        let log_map: TransactionLogMap = Arc::new(RwLock::new(HashMap::new()));
+        log_map.write().unwrap().insert(
+            "gone".to_string(),
+            Arc::new(RwLock::new(
+                TransactionLog::try_load_or_create(&storage.data_path().join("gone.log"), 10)
+                    .unwrap(),
+            )),
+        );
+        log_map.write().unwrap().remove("gone");
+
+        let mut sender = ReplicationSender::new(
+            log_map,
+            storage,
+            settings,
+            IoConfig::default(),
+            Box::new(remote_bucket),
+        );
+
+        assert_eq!(sender.run().unwrap(), SyncState::NoTransactions);
+    }
+
     fn imitate_write_record(sender: &ReplicationSender, transaction: &Transaction, size: u64) {
         sender
             .log_map
