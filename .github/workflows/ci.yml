@@ -424,7 +424,9 @@ jobs:
   benchmark:
     name: Run benchmarks
     runs-on: ubuntu-latest
-    needs: build
+    needs:
+      - build
+      - unit_tests
     strategy:
       matrix:
         branch: [ "main", "latest" ]
