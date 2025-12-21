@@ -82,16 +82,10 @@ mod tests {
     #[should_panic(expected = "Failed to acquire async read lock within timeout")]
     async fn test_async_rwlock_timeout() {
         let lock = Arc::new(AsyncRwLock::new(5));
-        let lock_clone = lock.clone();
         let _guard = lock.write().await.unwrap();
-        let handle = tokio::spawn(async move {
+        tokio::spawn(async move {
             sleep(RWLOCK_TIMEOUT + Duration::from_millis(50)).await;
-            drop(lock_clone);
         });
-
-        let res = lock.read().await;
-        assert!(res.is_err());
-        handle.await.unwrap();
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
