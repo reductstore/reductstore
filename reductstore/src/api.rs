@@ -683,6 +683,23 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_wait_components_recv_none_when_channel_closed_and_capacity_zero() {
+            let (_tx, mut rx) = tokio::sync::mpsc::channel(1);
+            drop(_tx);
+            rx.close();
+
+            let keeper = Arc::new(StateKeeper::new(
+                Arc::new(Box::new(NotReadyLockFile {})),
+                rx,
+            ));
+
+            let err = keeper.get_anonymous().await.err().unwrap();
+            let err: BaseHttpError = err.into();
+            assert_eq!(err.status(), ErrorCode::ServiceUnavailable);
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_wait_components_unlocked() {
             struct UnlockedLockFile;
             #[async_trait::async_trait]
