@@ -464,6 +464,109 @@ mod tests {
         assert!(lock_file.is_locked().await.unwrap());
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_run_lock_task_secondary_timeout_proceed_does_not_acquire_when_file_exists(
+        lock_file_path: PathBuf,
+    ) {
+        fs::write(&lock_file_path, "dummy").unwrap();
+
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let state = Arc::new(AsyncRwLock::new(State::Waiting));
+
+        let cfg = LockFileConfig {
+            polling_interval: Duration::from_millis(10),
+            timeout: Duration::from_secs(1),
+            failure_action: FailureAction::Proceed,
+            ..Default::default()
+        };
+
+        let task = tokio::spawn(LockFileBuilder::run_lock_task(
+            lock_file_path.clone(),
+            cfg,
+            InstanceRole::Secondary,
+            Arc::clone(&state),
+            Arc::clone(&stop_flag),
+        ));
+
+        tokio::time::sleep(Duration::from_millis(1300)).await;
+        assert_eq!(*state.read().await.unwrap(), State::Waiting);
+
+        stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        timeout(Duration::from_secs(2), task)
+            .await
+            .expect("run_lock_task must stop")
+            .unwrap()
+            .unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_run_lock_task_replica_runs_once_and_stops(lock_file_path: PathBuf) {
+        let _ = fs::remove_file(&lock_file_path);
+        let _ = fs::remove_dir_all(&lock_file_path);
+
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let state = Arc::new(AsyncRwLock::new(State::Waiting));
+        let cfg = LockFileConfig {
+            polling_interval: Duration::from_millis(10),
+            timeout: Duration::from_secs(1),
+            ..Default::default()
+        };
+
+        let task = tokio::spawn(LockFileBuilder::run_lock_task(
+            lock_file_path,
+            cfg,
+            InstanceRole::Replica,
+            state,
+            Arc::clone(&stop_flag),
+        ));
+
+        tokio::task::yield_now().await;
+        stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+
+        timeout(Duration::from_secs(2), task)
+            .await
+            .expect("run_lock_task must stop")
+            .unwrap()
+            .unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_run_lock_task_recreate_error_when_path_is_directory(lock_file_path: PathBuf) {
+        let _ = fs::remove_file(&lock_file_path);
+        fs::create_dir(&lock_file_path).unwrap();
+
+        let stop_flag = Arc::new(AtomicBool::new(false));
+        let state = Arc::new(AsyncRwLock::new(State::Waiting));
+
+        let cfg = LockFileConfig {
+            polling_interval: Duration::from_millis(10),
+            timeout: Duration::from_secs(1),
+            failure_action: FailureAction::Proceed,
+            ..Default::default()
+        };
+
+        let task = tokio::spawn(LockFileBuilder::run_lock_task(
+            lock_file_path,
+            cfg,
+            InstanceRole::Primary,
+            Arc::clone(&state),
+            Arc::clone(&stop_flag),
+        ));
+
+        tokio::time::sleep(Duration::from_millis(1300)).await;
+        assert_eq!(*state.read().await.unwrap(), State::Locked);
+
+        stop_flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        timeout(Duration::from_secs(2), task)
+            .await
+            .expect("run_lock_task must stop")
+            .unwrap()
+            .unwrap();
+    }
+
     async fn wait_new_state(lock_file: &BoxedLockFile) -> Result<(), Elapsed> {
         let acquired = timeout(Duration::from_secs(10), async {
             loop {

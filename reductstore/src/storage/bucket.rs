@@ -453,6 +453,7 @@ impl Bucket {
     }
 
     pub(crate) fn mark_deleting(&self) -> Result<(), ReductError> {
+        self.ensure_not_deleting()?;
         *self.status.write()? = ResourceStatus::Deleting;
         for entry in self.entries.read()?.values() {
             entry.mark_deleting()?;

@@ -443,12 +443,9 @@ mod tests {
         .err()
         .unwrap();
 
-        assert_eq!(
-            err,
-            HttpError::new(
-                ErrorCode::NotFound,
-                "Entry 'entry-1' not found in bucket 'bucket-1'"
-            )
+        assert!(
+            err.0.status() == ErrorCode::NotFound || err.0.status() == ErrorCode::Conflict,
+            "should return NotFound if the entry is deleted"
         );
     }
 

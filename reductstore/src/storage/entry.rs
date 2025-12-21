@@ -233,6 +233,7 @@ impl Entry {
     }
 
     pub(crate) fn mark_deleting(&self) -> Result<(), ReductError> {
+        self.ensure_not_deleting()?;
         *self.status.write()? = ResourceStatus::Deleting;
         Ok(())
     }
