@@ -1,36 +1,35 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::sync::RWLOCK_TIMEOUT;
+use crate::core::fallback_runtime::FallbackRuntime;
+use crate::core::sync::{lock_timeout_error, RWLOCK_TIMEOUT};
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
-use tokio::runtime::Handle;
 use tokio::time::timeout;
 
 /// An async read-write lock with embedded timeouts.
 pub struct AsyncRwLock<T> {
     inner: tokio::sync::RwLock<T>,
+    rt: FallbackRuntime,
 }
 
 impl<T> AsyncRwLock<T> {
     pub fn new(data: T) -> Self {
         Self {
             inner: tokio::sync::RwLock::new(data),
+            rt: FallbackRuntime::new(),
         }
     }
 
     pub async fn read(&self) -> Result<tokio::sync::RwLockReadGuard<'_, T>, ReductError> {
         timeout(RWLOCK_TIMEOUT, self.inner.read())
             .await
-            .map_err(|_| internal_server_error!("Failed to acquire async read lock within timeout"))
+            .map_err(|_| lock_timeout_error("Failed to acquire async read lock within timeout"))
     }
 
     pub async fn write(&self) -> Result<tokio::sync::RwLockWriteGuard<'_, T>, ReductError> {
         timeout(RWLOCK_TIMEOUT, self.inner.write())
             .await
-            .map_err(|_| {
-                internal_server_error!("Failed to acquire async write lock within timeout")
-            })
+            .map_err(|_| lock_timeout_error("Failed to acquire async write lock within timeout"))
     }
 
     pub fn try_read(&self) -> Option<tokio::sync::RwLockReadGuard<'_, T>> {
@@ -42,11 +41,11 @@ impl<T> AsyncRwLock<T> {
     }
 
     pub fn blocking_read(&self) -> Result<tokio::sync::RwLockReadGuard<'_, T>, ReductError> {
-        Ok(Handle::current().block_on(self.inner.read()))
+        Ok(self.rt.block_on(self.inner.read()))
     }
 
     pub fn blocking_write(&self) -> Result<tokio::sync::RwLockWriteGuard<'_, T>, ReductError> {
-        Ok(Handle::current().block_on(self.inner.write()))
+        Ok(self.rt.block_on(self.inner.write()))
     }
 }
 
@@ -80,6 +79,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[should_panic(expected = "Failed to acquire async read lock within timeout")]
     async fn test_async_rwlock_timeout() {
         let lock = Arc::new(AsyncRwLock::new(5));
         let lock_clone = lock.clone();

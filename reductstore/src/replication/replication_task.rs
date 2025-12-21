@@ -830,6 +830,7 @@ mod tests {
     }
 
     #[rstest]
+    #[should_panic] // because RWLock timeout is exceeded and test thread panics
     fn test_sender_error_handling(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,

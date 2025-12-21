@@ -264,8 +264,7 @@ mod tests {
             block_manager.clone(),
         );
         assert!(rx.is_empty());
-        tokio::time::sleep(Duration::from_millis(500)).await;
-        assert!(handle.is_finished());
+        assert_eq!(timeout(Duration::from_millis(1000), handle).await, Ok(()));
     }
 
     #[log_test(rstest)]

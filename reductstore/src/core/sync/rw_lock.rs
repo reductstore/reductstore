@@ -1,20 +1,13 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::sync::{lock_timeout_error, RWLOCK_TIMEOUT};
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
-use std::time::Duration;
 
 /// A read-write lock based on parking_lot with embedded timeouts.
 pub struct RwLock<T> {
     inner: parking_lot::RwLock<T>,
 }
-
-#[cfg(not(test))]
-pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(60);
-
-#[cfg(test)]
-pub const RWLOCK_TIMEOUT: Duration = Duration::from_secs(1);
 
 impl<T> RwLock<T> {
     pub fn new(data: T) -> Self {
@@ -26,17 +19,13 @@ impl<T> RwLock<T> {
     pub fn read(&self) -> Result<parking_lot::RwLockReadGuard<'_, T>, ReductError> {
         self.inner
             .try_read_for(RWLOCK_TIMEOUT)
-            .ok_or(internal_server_error!(
-                "Failed to acquire read lock within timeout"
-            ))
+            .ok_or_else(|| lock_timeout_error("Failed to acquire read lock within timeout"))
     }
 
     pub fn write(&self) -> Result<parking_lot::RwLockWriteGuard<'_, T>, ReductError> {
         self.inner
             .try_write_for(RWLOCK_TIMEOUT)
-            .ok_or(internal_server_error!(
-                "Failed to acquire write lock within timeout"
-            ))
+            .ok_or_else(|| lock_timeout_error("Failed to acquire write lock within timeout"))
     }
 
     pub fn try_read(&self) -> Option<parking_lot::RwLockReadGuard<'_, T>> {

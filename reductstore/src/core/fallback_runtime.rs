@@ -29,19 +29,12 @@ impl FallbackRuntime {
 
     pub fn block_on<F>(&self, future: F) -> F::Output
     where
-        F: Future + Send + 'static,
-        F::Output: Send + 'static,
+        F: Future,
+        F::Output:,
     {
         match self {
             FallbackRuntime::Handle(handle) => {
-                // Avoid block_on inside runtime; offload to a blocking section and wait via channel.
-                tokio::task::block_in_place(|| {
-                    let (tx, rx) = std::sync::mpsc::channel();
-                    handle.spawn(async move {
-                        let _ = tx.send(future.await);
-                    });
-                    rx.recv().expect("FallbackRuntime task panicked")
-                })
+                tokio::task::block_in_place(|| handle.block_on(future))
             }
             FallbackRuntime::Owned(rt) => rt.block_on(future),
         }
