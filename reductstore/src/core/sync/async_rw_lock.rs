@@ -52,7 +52,6 @@ impl<T> AsyncRwLock<T> {
 #[cfg(test)]
 mod tests {
     use super::AsyncRwLock;
-    use crate::core::sync::RWLOCK_TIMEOUT;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::sleep;
@@ -83,9 +82,7 @@ mod tests {
     async fn test_async_rwlock_timeout() {
         let lock = Arc::new(AsyncRwLock::new(5));
         let _guard = lock.write().await.unwrap();
-        tokio::spawn(async move {
-            sleep(RWLOCK_TIMEOUT + Duration::from_millis(50)).await;
-        });
+        let _ = lock.read().await;
     }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
