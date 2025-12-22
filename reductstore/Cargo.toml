@@ -62,7 +62,7 @@ base64 = "0.22.1"
 ring = "0.17.12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
 async-stream = "0.3.6"
-tower-http = { version = "0.6.6", features = ["cors"] }
+tower-http = { version = "0.6.8", features = ["cors"] }
 crc64fast = "1.1.0"
 rustls = "0.23.35"
 byteorder = "1.5.0"
