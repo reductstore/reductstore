@@ -2,8 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use axum_server::tls_rustls::RustlsConfig;
-use std::net::{IpAddr, SocketAddr};
-
 use axum_server::Handle;
 use log::info;
 use reduct_base::logger::Logger;
@@ -12,6 +10,7 @@ use reductstore::cfg::CfgParser;
 use reductstore::core::env::StdEnvGetter;
 use reductstore::lock_file::BoxedLockFile;
 use reductstore::storage::engine::StorageEngine;
+use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -19,7 +18,7 @@ use tokio::sync::mpsc;
 
 #[derive(Clone)]
 struct ContextGuard {
-    server_handle: Handle,
+    server_handle: Handle<SocketAddr>,
     storage: Arc<StorageEngine>,
     lock_file: Arc<BoxedLockFile>,
 }
@@ -186,7 +185,7 @@ mod tests {
     use tokio::time::sleep;
 
     static STOP_SERVER: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
-    pub(super) async fn shutdown_server(handle: Handle) {
+    pub(super) async fn shutdown_server(handle: Handle<SocketAddr>) {
         while !*STOP_SERVER.lock().await {
             sleep(Duration::from_millis(10)).await;
         }

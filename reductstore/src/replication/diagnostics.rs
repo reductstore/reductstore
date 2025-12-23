@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use reduct_base::error::{IntEnum, ReductError};
+use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::{DiagnosticsError, DiagnosticsItem};
 use std::collections::hash_map::Entry;
 
@@ -47,7 +47,7 @@ impl DiagnosticsCounter {
                 frame.errored += n;
 
                 // count errors by type
-                match frame.errors.entry(err.status.int_value()) {
+                match frame.errors.entry(err.status.into()) {
                     Entry::Occupied(mut entry) => {
                         let entry = entry.get_mut();
                         entry.count += n;

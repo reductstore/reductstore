@@ -7,7 +7,7 @@ use async_stream::stream;
 use axum::http::HeaderName;
 use bytes::Bytes;
 use futures_util::Stream;
-use reduct_base::error::{ErrorCode, IntEnum, ReductError};
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
@@ -187,7 +187,11 @@ impl BucketWrapper {
             failed_records.insert(
                 record_ts,
                 ReductError::new(
-                    ErrorCode::from_int(status.parse().unwrap()).unwrap(),
+                    status
+                        .parse::<i16>()
+                        .unwrap_or(-1)
+                        .try_into()
+                        .unwrap_or(ErrorCode::Unknown),
                     message,
                 ),
             );
@@ -222,7 +226,7 @@ fn check_response(response: Result<Response, Error>) -> Result<Response, ReductE
     }
 
     let status =
-        ErrorCode::from_int(response.status().as_u16() as i16).unwrap_or(ErrorCode::Unknown);
+        ErrorCode::try_from(response.status().as_u16() as i16).unwrap_or(ErrorCode::Unknown);
 
     let error_msg = response
         .headers()

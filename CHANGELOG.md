@@ -23,6 +23,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refactor CI workflow and use S3 cache for Rust dependencies, [PR-1003](https://github.com/reductstore/reductstore/pull/1003)
 - Revert Docker image build caching in Dockerfile and CI action to use the non-cache flow.
 
+### Changed
+
+- Update dependencies (int-enum 1.2, axum-server 0.8, zip 7.0, jsonwebtoken 10.2) and align status conversions, [PR-1079](https://github.com/reductstore/reductstore/pull/1079)
+
 ### Fixed
 
 - Fix replica crash at the start without write permissions, [PR-1054](https://github.com/reductstore/reductstore/pull/1054)
