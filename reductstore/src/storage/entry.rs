@@ -455,10 +455,12 @@ mod tests {
             write_stub_record(&mut entry, 1000000);
             write_stub_record(&mut entry, 2000000);
             write_stub_record(&mut entry, 3000000);
+            let ttl_s = 1;
 
             let params = QueryEntry {
                 start: Some(0),
                 stop: Some(4000000),
+                ttl: Some(ttl_s),
                 ..Default::default()
             };
 
@@ -489,7 +491,7 @@ mod tests {
                 );
             }
 
-            sleep(Duration::from_millis(100)); // let query task finish
+            sleep(Duration::from_secs(ttl_s * 2)); // let query task finish
 
             assert_eq!(
                 entry.get_query_receiver(id).err(),

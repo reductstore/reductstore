@@ -165,7 +165,7 @@ mod tests {
         #[case] body: String,
     ) {
         let keeper = keeper.await;
-        let query_id = query(&path_to_entry_1, keeper.clone()).await;
+        let query_id = query(&path_to_entry_1, keeper.clone(), None).await;
         let response = read_record(
             State(keeper.clone()),
             path_to_entry_1,
