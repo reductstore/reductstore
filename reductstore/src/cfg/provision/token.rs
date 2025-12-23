@@ -106,8 +106,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::Backend;
     use crate::cfg::tests::MockEnvGetter;
     use crate::cfg::Cfg;
+    use crate::core::file_cache::FILE_CACHE;
     use mockall::predicate::eq;
     use reduct_base::error::ReductError;
     use reduct_base::not_found;
@@ -115,6 +117,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::default::Default;
     use std::env::VarError;
+    use std::fs;
 
     #[rstest]
     #[tokio::test]
@@ -236,11 +239,20 @@ mod tests {
     #[fixture]
     fn env_with_tokens() -> MockEnvGetter {
         let tmp = tempfile::tempdir().unwrap();
+        let data_path = tmp.keep();
+        fs::create_dir_all(&data_path).unwrap();
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(data_path.clone())
+                .try_build()
+                .unwrap(),
+        );
+
         let mut mock_getter = MockEnvGetter::new();
         mock_getter
             .expect_get()
             .with(eq("RS_DATA_PATH"))
-            .return_const(Ok(tmp.keep().to_str().unwrap().to_string()));
+            .return_const(Ok(data_path.to_str().unwrap().to_string()));
         mock_getter
             .expect_get()
             .with(eq("RS_API_TOKEN"))
