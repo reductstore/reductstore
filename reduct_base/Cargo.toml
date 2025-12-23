@@ -28,7 +28,7 @@ all = ["io", "ext"]
 [dependencies]
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = { version = "1.0.143", features = ["preserve_order"] }
-int-enum = "0.5.0"
+int-enum = "1.2.0"
 chrono = { version = "0.4.41", features = ["serde"] }
 url = "2.5.4"
 http = "1.4.0"

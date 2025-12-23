@@ -37,7 +37,7 @@ reduct-base = { path = "../reduct_base", version = "1.15.0", features = ["ext"] 
 reduct-macros = { path = "../reduct_macros", version = "1.15.0" }
 
 chrono = { version = "0.4.41", features = ["serde"] }
-zip = "6.0.0"
+zip = "7.0.0"
 tempfile = "3.23.0"
 hex = "0.4.3"
 prost-wkt-types = "0.7.0"
@@ -52,12 +52,12 @@ tokio = { version = "1.48.0", features = ["full"] }
 hyper = { version = "1.7.0", features = ["full"] }
 futures-util = "0.3.31"
 futures = "0.3"
-axum-server = { version = "0.7.1", features = ["tls-rustls"] }
+axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 mime_guess = "2.0.5"
 bytesize = "2.3.1"
 async-trait = "0.1.89"
 url = { version = "2.5.4", features = ["serde"] }
-jsonwebtoken = "9.3.1"
+jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] }
 base64 = "0.22.1"
 ring = "0.17.12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
