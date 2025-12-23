@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RS_ENGINE_ENABLE_INTEGRITY_CHECKS` option to enable/disable integrity checks, [PR-1060](https://github.com/reductstore/reductstore/pull/1060)
 - Implement `DISABLE`,`PAUSE` and `DISABLED` modes for replication tasks, [PR-1065](https://github.com/reductstore/reductstore/pull/1065)
 - Implement non-blocking bucket and entry deletion, [PR-1066](https://github.com/reductstore/reductstore/pull/1066)
+- `RS_RWLOCK_TIMEOUT` and `RS_RWLOCK_FAILURE_ACTION` to configure lock timeout handling, [PR-1077](https://github.com/reductstore/reductstore/pull/1077)
 
 
 ### Internal
