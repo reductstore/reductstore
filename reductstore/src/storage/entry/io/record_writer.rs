@@ -3,8 +3,7 @@
 
 use crate::core::file_cache::FileWeak;
 use crate::core::sync::RwLock;
-use crate::core::thread_pool::GroupDepth::BLOCK;
-use crate::core::thread_pool::{group_from_path, shared_child_isolated};
+use crate::core::thread_pool::spawn;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 use crate::storage::proto::record;
@@ -38,7 +37,6 @@ struct WriteContext {
     offset: u64,
     content_size: u64,
     block_manager: Arc<RwLock<BlockManager>>,
-    task_group: String,
 }
 
 impl RecordWriter {
@@ -60,7 +58,7 @@ impl RecordWriter {
         block_ref: BlockRef,
         time: u64,
     ) -> Result<Self, ReductError> {
-        let (file_ref, offset, bucket_name, entry_name, task_group) = {
+        let (file_ref, offset, bucket_name, entry_name) = {
             let mut bm = block_manager.write()?;
             let block = block_ref.read()?;
 
@@ -71,15 +69,11 @@ impl RecordWriter {
 
             bm.save_block(block_ref.clone())?;
 
-            let entry_path = bm.path();
-            let task_group =
-                group_from_path(&entry_path.join(&block.block_id().to_string()), BLOCK);
             (
                 file,
                 offset,
                 bm.bucket_name().to_string(),
                 bm.entry_name().to_string(),
-                task_group,
             )
         };
 
@@ -97,12 +91,11 @@ impl RecordWriter {
             offset,
             content_size,
             block_manager,
-            task_group,
         };
 
         let me = if content_size >= MAX_IO_BUFFER_SIZE as u64 {
             let (tx, rx) = channel(CHANNEL_BUFFER_SIZE);
-            shared_child_isolated(&ctx.task_group.clone(), "write record content", move || {
+            spawn("write record content", move || {
                 Self::receive(rx, ctx);
             });
             RecordWriter {
@@ -267,9 +260,7 @@ mod tests {
     mod record_writer {
         use super::*;
         use crate::cfg::Cfg;
-        use crate::core::thread_pool::find_task_group;
         use crate::storage::block_manager::block_index::BlockIndex;
-        use crate::storage::entry::tests::get_task_group;
         use crate::storage::proto::{us_to_ts, Record};
         use rstest::fixture;
         use std::fs;
@@ -322,13 +313,6 @@ mod tests {
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, BIG_RECORD_TIME).unwrap();
 
-            sleep(Duration::from_millis(100)).await;
-            let path = block_manager.read().unwrap().path().clone();
-            assert!(
-                find_task_group(&get_task_group(&path, 1)).is_some(),
-                "task is running"
-            );
-
             let content = vec![0xaau8; MAX_IO_BUFFER_SIZE + 1];
             writer
                 .send(Ok(Some(Bytes::from(content.clone()))))
@@ -337,11 +321,6 @@ mod tests {
             writer.send(Ok(None)).await.unwrap();
 
             sleep(Duration::from_millis(100)).await;
-            assert!(
-                find_task_group(&get_task_group(&path, 1)).is_none(),
-                "task is finished"
-            );
-
             let block_ref = block_manager.write().unwrap().load_block(1).unwrap();
             assert_eq!(
                 block_ref

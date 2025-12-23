@@ -5,8 +5,7 @@ use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::RwLock;
-use crate::core::thread_pool::GroupDepth::BUCKET;
-use crate::core::thread_pool::{group_from_path, try_unique, unique, TaskHandle};
+use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::FolderKeeper;
@@ -18,7 +17,7 @@ use reduct_base::{conflict, forbidden, not_found, unprocessable_entity};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub(crate) const MAX_IO_BUFFER_SIZE: usize = 1024 * 512;
 pub(crate) const CHANNEL_BUFFER_SIZE: usize = 16;
@@ -242,9 +241,8 @@ impl StorageEngine {
         let path = self.data_path.join(name);
         let name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
-        let task_group = [self.data_path.file_name().unwrap().to_str().unwrap(), &name].join("/");
 
-        let _ = unique(&task_group, "remove bucket", move || {
+        let _ = spawn("remove bucket", move || {
             let remove_bucket_from_backend = || {
                 let mut buckets = buckets.write()?;
                 folder_keeper.remove_folder(&name)?;
@@ -300,7 +298,6 @@ impl StorageEngine {
             Err(err) => return TaskHandle::from(Err(err)),
         };
 
-        let task_group = group_from_path(&self.data_path.join(old_name), BUCKET);
         let buckets = self.buckets.clone();
         let new_path = self.data_path.join(new_name);
         let old_name = old_name.to_string();
@@ -308,7 +305,7 @@ impl StorageEngine {
         let cfg = self.cfg.clone();
         let folder_keeper = self.folder_keeper.clone();
 
-        unique(&task_group, "rename bucket", move || {
+        spawn("rename bucket", move || {
             let buckets = &mut buckets.write().unwrap();
 
             sync_task.wait()?;
@@ -349,28 +346,21 @@ impl StorageEngine {
             return Ok(()).into();
         };
 
-        for (name, bucket) in buckets.iter() {
-            debug!("Sync bucket '{}'", name);
+        for bucket in buckets.values() {
             handlers.push(bucket.sync_fs());
         }
 
-        try_unique(
-            "compact_storage",
-            "compact storage",
-            Duration::from_secs(1),
-            move || {
-                for handler in handlers {
-                    match handler.wait() {
-                        Ok(_) => {}
-                        Err(e) => {
-                            error!("Failed to sync bucket: {}", e);
-                        }
+        spawn("compact storage", move || {
+            for handler in handlers {
+                match handler.wait() {
+                    Ok(_) => {}
+                    Err(e) => {
+                        error!("Failed to sync bucket: {}", e);
                     }
                 }
-                Ok(())
-            },
-        )
-        .unwrap_or(Ok(()).into()) // skip if previous task is still running
+            }
+            Ok(())
+        })
     }
 
     pub fn data_path(&self) -> &PathBuf {

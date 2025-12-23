@@ -8,7 +8,7 @@ pub(super) mod settings;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::RwLock;
-use crate::core::thread_pool::{group_from_path, shared, unique, GroupDepth, TaskHandle};
+use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
@@ -318,7 +318,7 @@ impl Bucket {
         let cfg = self.cfg.clone();
         let folder_keeper = self.folder_keeper.clone();
 
-        unique(&self.task_group(), "rename entry", move || {
+        spawn("rename entry", move || {
             check_name_convention(&new_name)?;
             if new_path.exists() {
                 return Err(conflict!(
@@ -381,9 +381,8 @@ impl Bucket {
         let bucket_name = self.name.clone();
         let entry_name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
-        let task_group = self.task_group();
 
-        let _ = unique(&task_group, "remove entry", move || {
+        let _ = spawn("remove entry", move || {
             let remove_bucket_from_backend = || {
                 folder_keeper.remove_folder(&entry_name)?;
                 debug!(
@@ -414,16 +413,28 @@ impl Bucket {
             return Ok(()).into();
         }
 
+        let bucket_name = self.name.clone();
+        debug!("Syncing bucket '{}'", bucket_name);
+        let time_start = Instant::now();
+
         if let Err(e) = self.save_settings().wait() {
             return Err(e).into();
         }
 
-        let entries = self.entries.read().unwrap().clone();
+        let entries = self.entries.clone();
         // use shared task to avoid locking in graceful shutdown
-        shared(&self.task_group(), "sync entries", move || {
-            for entry in entries.values() {
+        spawn("sync entries", move || {
+            let mut count = 0usize;
+            for entry in entries.read()?.values() {
                 entry.compact()?;
+                count += 1;
             }
+            debug!(
+                "Bucket '{}' synced {} entries in {:?}",
+                bucket_name,
+                count,
+                Instant::now().duration_since(time_start)
+            );
             Ok(())
         })
     }
@@ -467,11 +478,6 @@ impl Bucket {
         } else {
             Ok(())
         }
-    }
-
-    fn task_group(&self) -> String {
-        // use folder hierarchy as task group to protect resources
-        group_from_path(&self.path, GroupDepth::BUCKET)
     }
 }
 

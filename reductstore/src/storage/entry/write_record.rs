@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{unique, TaskHandle};
+use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::block_manager::BlockRef;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
@@ -34,8 +34,7 @@ impl Entry {
     ) -> TaskHandle<Result<Box<dyn WriteRecord + Sync + Send>, ReductError>> {
         let block_manager = self.block_manager.clone();
         let settings = self.settings.read().unwrap().clone();
-        unique(
-            &self.task_group(),
+        spawn(
             "begin write",
             move || -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
                 let mut bm = block_manager.write().unwrap();

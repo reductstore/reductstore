@@ -41,9 +41,9 @@ pub async fn print_statuses(
         ));
     }
 
+    let strat_time = std::time::Instant::now();
     let path_and_query = request.uri().path_and_query().unwrap();
-
-    let msg = format!("{} {}", request.method(), path_and_query);
+    let method = format!("{} {}", request.method(), path_and_query);
 
     let response = next.run(request).await;
     let err_msg = match response.headers().get("x-reduct-error") {
@@ -57,9 +57,21 @@ pub async fn print_statuses(
         .is_some_and(|v| v == "skip-error-log");
 
     if response.status().is_server_error() && !skip_error_log {
-        error!("{} [{}] {}", msg, response.status(), err_msg);
+        error!(
+            "{} [{}] {}, {:?}",
+            method,
+            response.status(),
+            err_msg,
+            strat_time.elapsed()
+        );
     } else {
-        debug!("{} [{}] {}", msg, response.status(), err_msg);
+        debug!(
+            "{} [{}] {}, {:?}",
+            method,
+            response.status(),
+            err_msg,
+            strat_time.elapsed()
+        );
     }
 
     Ok(response)

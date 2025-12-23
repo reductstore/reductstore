@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::thread_pool::{unique, TaskHandle};
+use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::EntrySettings;
 use bytes::BytesMut;
@@ -112,7 +112,7 @@ impl Bucket {
         let settings = self.settings.read().unwrap().clone();
         let path = self.path.join(SETTINGS_NAME);
 
-        unique(&self.task_group(), "save settings", move || {
+        spawn("save settings", move || {
             let mut buf = BytesMut::new();
             crate::storage::proto::BucketSettings::from(settings)
                 .encode(&mut buf)

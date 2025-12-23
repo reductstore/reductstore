@@ -10,7 +10,7 @@ mod limited;
 
 use crate::cfg::io::IoConfig;
 use crate::core::sync::RwLock;
-use crate::core::thread_pool::{shared, shared_isolated, TaskHandle};
+use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -84,7 +84,7 @@ pub(super) fn spawn_query_task(
 
     // we spawn a new task to run the query outside hierarchical task group to avoid deadlocks
     let query = Arc::new(RwLock::new(query));
-    let handle = shared_isolated("spawn_query_task", "spawn query task", move || {
+    let handle = spawn("spawn query task", move || {
         trace!("Query task for '{}' id={} running", task_group, id);
         let watcher = Arc::new(RwLock::new(QueryWatcher::new()));
 
@@ -97,7 +97,7 @@ pub(super) fn spawn_query_task(
 
             // the task return None if the loop must be stopped
             // we do it for each iteration so we don't need to take the whole worker for a long query
-            let task = shared(&group.clone(), "query iteration", move || {
+            let task = spawn("query iteration", move || {
                 let mut watcher = match watcher.write() {
                     Ok(guard) => guard,
                     Err(_) => {
