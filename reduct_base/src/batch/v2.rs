@@ -11,6 +11,7 @@
 //
 // Per record:
 //   x-reduct-<ENTRY-INDEX>-<TIME-DELTA-uS>: batched header value
+//   (error responses use the same suffix: x-reduct-error-<ENTRY-INDEX>-<TIME-DELTA-uS>)
 //
 // Header value rules (optimised to avoid repetition):
 //   - Always includes content-length.
