@@ -47,6 +47,7 @@
 - Do not commit or push changes without explicit user approval.
 - Reminder: always wait for explicit user approval before committing or pushing.
 - Never push code without the user's explicit go-ahead for that push.
+- Never create or open a PR without the user's explicit approval.
 
 ## Security & Configuration
 
