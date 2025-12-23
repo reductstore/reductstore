@@ -479,7 +479,7 @@ mod tests {
     use crate::replication::Transaction;
 
     use crate::backend::Backend;
-    use crate::core::sync::RWLOCK_TIMEOUT;
+    use crate::core::sync::rwlock_timeout;
     use crate::storage::bucket::Bucket;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
@@ -846,7 +846,7 @@ mod tests {
         replication.notify(notification.clone()).unwrap();
         {
             let _lock = replication.log_map.write().unwrap();
-            sleep(RWLOCK_TIMEOUT + Duration::from_millis(100));
+            sleep(rwlock_timeout() + Duration::from_millis(100));
         }
 
         assert_eq!(

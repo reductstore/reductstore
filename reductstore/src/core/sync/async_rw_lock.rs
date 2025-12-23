@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::fallback_runtime::FallbackRuntime;
-use crate::core::sync::{lock_timeout_error, RWLOCK_TIMEOUT};
+use crate::core::sync::{lock_timeout_error, rwlock_timeout};
 use reduct_base::error::ReductError;
 use tokio::time::timeout;
 
@@ -21,13 +21,13 @@ impl<T> AsyncRwLock<T> {
     }
 
     pub async fn read(&self) -> Result<tokio::sync::RwLockReadGuard<'_, T>, ReductError> {
-        timeout(RWLOCK_TIMEOUT, self.inner.read())
+        timeout(rwlock_timeout(), self.inner.read())
             .await
             .map_err(|_| lock_timeout_error("Failed to acquire async read lock within timeout"))
     }
 
     pub async fn write(&self) -> Result<tokio::sync::RwLockWriteGuard<'_, T>, ReductError> {
-        timeout(RWLOCK_TIMEOUT, self.inner.write())
+        timeout(rwlock_timeout(), self.inner.write())
             .await
             .map_err(|_| lock_timeout_error("Failed to acquire async write lock within timeout"))
     }

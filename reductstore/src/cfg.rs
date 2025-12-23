@@ -6,6 +6,7 @@ pub mod lock_file;
 mod provision;
 pub mod remote_storage;
 pub mod replication;
+pub mod rw_lock;
 pub mod storage_engine;
 
 use crate::api::Components;
@@ -16,11 +17,12 @@ use crate::cfg::io::IoConfig;
 use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
+use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
 use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::AsyncRwLock;
+use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
 use crate::license::parse_license;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
@@ -78,6 +80,7 @@ pub struct Cfg {
     pub replication_conf: ReplicationConfig,
     pub cs_config: RemoteStorageConfig,
     pub lock_file_config: LockFileConfig,
+    pub rw_lock_config: RwLockConfig,
     pub engine_config: StorageEngineConfig,
 }
 
@@ -104,6 +107,7 @@ impl Default for Cfg {
             replication_conf: ReplicationConfig::default(),
             cs_config: RemoteStorageConfig::default(),
             lock_file_config: LockFileConfig::default(),
+            rw_lock_config: RwLockConfig::default(),
             engine_config: StorageEngineConfig::default(),
         }
     }
@@ -182,8 +186,12 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             replication_conf: Self::parse_replication_config(&mut env, port),
             cs_config: Self::parse_remote_storage_cfg(&mut env),
             lock_file_config: Self::parse_lock_file_config(&mut env),
+            rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
         };
+
+        set_rwlock_timeout(cfg.rw_lock_config.timeout);
+        set_rwlock_failure_action(cfg.rw_lock_config.failure_action);
 
         let license = parse_license(cfg.license_path.clone());
         let me = Self { cfg, env, license };
