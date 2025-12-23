@@ -39,6 +39,7 @@ struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,
     options: QueryOptions,
     last_access: Instant,
+    #[allow(dead_code)]
     query_task_handle: TaskHandle<()>,
     io_settings: IoConfig,
 }
@@ -330,15 +331,6 @@ impl Entry {
                 debug!("Query {}/{} expired", entry_path, id);
                 return false;
             }
-
-            // check if query task is finished and receiver is empty or closed
-            if let Some(rx) = handle.rx.try_read() {
-                if rx.is_empty() && handle.query_task_handle.is_finished() {
-                    debug!("Query {}/{} finished", entry_path, id);
-                    return false;
-                }
-            }
-
             true
         });
     }
@@ -372,6 +364,7 @@ mod tests {
     use bytes::Bytes;
     use reduct_base::{conflict, Labels};
     use rstest::{fixture, rstest};
+    use std::sync::Arc;
     use std::thread::sleep;
     use std::time::Duration;
     use tempfile;
@@ -462,10 +455,12 @@ mod tests {
             write_stub_record(&mut entry, 1000000);
             write_stub_record(&mut entry, 2000000);
             write_stub_record(&mut entry, 3000000);
+            let ttl_s = 1;
 
             let params = QueryEntry {
                 start: Some(0),
                 stop: Some(4000000),
+                ttl: Some(ttl_s),
                 ..Default::default()
             };
 
@@ -496,7 +491,7 @@ mod tests {
                 );
             }
 
-            sleep(Duration::from_millis(100)); // let query task finish
+            sleep(Duration::from_secs(ttl_s * 2)); // let query task finish
 
             assert_eq!(
                 entry.get_query_receiver(id).err(),
@@ -553,6 +548,54 @@ mod tests {
                 entry.get_query_receiver(id).err(),
                 Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request.", id))
             );
+        }
+
+        #[rstest]
+        fn keep_finished_query_until_ttl(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000);
+
+            let id = entry
+                .query(QueryEntry {
+                    limit: Some(1),
+                    ttl: Some(1),
+                    ..Default::default()
+                })
+                .wait()
+                .unwrap();
+
+            let (rx, _) = entry.get_query_receiver(id).unwrap();
+            let rx = rx.upgrade_and_unwrap();
+            {
+                let mut rx = rx.blocking_write().unwrap();
+                while rx.try_recv().is_ok() {}
+            }
+
+            for _ in 0..10 {
+                let finished = entry
+                    .queries
+                    .read()
+                    .unwrap()
+                    .get(&id)
+                    .map(|handle| handle.query_task_handle.is_finished())
+                    .unwrap_or(false);
+                if finished {
+                    break;
+                }
+                sleep(Duration::from_millis(10));
+            }
+
+            Entry::remove_expired_query(
+                Arc::clone(&entry.queries),
+                format!("{}/{}", entry.bucket_name(), entry.name()),
+            );
+            assert!(entry.queries.read().unwrap().contains_key(&id));
+
+            sleep(Duration::from_secs(2));
+            Entry::remove_expired_query(
+                Arc::clone(&entry.queries),
+                format!("{}/{}", entry.bucket_name(), entry.name()),
+            );
+            assert!(!entry.queries.read().unwrap().contains_key(&id));
         }
     }
 

@@ -328,7 +328,8 @@ mod tests {
             }
         }
 
-        let query_id = query(&path_to_entry_1, keeper.clone()).await;
+        let ttl = 1;
+        let query_id = query(&path_to_entry_1, keeper.clone(), Some(ttl)).await;
         let query = Query(HashMap::from_iter(vec![(
             "q".to_string(),
             query_id.to_string(),
@@ -395,7 +396,7 @@ mod tests {
             );
         }
 
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_secs(ttl)).await;
         let response = read_batched_records!();
         let resp_headers = response.headers();
         assert_eq!(
@@ -416,7 +417,7 @@ mod tests {
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
-        let query_id = query(&path_to_entry_1, keeper.clone()).await;
+        let query_id = query(&path_to_entry_1, keeper.clone(), None).await;
 
         components
             .storage

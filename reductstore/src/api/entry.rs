@@ -357,10 +357,12 @@ mod tests {
     pub async fn query(
         path_to_entry_1: &Path<HashMap<String, String>>,
         keeper: Arc<StateKeeper>,
+        ttl: Option<u64>,
     ) -> u64 {
         let options = QueryEntry {
             start: Some(0),
             stop: Some(u64::MAX),
+            ttl,
             ..Default::default()
         };
 
