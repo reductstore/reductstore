@@ -220,15 +220,15 @@ impl Bucket {
         let mut latest_record = 0u64;
         let mut entry_infos = Vec::new();
 
-        let handles = self
+        let infos = self
             .entries
             .read()?
             .values()
             .into_iter()
             .map(|entry| entry.info())
             .collect::<Vec<_>>();
-        for handle in handles {
-            let info = handle.wait()?;
+        for info in infos {
+            let info = info?;
             size += info.size;
             oldest_record = oldest_record.min(info.oldest_record);
             latest_record = latest_record.max(info.latest_record);

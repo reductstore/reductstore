@@ -53,7 +53,7 @@ impl Bucket {
                 let mut candidates: Vec<(u64, &Entry)> = vec![];
                 let entries = self.entries.read()?;
                 for (_, entry) in entries.iter() {
-                    let info = entry.info().wait()?;
+                    let info = entry.info()?;
                     candidates.push((info.oldest_record, entry));
                 }
                 candidates.sort_by_key(|entry| entry.0);
@@ -91,7 +91,7 @@ impl Bucket {
         let mut entries = self.entries.write()?;
         let mut names_to_remove = vec![];
         for (name, entry) in entries.iter() {
-            if entry.info().wait()?.record_count != 0 {
+            if entry.info()?.record_count != 0 {
                 continue;
             }
             names_to_remove.push(name.clone());

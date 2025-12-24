@@ -9,15 +9,22 @@ use std::future::Future;
 pub struct TaskHandle<T> {
     rx: Receiver<T>,
     rx_start: Receiver<()>,
+    id: usize,
 }
 
 impl<T> TaskHandle<T> {
-    pub(super) fn new(rx: Receiver<T>, rx_start: Receiver<()>) -> Self {
-        Self { rx, rx_start }
+    pub(super) fn new(rx: Receiver<T>, rx_start: Receiver<()>, id: usize) -> Self {
+        Self { rx, rx_start, id }
     }
 
     pub fn wait(self) -> T {
         self.rx.recv().unwrap()
+    }
+
+    /// Wait for the task to complete, ignoring errors if the channel is disconnected.
+    /// This is useful in Drop implementations where we don't want to panic.
+    pub fn wait_or_ignore(self) -> Option<T> {
+        self.rx.recv().ok()
     }
 
     pub fn is_finished(&self) -> bool {
@@ -31,6 +38,10 @@ impl<T> TaskHandle<T> {
     pub fn wait_started(&self) {
         self.rx_start.recv().unwrap()
     }
+
+    pub fn id(&self) -> usize {
+        self.id
+    }
 }
 
 impl<T> From<T> for TaskHandle<T> {
@@ -39,7 +50,11 @@ impl<T> From<T> for TaskHandle<T> {
         let (tx_start, rx_start) = crossbeam_channel::bounded(1);
         tx.send(data).unwrap();
         tx_start.send(()).unwrap();
-        Self { rx, rx_start }
+        Self {
+            rx,
+            rx_start,
+            id: 0,
+        }
     }
 }
 

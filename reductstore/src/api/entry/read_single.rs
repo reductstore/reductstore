@@ -48,7 +48,7 @@ pub(super) async fn read_record(
         .get_bucket(bucket_name)?
         .upgrade()?
         .get_entry(entry_name)?;
-    let last_record = entry.upgrade()?.info().wait()?.latest_record;
+    let last_record = entry.upgrade()?.info()?.latest_record;
 
     let (query_id, ts) = check_and_extract_ts_or_query_id(params, last_record)?;
 

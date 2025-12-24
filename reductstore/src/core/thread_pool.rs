@@ -4,67 +4,19 @@
 mod scaling;
 mod task_handle;
 
+use crate::cfg::thread_pool::thread_pool_config;
+use crate::cfg::thread_pool::ThreadPoolConfig;
 use crate::core::sync::RwLock;
 use crate::core::thread_pool::scaling::WorkerManager;
 use crossbeam_channel::{unbounded, Sender};
 use log::{error, trace};
 use std::cmp::max;
+use std::fmt::Debug;
 use std::num::NonZeroUsize;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Arc, LazyLock, OnceLock};
+use std::sync::{Arc, LazyLock};
 use std::thread::{available_parallelism, JoinHandle};
 use std::time::Duration;
 pub(crate) use task_handle::TaskHandle;
-
-#[derive(Clone, Debug)]
-pub struct ThreadPoolConfig {
-    pub min_threads: usize,
-    pub worker_task_timeout: Duration,
-    pub scale_down_cooldown: Duration,
-}
-
-impl Default for ThreadPoolConfig {
-    fn default() -> Self {
-        Self {
-            min_threads: default_min_threads(),
-            worker_task_timeout: default_worker_task_timeout(),
-            scale_down_cooldown: Duration::from_secs(5),
-        }
-    }
-}
-
-static THREAD_POOL_CONFIG: OnceLock<ThreadPoolConfig> = OnceLock::new();
-
-pub(crate) fn configure_thread_pool(config: ThreadPoolConfig) {
-    let _ = THREAD_POOL_CONFIG.set(config);
-}
-
-fn thread_pool_config() -> ThreadPoolConfig {
-    THREAD_POOL_CONFIG
-        .get()
-        .cloned()
-        .unwrap_or_else(ThreadPoolConfig::default)
-}
-
-fn default_min_threads() -> usize {
-    let threads = available_parallelism().unwrap_or(NonZeroUsize::new(2).unwrap());
-    max(threads.get() / 2, 2)
-}
-
-#[cfg(unix)]
-fn default_worker_task_timeout() -> Duration {
-    Duration::from_micros(250)
-}
-
-#[cfg(windows)]
-fn default_worker_task_timeout() -> Duration {
-    Duration::from_micros(1000)
-}
-
-#[cfg(not(any(unix, windows)))]
-fn default_worker_task_timeout() -> Duration {
-    Duration::from_micros(500)
-}
 
 #[derive(PartialEq)]
 pub(crate) enum ThreadPoolState {
@@ -89,6 +41,17 @@ type BoxedFunc = Box<dyn FnOnce() + Send>;
 struct Task {
     description: String,
     func: BoxedFunc,
+    id: usize,
+}
+
+impl Debug for Task {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Task {{ id: {}, description: '{}' }}",
+            self.id, self.description
+        )
+    }
 }
 
 static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
@@ -99,35 +62,22 @@ static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
 /// A thread pool for executing tasks.
 struct ThreadPool {
     task_queue: Sender<Task>,
-    queued_tasks: Arc<AtomicUsize>,
     state: Arc<RwLock<ThreadPoolState>>,
     supervisor: Option<JoinHandle<()>>,
 }
+
+pub(super) type StateRef = Arc<RwLock<ThreadPoolState>>;
 
 impl ThreadPool {
     /// Create a new thread pool with a given configuration.
     pub fn new(config: ThreadPoolConfig) -> Self {
         let (task_queue, task_queue_rx) = unbounded::<Task>();
         let state = Arc::new(RwLock::new(ThreadPoolState::Running));
-        let queued_tasks = Arc::new(AtomicUsize::new(0));
-        let worker_manager = Arc::new(
-            WorkerManager::builder()
-                .state(Arc::clone(&state))
-                .min_threads(config.min_threads)
-                .scale_down_cooldown(config.scale_down_cooldown)
-                .worker_task_timeout(config.worker_task_timeout)
-                .build(),
-        );
-
-        let supervisor = worker_manager.start(
-            task_queue_rx.clone(),
-            queued_tasks.clone(),
-            config.min_threads,
-        );
+        let worker_manager = Arc::new(WorkerManager::new(config.clone(), state.clone()));
+        let supervisor = worker_manager.start(task_queue_rx.clone());
 
         Self {
             task_queue,
-            queued_tasks,
             state,
             supervisor: Some(supervisor),
         }
@@ -138,12 +88,9 @@ impl ThreadPool {
         description: &str,
         task: impl FnOnce() -> T + Send + 'static,
     ) -> TaskHandle<T> {
-        trace!("Spawn task '{}'", description);
-        let description = description.to_string();
+        let (task, task_handle) = Self::build_task(description.to_string(), task);
 
-        let (task, task_handle) = Self::build_task(description, task);
-
-        self.queued_tasks.fetch_add(1, Ordering::SeqCst);
+        trace!("Spawn {:?}", task);
         self.task_queue.send(task).unwrap_or(());
 
         task_handle
@@ -153,6 +100,8 @@ impl ThreadPool {
         description: String,
         task: impl FnOnce() -> T + Send + 'static,
     ) -> (Task, TaskHandle<T>) {
+        static TASK_ID_COUNTER: LazyLock<RwLock<usize>> = LazyLock::new(|| RwLock::new(0));
+
         let (tx, rx) = crossbeam_channel::bounded(1);
         let (tx_start, rx_start) = crossbeam_channel::bounded(1);
 
@@ -163,12 +112,19 @@ impl ThreadPool {
             tx.send(result).unwrap_or(());
         });
 
+        let id = {
+            let mut counter = TASK_ID_COUNTER.write().unwrap();
+            *counter += 1;
+            *counter
+        };
+
         let task = Task {
             description: copy_description,
             func: box_task,
+            id,
         };
 
-        (task, TaskHandle::new(rx, rx_start))
+        (task, TaskHandle::new(rx, rx_start, id))
     }
 }
 
