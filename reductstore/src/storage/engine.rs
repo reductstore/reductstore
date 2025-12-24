@@ -137,7 +137,7 @@ impl StorageEngine {
 
         let buckets = self.buckets.read()?;
         for bucket in buckets.values() {
-            let bucket = bucket.info()?.info;
+            let bucket = bucket.info().wait()?.info;
             usage += bucket.size;
             oldest_record = oldest_record.min(bucket.oldest_record);
             latest_record = latest_record.max(bucket.latest_record);
@@ -323,7 +323,7 @@ impl StorageEngine {
         self.reload()?;
         let mut buckets = Vec::new();
         for bucket in self.buckets.read()?.values() {
-            buckets.push(bucket.info()?.info);
+            buckets.push(bucket.info().wait()?.info);
         }
 
         Ok(BucketInfoList { buckets })

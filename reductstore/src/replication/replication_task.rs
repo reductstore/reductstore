@@ -153,7 +153,8 @@ impl ReplicationTask {
                 for entry in thr_storage
                     .get_bucket(&thr_settings.src_bucket)?
                     .upgrade()?
-                    .info()?
+                    .info()
+                    .wait()?
                     .entries
                 {
                     let path = Self::build_path_to_transaction_log(

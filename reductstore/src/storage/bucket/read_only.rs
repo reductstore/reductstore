@@ -216,7 +216,7 @@ mod tests {
 
             tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
             {
-                let entries = read_only_bucket.info().unwrap().entries;
+                let entries = read_only_bucket.info().wait().unwrap().entries;
                 assert_eq!(entries.len(), 2);
             }
         }

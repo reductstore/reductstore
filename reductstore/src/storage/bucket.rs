@@ -25,13 +25,12 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
-use reduct_base::msg::entry_api::EntryInfo;
 use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found, Labels};
 use std::collections::BTreeMap;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -211,36 +210,54 @@ impl Bucket {
     }
 
     /// Return bucket stats
-    pub fn info(&self) -> Result<FullBucketInfo, ReductError> {
-        self.reload()?;
+    pub fn info(&self) -> TaskHandle<Result<FullBucketInfo, ReductError>> {
+        let name = self.name.clone();
+        let reload_result = self.reload();
+        let entries_result = self
+            .entries
+            .read()
+            .map(|guard| guard.values().cloned().collect::<Vec<_>>());
+        let status_result = self.status();
+        let settings_result = self.settings.read().map(|guard| guard.clone());
+        let is_provisioned = self.is_provisioned.load(Ordering::Relaxed);
 
-        let mut size = 0;
-        let mut oldest_record = u64::MAX;
-        let mut latest_record = 0u64;
-        let mut entries: Vec<EntryInfo> = vec![];
+        spawn("bucket info", move || {
+            let entries = entries_result?;
+            let settings = settings_result?;
+            reload_result?;
 
-        let entry_map = self.entries.read()?;
-        for entry in entry_map.values() {
-            let info = entry.info().wait()?;
-            entries.push(info.clone());
-            size += info.size;
-            oldest_record = oldest_record.min(info.oldest_record);
-            latest_record = latest_record.max(info.latest_record);
-        }
-        Ok(FullBucketInfo {
-            info: BucketInfo {
-                name: self.name.clone(),
-                size,
-                entry_count: entry_map.len() as u64,
-                oldest_record,
-                latest_record,
-                is_provisioned: self
-                    .is_provisioned
-                    .load(std::sync::atomic::Ordering::Relaxed),
-                status: self.status()?,
-            },
-            settings: self.settings.read()?.clone(),
-            entries,
+            let mut size = 0;
+            let mut oldest_record = u64::MAX;
+            let mut latest_record = 0u64;
+            let mut entry_infos = Vec::new();
+
+            for entry in entries {
+                let info = entry.info().wait()?;
+                size += info.size;
+                oldest_record = oldest_record.min(info.oldest_record);
+                latest_record = latest_record.max(info.latest_record);
+                entry_infos.push(info);
+            }
+
+            if entry_infos.is_empty() {
+                oldest_record = 0;
+            }
+
+            let status = status_result?;
+
+            Ok(FullBucketInfo {
+                info: BucketInfo {
+                    name,
+                    size,
+                    entry_count: entry_infos.len() as u64,
+                    oldest_record,
+                    latest_record,
+                    is_provisioned,
+                    status,
+                },
+                settings,
+                entries: entry_infos,
+            })
         })
     }
 

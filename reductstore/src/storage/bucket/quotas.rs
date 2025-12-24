@@ -16,7 +16,7 @@ impl Bucket {
             QuotaType::NONE => Ok(()),
             QuotaType::FIFO => self.remove_oldest_block(content_size, quota_size),
             QuotaType::HARD => {
-                if self.info()?.info.size + content_size as u64 > quota_size {
+                if self.info().wait()?.info.size + content_size as u64 > quota_size {
                     Err(bad_request!("Quota of '{}' exceeded", self.name()))
                 } else {
                     Ok(())
