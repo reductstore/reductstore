@@ -593,7 +593,7 @@ mod tests {
         async fn test_get_anonymous(#[future] keeper: Arc<StateKeeper>) {
             let keeper = keeper.await;
             let components = keeper.get_anonymous().await.unwrap();
-            assert!(components.storage.info().is_ok());
+            assert!(components.storage.info().wait().is_ok());
         }
 
         #[rstest]
@@ -607,7 +607,7 @@ mod tests {
                 .get_with_permissions(&headers, FullAccessPolicy {})
                 .await
                 .unwrap();
-            assert!(components.storage.info().is_ok());
+            assert!(components.storage.info().wait().is_ok());
         }
 
         #[rstest]
@@ -621,7 +621,7 @@ mod tests {
                 .get_with_permissions(&headers, AuthenticatedPolicy {})
                 .await
                 .unwrap();
-            assert!(components.storage.info().is_ok());
+            assert!(components.storage.info().wait().is_ok());
         }
 
         #[rstest]
@@ -635,7 +635,7 @@ mod tests {
                 .get_with_permissions(&headers, ReadAccessPolicy { bucket: "bucket-1" })
                 .await
                 .unwrap();
-            assert!(components.storage.info().is_ok());
+            assert!(components.storage.info().wait().is_ok());
         }
 
         #[rstest]
@@ -649,7 +649,7 @@ mod tests {
                 .get_with_permissions(&headers, WriteAccessPolicy { bucket: "bucket-1" })
                 .await
                 .unwrap();
-            assert!(components.storage.info().is_ok());
+            assert!(components.storage.info().wait().is_ok());
         }
 
         #[rstest]

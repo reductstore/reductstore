@@ -27,6 +27,7 @@ use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found, Labels};
+use reduct_macros::task;
 use std::collections::BTreeMap;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
@@ -210,54 +211,46 @@ impl Bucket {
     }
 
     /// Return bucket stats
-    pub fn info(&self) -> TaskHandle<Result<FullBucketInfo, ReductError>> {
-        let name = self.name.clone();
-        let reload_result = self.reload();
-        let entries_result = self
+    #[task("bucket info")]
+    pub fn info(self: Arc<Self>) -> Result<FullBucketInfo, ReductError> {
+        self.reload()?;
+
+        let mut size = 0;
+        let mut oldest_record = u64::MAX;
+        let mut latest_record = 0u64;
+        let mut entry_infos = Vec::new();
+
+        let handles = self
             .entries
-            .read()
-            .map(|guard| guard.values().cloned().collect::<Vec<_>>());
-        let status_result = self.status();
-        let settings_result = self.settings.read().map(|guard| guard.clone());
-        let is_provisioned = self.is_provisioned.load(Ordering::Relaxed);
+            .read()?
+            .values()
+            .into_iter()
+            .map(|entry| entry.info())
+            .collect::<Vec<_>>();
+        for handle in handles {
+            let info = handle.wait()?;
+            size += info.size;
+            oldest_record = oldest_record.min(info.oldest_record);
+            latest_record = latest_record.max(info.latest_record);
+            entry_infos.push(info);
+        }
 
-        spawn("bucket info", move || {
-            let entries = entries_result?;
-            let settings = settings_result?;
-            reload_result?;
+        if entry_infos.is_empty() {
+            oldest_record = 0;
+        }
 
-            let mut size = 0;
-            let mut oldest_record = u64::MAX;
-            let mut latest_record = 0u64;
-            let mut entry_infos = Vec::new();
-
-            for entry in entries {
-                let info = entry.info().wait()?;
-                size += info.size;
-                oldest_record = oldest_record.min(info.oldest_record);
-                latest_record = latest_record.max(info.latest_record);
-                entry_infos.push(info);
-            }
-
-            if entry_infos.is_empty() {
-                oldest_record = 0;
-            }
-
-            let status = status_result?;
-
-            Ok(FullBucketInfo {
-                info: BucketInfo {
-                    name,
-                    size,
-                    entry_count: entry_infos.len() as u64,
-                    oldest_record,
-                    latest_record,
-                    is_provisioned,
-                    status,
-                },
-                settings,
-                entries: entry_infos,
-            })
+        Ok(FullBucketInfo {
+            info: BucketInfo {
+                name: self.name.clone(),
+                size,
+                entry_count: entry_infos.len() as u64,
+                oldest_record,
+                latest_record,
+                is_provisioned: self.is_provisioned.load(Ordering::Relaxed),
+                status: self.status()?,
+            },
+            settings: self.settings.read()?.clone(),
+            entries: entry_infos,
         })
     }
 
@@ -276,7 +269,7 @@ impl Bucket {
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
     pub fn begin_write(
-        &self,
+        self: &Arc<Self>,
         name: &str,
         time: u64,
         content_size: u64,
@@ -507,6 +500,7 @@ mod tests {
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::msg::status::ResourceStatus;
     use rstest::{fixture, rstest};
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     mod get_or_create {
@@ -515,14 +509,14 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_or_create_entry(bucket: Bucket) {
+        async fn test_get_or_create_entry(bucket: Arc<Bucket>) {
             let entry = bucket.get_or_create_entry("test-1").unwrap();
             assert_eq!(entry.upgrade().unwrap().name(), "test-1");
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_or_create_entry_invalid_name(bucket: Bucket) {
+        async fn test_get_or_create_entry_invalid_name(bucket: Arc<Bucket>) {
             assert_eq!(
                 bucket.get_or_create_entry("test-1/").err(),
                 Some(unprocessable_entity!(
@@ -537,8 +531,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_entry(mut bucket: Bucket) {
-            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
+        async fn test_remove_entry(bucket: Arc<Bucket>) {
+            write(&bucket, "test-1", 1, b"test").await.unwrap();
 
             bucket.remove_entry("test-1").unwrap();
             let err = bucket.get_entry("test-1").err().unwrap();
@@ -551,7 +545,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_entry_not_found(bucket: Bucket) {
+        async fn test_remove_entry_not_found(bucket: Arc<Bucket>) {
             assert_eq!(
                 bucket.remove_entry("test-1").err(),
                 Some(ReductError::not_found(
@@ -567,8 +561,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry(mut bucket: Bucket) {
-            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
+        async fn test_rename_entry(bucket: Arc<Bucket>) {
+            write(&bucket, "test-1", 1, b"test").await.unwrap();
 
             bucket.rename_entry("test-1", "test-2").await.unwrap();
             assert_eq!(
@@ -590,7 +584,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry_not_found(bucket: Bucket) {
+        async fn test_rename_entry_not_found(bucket: Arc<Bucket>) {
             assert_eq!(
                 bucket.rename_entry("test-1", "test-2").await.err(),
                 Some(not_found!("Entry 'test-1' not found in bucket 'test'"))
@@ -599,9 +593,9 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry_already_exists(mut bucket: Bucket) {
-            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
-            write(&mut bucket, "test-2", 1, b"test").await.unwrap();
+        async fn test_rename_entry_already_exists(bucket: Arc<Bucket>) {
+            write(&bucket, "test-1", 1, b"test").await.unwrap();
+            write(&bucket, "test-2", 1, b"test").await.unwrap();
 
             assert_eq!(
                 bucket.rename_entry("test-1", "test-2").await.err(),
@@ -611,7 +605,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_invalid_name(bucket: Bucket) {
+        async fn test_rename_invalid_name(bucket: Arc<Bucket>) {
             assert_eq!(
                 bucket.rename_entry("test-1", "test-2/").await.err(),
                 Some(unprocessable_entity!(
@@ -622,8 +616,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry_persisted(mut bucket: Bucket) {
-            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
+        async fn test_rename_entry_persisted(bucket: Arc<Bucket>) {
+            write(&bucket, "test-1", 1, b"test").await.unwrap();
             bucket.sync_fs().await.unwrap();
             bucket.rename_entry("test-1", "test-2").await.unwrap();
 
@@ -644,8 +638,8 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_bucket_info_has_status(bucket: Bucket) {
-            let info = bucket.info().unwrap();
+        fn test_bucket_info_has_status(bucket: Arc<Bucket>) {
+            let info = bucket.info().wait().unwrap();
             assert_eq!(info.info.status, ResourceStatus::Ready);
             assert!(info
                 .entries
@@ -654,14 +648,14 @@ mod tests {
         }
 
         #[rstest]
-        fn test_bucket_deleting_rejects_operations(bucket: Bucket) {
+        fn test_bucket_deleting_rejects_operations(bucket: Arc<Bucket>) {
             bucket.mark_deleting().unwrap();
             let err = bucket.get_or_create_entry("new-entry").err().unwrap();
             assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
         }
 
         #[rstest]
-        fn bucket_mark_deleting_returns_conflict_when_already_deleting(bucket: Bucket) {
+        fn bucket_mark_deleting_returns_conflict_when_already_deleting(bucket: Arc<Bucket>) {
             bucket.mark_deleting().unwrap();
             assert_eq!(
                 bucket.mark_deleting(),
@@ -671,8 +665,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_entry_deleting_rejects_operations(mut bucket: Bucket) {
-            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
+        async fn test_entry_deleting_rejects_operations(bucket: Arc<Bucket>) {
+            write(&bucket, "test-1", 1, b"test").await.unwrap();
             let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
             entry.mark_deleting().unwrap();
 
@@ -685,8 +679,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn entry_mark_deleting_returns_conflict_when_already_deleting(mut bucket: Bucket) {
-            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
+        async fn entry_mark_deleting_returns_conflict_when_already_deleting(bucket: Arc<Bucket>) {
+            write(&bucket, "test-1", 1, b"test").await.unwrap();
             let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
             entry.mark_deleting().unwrap();
             assert_eq!(
@@ -699,8 +693,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn remove_entry_returns_conflict_when_entry_is_being_deleted(mut bucket: Bucket) {
-            write(&mut bucket, "test-1", 1, b"test").await.unwrap();
+        async fn remove_entry_returns_conflict_when_entry_is_being_deleted(bucket: Arc<Bucket>) {
+            write(&bucket, "test-1", 1, b"test").await.unwrap();
             let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
             entry.mark_deleting().unwrap();
 
@@ -714,13 +708,13 @@ mod tests {
     }
 
     #[rstest]
-    fn test_provisioned_info(provisioned_bucket: Bucket) {
-        let info = provisioned_bucket.info().unwrap().info;
+    fn test_provisioned_info(provisioned_bucket: Arc<Bucket>) {
+        let info = provisioned_bucket.info().wait().unwrap().info;
         assert_eq!(info.is_provisioned, true);
     }
 
     #[rstest]
-    fn test_provisioned_settings(provisioned_bucket: Bucket) {
+    fn test_provisioned_settings(provisioned_bucket: Arc<Bucket>) {
         let err = provisioned_bucket
             .set_settings(BucketSettings::default())
             .wait()
@@ -733,7 +727,7 @@ mod tests {
     }
 
     pub async fn write(
-        bucket: &mut Bucket,
+        bucket: &Arc<Bucket>,
         entry_name: &str,
         time: u64,
         content: &'static [u8],
@@ -759,7 +753,7 @@ mod tests {
     }
 
     pub async fn read(
-        bucket: &mut Bucket,
+        bucket: &Arc<Bucket>,
         entry_name: &str,
         time: u64,
     ) -> Result<Vec<u8>, ReductError> {
@@ -791,16 +785,16 @@ mod tests {
     }
 
     #[fixture]
-    pub fn bucket(settings: BucketSettings, path: PathBuf) -> Bucket {
+    pub fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
-        Bucket::new("test", &path, settings, Cfg::default()).unwrap()
+        Arc::new(Bucket::new("test", &path, settings, Cfg::default()).unwrap())
     }
 
     #[fixture]
-    pub fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Bucket {
+    pub fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
         let bucket = Bucket::new("test", &path, settings, Cfg::default()).unwrap();
         bucket.set_provisioned(true);
-        bucket
+        Arc::new(bucket)
     }
 }

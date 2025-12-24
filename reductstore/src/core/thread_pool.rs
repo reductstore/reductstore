@@ -10,13 +10,62 @@ use crossbeam_channel::{unbounded, Sender};
 use log::{error, trace};
 use std::cmp::max;
 use std::fmt::Display;
-use std::num::NonZero;
+use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock, OnceLock};
 use std::thread::{available_parallelism, JoinHandle};
 use std::time::Duration;
 pub(crate) use task_handle::TaskHandle;
+
+#[derive(Clone, Debug)]
+pub struct ThreadPoolConfig {
+    pub min_threads: usize,
+    pub worker_task_timeout: Duration,
+    pub scale_down_cooldown: Duration,
+}
+
+impl Default for ThreadPoolConfig {
+    fn default() -> Self {
+        Self {
+            min_threads: default_min_threads(),
+            worker_task_timeout: default_worker_task_timeout(),
+            scale_down_cooldown: Duration::from_secs(5),
+        }
+    }
+}
+
+static THREAD_POOL_CONFIG: OnceLock<ThreadPoolConfig> = OnceLock::new();
+
+pub(crate) fn configure_thread_pool(config: ThreadPoolConfig) {
+    let _ = THREAD_POOL_CONFIG.set(config);
+}
+
+fn thread_pool_config() -> ThreadPoolConfig {
+    THREAD_POOL_CONFIG
+        .get()
+        .cloned()
+        .unwrap_or_else(ThreadPoolConfig::default)
+}
+
+fn default_min_threads() -> usize {
+    let threads = available_parallelism().unwrap_or(NonZeroUsize::new(2).unwrap());
+    max(threads.get() / 2, 2)
+}
+
+#[cfg(unix)]
+fn default_worker_task_timeout() -> Duration {
+    Duration::from_micros(250)
+}
+
+#[cfg(windows)]
+fn default_worker_task_timeout() -> Duration {
+    Duration::from_micros(1000)
+}
+
+#[cfg(not(any(unix, windows)))]
+fn default_worker_task_timeout() -> Duration {
+    Duration::from_micros(500)
+}
 
 #[derive(PartialEq)]
 pub(crate) enum ThreadPoolState {
@@ -49,18 +98,9 @@ impl Display for Task {
     }
 }
 
-static THREAD_POOL_TASK_TIMEOUT: Duration = Duration::from_millis(5);
-static THREAD_POOL_SCALE_DOWN_COOLDOWN: Duration = Duration::from_secs(1);
-
 static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
-    let thread_pool_size = max(
-        available_parallelism()
-            .unwrap_or(NonZero::new(1).unwrap())
-            .get()
-            / 2,
-        2,
-    );
-    ThreadPool::new(thread_pool_size)
+    let config = thread_pool_config();
+    ThreadPool::new(config)
 });
 
 /// A thread pool for executing tasks.
@@ -72,24 +112,25 @@ struct ThreadPool {
 }
 
 impl ThreadPool {
-    /// Create a new thread pool with a given size.
-    pub fn new(size: usize) -> Self {
+    /// Create a new thread pool with a given configuration.
+    pub fn new(config: ThreadPoolConfig) -> Self {
         let (task_queue, task_queue_rx) = unbounded::<Task>();
         let state = Arc::new(RwLock::new(ThreadPoolState::Running));
         let queued_tasks = Arc::new(AtomicUsize::new(0));
         let worker_manager = Arc::new(
             WorkerManager::builder()
                 .state(Arc::clone(&state))
-                .min_threads(size)
-                .scale_down_cooldown(THREAD_POOL_SCALE_DOWN_COOLDOWN)
-                .worker_task_timeout(THREAD_POOL_TASK_TIMEOUT)
+                .min_threads(config.min_threads)
+                .scale_down_cooldown(config.scale_down_cooldown)
+                .worker_task_timeout(config.worker_task_timeout)
                 .build(),
         );
 
-        let supervisor =
-            worker_manager
-                .clone()
-                .start(task_queue_rx.clone(), queued_tasks.clone(), size);
+        let supervisor = worker_manager.start(
+            task_queue_rx.clone(),
+            queued_tasks.clone(),
+            config.min_threads,
+        );
 
         Self {
             task_queue,

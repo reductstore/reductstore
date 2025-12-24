@@ -90,16 +90,12 @@ impl WorkerManager {
 
                 if busy_since.elapsed() > timeout {
                     self.spawn_worker(&task_queue_rx, queued_task_counter.clone());
-                    debug!("Scaling up thread pool to {} threads", self.worker_count());
                     busy_since = Instant::now();
                 }
 
                 if idle_since.elapsed() > timeout && current_threads > pool_size {
                     self.scale_down();
-                    debug!(
-                        "Scaling down thread pool to {} threads",
-                        self.worker_count()
-                    );
+
                     idle_since = Instant::now();
                 }
 
@@ -149,6 +145,7 @@ impl WorkerManager {
             }
         });
 
+        debug!("Scaling up thread pool to {} threads", self.worker_count());
         self.workers.write().unwrap().insert(id, handle);
     }
 
@@ -170,6 +167,11 @@ impl WorkerManager {
             *self.last_scale_down.write().unwrap() = Instant::now();
             self.cleanup_finished_workers();
         }
+
+        debug!(
+            "Scaling down thread pool to {} threads",
+            self.worker_count()
+        );
     }
 
     fn cleanup_finished_workers(&self) {

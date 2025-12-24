@@ -86,11 +86,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_reload_new_entry(mut primary_bucket: Bucket) {
+    async fn test_reload_new_entry(primary_bucket: Arc<Bucket>) {
         // Create read-only bucket
         let mut cfg = primary_bucket.cfg().clone();
         cfg.role = InstanceRole::Replica;
-        let read_only_bucket = Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap();
+        let read_only_bucket =
+            Arc::new(Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap());
 
         // Initially, read-only bucket has one entry
         {
@@ -100,7 +101,7 @@ mod tests {
         }
 
         // Create new entry in primary bucket
-        write(&mut primary_bucket, "test-2", 1, b"test data")
+        write(&primary_bucket, "test-2", 1, b"test data")
             .await
             .unwrap();
 
@@ -128,11 +129,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_entry(primary_bucket: Bucket) {
+    async fn test_remove_entry(primary_bucket: Arc<Bucket>) {
         // Create read-only bucket
         let mut cfg = primary_bucket.cfg().clone();
         cfg.role = InstanceRole::Replica;
-        let read_only_bucket = Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap();
+        let read_only_bucket =
+            Arc::new(Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap());
 
         // Initially, read-only bucket has one entry
         {
@@ -169,12 +171,12 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_prohibited_operations_on_read_only_bucket(primary_bucket: Bucket) {
+        async fn test_prohibited_operations_on_read_only_bucket(primary_bucket: Arc<Bucket>) {
             // Create read-only bucket
             let mut cfg = primary_bucket.cfg().clone();
             cfg.role = InstanceRole::Replica;
             let read_only_bucket =
-                Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap();
+                Arc::new(Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap());
 
             let err = forbidden!("Cannot perform this operation in read-only mode");
 
@@ -196,11 +198,11 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_reload_before_access_entries(mut primary_bucket: Bucket) {
+        async fn test_reload_before_access_entries(primary_bucket: Arc<Bucket>) {
             let mut cfg = primary_bucket.cfg().clone();
             cfg.role = InstanceRole::Replica;
             let read_only_bucket =
-                Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap();
+                Arc::new(Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap());
 
             {
                 let entries = read_only_bucket.entries.read().unwrap();
@@ -209,7 +211,7 @@ mod tests {
             }
 
             // add new entry to primary bucket
-            write(&mut primary_bucket, "test-2", 1, b"test data")
+            write(&primary_bucket, "test-2", 1, b"test data")
                 .await
                 .unwrap();
             primary_bucket.sync_fs().await.unwrap();
@@ -223,7 +225,7 @@ mod tests {
     }
 
     #[fixture]
-    fn primary_bucket() -> Bucket {
+    fn primary_bucket() -> Arc<Bucket> {
         let path = tempdir().unwrap().keep();
         let mut cfg = Cfg {
             data_path: path,
@@ -247,14 +249,16 @@ mod tests {
         FILE_CACHE
             .create_dir_all(&cfg.data_path.join("bucket"))
             .unwrap();
-        let mut bucket = Bucket::new(
-            "bucket",
-            &cfg.data_path.clone(),
-            BucketSettings::default(),
-            cfg,
-        )
-        .unwrap();
-        block_on(write(&mut bucket, "test-1", 1, b"test data")).unwrap();
+        let bucket = Arc::new(
+            Bucket::new(
+                "bucket",
+                &cfg.data_path.clone(),
+                BucketSettings::default(),
+                cfg,
+            )
+            .unwrap(),
+        );
+        block_on(write(&bucket, "test-1", 1, b"test data")).unwrap();
         bucket.sync_fs().wait().unwrap();
         bucket
     }

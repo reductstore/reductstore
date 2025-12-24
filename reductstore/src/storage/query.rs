@@ -147,6 +147,7 @@ pub(super) fn spawn_query_task(
                     // continuous query will never be done
                     // but we don't want to flood the channel and wait for the receiver
                     sleep(options.ttl / 4);
+                    continue;
                 }
 
                 trace!("Query task done for '{}' id={}", group, id);

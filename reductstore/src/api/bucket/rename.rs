@@ -22,7 +22,7 @@ pub(super) async fn rename_bucket(
         .await?;
     components
         .storage
-        .rename_bucket(&bucket_name, &request.new_name)
+        .rename_bucket(bucket_name.clone(), request.new_name.clone())
         .await?;
     components
         .token_repo

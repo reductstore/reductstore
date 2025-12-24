@@ -138,9 +138,10 @@ mod tests {
     use crate::storage::bucket::Bucket;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::rstest;
+    use std::sync::Arc;
 
     #[rstest]
-    fn test_keep_settings_persistent(settings: BucketSettings, bucket: Bucket) {
+    fn test_keep_settings_persistent(settings: BucketSettings, bucket: Arc<Bucket>) {
         assert_eq!(bucket.settings(), settings);
 
         let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
@@ -163,7 +164,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_set_settings_partially(settings: BucketSettings, bucket: Bucket) {
+    fn test_set_settings_partially(settings: BucketSettings, bucket: Arc<Bucket>) {
         let new_settings = BucketSettings {
             max_block_size: Some(100),
             quota_type: None,
@@ -182,7 +183,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_apply_settings_to_entries(settings: BucketSettings, bucket: Bucket) {
+    fn test_apply_settings_to_entries(settings: BucketSettings, bucket: Arc<Bucket>) {
         bucket.get_or_create_entry("entry-1").unwrap();
         bucket.get_or_create_entry("entry-2").unwrap();
 
@@ -198,7 +199,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_overwrite_whole_settings_file(bucket: Bucket) {
+    fn test_overwrite_whole_settings_file(bucket: Arc<Bucket>) {
         bucket
             .set_settings(BucketSettings {
                 max_block_size: Some(5000000000000000000),
@@ -209,7 +210,7 @@ mod tests {
             .wait()
             .unwrap();
         bucket.set_settings(Bucket::defaults()).wait().unwrap();
-        let bucket = Bucket::restore(bucket.path, Cfg::default()).unwrap();
+        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
         assert_eq!(bucket.settings(), Bucket::defaults());
     }
 }

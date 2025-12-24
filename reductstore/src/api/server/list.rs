@@ -20,7 +20,7 @@ pub(super) async fn list(
 
     let mut filtered_by_read_permission = vec![];
 
-    for bucket in components.storage.get_bucket_list()?.buckets {
+    for bucket in components.storage.get_bucket_list().await?.buckets {
         // Filter out buckets that are not visible to the user
         if keeper
             .get_with_permissions(

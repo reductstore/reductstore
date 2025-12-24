@@ -23,6 +23,7 @@ use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
+use crate::core::thread_pool::{self, ThreadPoolConfig};
 use crate::ext::ext_repository::create_ext_repository;
 use crate::license::parse_license;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
@@ -82,6 +83,7 @@ pub struct Cfg {
     pub lock_file_config: LockFileConfig,
     pub rw_lock_config: RwLockConfig,
     pub engine_config: StorageEngineConfig,
+    pub thread_pool: ThreadPoolConfig,
 }
 
 impl Default for Cfg {
@@ -109,6 +111,7 @@ impl Default for Cfg {
             lock_file_config: LockFileConfig::default(),
             rw_lock_config: RwLockConfig::default(),
             engine_config: StorageEngineConfig::default(),
+            thread_pool: ThreadPoolConfig::default(),
         }
     }
 }
@@ -188,7 +191,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
+            thread_pool: Self::parse_thread_pool_config(&mut env),
         };
+
+        thread_pool::configure_thread_pool(cfg.thread_pool.clone());
 
         set_rwlock_timeout(cfg.rw_lock_config.timeout);
         set_rwlock_failure_action(cfg.rw_lock_config.failure_action);
@@ -263,7 +269,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             None
         };
 
-        let server_info = storage.info()?;
+        let server_info = storage.info().wait()?;
 
         Ok(Components {
             storage,
@@ -355,6 +361,31 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect()
+    }
+
+    pub fn parse_thread_pool_config(env: &mut Env<EnvGetter>) -> ThreadPoolConfig {
+        let default = ThreadPoolConfig::default();
+
+        let min_threads = env
+            .get_optional::<usize>("RS_THREAD_POOL_MIN_THREADS")
+            .map(|value| value.max(1))
+            .unwrap_or(default.min_threads);
+
+        let worker_task_timeout = env
+            .get_optional::<u64>("RS_THREAD_POOL_WORKER_TIMEOUT_US")
+            .map(Duration::from_micros)
+            .unwrap_or(default.worker_task_timeout);
+
+        let scale_down_cooldown = env
+            .get_optional::<u64>("RS_THREAD_POOL_SCALE_DOWN_COOLDOWN_SECS")
+            .map(Duration::from_secs)
+            .unwrap_or(default.scale_down_cooldown);
+
+        ThreadPoolConfig {
+            min_threads,
+            worker_task_timeout,
+            scale_down_cooldown,
+        }
     }
 }
 

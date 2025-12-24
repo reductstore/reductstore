@@ -74,14 +74,16 @@ mod tests {
 
     #[rstest]
     #[serial]
-    fn test_reload_new_bucket(primary_engine: StorageEngine) {
+    fn test_reload_new_bucket(primary_engine: Arc<StorageEngine>) {
         // Create read-only engine
         let mut cfg = primary_engine.cfg().clone();
         cfg.role = InstanceRole::Replica;
-        let read_only_engine = StorageEngine::builder()
-            .with_cfg(cfg.clone())
-            .with_data_path(cfg.data_path.clone())
-            .build();
+        let read_only_engine = Arc::new(
+            StorageEngine::builder()
+                .with_cfg(cfg.clone())
+                .with_data_path(cfg.data_path.clone())
+                .build(),
+        );
 
         // Initially, read-only engine has one bucket
         {
@@ -112,13 +114,15 @@ mod tests {
 
     #[rstest]
     #[serial]
-    fn test_remove_bucket(primary_engine: StorageEngine) {
+    fn test_remove_bucket(primary_engine: Arc<StorageEngine>) {
         let mut cfg = primary_engine.cfg().clone();
         cfg.role = InstanceRole::Replica;
-        let read_only_engine = StorageEngine::builder()
-            .with_cfg(cfg.clone())
-            .with_data_path(cfg.data_path.clone())
-            .build();
+        let read_only_engine = Arc::new(
+            StorageEngine::builder()
+                .with_cfg(cfg.clone())
+                .with_data_path(cfg.data_path.clone())
+                .build(),
+        );
 
         {
             let buckets = read_only_engine.buckets.read().unwrap();
@@ -148,13 +152,15 @@ mod tests {
         use reduct_base::forbidden;
         #[rstest]
         #[serial]
-        fn test_prohibited_operations_on_read_only_engine(primary_engine: StorageEngine) {
+        fn test_prohibited_operations_on_read_only_engine(primary_engine: Arc<StorageEngine>) {
             let mut cfg = primary_engine.cfg().clone();
             cfg.role = InstanceRole::Replica;
-            let read_only_engine = StorageEngine::builder()
-                .with_cfg(cfg.clone())
-                .with_data_path(cfg.data_path.clone())
-                .build();
+            let read_only_engine = Arc::new(
+                StorageEngine::builder()
+                    .with_cfg(cfg.clone())
+                    .with_data_path(cfg.data_path.clone())
+                    .build(),
+            );
             let err = forbidden!("Cannot perform this operation in read-only mode");
             // Example: try to create bucket
             let result = read_only_engine.create_bucket("new-bucket", BucketSettings::default());
@@ -164,7 +170,7 @@ mod tests {
             assert_eq!(result.err().unwrap(), err);
 
             let result = read_only_engine
-                .rename_bucket("bucket-1", "bucket-renamed")
+                .rename_bucket("bucket-1".to_string(), "bucket-renamed".to_string())
                 .wait();
             assert_eq!(result.err().unwrap(), err);
         }
@@ -174,13 +180,15 @@ mod tests {
         use super::*;
         #[rstest]
         #[serial]
-        fn test_reload_before_access_buckets(primary_engine: StorageEngine) {
+        fn test_reload_before_access_buckets(primary_engine: Arc<StorageEngine>) {
             let mut cfg = primary_engine.cfg().clone();
             cfg.role = InstanceRole::Replica;
-            let read_only_engine = StorageEngine::builder()
-                .with_cfg(cfg.clone())
-                .with_data_path(cfg.data_path.clone())
-                .build();
+            let read_only_engine = Arc::new(
+                StorageEngine::builder()
+                    .with_cfg(cfg.clone())
+                    .with_data_path(cfg.data_path.clone())
+                    .build(),
+            );
             {
                 let buckets = read_only_engine.buckets.read().unwrap();
                 assert_eq!(buckets.len(), 1);
@@ -202,7 +210,7 @@ mod tests {
     }
 
     #[fixture]
-    fn primary_engine() -> StorageEngine {
+    fn primary_engine() -> Arc<StorageEngine> {
         let path = tempdir().unwrap().keep();
         let cfg = Cfg {
             data_path: path,
@@ -219,14 +227,14 @@ mod tests {
                 .try_build()
                 .unwrap(),
         );
-        let engine = StorageEngine::builder()
+        let storage_engine = StorageEngine::builder()
             .with_cfg(cfg.clone())
             .with_data_path(cfg.data_path.clone())
             .build();
 
-        let _ = engine
+        let _ = storage_engine
             .create_bucket("bucket-1", BucketSettings::default())
             .unwrap();
-        engine
+        Arc::new(storage_engine)
     }
 }
