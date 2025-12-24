@@ -198,28 +198,36 @@ impl Entry {
     }
 
     /// Returns stats about the entry.
-    pub fn info(&self) -> Result<EntryInfo, ReductError> {
-        let mut bm = self.block_manager.write()?;
-        let index = bm.update_and_get_index()?;
-        let (oldest_record, latest_record) = if index.tree().is_empty() {
-            (0, 0)
-        } else {
-            let latest_block_id = index.tree().last().unwrap();
-            let latest_record = match index.get_block(*latest_block_id) {
-                Some(block) => ts_to_us(&block.latest_record_time.as_ref().unwrap()),
-                None => 0,
-            };
-            (*index.tree().first().unwrap(), latest_record)
-        };
+    pub fn info(&self) -> TaskHandle<Result<EntryInfo, ReductError>> {
+        let name = self.name.clone();
+        let block_manager = Arc::clone(&self.block_manager);
+        let status_result = self.status();
 
-        Ok(EntryInfo {
-            name: self.name.clone(),
-            size: index.size(),
-            record_count: index.record_count(),
-            block_count: index.tree().len() as u64,
-            oldest_record,
-            latest_record,
-            status: self.status()?,
+        spawn("entry info", move || {
+            let mut bm = block_manager.write()?;
+            let index = bm.update_and_get_index()?;
+            let (oldest_record, latest_record) = if index.tree().is_empty() {
+                (0, 0)
+            } else {
+                let latest_block_id = index.tree().last().unwrap();
+                let latest_record = match index.get_block(*latest_block_id) {
+                    Some(block) => ts_to_us(&block.latest_record_time.as_ref().unwrap()),
+                    None => 0,
+                };
+                (*index.tree().first().unwrap(), latest_record)
+            };
+
+            let status = status_result?;
+
+            Ok(EntryInfo {
+                name,
+                size: index.size(),
+                record_count: index.record_count(),
+                block_count: index.tree().len() as u64,
+                oldest_record,
+                latest_record,
+                status,
+            })
         })
     }
 
@@ -322,7 +330,7 @@ impl Entry {
     }
 
     fn get_query_time_range(&self, query: &QueryEntry) -> Result<(u64, u64), ReductError> {
-        let info = self.info()?;
+        let info = self.info().wait()?;
         let start = if let Some(start) = query.start {
             start
         } else {
@@ -416,7 +424,7 @@ mod tests {
                     .wait()
                     .unwrap()
                     .unwrap();
-            let info = entry.info().unwrap();
+            let info = entry.info().wait().unwrap();
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
             assert_eq!(info.size, 88);
@@ -594,7 +602,7 @@ mod tests {
         write_stub_record(&mut entry, 2000000);
         write_stub_record(&mut entry, 3000000);
 
-        let info = entry.info().unwrap();
+        let info = entry.info().wait().unwrap();
         assert_eq!(info.name, "entry");
         assert_eq!(info.size, 88);
         assert_eq!(info.record_count, 3);
@@ -635,7 +643,7 @@ mod tests {
                 .unwrap()
                 .to_string()
                 .contains("because it is in use"));
-            let info = entry.info().unwrap();
+            let info = entry.info().wait().unwrap();
             assert_eq!(info.block_count, 1);
             assert_eq!(info.size, 8388630);
         }
@@ -662,7 +670,7 @@ mod tests {
                     "Cannot remove block 1000000 because it is still in use"
                 ))
             );
-            let info = entry.info().unwrap();
+            let info = entry.info().wait().unwrap();
             assert_eq!(info.block_count, 1);
             assert_eq!(info.size, 524309);
         }
@@ -685,19 +693,19 @@ mod tests {
             write_stub_record(&mut entry, 3000000);
             write_stub_record(&mut entry, 4000000);
 
-            assert_eq!(entry.info().unwrap().block_count, 2);
-            assert_eq!(entry.info().unwrap().record_count, 4);
-            assert_eq!(entry.info().unwrap().size, 116);
+            assert_eq!(entry.info().wait().unwrap().block_count, 2);
+            assert_eq!(entry.info().wait().unwrap().record_count, 4);
+            assert_eq!(entry.info().wait().unwrap().size, 116);
 
             entry.try_remove_oldest_block().wait().unwrap();
-            assert_eq!(entry.info().unwrap().block_count, 1);
-            assert_eq!(entry.info().unwrap().record_count, 2);
-            assert_eq!(entry.info().unwrap().size, 58);
+            assert_eq!(entry.info().wait().unwrap().block_count, 1);
+            assert_eq!(entry.info().wait().unwrap().record_count, 2);
+            assert_eq!(entry.info().wait().unwrap().size, 58);
 
             entry.try_remove_oldest_block().wait().unwrap();
-            assert_eq!(entry.info().unwrap().block_count, 0);
-            assert_eq!(entry.info().unwrap().record_count, 0);
-            assert_eq!(entry.info().unwrap().size, 0);
+            assert_eq!(entry.info().wait().unwrap().block_count, 0);
+            assert_eq!(entry.info().wait().unwrap().record_count, 0);
+            assert_eq!(entry.info().wait().unwrap().size, 0);
         }
     }
 

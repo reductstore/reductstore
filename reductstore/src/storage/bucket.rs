@@ -221,7 +221,7 @@ impl Bucket {
 
         let entry_map = self.entries.read()?;
         for entry in entry_map.values() {
-            let info = entry.info()?;
+            let info = entry.info().wait()?;
             entries.push(info.clone());
             size += info.size;
             oldest_record = oldest_record.min(info.oldest_record);

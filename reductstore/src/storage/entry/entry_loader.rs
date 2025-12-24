@@ -458,7 +458,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        let info = entry.info().unwrap();
+        let info = entry.info().wait().unwrap();
         assert_eq!(entry.name, "entry");
         assert_eq!(info.record_count, 2);
         assert_eq!(info.size, 88);
@@ -497,7 +497,7 @@ mod tests {
             EntryLoader::restore_entry(path.join("entry"), entry_settings, Cfg::default().into())
                 .unwrap()
                 .unwrap();
-        let info = entry.info().unwrap();
+        let info = entry.info().wait().unwrap();
         assert_eq!(info.name, "entry");
         assert_eq!(info.record_count, 0);
         assert!(!meta_path.exists(), "should remove meta block");
@@ -566,7 +566,7 @@ mod tests {
         let entry = EntryLoader::restore_entry(path.clone(), entry_settings, Cfg::default().into())
             .unwrap()
             .unwrap();
-        let info = entry.info().unwrap();
+        let info = entry.info().wait().unwrap();
 
         assert_eq!(info.size, 88);
         assert_eq!(info.record_count, 2);
@@ -608,7 +608,7 @@ mod tests {
         )
         .unwrap()
         .unwrap();
-        let info = entry.info().unwrap();
+        let info = entry.info().wait().unwrap();
         assert_eq!(info.record_count, 2);
     }
 
