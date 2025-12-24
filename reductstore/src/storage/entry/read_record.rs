@@ -1,7 +1,7 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{shared, TaskHandle};
+use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::proto::record;
 use log::debug;
@@ -21,7 +21,7 @@ impl Entry {
     /// * `HTTPError` - The error if any.
     pub(crate) fn begin_read(&self, time: u64) -> TaskHandle<Result<RecordReader, ReductError>> {
         let block_manager = self.block_manager.clone();
-        shared(&self.task_group(), "begin read", move || {
+        spawn("begin read", move || {
             debug!("Reading record for ts={}", time);
 
             let (block_ref, record) = {

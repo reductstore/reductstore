@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::sync::RwLock;
-use crate::core::thread_pool::{shared, unique, unique_child, TaskHandle};
+use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
 use log::warn;
@@ -32,9 +32,8 @@ impl Entry {
         timestamps: Vec<u64>,
     ) -> TaskHandle<Result<BTreeMap<u64, ReductError>, ReductError>> {
         let block_manager = self.block_manager.clone();
-        let task_group = self.task_group();
-        unique(&task_group.clone(), "remove records", move || {
-            Self::inner_remove_records(timestamps, block_manager, task_group)
+        spawn("remove records", move || {
+            Self::inner_remove_records(timestamps, block_manager)
         })
     }
 
@@ -72,9 +71,8 @@ impl Entry {
 
         let block_manager = self.block_manager.clone();
         let max_block_records = self.settings().max_block_records; // max records per block
-        let task_group = self.task_group();
 
-        shared(&task_group.clone(), "query remove records", move || {
+        spawn("query remove records", move || {
             // Loop until the query is done
             let mut continue_query = true;
             let mut total_records = 0;
@@ -107,11 +105,7 @@ impl Entry {
                 total_records += records_to_remove.len() as u64;
                 let copy_block_manager = block_manager.clone();
 
-                match Self::inner_remove_records(
-                    records_to_remove,
-                    copy_block_manager,
-                    task_group.clone(),
-                ) {
+                match Self::inner_remove_records(records_to_remove, copy_block_manager) {
                     Ok(error_map) => {
                         for (timestamp, error) in error_map {
                             // TODO: send the error to the client
@@ -134,7 +128,6 @@ impl Entry {
     fn inner_remove_records(
         timestamps: Vec<u64>,
         block_manager: Arc<RwLock<BlockManager>>,
-        task_group: String,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let mut error_map = BTreeMap::new();
         let mut records_per_block = BTreeMap::new();
@@ -167,15 +160,11 @@ impl Entry {
         let mut handlers = vec![];
         for (block_id, timestamps) in records_per_block {
             let local_block_manager = block_manager.clone();
-            let handler = unique_child(
-                &format!("{}/{}", task_group, block_id),
-                "remove records from block",
-                move || {
-                    // TODO: we don't parallelize the removal of records in different blocks
-                    let mut bm = local_block_manager.write()?;
-                    bm.remove_records(block_id, timestamps)
-                },
-            );
+            let handler = spawn("remove records from block", move || {
+                // TODO: we don't parallelize the removal of records in different blocks
+                let mut bm = local_block_manager.write()?;
+                bm.remove_records(block_id, timestamps)
+            });
             handlers.push(handler);
         }
 
