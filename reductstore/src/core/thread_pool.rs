@@ -49,7 +49,8 @@ impl Display for Task {
     }
 }
 
-static THREAD_POOL_TASK_TIMEOUT: Duration = Duration::from_millis(1);
+static THREAD_POOL_TASK_TIMEOUT: Duration = Duration::from_millis(5);
+static THREAD_POOL_SCALE_DOWN_COOLDOWN: Duration = Duration::from_secs(1);
 
 static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
     let thread_pool_size = max(
@@ -80,25 +81,20 @@ impl ThreadPool {
             WorkerManager::builder()
                 .state(Arc::clone(&state))
                 .min_threads(size)
-                .scale_down_cooldown(Duration::from_secs(1))
-                .worker_task_timeout(Duration::from_millis(5))
+                .scale_down_cooldown(THREAD_POOL_SCALE_DOWN_COOLDOWN)
+                .worker_task_timeout(THREAD_POOL_TASK_TIMEOUT)
                 .build(),
         );
 
-        worker_manager.spawn_initial(&task_queue_rx, queued_tasks.clone());
-
-        let state_clone = state.clone();
-
-        let supervisor = worker_manager.clone().start_supervisor(
-            task_queue_rx.clone(),
-            queued_tasks.clone(),
-            size,
-        );
+        let supervisor =
+            worker_manager
+                .clone()
+                .start(task_queue_rx.clone(), queued_tasks.clone(), size);
 
         Self {
             task_queue,
             queued_tasks,
-            state: state_clone,
+            state,
             supervisor: Some(supervisor),
         }
     }

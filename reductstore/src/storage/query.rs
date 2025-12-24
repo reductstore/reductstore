@@ -90,79 +90,66 @@ pub(super) fn spawn_query_task(
 
         loop {
             let group = task_group.clone();
-            let query = query.clone();
-            let block_manager = block_manager.clone();
-            let tx = tx.clone();
-            let watcher = watcher.clone();
 
             // the task return None if the loop must be stopped
             // we do it for each iteration so we don't need to take the whole worker for a long query
-            let task = spawn("query iteration", move || {
-                let mut watcher = match watcher.write() {
-                    Ok(guard) => guard,
-                    Err(_) => {
-                        warn!(
-                            "Error acquiring watcher lock for query '{}' id={}",
-                            group, id
-                        );
-                        return None;
-                    }
-                };
+            let mut watcher = match watcher.write() {
+                Ok(guard) => guard,
+                Err(_) => {
+                    warn!(
+                        "Error acquiring watcher lock for query '{}' id={}",
+                        group, id
+                    );
+                    break;
+                }
+            };
 
-                if tx.is_closed() {
-                    debug!("Query '{}' id={} task channel closed", group, id);
-                    return None;
+            if tx.is_closed() {
+                debug!("Query '{}' id={} task channel closed", group, id);
+                break;
+            }
+
+            if watcher.expired(options.ttl) && !options.continuous {
+                debug!("Query '{}' id={} task expired", group, id);
+                break;
+            }
+
+            if tx.capacity() == 0 {
+                trace!("Query '{}' id={} task channel full", group, id);
+                // we increase the sleep time for the next iteration
+                // to avoid flooding the channel but still be responsive
+                let timeout = watcher.full_channel();
+                sleep(timeout);
+            }
+
+            let next_result = match query.write() {
+                Ok(mut guard) => guard.next(block_manager.clone()),
+                Err(_) => {
+                    warn!("Error acquiring query lock for query '{}' id={}", group, id);
+                    break;
+                }
+            };
+
+            let query_err = next_result.as_ref().err().cloned();
+
+            let send_result = tx.blocking_send(next_result);
+
+            if let Err(err) = send_result {
+                warn!("Error sending query '{}' id={} result: {}", group, id, err);
+                break;
+            }
+
+            // notify the watcher that we sent a result
+            watcher.send_success();
+
+            if let Some(err) = query_err {
+                if err.status == NoContent && options.continuous {
+                    // continuous query will never be done
+                    // but we don't want to flood the channel and wait for the receiver
+                    sleep(options.ttl / 4);
                 }
 
-                if watcher.expired(options.ttl) && !options.continuous {
-                    debug!("Query '{}' id={} task expired", group, id);
-                    return None;
-                }
-
-                if tx.capacity() == 0 {
-                    trace!("Query '{}' id={} task channel full", group, id);
-                    // we increase the sleep time for the next iteration
-                    // to avoid flooding the channel but still be responsive
-                    let timeout = watcher.full_channel();
-                    return Some(timeout);
-                }
-
-                let next_result = match query.write() {
-                    Ok(mut guard) => guard.next(block_manager.clone()),
-                    Err(_) => {
-                        warn!("Error acquiring query lock for query '{}' id={}", group, id);
-                        return None;
-                    }
-                };
-
-                let query_err = next_result.as_ref().err().cloned();
-
-                let send_result = tx.blocking_send(next_result);
-
-                if let Err(err) = send_result {
-                    warn!("Error sending query '{}' id={} result: {}", group, id, err);
-                    return None;
-                }
-
-                // notify the watcher that we sent a result
-                watcher.send_success();
-
-                if let Some(err) = query_err {
-                    if err.status == NoContent && options.continuous {
-                        // continuous query will never be done
-                        // but we don't want to flood the channel and wait for the receiver
-                        return Some(options.ttl / 4);
-                    }
-
-                    trace!("Query task done for '{}' id={}", group, id);
-                    return None;
-                }
-                Some(Duration::from_millis(0))
-            });
-
-            if let Some(sleep_duration) = task.wait() {
-                sleep(sleep_duration);
-            } else {
+                trace!("Query task done for '{}' id={}", group, id);
                 break;
             }
         }

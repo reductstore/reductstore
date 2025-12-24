@@ -59,113 +59,14 @@ impl WorkerManager {
         WorkerManagerBuilder::default()
     }
 
-    pub(crate) fn spawn_initial(
-        &self,
-        task_rx: &Receiver<Task>,
-        queued_task_counter: Arc<AtomicUsize>,
-    ) {
-        for _ in 0..self.config.min_threads {
-            self.spawn_worker(task_rx, queued_task_counter.clone());
-        }
-    }
-
-    pub(crate) fn spawn_worker(
-        &self,
-        task_rx: &Receiver<Task>,
-        queued_task_counter: Arc<AtomicUsize>,
-    ) {
-        static WORKER_ID: AtomicUsize = AtomicUsize::new(0);
-        let id = WORKER_ID.fetch_add(1, Ordering::Relaxed) as u64;
-
-        let task_rx = task_rx.clone();
-        let state = self.state.clone();
-        let stop_rx = self.stop_rx.clone();
-
-        let worker_task_timeout = self.config.worker_task_timeout;
-        let handle = std::thread::spawn(move || loop {
-            match state.read().unwrap().deref() {
-                ThreadPoolState::Running => {}
-                ThreadPoolState::Stopped => break,
-            }
-
-            crossbeam_channel::select! {
-                recv(stop_rx) -> _ => {
-                    debug!("Worker {} received stop signal", id);
-                    break;
-                }
-                recv(task_rx) -> msg => {
-                    match msg {
-                        Ok(Task { description, func }) => {
-                            let start = Instant::now();
-                            queued_task_counter.fetch_sub(1, Ordering::SeqCst);
-                            func();
-                            trace!("Executed Task({}) in {:?}", description, start.elapsed());
-                        }
-                        Err(_) => break,
-                    }
-                }
-                recv(crossbeam_channel::after(worker_task_timeout)) -> _ => {}
-            }
-        });
-
-        self.workers.write().unwrap().insert(id, handle);
-    }
-
-    pub(crate) fn scale_down(&self) {
-        self.cleanup_finished_workers();
-
-        let worker_count = self.worker_count();
-        if worker_count <= self.config.min_threads {
-            return;
-        }
-
-        if Instant::now().duration_since(*self.last_scale_down.read().unwrap())
-            < self.config.scale_down_cooldown
-        {
-            return;
-        }
-
-        if self.stop_tx.try_send(()).is_ok() {
-            *self.last_scale_down.write().unwrap() = Instant::now();
-            self.cleanup_finished_workers();
-        }
-    }
-
-    fn cleanup_finished_workers(&self) {
-        let mut workers = self.workers.write().unwrap();
-        let finished: Vec<u64> = workers
-            .iter()
-            .filter_map(|(id, handle)| handle.is_finished().then_some(*id))
-            .collect();
-
-        for id in finished {
-            if let Some(handle) = workers.remove(&id) {
-                if let Err(err) = handle.join() {
-                    error!("Failed to join worker {id}: {:?}", err);
-                }
-            }
-        }
-    }
-
-    pub(crate) fn worker_count(&self) -> usize {
-        self.workers.read().unwrap().len()
-    }
-
-    pub(crate) fn join_all(&self) {
-        for (id, handle) in self.workers.write().unwrap().drain() {
-            trace!("Joining worker thread {}", id);
-            if let Err(err) = handle.join() {
-                error!("Failed to join worker {id}: {:?}", err);
-            }
-        }
-    }
-
-    pub(crate) fn start_supervisor(
+    pub fn start(
         self: Arc<Self>,
         task_queue_rx: Receiver<Task>,
         queued_task_counter: Arc<AtomicUsize>,
         pool_size: usize,
     ) -> JoinHandle<()> {
+        self.spawn_initial(&task_queue_rx, queued_task_counter.clone());
+
         std::thread::spawn(move || {
             let mut idle_since = Instant::now();
             let mut busy_since = Instant::now();
@@ -205,6 +106,99 @@ impl WorkerManager {
                 std::thread::sleep(worker_task_timeout);
             }
         })
+    }
+
+    fn spawn_initial(&self, task_rx: &Receiver<Task>, queued_task_counter: Arc<AtomicUsize>) {
+        for _ in 0..self.config.min_threads {
+            self.spawn_worker(task_rx, queued_task_counter.clone());
+        }
+    }
+
+    fn spawn_worker(&self, task_rx: &Receiver<Task>, queued_task_counter: Arc<AtomicUsize>) {
+        static WORKER_ID: AtomicUsize = AtomicUsize::new(0);
+        let id = WORKER_ID.fetch_add(1, Ordering::Relaxed) as u64;
+
+        let task_rx = task_rx.clone();
+        let state = self.state.clone();
+        let stop_rx = self.stop_rx.clone();
+
+        let worker_task_timeout = self.config.worker_task_timeout;
+        let handle = std::thread::spawn(move || loop {
+            match state.read().unwrap().deref() {
+                ThreadPoolState::Running => {}
+                ThreadPoolState::Stopped => break,
+            }
+
+            crossbeam_channel::select! {
+                recv(stop_rx) -> _ => {
+                    debug!("Worker {} received stop signal", id);
+                    break;
+                }
+                recv(task_rx) -> msg => {
+                    match msg {
+                        Ok(Task { description, func }) => {
+                            let start = Instant::now();
+                            queued_task_counter.fetch_sub(1, Ordering::SeqCst);
+                            func();
+                            trace!("Executed Task({}) in {:?}", description, start.elapsed());
+                        }
+                        Err(_) => break,
+                    }
+                }
+                recv(crossbeam_channel::after(worker_task_timeout)) -> _ => {}
+            }
+        });
+
+        self.workers.write().unwrap().insert(id, handle);
+    }
+
+    fn scale_down(&self) {
+        self.cleanup_finished_workers();
+
+        let worker_count = self.worker_count();
+        if worker_count <= self.config.min_threads {
+            return;
+        }
+
+        if Instant::now().duration_since(*self.last_scale_down.read().unwrap())
+            < self.config.scale_down_cooldown
+        {
+            return;
+        }
+
+        if self.stop_tx.try_send(()).is_ok() {
+            *self.last_scale_down.write().unwrap() = Instant::now();
+            self.cleanup_finished_workers();
+        }
+    }
+
+    fn cleanup_finished_workers(&self) {
+        let mut workers = self.workers.write().unwrap();
+        let finished: Vec<u64> = workers
+            .iter()
+            .filter_map(|(id, handle)| handle.is_finished().then_some(*id))
+            .collect();
+
+        for id in finished {
+            if let Some(handle) = workers.remove(&id) {
+                if let Err(err) = handle.join() {
+                    error!("Failed to join worker {id}: {:?}", err);
+                }
+            }
+        }
+    }
+
+    fn worker_count(&self) -> usize {
+        self.workers.read().unwrap().len()
+    }
+
+    fn join_all(&self) {
+        for (id, handle) in self.workers.write().unwrap().drain() {
+            trace!("Joining worker thread {}", id);
+            if let Err(err) = handle.join() {
+                error!("Failed to join worker {id}: {:?}", err);
+            }
+        }
     }
 }
 
