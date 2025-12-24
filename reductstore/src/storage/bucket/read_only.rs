@@ -145,7 +145,7 @@ mod tests {
 
         // Remove entry in primary bucket
         primary_bucket.remove_entry("test-1").unwrap();
-        primary_bucket.sync_fs().await.unwrap();
+        primary_bucket.sync_fs().wait().unwrap();
         read_only_bucket.reload().unwrap();
 
         assert_eq!(

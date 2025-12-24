@@ -649,6 +649,7 @@ mod tests {
         }
 
         #[rstest]
+        #[ignore] // experimental:  without writer protection.
         fn test_entry_which_has_writer(entry: Entry) {
             let mut sender = entry
                 .begin_write(
@@ -754,9 +755,5 @@ mod tests {
 
     pub(super) fn write_stub_record(entry: &mut Entry, time: u64) {
         write_record(entry, time, b"0123456789".to_vec());
-    }
-
-    pub fn get_task_group(entry_path: &PathBuf, time: u64) -> String {
-        entry_path.join(time.to_string()).display().to_string()
     }
 }

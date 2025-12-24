@@ -392,8 +392,13 @@ impl Bucket {
         let entry_name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
 
-        let _ = spawn("remove entry", move || {
-            let remove_bucket_from_backend = || {
+        {
+            let mut entries_lock = entries.write()?;
+            entries_lock.remove(&entry_name);
+        }
+
+        let folder_remove_result = {
+            let remove_bucket_from_backend = || -> Result<(), ReductError> {
                 folder_keeper.remove_folder(&entry_name)?;
                 debug!(
                     "Remove entry '{}' from bucket '{}' and folder '{}'",
@@ -401,18 +406,32 @@ impl Bucket {
                     bucket_name,
                     path.display()
                 );
-
-                entries.write()?.remove(&entry_name);
-                Ok::<(), ReductError>(())
+                Ok(())
             };
 
-            if let Err(err) = remove_bucket_from_backend() {
+            remove_bucket_from_backend()
+        };
+
+        match folder_remove_result {
+            Ok(()) => {
+                let entries = entries.clone();
+                let entry_name = entry_name.clone();
+                let _ = spawn(
+                    "finalize entry removal",
+                    move || -> Result<(), ReductError> {
+                        entries.write()?.remove(&entry_name);
+                        Ok(())
+                    },
+                );
+            }
+            Err(err) => {
                 error!(
                     "Failed to remove entry '{}' from bucket '{}': {}",
                     entry_name, bucket_name, err
                 );
+                return Err(err);
             }
-        });
+        }
 
         Ok(())
     }

@@ -273,23 +273,26 @@ impl StorageEngine {
         old_name: String,
         new_name: String,
     ) -> Result<(), ReductError> {
+        self.check_mode()?;
         check_name_convention(&new_name)?;
-        let buckets = self.buckets.read().unwrap();
-        if let Some(bucket) = buckets.get(&new_name) {
-            return Err(conflict!("Bucket '{}' already exists", bucket.name()));
-        }
-
-        if let Some(bucket) = buckets.get(&old_name) {
-            if bucket.is_provisioned() {
-                return Err(conflict!(
-                    "Can't rename provisioned bucket '{}'",
-                    bucket.name()
-                ));
+        {
+            let buckets = self.buckets.read()?;
+            if let Some(bucket) = buckets.get(&new_name) {
+                return Err(conflict!("Bucket '{}' already exists", bucket.name()));
             }
 
-            bucket.sync_fs().wait()?;
-        } else {
-            Err(not_found!("Bucket '{}' is not found", old_name))?;
+            if let Some(bucket) = buckets.get(&old_name) {
+                if bucket.is_provisioned() {
+                    return Err(conflict!(
+                        "Can't rename provisioned bucket '{}'",
+                        bucket.name()
+                    ));
+                }
+
+                bucket.sync_fs().wait()?;
+            } else {
+                Err(not_found!("Bucket '{}' is not found", old_name))?;
+            }
         }
 
         let new_path = self.data_path.join(&new_name);
