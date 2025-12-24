@@ -2,11 +2,11 @@
 // Licensed under the Business Source License 1.1
 
 use axum::body::Body;
-use axum::http::Request;
+use axum::http::{Request, StatusCode};
 
 use axum::middleware::Next;
 use axum::response::IntoResponse;
-use log::{debug, error};
+use log::{debug, error, Level};
 use reduct_base::error::ErrorCode;
 
 use crate::api::HttpError;
@@ -56,43 +56,60 @@ pub async fn print_statuses(
         .get("x-reduct-log-hint")
         .is_some_and(|v| v == "skip-error-log");
 
-    if response.status().is_server_error() && !skip_error_log {
-        error!(
+    match log_level_for_response(response.status(), skip_error_log) {
+        Level::Error => error!(
             "{} [{}] {}, {:?}",
             method,
             response.status(),
             err_msg,
             strat_time.elapsed()
-        );
-    } else {
-        debug!(
+        ),
+        _ => debug!(
             "{} [{}] {}, {:?}",
             method,
             response.status(),
             err_msg,
             strat_time.elapsed()
-        );
+        ),
     }
 
     Ok(response)
 }
 
+fn log_level_for_response(status: StatusCode, skip_error_log: bool) -> Level {
+    if status.is_server_error() && !skip_error_log {
+        Level::Error
+    } else {
+        Level::Debug
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use axum::http::HeaderMap;
-    use axum::http::HeaderValue;
+    use super::*;
+    use axum::http::{HeaderMap, HeaderValue};
+    use log::Level;
 
-    #[test]
+    #[test_log::test]
+    fn selects_error_for_server_error_without_hint() {
+        let level = log_level_for_response(StatusCode::INTERNAL_SERVER_ERROR, false);
+        assert_eq!(level, Level::Error);
+    }
+
+    #[test_log::test]
+    fn respects_skip_hint_even_for_server_errors() {
+        let level = log_level_for_response(StatusCode::INTERNAL_SERVER_ERROR, true);
+        assert_eq!(level, Level::Debug);
+    }
+
+    #[test_log::test]
+    fn uses_debug_for_non_server_errors() {
+        let level = log_level_for_response(StatusCode::BAD_REQUEST, false);
+        assert_eq!(level, Level::Debug);
+    }
+
+    #[test_log::test]
     fn detects_skip_header() {
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            "x-reduct-log-hint",
-            HeaderValue::from_static("skip-error-log"),
-        );
-        assert!(headers
-            .get("x-reduct-log-hint")
-            .is_some_and(|v| v == "skip-error-log"));
-
         let mut headers = HeaderMap::new();
         headers.insert("x-reduct-log-hint", HeaderValue::from_static("keep"));
         assert!(!headers

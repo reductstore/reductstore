@@ -9,7 +9,6 @@ use crate::core::thread_pool::scaling::WorkerManager;
 use crossbeam_channel::{unbounded, Sender};
 use log::{error, trace};
 use std::cmp::max;
-use std::fmt::Display;
 use std::num::NonZeroUsize;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock, OnceLock};
@@ -90,12 +89,6 @@ type BoxedFunc = Box<dyn FnOnce() + Send>;
 struct Task {
     description: String,
     func: BoxedFunc,
-}
-
-impl Display for Task {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "Task({})", self.description,)
-    }
 }
 
 static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {

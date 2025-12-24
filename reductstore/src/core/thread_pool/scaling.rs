@@ -239,3 +239,201 @@ impl WorkerManagerBuilder {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crossbeam_channel::unbounded;
+    use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+    use std::thread;
+    use std::time::Instant;
+
+    const WAIT_TIMEOUT: Duration = Duration::from_millis(200);
+
+    fn make_manager(min_threads: usize) -> Arc<WorkerManager> {
+        Arc::new(
+            WorkerManager::builder()
+                .state(Arc::new(RwLock::new(ThreadPoolState::Running)))
+                .min_threads(min_threads)
+                .scale_down_cooldown(Duration::from_millis(1))
+                .worker_task_timeout(Duration::from_millis(1))
+                .build(),
+        )
+    }
+
+    fn make_task(action: impl FnOnce() + Send + 'static) -> Task {
+        Task {
+            description: "test-task".into(),
+            func: Box::new(action),
+        }
+    }
+
+    fn wait_until(mut predicate: impl FnMut() -> bool) -> bool {
+        let deadline = Instant::now() + WAIT_TIMEOUT;
+        while Instant::now() < deadline {
+            if predicate() {
+                return true;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        predicate()
+    }
+
+    fn wait_for_workers(manager: &WorkerManager, expected: usize) -> bool {
+        wait_until(|| {
+            manager.cleanup_finished_workers();
+            manager.worker_count() == expected
+        })
+    }
+
+    fn shutdown(manager: &Arc<WorkerManager>) {
+        *manager.state.write().unwrap() = ThreadPoolState::Stopped;
+        manager.join_all();
+    }
+
+    #[test]
+    fn scaling_config_has_reasonable_defaults() {
+        let defaults = ScalingConfig::default();
+        assert_eq!(defaults.min_threads, 1);
+        assert_eq!(defaults.scale_down_cooldown, Duration::from_millis(100));
+        assert_eq!(defaults.worker_task_timeout, Duration::from_millis(5));
+    }
+
+    #[test]
+    fn builder_applies_overrides() {
+        let state = Arc::new(RwLock::new(ThreadPoolState::Stopped));
+        let cooldown = Duration::from_millis(7);
+        let timeout = Duration::from_millis(2);
+        let manager = WorkerManager::builder()
+            .state(state.clone())
+            .min_threads(3)
+            .scale_down_cooldown(cooldown)
+            .worker_task_timeout(timeout)
+            .build();
+
+        assert_eq!(manager.config.min_threads, 3);
+        assert_eq!(manager.config.scale_down_cooldown, cooldown);
+        assert_eq!(manager.config.worker_task_timeout, timeout);
+        assert!(Arc::ptr_eq(&manager.state, &state));
+    }
+
+    #[test]
+    fn spawn_initial_launches_minimum_workers() {
+        let manager = make_manager(2);
+        let (tx, rx) = unbounded::<Task>();
+        let counter = Arc::new(AtomicUsize::new(0));
+        manager.spawn_initial(&rx, counter);
+        assert!(wait_for_workers(&manager, 2));
+        drop(tx);
+        shutdown(&manager);
+    }
+
+    #[test]
+    fn spawn_worker_executes_task_and_updates_queue_counter() {
+        let manager = make_manager(1);
+        let (tx, rx) = unbounded::<Task>();
+        let counter = Arc::new(AtomicUsize::new(1));
+        manager.spawn_worker(&rx, counter.clone());
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = flag.clone();
+        tx.send(make_task(move || {
+            flag_clone.store(true, Ordering::SeqCst);
+        }))
+        .unwrap();
+        assert!(wait_until(|| flag.load(Ordering::SeqCst)));
+        assert_eq!(counter.load(Ordering::SeqCst), 0);
+        drop(tx);
+        shutdown(&manager);
+    }
+
+    #[test]
+    fn start_supervisor_stops_when_state_changes() {
+        let manager = make_manager(1);
+        let (tx, rx) = unbounded::<Task>();
+        let counter = Arc::new(AtomicUsize::new(0));
+        let supervisor = Arc::clone(&manager).start(rx, counter.clone(), 1);
+        assert!(wait_for_workers(&manager, 1));
+
+        counter.fetch_add(1, Ordering::SeqCst);
+        let flag = Arc::new(AtomicBool::new(false));
+        let flag_clone = flag.clone();
+        tx.send(make_task(move || {
+            flag_clone.store(true, Ordering::SeqCst);
+        }))
+        .unwrap();
+        assert!(wait_until(|| flag.load(Ordering::SeqCst)));
+
+        drop(tx);
+        *manager.state.write().unwrap() = ThreadPoolState::Stopped;
+        supervisor.join().unwrap();
+        manager.join_all();
+    }
+
+    #[test]
+    fn scale_down_stops_extra_workers() {
+        let manager = make_manager(1);
+        let (tx, rx) = unbounded::<Task>();
+        let counter = Arc::new(AtomicUsize::new(0));
+        manager.spawn_initial(&rx, counter.clone());
+        manager.spawn_worker(&rx, counter);
+        assert!(wait_for_workers(&manager, 2));
+
+        *manager.last_scale_down.write().unwrap() = Instant::now() - Duration::from_millis(10);
+        manager.scale_down();
+        assert!(wait_for_workers(&manager, 1));
+        drop(tx);
+        shutdown(&manager);
+    }
+
+    #[test]
+    fn scale_down_respects_cooldown_window() {
+        let manager = make_manager(1);
+        let (tx, rx) = unbounded::<Task>();
+        let counter = Arc::new(AtomicUsize::new(0));
+        manager.spawn_initial(&rx, counter.clone());
+        manager.spawn_worker(&rx, counter);
+        assert!(wait_for_workers(&manager, 2));
+
+        *manager.last_scale_down.write().unwrap() = Instant::now();
+        manager.scale_down();
+        thread::sleep(Duration::from_millis(5));
+        manager.cleanup_finished_workers();
+        assert_eq!(manager.worker_count(), 2);
+        drop(tx);
+        shutdown(&manager);
+    }
+
+    #[test]
+    fn cleanup_finished_workers_removes_completed_handles() {
+        let manager = make_manager(1);
+        let (done_tx, done_rx) = crossbeam_channel::bounded(1);
+        let handle = std::thread::spawn(move || {
+            done_tx.send(()).ok();
+        });
+        done_rx.recv().unwrap();
+        manager.workers.write().unwrap().insert(42, handle);
+        manager.cleanup_finished_workers();
+        assert_eq!(manager.worker_count(), 0);
+    }
+
+    #[test]
+    fn worker_count_matches_internal_registry() {
+        let manager = make_manager(1);
+        assert_eq!(manager.worker_count(), 0);
+        let handle = std::thread::spawn(|| {});
+        manager.workers.write().unwrap().insert(7, handle);
+        assert_eq!(manager.worker_count(), 1);
+        manager.join_all();
+    }
+
+    #[test]
+    fn join_all_drains_workers() {
+        let manager = make_manager(1);
+        for id in 0..2 {
+            let handle = std::thread::spawn(|| {});
+            manager.workers.write().unwrap().insert(id, handle);
+        }
+        manager.join_all();
+        assert_eq!(manager.worker_count(), 0);
+    }
+}
