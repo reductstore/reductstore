@@ -1,19 +1,28 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+mod scaling;
 mod task_handle;
 
 use crate::core::sync::RwLock;
+use crate::core::thread_pool::scaling::WorkerManager;
 use crossbeam_channel::{unbounded, Sender};
-use log::trace;
+use log::{error, trace};
 use std::cmp::max;
 use std::fmt::Display;
 use std::num::NonZero;
-use std::ops::Deref;
-use std::sync::{Arc, LazyLock};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
+use std::sync::LazyLock;
 use std::thread::{available_parallelism, JoinHandle};
 use std::time::Duration;
 pub(crate) use task_handle::TaskHandle;
+
+#[derive(PartialEq)]
+pub(crate) enum ThreadPoolState {
+    Running,
+    Stopped,
+}
 
 /// Spawn a task in the thread pool.
 pub(crate) fn spawn<T>(
@@ -40,12 +49,6 @@ impl Display for Task {
     }
 }
 
-#[derive(PartialEq)]
-enum ThreadPoolState {
-    Running,
-    Stopped,
-}
-
 static THREAD_POOL_TASK_TIMEOUT: Duration = Duration::from_millis(1);
 
 static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
@@ -54,54 +57,49 @@ static THREAD_POOL: LazyLock<ThreadPool> = LazyLock::new(|| {
             .unwrap_or(NonZero::new(1).unwrap())
             .get()
             / 2,
-        4,
+        2,
     );
     ThreadPool::new(thread_pool_size)
 });
 
 /// A thread pool for executing tasks.
 struct ThreadPool {
-    threads: Vec<JoinHandle<()>>,
     task_queue: Sender<Task>,
+    queued_tasks: Arc<AtomicUsize>,
     state: Arc<RwLock<ThreadPoolState>>,
+    supervisor: Option<JoinHandle<()>>,
 }
 
 impl ThreadPool {
     /// Create a new thread pool with a given size.
     pub fn new(size: usize) -> Self {
-        let mut threads = Vec::with_capacity(size);
-        let (task_queue, task_queue_rc) = unbounded::<Task>();
+        let (task_queue, task_queue_rx) = unbounded::<Task>();
         let state = Arc::new(RwLock::new(ThreadPoolState::Running));
+        let queued_tasks = Arc::new(AtomicUsize::new(0));
+        let worker_manager = Arc::new(
+            WorkerManager::builder()
+                .state(Arc::clone(&state))
+                .min_threads(size)
+                .scale_down_cooldown(Duration::from_secs(1))
+                .worker_task_timeout(Duration::from_millis(5))
+                .build(),
+        );
 
-        for _ in 0..size {
-            let task_rx = task_queue_rc.clone();
-            let pool_state = state.clone();
+        worker_manager.spawn_initial(&task_queue_rx, queued_tasks.clone());
 
-            let thread = std::thread::spawn(move || loop {
-                match pool_state.read().unwrap().deref() {
-                    ThreadPoolState::Running => {}
-                    ThreadPoolState::Stopped => {
-                        break;
-                    }
-                }
-                let task = task_rx.recv_timeout(THREAD_POOL_TASK_TIMEOUT);
-                if task.is_err() {
-                    continue;
-                }
+        let state_clone = state.clone();
 
-                let task = task.unwrap();
-                let Task { description, func } = task;
-                let start = std::time::Instant::now();
-                func();
-                trace!("Executed Task({}) in {:?}", description, start.elapsed());
-            });
+        let supervisor = worker_manager.clone().start_supervisor(
+            task_queue_rx.clone(),
+            queued_tasks.clone(),
+            size,
+        );
 
-            threads.push(thread);
-        }
         Self {
-            threads,
             task_queue,
-            state,
+            queued_tasks,
+            state: state_clone,
+            supervisor: Some(supervisor),
         }
     }
 
@@ -115,7 +113,9 @@ impl ThreadPool {
 
         let (task, task_handle) = Self::build_task(description, task);
 
+        self.queued_tasks.fetch_add(1, Ordering::SeqCst);
         self.task_queue.send(task).unwrap_or(());
+
         task_handle
     }
 
@@ -145,9 +145,10 @@ impl ThreadPool {
 impl Drop for ThreadPool {
     fn drop(&mut self) {
         *self.state.write().unwrap() = ThreadPoolState::Stopped;
-
-        for thread in self.threads.drain(..) {
-            thread.join().unwrap();
+        if let Some(handle) = self.supervisor.take() {
+            if let Err(err) = handle.join() {
+                error!("Thread pool exited with error: {:?}", err);
+            }
         }
     }
 }
