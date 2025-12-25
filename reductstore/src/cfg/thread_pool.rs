@@ -3,10 +3,7 @@
 
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
-use std::cmp::max;
-use std::num::NonZeroUsize;
 use std::sync::OnceLock;
-use std::thread::available_parallelism;
 use std::time::Duration;
 
 #[derive(Clone, Debug)]

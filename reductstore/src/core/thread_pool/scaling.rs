@@ -8,7 +8,7 @@ use std::ops::Deref;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 use crate::cfg::thread_pool::ThreadPoolConfig;
 use crate::core::sync::RwLock;

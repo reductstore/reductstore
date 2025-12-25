@@ -10,12 +10,9 @@ use crate::core::sync::RwLock;
 use crate::core::thread_pool::scaling::WorkerManager;
 use crossbeam_channel::{unbounded, Sender};
 use log::{error, trace};
-use std::cmp::max;
 use std::fmt::Debug;
-use std::num::NonZeroUsize;
 use std::sync::{Arc, LazyLock};
-use std::thread::{available_parallelism, JoinHandle};
-use std::time::Duration;
+use std::thread::JoinHandle;
 pub(crate) use task_handle::TaskHandle;
 
 #[derive(PartialEq)]

@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::thread::{sleep, JoinHandle};
+use std::thread::sleep;
 use std::time::Duration;
 
 #[derive(Clone)]
