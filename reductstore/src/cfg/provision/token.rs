@@ -114,6 +114,7 @@ mod tests {
     use reduct_base::error::ReductError;
     use reduct_base::not_found;
     use rstest::{fixture, rstest};
+    use serial_test::serial;
     use std::collections::BTreeMap;
     use std::default::Default;
     use std::env::VarError;
@@ -121,6 +122,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_tokens(mut env_with_tokens: MockEnvGetter) {
         env_with_tokens
             .expect_get()
@@ -158,6 +160,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_tokens_not_full_permissions(mut env_with_tokens: MockEnvGetter) {
         env_with_tokens
             .expect_get()
@@ -191,6 +194,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_tokens_no_value(mut env_with_tokens: MockEnvGetter) {
         env_with_tokens
             .expect_get()
@@ -210,6 +214,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_override_token(mut env_with_tokens: MockEnvGetter) {
         let mut auth_repo = TokenRepositoryBuilder::new(Cfg {
             api_token: "init".to_string(),

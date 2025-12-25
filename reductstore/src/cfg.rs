@@ -8,6 +8,7 @@ pub mod remote_storage;
 pub mod replication;
 pub mod rw_lock;
 pub mod storage_engine;
+pub mod thread_pool;
 
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
@@ -19,11 +20,11 @@ use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
+use crate::cfg::thread_pool::ThreadPoolConfig;
 use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
-use crate::core::thread_pool::{self, ThreadPoolConfig};
 use crate::ext::ext_repository::create_ext_repository;
 use crate::license::parse_license;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
@@ -361,31 +362,6 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect()
-    }
-
-    pub fn parse_thread_pool_config(env: &mut Env<EnvGetter>) -> ThreadPoolConfig {
-        let default = ThreadPoolConfig::default();
-
-        let min_threads = env
-            .get_optional::<usize>("RS_THREAD_POOL_MIN_THREADS")
-            .map(|value| value.max(1))
-            .unwrap_or(default.min_threads);
-
-        let worker_task_timeout = env
-            .get_optional::<u64>("RS_THREAD_POOL_WORKER_TIMEOUT_US")
-            .map(Duration::from_micros)
-            .unwrap_or(default.worker_task_timeout);
-
-        let scale_down_cooldown = env
-            .get_optional::<u64>("RS_THREAD_POOL_SCALE_DOWN_COOLDOWN_SECS")
-            .map(Duration::from_secs)
-            .unwrap_or(default.scale_down_cooldown);
-
-        ThreadPoolConfig {
-            min_threads,
-            worker_task_timeout,
-            scale_down_cooldown,
-        }
     }
 }
 
