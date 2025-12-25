@@ -23,7 +23,7 @@ impl Default for ThreadPoolConfig {
             #[cfg(not(test))]
             min_idle_threads: 4,
             #[cfg(test)]
-            min_idle_threads: 8, // More threads for tests to avoid deadlock when tasks wait for other tasks
+            min_idle_threads: 2,
             #[cfg(not(test))]
             worker_task_timeout: Duration::from_secs(1),
             #[cfg(test)]

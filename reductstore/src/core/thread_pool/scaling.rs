@@ -43,37 +43,33 @@ impl WorkerManager {
         self.spawn_initial(&task_queue_rx);
 
         std::thread::spawn(move || {
-            let mut idle_duration = Duration::ZERO;
-            let mut busy_duration = Duration::ZERO;
-            let poll_interval = self.config.worker_task_timeout;
-            let timeout = poll_interval * 20;
-
+            let mut idle_since = Instant::now();
+            let worker_task_timeout = self.config.worker_task_timeout * 5;
             loop {
                 if self.state.read().unwrap().deref() == &ThreadPoolState::Stopped {
                     self.join_all();
                     break;
                 }
 
-                let idle_workers = self.idle_workers.load(Ordering::SeqCst);
-                if idle_workers == 0 {
-                    busy_duration += poll_interval;
-                    idle_duration = Duration::ZERO;
+                let idlers = self.idle_workers.load(Ordering::SeqCst);
+
+                // Scale up immediately if no idle workers (prevents deadlock from nested tasks)
+                if idlers == 0 {
+                    for _ in 0..self.config.scale_step {
+                        self.spawn_worker(&task_queue_rx);
+                    }
+                    idle_since = Instant::now();
+                } else if idlers > self.config.min_idle_threads {
+                    // Scale down if we have more idle workers than needed for a while
+                    if idle_since.elapsed() > worker_task_timeout {
+                        self.scale_down();
+                        idle_since = Instant::now();
+                    }
                 } else {
-                    idle_duration += poll_interval;
-                    busy_duration = Duration::ZERO;
+                    idle_since = Instant::now();
                 }
 
-                if busy_duration >= timeout {
-                    self.scale_up(&task_queue_rx);
-                    busy_duration = Duration::ZERO;
-                }
-
-                if idle_duration >= timeout {
-                    self.scale_down();
-                    idle_duration = Duration::ZERO;
-                }
-
-                std::thread::sleep(poll_interval);
+                std::thread::sleep(self.config.worker_task_timeout);
             }
         })
     }
@@ -95,48 +91,37 @@ impl WorkerManager {
 
         let worker_task_timeout = self.config.worker_task_timeout;
 
-        let handle = std::thread::spawn(move || {
-            let mut is_idle = false;
-            loop {
-                match state.read().unwrap().deref() {
-                    ThreadPoolState::Running => {}
-                    ThreadPoolState::Stopped => break,
-                }
-
-                crossbeam_channel::select! {
-                    recv(stop_rx) -> _ => {
-                        if is_idle {
-                            idle_counter.fetch_sub(1, Ordering::SeqCst);
-                        }
-                        debug!("Worker {} received stop signal", id);
-                        break;
-                    }
-                    recv(task_rx) -> msg => {
-                        if is_idle {
-                            idle_counter.fetch_sub(1, Ordering::SeqCst);
-                            is_idle = false;
-                        }
-                        match msg {
-                            Ok(task) => {
-                                let print = format!("{:?}", task);
-                                let start = Instant::now();
-                                (task.func)();
-                                trace!("Executed {} at worker={} in {:?}", print, id, start.elapsed());
-                            }
-                            Err(_) => break,
-                        }
-                    }
-                    recv(crossbeam_channel::after(worker_task_timeout)) -> _ => {
-                        if !is_idle {
-                            idle_counter.fetch_add(1, Ordering::SeqCst);
-                            is_idle = true;
-                        }
-                    }
-                }
+        let handle = std::thread::spawn(move || loop {
+            match state.read().unwrap().deref() {
+                ThreadPoolState::Running => {}
+                ThreadPoolState::Stopped => break,
             }
 
-            if is_idle {
-                idle_counter.fetch_sub(1, Ordering::SeqCst);
+            idle_counter.fetch_add(1, Ordering::SeqCst);
+
+            crossbeam_channel::select! {
+                recv(stop_rx) -> _ => {
+                    debug!("Worker {} received stop signal", id);
+                    idle_counter.fetch_sub(1, Ordering::SeqCst);
+                    break;
+                }
+                recv(task_rx) -> msg => {
+                    idle_counter.fetch_sub(1, Ordering::SeqCst);
+                    match msg {
+                        Ok(task) => {
+                            let print = format!("{:?}", task);
+                            let start = Instant::now();
+
+                            (task.func)();
+                            trace!("Executed {} at worker={} in {:?}", print, id, start.elapsed());
+                        }
+                        Err(_) => break,
+                    }
+                }
+                recv(crossbeam_channel::after(worker_task_timeout)) -> _ => {
+                    idle_counter.fetch_sub(1, Ordering::SeqCst);
+
+                }
             }
         });
         self.workers.write().unwrap().insert(id, handle);
@@ -145,12 +130,6 @@ impl WorkerManager {
             self.worker_count(),
             self.idle_workers.load(Ordering::SeqCst)
         );
-    }
-
-    fn scale_up(&self, task_rx: &Receiver<Task>) {
-        for _ in 0..self.config.scale_step {
-            self.spawn_worker(task_rx);
-        }
     }
 
     fn scale_down(&self) {
@@ -162,23 +141,16 @@ impl WorkerManager {
             return;
         }
 
-        let mut scaled = 0;
-        while scaled < self.config.scale_step {
-            if self.stop_tx.try_send(()).is_err() {
-                break;
-            }
-            scaled += 1;
-        }
-
-        if scaled > 0 {
+        if self.stop_tx.try_send(()).is_ok() {
             *self.last_scale_down.write().unwrap() = Instant::now();
             self.cleanup_finished_workers();
-            debug!(
-                "Scaling down thread pool to {} ({} idle) workers",
-                self.worker_count(),
-                self.idle_workers.load(Ordering::SeqCst)
-            );
         }
+
+        debug!(
+            "Scaling down thread pool to {} ({} idle) workers",
+            self.worker_count(),
+            self.idle_workers.load(Ordering::SeqCst)
+        );
     }
 
     fn cleanup_finished_workers(&self) {
