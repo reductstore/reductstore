@@ -20,7 +20,7 @@ impl Default for ThreadPoolConfig {
             #[cfg(not(test))]
             min_idle_threads: 4,
             #[cfg(test)]
-            min_idle_threads: 2,
+            min_idle_threads: 8,
             #[cfg(not(test))]
             worker_task_timeout: Duration::from_secs(1),
             #[cfg(test)]

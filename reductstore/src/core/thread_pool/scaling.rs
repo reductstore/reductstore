@@ -189,7 +189,7 @@ mod tests {
     use crossbeam_channel::unbounded;
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::thread;
-    use std::time::Instant;
+    use std::time::{Duration, Instant};
 
     const WAIT_TIMEOUT: Duration = Duration::from_millis(200);
 
