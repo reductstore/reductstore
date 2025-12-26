@@ -41,14 +41,15 @@ impl Bucket {
             })
             .collect::<Result<HashMap<_, _>, ReductError>>()?;
 
-        self.queries.write()?.insert(
-            query_id,
-            MultiEntryQuery {
-                entry_queries,
-                aggregated_rx: None,
-                io_settings: None,
-            },
-        );
+        let mut multi_query = MultiEntryQuery {
+            entry_queries,
+            aggregated_rx: None,
+            io_settings: None,
+        };
+
+        self.init_aggregator(&mut multi_query)?;
+
+        self.queries.write()?.insert(query_id, multi_query);
 
         Ok(query_id)
     }
