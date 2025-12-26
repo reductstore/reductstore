@@ -25,6 +25,7 @@ struct ContextGuard {
 
 impl ContextGuard {
     fn shutdown(self) {
+        info!("Shutting down server...");
         self.server_handle
             .graceful_shutdown(Some(Duration::from_secs(5)));
         self.storage.sync_fs().expect("Failed to shutdown storage");
@@ -146,7 +147,6 @@ async fn main() {
 
 async fn shutdown_ctrl_c(ctx: ContextGuard) {
     tokio::signal::ctrl_c().await.unwrap();
-    info!("Ctrl-C received, shutting down...");
     ctx.shutdown();
 }
 

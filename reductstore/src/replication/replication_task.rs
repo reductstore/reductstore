@@ -5,6 +5,7 @@ use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::RwLock;
+use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
@@ -20,7 +21,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::thread::{sleep, spawn, JoinHandle};
+use std::thread::sleep;
 use std::time::Duration;
 
 #[derive(Clone)]
@@ -44,7 +45,7 @@ pub struct ReplicationTask {
     stop_flag: Arc<AtomicBool>,
     is_active: Arc<AtomicBool>,
     mode: Arc<AtomicU8>,
-    worker_handle: Option<JoinHandle<()>>,
+    worker_handle: Option<TaskHandle<()>>,
     worker_bucket: Option<Box<dyn RemoteBucket + Send + Sync>>,
 }
 
@@ -147,13 +148,14 @@ impl ReplicationTask {
         let thr_is_active = Arc::clone(&self.is_active);
         let thr_mode = Arc::clone(&self.mode);
 
-        let handle = spawn(move || {
+        let handle = spawn("replication task", move || {
             let init_transaction_logs = || {
                 let mut logs = thr_log_map.write()?;
                 for entry in thr_storage
                     .get_bucket(&thr_settings.src_bucket)?
                     .upgrade()?
-                    .info()?
+                    .info()
+                    .wait()?
                     .entries
                 {
                     let path = Self::build_path_to_transaction_log(
@@ -454,9 +456,9 @@ impl Drop for ReplicationTask {
     fn drop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         if let Some(handle) = self.worker_handle.take() {
-            if let Err(err) = handle.join() {
-                error!("Failed to stop replication task '{}': {:?}", self.name, err);
-            }
+            // Use recv() without unwrap to avoid panic if the channel is disconnected
+            // (e.g., during test cleanup or thread pool shutdown)
+            let _ = handle.wait_or_ignore();
         }
     }
 }
@@ -890,9 +892,9 @@ mod tests {
         let path = tempfile::tempdir().unwrap().keep();
         let mut replication = build_replication(path, remote_bucket, settings);
 
-        let handle_before = replication.worker_handle.as_ref().unwrap().thread().id();
+        let handle_before = replication.worker_handle.as_ref().unwrap().id();
         replication.start();
-        let handle_after = replication.worker_handle.as_ref().unwrap().thread().id();
+        let handle_after = replication.worker_handle.as_ref().unwrap().id();
 
         assert_eq!(
             handle_before, handle_after,

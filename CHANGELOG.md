@@ -16,7 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implement `DISABLE`,`PAUSE` and `DISABLED` modes for replication tasks, [PR-1065](https://github.com/reductstore/reductstore/pull/1065)
 - Implement non-blocking bucket and entry deletion, [PR-1066](https://github.com/reductstore/reductstore/pull/1066)
 - `RS_RWLOCK_TIMEOUT` and `RS_RWLOCK_FAILURE_ACTION` to configure lock timeout handling, [PR-1077](https://github.com/reductstore/reductstore/pull/1077)
-
+- Refactor thread pool, [PR-1080](https://github.com/reductstore/reductstore/pull/1080)
 
 ### Internal
 
@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix thread pool deadlock in tests when tasks wait for other tasks, [PR-1081](https://github.com/reductstore/reductstore/pull/1081)
 - Fix replica crash at the start without write permissions, [PR-1054](https://github.com/reductstore/reductstore/pull/1054)
 - Handle encode error in folder keeper, [PR-1055](https://github.com/reductstore/reductstore/pull/1055)
 - Fix writing folder cache and read only mode, [PR-1056](https://github.com/reductstore/reductstore/pull/1056)

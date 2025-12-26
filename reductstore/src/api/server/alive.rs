@@ -15,7 +15,7 @@ pub(super) async fn alive(
 ) -> Result<StatusCode, HttpError> {
     match keeper.get_anonymous().await {
         Ok(components) => {
-            components.storage.info()?;
+            components.storage.info().await?;
             Ok(StatusCode::OK)
         }
         Err(e) if e.status() == ErrorCode::ServiceUnavailable => Ok(StatusCode::OK),

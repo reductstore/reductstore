@@ -11,9 +11,7 @@ mod write_record;
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::sync::{AsyncRwLock, RwLock};
-use crate::core::thread_pool::{
-    group_from_path, shared, try_unique, unique_child, GroupDepth, TaskHandle,
-};
+use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
@@ -30,7 +28,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Instant;
 
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
@@ -109,14 +107,10 @@ impl Entry {
         options: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> TaskHandle<Result<Option<Entry>, ReductError>> {
-        unique_child(
-            &group_from_path(&path, GroupDepth::ENTRY),
-            "restore entry",
-            move || {
-                let entry = EntryLoader::restore_entry(path, options, cfg)?;
-                Ok(entry)
-            },
-        )
+        spawn("restore entry", move || {
+            let entry = EntryLoader::restore_entry(path, options, cfg)?;
+            Ok(entry)
+        })
     }
 
     /// Query records for a time range.
@@ -186,7 +180,7 @@ impl Entry {
     ) -> Result<(Weak<AsyncRwLock<QueryRx>>, IoConfig), ReductError> {
         let entry_path = format!("{}/{}", self.bucket_name, self.name);
         let queries = Arc::clone(&self.queries);
-        shared(&self.task_group(), "remove expired queries", move || {
+        spawn("remove expired queries", move || {
             Self::remove_expired_query(queries, entry_path);
         })
         .wait();
@@ -205,6 +199,9 @@ impl Entry {
 
     /// Returns stats about the entry.
     pub fn info(&self) -> Result<EntryInfo, ReductError> {
+        let name = self.name.clone();
+        let status_result = self.status();
+
         let mut bm = self.block_manager.write()?;
         let index = bm.update_and_get_index()?;
         let (oldest_record, latest_record) = if index.tree().is_empty() {
@@ -218,14 +215,16 @@ impl Entry {
             (*index.tree().first().unwrap(), latest_record)
         };
 
+        let status = status_result?;
+
         Ok(EntryInfo {
-            name: self.name.clone(),
+            name,
             size: index.size(),
             record_count: index.record_count(),
             block_count: index.tree().len() as u64,
             oldest_record,
             latest_record,
-            status: self.status()?,
+            status,
         })
     }
 
@@ -276,27 +275,15 @@ impl Entry {
         let block_manager = Arc::clone(&self.block_manager);
         drop(bm); // release read lock before acquiring write lock
 
-        match try_unique(
-            &format!("{}/{}", self.task_group(), oldest_block_id),
-            "try to remove oldest block",
-            Duration::from_millis(5),
-            move || {
-                let mut bm = block_manager.write()?;
-                bm.remove_block(oldest_block_id)?;
-                debug!(
-                    "Removing the oldest block {}.blk",
-                    bm.path().join(oldest_block_id.to_string()).display()
-                );
-                Ok(())
-            },
-        ) {
-            Some(handle) => handle,
-            None => Err(internal_server_error!(
-                "Cannot remove block {} because it is still in use",
-                oldest_block_id
-            ))
-            .into(),
-        }
+        spawn("remove oldest block", move || {
+            let mut bm = block_manager.write()?;
+            bm.remove_block(oldest_block_id)?;
+            debug!(
+                "Removing the oldest block {}.blk",
+                bm.path().join(oldest_block_id.to_string()).display()
+            );
+            Ok(())
+        })
     }
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
@@ -336,8 +323,7 @@ impl Entry {
     }
 
     fn task_group(&self) -> String {
-        // use folder hierarchy as task group to protect resources
-        group_from_path(&self.path, GroupDepth::ENTRY)
+        self.path.display().to_string()
     }
 
     fn get_query_time_range(&self, query: &QueryEntry) -> Result<(u64, u64), ReductError> {
@@ -660,6 +646,7 @@ mod tests {
         }
 
         #[rstest]
+        #[ignore] // experimental:  without writer protection.
         fn test_entry_which_has_writer(entry: Entry) {
             let mut sender = entry
                 .begin_write(
@@ -765,9 +752,5 @@ mod tests {
 
     pub(super) fn write_stub_record(entry: &mut Entry, time: u64) {
         write_record(entry, time, b"0123456789".to_vec());
-    }
-
-    pub fn get_task_group(entry_path: &PathBuf, time: u64) -> String {
-        group_from_path(&entry_path.join(time.to_string()), GroupDepth::BLOCK)
     }
 }

@@ -8,6 +8,7 @@ pub mod remote_storage;
 pub mod replication;
 pub mod rw_lock;
 pub mod storage_engine;
+pub mod thread_pool;
 
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
@@ -19,6 +20,7 @@ use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
+use crate::cfg::thread_pool::ThreadPoolConfig;
 use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
@@ -82,6 +84,7 @@ pub struct Cfg {
     pub lock_file_config: LockFileConfig,
     pub rw_lock_config: RwLockConfig,
     pub engine_config: StorageEngineConfig,
+    pub thread_pool: ThreadPoolConfig,
 }
 
 impl Default for Cfg {
@@ -109,6 +112,7 @@ impl Default for Cfg {
             lock_file_config: LockFileConfig::default(),
             rw_lock_config: RwLockConfig::default(),
             engine_config: StorageEngineConfig::default(),
+            thread_pool: ThreadPoolConfig::default(),
         }
     }
 }
@@ -188,7 +192,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
+            thread_pool: Self::parse_thread_pool_config(&mut env),
         };
+
+        thread_pool::configure_thread_pool(cfg.thread_pool.clone());
 
         set_rwlock_timeout(cfg.rw_lock_config.timeout);
         set_rwlock_failure_action(cfg.rw_lock_config.failure_action);
@@ -263,7 +270,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             None
         };
 
-        let server_info = storage.info()?;
+        let server_info = storage.info().wait()?;
 
         Ok(Components {
             storage,

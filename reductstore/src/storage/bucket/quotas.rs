@@ -7,16 +7,20 @@ use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::QuotaType;
 use reduct_base::{bad_request, internal_server_error};
+use std::sync::Arc;
 
 impl Bucket {
-    pub(super) fn keep_quota_for(&self, content_size: u64) -> Result<(), ReductError> {
+    pub(super) fn keep_quota_for(self: &Arc<Self>, content_size: u64) -> Result<(), ReductError> {
         let settings = self.settings.read()?;
         let quota_size = settings.quota_size.unwrap_or(0);
         match settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
             QuotaType::NONE => Ok(()),
             QuotaType::FIFO => self.remove_oldest_block(content_size, quota_size),
             QuotaType::HARD => {
-                if self.info()?.info.size + content_size as u64 > quota_size {
+                let total_size = self.entries.read()?.values().try_fold(0u64, |acc, entry| {
+                    entry.size().map(|entry_size| acc + entry_size)
+                })?;
+                if total_size + content_size as u64 > quota_size {
                     Err(bad_request!("Quota of '{}' exceeded", self.name()))
                 } else {
                     Ok(())
@@ -111,7 +115,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_fifo_quota_keeping(path: PathBuf) {
-        let mut bucket = bucket(
+        let bucket = bucket(
             BucketSettings {
                 max_block_size: Some(20),
                 quota_type: Some(QuotaType::FIFO),
@@ -123,17 +127,17 @@ mod tests {
 
         let blob: &[u8] = &[0u8; 40];
 
-        write(&mut bucket, "test-1", 0, blob).await.unwrap();
-        assert_eq!(bucket.info().unwrap().info.size, 44);
+        write(&bucket, "test-1", 0, blob).await.unwrap();
+        assert_eq!(bucket.info().wait().unwrap().info.size, 44);
 
-        write(&mut bucket, "test-2", 1, blob).await.unwrap();
-        assert_eq!(bucket.info().unwrap().info.size, 91);
+        write(&bucket, "test-2", 1, blob).await.unwrap();
+        assert_eq!(bucket.info().wait().unwrap().info.size, 91);
 
-        write(&mut bucket, "test-3", 2, blob).await.unwrap();
-        assert_eq!(bucket.info().unwrap().info.size, 94);
+        write(&bucket, "test-3", 2, blob).await.unwrap();
+        assert_eq!(bucket.info().wait().unwrap().info.size, 94);
 
         assert_eq!(
-            crate::storage::bucket::tests::read(&mut bucket, "test-1", 0)
+            crate::storage::bucket::tests::read(&bucket, "test-1", 0)
                 .await
                 .err(),
             Some(ReductError::not_found(
@@ -145,7 +149,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_hard_quota_keeping(path: PathBuf) {
-        let mut bucket = bucket(
+        let bucket = bucket(
             BucketSettings {
                 quota_type: Some(QuotaType::HARD),
                 quota_size: Some(100),
@@ -155,17 +159,17 @@ mod tests {
         );
 
         let blob: &[u8] = &[0u8; 40];
-        write(&mut bucket, "test-1", 0, blob).await.unwrap();
-        write(&mut bucket, "test-2", 1, blob).await.unwrap();
+        write(&bucket, "test-1", 0, blob).await.unwrap();
+        write(&bucket, "test-2", 1, blob).await.unwrap();
 
-        let err = write(&mut bucket, "test-3", 2, blob).await.err().unwrap();
+        let err = write(&bucket, "test-3", 2, blob).await.err().unwrap();
         assert_eq!(err, ReductError::bad_request("Quota of 'test' exceeded"));
     }
 
     #[rstest]
     #[tokio::test]
     async fn test_blob_bigger_than_quota(path: PathBuf) {
-        let mut bucket = bucket(
+        let bucket = bucket(
             BucketSettings {
                 max_block_size: Some(5),
                 quota_type: Some(QuotaType::FIFO),
@@ -175,11 +179,11 @@ mod tests {
             path,
         );
 
-        write(&mut bucket, "test-1", 0, b"test").await.unwrap();
+        write(&bucket, "test-1", 0, b"test").await.unwrap();
         bucket.sync_fs().await.unwrap(); // we need to sync to get the correct size
-        assert_eq!(bucket.info().unwrap().info.size, 22);
+        assert_eq!(bucket.info().wait().unwrap().info.size, 22);
 
-        let result = write(&mut bucket, "test-2", 1, b"0123456789___").await;
+        let result = write(&bucket, "test-2", 1, b"0123456789___").await;
         assert_eq!(
             result.err(),
             Some(ReductError::internal_server_error(
