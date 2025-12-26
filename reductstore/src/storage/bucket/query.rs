@@ -31,8 +31,7 @@ pub(super) struct MultiEntryQuery {
 }
 
 impl Bucket {
-    #[allow(dead_code)]
-    pub(crate) fn entry_query(&self, request: QueryEntry) -> Result<u64, ReductError> {
+    pub(crate) fn query(&self, request: QueryEntry) -> Result<u64, ReductError> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
         let entries = self.filter_entries(&request)?;
@@ -62,7 +61,6 @@ impl Bucket {
         Ok(query_id)
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn get_query_receiver(
         &self,
         query_id: u64,
@@ -85,7 +83,6 @@ impl Bucket {
         ))
     }
 
-    #[allow(dead_code)]
     fn filter_entries(
         &self,
         request: &QueryEntry,
@@ -267,7 +264,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.entry_query(query).unwrap();
+        let id = bucket.query(query).unwrap();
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
 
         let records = collect_records(rx).await;
@@ -296,7 +293,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.entry_query(query).unwrap();
+        let id = bucket.query(query).unwrap();
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
 
         let records = collect_records(rx).await;
@@ -320,7 +317,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.entry_query(query).unwrap();
+        let id = bucket.query(query).unwrap();
         let _ = bucket.get_query_receiver(id).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(1100)).await;

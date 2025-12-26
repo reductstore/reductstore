@@ -1,7 +1,7 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-mod multi_entry_query;
+mod query;
 mod quotas;
 mod read_only;
 pub(super) mod settings;
@@ -13,7 +13,7 @@ use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
-use crate::storage::bucket::multi_entry_query::MultiEntryQuery;
+use crate::storage::bucket::query::MultiEntryQuery;
 use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
