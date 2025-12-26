@@ -21,8 +21,8 @@ const AGGREGATOR_BUFFER_SIZE: usize = 64;
 #[allow(dead_code)]
 pub(super) struct MultiEntryQuery {
     entry_queries: HashMap<String, u64>,
-    aggregated_rx: Option<Arc<AsyncRwLock<QueryRx>>>,
-    io_settings: Option<IoConfig>,
+    aggregated_rx: Arc<AsyncRwLock<QueryRx>>,
+    io_settings: IoConfig,
 }
 
 impl Bucket {
@@ -41,13 +41,13 @@ impl Bucket {
             })
             .collect::<Result<HashMap<_, _>, ReductError>>()?;
 
-        let mut multi_query = MultiEntryQuery {
-            entry_queries,
-            aggregated_rx: None,
-            io_settings: None,
-        };
+        let (aggregated_rx, io_settings) = self.init_aggregator(&entry_queries)?;
 
-        self.init_aggregator(&mut multi_query)?;
+        let multi_query = MultiEntryQuery {
+            entry_queries,
+            aggregated_rx,
+            io_settings,
+        };
 
         self.queries.write()?.insert(query_id, multi_query);
 
@@ -67,13 +67,9 @@ impl Bucket {
             )
         })?;
 
-        if multi_query.aggregated_rx.is_none() {
-            self.init_aggregator(multi_query)?;
-        }
-
         Ok((
-            Weak::new(Arc::clone(multi_query.aggregated_rx.as_ref().unwrap())),
-            multi_query.io_settings.clone().unwrap_or_default(),
+            Weak::new(Arc::clone(&multi_query.aggregated_rx)),
+            multi_query.io_settings.clone(),
         ))
     }
 
@@ -99,16 +95,20 @@ impl Bucket {
         Ok(results)
     }
 
-    fn init_aggregator(&self, multi_query: &mut MultiEntryQuery) -> Result<(), ReductError> {
+    fn init_aggregator(
+        &self,
+        entry_queries: &HashMap<String, u64>,
+    ) -> Result<(Arc<AsyncRwLock<QueryRx>>, IoConfig), ReductError> {
         let mut entry_receivers: HashMap<String, Arc<AsyncRwLock<QueryRx>>> = HashMap::new();
+        let mut io_settings: Option<IoConfig> = None;
 
-        for (entry_name, entry_query_id) in &multi_query.entry_queries {
+        for (entry_name, entry_query_id) in entry_queries {
             let entry = self.get_entry(entry_name)?.upgrade()?;
             let (rx, settings) = entry.get_query_receiver(*entry_query_id)?;
             let rx = rx.upgrade()?;
 
-            if multi_query.io_settings.is_none() {
-                multi_query.io_settings = Some(settings);
+            if io_settings.is_none() {
+                io_settings = Some(settings);
             }
 
             entry_receivers.insert(entry_name.clone(), rx);
@@ -120,9 +120,10 @@ impl Bucket {
             Self::aggregate(entry_receivers, tx).await;
         });
 
-        multi_query.aggregated_rx = Some(Arc::new(AsyncRwLock::new(rx_out)));
-
-        Ok(())
+        Ok((
+            Arc::new(AsyncRwLock::new(rx_out)),
+            io_settings.unwrap_or_default(),
+        ))
     }
 
     async fn aggregate(
