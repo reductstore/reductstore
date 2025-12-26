@@ -1,6 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::api::entry::common::parse_content_length_from_header;
 use crate::api::Components;
 use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::WriteAccessPolicy;
@@ -151,21 +152,15 @@ fn err_to_batched_header(
 fn check_and_get_content_length(
     headers: &HeaderMap,
     records: &Vec<IndexedRecordHeader>,
-) -> Result<u64, ReductError> {
+) -> Result<u64, HttpError> {
     let total_content_length: u64 = records
         .iter()
         .map(|record| record.record.header.content_length)
         .sum();
 
-    if total_content_length
-        != headers
-            .get("content-length")
-            .ok_or(unprocessable_entity!("content-length header is required",))?
-            .to_str()
-            .map_err(|_| unprocessable_entity!("content-length header must be a string",))?
-            .parse::<u64>()
-            .map_err(|_| unprocessable_entity!("content-length header must be a number"))?
-    {
+    let header_content_length = parse_content_length_from_header(headers)?;
+
+    if total_content_length != header_content_length {
         return Err(unprocessable_entity!(
             "content-length header does not match the sum of the content-lengths in the headers",
         )

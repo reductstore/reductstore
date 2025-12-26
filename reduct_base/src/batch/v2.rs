@@ -8,6 +8,7 @@
 // Metadata:
 //   x-reduct-entries: comma-separated, percent-encoded entry names (index == position)
 //   x-reduct-start-ts: first timestamp in the batch
+//   Content is sorted by entry index in ascending order, then by timestamp (start + delta).
 //
 // Per record:
 //   x-reduct-<ENTRY-INDEX>-<TIME-DELTA-uS>: batched header value
@@ -287,7 +288,7 @@ fn parse_record_header_with_defaults(
 /// Sort and parse v2 batched headers in a header map.
 ///
 /// Only headers following the `x-reduct-<ENTRY-INDEX>-<TIME-DELTA>` pattern are considered.
-/// Entries are sorted lexicographically by entry name, then by timestamp (start + delta).
+/// Headers are sorted by entry index, then timestamp (start + delta).
 pub fn sort_headers_by_entry_and_time(
     headers: &HeaderMap,
 ) -> Result<Vec<(usize, u64, HeaderValue)>, ReductError> {
@@ -309,13 +310,8 @@ pub fn sort_headers_by_entry_and_time(
         })
         .collect::<Result<_, ReductError>>()?;
 
-    parsed_headers.sort_by(|(idx_a, time_a, _), (idx_b, time_b, _)| {
-        let ordering = idx_a.cmp(idx_b);
-        if ordering == std::cmp::Ordering::Equal {
-            time_a.cmp(time_b)
-        } else {
-            ordering
-        }
+    parsed_headers.sort_by(|(idx_a, delta_a, _), (idx_b, delta_b, _)| {
+        idx_a.cmp(idx_b).then_with(|| delta_a.cmp(delta_b))
     });
 
     Ok(parsed_headers)
@@ -435,15 +431,21 @@ mod tests {
             make_batched_header_name(0, 3),
             HeaderValue::from_static("1,text/plain"),
         );
+        headers.insert(
+            make_batched_header_name(1, 3),
+            HeaderValue::from_static("1,text/plain"),
+        );
 
         let parsed = sort_headers_by_entry_and_time(&headers).unwrap();
-        assert_eq!(parsed.len(), 3);
+        assert_eq!(parsed.len(), 4);
         assert_eq!(parsed[0].0, 0);
         assert_eq!(parsed[0].1, 2);
         assert_eq!(parsed[1].0, 0);
         assert_eq!(parsed[1].1, 3);
         assert_eq!(parsed[2].0, 1);
-        assert_eq!(parsed[2].1, 5);
+        assert_eq!(parsed[2].1, 3);
+        assert_eq!(parsed[3].0, 1);
+        assert_eq!(parsed[3].1, 5);
     }
 
     #[test]

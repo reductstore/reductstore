@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-mod common;
+pub(crate) mod common;
 mod read_batched;
 mod read_query;
 mod read_query_post;

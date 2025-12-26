@@ -9,7 +9,7 @@ use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-pub(super) fn parse_content_length_from_header(headers: &HeaderMap) -> Result<u64, HttpError> {
+pub(crate) fn parse_content_length_from_header(headers: &HeaderMap) -> Result<u64, HttpError> {
     let content_size = headers
         .get("content-length")
         .ok_or(unprocessable_entity!("content-length header is required"))?
