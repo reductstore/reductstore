@@ -379,7 +379,6 @@ mod tests {
                 .upgrade()
                 .unwrap()
                 .query(options)
-                .await
                 .unwrap()
         };
         query_id

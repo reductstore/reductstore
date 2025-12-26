@@ -2,11 +2,13 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::AsyncRwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::{Entry, RecordReader};
+use crate::storage::query::base::QueryOptions;
 use crate::storage::query::QueryRx;
+use log::debug;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
@@ -14,6 +16,7 @@ use reduct_base::{no_content, not_found};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc;
 
 const AGGREGATOR_BUFFER_SIZE: usize = 64;
@@ -23,6 +26,8 @@ pub(super) struct MultiEntryQuery {
     entry_queries: HashMap<String, u64>,
     aggregated_rx: Arc<AsyncRwLock<QueryRx>>,
     io_settings: IoConfig,
+    options: QueryOptions,
+    last_access: Instant,
 }
 
 impl Bucket {
@@ -32,6 +37,7 @@ impl Bucket {
 
         let entries = self.filter_entries(&request)?;
         let query_id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
+        let options: QueryOptions = request.clone().into();
 
         let entry_queries = entries
             .into_iter()
@@ -47,6 +53,8 @@ impl Bucket {
             entry_queries,
             aggregated_rx,
             io_settings,
+            options,
+            last_access: Instant::now(),
         };
 
         self.queries.write()?.insert(query_id, multi_query);
@@ -59,6 +67,8 @@ impl Bucket {
         &self,
         query_id: u64,
     ) -> Result<(Weak<AsyncRwLock<QueryRx>>, IoConfig), ReductError> {
+        Self::remove_expired_query(&self.queries, &self.name);
+
         let mut queries = self.queries.write()?;
         let multi_query = queries.get_mut(&query_id).ok_or_else(|| {
             not_found!(
@@ -66,6 +76,8 @@ impl Bucket {
                 query_id
             )
         })?;
+
+        multi_query.last_access = Instant::now();
 
         Ok((
             Weak::new(Arc::clone(&multi_query.aggregated_rx)),
@@ -124,6 +136,18 @@ impl Bucket {
             Arc::new(AsyncRwLock::new(rx_out)),
             io_settings.unwrap_or_default(),
         ))
+    }
+
+    fn remove_expired_query(queries: &RwLock<HashMap<u64, MultiEntryQuery>>, bucket: &str) {
+        if let Ok(mut queries) = queries.write() {
+            queries.retain(|id, handle| {
+                if handle.last_access.elapsed() >= handle.options.ttl {
+                    debug!("Query {}/{} expired", bucket, id);
+                    return false;
+                }
+                true
+            });
+        }
     }
 
     async fn aggregate(
@@ -193,5 +217,124 @@ impl Bucket {
                 break;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::bucket::tests::{bucket, write};
+    use reduct_base::error::ErrorCode;
+    use reduct_base::io::ReadRecord;
+    use reduct_base::msg::entry_api::{QueryEntry, QueryType};
+    use reduct_base::not_found;
+    use rstest::rstest;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    async fn collect_records(rx: Weak<AsyncRwLock<QueryRx>>) -> Vec<(String, u64)> {
+        let rx = rx.upgrade().unwrap();
+        let mut rx = rx.write().await.unwrap();
+        let mut records = Vec::new();
+
+        while let Some(result) = rx.recv().await {
+            match result {
+                Ok(reader) => {
+                    let meta = reader.meta().clone();
+                    records.push((meta.entry_name().to_string(), meta.timestamp()));
+                }
+                Err(err) => {
+                    assert_eq!(err.status(), ErrorCode::NoContent);
+                    break;
+                }
+            }
+        }
+
+        records
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn aggregates_by_timestamp(bucket: Arc<Bucket>) {
+        write(&bucket, "entry-a", 10, b"a1").await.unwrap();
+        write(&bucket, "entry-b", 20, b"b1").await.unwrap();
+        write(&bucket, "entry-b", 25, b"b2").await.unwrap();
+        write(&bucket, "entry-a", 30, b"a2").await.unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["entry-a".into(), "entry-b".into()]),
+            ..Default::default()
+        };
+
+        let id = bucket.entry_query(query).unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        let records = collect_records(rx).await;
+
+        assert_eq!(
+            records,
+            vec![
+                ("entry-a".to_string(), 10),
+                ("entry-b".to_string(), 20),
+                ("entry-b".to_string(), 25),
+                ("entry-a".to_string(), 30),
+            ]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn filters_requested_entries(bucket: Arc<Bucket>) {
+        write(&bucket, "entry-a", 10, b"a1").await.unwrap();
+        write(&bucket, "entry-b", 20, b"b1").await.unwrap();
+        write(&bucket, "entry-c", 15, b"c1").await.unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["entry-b".into(), "entry-c".into()]),
+            ..Default::default()
+        };
+
+        let id = bucket.entry_query(query).unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        let records = collect_records(rx).await;
+
+        assert_eq!(
+            records,
+            vec![("entry-c".to_string(), 15), ("entry-b".to_string(), 20),]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn removes_expired_queries(bucket: Arc<Bucket>) {
+        write(&bucket, "entry-a", 10, b"a1").await.unwrap();
+        write(&bucket, "entry-b", 20, b"b1").await.unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["entry-a".into(), "entry-b".into()]),
+            ttl: Some(1),
+            ..Default::default()
+        };
+
+        let id = bucket.entry_query(query).unwrap();
+        let _ = bucket.get_query_receiver(id).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(1100)).await;
+
+        let err = match bucket.get_query_receiver(id).await {
+            Ok(_) => panic!("Expected query to expire"),
+            Err(err) => err,
+        };
+        assert_eq!(
+            err,
+            not_found!(
+                "Query {} not found and it might have expired. Check TTL in your query request.",
+                id
+            )
+        );
     }
 }

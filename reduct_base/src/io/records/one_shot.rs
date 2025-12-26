@@ -103,6 +103,7 @@ mod tests {
     #[fixture]
     fn meta() -> RecordMeta {
         RecordMeta {
+            entry_name: "entry".to_string(),
             timestamp: 0,
             state: 0,
             labels: HashMap::new(),

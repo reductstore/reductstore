@@ -533,7 +533,6 @@ mod tests {
                     ttl: Some(1),
                     ..Default::default()
                 })
-                .wait()
                 .unwrap();
 
             let (rx, _) = entry.get_query_receiver(id).unwrap();
