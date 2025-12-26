@@ -60,6 +60,7 @@ pub(super) fn parse_query_params(
 
     Ok(QueryEntry {
         query_type: QueryType::Query,
+        entries: None,
         start,
         stop,
         include: Some(include),

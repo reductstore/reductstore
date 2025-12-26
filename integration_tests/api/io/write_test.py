@@ -1,3 +1,6 @@
+from integration_tests.api.conftest import requires_env, auth_headers
+
+
 def test_write_batched_orders_by_entry_then_time(base_url, session, bucket):
     """
     Should consume batched writes in entry-index order, even when timestamps differ.
@@ -25,3 +28,35 @@ def test_write_batched_orders_by_entry_then_time(base_url, session, bucket):
     assert resp_entry_1.status_code == 200
     assert resp_entry_1.content == b"BBB"
     assert resp_entry_1.headers["content-type"] == "text/plain"
+
+
+@requires_env("API_TOKEN")
+def test_write_with_bucket_write_permissions(
+    base_url,
+    session,
+    bucket,
+    token_without_permissions,
+    token_read_bucket,
+    token_write_bucket,
+):
+    """Needs write permissions to write entry"""
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry?ts=1000",
+        data="some_data1",
+        headers=auth_headers(token_without_permissions.value),
+    )
+    assert resp.status_code == 403
+
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry?ts=1000",
+        data="some_data1",
+        headers=auth_headers(token_read_bucket.value),
+    )
+    assert resp.status_code == 403
+
+    resp = session.post(
+        f"{base_url}/b/{bucket}/entry?ts=1000",
+        data="some_data1",
+        headers=auth_headers(token_write_bucket.value),
+    )
+    assert resp.status_code == 200

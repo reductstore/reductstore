@@ -33,7 +33,7 @@ pub(super) async fn read_query(
 
     let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
     let entry = bucket.get_entry(entry_name)?.upgrade()?;
-    let id = entry.query(parse_query_params(params, false)?).await?;
+    let id = entry.query(parse_query_params(params, false)?)?;
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))
 }

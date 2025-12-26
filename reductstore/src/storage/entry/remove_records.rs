@@ -60,7 +60,7 @@ impl Entry {
 
         let rx = || {
             // io defaults isn't used in remove queries
-            let query_id = self.query(options).wait()?;
+            let query_id = self.query(options)?;
             self.get_query_receiver(query_id)
         };
 

@@ -636,7 +636,6 @@ mod tests {
                     }
                     .into(),
                 )
-                .await
                 .unwrap();
 
             fetch_and_response_batched_records(

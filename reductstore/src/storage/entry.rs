@@ -123,34 +123,21 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub fn query(&self, query_parameters: QueryEntry) -> TaskHandle<Result<u64, ReductError>> {
+    pub fn query(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
-        let range = self.get_query_time_range(&query_parameters);
-        if let Err(e) = range {
-            return Err(e).into();
-        }
-
-        let (start, stop) = range.unwrap();
+        let (start, stop) = self.get_query_time_range(&query_parameters)?;
         let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
         let block_manager = Arc::clone(&self.block_manager);
 
         let options: QueryOptions = query_parameters.into();
-        let query = build_query(start, stop, options.clone(), self.cfg.io_conf.clone());
-        if let Err(e) = query {
-            return e.into();
-        }
+        let query = build_query(start, stop, options.clone(), self.cfg.io_conf.clone())?;
 
-        let io_settings = query.as_ref().unwrap().io_settings().clone();
-        let (rx, task_handle) = spawn_query_task(
-            id,
-            self.task_group(),
-            query.unwrap(),
-            options.clone(),
-            block_manager,
-        );
+        let io_settings = query.as_ref().io_settings().clone();
+        let (rx, task_handle) =
+            spawn_query_task(id, self.task_group(), query, options.clone(), block_manager);
 
-        self.queries.write().unwrap().insert(
+        self.queries.write()?.insert(
             id,
             QueryHandle {
                 rx: Arc::new(AsyncRwLock::new(rx)),
@@ -161,7 +148,7 @@ impl Entry {
             },
         );
 
-        Ok(id).into()
+        Ok(id)
     }
 
     /// Returns the next record for a query.
@@ -450,7 +437,7 @@ mod tests {
                 ..Default::default()
             };
 
-            let id = entry.query(params).wait().unwrap();
+            let id = entry.query(params).unwrap();
             assert!(id >= 1);
 
             {
@@ -496,7 +483,7 @@ mod tests {
                 ttl: Some(1),
                 ..Default::default()
             };
-            let id = entry.query(params).wait().unwrap();
+            let id = entry.query(params).unwrap();
 
             {
                 let (rx, _) = entry.get_query_receiver(id).unwrap();

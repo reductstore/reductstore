@@ -55,10 +55,16 @@ impl RecordReader {
         let record = block.get_record(record_timestamp).unwrap();
         let content_size = record.end - record.begin;
 
-        let meta: RecordMeta = if let Some(processed_record) = processed_record {
-            processed_record.into()
-        } else {
-            record.clone().into()
+        let meta: RecordMeta = {
+            let meta = if let Some(processed_record) = processed_record {
+                processed_record.into()
+            } else {
+                record.clone().into()
+            };
+
+            RecordMeta::builder_from(meta)
+                .entry_name(bm.entry_name().clone())
+                .build()
         };
 
         Ok(Self {

@@ -64,6 +64,9 @@ pub enum QueryType {
 pub struct QueryEntry {
     pub query_type: QueryType,
 
+    /// Specific entries to query (used for Batch Protocol v2)
+    pub entries: Option<Vec<String>>,
+
     /// Start query from (Unix timestamp in microseconds)
     pub start: Option<u64>,
     /// Stop query at (Unix timestamp in microseconds)
