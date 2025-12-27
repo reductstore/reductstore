@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
+use crate::api::utils::ReadersWrapper;
 use crate::api::{ErrorCode, HttpError, StateKeeper};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::ext::ext_repository::BoxedManageExtensions;
@@ -14,7 +15,6 @@ use axum::http;
 use axum::response::IntoResponse;
 use axum_extra::headers::HeaderMap;
 use bytes::Bytes;
-use futures_util::Stream;
 use log::debug;
 use reduct_base::batch::v2::{
     encode_entry_name, make_batched_header_name, make_record_header_value, LabelIndex,
@@ -22,10 +22,8 @@ use reduct_base::batch::v2::{
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::{no_content, unprocessable_entity};
-use std::collections::{HashMap, VecDeque};
-use std::pin::Pin;
+use std::collections::HashMap;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Instant;
 use tokio::time::timeout;
 
@@ -266,53 +264,6 @@ async fn next_record_readers(
     } else {
         debug!("Timeout while waiting for record from query {}", query_path);
         None
-    }
-}
-
-struct ReadersWrapper {
-    readers: VecDeque<BoxedReadRecord>,
-    empty_body: bool,
-}
-
-impl ReadersWrapper {
-    fn new(readers: Vec<BoxedReadRecord>, empty_body: bool) -> Self {
-        Self {
-            readers: VecDeque::from(readers),
-            empty_body,
-        }
-    }
-}
-
-impl Stream for ReadersWrapper {
-    type Item = Result<Bytes, HttpError>;
-
-    fn poll_next(
-        mut self: Pin<&mut ReadersWrapper>,
-        _ctx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        if self.empty_body {
-            return Poll::Ready(None);
-        }
-
-        if self.readers.is_empty() {
-            return Poll::Ready(None);
-        }
-
-        while let Some(mut reader) = self.readers.pop_front() {
-            match reader.read_chunk() {
-                Some(Ok(bytes)) => {
-                    self.readers.push_front(reader);
-                    return Poll::Ready(Some(Ok(bytes)));
-                }
-                Some(Err(err)) => return Poll::Ready(Some(Err(HttpError::from(err)))),
-                None => continue,
-            }
-        }
-        Poll::Ready(None)
-    }
-
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, None)
     }
 }
 

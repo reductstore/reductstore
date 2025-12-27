@@ -178,6 +178,53 @@ impl Stream for RangeRecordStream {
     }
 }
 
+pub(super) struct ReadersWrapper {
+    readers: VecDeque<BoxedReadRecord>,
+    empty_body: bool,
+}
+
+impl ReadersWrapper {
+    pub fn new(readers: Vec<BoxedReadRecord>, empty_body: bool) -> Self {
+        Self {
+            readers: VecDeque::from(readers),
+            empty_body,
+        }
+    }
+}
+
+impl Stream for ReadersWrapper {
+    type Item = Result<Bytes, HttpError>;
+
+    fn poll_next(
+        mut self: Pin<&mut ReadersWrapper>,
+        _ctx: &mut Context<'_>,
+    ) -> Poll<Option<Self::Item>> {
+        if self.empty_body {
+            return Poll::Ready(None);
+        }
+
+        if self.readers.is_empty() {
+            return Poll::Ready(None);
+        }
+
+        while let Some(mut reader) = self.readers.pop_front() {
+            match reader.read_chunk() {
+                Some(Ok(bytes)) => {
+                    self.readers.push_front(reader);
+                    return Poll::Ready(Some(Ok(bytes)));
+                }
+                Some(Err(err)) => return Poll::Ready(Some(Err(HttpError::from(err)))),
+                None => continue,
+            }
+        }
+        Poll::Ready(None)
+    }
+
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        (0, None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
