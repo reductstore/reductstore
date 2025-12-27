@@ -16,7 +16,9 @@ use axum_extra::headers::HeaderMap;
 use bytes::Bytes;
 use futures_util::Stream;
 use log::debug;
-use reduct_base::batch::v2::{encode_entry_name, encode_label_name, make_batched_header_name};
+use reduct_base::batch::v2::{
+    encode_entry_name, make_batched_header_name, make_record_header_value, LabelIndex,
+};
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::{no_content, unprocessable_entity};
@@ -91,39 +93,6 @@ struct PrevMeta {
     labels: reduct_base::Labels,
 }
 
-#[derive(Default)]
-struct LabelIndex {
-    names: Vec<String>,
-    lookup: HashMap<String, usize>,
-}
-
-impl LabelIndex {
-    fn ensure(&mut self, name: &str) -> usize {
-        if let Some(idx) = self.lookup.get(name) {
-            return *idx;
-        }
-
-        let idx = self.names.len();
-        self.names.push(name.to_string());
-        self.lookup.insert(name.to_string(), idx);
-        idx
-    }
-
-    fn as_header(&self) -> Option<http::HeaderValue> {
-        if self.names.is_empty() {
-            return None;
-        }
-
-        let encoded = self
-            .names
-            .iter()
-            .map(|name| encode_label_name(name))
-            .collect::<Vec<_>>()
-            .join(",");
-        Some(encoded.parse().unwrap())
-    }
-}
-
 fn calculate_header_size(records: &[BatchedRecord], start_ts: u64) -> usize {
     records
         .iter()
@@ -132,96 +101,6 @@ fn calculate_header_size(records: &[BatchedRecord], start_ts: u64) -> usize {
             name.as_str().len() + record.header_value.to_str().unwrap().len() + 2
         })
         .sum()
-}
-
-fn make_record_header_value(
-    meta: &reduct_base::io::RecordMeta,
-    previous: Option<&PrevMeta>,
-    label_index: &mut LabelIndex,
-) -> http::HeaderValue {
-    let mut parts: Vec<String> = vec![meta.content_length().to_string()];
-
-    let mut content_type = String::new();
-    match previous {
-        Some(prev) if prev.content_type != meta.content_type() => {
-            content_type = meta.content_type().to_string()
-        }
-        None => content_type = meta.content_type().to_string(),
-        _ => {}
-    }
-
-    let labels_delta = build_label_delta(meta, previous.map(|p| &p.labels), label_index);
-    let has_labels = !labels_delta.is_empty();
-
-    if !content_type.is_empty() || has_labels {
-        parts.push(content_type);
-    }
-
-    if has_labels {
-        parts.push(labels_delta);
-    }
-
-    parts.join(",").parse().unwrap()
-}
-
-fn build_label_delta(
-    meta: &reduct_base::io::RecordMeta,
-    previous_labels: Option<&reduct_base::Labels>,
-    label_index: &mut LabelIndex,
-) -> String {
-    let mut deltas: Vec<(usize, String)> = Vec::new();
-
-    let format_value = |value: &str| {
-        if value.contains(',') {
-            format!("\"{}\"", value)
-        } else {
-            value.to_string()
-        }
-    };
-
-    if let Some(prev) = previous_labels {
-        let mut keys: Vec<String> = prev
-            .keys()
-            .chain(meta.labels().keys())
-            .map(|k| k.to_string())
-            .collect();
-        keys.sort();
-        keys.dedup();
-
-        for key in keys {
-            let prev_val = prev.get(&key);
-            let curr_val = meta.labels().get(&key);
-            match (prev_val, curr_val) {
-                (Some(p), Some(c)) if p == c => continue,
-                (Some(_), None) => {
-                    let idx = label_index.ensure(&key);
-                    deltas.push((idx, String::new()))
-                }
-                (_, Some(c)) => {
-                    let idx = label_index.ensure(&key);
-                    deltas.push((idx, format_value(c)))
-                }
-                _ => {}
-            }
-        }
-    } else {
-        for (k, v) in meta.labels().iter() {
-            let idx = label_index.ensure(k);
-            deltas.push((idx, format_value(v)));
-        }
-    }
-
-    for (k, v) in meta.computed_labels() {
-        let idx = label_index.ensure(&format!("@{}", k));
-        deltas.push((idx, format_value(v)));
-    }
-
-    deltas.sort_by_key(|(idx, _)| *idx);
-    deltas
-        .into_iter()
-        .map(|(idx, value)| format!("{}={}", idx, value))
-        .collect::<Vec<_>>()
-        .join(",")
 }
 
 async fn fetch_and_response_batched_records(
@@ -273,7 +152,12 @@ async fn fetch_and_response_batched_records(
                         });
 
                     let prev = prev_meta.get(meta.entry_name());
-                    let header_value = make_record_header_value(&meta, prev, &mut label_index);
+                    let header_value = make_record_header_value(
+                        &meta,
+                        prev.map(|p| p.content_type.as_str()),
+                        prev.map(|p| &p.labels),
+                        &mut label_index,
+                    );
                     body_size += meta.content_length();
 
                     records.push(BatchedRecord {

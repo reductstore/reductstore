@@ -31,6 +31,8 @@
 
 use crate::batch::v1::RecordHeader;
 use crate::error::ReductError;
+#[cfg(feature = "io")]
+use crate::io::RecordMeta;
 use crate::unprocessable_entity;
 use crate::Labels;
 use http::{HeaderMap, HeaderName, HeaderValue};
@@ -159,6 +161,140 @@ pub fn parse_labels_header(labels: &HeaderValue) -> Result<Vec<String>, ReductEr
         .split(',')
         .map(|label| decode_label_name(label.trim()))
         .collect()
+}
+
+/// Keeps label names unique and provides the value for the `x-reduct-labels` header.
+#[derive(Debug, Default, Clone)]
+pub struct LabelIndex {
+    names: Vec<String>,
+    lookup: HashMap<String, usize>,
+}
+
+impl LabelIndex {
+    /// Returns the index of the label name, inserting it if missing.
+    pub fn ensure(&mut self, name: &str) -> usize {
+        if let Some(idx) = self.lookup.get(name) {
+            return *idx;
+        }
+
+        let idx = self.names.len();
+        self.names.push(name.to_string());
+        self.lookup.insert(name.to_string(), idx);
+        idx
+    }
+
+    /// Returns the header value for `x-reduct-labels` if at least one label was registered.
+    pub fn as_header(&self) -> Option<HeaderValue> {
+        if self.names.is_empty() {
+            return None;
+        }
+
+        let encoded = self
+            .names
+            .iter()
+            .map(|name| encode_label_name(name))
+            .collect::<Vec<_>>()
+            .join(",");
+        Some(encoded.parse().unwrap())
+    }
+
+    /// Returns the collected label names.
+    pub fn names(&self) -> &[String] {
+        &self.names
+    }
+}
+
+/// Build a label delta string for batched protocol v2.
+#[cfg(feature = "io")]
+pub fn build_label_delta(
+    meta: &RecordMeta,
+    previous_labels: Option<&Labels>,
+    label_index: &mut LabelIndex,
+) -> String {
+    let mut deltas: Vec<(usize, String)> = Vec::new();
+
+    let format_value = |value: &str| {
+        if value.contains(',') {
+            format!("\"{}\"", value)
+        } else {
+            value.to_string()
+        }
+    };
+
+    if let Some(prev) = previous_labels {
+        let mut keys: Vec<String> = prev
+            .keys()
+            .chain(meta.labels().keys())
+            .map(|k| k.to_string())
+            .collect();
+        keys.sort();
+        keys.dedup();
+
+        for key in keys {
+            let prev_val = prev.get(&key);
+            let curr_val = meta.labels().get(&key);
+            match (prev_val, curr_val) {
+                (Some(p), Some(c)) if p == c => continue,
+                (Some(_), None) => {
+                    let idx = label_index.ensure(&key);
+                    deltas.push((idx, String::new()))
+                }
+                (_, Some(c)) => {
+                    let idx = label_index.ensure(&key);
+                    deltas.push((idx, format_value(c)))
+                }
+                _ => {}
+            }
+        }
+    } else {
+        for (k, v) in meta.labels().iter() {
+            let idx = label_index.ensure(k);
+            deltas.push((idx, format_value(v)));
+        }
+    }
+
+    for (k, v) in meta.computed_labels() {
+        let idx = label_index.ensure(&format!("@{}", k));
+        deltas.push((idx, format_value(v)));
+    }
+
+    deltas.sort_by_key(|(idx, _)| *idx);
+    deltas
+        .into_iter()
+        .map(|(idx, value)| format!("{}={}", idx, value))
+        .collect::<Vec<_>>()
+        .join(",")
+}
+
+/// Construct a record header value for batched protocol v2.
+#[cfg(feature = "io")]
+pub fn make_record_header_value(
+    meta: &RecordMeta,
+    previous_content_type: Option<&str>,
+    previous_labels: Option<&Labels>,
+    label_index: &mut LabelIndex,
+) -> HeaderValue {
+    let mut parts: Vec<String> = vec![meta.content_length().to_string()];
+
+    let mut content_type = String::new();
+    match previous_content_type {
+        Some(prev) if prev != meta.content_type() => content_type = meta.content_type().to_string(),
+        None => content_type = meta.content_type().to_string(),
+        _ => {}
+    }
+
+    let labels_delta = build_label_delta(meta, previous_labels, label_index);
+    let has_labels = !labels_delta.is_empty();
+
+    if !content_type.is_empty() || has_labels {
+        parts.push(content_type);
+    }
+
+    if has_labels {
+        parts.push(labels_delta);
+    }
+
+    parts.join(",").parse().unwrap()
 }
 
 /// Create a header name for batched protocol v2: `x-reduct-<ENTRY-INDEX>-<TIME-DELTA>`.
