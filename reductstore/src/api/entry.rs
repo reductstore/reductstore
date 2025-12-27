@@ -85,7 +85,7 @@ pub(super) struct QueryInfoAxum(QueryInfo);
 pub(super) struct RemoveQueryInfoAxum(RemoveQueryInfo);
 
 #[derive(IntoResponse, Twin)]
-pub(super) struct QueryEntryAxum(QueryEntry);
+pub(super) struct QueryEntryAxum(pub QueryEntry);
 
 impl<S> FromRequest<S> for QueryEntryAxum
 where
