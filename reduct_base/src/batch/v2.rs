@@ -7,6 +7,7 @@
 // -------------------
 // Metadata:
 //   x-reduct-entries: comma-separated, percent-encoded entry names (index == position)
+//   x-reduct-labels (optional): comma-separated, percent-encoded label names (index == position)
 //   x-reduct-start-ts: first timestamp in the batch
 //   Content is sorted by entry index in ascending order, then by timestamp (start + delta).
 //
@@ -22,7 +23,9 @@
 //       * "123,,<label-delta>" -> reuse previous content-type; apply label delta.
 //       * "123,<ct>,<label-delta>" -> explicit content-type and label delta.
 //   - Label delta sends only changed labels; unset a label with `k=`. Unmentioned labels
-//     keep their previous value for the entry.
+//     keep their previous value for the entry. When `x-reduct-labels` is provided, the
+//     label delta may use indexes instead of names (`<IDX>=<VALUE>`), where the index
+//     refers to the position in `x-reduct-labels`.
 //   - The first record for an entry must provide content-type and labels when re-use is
 //     requested; otherwise defaults apply (content-type defaults to octet-stream, labels to empty).
 
@@ -37,6 +40,7 @@ use std::str::FromStr;
 const HEADER_PREFIX: &str = "x-reduct-";
 const ENTRIES_HEADER: &str = "x-reduct-entries";
 const START_TS_HEADER: &str = "x-reduct-start-ts";
+const LABELS_HEADER: &str = "x-reduct-labels";
 
 /// Represents a parsed batched header that includes the entry name and timestamp.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -131,6 +135,32 @@ pub fn parse_entries_header(entries: &HeaderValue) -> Result<Vec<String>, Reduct
         .collect()
 }
 
+/// Decode a percent-encoded label name.
+pub fn decode_label_name(encoded: &str) -> Result<String, ReductError> {
+    decode_entry_name(encoded)
+        .map_err(|_| unprocessable_entity!("Invalid label encoding in header value: '{}'", encoded))
+}
+
+/// Percent-encode a label name.
+pub fn encode_label_name(label: &str) -> String {
+    encode_entry_name(label)
+}
+
+/// Parse the `x-reduct-labels` header containing a comma separated list of percent-encoded labels.
+pub fn parse_labels_header(labels: &HeaderValue) -> Result<Vec<String>, ReductError> {
+    let labels = labels
+        .to_str()
+        .map_err(|_| unprocessable_entity!("Invalid labels header"))?;
+    if labels.trim().is_empty() {
+        return Err(unprocessable_entity!("x-reduct-labels header is empty"));
+    }
+
+    labels
+        .split(',')
+        .map(|label| decode_label_name(label.trim()))
+        .collect()
+}
+
 /// Create a header name for batched protocol v2: `x-reduct-<ENTRY-INDEX>-<TIME-DELTA>`.
 pub fn make_batched_header_name(entry_index: usize, time_delta: u64) -> HeaderName {
     HeaderName::from_str(&format!("{}{}-{}", HEADER_PREFIX, entry_index, time_delta))
@@ -181,7 +211,38 @@ fn parse_entries(headers: &HeaderMap) -> Result<Vec<String>, ReductError> {
         .and_then(parse_entries_header)
 }
 
-fn apply_label_delta(raw_labels: &str, base: &Labels) -> Result<Labels, ReductError> {
+fn parse_labels(headers: &HeaderMap) -> Result<Option<Vec<String>>, ReductError> {
+    match headers.get(LABELS_HEADER) {
+        None => Ok(None),
+        Some(labels) => parse_labels_header(labels).map(Some),
+    }
+}
+
+fn resolve_label_name<'a>(
+    raw: &'a str,
+    label_names: Option<&Vec<String>>,
+) -> Result<String, ReductError> {
+    if let (Some(label_names), Ok(idx)) = (label_names, raw.parse::<usize>()) {
+        return label_names
+            .get(idx)
+            .cloned()
+            .ok_or_else(|| unprocessable_entity!("Label index '{}' is out of range", raw));
+    }
+
+    if raw.starts_with('@') {
+        return Err(unprocessable_entity!(
+            "Label names must not start with '@': reserved for computed labels",
+        ));
+    }
+
+    Ok(raw.to_string())
+}
+
+fn apply_label_delta(
+    raw_labels: &str,
+    base: &Labels,
+    label_names: Option<&Vec<String>>,
+) -> Result<Labels, ReductError> {
     let mut labels = base.clone();
     let mut rest = raw_labels.trim().to_string();
 
@@ -191,12 +252,7 @@ fn apply_label_delta(raw_labels: &str, base: &Labels) -> Result<Labels, ReductEr
 
     while let Some(pair) = rest.split_once('=') {
         let (key, value) = pair;
-        let key = key.trim();
-        if key.starts_with('@') {
-            return Err(unprocessable_entity!(
-                "Label names must not start with '@': reserved for computed labels",
-            ));
-        }
+        let key = resolve_label_name(key.trim(), label_names)?;
 
         let (value, next_rest) = if value.starts_with('\"') {
             let value = value[1..].to_string();
@@ -214,7 +270,7 @@ fn apply_label_delta(raw_labels: &str, base: &Labels) -> Result<Labels, ReductEr
         };
 
         if value.is_empty() {
-            labels.remove(key);
+            labels.remove(&key);
         } else {
             labels.insert(key.to_string(), value);
         }
@@ -231,6 +287,7 @@ fn apply_label_delta(raw_labels: &str, base: &Labels) -> Result<Labels, ReductEr
 fn parse_record_header_with_defaults(
     raw: &str,
     previous: Option<&RecordHeader>,
+    label_names: Option<&Vec<String>>,
 ) -> Result<RecordHeader, ReductError> {
     let (content_length_str, rest_opt) = raw
         .split_once(',')
@@ -275,6 +332,7 @@ fn parse_record_header_with_defaults(
         Some(raw_labels) => apply_label_delta(
             raw_labels,
             previous.map(|prev| &prev.labels).unwrap_or(&HashMap::new()),
+            label_names,
         )?,
     };
 
@@ -321,6 +379,7 @@ pub fn sort_headers_by_entry_and_time(
 pub fn parse_batched_headers(headers: &HeaderMap) -> Result<Vec<EntryRecordHeader>, ReductError> {
     let entries = parse_entries(headers)?;
     let start_ts = parse_start_timestamp(headers)?;
+    let label_names = parse_labels(headers)?;
     let mut last_header_per_entry: HashMap<String, RecordHeader> = HashMap::new();
     let mut result = Vec::new();
 
@@ -338,8 +397,11 @@ pub fn parse_batched_headers(headers: &HeaderMap) -> Result<Vec<EntryRecordHeade
             .to_str()
             .map_err(|_| unprocessable_entity!("Invalid batched header"))?;
 
-        let header =
-            parse_record_header_with_defaults(raw_value, last_header_per_entry.get(entry))?;
+        let header = parse_record_header_with_defaults(
+            raw_value,
+            last_header_per_entry.get(entry),
+            label_names.as_ref(),
+        )?;
         let timestamp = start_ts + delta;
 
         last_header_per_entry.insert(entry.clone(), header.clone());
@@ -390,6 +452,13 @@ mod tests {
         let value = HeaderValue::from_str("sensor,ro%2Ftopic").unwrap();
         let entries = parse_entries_header(&value).unwrap();
         assert_eq!(entries, vec!["sensor".to_string(), "ro/topic".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_labels_header_roundtrip() {
+        let value = HeaderValue::from_str("label-1,foo%2Fbar").unwrap();
+        let labels = parse_labels_header(&value).unwrap();
+        assert_eq!(labels, vec!["label-1".to_string(), "foo/bar".to_string()]);
     }
 
     #[test]
@@ -453,9 +522,10 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(ENTRIES_HEADER, HeaderValue::from_static("entry,ro%2Ftopic"));
         headers.insert(START_TS_HEADER, HeaderValue::from_static("1000"));
+        headers.insert(LABELS_HEADER, HeaderValue::from_static("label"));
         headers.insert(
             make_batched_header_name(1, 15),
-            HeaderValue::from_static("3,text/plain"),
+            HeaderValue::from_static("3,text/plain,0=z"),
         );
         headers.insert(
             make_batched_header_name(0, 10),
@@ -475,6 +545,7 @@ mod tests {
         assert_eq!(parsed[1].timestamp, 1015);
         assert_eq!(parsed[1].header.content_length, 3);
         assert_eq!(parsed[1].header.content_type, "text/plain");
+        assert_eq!(parsed[1].header.labels.get("label").unwrap(), "z");
     }
 
     #[test]
@@ -482,9 +553,10 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(ENTRIES_HEADER, HeaderValue::from_static("entry"));
         headers.insert(START_TS_HEADER, HeaderValue::from_static("0"));
+        headers.insert(LABELS_HEADER, HeaderValue::from_static("x"));
         headers.insert(
             make_batched_header_name(0, 0),
-            HeaderValue::from_static("10,text/plain,x=y"),
+            HeaderValue::from_static("10,text/plain,0=y"),
         );
         headers.insert(
             make_batched_header_name(0, 5),
@@ -492,7 +564,7 @@ mod tests {
         ); // reuse type + labels
         headers.insert(
             make_batched_header_name(0, 10),
-            HeaderValue::from_static("3,,x=z"),
+            HeaderValue::from_static("3,,0=z"),
         ); // reuse type, override labels
 
         let parsed = parse_batched_headers(&headers).unwrap();
@@ -505,6 +577,29 @@ mod tests {
 
         assert_eq!(parsed[2].header.content_type, "text/plain");
         assert_eq!(parsed[2].header.labels.get("x").unwrap(), "z");
+    }
+
+    #[test]
+    fn test_parse_batched_headers_with_label_indexes() {
+        let mut headers = HeaderMap::new();
+        headers.insert(ENTRIES_HEADER, HeaderValue::from_static("entry"));
+        headers.insert(START_TS_HEADER, HeaderValue::from_static("0"));
+        headers.insert(LABELS_HEADER, HeaderValue::from_static("a,b"));
+
+        headers.insert(
+            make_batched_header_name(0, 0),
+            HeaderValue::from_static("10,text/plain,0=1,1=2"),
+        );
+        headers.insert(
+            make_batched_header_name(0, 5),
+            HeaderValue::from_static("2,,0="), // remove label a
+        );
+
+        let parsed = parse_batched_headers(&headers).unwrap();
+        assert_eq!(parsed[0].header.labels.get("a").unwrap(), "1");
+        assert_eq!(parsed[0].header.labels.get("b").unwrap(), "2");
+        assert!(!parsed[1].header.labels.contains_key("a"));
+        assert_eq!(parsed[1].header.labels.get("b").unwrap(), "2");
     }
 
     #[test]

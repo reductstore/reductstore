@@ -16,7 +16,7 @@ use axum_extra::headers::HeaderMap;
 use bytes::Bytes;
 use futures_util::Stream;
 use log::debug;
-use reduct_base::batch::v2::{encode_entry_name, make_batched_header_name};
+use reduct_base::batch::v2::{encode_entry_name, encode_label_name, make_batched_header_name};
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::{no_content, unprocessable_entity};
@@ -28,6 +28,7 @@ use std::time::Instant;
 use tokio::time::timeout;
 
 const QUERY_ID_HEADER: &str = "x-reduct-query-id";
+const LABELS_HEADER: &str = "x-reduct-labels";
 
 fn parse_query_id(headers: &HeaderMap) -> Result<u64, HttpError> {
     let value = headers.get(QUERY_ID_HEADER).ok_or_else(|| {
@@ -80,7 +81,6 @@ pub(super) async fn read_batched_records(
 struct BatchedRecord {
     entry_index: usize,
     timestamp: u64,
-    header_name: http::HeaderName,
     header_value: http::HeaderValue,
     reader: BoxedReadRecord,
 }
@@ -91,14 +91,54 @@ struct PrevMeta {
     labels: reduct_base::Labels,
 }
 
-fn make_batch_header(
-    entry_index: usize,
-    start_ts: u64,
+#[derive(Default)]
+struct LabelIndex {
+    names: Vec<String>,
+    lookup: HashMap<String, usize>,
+}
+
+impl LabelIndex {
+    fn ensure(&mut self, name: &str) -> usize {
+        if let Some(idx) = self.lookup.get(name) {
+            return *idx;
+        }
+
+        let idx = self.names.len();
+        self.names.push(name.to_string());
+        self.lookup.insert(name.to_string(), idx);
+        idx
+    }
+
+    fn as_header(&self) -> Option<http::HeaderValue> {
+        if self.names.is_empty() {
+            return None;
+        }
+
+        let encoded = self
+            .names
+            .iter()
+            .map(|name| encode_label_name(name))
+            .collect::<Vec<_>>()
+            .join(",");
+        Some(encoded.parse().unwrap())
+    }
+}
+
+fn calculate_header_size(records: &[BatchedRecord], start_ts: u64) -> usize {
+    records
+        .iter()
+        .map(|record| {
+            let name = make_batched_header_name(record.entry_index, record.timestamp - start_ts);
+            name.as_str().len() + record.header_value.to_str().unwrap().len() + 2
+        })
+        .sum()
+}
+
+fn make_record_header_value(
     meta: &reduct_base::io::RecordMeta,
     previous: Option<&PrevMeta>,
-) -> (http::HeaderName, http::HeaderValue) {
-    let delta = meta.timestamp() - start_ts;
-    let name = make_batched_header_name(entry_index, delta);
+    label_index: &mut LabelIndex,
+) -> http::HeaderValue {
     let mut parts: Vec<String> = vec![meta.content_length().to_string()];
 
     let mut content_type = String::new();
@@ -110,7 +150,7 @@ fn make_batch_header(
         _ => {}
     }
 
-    let labels_delta = build_label_delta(meta, previous.map(|p| &p.labels));
+    let labels_delta = build_label_delta(meta, previous.map(|p| &p.labels), label_index);
     let has_labels = !labels_delta.is_empty();
 
     if !content_type.is_empty() || has_labels {
@@ -121,21 +161,21 @@ fn make_batch_header(
         parts.push(labels_delta);
     }
 
-    let value: http::HeaderValue = parts.join(",").parse().unwrap();
-    (name, value)
+    parts.join(",").parse().unwrap()
 }
 
 fn build_label_delta(
     meta: &reduct_base::io::RecordMeta,
     previous_labels: Option<&reduct_base::Labels>,
+    label_index: &mut LabelIndex,
 ) -> String {
-    let mut deltas: Vec<String> = Vec::new();
+    let mut deltas: Vec<(usize, String)> = Vec::new();
 
-    let format_label = |key: &str, value: &str| {
+    let format_value = |value: &str| {
         if value.contains(',') {
-            format!("{}=\"{}\"", key, value)
+            format!("\"{}\"", value)
         } else {
-            format!("{}={}", key, value)
+            value.to_string()
         }
     };
 
@@ -153,23 +193,35 @@ fn build_label_delta(
             let curr_val = meta.labels().get(&key);
             match (prev_val, curr_val) {
                 (Some(p), Some(c)) if p == c => continue,
-                (Some(_), None) => deltas.push(format!("{}=", key)),
-                (_, Some(c)) => deltas.push(format_label(&key, c)),
+                (Some(_), None) => {
+                    let idx = label_index.ensure(&key);
+                    deltas.push((idx, String::new()))
+                }
+                (_, Some(c)) => {
+                    let idx = label_index.ensure(&key);
+                    deltas.push((idx, format_value(c)))
+                }
                 _ => {}
             }
         }
     } else {
         for (k, v) in meta.labels().iter() {
-            deltas.push(format_label(k, v));
+            let idx = label_index.ensure(k);
+            deltas.push((idx, format_value(v)));
         }
     }
 
     for (k, v) in meta.computed_labels() {
-        deltas.push(format_label(&format!("@{}", k), v));
+        let idx = label_index.ensure(&format!("@{}", k));
+        deltas.push((idx, format_value(v)));
     }
 
-    deltas.sort();
-    deltas.join(",")
+    deltas.sort_by_key(|(idx, _)| *idx);
+    deltas
+        .into_iter()
+        .map(|(idx, value)| format!("{}={}", idx, value))
+        .collect::<Vec<_>>()
+        .join(",")
 }
 
 async fn fetch_and_response_batched_records(
@@ -184,6 +236,7 @@ async fn fetch_and_response_batched_records(
     let mut entry_indices: HashMap<String, usize> = HashMap::new();
     let mut records = Vec::new();
     let mut prev_meta: HashMap<String, PrevMeta> = HashMap::new();
+    let mut label_index = LabelIndex::default();
 
     let mut header_size = 0usize;
     let mut body_size = 0u64;
@@ -210,10 +263,8 @@ async fn fetch_and_response_batched_records(
             match reader {
                 Ok(reader) => {
                     let meta = reader.meta().clone();
-                    if start_ts.is_none() {
-                        start_ts = Some(meta.timestamp());
-                    }
-                    let start_ts = start_ts.unwrap();
+                    start_ts =
+                        Some(start_ts.map_or(meta.timestamp(), |curr| curr.min(meta.timestamp())));
                     let entry_index = *entry_indices
                         .entry(meta.entry_name().to_string())
                         .or_insert_with(|| {
@@ -222,19 +273,16 @@ async fn fetch_and_response_batched_records(
                         });
 
                     let prev = prev_meta.get(meta.entry_name());
-                    let (header_name, header_value) =
-                        make_batch_header(entry_index, start_ts, &meta, prev);
-                    header_size +=
-                        header_name.as_str().len() + header_value.to_str().unwrap().len() + 2;
+                    let header_value = make_record_header_value(&meta, prev, &mut label_index);
                     body_size += meta.content_length();
 
                     records.push(BatchedRecord {
                         entry_index,
                         timestamp: meta.timestamp(),
-                        header_name,
                         header_value,
                         reader,
                     });
+                    header_size = calculate_header_size(&records, start_ts.unwrap());
 
                     prev_meta.insert(
                         meta.entry_name().to_string(),
@@ -295,10 +343,14 @@ async fn fetch_and_response_batched_records(
             .unwrap(),
     );
     resp_headers.insert("x-reduct-start-ts", start_ts.to_string().parse().unwrap());
+    if let Some(label_header) = label_index.as_header() {
+        resp_headers.insert(LABELS_HEADER, label_header);
+    }
 
     let mut readers_only = Vec::with_capacity(records.len());
     for record in records.into_iter() {
-        resp_headers.insert(record.header_name, record.header_value);
+        let header_name = make_batched_header_name(record.entry_index, record.timestamp - start_ts);
+        resp_headers.insert(header_name, record.header_value);
         readers_only.push(record.reader);
     }
 
@@ -456,12 +508,144 @@ mod tests {
         .into_response();
 
         let resp_headers = response.headers();
-        assert_eq!(resp_headers["x-reduct-entries"], "entry-1,entry-2");
+        assert_eq!(
+            resp_headers["x-reduct-entries"],
+            "batch-label-entry-1,batch-label-entry-2"
+        );
         assert_eq!(resp_headers["x-reduct-start-ts"], "1000");
         assert!(resp_headers.contains_key("x-reduct-0-0"));
         assert!(resp_headers.contains_key("x-reduct-1-10"));
         assert_eq!(resp_headers["content-length"], "5");
         assert_eq!(resp_headers["x-reduct-last"], "true");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn writes_label_index_header(
+        #[future] keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        for (entry, ts, data, label) in [
+            ("batch-label-entry-1", 1000u64, "aa", "foo"),
+            ("batch-label-entry-2", 1010u64, "bbb", "bar"),
+        ] {
+            let mut writer = bucket
+                .begin_write(
+                    entry,
+                    ts,
+                    data.len() as u64,
+                    "text/plain".to_string(),
+                    [("label".to_string(), label.to_string())]
+                        .into_iter()
+                        .collect(),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(Bytes::from(data.to_string()))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec![
+                "batch-label-entry-1".into(),
+                "batch-label-entry-2".into(),
+            ]),
+            ..Default::default()
+        };
+        let path = Path(path_to_bucket_1.0.clone());
+        let response = query(
+            State(keeper.clone()),
+            headers.clone(),
+            path,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap();
+        let query_info: reduct_base::msg::entry_api::QueryInfo = response.into();
+
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_str(&query_info.id.to_string()).unwrap(),
+        );
+
+        let response = read_batched_records(
+            State(keeper.clone()),
+            headers,
+            path_to_bucket_1,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        let resp_headers = response.headers();
+        assert_eq!(
+            resp_headers["x-reduct-entries"],
+            "batch-label-entry-1,batch-label-entry-2"
+        );
+        let label_header = resp_headers[LABELS_HEADER].to_str().unwrap();
+        let label_index = label_header
+            .split(',')
+            .position(|label| label == "label")
+            .expect("label index should be present");
+
+        let expected_first = format!("{}=foo", label_index);
+        let expected_second = format!("{}=bar", label_index);
+
+        let entries: Vec<&str> = resp_headers["x-reduct-entries"]
+            .to_str()
+            .unwrap()
+            .split(',')
+            .collect();
+        let entry1_idx = entries
+            .iter()
+            .position(|entry| *entry == "batch-label-entry-1")
+            .unwrap();
+        let entry2_idx = entries
+            .iter()
+            .position(|entry| *entry == "batch-label-entry-2")
+            .unwrap();
+
+        let first_header = resp_headers
+            .iter()
+            .find(|(name, _)| {
+                name.as_str()
+                    .starts_with(&format!("x-reduct-{}-", entry1_idx))
+            })
+            .map(|(_, value)| value.to_str().unwrap().to_string())
+            .expect("header for entry-1");
+        let second_header = resp_headers
+            .iter()
+            .find(|(name, _)| {
+                name.as_str()
+                    .starts_with(&format!("x-reduct-{}-", entry2_idx))
+            })
+            .map(|(_, value)| value.to_str().unwrap().to_string())
+            .expect("header for entry-2");
+
+        assert!(
+            first_header.contains(&expected_first),
+            "header: {}",
+            first_header
+        );
+        assert!(
+            second_header.contains(&expected_second),
+            "header: {}",
+            second_header
+        );
     }
 
     #[rstest]
