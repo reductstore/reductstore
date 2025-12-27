@@ -14,7 +14,6 @@ use axum::extract::{Path, State};
 use axum::http;
 use axum::response::IntoResponse;
 use axum_extra::headers::HeaderMap;
-use bytes::Bytes;
 use log::debug;
 use reduct_base::batch::v2::{
     encode_entry_name, make_batched_header_name, make_record_header_value, LabelIndex,
@@ -275,6 +274,7 @@ mod tests {
     use crate::api::tests::{headers, keeper, path_to_bucket_1};
     use axum::extract::Path;
     use axum::response::IntoResponse;
+    use bytes::Bytes;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use rstest::rstest;
 

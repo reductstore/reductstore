@@ -15,7 +15,6 @@ use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
-use bytes::Bytes;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
@@ -233,6 +232,7 @@ mod tests {
 
     use crate::api::entry::tests::query;
     use axum::body::to_bytes;
+    use bytes::Bytes;
 
     use crate::api::tests::{headers, keeper, path_to_entry_1};
 

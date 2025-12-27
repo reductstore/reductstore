@@ -4,6 +4,7 @@
 mod query;
 mod quotas;
 mod read_only;
+mod remove_records;
 pub(super) mod settings;
 
 use crate::cfg::{Cfg, InstanceRole};

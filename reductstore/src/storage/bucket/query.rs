@@ -31,6 +31,15 @@ pub(super) struct MultiEntryQuery {
 }
 
 impl Bucket {
+    /// Initiate a query across multiple entries in the bucket.
+    ///
+    /// # Arguments
+    ///
+    /// * `request` - The query request containing the parameters for the query.
+    ///
+    /// # Returns
+    /// A unique identifier for the initiated query.
+    ///
     pub(crate) fn query(&self, request: QueryEntry) -> Result<u64, ReductError> {
         static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
 
@@ -61,6 +70,15 @@ impl Bucket {
         Ok(query_id)
     }
 
+    /// Get the query receiver for a given query ID.
+    ///
+    /// # Arguments
+    ///
+    /// * `query_id` - The unique identifier of the query.
+    ///
+    /// # Returns
+    /// A weak reference to the query receiver and the IO configuration.
+    ///
     pub(crate) async fn get_query_receiver(
         &self,
         query_id: u64,

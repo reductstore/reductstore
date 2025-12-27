@@ -5,7 +5,7 @@ use crate::auth::policy::ReadAccessPolicy;
 
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
-use reduct_base::msg::entry_api::{QueryEntry, QueryInfo};
+use reduct_base::msg::entry_api::QueryInfo;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -57,7 +57,7 @@ mod tests {
     use bytes::Bytes;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
-    use reduct_base::msg::entry_api::QueryType;
+    use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use rstest::rstest;
 
     async fn write_record(bucket: &Arc<Bucket>, entry: &str, timestamp: u64, data: &str) {
