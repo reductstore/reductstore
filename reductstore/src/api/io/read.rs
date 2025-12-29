@@ -272,11 +272,13 @@ mod tests {
     use crate::api::entry::QueryEntryAxum;
     use crate::api::io::query::query;
     use crate::api::tests::{headers, keeper, path_to_bucket_1};
+    use axum::body::to_bytes;
     use axum::extract::Path;
     use axum::response::IntoResponse;
     use bytes::Bytes;
-    use reduct_base::msg::entry_api::{QueryEntry, QueryType};
+    use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType};
     use rstest::rstest;
+    use serde_json::from_slice;
 
     #[rstest]
     #[tokio::test]
@@ -314,6 +316,7 @@ mod tests {
         let request = QueryEntry {
             query_type: QueryType::Query,
             entries: Some(vec!["entry-1".into(), "entry-2".into()]),
+            start: Some(1000),
             ..Default::default()
         };
         let path = Path(path_to_bucket_1.0.clone());
@@ -324,12 +327,14 @@ mod tests {
             QueryEntryAxum(request),
         )
         .await
-        .unwrap();
-        let query_info: reduct_base::msg::entry_api::QueryInfo = response.into();
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
 
         headers.insert(
             QUERY_ID_HEADER,
-            http::HeaderValue::from_str(&query_info.id.to_string()).unwrap(),
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
         );
 
         let response = read_batched_records(
@@ -343,10 +348,7 @@ mod tests {
         .into_response();
 
         let resp_headers = response.headers();
-        assert_eq!(
-            resp_headers["x-reduct-entries"],
-            "batch-label-entry-1,batch-label-entry-2"
-        );
+        assert_eq!(resp_headers["x-reduct-entries"], "entry-1,entry-2");
         assert_eq!(resp_headers["x-reduct-start-ts"], "1000");
         assert!(resp_headers.contains_key("x-reduct-0-0"));
         assert!(resp_headers.contains_key("x-reduct-1-10"));
@@ -408,12 +410,14 @@ mod tests {
             QueryEntryAxum(request),
         )
         .await
-        .unwrap();
-        let query_info: reduct_base::msg::entry_api::QueryInfo = response.into();
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
 
         headers.insert(
             QUERY_ID_HEADER,
-            http::HeaderValue::from_str(&query_info.id.to_string()).unwrap(),
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
         );
 
         let response = read_batched_records(

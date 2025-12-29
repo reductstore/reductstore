@@ -1,11 +1,14 @@
-use crate::api::entry::{QueryEntryAxum, QueryInfoAxum};
+use crate::api::entry::{QueryEntryAxum, QueryInfoAxum, RemoveQueryInfoAxum};
 use crate::api::HttpError;
 use crate::api::StateKeeper;
-use crate::auth::policy::ReadAccessPolicy;
+use crate::auth::policy::{ReadAccessPolicy, WriteAccessPolicy};
 
 use axum::extract::{Path, State};
+use axum::response::IntoResponse;
 use axum_extra::headers::HeaderMap;
-use reduct_base::msg::entry_api::QueryInfo;
+use reduct_base::error::ReductError;
+use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType, RemoveQueryInfo};
+use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -15,34 +18,65 @@ pub(super) async fn query(
     headers: HeaderMap,
     Path(path): Path<HashMap<String, String>>,
     request: QueryEntryAxum,
-) -> Result<QueryInfoAxum, HttpError> {
+) -> Result<axum::response::Response, HttpError> {
     let request = request.0;
     let bucket_name = path.get("bucket_name").unwrap();
-    let components = keeper
-        .get_with_permissions(
-            &headers,
-            ReadAccessPolicy {
-                bucket: bucket_name,
-            },
-        )
-        .await?;
 
-    let entry_name = request
-        .entries
-        .as_ref()
-        .and_then(|entries| entries.first())
-        .cloned()
-        .unwrap_or_default();
+    match request.query_type {
+        QueryType::Query => {
+            let components = keeper
+                .get_with_permissions(
+                    &headers,
+                    ReadAccessPolicy {
+                        bucket: bucket_name,
+                    },
+                )
+                .await?;
 
-    let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
-    let id = bucket.query(request.clone())?;
+            let entry_name = request
+                .entries
+                .as_ref()
+                .and_then(|entries| entries.first())
+                .cloned()
+                .unwrap_or_default();
 
-    components
-        .ext_repo
-        .register_query(id, bucket_name, &entry_name, request)
-        .await?;
+            let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
+            let id = bucket.query(request.clone())?;
 
-    Ok(QueryInfoAxum::from(QueryInfo { id }))
+            components
+                .ext_repo
+                .register_query(id, bucket_name, &entry_name, request)
+                .await?;
+
+            Ok(QueryInfoAxum::from(QueryInfo { id }).into_response())
+        }
+        QueryType::Remove => {
+            let components = keeper
+                .get_with_permissions(
+                    &headers,
+                    WriteAccessPolicy {
+                        bucket: bucket_name,
+                    },
+                )
+                .await?;
+
+            let empty_query = QueryEntry {
+                query_type: QueryType::Remove,
+                ..Default::default()
+            };
+            if request == empty_query {
+                return Err(unprocessable_entity!(
+                    "Define at least one query parameter to delete records"
+                )
+                .into());
+            }
+
+            let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
+            let removed_records = bucket.query_remove_records(request).await?;
+
+            Ok(RemoveQueryInfoAxum::from(RemoveQueryInfo { removed_records }).into_response())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -53,12 +87,15 @@ mod tests {
     use crate::core::weak::Weak;
     use crate::storage::bucket::Bucket;
     use crate::storage::query::QueryRx;
+    use axum::body::to_bytes;
     use axum::extract::Path;
     use bytes::Bytes;
+    use hyper::StatusCode;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
-    use reduct_base::msg::entry_api::{QueryEntry, QueryType};
+    use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType, RemoveQueryInfo};
     use rstest::rstest;
+    use serde_json::from_slice;
 
     async fn write_record(bucket: &Arc<Bucket>, entry: &str, timestamp: u64, data: &str) {
         let mut writer = bucket
@@ -131,8 +168,11 @@ mod tests {
             QueryEntryAxum(request),
         )
         .await
-        .unwrap();
-        let QueryInfo { id } = response.into();
+        .unwrap()
+        .into_response();
+        assert_eq!(response.status(), StatusCode::OK);
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
 
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
         let records = collect_records(rx).await;
@@ -145,5 +185,52 @@ mod tests {
                 ("entry-a".to_string(), 30)
             ]
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn removes_records_from_bucket(
+        #[future] keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        write_record(&bucket, "entry-a", 20, "aa").await;
+        write_record(&bucket, "entry-b", 10, "bb").await;
+        write_record(&bucket, "entry-a", 30, "cc").await;
+
+        let request = QueryEntry {
+            query_type: QueryType::Remove,
+            entries: Some(vec!["entry-a".into(), "entry-b".into()]),
+            start: Some(0),
+            stop: Some(31),
+            ..Default::default()
+        };
+
+        let response = query(
+            State(keeper.clone()),
+            headers,
+            path_to_bucket_1,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let RemoveQueryInfo { removed_records } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+        assert_eq!(removed_records, 3);
+
+        assert!(bucket.begin_read("entry-a", 20).await.is_err());
+        assert!(bucket.begin_read("entry-a", 30).await.is_err());
+        assert!(bucket.begin_read("entry-b", 10).await.is_err());
     }
 }
