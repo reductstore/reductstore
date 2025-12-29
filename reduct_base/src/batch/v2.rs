@@ -36,10 +36,11 @@ use crate::io::RecordMeta;
 use crate::unprocessable_entity;
 use crate::Labels;
 use http::{HeaderMap, HeaderName, HeaderValue};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
 const HEADER_PREFIX: &str = "x-reduct-";
+const ERROR_HEADER_PREFIX: &str = "x-reduct-error-";
 const ENTRIES_HEADER: &str = "x-reduct-entries";
 const START_TS_HEADER: &str = "x-reduct-start-ts";
 const LABELS_HEADER: &str = "x-reduct-labels";
@@ -328,7 +329,22 @@ pub fn parse_batched_header_name(name: &str) -> Result<(usize, u64), ReductError
     Ok((entry_index, delta))
 }
 
-fn parse_start_timestamp(headers: &HeaderMap) -> Result<u64, ReductError> {
+pub fn make_error_batched_header(
+    entry_index: usize,
+    time_delta: u64,
+    err: &ReductError,
+) -> (HeaderName, HeaderValue) {
+    let name = HeaderName::from_str(&format!(
+        "{}{}-{}",
+        ERROR_HEADER_PREFIX, entry_index, time_delta
+    ))
+    .expect("Entry index and time delta must produce a valid header name");
+    let value = HeaderValue::from_str(&format!("{},{}", err.status(), err.message()))
+        .expect("Status code and message must produce a valid header value");
+    (name, value)
+}
+
+fn parse_start_timestamp_internal(headers: &HeaderMap) -> Result<u64, ReductError> {
     headers
         .get(START_TS_HEADER)
         .ok_or(unprocessable_entity!(
@@ -340,21 +356,25 @@ fn parse_start_timestamp(headers: &HeaderMap) -> Result<u64, ReductError> {
         .map_err(|_| unprocessable_entity!("Invalid x-reduct-start-ts header"))
 }
 
-fn parse_entries(headers: &HeaderMap) -> Result<Vec<String>, ReductError> {
+pub fn parse_start_timestamp(headers: &HeaderMap) -> Result<u64, ReductError> {
+    parse_start_timestamp_internal(headers)
+}
+
+pub fn parse_entries(headers: &HeaderMap) -> Result<Vec<String>, ReductError> {
     headers
         .get(ENTRIES_HEADER)
         .ok_or(unprocessable_entity!("x-reduct-entries header is required"))
         .and_then(parse_entries_header)
 }
 
-fn parse_labels(headers: &HeaderMap) -> Result<Option<Vec<String>>, ReductError> {
+pub fn parse_labels(headers: &HeaderMap) -> Result<Option<Vec<String>>, ReductError> {
     match headers.get(LABELS_HEADER) {
         None => Ok(None),
         Some(labels) => parse_labels_header(labels).map(Some),
     }
 }
 
-fn resolve_label_name<'a>(
+pub fn resolve_label_name<'a>(
     raw: &'a str,
     label_names: Option<&Vec<String>>,
 ) -> Result<String, ReductError> {
@@ -380,44 +400,83 @@ fn apply_label_delta(
     label_names: Option<&Vec<String>>,
 ) -> Result<Labels, ReductError> {
     let mut labels = base.clone();
-    let mut rest = raw_labels.trim().to_string();
-
-    if rest.is_empty() {
-        return Ok(labels);
-    }
-
-    while let Some(pair) = rest.split_once('=') {
-        let (key, value) = pair;
-        let key = resolve_label_name(key.trim(), label_names)?;
-
-        let (value, next_rest) = if value.starts_with('\"') {
-            let value = value[1..].to_string();
-            let (value, rest) = value
-                .split_once('\"')
-                .ok_or(unprocessable_entity!("Invalid batched header"))?;
-            (
-                value.trim().to_string(),
-                rest.trim_start_matches(',').trim().to_string(),
-            )
-        } else if let Some((value, rest)) = value.split_once(',') {
-            (value.trim().to_string(), rest.trim().to_string())
-        } else {
-            (value.trim().to_string(), String::new())
-        };
-
-        if value.is_empty() {
-            labels.remove(&key);
-        } else {
-            labels.insert(key.to_string(), value);
-        }
-
-        rest = next_rest;
-        if rest.is_empty() {
-            break;
+    for (key, value) in parse_label_delta_ops(raw_labels, label_names)? {
+        match value {
+            Some(value) => {
+                labels.insert(key.to_string(), value);
+            }
+            None => {
+                labels.remove(&key);
+            }
         }
     }
 
     Ok(labels)
+}
+
+fn parse_label_delta_ops(
+    raw_labels: &str,
+    label_names: Option<&Vec<String>>,
+) -> Result<Vec<(String, Option<String>)>, ReductError> {
+    let mut ops = Vec::new();
+    let mut rest = raw_labels.trim().to_string();
+
+    if rest.is_empty() {
+        return Ok(ops);
+    }
+
+    loop {
+        let (raw_key, value_part) = rest
+            .split_once('=')
+            .ok_or_else(|| unprocessable_entity!("Invalid batched header"))?;
+        let key = resolve_label_name(raw_key.trim(), label_names)?;
+
+        let (value, next_rest) = if value_part.starts_with('\"') {
+            let value_part = &value_part[1..];
+            let (value, rest) = value_part
+                .split_once('\"')
+                .ok_or_else(|| unprocessable_entity!("Invalid batched header"))?;
+            (
+                value.trim().to_string(),
+                rest.trim_start_matches(',').trim().to_string(),
+            )
+        } else if let Some((value, rest)) = value_part.split_once(',') {
+            (value.trim().to_string(), rest.trim().to_string())
+        } else {
+            (value_part.trim().to_string(), String::new())
+        };
+
+        let value = if value.is_empty() { None } else { Some(value) };
+        ops.push((key, value));
+
+        if next_rest.is_empty() {
+            break;
+        }
+        rest = next_rest;
+    }
+
+    Ok(ops)
+}
+
+pub fn parse_label_delta(
+    raw_labels: &str,
+    label_names: Option<&Vec<String>>,
+) -> Result<(Labels, HashSet<String>), ReductError> {
+    let mut updates = Labels::new();
+    let mut remove = HashSet::new();
+
+    for (key, value) in parse_label_delta_ops(raw_labels, label_names)? {
+        match value {
+            Some(value) => {
+                updates.insert(key, value);
+            }
+            None => {
+                remove.insert(key);
+            }
+        }
+    }
+
+    Ok((updates, remove))
 }
 
 fn parse_record_header_with_defaults(
@@ -808,6 +867,30 @@ mod tests {
         assert_eq!(
             err,
             unprocessable_entity!("x-reduct-entries header is required")
+        );
+    }
+
+    #[test]
+    fn test_parse_label_delta_updates_and_removals() {
+        let label_names = vec!["a".to_string(), "b".to_string()];
+        let (updates, remove) =
+            parse_label_delta("0=one,1=,c=\"3,4\"", Some(&label_names)).unwrap();
+
+        assert_eq!(updates.get("a").unwrap(), "one");
+        assert_eq!(updates.get("c").unwrap(), "3,4");
+        assert!(remove.contains("b"));
+        assert_eq!(remove.len(), 1);
+    }
+
+    #[test]
+    fn test_make_error_batched_header() {
+        let err = unprocessable_entity!("broken");
+        let (name, value) = make_error_batched_header(2, 10, &err);
+
+        assert_eq!(name.as_str(), "x-reduct-error-2-10");
+        assert_eq!(
+            value.to_str().unwrap(),
+            format!("{},{}", err.status(), err.message())
         );
     }
 }

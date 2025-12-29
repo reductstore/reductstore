@@ -5,11 +5,12 @@ use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
-use reduct_base::batch::v2::{parse_entries_header, sort_headers_by_entry_and_time};
+use reduct_base::batch::v2::{
+    make_error_batched_header, parse_entries, parse_start_timestamp, sort_headers_by_entry_and_time,
+};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 
 #[derive(Clone)]
@@ -35,8 +36,8 @@ pub(super) async fn remove_batched_records(
         )
         .await?;
 
-    let start_ts = parse_start_timestamp(&headers)?;
-    let entries = parse_entries(&headers)?;
+    let start_ts = parse_start_timestamp(&headers).map_err(HttpError::from)?;
+    let entries = parse_entries(&headers).map_err(HttpError::from)?;
     let parsed_headers = sort_headers_by_entry_and_time(&headers)?;
 
     let mut records_by_entry: HashMap<String, Vec<IndexedTimestamp>> = HashMap::new();
@@ -73,64 +74,23 @@ pub(super) async fn remove_batched_records(
                     if let Some(record) =
                         records.iter().find(|record| record.timestamp == timestamp)
                     {
-                        err_to_batched_header(
-                            &mut resp_headers,
-                            record.entry_index,
-                            record.delta,
-                            &err,
-                        );
+                        let (name, value) =
+                            make_error_batched_header(record.entry_index, record.delta, &err);
+                        resp_headers.insert(name, value);
                     }
                 }
             }
             Err(err) => {
                 for record in records {
-                    err_to_batched_header(
-                        &mut resp_headers,
-                        record.entry_index,
-                        record.delta,
-                        &err,
-                    );
+                    let (name, value) =
+                        make_error_batched_header(record.entry_index, record.delta, &err);
+                    resp_headers.insert(name, value);
                 }
             }
         }
     }
 
     Ok(resp_headers)
-}
-
-fn err_to_batched_header(
-    headers: &mut HeaderMap,
-    entry_index: usize,
-    delta: u64,
-    err: &ReductError,
-) {
-    let name = format!("x-reduct-error-{}-{}", entry_index, delta);
-    let value = format!("{},{}", err.status(), err.message());
-
-    headers.insert(
-        axum::http::HeaderName::from_str(&name).unwrap(),
-        axum::http::HeaderValue::from_str(&value).unwrap(),
-    );
-}
-
-fn parse_start_timestamp(headers: &HeaderMap) -> Result<u64, HttpError> {
-    headers
-        .get("x-reduct-start-ts")
-        .ok_or(unprocessable_entity!(
-            "x-reduct-start-ts header is required"
-        ))?
-        .to_str()
-        .map_err(|_| HttpError::from(unprocessable_entity!("Invalid x-reduct-start-ts header")))?
-        .parse::<u64>()
-        .map_err(|_| HttpError::from(unprocessable_entity!("Invalid x-reduct-start-ts header")))
-}
-
-fn parse_entries(headers: &HeaderMap) -> Result<Vec<String>, HttpError> {
-    headers
-        .get("x-reduct-entries")
-        .ok_or(unprocessable_entity!("x-reduct-entries header is required"))
-        .and_then(parse_entries_header)
-        .map_err(HttpError::from)
 }
 
 #[cfg(test)]

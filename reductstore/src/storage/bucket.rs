@@ -6,7 +6,7 @@ mod quotas;
 mod read_only;
 mod remove_records;
 pub(super) mod settings;
-mod update_records;
+pub(crate) mod update_records;
 
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;

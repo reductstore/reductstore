@@ -11,20 +11,20 @@ use crate::storage::entry::RecordDrainer;
 use axum::body::Body;
 use axum::body::BodyDataStream;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, HeaderName, HeaderValue};
+use axum::http::{HeaderMap, HeaderName};
 use axum::response::IntoResponse;
 use axum_extra::headers::{Expect, Header};
 use bytes::Bytes;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::batch::v2::{
-    parse_batched_headers, parse_entries_header, sort_headers_by_entry_and_time, EntryRecordHeader,
+    make_error_batched_header, parse_batched_headers, parse_entries,
+    sort_headers_by_entry_and_time, EntryRecordHeader,
 };
 use reduct_base::error::ReductError;
 use reduct_base::io::{RecordMeta, WriteRecord};
 use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
 use std::collections::HashMap;
-use std::str::FromStr;
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
 use tokio::task::JoinHandle;
@@ -84,7 +84,8 @@ pub(super) async fn write_batched_records(
         Ok(error_map) => {
             let mut resp_headers = HeaderMap::new();
             error_map.iter().for_each(|((entry_idx, delta), err)| {
-                err_to_batched_header(&mut resp_headers, *entry_idx, *delta, err)
+                let (name, value) = make_error_batched_header(*entry_idx, *delta, err);
+                resp_headers.insert(name, value);
             });
 
             Ok(resp_headers.into())
@@ -100,10 +101,7 @@ pub(super) async fn write_batched_records(
 }
 
 fn parse_and_index_headers(headers: &HeaderMap) -> Result<Vec<IndexedRecordHeader>, ReductError> {
-    let entries_header = headers
-        .get("x-reduct-entries")
-        .ok_or(unprocessable_entity!("x-reduct-entries header is required"))?;
-    let entries = parse_entries_header(entries_header)?;
+    let entries = parse_entries(headers)?;
     let records = parse_batched_headers(headers)?;
     let sorted_header_meta = sort_headers_by_entry_and_time(headers)?;
 
@@ -133,20 +131,6 @@ fn parse_and_index_headers(headers: &HeaderMap) -> Result<Vec<IndexedRecordHeade
     }
 
     Ok(indexed_headers)
-}
-
-fn err_to_batched_header(
-    headers: &mut HeaderMap,
-    entry_index: usize,
-    delta: u64,
-    err: &ReductError,
-) {
-    let name = format!("x-reduct-error-{}-{}", entry_index, delta);
-    let value = format!("{},{}", err.status(), err.message());
-    headers.insert(
-        HeaderName::from_str(&name).unwrap(),
-        HeaderValue::from_str(&value).unwrap(),
-    );
 }
 
 fn check_and_get_content_length(

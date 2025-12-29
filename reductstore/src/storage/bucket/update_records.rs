@@ -9,6 +9,7 @@ use reduct_macros::task;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
+#[derive(Clone)]
 pub(crate) struct UpdateLabelsMulti {
     pub entry_name: String,
     pub time: u64,
@@ -93,9 +94,10 @@ mod tests {
             .wait()
             .unwrap();
         sender
-            .blocking_send(Ok(Some(Bytes::from_static(b"x"))))
+            .send(Ok(Some(Bytes::from_static(b"x"))))
+            .await
             .unwrap();
-        sender.blocking_send(Ok(None)).unwrap();
+        sender.send(Ok(None)).await.unwrap();
     }
 
     #[rstest]
