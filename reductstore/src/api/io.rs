@@ -3,13 +3,15 @@
 
 mod query;
 mod read;
+mod remove;
 mod write;
 
 use crate::api::io::query::query;
 use crate::api::io::read::read_batched_records;
+use crate::api::io::remove::remove_batched_records;
 use crate::api::io::write::write_batched_records;
 use crate::api::StateKeeper;
-use axum::routing::{get, post};
+use axum::routing::{delete, get, post};
 use std::sync::Arc;
 
 pub(super) fn create_io_api_routes() -> axum::Router<Arc<StateKeeper>> {
@@ -19,5 +21,6 @@ pub(super) fn create_io_api_routes() -> axum::Router<Arc<StateKeeper>> {
             "/{bucket_name}/read",
             get(read_batched_records).head(read_batched_records),
         )
+        .route("/{bucket_name}/remove", delete(remove_batched_records))
         .route("/{bucket_name}/q", post(query))
 }
