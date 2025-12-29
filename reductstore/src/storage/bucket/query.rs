@@ -106,18 +106,32 @@ impl Bucket {
         request: &QueryEntry,
     ) -> Result<Vec<(String, Arc<Entry>)>, ReductError> {
         let entries = self.entries.read()?;
-        let results: Vec<(String, Arc<Entry>)> = if let Some(requested_entries) = &request.entries {
-            entries
-                .iter()
-                .filter(|(name, _)| requested_entries.contains(name))
-                .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
-                .collect()
-        } else {
-            entries
-                .iter()
-                .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
-                .collect()
+        let requested_entries = match &request.entries {
+            Some(entries) if entries.iter().any(|entry| entry == "*") => None,
+            Some(entries) => Some(entries.clone()),
+            None => None,
         };
+
+        let matches_pattern = |entry: &str, patterns: &[String]| {
+            patterns.iter().any(|pattern| {
+                if let Some(prefix) = pattern.strip_suffix('*') {
+                    entry.starts_with(prefix)
+                } else {
+                    entry == pattern
+                }
+            })
+        };
+
+        let results: Vec<(String, Arc<Entry>)> = entries
+            .iter()
+            .filter(|(name, _)| {
+                requested_entries
+                    .as_ref()
+                    .map(|patterns| matches_pattern(name, patterns))
+                    .unwrap_or(true)
+            })
+            .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
+            .collect();
 
         Ok(results)
     }
@@ -319,6 +333,53 @@ mod tests {
         assert_eq!(
             records,
             vec![("entry-c".to_string(), 15), ("entry-b".to_string(), 20),]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn filters_by_prefix_wildcard(bucket: Arc<Bucket>) {
+        write(&bucket, "acc-a", 10, b"a1").await.unwrap();
+        write(&bucket, "acc-b", 20, b"b1").await.unwrap();
+        write(&bucket, "other", 15, b"c1").await.unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["acc-*".into()]),
+            ..Default::default()
+        };
+
+        let id = bucket.query(query).unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        let records = collect_records(rx).await;
+
+        assert_eq!(
+            records,
+            vec![("acc-a".to_string(), 10), ("acc-b".to_string(), 20)]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn wildcard_all_entries(bucket: Arc<Bucket>) {
+        write(&bucket, "entry-a", 10, b"a1").await.unwrap();
+        write(&bucket, "entry-b", 20, b"b1").await.unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["*".into()]),
+            ..Default::default()
+        };
+
+        let id = bucket.query(query).unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        let records = collect_records(rx).await;
+
+        assert_eq!(
+            records,
+            vec![("entry-a".to_string(), 10), ("entry-b".to_string(), 20)]
         );
     }
 

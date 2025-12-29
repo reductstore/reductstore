@@ -142,7 +142,6 @@ mod tests {
     use bytes::Bytes;
     use reduct_base::batch::v2::encode_entry_name;
     use reduct_base::error::ErrorCode;
-    use reduct_base::io::ReadRecord;
     use rstest::rstest;
 
     async fn write_record(bucket: &Arc<crate::storage::bucket::Bucket>, entry: &str, ts: u64) {
