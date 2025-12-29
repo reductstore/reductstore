@@ -68,7 +68,7 @@ pub(super) async fn update_batched_records(
             .upgrade()?
             .get_entry(entry_name)?
             .upgrade()?;
-        entry.update_labels(records_to_update).await?
+        entry.update_labels(records_to_update).wait()?
     };
 
     let mut headers = HeaderMap::new();

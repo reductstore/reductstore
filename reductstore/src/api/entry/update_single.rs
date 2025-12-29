@@ -66,7 +66,7 @@ pub(super) async fn update_record(
             update: labels_to_update,
             remove: labels_to_remove,
         }])
-        .await?;
+        .wait()?;
 
     components
         .replication_repo

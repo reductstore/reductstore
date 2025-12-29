@@ -14,8 +14,9 @@ impl Bucket {
     /// # Arguments
     ///
     /// * `record_ids` - A map where the key is the entry name and the value is a vector of record IDs to remove.
+    #[task("remove records")]
     pub fn remove_records(
-        &self,
+        self: Arc<Self>,
         record_ids: HashMap<String, Vec<u64>>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let mut results = BTreeMap::new();
@@ -88,6 +89,7 @@ mod tests {
                 ("entry-b".to_string(), vec![2, 4]),
                 ("missing".to_string(), vec![5]),
             ]))
+            .await
             .unwrap();
 
         assert_eq!(errors.len(), 2);
