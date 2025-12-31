@@ -54,7 +54,7 @@ runs:
           ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-
       env:
         RUNS_ON_S3_BUCKET_CACHE: reduct-cache
-        RUNS_ON_S3_BUCKET_ENDPOINT: fsn1.your-objectstorage.com
+        RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com
         AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
         AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
         AWS_REGION: ${{ inputs.region }}
