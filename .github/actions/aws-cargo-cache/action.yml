@@ -8,13 +8,17 @@ inputs:
     description: 'Cargo profile used for the build.'
     required: false
     default: 'ci'
-
   access-key-id:
     description: 'AWS Access Key ID'
     required: true
   secret-access-key:
     description: 'AWS Secret Access Key'
     required: true
+    region:
+      description: 'S3 region (used by AWS SDK for S3-compatible endpoints).'
+      required: false
+      default: 'fsn1'
+
 runs:
   using: 'composite'
   steps:
@@ -27,13 +31,13 @@ runs:
         else
           echo "Using preset RUST_MINOR=${RUST_MINOR}"
         fi
-#
-#    - name: Configure AWS credentials via OIDC (org-wide role)
-#      uses: aws-actions/configure-aws-credentials@v4
-#      with:
-#        aws-access-key-id: ${{ inputs.access-key-id }}
-#        aws-secret-access-key: ${{ inputs.secret-access-key }}
-#        aws-region: eu-central
+    #
+    #    - name: Configure AWS credentials via OIDC (org-wide role)
+    #      uses: aws-actions/configure-aws-credentials@v4
+    #      with:
+    #        aws-access-key-id: ${{ inputs.access-key-id }}
+    #        aws-secret-access-key: ${{ inputs.secret-access-key }}
+    #        aws-region: eu-central
 
     - name: Use cache for Cargo
       uses: runs-on/cache@v4
@@ -53,3 +57,5 @@ runs:
         RUNS_ON_S3_BUCKET_ENDPOINT: fsn1.your-objectstorage.com
         AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
         AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        AWS_REGION: ${{ inputs.region }}
+        AWS_DEFAULT_REGION: ${{ inputs.region }}
