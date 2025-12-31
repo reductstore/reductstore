@@ -17,13 +17,10 @@ use std::collections::HashSet;
 use std::io;
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::SystemTime;
 use tokio::io::AsyncWriteExt;
 use tokio::runtime::Runtime;
 use tokio::task::block_in_place;
-use tokio::time::timeout;
-
-const REQUEST_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub(super) struct S3Connector {
     bucket: String,
@@ -99,16 +96,6 @@ impl S3Connector {
             default_storage_class,
         }
     }
-
-    fn timeout_error(&self, op: &str, key: &str) -> io::Error {
-        io::Error::new(
-            io::ErrorKind::TimedOut,
-            format!(
-                "S3 {op} timeout bucket={}, key={}: exceeded {:?}",
-                self.bucket, key, REQUEST_TIMEOUT
-            ),
-        )
-    }
 }
 
 impl RemoteStorageConnector for S3Connector {
@@ -116,39 +103,30 @@ impl RemoteStorageConnector for S3Connector {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let key = format!("{}{}", self.prefix, key);
-        let bucket = self.bucket.clone();
-        let key_for_log = key.clone();
 
         block_in_place(move || {
             rt.block_on(async {
-                let mut resp = match timeout(
-                    REQUEST_TIMEOUT,
-                    client.get_object().bucket(&bucket).key(&key).send(),
-                )
-                .await
-                {
-                    Ok(Ok(resp)) => resp,
-                    Ok(Err(e)) => {
+                let mut resp = client
+                    .get_object()
+                    .bucket(&self.bucket)
+                    .key(&key)
+                    .send()
+                    .await
+                    .map_err(|e| {
                         error!("S3 get_object error: {}", DisplayErrorContext(&e));
-                        return Err(io::Error::new(
+                        io::Error::new(
                             io::ErrorKind::Other,
                             format!(
                                 "S3 get_object error bucket={}, key={}: {}",
-                                &bucket,
-                                &key_for_log,
+                                &self.bucket,
+                                &key,
                                 e.message().unwrap_or("connection error")
                             ),
-                        ));
-                    }
-                    Err(_) => return Err(self.timeout_error("get_object", &key_for_log)),
-                };
-
+                        )
+                    })?;
                 let mut file = tokio::fs::File::create(dest).await?;
 
-                while let Some(chunk) = match timeout(REQUEST_TIMEOUT, resp.body.next()).await {
-                    Ok(next) => next,
-                    Err(_) => return Err(self.timeout_error("get_object stream", &key_for_log)),
-                } {
+                while let Some(chunk) = resp.body.next().await {
                     let data = chunk?;
                     file.write_all(&data).await?;
                 }
@@ -162,8 +140,6 @@ impl RemoteStorageConnector for S3Connector {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let key = format!("{}{}", self.prefix, key);
-        let bucket = self.bucket.clone();
-        let key_for_log = key.clone();
 
         let storage_class = if key.ends_with(".blk") {
             self.default_storage_class.clone()
@@ -175,33 +151,26 @@ impl RemoteStorageConnector for S3Connector {
             rt.block_on(async {
                 let stream = ByteStream::from_path(src).await?;
 
-                match timeout(
-                    REQUEST_TIMEOUT,
-                    client
-                        .put_object()
-                        .bucket(&bucket)
-                        .key(&key)
-                        .set_storage_class(storage_class)
-                        .body(stream)
-                        .send(),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(e)) => {
+                client
+                    .put_object()
+                    .bucket(&self.bucket)
+                    .key(&key)
+                    .set_storage_class(storage_class)
+                    .body(stream)
+                    .send()
+                    .await
+                    .map_err(|e| {
                         error!("S3 put_object error: {}", DisplayErrorContext(&e));
-                        return Err(io::Error::new(
+                        io::Error::new(
                             io::ErrorKind::Other,
                             format!(
                                 "S3 put_object error bucket={}, key={}: {}",
-                                &bucket,
-                                &key_for_log,
+                                &self.bucket,
+                                &key,
                                 e.message().unwrap_or("connection error")
                             ),
-                        ));
-                    }
-                    Err(_) => return Err(self.timeout_error("put_object", &key_for_log)),
-                }
+                        )
+                    })?;
                 Ok(())
             })
         })
@@ -209,43 +178,34 @@ impl RemoteStorageConnector for S3Connector {
     fn create_dir_all(&self, key: &str) -> Result<(), io::Error> {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
-        let bucket = self.bucket.clone();
 
         let dir_key = if key.ends_with('/') {
             format!("{}{}", self.prefix, key)
         } else {
             format!("{}{}/", self.prefix, key)
         };
-        let dir_key_log = dir_key.clone();
 
         block_in_place(|| {
             rt.block_on(async {
-                match timeout(
-                    REQUEST_TIMEOUT,
-                    client
-                        .put_object()
-                        .bucket(&bucket)
-                        .key(&dir_key)
-                        .body(Vec::new().into())
-                        .send(),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(e)) => {
+                client
+                    .put_object()
+                    .bucket(&self.bucket)
+                    .key(&dir_key)
+                    .body(Vec::new().into())
+                    .send()
+                    .await
+                    .map_err(|e| {
                         error!("S3 put_object: {}", DisplayErrorContext(&e));
-                        return Err(io::Error::new(
+                        io::Error::new(
                             io::ErrorKind::Other,
                             format!(
                                 "S3 put_object error bucket={}, key={}: {}",
-                                &bucket,
-                                dir_key_log,
+                                &self.bucket,
+                                dir_key,
                                 e.message().unwrap_or("connection error")
                             ),
-                        ));
-                    }
-                    Err(_) => return Err(self.timeout_error("put_object", &dir_key_log)),
-                }
+                        )
+                    })?;
                 Ok(())
             })
         })
@@ -258,8 +218,6 @@ impl RemoteStorageConnector for S3Connector {
         } else {
             format!("{}{}/", self.prefix, key)
         };
-        let bucket = self.bucket.clone();
-        let prefix_log = prefix.clone();
 
         block_in_place(|| {
             rt.block_on(async {
@@ -267,32 +225,25 @@ impl RemoteStorageConnector for S3Connector {
                 let mut continuation_token = None;
 
                 loop {
-                    let resp = match timeout(
-                        REQUEST_TIMEOUT,
-                        client
-                            .list_objects_v2()
-                            .bucket(&bucket)
-                            .set_continuation_token(continuation_token.clone())
-                            .prefix(&prefix)
-                            .send(),
-                    )
-                    .await
-                    {
-                        Ok(Ok(resp)) => resp,
-                        Ok(Err(e)) => {
+                    let resp = client
+                        .list_objects_v2()
+                        .bucket(&self.bucket)
+                        .set_continuation_token(continuation_token.clone())
+                        .prefix(&prefix)
+                        .send()
+                        .await
+                        .map_err(|e| {
                             error!("S3 list_objects_v2 error: {}", DisplayErrorContext(&e));
-                            return Err(io::Error::new(
+                            io::Error::new(
                                 io::ErrorKind::Other,
                                 format!(
                                     "S3 list_objects_v2 error bucket={}, key={}: {}",
-                                    &bucket,
-                                    &prefix_log,
+                                    &self.bucket,
+                                    &prefix,
                                     e.message().unwrap_or("connection error")
                                 ),
-                            ));
-                        }
-                        Err(_) => return Err(self.timeout_error("list_objects_v2", &prefix_log)),
-                    };
+                            )
+                        })?;
 
                     for object in resp.contents() {
                         // Didn't find a better way to filter out "subdirectories"
@@ -332,32 +283,27 @@ impl RemoteStorageConnector for S3Connector {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let key = format!("{}{}", self.prefix, key);
-        let bucket = self.bucket.clone();
-        let key_for_log = key.clone();
 
         block_in_place(|| {
             rt.block_on(async {
-                match timeout(
-                    REQUEST_TIMEOUT,
-                    client.delete_object().bucket(&bucket).key(&key).send(),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(e)) => {
+                client
+                    .delete_object()
+                    .bucket(&self.bucket)
+                    .key(&key)
+                    .send()
+                    .await
+                    .map_err(|e| {
                         error!("S3 delete_object error: {}", DisplayErrorContext(&e));
-                        return Err(io::Error::new(
+                        io::Error::new(
                             io::ErrorKind::Other,
                             format!(
                                 "S3 delete_object error bucket={}, key={}: {}",
-                                &bucket,
-                                &key_for_log,
+                                &self.bucket,
+                                &key,
                                 e.message().unwrap_or("connection error")
                             ),
-                        ));
-                    }
-                    Err(_) => return Err(self.timeout_error("delete_object", &key_for_log)),
-                }
+                        )
+                    })?;
                 Ok(())
             })
         })
@@ -366,17 +312,16 @@ impl RemoteStorageConnector for S3Connector {
         let client = Arc::clone(&self.client);
         let rt = Arc::clone(&self.rt);
         let key = format!("{}{}", self.prefix, key);
-        let bucket = self.bucket.clone();
-        let key_for_log = key.clone();
         block_in_place(|| {
             rt.block_on(async {
-                let resp = timeout(
-                    REQUEST_TIMEOUT,
-                    client.head_object().bucket(&bucket).key(&key).send(),
-                )
-                .await;
+                let resp = client
+                    .head_object()
+                    .bucket(&self.bucket)
+                    .key(&key)
+                    .send()
+                    .await;
 
-                match resp.map_err(|_| self.timeout_error("head_object", &key_for_log))? {
+                match resp {
                     Ok(output) => {
                         let metadata = ObjectMetadata {
                             size: output.content_length(),
@@ -400,8 +345,8 @@ impl RemoteStorageConnector for S3Connector {
                             io::ErrorKind::Other,
                             format!(
                                 "S3 head_object error bucket={}, key={}: {}",
-                                &bucket,
-                                &key_for_log,
+                                &self.bucket,
+                                &key,
                                 e.message().unwrap_or("connection error")
                             ),
                         ))
@@ -415,9 +360,6 @@ impl RemoteStorageConnector for S3Connector {
         let rt = Arc::clone(&self.rt);
         let from_key = format!("{}{}", self.prefix, from);
         let to_key = format!("{}{}", self.prefix, to);
-        let bucket = self.bucket.clone();
-        let from_key_log = from_key.clone();
-        let to_key_log = to_key.clone();
 
         debug!(
             "Renaming S3 object from key: {} to key: {}",
@@ -425,54 +367,44 @@ impl RemoteStorageConnector for S3Connector {
         );
         block_in_place(|| {
             rt.block_on(async {
-                match timeout(
-                    REQUEST_TIMEOUT,
-                    client
-                        .rename_object()
-                        .bucket(&bucket)
-                        .rename_source(&from_key)
-                        .key(&to_key)
-                        .send(),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(e)) => {
-                        return Err(io::Error::new(
+                client
+                    .rename_object()
+                    .bucket(&self.bucket)
+                    .rename_source(&from_key)
+                    .key(&to_key)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        io::Error::new(
                             io::ErrorKind::Other,
                             format!(
                                 "S3 rename_object error bucket={}, from_key={}, to_key={}: {}",
-                                &bucket,
-                                &from_key_log,
-                                &to_key_log,
+                                &self.bucket,
+                                &from_key,
+                                &to_key,
                                 e.message().unwrap_or("connection error")
                             ),
-                        ));
-                    }
-                    Err(_) => return Err(self.timeout_error("rename_object", &from_key_log)),
-                }
+                        )
+                    })?;
 
                 // Optionally, delete the source object after copying
-                match timeout(
-                    REQUEST_TIMEOUT,
-                    client.delete_object().bucket(&bucket).key(&from_key).send(),
-                )
-                .await
-                {
-                    Ok(Ok(_)) => {}
-                    Ok(Err(e)) => {
-                        return Err(io::Error::new(
+                client
+                    .delete_object()
+                    .bucket(&self.bucket)
+                    .key(&from_key)
+                    .send()
+                    .await
+                    .map_err(|e| {
+                        io::Error::new(
                             io::ErrorKind::Other,
                             format!(
                                 "S3 delete_object error bucket={}, key={}: {}",
-                                &bucket,
-                                &from_key_log,
+                                &self.bucket,
+                                &from_key,
                                 e.message().unwrap_or("connection error")
                             ),
-                        ));
-                    }
-                    Err(_) => return Err(self.timeout_error("delete_object", &from_key_log)),
-                }
+                        )
+                    })?;
                 Ok(())
             })
         })
