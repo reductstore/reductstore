@@ -16,6 +16,13 @@ inputs:
   compiler:
     description: 'Compiler package name.'
     required: true
+  access-key-id:
+    description: 'AWS Access Key ID'
+    required: true
+  secret-access-key:
+    description: 'AWS Secret Access Key'
+    required: true
+
 runs:
   using: 'composite'
   steps:
@@ -55,6 +62,9 @@ runs:
       with:
         target: ${{ inputs.target }}
         profile: ${{ github.event_name == 'pull_request' && 'ci' || 'release' }}
+        access-key-id: ${{ inputs.access-key-id }}
+        secret-access-key: ${{ inputs.secret-access-key }}
+
 
     - name: Install cargo-export
       shell: bash
