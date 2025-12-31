@@ -24,8 +24,9 @@ runs:
     - name: Configure AWS credentials via OIDC (org-wide role)
       uses: aws-actions/configure-aws-credentials@v4
       with:
-        role-to-assume: arn:aws:iam::800293099462:role/gha-s3-cache-multi-repo
-        aws-region: us-east-1
+        aws-access-key-id: ${{ secrets.S3_CACHE_ACCESS_KEY }}
+        aws-secret-access-key: ${{ secrets.S3_CACHE_SECRET_KEY }}
+        aws-region: eu-central
 
     - name: Use cache for Cargo
       uses: runs-on/cache@v4
@@ -41,4 +42,5 @@ runs:
           ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-
           ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-
       env:
-        RUNS_ON_S3_BUCKET_CACHE: reduct-github-cache
+        RUNS_ON_S3_BUCKET_CACHE: reduct-cache
+        RUNS_ON_S3_BUCKET_ENDPOINT: reduct-cache.fsn1.your-objectstorage.com
