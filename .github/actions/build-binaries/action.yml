@@ -55,6 +55,8 @@ runs:
       with:
         target: ${{ inputs.target }}
         profile: ${{ github.event_name == 'pull_request' && 'ci' || 'release' }}
+        access-key-id: ${{ secrets.S3_CACHE_ACCESS_KEY }}
+        secret-access-key: ${{ secrets.S3_CACHE_SECRET_KEY }}
 
     - name: Install cargo-export
       shell: bash
