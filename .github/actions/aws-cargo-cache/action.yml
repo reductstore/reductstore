@@ -14,10 +14,6 @@ inputs:
   secret-access-key:
     description: 'AWS Secret Access Key'
     required: true
-  region:
-    description: 'S3 region (used by AWS SDK for S3-compatible endpoints).'
-    required: false
-    default: 'fsn1'
 
 runs:
   using: 'composite'
@@ -57,5 +53,5 @@ runs:
         RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com
         AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
         AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
-        AWS_REGION: ${{ inputs.region }}
-        AWS_DEFAULT_REGION: ${{ inputs.region }}
+        AWS_REGION: fsn1
+        AWS_DEFAULT_REGION: fsn1
