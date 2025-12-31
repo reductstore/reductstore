@@ -8,6 +8,13 @@ inputs:
     description: 'Cargo profile used for the build.'
     required: false
     default: 'ci'
+  access-key-id:
+    description: 'AWS Access Key ID'
+    required: true
+  secret-access-key:
+    description: 'AWS Secret Access Key'
+    required: true
+
 runs:
   using: 'composite'
   steps:
@@ -20,12 +27,13 @@ runs:
         else
           echo "Using preset RUST_MINOR=${RUST_MINOR}"
         fi
-
-    - name: Configure AWS credentials via OIDC (org-wide role)
-      uses: aws-actions/configure-aws-credentials@v4
-      with:
-        role-to-assume: arn:aws:iam::800293099462:role/gha-s3-cache-multi-repo
-        aws-region: us-east-1
+    #
+    #    - name: Configure AWS credentials via OIDC (org-wide role)
+    #      uses: aws-actions/configure-aws-credentials@v4
+    #      with:
+    #        aws-access-key-id: ${{ inputs.access-key-id }}
+    #        aws-secret-access-key: ${{ inputs.secret-access-key }}
+    #        aws-region: eu-central
 
     - name: Use cache for Cargo
       uses: runs-on/cache@v4
@@ -41,4 +49,9 @@ runs:
           ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-
           ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-
       env:
-        RUNS_ON_S3_BUCKET_CACHE: reduct-github-cache
+        RUNS_ON_S3_BUCKET_CACHE: reduct-cache
+        RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        AWS_REGION: fsn1
+        AWS_DEFAULT_REGION: fsn1
