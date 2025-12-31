@@ -14,10 +14,10 @@ inputs:
   secret-access-key:
     description: 'AWS Secret Access Key'
     required: true
-    region:
-      description: 'S3 region (used by AWS SDK for S3-compatible endpoints).'
-      required: false
-      default: 'fsn1'
+  region:
+    description: 'S3 region (used by AWS SDK for S3-compatible endpoints).'
+    required: false
+    default: 'fsn1'
 
 runs:
   using: 'composite'

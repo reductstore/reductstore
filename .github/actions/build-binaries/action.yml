@@ -22,6 +22,10 @@ inputs:
   secret-access-key:
     description: 'AWS Secret Access Key'
     required: true
+  region:
+    description: 'S3 region used for the cache endpoint.'
+    required: false
+    default: 'fsn1'
 
 runs:
   using: 'composite'
@@ -64,6 +68,7 @@ runs:
         profile: ${{ github.event_name == 'pull_request' && 'ci' || 'release' }}
         access-key-id: ${{ inputs.access-key-id }}
         secret-access-key: ${{ inputs.secret-access-key }}
+        region: ${{ inputs.region }}
 
 
     - name: Install cargo-export
