@@ -1,4 +1,4 @@
-from integration_tests.api.conftest import requires_env, auth_headers
+from ..conftest import requires_env, auth_headers
 
 
 def test_write_batched_orders_by_entry_then_time(base_url, session, bucket):

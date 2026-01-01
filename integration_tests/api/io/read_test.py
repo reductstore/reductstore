@@ -1,4 +1,4 @@
-from integration_tests.api.conftest import auth_headers, requires_env
+from ..conftest import auth_headers, requires_env
 
 
 def test_read_batched_records_v2(base_url, session, bucket):

@@ -1,4 +1,4 @@
-from integration_tests.api.conftest import requires_env, auth_headers
+from ..conftest import requires_env, auth_headers
 
 
 def _write_records(base_url, session, bucket):
