@@ -164,6 +164,110 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn rejects_entry_index_out_of_range(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+    ) {
+        let keeper = keeper.await;
+        let entries = encode_entry_name("entry-1");
+        headers.insert(
+            "x-reduct-entries",
+            HeaderValue::from_str(entries.as_str()).unwrap(),
+        );
+        headers.insert("x-reduct-start-ts", HeaderValue::from_static("1000"));
+        headers.insert(
+            axum::http::HeaderName::from_static("x-reduct-1-0"),
+            HeaderValue::from_static(""),
+        );
+
+        let err = remove_batched_records(State(keeper.clone()), headers, path_to_bucket_1)
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+        assert_eq!(
+            err.message(),
+            "Invalid header 'x-reduct-1-0': entry index out of range"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn reports_missing_entries_in_response_headers(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+    ) {
+        let keeper = keeper.await;
+        let entries = encode_entry_name("missing-entry");
+        headers.insert(
+            "x-reduct-entries",
+            HeaderValue::from_str(entries.as_str()).unwrap(),
+        );
+        headers.insert("x-reduct-start-ts", HeaderValue::from_static("1000"));
+        headers.insert(
+            axum::http::HeaderName::from_static("x-reduct-0-0"),
+            HeaderValue::from_static(""),
+        );
+
+        let resp_headers = remove_batched_records(State(keeper.clone()), headers, path_to_bucket_1)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            resp_headers.get("x-reduct-error-0-0").unwrap(),
+            "404,Entry 'missing-entry' not found in bucket 'bucket-1'"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn reports_missing_records_in_response_headers(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        write_record(&bucket, "entry-1", 1000).await;
+
+        let entries = encode_entry_name("entry-1");
+        headers.insert(
+            "x-reduct-entries",
+            HeaderValue::from_str(entries.as_str()).unwrap(),
+        );
+        headers.insert("x-reduct-start-ts", HeaderValue::from_static("1000"));
+        headers.insert(
+            axum::http::HeaderName::from_static("x-reduct-0-0"),
+            HeaderValue::from_static(""),
+        );
+        headers.insert(
+            axum::http::HeaderName::from_static("x-reduct-0-1"),
+            HeaderValue::from_static(""),
+        );
+
+        let resp_headers = remove_batched_records(State(keeper.clone()), headers, path_to_bucket_1)
+            .await
+            .unwrap();
+
+        assert_eq!(resp_headers.len(), 1);
+        assert_eq!(
+            resp_headers.get("x-reduct-error-0-1").unwrap(),
+            "404,No record with timestamp 1001"
+        );
+        assert!(bucket.begin_read("entry-1", 1000).await.is_err());
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn requires_headers(
         #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
