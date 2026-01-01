@@ -883,6 +883,27 @@ mod tests {
     }
 
     #[test]
+    fn test_resolve_label_name_reserved_prefix() {
+        let err = resolve_label_name("@cpu", None).err().unwrap();
+        assert_eq!(
+            err,
+            unprocessable_entity!(
+                "Label names must not start with '@': reserved for computed labels",
+            )
+        );
+    }
+
+    #[test]
+    fn test_resolve_label_name_index_out_of_range() {
+        let label_names = vec!["a".to_string()];
+        let err = resolve_label_name("2", Some(&label_names)).err().unwrap();
+        assert_eq!(
+            err,
+            unprocessable_entity!("Label index '2' is out of range")
+        );
+    }
+
+    #[test]
     fn test_make_error_batched_header() {
         let err = unprocessable_entity!("broken");
         let (name, value) = make_error_batched_header(2, 10, &err);
@@ -892,5 +913,89 @@ mod tests {
             value.to_str().unwrap(),
             format!("{},{}", err.status(), err.message())
         );
+    }
+
+    #[cfg(feature = "io")]
+    mod io_tests {
+        use super::*;
+        use std::collections::HashMap;
+
+        fn build_meta(
+            labels: &[(&str, &str)],
+            computed: &[(&str, &str)],
+            content_type: &str,
+            content_length: u64,
+        ) -> RecordMeta {
+            let mut label_map = HashMap::new();
+            for (key, value) in labels {
+                label_map.insert((*key).to_string(), (*value).to_string());
+            }
+
+            let mut computed_map = HashMap::new();
+            for (key, value) in computed {
+                computed_map.insert((*key).to_string(), (*value).to_string());
+            }
+
+            RecordMeta::builder()
+                .labels(label_map)
+                .computed_labels(computed_map)
+                .content_type(content_type.to_string())
+                .content_length(content_length)
+                .build()
+        }
+
+        #[test]
+        fn test_build_label_delta_with_previous_and_computed() {
+            let mut label_index = LabelIndex::default();
+            label_index.ensure("a");
+            label_index.ensure("b");
+            label_index.ensure("c");
+            label_index.ensure("@cpu");
+
+            let mut previous = Labels::new();
+            previous.insert("a".to_string(), "1".to_string());
+            previous.insert("b".to_string(), "2".to_string());
+
+            let meta = build_meta(&[("a", "1"), ("c", "3,4")], &[("cpu", "10")], "text", 1);
+
+            let delta = build_label_delta(&meta, Some(&previous), &mut label_index);
+            assert_eq!(delta, "1=,2=\"3,4\",3=10");
+        }
+
+        #[test]
+        fn test_make_record_header_value_reuse_metadata() {
+            let mut label_index = LabelIndex::default();
+            label_index.ensure("a");
+
+            let mut previous = Labels::new();
+            previous.insert("a".to_string(), "1".to_string());
+
+            let meta = build_meta(&[("a", "1")], &[], "text/plain", 8);
+            let value = make_record_header_value(
+                &meta,
+                Some("text/plain"),
+                Some(&previous),
+                &mut label_index,
+            );
+
+            assert_eq!(value.to_str().unwrap(), "8");
+        }
+
+        #[test]
+        fn test_make_record_header_value_with_label_delta() {
+            let mut label_index = LabelIndex::default();
+            label_index.ensure("a");
+
+            let previous = Labels::new();
+            let meta = build_meta(&[("a", "1")], &[], "text/plain", 10);
+            let value = make_record_header_value(
+                &meta,
+                Some("text/plain"),
+                Some(&previous),
+                &mut label_index,
+            );
+
+            assert_eq!(value.to_str().unwrap(), "10,,0=1");
+        }
     }
 }
