@@ -11,7 +11,7 @@ use crate::storage::entry::RecordDrainer;
 use axum::body::Body;
 use axum::body::BodyDataStream;
 use axum::extract::{Path, State};
-use axum::http::{HeaderMap, HeaderName};
+use axum::http::HeaderMap;
 use axum::response::IntoResponse;
 use axum_extra::headers::{Expect, Header};
 use bytes::Bytes;
@@ -349,12 +349,18 @@ mod tests {
     use super::*;
     use crate::api::tests::{headers, keeper, path_to_bucket_1};
     use axum::extract::Path;
+    use axum::http::HeaderName;
     use axum_extra::headers::HeaderValue;
     use bytes::Bytes;
+    use futures_util::stream;
     use reduct_base::batch::v2::encode_entry_name;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
+    use reduct_base::io::WriteRecord;
+    use reduct_base::Labels;
     use rstest::rstest;
+    use std::sync::{Arc as StdArc, Mutex};
+    use std::time::Duration;
 
     #[rstest]
     #[tokio::test]
@@ -528,5 +534,186 @@ mod tests {
             .unwrap();
         assert_eq!(reader.meta().content_length(), 3);
         assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("def")));
+    }
+
+    struct TestWriter {
+        chunks: StdArc<Mutex<Vec<Bytes>>>,
+        fail: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl WriteRecord for TestWriter {
+        async fn send(&mut self, chunk: reduct_base::io::WriteChunk) -> Result<(), ReductError> {
+            self.blocking_send(chunk)
+        }
+
+        fn blocking_send(&mut self, chunk: reduct_base::io::WriteChunk) -> Result<(), ReductError> {
+            if self.fail {
+                return Err(bad_request!("Simulated write error"));
+            }
+            if let Ok(Some(bytes)) = chunk {
+                self.chunks.lock().unwrap().push(bytes);
+            }
+            Ok(())
+        }
+
+        async fn send_timeout(
+            &mut self,
+            chunk: reduct_base::io::WriteChunk,
+            _timeout: Duration,
+        ) -> Result<(), ReductError> {
+            self.blocking_send(chunk)
+        }
+    }
+
+    fn make_entry_header(content_length: u64) -> EntryRecordHeader {
+        EntryRecordHeader {
+            entry: "entry-1".to_string(),
+            timestamp: 0,
+            header: reduct_base::batch::RecordHeader {
+                content_length,
+                content_type: "text/plain".to_string(),
+                labels: Labels::new(),
+            },
+        }
+    }
+
+    #[tokio::test]
+    async fn test_write_chunk_splits_and_returns_rest() {
+        let chunks = StdArc::new(Mutex::new(Vec::new()));
+        let mut writer: Box<dyn WriteRecord + Sync + Send> = Box::new(TestWriter {
+            chunks: StdArc::clone(&chunks),
+            fail: false,
+        });
+        let mut written = 0;
+        let rest = write_chunk(
+            &mut writer,
+            Bytes::from("abcdef"),
+            &mut written,
+            4,
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(rest, Bytes::from("ef"));
+        assert_eq!(written, 6);
+        assert_eq!(chunks.lock().unwrap().as_slice(), &[Bytes::from("abcd")]);
+    }
+
+    #[tokio::test]
+    async fn test_write_chunk_partial_no_rest() {
+        let chunks = StdArc::new(Mutex::new(Vec::new()));
+        let mut writer: Box<dyn WriteRecord + Sync + Send> = Box::new(TestWriter {
+            chunks: StdArc::clone(&chunks),
+            fail: false,
+        });
+        let mut written = 0;
+        let rest = write_chunk(
+            &mut writer,
+            Bytes::from("abcd"),
+            &mut written,
+            10,
+            Duration::from_secs(1),
+        )
+        .await
+        .unwrap();
+
+        assert!(rest.is_none());
+        assert_eq!(written, 4);
+        assert_eq!(chunks.lock().unwrap().as_slice(), &[Bytes::from("abcd")]);
+    }
+
+    #[tokio::test]
+    async fn test_write_chunk_error_propagation() {
+        let chunks = StdArc::new(Mutex::new(Vec::new()));
+        let mut writer: Box<dyn WriteRecord + Sync + Send> = Box::new(TestWriter {
+            chunks: StdArc::clone(&chunks),
+            fail: true,
+        });
+        let mut written = 0;
+        let err = write_chunk(
+            &mut writer,
+            Bytes::from("abcd"),
+            &mut written,
+            4,
+            Duration::from_secs(1),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err, bad_request!("Simulated write error"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_receive_body_and_write_records_short_body(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let writer: Box<dyn WriteRecord + Sync + Send> = Box::new(TestWriter {
+            chunks: StdArc::new(Mutex::new(Vec::new())),
+            fail: false,
+        });
+
+        tx.send(WriteContext {
+            entry_name: "entry-1".to_string(),
+            time: 0,
+            header: make_entry_header(5),
+            writer,
+        })
+        .await
+        .unwrap();
+
+        let body = Body::from("abc");
+        let mut stream = body.into_data_stream();
+        let err =
+            receive_body_and_write_records(&"bucket-1".to_string(), components, 5, &mut stream, rx)
+                .await
+                .err()
+                .unwrap();
+
+        assert_eq!(
+            err,
+            bad_request!("Content is shorter than expected: no more data to read")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_receive_body_and_write_records_chunk_error(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        let writer: Box<dyn WriteRecord + Sync + Send> = Box::new(TestWriter {
+            chunks: StdArc::new(Mutex::new(Vec::new())),
+            fail: false,
+        });
+
+        tx.send(WriteContext {
+            entry_name: "entry-1".to_string(),
+            time: 0,
+            header: make_entry_header(1),
+            writer,
+        })
+        .await
+        .unwrap();
+
+        let body = Body::from_stream(stream::iter(vec![Err::<Bytes, ReductError>(bad_request!(
+            "Simulated chunk error"
+        ))]));
+        let mut stream = body.into_data_stream();
+        let err =
+            receive_body_and_write_records(&"bucket-1".to_string(), components, 1, &mut stream, rx)
+                .await
+                .err()
+                .unwrap();
+
+        assert_eq!(
+            err,
+            bad_request!("Error while receiving data chunk: [BadRequest] Simulated chunk error")
+        );
     }
 }
