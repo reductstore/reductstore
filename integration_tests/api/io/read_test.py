@@ -59,7 +59,12 @@ def test_read_requires_bucket_read_permissions(
     resp = session.post(f"{base_url}/io/{bucket}/write", data=b"AA", headers=headers)
     assert resp.status_code == 200
 
-    query_body = {"entries": ["entry-0"], "start": 0, "stop": 2000}
+    query_body = {
+        "entries": ["entry-0"],
+        "start": 0,
+        "stop": 2000,
+        "query_type": "QUERY",
+    }
 
     resp = session.post(
         f"{base_url}/io/{bucket}/q",

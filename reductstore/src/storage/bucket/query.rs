@@ -7,14 +7,13 @@ use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::base::QueryOptions;
-use crate::storage::query::QueryRx;
+use crate::storage::query::{next_query_id, QueryRx};
 use log::debug;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{no_content, not_found};
 use std::collections::HashMap;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc;
@@ -41,10 +40,8 @@ impl Bucket {
     /// A unique identifier for the initiated query.
     ///
     pub(crate) fn query(&self, request: QueryEntry) -> Result<u64, ReductError> {
-        static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
-
         let entries = self.filter_entries(&request)?;
-        let query_id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
+        let query_id = next_query_id();
         let options: QueryOptions = request.clone().into();
 
         let entry_queries = entries

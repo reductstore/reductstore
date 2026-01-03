@@ -18,7 +18,7 @@ use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
 use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
-use crate::storage::query::{build_query, spawn_query_task, QueryRx};
+use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
@@ -26,7 +26,6 @@ use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -124,10 +123,8 @@ impl Entry {
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
     pub fn query(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
-        static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
-
         let (start, stop) = self.get_query_time_range(&query_parameters)?;
-        let id = QUERY_ID.fetch_add(1, Ordering::SeqCst);
+        let id = next_query_id();
         let block_manager = Arc::clone(&self.block_manager);
 
         let options: QueryOptions = query_parameters.into();
