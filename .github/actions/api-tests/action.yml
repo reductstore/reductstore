@@ -103,10 +103,16 @@ runs:
     - name: Run API tests
       shell: bash
       run: |
+        backend="${{ inputs.backend }}"
+        storage_backend="$backend"
+        if [ "$backend" = "s3" ] && [ -z "${{ inputs.license_path }}" ]; then
+          storage_backend="fs"
+        fi
+
         docker run --network=host \
           --env API_TOKEN=${{ inputs.token }} \
           --env LICENSE_PATH=${{ inputs.license_path }} \
-          --env STORAGE_BACKEND=${{ inputs.backend }} \
+          --env STORAGE_BACKEND=$storage_backend \
           --env STORAGE_URL=${{ inputs.url }} api
 
     - name: Print docker logs
