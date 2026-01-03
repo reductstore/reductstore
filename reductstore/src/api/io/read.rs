@@ -193,7 +193,7 @@ async fn fetch_and_response_batched_records(
         if header_size > io_settings.batch_max_metadata_size
             || (!empty_body && body_size > io_settings.batch_max_size)
             || records.len() >= io_settings.batch_max_records
-            || start_time.elapsed() > io_settings.batch_timeout
+            || (!records.is_empty() && start_time.elapsed() > io_settings.batch_timeout)
         {
             break;
         }
@@ -205,7 +205,7 @@ async fn fetch_and_response_batched_records(
             Err(err) if err.status() == ErrorCode::NotFound => {
                 return Err(no_content!("No more records").into())
             }
-            _ => { /* query is still alive */ }
+            _ => return Err(no_content!("No content").into()),
         }
     }
 
