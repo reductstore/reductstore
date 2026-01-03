@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-mod common;
+pub(crate) mod common;
 mod read_batched;
 mod read_query;
 mod read_query_post;
@@ -85,7 +85,7 @@ pub(super) struct QueryInfoAxum(QueryInfo);
 pub(super) struct RemoveQueryInfoAxum(RemoveQueryInfo);
 
 #[derive(IntoResponse, Twin)]
-pub(super) struct QueryEntryAxum(QueryEntry);
+pub(super) struct QueryEntryAxum(pub QueryEntry);
 
 impl<S> FromRequest<S> for QueryEntryAxum
 where
@@ -379,7 +379,6 @@ mod tests {
                 .upgrade()
                 .unwrap()
                 .query(options)
-                .await
                 .unwrap()
         };
         query_id

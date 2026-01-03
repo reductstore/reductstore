@@ -93,9 +93,13 @@ impl Display for ErrorCode {
 
 impl From<std::io::Error> for ReductError {
     fn from(err: std::io::Error) -> Self {
-        // An IO error is an internal reductstore error
+        let status = match err.kind() {
+            std::io::ErrorKind::Unsupported => ErrorCode::MethodNotAllowed,
+            _ => ErrorCode::InternalServerError,
+        };
+
         ReductError {
-            status: ErrorCode::InternalServerError,
+            status,
             message: err.to_string(),
         }
     }

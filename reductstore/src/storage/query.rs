@@ -19,6 +19,7 @@ use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::cmp::{max, min};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, Instant};
@@ -29,6 +30,11 @@ pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
 const QUERY_BUFFER_SIZE: usize = 64;
 const MIN_FULL_CHANNEL_SLEEP: Duration = Duration::from_micros(10);
 const MAX_FULL_CHANNEL_SLEEP: Duration = Duration::from_millis(10);
+
+pub(crate) fn next_query_id() -> u64 {
+    static QUERY_ID: AtomicU64 = AtomicU64::new(1); // start with 1 because 0 may confuse with false
+    QUERY_ID.fetch_add(1, Ordering::SeqCst)
+}
 
 /// Build a query.
 pub(in crate::storage) fn build_query(

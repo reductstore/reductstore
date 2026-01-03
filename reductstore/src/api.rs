@@ -3,6 +3,7 @@
 //
 mod bucket;
 mod entry;
+mod io;
 mod links;
 mod middleware;
 mod replication;
@@ -11,6 +12,7 @@ mod token;
 mod ui;
 mod utils;
 
+use crate::api::io::create_io_api_routes;
 use crate::api::ui::{redirect_to_index, show_ui};
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::policy::Policy;
@@ -334,6 +336,10 @@ impl AxumAppBuilder {
             .nest(
                 &format!("{}api/v1/replications", cfg.api_base_path),
                 create_replication_api_routes(),
+            )
+            .nest(
+                &format!("{}api/v1/io", cfg.api_base_path),
+                create_io_api_routes(),
             )
             .nest(
                 &format!("{}api/v1/links", cfg.api_base_path),
@@ -966,6 +972,14 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.typed_insert(Authorization::bearer("init-token").unwrap());
         headers
+    }
+
+    #[fixture]
+    pub fn path_to_bucket_1() -> Path<HashMap<String, String>> {
+        Path(HashMap::from_iter(vec![(
+            "bucket_name".to_string(),
+            "bucket-1".to_string(),
+        )]))
     }
 
     #[fixture]

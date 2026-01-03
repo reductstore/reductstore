@@ -7,7 +7,9 @@ use crate::storage::proto::record::Label;
 use crate::storage::proto::Record;
 use reduct_base::error::ReductError;
 use reduct_base::{not_found, Labels};
+use reduct_macros::task;
 use std::collections::{BTreeMap, HashSet};
+use std::sync::Arc;
 
 /// A struct that contains the timestamp of the record to update, the labels to update and the labels to remove.
 pub(crate) struct UpdateLabels {
@@ -32,77 +34,72 @@ impl Entry {
     ///
     /// A map of timestamps to the result of the update operation. The result is either a vector of labels
     /// or an error if the record was not found.
+    #[task("update labels")]
     pub fn update_labels(
-        &self,
+        self: Arc<Self>,
         updates: Vec<UpdateLabels>,
-    ) -> TaskHandle<Result<UpdateResult, ReductError>> {
-        let block_manager = self.block_manager.clone();
-        spawn("update labels", move || {
-            let mut result = UpdateResult::new();
-            let mut records_per_block = BTreeMap::new();
+    ) -> Result<UpdateResult, ReductError> {
+        let mut result = UpdateResult::new();
+        let mut records_per_block = BTreeMap::new();
 
+        {
+            let mut bm = self.block_manager.write()?;
+            for UpdateLabels {
+                time,
+                update,
+                remove,
+            } in updates
             {
-                let mut bm = block_manager.write()?;
-                for UpdateLabels {
-                    time,
-                    update,
-                    remove,
-                } in updates
-                {
-                    // Find the block that contains the record
-                    // TODO: Try to avoid the lookup for each record
-                    match bm.find_block(time) {
-                        Ok(block_ref) => {
-                            let block = block_ref.read()?;
-                            if let Some(record) = block.get_record(time) {
-                                let record =
-                                    Self::update_single_label(record.clone(), update, remove);
-                                records_per_block
-                                    .entry(block.block_id())
-                                    .or_insert_with(Vec::new)
-                                    .push(record.clone());
-                                result.insert(
-                                    time,
-                                    Ok(record
-                                        .labels
-                                        .iter()
-                                        .map(|label| (label.name.clone(), label.value.clone()))
-                                        .collect()),
-                                );
-                            } else {
-                                result.insert(
-                                    time,
-                                    Err(not_found!("No record with timestamp {}", time)),
-                                );
-                            }
+                // Find the block that contains the record
+                // TODO: Try to avoid the lookup for each record
+                match bm.find_block(time) {
+                    Ok(block_ref) => {
+                        let block = block_ref.read()?;
+                        if let Some(record) = block.get_record(time) {
+                            let record = Self::update_single_label(record.clone(), update, remove);
+                            records_per_block
+                                .entry(block.block_id())
+                                .or_insert_with(Vec::new)
+                                .push(record.clone());
+                            result.insert(
+                                time,
+                                Ok(record
+                                    .labels
+                                    .iter()
+                                    .map(|label| (label.name.clone(), label.value.clone()))
+                                    .collect()),
+                            );
+                        } else {
+                            result
+                                .insert(time, Err(not_found!("No record with timestamp {}", time)));
                         }
-                        Err(err) => {
-                            result.insert(time, Err(err));
-                        }
+                    }
+                    Err(err) => {
+                        result.insert(time, Err(err));
                     }
                 }
             }
+        }
 
-            // Update blocks
-            let mut handlers = Vec::new();
-            for (block_id, records) in records_per_block.into_iter() {
-                let local_block_manager = block_manager.clone();
-                let handler: TaskHandle<Result<(), ReductError>> =
-                    spawn("update labels in block", move || {
-                        let mut bm = local_block_manager.write().unwrap();
-                        bm.update_records(block_id, records)?;
-                        Ok(())
-                    });
+        // Update blocks
+        let mut handlers = Vec::new();
+        for (block_id, records) in records_per_block.into_iter() {
+            let local_block_manager = self.block_manager.clone();
+            let handler: TaskHandle<Result<(), ReductError>> =
+                spawn("update labels in block", move || {
+                    let mut bm = local_block_manager.write().unwrap();
+                    bm.update_records(block_id, records)?;
+                    Ok(())
+                });
 
-                handlers.push(handler);
-            }
+            handlers.push(handler);
+        }
 
-            // Wait for all handlers to finish
-            for handler in handlers {
-                handler.wait()?;
-            }
-            Ok(result)
-        })
+        // Wait for all handlers to finish
+        for handler in handlers {
+            handler.wait()?;
+        }
+        Ok(result)
     }
 
     fn update_single_label(
@@ -159,6 +156,7 @@ mod tests {
         write_stub_record(&mut entry, 1);
         write_stub_record(&mut entry, 2);
         write_stub_record(&mut entry, 3);
+        let entry = Arc::new(entry);
 
         // update, remove and add labels
         let result = entry
@@ -209,6 +207,7 @@ mod tests {
     #[rstest]
     fn test_update_nothing(mut entry: Entry) {
         write_stub_record(&mut entry, 1);
+        let entry = Arc::new(entry);
         let result = entry
             .update_labels(vec![UpdateLabels {
                 time: 1,

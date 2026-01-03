@@ -1,7 +1,7 @@
 import json
 from time import sleep
 
-from .conftest import requires_env, auth_headers
+from .conftest import requires_env, requires_backend, auth_headers
 
 
 def test__create_bucket_ok(base_url, session, bucket_name):
@@ -299,6 +299,7 @@ def test__head_bucket_with_full_access_token(
     assert resp.status_code == 200
 
 
+@requires_backend("fs")
 def test__rename_bucket_ok(base_url, session, bucket_name):
     """Should rename a bucket"""
     resp = session.post(f"{base_url}/b/{bucket_name}")
@@ -317,7 +318,20 @@ def test__rename_bucket_ok(base_url, session, bucket_name):
     assert resp.status_code == 200
 
 
+@requires_backend("s3")
+def test__rename_bucket_s3_not_allowed(base_url, session, bucket_name):
+    """Should not rename a bucket with S3 backend"""
+    resp = session.post(f"{base_url}/b/{bucket_name}")
+    assert resp.status_code == 200
+
+    resp = session.put(
+        f"{base_url}/b/{bucket_name}/rename", json={"new_name": "new_bucket_name"}
+    )
+    assert resp.status_code == 405
+
+
 @requires_env("API_TOKEN")
+@requires_backend("fs")
 def test__rename_bucket_with_full_access_token(
     base_url,
     session,

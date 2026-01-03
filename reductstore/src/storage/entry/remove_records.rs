@@ -10,6 +10,7 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::not_found;
+use reduct_macros::task;
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
@@ -27,14 +28,13 @@ impl Entry {
     ///
     /// A map of timestamps to the result of the remove operation. The result is either a vector of labels
     /// or an error if the record was not found.
+    #[task("remove records")]
     pub fn remove_records(
-        &self,
+        self: Arc<Self>,
         timestamps: Vec<u64>,
-    ) -> TaskHandle<Result<BTreeMap<u64, ReductError>, ReductError>> {
+    ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let block_manager = self.block_manager.clone();
-        spawn("remove records", move || {
-            Self::inner_remove_records(timestamps, block_manager)
-        })
+        Self::inner_remove_records(timestamps, block_manager)
     }
 
     /// Query and remove multiple records over a range of timestamps.
@@ -60,7 +60,7 @@ impl Entry {
 
         let rx = || {
             // io defaults isn't used in remove queries
-            let query_id = self.query(options).wait()?;
+            let query_id = self.query(options)?;
             self.get_query_receiver(query_id)
         };
 
@@ -182,9 +182,10 @@ mod tests {
     use crate::storage::entry::tests::{entry, write_stub_record};
     use crate::storage::entry::EntrySettings;
     use rstest::{fixture, rstest};
+    use std::sync::Arc;
 
     #[rstest]
-    fn test_remove_records(entry_with_data: Entry) {
+    fn test_remove_records(entry_with_data: Arc<Entry>) {
         let timestamps = vec![0, 2, 4, 5];
         let error_map = entry_with_data.remove_records(timestamps).wait().unwrap();
 
@@ -208,7 +209,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_remove_records(entry_with_data: Entry) {
+    fn test_query_remove_records(entry_with_data: Arc<Entry>) {
         let params = QueryEntry {
             start: Some(2),
             stop: Some(4),
@@ -231,7 +232,7 @@ mod tests {
     }
 
     #[fixture]
-    fn entry_with_data(mut entry: Entry) -> Entry {
+    fn entry_with_data(mut entry: Entry) -> Arc<Entry> {
         entry.set_settings(EntrySettings {
             max_block_records: 2,
             ..entry.settings()
@@ -241,6 +242,6 @@ mod tests {
         write_stub_record(&mut entry, 2);
         write_stub_record(&mut entry, 3);
         write_stub_record(&mut entry, 4);
-        entry
+        Arc::new(entry)
     }
 }

@@ -1,9 +1,12 @@
 // Copyright 2023-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+mod query;
 mod quotas;
 mod read_only;
+mod remove_records;
 pub(super) mod settings;
+pub(crate) mod update_records;
 
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
@@ -12,6 +15,7 @@ use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
+use crate::storage::bucket::query::MultiEntryQuery;
 use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
@@ -28,7 +32,7 @@ use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found, Labels};
 use reduct_macros::task;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -46,6 +50,8 @@ pub(crate) struct Bucket {
     last_replica_sync: RwLock<Instant>,
     is_provisioned: AtomicBool,
     status: RwLock<ResourceStatus>,
+    #[allow(dead_code)]
+    queries: RwLock<HashMap<u64, MultiEntryQuery>>,
 }
 
 impl Bucket {
@@ -81,6 +87,7 @@ impl Bucket {
             cfg: Arc::new(cfg),
             last_replica_sync: RwLock::new(Instant::now()),
             folder_keeper: Arc::new(folder_keeper),
+            queries: RwLock::new(HashMap::new()),
         };
 
         bucket.save_settings().wait()?;
@@ -149,6 +156,7 @@ impl Bucket {
             last_replica_sync: RwLock::new(Instant::now()),
             cfg,
             folder_keeper: Arc::new(folder_keeper),
+            queries: RwLock::new(HashMap::new()),
         })
     }
 
@@ -488,11 +496,16 @@ impl Bucket {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    pub(crate) fn status(&self) -> Result<ResourceStatus, ReductError> {
+    #[allow(dead_code)]
+    pub fn entries(&self) -> Result<BTreeMap<String, Arc<Entry>>, ReductError> {
+        Ok(self.entries.read()?.clone())
+    }
+
+    pub(super) fn status(&self) -> Result<ResourceStatus, ReductError> {
         Ok(*self.status.read()?)
     }
 
-    pub(crate) fn mark_deleting(&self) -> Result<(), ReductError> {
+    pub(super) fn mark_deleting(&self) -> Result<(), ReductError> {
         self.ensure_not_deleting()?;
         *self.status.write()? = ResourceStatus::Deleting;
         for entry in self.entries.read()?.values() {
@@ -501,7 +514,7 @@ impl Bucket {
         Ok(())
     }
 
-    pub(crate) fn ensure_not_deleting(&self) -> Result<(), ReductError> {
+    pub(super) fn ensure_not_deleting(&self) -> Result<(), ReductError> {
         if self.status()? == ResourceStatus::Deleting {
             Err(conflict!("Bucket '{}' is being deleted", self.name))
         } else {

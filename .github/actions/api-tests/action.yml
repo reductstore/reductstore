@@ -57,29 +57,42 @@ runs:
     - name: Run ReductStore
       shell: bash
       run: |
-        if [ "${{ inputs.backend }}" = "fs" ]; then
-          docker run --network=host -v ${PWD}/misc:/misc --env RS_API_TOKEN=${{ inputs.token }} \
-            --name reduct \
+        backend="${{ inputs.backend }}"
+        minio_endpoint="${{ inputs.minio_endpoint }}"
+        if [ -z "$minio_endpoint" ]; then
+          minio_endpoint="http://localhost:9000"
+        fi
+
+        if [ "$backend" = "s3" ] && [ -n "${{ inputs.license_path }}" ]; then
+          docker run --network=host -v ${PWD}/misc:/misc \
+            --env RS_API_TOKEN=${{ inputs.token }} \
             --env RS_CERT_PATH=${{ inputs.cert_path }} \
             --env RS_LICENSE_PATH=${{ inputs.license_path }} \
             --env RS_CERT_KEY_PATH=/misc/privateKey.key \
+            --env RS_REMOTE_BACKEND_TYPE=s3 \
+            --env RS_REMOTE_ENDPOINT=$minio_endpoint \
+            --env RS_REMOTE_CACHE_PATH=/data \
+            --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }} \
+            --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }} \
+            --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }} \
             --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
-            -d ${{ github.repository }}
+            --name reduct -d ${{ github.repository }}
         else
           docker run --network=host -v ${PWD}/misc:/misc \
             --env RS_API_TOKEN=${{ inputs.token }} \
             --env RS_CERT_PATH=${{ inputs.cert_path }} \
             --env RS_LICENSE_PATH=${{ inputs.license_path }} \
             --env RS_CERT_KEY_PATH=/misc/privateKey.key \
-            --env RS_STORAGE_TYPE=s3 \
-            --env RS_REMOTE_BACKEND_ENDPOINT=${{ inputs.minio_endpoint }} \
-            --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }} \
-            --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }} \
-            --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }} \
             --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
             --name reduct -d ${{ github.repository }}
         fi
-        sleep 5
+
+        for _ in {1..20}; do
+          if curl -kfsS "${{ inputs.url }}/api/v1/ready" >/dev/null 2>&1; then
+            break
+          fi
+          sleep 1
+        done
         docker logs reduct
 
     - name: Build API tests
@@ -90,9 +103,16 @@ runs:
     - name: Run API tests
       shell: bash
       run: |
+        backend="${{ inputs.backend }}"
+        storage_backend="$backend"
+        if [ "$backend" = "s3" ] && [ -z "${{ inputs.license_path }}" ]; then
+          storage_backend="fs"
+        fi
+
         docker run --network=host \
           --env API_TOKEN=${{ inputs.token }} \
           --env LICENSE_PATH=${{ inputs.license_path }} \
+          --env STORAGE_BACKEND=$storage_backend \
           --env STORAGE_URL=${{ inputs.url }} api
 
     - name: Print docker logs

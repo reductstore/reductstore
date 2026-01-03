@@ -10,7 +10,7 @@ use tokio::runtime::Handle;
 #[derive(Clone)]
 pub(crate) enum FallbackRuntime {
     Handle(Handle),
-    Owned(Arc<tokio::runtime::Runtime>),
+    Owned(Option<Arc<tokio::runtime::Runtime>>),
 }
 
 impl FallbackRuntime {
@@ -18,12 +18,12 @@ impl FallbackRuntime {
         if let Ok(handle) = Handle::try_current() {
             FallbackRuntime::Handle(handle)
         } else {
-            FallbackRuntime::Owned(Arc::new(
+            FallbackRuntime::Owned(Some(Arc::new(
                 tokio::runtime::Builder::new_current_thread()
                     .enable_all()
                     .build()
                     .unwrap(),
-            ))
+            )))
         }
     }
 
@@ -36,7 +36,7 @@ impl FallbackRuntime {
             FallbackRuntime::Handle(handle) => {
                 tokio::task::block_in_place(|| handle.block_on(future))
             }
-            FallbackRuntime::Owned(rt) => rt.block_on(future),
+            FallbackRuntime::Owned(rt) => rt.as_ref().unwrap().block_on(future),
         }
     }
 }
@@ -45,9 +45,9 @@ impl Drop for FallbackRuntime {
     fn drop(&mut self) {
         if let FallbackRuntime::Owned(rt) = self {
             // Dropping a runtime inside an async context can panic; hand it off to a thread
-            // when this is the last reference and we're currently on a Tokio runtime.
-            if Arc::strong_count(rt) == 1 && Handle::try_current().is_ok() {
-                let rt = rt.clone();
+            // when this is the last reference to avoid blocking shutdown paths.
+            let rt = rt.take().unwrap();
+            if Arc::strong_count(&rt) == 1 {
                 std::thread::spawn(move || drop(rt));
             }
         }

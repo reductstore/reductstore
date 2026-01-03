@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Implement non-blocking bucket and entry deletion, [PR-1066](https://github.com/reductstore/reductstore/pull/1066)
 - `RS_RWLOCK_TIMEOUT` and `RS_RWLOCK_FAILURE_ACTION` to configure lock timeout handling, [PR-1077](https://github.com/reductstore/reductstore/pull/1077)
 - Refactor thread pool, [PR-1080](https://github.com/reductstore/reductstore/pull/1080)
+- Add multi-entry IO batching, wildcard queries, and record update/remove endpoints, [PR-1095](https://github.com/reductstore/reductstore/pull/1095)
 
 ### Internal
 

@@ -79,7 +79,7 @@ pub(super) async fn get(
         let repo_ext = &components.ext_repo;
 
         // Execute the query with extension mechanism
-        let id = entry.query(query.query.clone()).await?;
+        let id = entry.query(query.query.clone())?;
         repo_ext
             .register_query(id, &query.bucket, &query.entry, query.query)
             .await?;
