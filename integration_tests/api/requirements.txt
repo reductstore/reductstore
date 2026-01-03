@@ -1,4 +1,4 @@
-pytest~=6.2
+pytest~=9.0
 pylint~=2.12
-requests~=2.26
+requests~=2.32
 numpy
