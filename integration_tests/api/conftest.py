@@ -21,12 +21,12 @@ def _base_url(storage_url) -> str:
 
 @pytest.fixture(name="bucket_name")
 def _gen_bucket_name() -> str:
-    return f"bucket_{random.randint(0, 1000000)}"
+    return f"bucket_{random.randint(0, 10000000)}"
 
 
 @pytest.fixture(name="replication_name")
 def _gen_replication_name() -> str:
-    return f"replication_{random.randint(0, 1000000)}"
+    return f"replication_{random.randint(0, 10000000)}"
 
 
 def requires_env(key):
@@ -35,6 +35,14 @@ def requires_env(key):
     return pytest.mark.skipif(
         env is None or env == "",
         reason=f"Not suitable environment {key} for current test",
+    )
+
+
+def requires_backend(*backends):
+    backend = os.environ.get("STORAGE_BACKEND", "fs")
+    return pytest.mark.skipif(
+        backend not in backends,
+        reason=f"Not suitable backend {backend} for current test",
     )
 
 

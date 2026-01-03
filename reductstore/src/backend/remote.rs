@@ -113,7 +113,7 @@ impl StorageBackend for RemoteBackend {
     fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         if self.backend_type == BackendType::S3 {
             return Err(io::Error::new(
-                io::ErrorKind::Other,
+                io::ErrorKind::Unsupported,
                 "Renaming in S3 backend is not supported",
             ));
         }
