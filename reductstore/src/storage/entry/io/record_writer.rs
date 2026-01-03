@@ -216,7 +216,10 @@ impl WriteRecord for RecordWriter {
 
         if stop {
             if let Some((rx, ctx)) = self.lazy_write.take() {
-                tokio::task::spawn_blocking(|| Self::receive(rx, ctx));
+                let handle = tokio::task::spawn_blocking(|| Self::receive(rx, ctx));
+                handle.await.map_err(|err| {
+                    internal_server_error!("Failed to write the record to storage: {:?}", err)
+                })?;
             }
             self.tx.closed().await;
         }
