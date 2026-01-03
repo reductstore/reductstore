@@ -15,7 +15,12 @@ def test_read_batched_records_v2(base_url, session, bucket):
 
     resp = session.post(
         f"{base_url}/io/{bucket}/q",
-        json={"entries": ["entry-0", "entry-1"], "start": 0, "stop": 2000},
+        json={
+            "query_type": "QUERY",
+            "entries": ["entry-0", "entry-1"],
+            "start": 0,
+            "stop": 2000,
+        },
     )
     assert resp.status_code == 200
     query_id = resp.json()["id"]

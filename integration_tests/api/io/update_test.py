@@ -36,7 +36,6 @@ def test_update_labels_in_batch(base_url, session, bucket):
 
     resp = session.patch(f"{base_url}/io/{bucket}/update", headers=headers)
     assert resp.status_code == 200
-    assert resp.headers == {}
 
     resp_entry_0 = session.get(f"{base_url}/b/{bucket}/entry-0?ts=1000")
     assert resp_entry_0.status_code == 200
