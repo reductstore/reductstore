@@ -28,6 +28,9 @@ def test_read_batched_records_v2(base_url, session, bucket):
     resp = session.get(
         f"{base_url}/io/{bucket}/read", headers={"x-reduct-query-id": str(query_id)}
     )
+
+    print(resp.headers)
+
     assert resp.status_code == 200
     assert resp.headers["x-reduct-entries"] == "entry-1,entry-0"
     assert resp.headers["x-reduct-start-ts"] == "1000"
