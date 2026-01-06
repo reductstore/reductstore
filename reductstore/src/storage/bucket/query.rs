@@ -13,9 +13,9 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{no_content, not_found};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 const AGGREGATOR_BUFFER_SIZE: usize = 64;
@@ -181,9 +181,15 @@ impl Bucket {
         tx: mpsc::Sender<Result<RecordReader, ReductError>>,
     ) {
         let mut pending_readers: HashMap<String, Option<RecordReader>> = HashMap::new();
+        let mut completed: HashSet<String> = HashSet::new();
 
         loop {
+            if tx.is_closed() {
+                break;
+            }
+
             let mut last_error: Option<ReductError> = None;
+            let mut made_progress = false;
 
             for (entry_name, rx) in &entry_receivers {
                 if matches!(
@@ -193,8 +199,12 @@ impl Bucket {
                     continue;
                 }
 
+                if completed.contains(entry_name) {
+                    continue;
+                }
+
                 let recv_result = match rx.write().await {
-                    Ok(mut guard) => guard.recv().await,
+                    Ok(mut guard) => guard.try_recv(),
                     Err(err) => {
                         last_error = Some(err);
                         break;
@@ -202,21 +212,37 @@ impl Bucket {
                 };
 
                 match recv_result {
-                    Some(Ok(reader)) => {
+                    Ok(Ok(reader)) => {
                         pending_readers.insert(entry_name.clone(), Some(reader));
+                        made_progress = true;
                     }
-                    Some(Err(err)) => {
+                    Ok(Err(err)) => {
                         if err.status() != ErrorCode::NoContent {
                             last_error = Some(err);
                             break;
                         }
+                        // NoContent just means no records right now; keep polling the entry
+                        made_progress = true;
                     }
-                    None => {}
+                    Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
+                        completed.insert(entry_name.clone());
+                        made_progress = true;
+                    }
+                    Err(tokio::sync::mpsc::error::TryRecvError::Empty) => {
+                        // nothing ready for this entry right now
+                    }
                 }
             }
 
             if let Some(err) = last_error {
                 let _ = tx.send(Err(err)).await;
+                break;
+            }
+
+            if completed.len() == entry_receivers.len()
+                && pending_readers.values().all(|v| v.is_none())
+            {
+                let _ = tx.send(Err(no_content!("No content"))).await;
                 break;
             }
 
@@ -239,8 +265,10 @@ impl Bucket {
                     }
                 }
             } else {
-                let _ = tx.send(Err(no_content!("No content"))).await;
-                break;
+                // Nothing ready yet; yield to avoid busy loop while we wait for more data.
+                if !made_progress {
+                    tokio::time::sleep(Duration::from_millis(1)).await;
+                }
             }
         }
     }

@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
-use tokio::task::{block_in_place, JoinHandle};
+use tokio::task::{spawn_blocking, JoinHandle};
 use tokio::time::sleep;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
@@ -116,7 +116,7 @@ pub(super) fn spawn_query_task(
             }
 
             // Heavy synchronous IO work must not block Tokio workers.
-            let next_result = block_in_place({
+            let next_result = spawn_blocking({
                 let group = group.clone();
                 let query = Arc::clone(&query);
                 let block_manager = Arc::clone(&block_manager);
@@ -127,7 +127,16 @@ pub(super) fn spawn_query_task(
                         None
                     }
                 }
-            });
+            })
+            .await;
+
+            let next_result = match next_result {
+                Ok(result) => result,
+                Err(err) => {
+                    warn!("Query '{}' id={} blocking task failed: {}", group, id, err);
+                    break;
+                }
+            };
 
             let Some(next_result) = next_result else {
                 break;
