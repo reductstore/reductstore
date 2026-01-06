@@ -286,7 +286,10 @@ pub(crate) mod tests {
         use std::fs;
 
         #[rstest]
-        fn test_read_chunk(mut reader: RecordReader) {
+        #[tokio::test]
+        async fn test_read_chunk(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000).await;
+            let mut reader = entry.begin_read(1000).wait().unwrap();
             assert_eq!(
                 reader.read_chunk().unwrap().unwrap(),
                 Bytes::from("0123456789")
@@ -294,7 +297,10 @@ pub(crate) mod tests {
         }
 
         #[rstest]
-        fn test_read(mut reader: RecordReader) {
+        #[tokio::test]
+        async fn test_read(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000).await;
+            let mut reader = entry.begin_read(1000).wait().unwrap();
             let mut buf = vec![0; 4];
             let read = reader.read(&mut buf).unwrap();
             assert_eq!(read, 4);
@@ -302,7 +308,8 @@ pub(crate) mod tests {
         }
 
         #[rstest]
-        fn test_empty_body(record: Record) {
+        #[tokio::test]
+        async fn test_empty_body(record: Record) {
             let mut reader = RecordReader::form_record(record);
             let mut buf = vec![0; 4];
             let read = reader.read(&mut buf).unwrap();
@@ -316,13 +323,16 @@ pub(crate) mod tests {
         #[case(SeekFrom::Start(5), 5, 4, b"5678")]
         #[case(SeekFrom::End(-5), 5, 4, b"5678")]
         #[case(SeekFrom::Current(2), 2, 4, b"2345")]
-        fn test_seek(
-            mut reader: RecordReader,
+        #[tokio::test]
+        async fn test_seek(
+            mut entry: Entry,
             #[case] seek_from: SeekFrom,
             #[case] expected_pos: u64,
             #[case] read_size: usize,
             #[case] expected_data: &[u8],
         ) {
+            write_stub_record(&mut entry, 1000).await;
+            let mut reader = entry.begin_read(1000).wait().unwrap();
             let new_pos = reader.seek(seek_from).unwrap();
             assert_eq!(new_pos, expected_pos);
             let mut buf = vec![0; read_size];
@@ -335,15 +345,19 @@ pub(crate) mod tests {
         #[case(SeekFrom::Start(20))]
         #[case(SeekFrom::End(1))]
         #[case(SeekFrom::Current(-1))]
-        fn test_seek_wrong(mut reader: RecordReader, #[case] seek_from: SeekFrom) {
+        #[tokio::test]
+        async fn test_seek_wrong(mut entry: Entry, #[case] seek_from: SeekFrom) {
+            write_stub_record(&mut entry, 1000).await;
+            let mut reader = entry.begin_read(1000).wait().unwrap();
             let err = reader.seek(seek_from).err().unwrap();
             assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
             assert_eq!(err.to_string(), "Seek position out of bounds");
         }
 
         #[rstest]
-        fn test_read_with_error(mut entry: Entry) {
-            write_record(&mut entry, 1000, vec![0; 100]);
+        #[tokio::test]
+        async fn test_read_with_error(mut entry: Entry) {
+            write_record(&mut entry, 1000, vec![0; 100]).await;
 
             fs::write(entry.path().join("1000.blk"), "").unwrap();
             let mut reader = entry.begin_read(1000).wait().unwrap();
@@ -355,14 +369,16 @@ pub(crate) mod tests {
         }
 
         #[rstest]
-        fn test_state(mut record: Record) {
+        #[tokio::test]
+        async fn test_state(mut record: Record) {
             record.state = 1;
             let reader = RecordReader::form_record(record);
             assert_eq!(reader.meta().state(), 1);
         }
 
         #[rstest]
-        fn test_meta_mut(record: Record) {
+        #[tokio::test]
+        async fn test_meta_mut(record: Record) {
             let mut reader = RecordReader::form_record(record);
             let meta_mut = reader.meta_mut();
             meta_mut
@@ -382,12 +398,6 @@ pub(crate) mod tests {
                 nanos: 0,
             });
             record
-        }
-
-        #[fixture]
-        fn reader(mut entry: Entry) -> RecordReader {
-            write_stub_record(&mut entry, 1000);
-            entry.begin_read(1000).wait().unwrap()
         }
     }
 

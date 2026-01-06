@@ -78,8 +78,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_begin_read_early(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000);
+    #[tokio::test]
+    async fn test_begin_read_early(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000).await;
         let writer = entry.begin_read(1000).wait();
         assert_eq!(
             writer.err(),
@@ -88,8 +89,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_begin_read_late(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000);
+    #[tokio::test]
+    async fn test_begin_read_late(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000).await;
         let reader = entry.begin_read(2000000).wait();
         assert_eq!(
             reader.err(),
@@ -137,9 +139,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_begin_read_not_found(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000);
-        write_stub_record(&mut entry, 3000000);
+    #[tokio::test]
+    async fn test_begin_read_not_found(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000).await;
+        write_stub_record(&mut entry, 3000000).await;
 
         let reader = entry.begin_read(2000000).wait();
         assert_eq!(
@@ -149,28 +152,31 @@ mod tests {
     }
 
     #[rstest]
-    fn test_begin_read_ok1(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000);
+    #[tokio::test]
+    async fn test_begin_read_ok1(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000).await;
         let mut reader = entry.begin_read(1000000).wait().unwrap();
         assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
     }
 
     #[rstest]
-    fn test_begin_read_ok2(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000);
-        write_stub_record(&mut entry, 1010000);
+    #[tokio::test]
+    async fn test_begin_read_ok2(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000).await;
+        write_stub_record(&mut entry, 1010000).await;
 
         let mut reader = entry.begin_read(1010000).wait().unwrap();
         assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
     }
 
     #[rstest]
-    fn test_begin_read_ok_in_chunks(mut entry: Entry) {
+    #[tokio::test]
+    async fn test_begin_read_ok_in_chunks(mut entry: Entry) {
         let mut data = vec![0; MAX_IO_BUFFER_SIZE + 1];
         data[0] = 1;
         data[MAX_IO_BUFFER_SIZE] = 2;
 
-        write_record(&mut entry, 1000000, data.clone());
+        write_record(&mut entry, 1000000, data.clone()).await;
 
         let mut reader = entry.begin_read(1000000).wait().unwrap();
         assert_eq!(
@@ -185,7 +191,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_search(path: PathBuf) {
+    #[tokio::test]
+    async fn test_search(path: PathBuf) {
         let mut entry = entry(
             EntrySettings {
                 max_block_size: 10000,
@@ -196,7 +203,7 @@ mod tests {
 
         let step = 100000;
         for i in 0..10 {
-            write_stub_record(&mut entry, i * step);
+            write_stub_record(&mut entry, i * step).await;
         }
 
         let reader = entry.begin_read(5 * step).wait().unwrap();

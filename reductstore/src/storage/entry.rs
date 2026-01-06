@@ -335,7 +335,6 @@ mod tests {
     use reduct_base::{conflict, Labels};
     use rstest::{fixture, rstest};
     use std::sync::Arc;
-    use std::thread::sleep;
     use std::time::Duration;
     use tempfile;
 
@@ -361,10 +360,11 @@ mod tests {
         use crate::storage::proto::{record, us_to_ts, Record};
 
         #[rstest]
-        fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
+        #[tokio::test]
+        async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
             let mut entry = entry(entry_settings.clone(), path.clone());
-            write_stub_record(&mut entry, 1);
-            write_stub_record(&mut entry, 2000010);
+            write_stub_record(&mut entry, 1).await;
+            write_stub_record(&mut entry, 2000010).await;
 
             let mut bm = entry.block_manager.write().unwrap();
             let records = bm
@@ -421,10 +421,11 @@ mod tests {
         use std::thread::sleep;
 
         #[rstest]
-        fn test_historical_query(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000);
-            write_stub_record(&mut entry, 2000000);
-            write_stub_record(&mut entry, 3000000);
+        #[tokio::test]
+        async fn test_historical_query(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await;
+            write_stub_record(&mut entry, 2000000).await;
+            write_stub_record(&mut entry, 3000000).await;
             let ttl_s = 1;
 
             let params = QueryEntry {
@@ -440,23 +441,23 @@ mod tests {
             {
                 let (rx, _) = entry.get_query_receiver(id).unwrap();
                 let rx = rx.upgrade_and_unwrap();
-                let mut rx = rx.blocking_write().unwrap();
+                let mut rx = rx.write().await.unwrap();
 
                 {
-                    let reader = rx.blocking_recv().unwrap().unwrap();
+                    let reader = rx.recv().await.unwrap().unwrap();
                     assert_eq!(reader.meta().timestamp(), 1000000);
                 }
                 {
-                    let reader = rx.blocking_recv().unwrap().unwrap();
+                    let reader = rx.recv().await.unwrap().unwrap();
                     assert_eq!(reader.meta().timestamp(), 2000000);
                 }
                 {
-                    let reader = rx.blocking_recv().unwrap().unwrap();
+                    let reader = rx.recv().await.unwrap().unwrap();
                     assert_eq!(reader.meta().timestamp(), 3000000);
                 }
 
                 assert_eq!(
-                    rx.blocking_recv().unwrap().err(),
+                    rx.recv().await.unwrap().err(),
                     Some(no_content!("No content"))
                 );
             }
@@ -470,8 +471,9 @@ mod tests {
         }
 
         #[rstest]
-        fn test_continuous_query(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000);
+        #[tokio::test]
+        async fn test_continuous_query(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await;
 
             let params = QueryEntry {
                 start: Some(0),
@@ -485,22 +487,22 @@ mod tests {
             {
                 let (rx, _) = entry.get_query_receiver(id).unwrap();
                 let rx = rx.upgrade_and_unwrap();
-                let mut rx = rx.blocking_write().unwrap();
-                let reader = rx.blocking_recv().unwrap().unwrap();
+                let mut rx = rx.write().await.unwrap();
+                let reader = rx.recv().await.unwrap().unwrap();
                 assert_eq!(reader.meta().timestamp(), 1000000);
                 assert_eq!(
-                    rx.blocking_recv().unwrap().err(),
+                    rx.recv().await.unwrap().err(),
                     Some(no_content!("No content"))
                 );
             }
 
-            write_stub_record(&mut entry, 2000000);
+            write_stub_record(&mut entry, 2000000).await;
             {
                 let (rx, _) = entry.get_query_receiver(id).unwrap();
                 let rc = rx.upgrade_and_unwrap();
-                let mut rx = rc.blocking_write().unwrap();
+                let mut rx = rc.write().await.unwrap();
                 let reader = loop {
-                    let reader = rx.blocking_recv().unwrap();
+                    let reader = rx.recv().await.unwrap();
                     match reader {
                         Ok(reader) => break reader,
                         Err(ReductError {
@@ -513,7 +515,7 @@ mod tests {
                 assert_eq!(reader.meta().timestamp(), 2000000);
             }
 
-            sleep(Duration::from_millis(1700));
+            tokio::time::sleep(Duration::from_millis(1700)).await;
             assert_eq!(
                 entry.get_query_receiver(id).err(),
                 Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request.", id))
@@ -521,8 +523,9 @@ mod tests {
         }
 
         #[rstest]
-        fn keep_finished_query_until_ttl(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000);
+        #[tokio::test]
+        async fn keep_finished_query_until_ttl(mut entry: Entry) {
+            write_stub_record(&mut entry, 1000000).await;
 
             let id = entry
                 .query(QueryEntry {
@@ -535,7 +538,7 @@ mod tests {
             let (rx, _) = entry.get_query_receiver(id).unwrap();
             let rx = rx.upgrade_and_unwrap();
             {
-                let mut rx = rx.blocking_write().unwrap();
+                let mut rx = rx.write().await.unwrap();
                 while rx.try_recv().is_ok() {}
             }
 
@@ -550,7 +553,7 @@ mod tests {
                 if finished {
                     break;
                 }
-                sleep(Duration::from_millis(10));
+                tokio::time::sleep(Duration::from_millis(10)).await;
             }
 
             Entry::remove_expired_query(
@@ -559,7 +562,7 @@ mod tests {
             );
             assert!(entry.queries.read().unwrap().contains_key(&id));
 
-            sleep(Duration::from_secs(2));
+            tokio::time::sleep(Duration::from_secs(2)).await;
             Entry::remove_expired_query(
                 Arc::clone(&entry.queries),
                 format!("{}/{}", entry.bucket_name(), entry.name()),
@@ -569,7 +572,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_info(path: PathBuf) {
+    #[tokio::test]
+    async fn test_info(path: PathBuf) {
         let mut entry = entry(
             EntrySettings {
                 max_block_size: 10000,
@@ -578,9 +582,9 @@ mod tests {
             path,
         );
 
-        write_stub_record(&mut entry, 1000000);
-        write_stub_record(&mut entry, 2000000);
-        write_stub_record(&mut entry, 3000000);
+        write_stub_record(&mut entry, 1000000).await;
+        write_stub_record(&mut entry, 2000000).await;
+        write_stub_record(&mut entry, 3000000).await;
 
         let info = entry.info().unwrap();
         assert_eq!(info.name, "entry");
@@ -607,12 +611,14 @@ mod tests {
 
         #[rstest]
         #[ignore] // experimental:  without reader protection.
-        fn test_entry_which_has_reader(mut entry: Entry) {
+        #[tokio::test]
+        async fn test_entry_which_has_reader(mut entry: Entry) {
             write_record(
                 &mut entry,
                 1000000,
                 vec![0; MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1],
-            );
+            )
+            .await;
             let _rx = entry.begin_read(1000000).wait().unwrap();
             sleep(Duration::from_millis(100));
 
@@ -657,7 +663,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_size_counting(path: PathBuf) {
+        #[tokio::test]
+        async fn test_size_counting(path: PathBuf) {
             let mut entry = Entry::try_new(
                 "entry",
                 path.clone(),
@@ -669,10 +676,10 @@ mod tests {
             )
             .unwrap();
 
-            write_stub_record(&mut entry, 1000000);
-            write_stub_record(&mut entry, 2000000);
-            write_stub_record(&mut entry, 3000000);
-            write_stub_record(&mut entry, 4000000);
+            write_stub_record(&mut entry, 1000000).await;
+            write_stub_record(&mut entry, 2000000).await;
+            write_stub_record(&mut entry, 3000000).await;
+            write_stub_record(&mut entry, 4000000).await;
 
             assert_eq!(entry.info().unwrap().block_count, 2);
             assert_eq!(entry.info().unwrap().record_count, 4);
@@ -708,7 +715,7 @@ mod tests {
         tempfile::tempdir().unwrap().keep().join("bucket")
     }
 
-    pub fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) {
+    pub async fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) {
         let mut sender = entry
             .begin_write(
                 time,
@@ -716,24 +723,29 @@ mod tests {
                 "text/plain".to_string(),
                 Labels::new(),
             )
-            .wait()
+            .await
             .unwrap();
-        sender.blocking_send(Ok(Some(Bytes::from(data)))).unwrap();
-        sender.blocking_send(Ok(None)).expect("Failed to send None");
+        sender.send(Ok(Some(Bytes::from(data)))).await.unwrap();
+        sender.send(Ok(None)).await.expect("Failed to send None");
         drop(sender);
-        sleep(Duration::from_millis(25)); // let the record be written
+        tokio::time::sleep(Duration::from_millis(25)).await; // let the record be written
     }
 
-    pub fn write_record_with_labels(entry: &mut Entry, time: u64, data: Vec<u8>, labels: Labels) {
+    pub async fn write_record_with_labels(
+        entry: &mut Entry,
+        time: u64,
+        data: Vec<u8>,
+        labels: Labels,
+    ) {
         let mut sender = entry
             .begin_write(time, data.len() as u64, "text/plain".to_string(), labels)
             .wait()
             .unwrap();
-        sender.blocking_send(Ok(Some(Bytes::from(data)))).unwrap();
-        sender.blocking_send(Ok(None)).expect("Failed to send None");
+        sender.send(Ok(Some(Bytes::from(data)))).await.unwrap();
+        sender.send(Ok(None)).await.expect("Failed to send None");
     }
 
-    pub(super) fn write_stub_record(entry: &mut Entry, time: u64) {
-        write_record(entry, time, b"0123456789".to_vec());
+    pub(super) async fn write_stub_record(entry: &mut Entry, time: u64) {
+        write_record(entry, time, b"0123456789".to_vec()).await;
     }
 }

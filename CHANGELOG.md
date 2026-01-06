@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Avoid error-level log spam when a passive node serves 503 during lock wait, [PR-1071](https://github.com/reductstore/reductstore/pull/1071)
 - Keep finished queries alive until TTL to avoid spurious `NotFound` during reads, [PR-1078](https://github.com/reductstore/reductstore/pull/1078)
 - Run query tasks on Tokio to avoid exhausting the thread pool and shrink read cache size, [PR-1098](https://github.com/reductstore/reductstore/pull/1098)
+- Abort on thread pool worker panic to fail fast on background task crashes, [PR-1098](https://github.com/reductstore/reductstore/pull/1098)
 
 ## 1.17.8 - 2025-12-15
 
