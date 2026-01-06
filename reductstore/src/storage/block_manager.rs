@@ -54,7 +54,7 @@ pub const DATA_FILE_EXT: &str = ".blk";
 pub const BLOCK_INDEX_FILE: &str = "blocks.idx";
 
 const WRITE_BLOCK_CACHE_SIZE: usize = 2; // we need 2 to avoid double sync when start a new one but not yet saved the old one when the record is written
-const READ_BLOCK_CACHE_SIZE: usize = 64;
+const READ_BLOCK_CACHE_SIZE: usize = 16;
 
 impl BlockManager {
     /// Create a new block manager.

@@ -19,6 +19,8 @@ use crate::storage::entry::entry_loader::EntryLoader;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
+pub(crate) use io::record_reader::RecordReader;
+pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
@@ -28,16 +30,14 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
-
-pub(crate) use io::record_reader::RecordReader;
-pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
+use tokio::task::JoinHandle;
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,
     options: QueryOptions,
     last_access: Instant,
     #[allow(dead_code)]
-    query_task_handle: TaskHandle<()>,
+    query_task_handle: JoinHandle<()>,
     io_settings: IoConfig,
 }
 
