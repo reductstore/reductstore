@@ -6,6 +6,7 @@ use log::{debug, error, trace};
 use std::collections::HashMap;
 use std::ops::Deref;
 use std::panic::{self, AssertUnwindSafe};
+#[cfg(not(test))]
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;

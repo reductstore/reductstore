@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
+use tokio::task::{block_in_place, JoinHandle};
 use tokio::time::sleep;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
@@ -84,7 +85,7 @@ pub(super) fn spawn_query_task(
     query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
     block_manager: Arc<RwLock<BlockManager>>,
-) -> (QueryRx, tokio::task::JoinHandle<()>) {
+) -> (QueryRx, JoinHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
     // we spawn a new task to run the query outside hierarchical task group to avoid deadlocks
@@ -114,12 +115,22 @@ pub(super) fn spawn_query_task(
                 sleep(timeout).await;
             }
 
-            let next_result = match query.write() {
-                Ok(mut guard) => guard.next(block_manager.clone()),
-                Err(_) => {
-                    warn!("Error acquiring query lock for query '{}' id={}", group, id);
-                    break;
+            // Heavy synchronous IO work must not block Tokio workers.
+            let next_result = block_in_place({
+                let group = group.clone();
+                let query = Arc::clone(&query);
+                let block_manager = Arc::clone(&block_manager);
+                move || match query.write() {
+                    Ok(mut guard) => Some(guard.next(block_manager)),
+                    Err(_) => {
+                        warn!("Error acquiring query lock for query '{}' id={}", group, id);
+                        None
+                    }
                 }
+            });
+
+            let Some(next_result) = next_result else {
+                break;
             };
 
             let query_err = next_result.as_ref().err().cloned();
@@ -226,7 +237,7 @@ mod tests {
     }
 
     #[log_test(rstest)]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_query_task_expired(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
@@ -251,7 +262,7 @@ mod tests {
     }
 
     #[log_test(rstest)]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_query_task_ok(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions::default();
         let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
@@ -273,7 +284,7 @@ mod tests {
     }
 
     #[log_test(rstest)]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_query_task_continuous_ok(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
