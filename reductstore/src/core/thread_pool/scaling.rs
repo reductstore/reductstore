@@ -5,6 +5,8 @@ use crate::core::thread_pool::{StateRef, Task, ThreadPoolState};
 use log::{debug, error, trace};
 use std::collections::HashMap;
 use std::ops::Deref;
+use std::panic::{self, AssertUnwindSafe};
+use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread::JoinHandle;
@@ -112,7 +114,13 @@ impl WorkerManager {
                             let print = format!("{:?}", task);
                             let start = Instant::now();
 
-                            (task.func)();
+                            let result =
+                                panic::catch_unwind(AssertUnwindSafe(|| (task.func)()));
+                            if let Err(err) = result {
+                                error!("Worker {id} panicked running {print:?}: {:?}", err);
+                                #[cfg(not(test))]
+                                process::abort();
+                            }
                             trace!("Executed {} at worker={} in {:?}", print, id, start.elapsed());
                         }
                         Err(_) => break,

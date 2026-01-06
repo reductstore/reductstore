@@ -10,7 +10,6 @@ mod limited;
 
 use crate::cfg::io::IoConfig;
 use crate::core::sync::RwLock;
-use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -21,9 +20,9 @@ use reduct_base::unprocessable_entity;
 use std::cmp::{max, min};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::thread::sleep;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
+use tokio::time::sleep;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
 
@@ -85,30 +84,17 @@ pub(super) fn spawn_query_task(
     query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
     block_manager: Arc<RwLock<BlockManager>>,
-) -> (QueryRx, TaskHandle<()>) {
+) -> (QueryRx, tokio::task::JoinHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
     // we spawn a new task to run the query outside hierarchical task group to avoid deadlocks
     let query = Arc::new(RwLock::new(query));
-    let handle = spawn("spawn query task", move || {
+    let handle = tokio::spawn(async move {
         trace!("Query task for '{}' id={} running", task_group, id);
-        let watcher = Arc::new(RwLock::new(QueryWatcher::new()));
+        let mut watcher = QueryWatcher::new();
 
         loop {
             let group = task_group.clone();
-
-            // the task return None if the loop must be stopped
-            // we do it for each iteration so we don't need to take the whole worker for a long query
-            let mut watcher = match watcher.write() {
-                Ok(guard) => guard,
-                Err(_) => {
-                    warn!(
-                        "Error acquiring watcher lock for query '{}' id={}",
-                        group, id
-                    );
-                    break;
-                }
-            };
 
             if tx.is_closed() {
                 debug!("Query '{}' id={} task channel closed", group, id);
@@ -125,7 +111,7 @@ pub(super) fn spawn_query_task(
                 // we increase the sleep time for the next iteration
                 // to avoid flooding the channel but still be responsive
                 let timeout = watcher.full_channel();
-                sleep(timeout);
+                sleep(timeout).await;
             }
 
             let next_result = match query.write() {
@@ -138,10 +124,10 @@ pub(super) fn spawn_query_task(
 
             let query_err = next_result.as_ref().err().cloned();
 
-            let send_result = tx.blocking_send(next_result);
+            let send_result = tx.send(next_result).await;
 
             if let Err(err) = send_result {
-                warn!("Error sending query '{}' id={} result: {}", group, id, err);
+                debug!("Error sending query '{}' id={} result: {}", group, id, err);
                 break;
             }
 
@@ -152,7 +138,7 @@ pub(super) fn spawn_query_task(
                 if err.status == NoContent && options.continuous {
                     // continuous query will never be done
                     // but we don't want to flood the channel and wait for the receiver
-                    sleep(options.ttl / 4);
+                    sleep(options.ttl / 4).await;
                     continue;
                 }
 
@@ -258,7 +244,10 @@ mod tests {
             block_manager.clone(),
         );
         assert!(rx.is_empty());
-        assert_eq!(timeout(Duration::from_millis(1000), handle).await, Ok(()));
+        assert!(timeout(Duration::from_millis(1000), handle)
+            .await
+            .unwrap()
+            .is_ok());
     }
 
     #[log_test(rstest)]
@@ -277,7 +266,10 @@ mod tests {
         assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 0);
         assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 1);
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
-        assert_eq!(timeout(Duration::from_millis(1000), handle).await, Ok(()));
+        assert!(timeout(Duration::from_millis(1000), handle)
+            .await
+            .unwrap()
+            .is_ok());
     }
 
     #[log_test(rstest)]
@@ -341,7 +333,10 @@ mod tests {
             block_manager.clone(),
         );
         drop(rx); // drop the receiver to simulate a closed channel
-        assert!(timeout(Duration::from_millis(1000), handle).await.is_ok());
+        assert!(timeout(Duration::from_millis(1000), handle)
+            .await
+            .unwrap()
+            .is_ok());
     }
 
     #[fixture]
@@ -438,7 +433,7 @@ mod tests {
         fn test_expired() {
             let watcher = QueryWatcher::new();
             assert!(!watcher.expired(Duration::from_millis(100)));
-            sleep(Duration::from_millis(100));
+            std::thread::sleep(Duration::from_millis(100));
             assert!(watcher.expired(Duration::from_millis(100)));
         }
     }

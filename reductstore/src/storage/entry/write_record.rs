@@ -178,7 +178,8 @@ mod tests {
 
     #[rstest]
     #[serial]
-    fn test_begin_write_new_block_size(path: PathBuf) {
+    #[tokio::test]
+    async fn test_begin_write_new_block_size(path: PathBuf) {
         let mut entry = entry(
             EntrySettings {
                 max_block_size: 10,
@@ -187,8 +188,8 @@ mod tests {
             path,
         );
 
-        write_stub_record(&mut entry, 1);
-        write_stub_record(&mut entry, 2000010);
+        write_stub_record(&mut entry, 1).await;
+        write_stub_record(&mut entry, 2000010).await;
         let mut bm = entry.block_manager.write().unwrap();
 
         assert_eq!(
@@ -230,7 +231,8 @@ mod tests {
 
     #[rstest]
     #[serial]
-    fn test_begin_write_new_block_records(path: PathBuf) {
+    #[tokio::test]
+    async fn test_begin_write_new_block_records(path: PathBuf) {
         let mut entry = entry(
             EntrySettings {
                 max_block_size: 10000,
@@ -239,9 +241,9 @@ mod tests {
             path,
         );
 
-        write_stub_record(&mut entry, 1);
-        write_stub_record(&mut entry, 2);
-        write_stub_record(&mut entry, 2000010);
+        write_stub_record(&mut entry, 1).await;
+        write_stub_record(&mut entry, 2).await;
+        write_stub_record(&mut entry, 2000010).await;
 
         let mut bm = entry.block_manager.write().unwrap();
         let records = bm
@@ -285,10 +287,11 @@ mod tests {
 
     #[rstest]
     #[serial]
-    fn test_begin_write_belated_record(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000);
-        write_stub_record(&mut entry, 3000000);
-        write_stub_record(&mut entry, 2000000);
+    #[tokio::test]
+    async fn test_begin_write_belated_record(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000).await;
+        write_stub_record(&mut entry, 3000000).await;
+        write_stub_record(&mut entry, 2000000).await;
 
         let mut bm = entry.block_manager.write().unwrap();
         let records = bm
@@ -315,9 +318,10 @@ mod tests {
 
     #[rstest]
     #[serial]
-    fn test_begin_write_belated_first(mut entry: Entry) {
-        write_stub_record(&mut entry, 3000000);
-        write_stub_record(&mut entry, 1000000);
+    #[tokio::test]
+    async fn test_begin_write_belated_first(mut entry: Entry) {
+        write_stub_record(&mut entry, 3000000).await;
+        write_stub_record(&mut entry, 1000000).await;
 
         let mut bm = entry.block_manager.write().unwrap();
         let records = bm
@@ -336,9 +340,10 @@ mod tests {
 
     #[rstest]
     #[serial]
-    fn test_begin_write_existing_record(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000);
-        write_stub_record(&mut entry, 2000000);
+    #[tokio::test]
+    async fn test_begin_write_existing_record(mut entry: Entry) {
+        write_stub_record(&mut entry, 1000000).await;
+        write_stub_record(&mut entry, 2000000).await;
         let err = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .wait();
@@ -352,9 +357,10 @@ mod tests {
 
     #[rstest]
     #[serial]
-    fn test_begin_write_existing_record_belated(mut entry: Entry) {
-        write_stub_record(&mut entry, 2000000);
-        write_stub_record(&mut entry, 1000000);
+    #[tokio::test]
+    async fn test_begin_write_existing_record_belated(mut entry: Entry) {
+        write_stub_record(&mut entry, 2000000).await;
+        write_stub_record(&mut entry, 1000000).await;
         let err = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .wait();

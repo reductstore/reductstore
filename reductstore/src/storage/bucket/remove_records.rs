@@ -47,8 +47,10 @@ impl Bucket {
     ///
     /// # Returns
     /// The number of records removed.
-    #[task("query and remove records")]
-    pub fn query_remove_records(self: Arc<Self>, options: QueryEntry) -> Result<u64, ReductError> {
+    pub async fn query_remove_records(
+        self: Arc<Self>,
+        options: QueryEntry,
+    ) -> Result<u64, ReductError> {
         let entries = self.entries.read()?.clone();
         let mut total_removed = 0;
 
@@ -59,7 +61,7 @@ impl Bucket {
                 }
             }
 
-            let removed_records = entry.query_remove_records(options.clone()).wait()?;
+            let removed_records = entry.query_remove_records(options.clone()).await?;
             total_removed += removed_records;
         }
 

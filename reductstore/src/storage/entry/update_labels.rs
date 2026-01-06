@@ -148,14 +148,15 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn test_update_labels(mut entry: Entry) {
+    #[tokio::test]
+    async fn test_update_labels(mut entry: Entry) {
         entry.set_settings(EntrySettings {
             max_block_records: 2,
             ..entry.settings()
         });
-        write_stub_record(&mut entry, 1);
-        write_stub_record(&mut entry, 2);
-        write_stub_record(&mut entry, 3);
+        write_stub_record(&mut entry, 1).await;
+        write_stub_record(&mut entry, 2).await;
+        write_stub_record(&mut entry, 3).await;
         let entry = Arc::new(entry);
 
         // update, remove and add labels
@@ -205,8 +206,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_update_nothing(mut entry: Entry) {
-        write_stub_record(&mut entry, 1);
+    #[tokio::test]
+    async fn test_update_nothing(mut entry: Entry) {
+        write_stub_record(&mut entry, 1).await;
         let entry = Arc::new(entry);
         let result = entry
             .update_labels(vec![UpdateLabels {
@@ -262,7 +264,7 @@ mod tests {
         ])
     }
 
-    fn write_stub_record(mut entry: &mut Entry, time: u64) {
+    async fn write_stub_record(mut entry: &mut Entry, time: u64) {
         write_record_with_labels(
             &mut entry,
             time,
@@ -271,6 +273,7 @@ mod tests {
                 (format!("a-{}", time), format!("x-{}", time)),
                 (format!("c-{}", time), format!("z-{}", time)),
             ]),
-        );
+        )
+        .await;
     }
 }
