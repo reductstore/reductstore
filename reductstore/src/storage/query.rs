@@ -22,6 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
+use tokio::task::{spawn_blocking, JoinHandle};
 use tokio::time::sleep;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
@@ -84,7 +85,7 @@ pub(super) fn spawn_query_task(
     query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
     block_manager: Arc<RwLock<BlockManager>>,
-) -> (QueryRx, tokio::task::JoinHandle<()>) {
+) -> (QueryRx, JoinHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
     // we spawn a new task to run the query outside hierarchical task group to avoid deadlocks
@@ -114,12 +115,31 @@ pub(super) fn spawn_query_task(
                 sleep(timeout).await;
             }
 
-            let next_result = match query.write() {
-                Ok(mut guard) => guard.next(block_manager.clone()),
-                Err(_) => {
-                    warn!("Error acquiring query lock for query '{}' id={}", group, id);
+            // Heavy synchronous IO work must not block Tokio workers.
+            let next_result = spawn_blocking({
+                let group = group.clone();
+                let query = Arc::clone(&query);
+                let block_manager = Arc::clone(&block_manager);
+                move || match query.write() {
+                    Ok(mut guard) => Some(guard.next(block_manager)),
+                    Err(_) => {
+                        warn!("Error acquiring query lock for query '{}' id={}", group, id);
+                        None
+                    }
+                }
+            })
+            .await;
+
+            let next_result = match next_result {
+                Ok(result) => result,
+                Err(err) => {
+                    warn!("Query '{}' id={} blocking task failed: {}", group, id, err);
                     break;
                 }
+            };
+
+            let Some(next_result) = next_result else {
+                break;
             };
 
             let query_err = next_result.as_ref().err().cloned();
@@ -226,7 +246,7 @@ mod tests {
     }
 
     #[log_test(rstest)]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_query_task_expired(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
@@ -251,7 +271,7 @@ mod tests {
     }
 
     #[log_test(rstest)]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_query_task_ok(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions::default();
         let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
@@ -273,7 +293,7 @@ mod tests {
     }
 
     #[log_test(rstest)]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_query_task_continuous_ok(block_manager: Arc<RwLock<BlockManager>>) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
@@ -333,6 +353,53 @@ mod tests {
             block_manager.clone(),
         );
         drop(rx); // drop the receiver to simulate a closed channel
+        assert!(timeout(Duration::from_millis(1000), handle)
+            .await
+            .unwrap()
+            .is_ok());
+    }
+
+    struct PanickingQuery {
+        io: IoConfig,
+    }
+
+    impl Query for PanickingQuery {
+        fn next(
+            &mut self,
+            _block_manager: Arc<RwLock<BlockManager>>,
+        ) -> Result<RecordReader, ReductError> {
+            panic!("force JoinError from spawn_blocking");
+        }
+
+        fn io_settings(&self) -> &IoConfig {
+            &self.io
+        }
+    }
+
+    #[log_test(rstest)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_task_blocking_error(block_manager: Arc<RwLock<BlockManager>>) {
+        let options = QueryOptions::default();
+        let query: Box<dyn Query + Send + Sync> = Box::new(PanickingQuery {
+            io: IoConfig::default(),
+        });
+
+        assert_eq!(
+            query.io_settings().clone(),
+            IoConfig::default(),
+            "for code coverage"
+        );
+
+        let (mut rx, handle) = spawn_query_task(
+            42,
+            "bucket/entry".to_string(),
+            query,
+            options,
+            block_manager,
+        );
+
+        // spawn_blocking panic should close the channel without hanging the task
+        assert!(rx.recv().await.is_none());
         assert!(timeout(Duration::from_millis(1000), handle)
             .await
             .unwrap()

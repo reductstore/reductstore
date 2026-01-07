@@ -210,6 +210,35 @@ async fn fetch_and_response_batched_records(
     }
 
     let start_ts = start_ts.unwrap_or_default();
+    // Align entry indices with the chronological order of the first record per entry
+    let mut first_ts_by_entry: HashMap<usize, u64> = HashMap::new();
+    for record in &records {
+        first_ts_by_entry
+            .entry(record.entry_index)
+            .and_modify(|ts| *ts = (*ts).min(record.timestamp))
+            .or_insert(record.timestamp);
+    }
+
+    let mut ordered_entries: Vec<(usize, String)> = entries.into_iter().enumerate().collect();
+    ordered_entries.sort_by_key(|(idx, _)| {
+        (
+            first_ts_by_entry.get(idx).copied().unwrap_or(u64::MAX),
+            *idx,
+        )
+    });
+
+    let mut remapped_indices = HashMap::new();
+    let mut reordered_entries = Vec::with_capacity(ordered_entries.len());
+    for (new_idx, (old_idx, entry)) in ordered_entries.into_iter().enumerate() {
+        remapped_indices.insert(old_idx, new_idx);
+        reordered_entries.push(entry);
+    }
+    entries = reordered_entries;
+
+    for record in &mut records {
+        record.entry_index = *remapped_indices.get(&record.entry_index).unwrap();
+    }
+
     records.sort_by_key(|record| (record.entry_index, record.timestamp));
 
     let mut resp_headers = http::HeaderMap::new();
@@ -354,6 +383,94 @@ mod tests {
         assert!(resp_headers.contains_key("x-reduct-1-10"));
         assert_eq!(resp_headers["content-length"], "5");
         assert_eq!(resp_headers["x-reduct-last"], "true");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn sorts_entries_by_first_timestamp(
+        #[future] keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        for (entry, ts, data) in [
+            ("late-entry", 1010u64, "aa"),
+            ("early-entry", 1000u64, "bbb"),
+        ] {
+            let mut writer = bucket
+                .begin_write(
+                    entry,
+                    ts,
+                    data.len() as u64,
+                    "text/plain".to_string(),
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(Bytes::from(data.to_string()))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["late-entry".into(), "early-entry".into()]),
+            start: Some(1000),
+            ..Default::default()
+        };
+        let path = Path(path_to_bucket_1.0.clone());
+        let response = query(
+            State(keeper.clone()),
+            headers.clone(),
+            path,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
+        );
+
+        let response = read_batched_records(
+            State(keeper.clone()),
+            headers,
+            path_to_bucket_1,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        let resp_headers = response.headers().clone();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+
+        assert_eq!(resp_headers["x-reduct-entries"], "early-entry,late-entry");
+        assert!(resp_headers["x-reduct-0-0"]
+            .to_str()
+            .unwrap()
+            .starts_with("3,"));
+        assert!(resp_headers["x-reduct-1-10"]
+            .to_str()
+            .unwrap()
+            .starts_with("2,"));
+        assert_eq!(resp_headers["content-length"], "5");
+        assert_eq!(resp_headers["x-reduct-start-ts"], "1000");
+        assert_eq!(resp_headers["x-reduct-last"], "true");
+        assert_eq!(body, Bytes::from("bbbaa"));
     }
 
     #[rstest]
