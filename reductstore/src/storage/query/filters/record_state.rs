@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::proto::record::State;
+use log::info;
 use reduct_base::error::ReductError;
 
 use crate::storage::query::filters::{FilterRecord, RecordFilter};
@@ -32,6 +33,7 @@ impl<R: FilterRecord> RecordFilter<R> for RecordStateFilter {
         if result {
             Ok(Some(vec![record]))
         } else {
+            info!("RecordStateFilter: record ts {} filtered out due to state mismatch (expected: {:?}, got: {})", record.timestamp(), self.state, record.state());
             Ok(Some(vec![]))
         }
     }

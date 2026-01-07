@@ -30,7 +30,18 @@ impl Entry {
                 let block = block_ref.read()?;
                 let record = block
                     .get_record(time)
-                    .ok_or_else(|| not_found!("No record with timestamp {}", time))?
+                    .ok_or_else(|| {
+                        let keys: Vec<u64> = block.record_index().keys().cloned().collect();
+                        debug!(
+                            "Record {} not found in block {}/{}/{}; available range: {:?}",
+                            time,
+                            bm.bucket_name(),
+                            bm.entry_name(),
+                            block.block_id(),
+                            keys
+                        );
+                        not_found!("No record with timestamp {}", time)
+                    })?
                     .clone();
                 (block_ref.clone(), record)
             };
