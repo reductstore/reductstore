@@ -384,6 +384,12 @@ mod tests {
             io: IoConfig::default(),
         });
 
+        assert_eq!(
+            query.io_settings().clone(),
+            IoConfig::default(),
+            "for code coverage"
+        );
+
         let (mut rx, handle) = spawn_query_task(
             42,
             "bucket/entry".to_string(),
