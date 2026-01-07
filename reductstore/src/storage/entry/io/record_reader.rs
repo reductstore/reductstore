@@ -284,11 +284,12 @@ pub(crate) mod tests {
         use crate::storage::entry::Entry;
         use prost_wkt_types::Timestamp;
         use std::fs;
+        use std::sync::Arc;
 
         #[rstest]
         #[tokio::test]
-        async fn test_read_chunk(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000).await;
+        async fn test_read_chunk(entry: Arc<Entry>) {
+            write_stub_record(&entry, 1000).await;
             let mut reader = entry.begin_read(1000).wait().unwrap();
             assert_eq!(
                 reader.read_chunk().unwrap().unwrap(),
@@ -298,8 +299,8 @@ pub(crate) mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_read(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000).await;
+        async fn test_read(entry: Arc<Entry>) {
+            write_stub_record(&entry, 1000).await;
             let mut reader = entry.begin_read(1000).wait().unwrap();
             let mut buf = vec![0; 4];
             let read = reader.read(&mut buf).unwrap();
@@ -325,13 +326,13 @@ pub(crate) mod tests {
         #[case(SeekFrom::Current(2), 2, 4, b"2345")]
         #[tokio::test]
         async fn test_seek(
-            mut entry: Entry,
+            entry: Arc<Entry>,
             #[case] seek_from: SeekFrom,
             #[case] expected_pos: u64,
             #[case] read_size: usize,
             #[case] expected_data: &[u8],
         ) {
-            write_stub_record(&mut entry, 1000).await;
+            write_stub_record(&entry, 1000).await;
             let mut reader = entry.begin_read(1000).wait().unwrap();
             let new_pos = reader.seek(seek_from).unwrap();
             assert_eq!(new_pos, expected_pos);
@@ -346,8 +347,8 @@ pub(crate) mod tests {
         #[case(SeekFrom::End(1))]
         #[case(SeekFrom::Current(-1))]
         #[tokio::test]
-        async fn test_seek_wrong(mut entry: Entry, #[case] seek_from: SeekFrom) {
-            write_stub_record(&mut entry, 1000).await;
+        async fn test_seek_wrong(entry: Arc<Entry>, #[case] seek_from: SeekFrom) {
+            write_stub_record(&entry, 1000).await;
             let mut reader = entry.begin_read(1000).wait().unwrap();
             let err = reader.seek(seek_from).err().unwrap();
             assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
@@ -356,8 +357,8 @@ pub(crate) mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_read_with_error(mut entry: Entry) {
-            write_record(&mut entry, 1000, vec![0; 100]).await;
+        async fn test_read_with_error(entry: Arc<Entry>) {
+            write_record(&entry, 1000, vec![0; 100]).await;
 
             fs::write(entry.path().join("1000.blk"), "").unwrap();
             let mut reader = entry.begin_read(1000).wait().unwrap();

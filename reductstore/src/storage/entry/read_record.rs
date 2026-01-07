@@ -77,10 +77,11 @@ mod tests {
     use reduct_base::Labels;
     use rstest::rstest;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_begin_read_empty(entry: Entry) {
+    async fn test_begin_read_empty(entry: Arc<Entry>) {
         let writer = entry.begin_read(1000).await;
         assert_eq!(
             writer.err(),
@@ -90,8 +91,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_begin_read_early(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await;
+    async fn test_begin_read_early(entry: Arc<Entry>) {
+        write_stub_record(&entry, 1000000).await;
         let writer = entry.begin_read(1000).wait();
         assert_eq!(
             writer.err(),
@@ -101,8 +102,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_begin_read_late(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await;
+    async fn test_begin_read_late(entry: Arc<Entry>) {
+        write_stub_record(&entry, 1000000).await;
         let reader = entry.begin_read(2000000).wait();
         assert_eq!(
             reader.err(),
@@ -111,7 +112,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_begin_read_broken(entry: Entry) {
+    fn test_begin_read_broken(entry: Arc<Entry>) {
         let mut sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .wait()
@@ -131,7 +132,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_begin_read_still_written(entry: Entry) {
+    fn test_begin_read_still_written(entry: Arc<Entry>) {
         let mut sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .wait()
@@ -151,9 +152,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_begin_read_not_found(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await;
-        write_stub_record(&mut entry, 3000000).await;
+    async fn test_begin_read_not_found(entry: Arc<Entry>) {
+        write_stub_record(&entry, 1000000).await;
+        write_stub_record(&entry, 3000000).await;
 
         let reader = entry.begin_read(2000000).wait();
         assert_eq!(
@@ -164,17 +165,17 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_begin_read_ok1(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await;
+    async fn test_begin_read_ok1(entry: Arc<Entry>) {
+        write_stub_record(&entry, 1000000).await;
         let mut reader = entry.begin_read(1000000).wait().unwrap();
         assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_begin_read_ok2(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await;
-        write_stub_record(&mut entry, 1010000).await;
+    async fn test_begin_read_ok2(entry: Arc<Entry>) {
+        write_stub_record(&entry, 1000000).await;
+        write_stub_record(&entry, 1010000).await;
 
         let mut reader = entry.begin_read(1010000).wait().unwrap();
         assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
@@ -182,12 +183,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_begin_read_ok_in_chunks(mut entry: Entry) {
+    async fn test_begin_read_ok_in_chunks(entry: Arc<Entry>) {
         let mut data = vec![0; MAX_IO_BUFFER_SIZE + 1];
         data[0] = 1;
         data[MAX_IO_BUFFER_SIZE] = 2;
 
-        write_record(&mut entry, 1000000, data.clone()).await;
+        write_record(&entry, 1000000, data.clone()).await;
 
         let mut reader = entry.begin_read(1000000).wait().unwrap();
         assert_eq!(
@@ -204,7 +205,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_search(path: PathBuf) {
-        let mut entry = entry(
+        let entry = entry(
             EntrySettings {
                 max_block_size: 10000,
                 max_block_records: 5,
@@ -214,7 +215,7 @@ mod tests {
 
         let step = 100000;
         for i in 0..10 {
-            write_stub_record(&mut entry, i * step).await;
+            write_stub_record(&entry, i * step).await;
         }
 
         let reader = entry.begin_read(5 * step).wait().unwrap();

@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Abort on thread pool worker panic to fail fast on background task crashes, [PR-1098](https://github.com/reductstore/reductstore/pull/1098)
 - Prevent query tasks from blocking Tokio workers and surface join failures, [PR-1099](https://github.com/reductstore/reductstore/pull/1099)
 - Fix multi-entry read aggregation returning only one entry and hanging shutdown, [PR-1099](https://github.com/reductstore/reductstore/pull/1099)
+- Fix entry write task panic and update tests, [PR-1100](https://github.com/reductstore/reductstore/pull/1100)
 
 ## 1.17.8 - 2025-12-15
 

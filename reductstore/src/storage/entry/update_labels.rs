@@ -146,18 +146,18 @@ mod tests {
     use crate::storage::entry::EntrySettings;
     use reduct_base::io::ReadRecord;
     use rstest::rstest;
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_labels(mut entry: Entry) {
+    async fn test_update_labels(entry: Arc<Entry>) {
         entry.set_settings(EntrySettings {
             max_block_records: 2,
             ..entry.settings()
         });
-        write_stub_record(&mut entry, 1).await;
-        write_stub_record(&mut entry, 2).await;
-        write_stub_record(&mut entry, 3).await;
-        let entry = Arc::new(entry);
+        write_stub_record(&entry, 1).await;
+        write_stub_record(&entry, 2).await;
+        write_stub_record(&entry, 3).await;
 
         // update, remove and add labels
         let result = entry
@@ -207,9 +207,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_nothing(mut entry: Entry) {
-        write_stub_record(&mut entry, 1).await;
-        let entry = Arc::new(entry);
+    async fn test_update_nothing(entry: Arc<Entry>) {
+        write_stub_record(&entry, 1).await;
         let result = entry
             .update_labels(vec![UpdateLabels {
                 time: 1,
@@ -264,9 +263,9 @@ mod tests {
         ])
     }
 
-    async fn write_stub_record(mut entry: &mut Entry, time: u64) {
+    async fn write_stub_record(entry: &Arc<Entry>, time: u64) {
         write_record_with_labels(
-            &mut entry,
+            entry,
             time,
             vec![],
             Labels::from_iter(vec![

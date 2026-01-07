@@ -175,7 +175,10 @@ mod tests {
             from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
 
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
-        let records = collect_records(rx).await;
+        let mut records = collect_records(rx).await;
+        records.sort_by(|(entry_a, ts_a), (entry_b, ts_b)| {
+            ts_a.cmp(ts_b).then_with(|| entry_a.cmp(entry_b))
+        });
 
         assert_eq!(
             records,

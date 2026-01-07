@@ -413,9 +413,9 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
-        let mut entry = entry(entry_settings.clone(), path.clone());
-        write_stub_record(&mut entry, 1).await;
-        write_stub_record(&mut entry, 2000010).await;
+        let entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&entry, 1).await;
+        write_stub_record(&entry, 2000010).await;
 
         let mut bm = entry.block_manager.write().unwrap();
         let records = bm
@@ -453,7 +453,7 @@ mod tests {
 
         bm.save_cache_on_disk().unwrap();
         let entry = EntryLoader::restore_entry(
-            path.join(entry.name),
+            path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
         )
@@ -586,9 +586,9 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_empty_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let mut entry = entry(entry_settings.clone(), path.clone());
-        write_stub_record(&mut entry, 1).await;
-        write_stub_record(&mut entry, 2000010).await;
+        let entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&entry, 1).await;
+        write_stub_record(&entry, 2000010).await;
         entry.compact().unwrap(); // sync WALs
 
         {
@@ -604,7 +604,7 @@ mod tests {
         }
 
         let entry = EntryLoader::restore_entry(
-            path.join(entry.name),
+            path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
         )
@@ -617,9 +617,9 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_create_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let mut entry = entry(entry_settings.clone(), path.clone());
-        write_stub_record(&mut entry, 1).await;
-        write_stub_record(&mut entry, 2000010).await;
+        let entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&entry, 1).await;
+        write_stub_record(&entry, 2000010).await;
         entry
             .block_manager
             .write()
@@ -627,9 +627,13 @@ mod tests {
             .save_cache_on_disk()
             .unwrap();
 
-        EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default().into())
-            .unwrap()
-            .unwrap();
+        EntryLoader::restore_entry(
+            path.join(entry.name()),
+            entry_settings,
+            Cfg::default().into(),
+        )
+        .unwrap()
+        .unwrap();
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
         assert_eq!(block_index_path.exists(), true, "should create block index");
@@ -646,9 +650,9 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_check_integrity_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let mut entry = entry(entry_settings.clone(), path.clone());
-        write_stub_record(&mut entry, 1).await;
-        write_stub_record(&mut entry, 2000010).await;
+        let entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&entry, 1).await;
+        write_stub_record(&entry, 2000010).await;
         let _ = entry.block_manager.write().unwrap().save_cache_on_disk();
 
         EntryLoader::restore_entry(
@@ -672,8 +676,12 @@ mod tests {
         file.write_all(&block_index.encode_to_vec()).unwrap();
         file.sync_all().unwrap();
 
-        EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default().into())
-            .unwrap();
+        EntryLoader::restore_entry(
+            path.join(entry.name()),
+            entry_settings,
+            Cfg::default().into(),
+        )
+        .unwrap();
 
         let buf = fs::read(block_index_path).unwrap();
         let block_index = BlockIndexProto::decode(Bytes::from(buf)).unwrap();
@@ -686,8 +694,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_missed_descriptor(path: PathBuf, entry_settings: EntrySettings) {
-        let mut entry = entry(entry_settings.clone(), path.clone());
-        write_stub_record(&mut entry, 1).await;
+        let entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&entry, 1).await;
         let _ = entry.block_manager.write().unwrap().save_cache_on_disk();
 
         let entry = EntryLoader::restore_entry(
@@ -705,8 +713,12 @@ mod tests {
         fs::remove_file(path.join("entry/1.meta")).unwrap();
         fs::remove_file(path.join("entry/1.blk")).unwrap();
 
-        EntryLoader::restore_entry(path.join(entry.name), entry_settings, Cfg::default().into())
-            .unwrap();
+        EntryLoader::restore_entry(
+            path.join(entry.name()),
+            entry_settings,
+            Cfg::default().into(),
+        )
+        .unwrap();
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
         let buf = fs::read(block_index_path).unwrap();
@@ -720,8 +732,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_recovery_with_orphan_block(path: PathBuf, entry_settings: EntrySettings) {
-        let mut entry = entry(entry_settings.clone(), path.clone());
-        write_stub_record(&mut entry, 1).await;
+        let entry = entry(entry_settings.clone(), path.clone());
+        write_stub_record(&entry, 1).await;
         entry.compact().unwrap();
 
         // Create a new block but don't add it to the index
@@ -755,7 +767,7 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_new_block(entry_fix: (Entry, PathBuf), record2: Record) {
+        fn test_new_block(entry_fix: (Arc<Entry>, PathBuf), record2: Record) {
             let (entry, path) = entry_fix;
             let mut wal = create_wal(path.clone());
             // Block #3 was created
@@ -792,7 +804,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_update_block(entry_fix: (Entry, PathBuf), mut record2: Record) {
+        fn test_update_block(entry_fix: (Arc<Entry>, PathBuf), mut record2: Record) {
             let (entry, path) = entry_fix;
             let mut wal = create_wal(path.clone());
 
@@ -822,7 +834,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_record(entry_fix: (Entry, PathBuf)) {
+        fn test_remove_record(entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix;
             let mut wal = create_wal(path.clone());
 
@@ -841,7 +853,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_block(entry_fix: (Entry, PathBuf)) {
+        fn test_remove_block(entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix;
             let mut wal = create_wal(path.clone());
 
@@ -856,7 +868,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_corrupted_wal(entry_fix: (Entry, PathBuf)) {
+        fn test_corrupted_wal(entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix;
 
             fs::write(path.join("wal/1.wal"), b"bad data").unwrap();
@@ -870,7 +882,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_recovery_without_index(entry_fix: (Entry, PathBuf)) {
+        fn test_recovery_without_index(entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix;
             let mut wal = create_wal(path.clone());
 
@@ -918,9 +930,9 @@ mod tests {
         }
 
         #[fixture]
-        fn entry_fix(path: PathBuf, entry_settings: EntrySettings) -> (Entry, PathBuf) {
+        fn entry_fix(path: PathBuf, entry_settings: EntrySettings) -> (Arc<Entry>, PathBuf) {
             let entry = entry(entry_settings.clone(), path.clone());
-            let name = entry.name.clone();
+            let name = entry.name().to_string();
             {
                 let mut block_manager = entry.block_manager.write().unwrap();
 
