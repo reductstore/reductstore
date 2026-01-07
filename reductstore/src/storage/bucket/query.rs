@@ -285,6 +285,7 @@ mod tests {
     use rstest::rstest;
     use std::sync::Arc;
     use std::time::Duration;
+    use tokio::time::timeout;
 
     async fn collect_records(rx: Weak<AsyncRwLock<QueryRx>>) -> Vec<(String, u64)> {
         let rx = rx.upgrade().unwrap();
@@ -437,5 +438,19 @@ mod tests {
                 id
             )
         );
+    }
+
+    #[tokio::test]
+    async fn aggregate_stops_when_channel_closed() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+
+        // Should exit immediately because the receiver is gone.
+        assert!(timeout(
+            Duration::from_millis(100),
+            Bucket::aggregate(HashMap::new(), tx)
+        )
+        .await
+        .is_ok());
     }
 }
