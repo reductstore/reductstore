@@ -359,6 +359,47 @@ mod tests {
             .is_ok());
     }
 
+    struct PanickingQuery {
+        io: IoConfig,
+    }
+
+    impl Query for PanickingQuery {
+        fn next(
+            &mut self,
+            _block_manager: Arc<RwLock<BlockManager>>,
+        ) -> Result<RecordReader, ReductError> {
+            panic!("force JoinError from spawn_blocking");
+        }
+
+        fn io_settings(&self) -> &IoConfig {
+            &self.io
+        }
+    }
+
+    #[log_test(rstest)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_task_blocking_error(block_manager: Arc<RwLock<BlockManager>>) {
+        let options = QueryOptions::default();
+        let query: Box<dyn Query + Send + Sync> = Box::new(PanickingQuery {
+            io: IoConfig::default(),
+        });
+
+        let (mut rx, handle) = spawn_query_task(
+            42,
+            "bucket/entry".to_string(),
+            query,
+            options,
+            block_manager,
+        );
+
+        // spawn_blocking panic should close the channel without hanging the task
+        assert!(rx.recv().await.is_none());
+        assert!(timeout(Duration::from_millis(1000), handle)
+            .await
+            .unwrap()
+            .is_ok());
+    }
+
     #[fixture]
     fn block_manager() -> Arc<RwLock<BlockManager>> {
         let path = tempfile::tempdir()
