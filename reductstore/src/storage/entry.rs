@@ -342,7 +342,7 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn mark_deleting_returns_conflict_when_already_deleting(entry: Entry) {
+        fn mark_deleting_returns_conflict_when_already_deleting(entry: Arc<Entry>) {
             entry.mark_deleting().unwrap();
             assert_eq!(
                 entry.mark_deleting(),
@@ -362,9 +362,9 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
-            let mut entry = entry(entry_settings.clone(), path.clone());
-            write_stub_record(&mut entry, 1).await;
-            write_stub_record(&mut entry, 2000010).await;
+            let entry = entry(entry_settings.clone(), path.clone());
+            write_stub_record(&entry, 1).await;
+            write_stub_record(&entry, 2000010).await;
 
             let mut bm = entry.block_manager.write().unwrap();
             let records = bm
@@ -400,11 +400,14 @@ mod tests {
             );
 
             bm.save_cache_on_disk().unwrap();
-            let entry =
-                Entry::restore(path.join(entry.name), entry_settings, Cfg::default().into())
-                    .wait()
-                    .unwrap()
-                    .unwrap();
+            let entry = Entry::restore(
+                path.join(entry.name()),
+                entry_settings,
+                Cfg::default().into(),
+            )
+            .wait()
+            .unwrap()
+            .unwrap();
             let info = entry.info().unwrap();
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
@@ -422,10 +425,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_historical_query(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await;
-            write_stub_record(&mut entry, 2000000).await;
-            write_stub_record(&mut entry, 3000000).await;
+        async fn test_historical_query(entry: Arc<Entry>) {
+            write_stub_record(&entry, 1000000).await;
+            write_stub_record(&entry, 2000000).await;
+            write_stub_record(&entry, 3000000).await;
             let ttl_s = 1;
 
             let params = QueryEntry {
@@ -472,8 +475,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_continuous_query(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await;
+        async fn test_continuous_query(entry: Arc<Entry>) {
+            write_stub_record(&entry, 1000000).await;
 
             let params = QueryEntry {
                 start: Some(0),
@@ -496,7 +499,7 @@ mod tests {
                 );
             }
 
-            write_stub_record(&mut entry, 2000000).await;
+            write_stub_record(&entry, 2000000).await;
             {
                 let (rx, _) = entry.get_query_receiver(id).unwrap();
                 let rc = rx.upgrade_and_unwrap();
@@ -524,8 +527,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn keep_finished_query_until_ttl(mut entry: Entry) {
-            write_stub_record(&mut entry, 1000000).await;
+        async fn keep_finished_query_until_ttl(entry: Arc<Entry>) {
+            write_stub_record(&entry, 1000000).await;
 
             let id = entry
                 .query(QueryEntry {
@@ -574,7 +577,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_info(path: PathBuf) {
-        let mut entry = entry(
+        let entry = entry(
             EntrySettings {
                 max_block_size: 10000,
                 max_block_records: 10000,
@@ -582,9 +585,9 @@ mod tests {
             path,
         );
 
-        write_stub_record(&mut entry, 1000000).await;
-        write_stub_record(&mut entry, 2000000).await;
-        write_stub_record(&mut entry, 3000000).await;
+        write_stub_record(&entry, 1000000).await;
+        write_stub_record(&entry, 2000000).await;
+        write_stub_record(&entry, 3000000).await;
 
         let info = entry.info().unwrap();
         assert_eq!(info.name, "entry");
@@ -602,7 +605,7 @@ mod tests {
         use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 
         #[rstest]
-        fn test_empty_entry(entry: Entry) {
+        fn test_empty_entry(entry: Arc<Entry>) {
             assert_eq!(
                 entry.try_remove_oldest_block().wait(),
                 Err(internal_server_error!("No block to remove"))
@@ -612,9 +615,9 @@ mod tests {
         #[rstest]
         #[ignore] // experimental:  without reader protection.
         #[tokio::test]
-        async fn test_entry_which_has_reader(mut entry: Entry) {
+        async fn test_entry_which_has_reader(entry: Arc<Entry>) {
             write_record(
-                &mut entry,
+                &entry,
                 1000000,
                 vec![0; MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1],
             )
@@ -636,7 +639,7 @@ mod tests {
 
         #[rstest]
         #[ignore] // experimental:  without writer protection.
-        fn test_entry_which_has_writer(entry: Entry) {
+        fn test_entry_which_has_writer(entry: Arc<Entry>) {
             let mut sender = entry
                 .begin_write(
                     1000000,
@@ -665,21 +668,23 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_size_counting(path: PathBuf) {
-            let mut entry = Entry::try_new(
-                "entry",
-                path.clone(),
-                EntrySettings {
-                    max_block_size: 100000,
-                    max_block_records: 2,
-                },
-                Cfg::default().into(),
-            )
-            .unwrap();
+            let entry = Arc::new(
+                Entry::try_new(
+                    "entry",
+                    path.clone(),
+                    EntrySettings {
+                        max_block_size: 100000,
+                        max_block_records: 2,
+                    },
+                    Cfg::default().into(),
+                )
+                .unwrap(),
+            );
 
-            write_stub_record(&mut entry, 1000000).await;
-            write_stub_record(&mut entry, 2000000).await;
-            write_stub_record(&mut entry, 3000000).await;
-            write_stub_record(&mut entry, 4000000).await;
+            write_stub_record(&entry, 1000000).await;
+            write_stub_record(&entry, 2000000).await;
+            write_stub_record(&entry, 3000000).await;
+            write_stub_record(&entry, 4000000).await;
 
             assert_eq!(entry.info().unwrap().block_count, 2);
             assert_eq!(entry.info().unwrap().record_count, 4);
@@ -706,8 +711,10 @@ mod tests {
     }
 
     #[fixture]
-    pub(super) fn entry(entry_settings: EntrySettings, path: PathBuf) -> Entry {
-        Entry::try_new("entry", path.clone(), entry_settings, Cfg::default().into()).unwrap()
+    pub(super) fn entry(entry_settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
+        Arc::new(
+            Entry::try_new("entry", path.clone(), entry_settings, Cfg::default().into()).unwrap(),
+        )
     }
 
     #[fixture]
@@ -715,7 +722,7 @@ mod tests {
         tempfile::tempdir().unwrap().keep().join("bucket")
     }
 
-    pub async fn write_record(entry: &mut Entry, time: u64, data: Vec<u8>) {
+    pub async fn write_record(entry: &Arc<Entry>, time: u64, data: Vec<u8>) {
         let mut sender = entry
             .begin_write(
                 time,
@@ -732,7 +739,7 @@ mod tests {
     }
 
     pub async fn write_record_with_labels(
-        entry: &mut Entry,
+        entry: &Arc<Entry>,
         time: u64,
         data: Vec<u8>,
         labels: Labels,
@@ -745,7 +752,7 @@ mod tests {
         sender.send(Ok(None)).await.expect("Failed to send None");
     }
 
-    pub(super) async fn write_stub_record(entry: &mut Entry, time: u64) {
+    pub(super) async fn write_stub_record(entry: &Arc<Entry>, time: u64) {
         write_record(entry, time, b"0123456789".to_vec()).await;
     }
 }

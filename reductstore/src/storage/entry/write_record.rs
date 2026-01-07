@@ -1,7 +1,6 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::block_manager::BlockRef;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
@@ -178,12 +177,13 @@ mod tests {
     use rstest::rstest;
     use serial_test::serial;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[rstest]
     #[serial]
     #[tokio::test]
     async fn test_begin_write_new_block_size(path: PathBuf) {
-        let mut entry = entry(
+        let entry = entry(
             EntrySettings {
                 max_block_size: 10,
                 max_block_records: 10000,
@@ -191,8 +191,8 @@ mod tests {
             path,
         );
 
-        write_stub_record(&mut entry, 1).await;
-        write_stub_record(&mut entry, 2000010).await;
+        write_stub_record(&entry, 1).await;
+        write_stub_record(&entry, 2000010).await;
         let mut bm = entry.block_manager.write().unwrap();
 
         assert_eq!(
@@ -236,7 +236,7 @@ mod tests {
     #[serial]
     #[tokio::test]
     async fn test_begin_write_new_block_records(path: PathBuf) {
-        let mut entry = entry(
+        let entry = entry(
             EntrySettings {
                 max_block_size: 10000,
                 max_block_records: 1,
@@ -244,9 +244,9 @@ mod tests {
             path,
         );
 
-        write_stub_record(&mut entry, 1).await;
-        write_stub_record(&mut entry, 2).await;
-        write_stub_record(&mut entry, 2000010).await;
+        write_stub_record(&entry, 1).await;
+        write_stub_record(&entry, 2).await;
+        write_stub_record(&entry, 2000010).await;
 
         let mut bm = entry.block_manager.write().unwrap();
         let records = bm
@@ -291,10 +291,10 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_belated_record(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await;
-        write_stub_record(&mut entry, 3000000).await;
-        write_stub_record(&mut entry, 2000000).await;
+    async fn test_begin_write_belated_record(entry: Arc<Entry>) {
+        write_stub_record(&entry, 1000000).await;
+        write_stub_record(&entry, 3000000).await;
+        write_stub_record(&entry, 2000000).await;
 
         let mut bm = entry.block_manager.write().unwrap();
         let records = bm
@@ -322,9 +322,9 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_belated_first(mut entry: Entry) {
-        write_stub_record(&mut entry, 3000000).await;
-        write_stub_record(&mut entry, 1000000).await;
+    async fn test_begin_write_belated_first(entry: Arc<Entry>) {
+        write_stub_record(&entry, 3000000).await;
+        write_stub_record(&entry, 1000000).await;
 
         let mut bm = entry.block_manager.write().unwrap();
         let records = bm
@@ -344,9 +344,9 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_existing_record(mut entry: Entry) {
-        write_stub_record(&mut entry, 1000000).await;
-        write_stub_record(&mut entry, 2000000).await;
+    async fn test_begin_write_existing_record(entry: Arc<Entry>) {
+        write_stub_record(&entry, 1000000).await;
+        write_stub_record(&entry, 2000000).await;
         let err = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .wait();
@@ -361,9 +361,9 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_existing_record_belated(mut entry: Entry) {
-        write_stub_record(&mut entry, 2000000).await;
-        write_stub_record(&mut entry, 1000000).await;
+    async fn test_begin_write_existing_record_belated(entry: Arc<Entry>) {
+        write_stub_record(&entry, 2000000).await;
+        write_stub_record(&entry, 1000000).await;
         let err = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .wait();
@@ -378,7 +378,7 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_override_errored(entry: Entry) {
+    async fn test_begin_override_errored(entry: Arc<Entry>) {
         let mut sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .await
@@ -420,7 +420,7 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_not_override_if_different_size(entry: Entry) {
+    async fn test_begin_not_override_if_different_size(entry: Arc<Entry>) {
         let mut sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .await
@@ -447,13 +447,13 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_belated_record_readable_after_rotation(mut entry: Entry) {
+    async fn test_belated_record_readable_after_rotation(entry: Arc<Entry>) {
         // Fill the first block
-        write_stub_record(&mut entry, 1000000).await;
+        write_stub_record(&entry, 1000000).await;
         // Rotate to a new block
-        write_stub_record(&mut entry, 3000000).await;
+        write_stub_record(&entry, 3000000).await;
         // Belated write into the first block
-        write_stub_record(&mut entry, 2000000).await;
+        write_stub_record(&entry, 2000000).await;
 
         // We must be able to read the belated record back
         let reader = entry.begin_read(2000000).wait();

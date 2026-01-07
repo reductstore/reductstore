@@ -234,16 +234,16 @@ mod tests {
 
     // TODO: replace with multiple add/remove on RwLock
     #[fixture]
-    async fn entry_with_data(mut entry: Entry) -> Arc<Entry> {
+    async fn entry_with_data(entry: Arc<Entry>) -> Arc<Entry> {
         entry.set_settings(EntrySettings {
             max_block_records: 2,
             ..entry.settings()
         });
 
-        write_stub_record(&mut entry, 1).await;
-        write_stub_record(&mut entry, 2).await;
-        write_stub_record(&mut entry, 3).await;
-        write_stub_record(&mut entry, 4).await;
-        Arc::new(entry)
+        write_stub_record(&entry, 1).await;
+        write_stub_record(&entry, 2).await;
+        write_stub_record(&entry, 3).await;
+        write_stub_record(&entry, 4).await;
+        entry
     }
 }
