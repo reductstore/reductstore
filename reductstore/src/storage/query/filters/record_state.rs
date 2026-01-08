@@ -33,7 +33,6 @@ impl<R: FilterRecord> RecordFilter<R> for RecordStateFilter {
         if result {
             Ok(Some(vec![record]))
         } else {
-            info!("RecordStateFilter: record ts {} filtered out due to state mismatch (expected: {:?}, got: {})", record.timestamp(), self.state, record.state());
             Ok(Some(vec![]))
         }
     }
