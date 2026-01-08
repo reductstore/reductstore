@@ -30,18 +30,14 @@ It guarantees that your data will not overflow your hard disk and batches record
 
 ## Features
 
-- HTTP(S) API
 - Storing and accessing unstructured data as time series
-- No limit for maximum size of objects
 - Labeling data for annotation and filtering
 - JSON-based query language for filtering data
-- Append-only data replication
-- Batching records in an HTTP response for write and read operations
+- Data replication
 - Real-time FIFO bucket quota based on size to avoid disk space shortage
-- Embedded Web Console
-- Token authorization for managing data access
 - Native support for S3-compatible storage backends (MinIO, AWS S3, etc.)
-- Query Links for easy data sharing
+- Readonly replicas for horizontal scaling of read operations
+- Primary\Secondary mode for high availability
 
 ## Get Started
 
