@@ -429,17 +429,15 @@ jobs:
     needs:
       - build
       - unit_tests
-    strategy:
-      matrix:
-        branch: [ "main", "latest" ]
     timeout-minutes: 5
+    if: github.ref == 'refs/heads/main'
     env:
       rs_api_token: token
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/benchmarks
         with:
-          branch: ${{ matrix.branch }}
+          branch: "latest"
           rs_api_token: ${{ env.rs_api_token }}
           repository: ${{ github.repository }}
 
