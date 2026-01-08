@@ -48,7 +48,7 @@ jobs:
         with:
           artifact_sas_url: ${{ secrets.ARTIFACT_SAS_URL }}
           rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
-          build_profile: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/stable' && 'release' || 'ci' }}
+          build_profile: ${{ github.event_name == 'pull_request' && 'ci' || 'release' }}
 
   build_binaries:
     name: Build Binaries
