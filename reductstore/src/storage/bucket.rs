@@ -173,11 +173,18 @@ impl Bucket {
         check_name_convention(key)?;
         self.ensure_not_deleting()?;
 
-        if !self.entries.read()?.contains_key(key) {
+        let entry = {
+            let entries = self.entries.read()?;
+            entries.get(key).cloned()
+        };
+
+        let entry = if let Some(entry) = entry {
+            entry
+        } else {
             self.check_mode()?;
             let settings = self.settings.read()?;
             self.folder_keeper.add_folder(key)?;
-            let entry = Entry::try_new(
+            let entry = Arc::new(Entry::try_new(
                 &key,
                 self.path.clone(),
                 EntrySettings {
@@ -185,13 +192,13 @@ impl Bucket {
                     max_block_records: settings.max_block_records.unwrap(),
                 },
                 self.cfg.clone(),
-            )?;
-            self.entries
-                .write()?
-                .insert(key.to_string(), Arc::new(entry));
-        }
-
-        let entry = self.entries.read()?.get(key).unwrap().clone();
+            )?);
+            let mut entries = self.entries.write()?;
+            entries
+                .entry(key.to_string())
+                .or_insert_with(|| Arc::clone(&entry))
+                .clone()
+        };
         entry.ensure_not_deleting()?;
         Ok(entry.into())
     }
@@ -396,11 +403,6 @@ impl Bucket {
         let entry_name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
 
-        {
-            let mut entries_lock = entries.write()?;
-            entries_lock.remove(&entry_name);
-        }
-
         let folder_remove_result = {
             let remove_bucket_from_backend = || -> Result<(), ReductError> {
                 folder_keeper.remove_folder(&entry_name)?;
@@ -418,15 +420,7 @@ impl Bucket {
 
         match folder_remove_result {
             Ok(()) => {
-                let entries = entries.clone();
-                let entry_name = entry_name.clone();
-                let _ = spawn(
-                    "finalize entry removal",
-                    move || -> Result<(), ReductError> {
-                        entries.write()?.remove(&entry_name);
-                        Ok(())
-                    },
-                );
+                entries.write()?.remove(&entry_name);
             }
             Err(err) => {
                 error!(

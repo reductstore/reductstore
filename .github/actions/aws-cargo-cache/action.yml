@@ -45,9 +45,6 @@ runs:
           ~/.cargo/git/db/
           target/
         key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
-        restore-keys: |
-          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-
-          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-
       env:
         RUNS_ON_S3_BUCKET_CACHE: reduct-cache
         RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com

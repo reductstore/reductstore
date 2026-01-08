@@ -31,7 +31,7 @@ runs:
           --env RS_DATA_PATH=/data \
           --env RS_API_TOKEN=${{ inputs.rs_api_token }} \
           -p 8383:8383 \
-          -v ./data:/data \
+          -v ./data1:/data \
           ${{ inputs.repository }}:latest
         sleep 5
         docker logs reductstore
@@ -61,7 +61,7 @@ runs:
           --env RS_API_TOKEN=${{ inputs.rs_api_token }} \
           --env RS_LOG_LEVEL=INFO \
           -p 8383:8383 \
-          -v ./data:/data \
+          -v ./data2:/data \
           reduct/store:${{ inputs.branch }}
         sleep 5
         docker logs reductstore

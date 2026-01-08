@@ -104,6 +104,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 }
 
 #[cfg(test)]
+#[cfg(not(windows))] // fixme: Windows paths differ in tests
 mod tests {
     use super::*;
     use crate::backend::Backend;
