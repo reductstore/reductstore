@@ -243,10 +243,6 @@ impl Bucket {
             entry_infos.push(info);
         }
 
-        if entry_infos.is_empty() {
-            oldest_record = 0;
-        }
-
         Ok(FullBucketInfo {
             info: BucketInfo {
                 name: self.name.clone(),
