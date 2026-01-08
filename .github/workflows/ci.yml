@@ -47,7 +47,8 @@ jobs:
       - uses: ./.github/actions/build-docker
         with:
           artifact_sas_url: ${{ secrets.ARTIFACT_SAS_URL }}
-          rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
+          rust_version: ${{ vars.MINIMAL_RUST_VERSION
+          build_profile: ${{ github.ref == 'refs/heads/main' || github.ref == 'refs/heads/stable' && 'release' || 'ci' }}
 
   build_binaries:
     name: Build Binaries

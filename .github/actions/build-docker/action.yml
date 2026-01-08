@@ -7,6 +7,9 @@ inputs:
   rust_version:
     description: 'Minimal Rust version.'
     required: true
+  build_profile:
+    description: 'Build profile (e.g., ci, release).'
+    required: true
 runs:
   using: 'composite'
   steps:
@@ -26,7 +29,7 @@ runs:
         build-args: |
           ARTIFACT_SAS_URL=${{ inputs.artifact_sas_url }}
           RUST_VERSION=${{ inputs.rust_version }}
-          BUILD_PROFILE=ci
+          BUILD_PROFILE=${{ inputs.build_profile }}
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
