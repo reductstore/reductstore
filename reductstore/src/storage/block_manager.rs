@@ -580,20 +580,21 @@ impl BlockManager {
     }
 
     fn save_block_on_disk(&mut self, block_ref: Arc<RwLock<Block>>) -> Result<(), ReductError> {
+        // Take a snapshot under a short-lived write lock to avoid blocking readers
+        let (block_id, block_snapshot) = {
+            let block = block_ref.write()?;
+            (block.block_id(), block.to_owned())
+        };
+
         debug!(
             "Saving block {}/{}/{} on disk and updating index",
-            self.bucket,
-            self.entry,
-            block_ref.read()?.block_id()
+            self.bucket, self.entry, block_id
         );
 
-        let block = block_ref.write()?;
-        let block_id = block.block_id();
-
-        let path = self.path_to_desc(block.block_id());
+        let path = self.path_to_desc(block_id);
         let mut buf = BytesMut::new();
 
-        let mut proto = BlockProto::from(block.to_owned());
+        let mut proto = BlockProto::from(block_snapshot);
         proto.encode(&mut buf).map_err(|e| {
             internal_server_error!("Failed to encode block descriptor {:?}: {}", path, e)
         })?;
