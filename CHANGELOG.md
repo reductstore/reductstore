@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.8.0-beta.2 - 2026-01-09
+
 ### Fixed
 
 - Fix block cache read access, [PR-1101](https://github.com/reductstore/reductstore/pull/1101)
