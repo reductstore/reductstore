@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix block cache read access, [PR-1101](https://github.com/reductstore/reductstore/pull/1101)
 - Avoid long block write lock during save, [PR-1104](https://github.com/reductstore/reductstore/pull/1104)
+- Skip compact when block manager busy, [PR-1105](https://github.com/reductstore/reductstore/pull/1105)
 
 ## 1.8.0-beta.1 - 2026-01-08
 
