@@ -12,7 +12,11 @@ use reductstore::lock_file::BoxedLockFile;
 use reductstore::storage::engine::StorageEngine;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
+#[cfg(test)]
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+#[cfg(test)]
+use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -30,6 +34,22 @@ impl ContextGuard {
             .graceful_shutdown(Some(Duration::from_secs(5)));
         self.storage.sync_fs().expect("Failed to shutdown storage");
         self.lock_file.release();
+    }
+}
+
+#[cfg(test)]
+static COMPACTION_OBSERVER: LazyLock<Mutex<Option<Arc<AtomicUsize>>>> =
+    LazyLock::new(|| Mutex::new(None));
+
+#[cfg(test)]
+fn set_compaction_observer(observer: Option<Arc<AtomicUsize>>) {
+    *COMPACTION_OBSERVER.lock().unwrap() = observer;
+}
+
+#[cfg(test)]
+fn observe_compaction_tick() {
+    if let Some(observer) = COMPACTION_OBSERVER.lock().unwrap().as_ref() {
+        observer.fetch_add(1, Ordering::Relaxed);
     }
 }
 
@@ -53,6 +73,7 @@ async fn launch_server() {
     let config_lock = Arc::clone(&lock_file);
     let signal_handle = handle.clone();
     let cfg = parser.cfg.clone();
+    let engine_config = cfg.engine_config.clone();
     let (tx, rx) = mpsc::channel(1);
     tokio::spawn(async move {
         while config_lock.is_waiting().await.unwrap_or(false) {
@@ -70,10 +91,13 @@ async fn launch_server() {
             lock_file: config_lock.clone(),
         };
 
-        tokio::spawn(periodical_compact_storage(
-            components.storage.clone(),
-            cfg.engine_config.compaction_interval,
-        ));
+        if !engine_config.compaction_interval.is_zero() {
+            tokio::spawn(periodical_compact_storage(
+                components.storage.clone(),
+                engine_config.compaction_interval,
+            ));
+        }
+
         tokio::spawn(shutdown_ctrl_c(ctx.clone()));
         #[cfg(unix)]
         tokio::spawn(shutdown_signal(ctx));
@@ -162,6 +186,8 @@ async fn shutdown_signal(ctx: ContextGuard) {
 async fn periodical_compact_storage(storage: Arc<StorageEngine>, sync_interval: Duration) {
     loop {
         tokio::time::sleep(sync_interval).await;
+        #[cfg(test)]
+        observe_compaction_tick();
         if let Err(e) = storage.compact().await {
             log::error!("Failed to sync storage: {}", e);
         }
@@ -178,7 +204,8 @@ mod tests {
     use std::env;
 
     use std::path::PathBuf;
-    use std::sync::LazyLock;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, LazyLock};
     use std::thread::{spawn, JoinHandle};
     use tempfile::tempdir;
     use tokio::sync::Mutex;
@@ -250,6 +277,35 @@ mod tests {
         // send shutdown signal
         *STOP_SERVER.lock().await = true;
         task.join().unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn test_compaction_task_runs_when_interval_non_zero() {
+        let compactions = Arc::new(AtomicUsize::new(0));
+        set_compaction_observer(Some(compactions.clone()));
+
+        let data_path = tempdir().unwrap().keep();
+        env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
+        let parser = CfgParser::from_env(StdEnvGetter::default(), "0.0.0");
+        let storage = parser.build().unwrap().storage;
+
+        let handler = tokio::spawn(periodical_compact_storage(
+            storage,
+            Duration::from_millis(50),
+        ));
+
+        sleep(Duration::from_millis(120)).await;
+        handler.abort();
+        let _ = handler.await;
+
+        set_compaction_observer(None);
+
+        assert!(
+            compactions.load(Ordering::Relaxed) > 0,
+            "periodical_compact_storage should run when interval is non-zero"
+        );
     }
 
     #[rstest]
