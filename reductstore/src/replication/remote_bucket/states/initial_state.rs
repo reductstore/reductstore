@@ -150,4 +150,38 @@ mod tests {
         );
         assert_eq!(state.is_available(), false);
     }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_available(mut client: MockReductClientApi, bucket: MockReductBucketApi) {
+        client
+            .expect_get_bucket()
+            .return_once(move |_| Ok(Box::new(bucket)));
+
+        let state = Box::new(InitialState {
+            client: Box::new(client),
+            bucket_name: "test_bucket".to_string(),
+            last_result: Ok(ErrorRecordMap::new()),
+        });
+
+        let state = state.probe();
+        assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_unavailable(mut client: MockReductClientApi) {
+        client
+            .expect_get_bucket()
+            .return_once(move |_| Err(ReductError::bad_request("test error")));
+
+        let state = Box::new(InitialState {
+            client: Box::new(client),
+            bucket_name: "test_bucket".to_string(),
+            last_result: Ok(ErrorRecordMap::new()),
+        });
+
+        let state = state.probe();
+        assert!(!state.is_available());
+    }
 }
