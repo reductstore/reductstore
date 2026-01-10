@@ -162,11 +162,11 @@ impl RecordWriter {
             }
         };
 
-        if let Err(err) = ctx.block_manager.write().unwrap().finish_write_record(
-            ctx.block_id,
-            state,
-            ctx.record_timestamp,
-        ) {
+        if let Err(err) = ctx
+            .block_manager
+            .write()
+            .and_then(|mut bm| bm.finish_write_record(ctx.block_id, state, ctx.record_timestamp))
+        {
             error!(
                 "Failed to finish writing {}/{}/{} record: {}",
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, err
@@ -260,9 +260,13 @@ mod tests {
     mod record_writer {
         use super::*;
         use crate::cfg::Cfg;
+        use crate::core::sync::{
+            reset_rwlock_config, set_rwlock_failure_action, set_rwlock_timeout, RwLockFailureAction,
+        };
         use crate::storage::block_manager::block_index::BlockIndex;
         use crate::storage::proto::{us_to_ts, Record};
         use rstest::fixture;
+        use serial_test::serial;
         use std::fs;
         use std::io::Read;
         use std::path::PathBuf;
@@ -397,6 +401,45 @@ mod tests {
             assert_eq!(
                 result.await.err().unwrap(),
                 internal_server_error!("Timeout while writing the record to internal buffer")
+            );
+        }
+
+        #[rstest]
+        #[serial]
+        #[tokio::test]
+        async fn test_finish_write_record_lock_timeout(
+            block_manager: Arc<RwLock<BlockManager>>,
+            block_ref: BlockRef,
+        ) {
+            struct ResetGuard;
+            impl Drop for ResetGuard {
+                fn drop(&mut self) {
+                    reset_rwlock_config();
+                }
+            }
+            let _reset = ResetGuard;
+
+            set_rwlock_failure_action(RwLockFailureAction::Error);
+            set_rwlock_timeout(Duration::from_millis(10));
+
+            let mut writer =
+                RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME).unwrap();
+
+            let lock = block_manager.write_blocking();
+            writer.send(Ok(Some(Bytes::from("te")))).await.unwrap();
+            writer.send(Ok(Some(Bytes::from("st")))).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
+            drop(lock);
+
+            let block_ref = block_manager.write().unwrap().load_block(1).unwrap();
+            assert_eq!(
+                block_ref
+                    .read()
+                    .unwrap()
+                    .get_record(SMALL_RECORD_TIME)
+                    .unwrap()
+                    .state,
+                record::State::Started as i32
             );
         }
 
