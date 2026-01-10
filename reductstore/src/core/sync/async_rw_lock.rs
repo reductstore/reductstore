@@ -135,4 +135,12 @@ mod tests {
         let _read = lock.read().await.unwrap();
         assert!(lock.try_write().is_none());
     }
+
+    #[tokio::test]
+    #[should_panic(expected = "Failed to acquire async write lock within timeout")]
+    async fn test_async_rwlock_write_timeout() {
+        let lock = Arc::new(AsyncRwLock::new(5));
+        let _guard = lock.read().await.unwrap();
+        let _ = lock.write().await;
+    }
 }
