@@ -62,6 +62,17 @@ impl RemoteBucketState for InitialState {
         }
     }
 
+    fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send> {
+        match self.client.get_bucket(&self.bucket_name) {
+            Ok(bucket) => Box::new(BucketAvailableState::new(self.client, bucket)),
+            Err(err) => Box::new(BucketUnavailableState::new(
+                self.client,
+                self.bucket_name,
+                err,
+            )),
+        }
+    }
+
     fn is_available(&self) -> bool {
         false
     }

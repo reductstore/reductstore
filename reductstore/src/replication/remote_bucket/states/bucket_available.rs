@@ -147,6 +147,11 @@ impl RemoteBucketState for BucketAvailableState {
         true
     }
 
+    fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send> {
+        // Already available, stay in this state
+        self
+    }
+
     fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
         &self.last_result
     }
