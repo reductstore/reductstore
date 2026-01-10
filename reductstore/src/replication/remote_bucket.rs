@@ -25,6 +25,8 @@ pub(crate) trait RemoteBucket {
         records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError>;
 
+    fn probe_availability(&mut self);
+
     fn is_active(&self) -> bool;
 }
 
@@ -48,6 +50,11 @@ impl RemoteBucket for RemoteBucketImpl {
         let state = self.state.as_ref().unwrap();
         self.is_active = state.is_available();
         state.last_result().clone()
+    }
+
+    fn probe_availability(&mut self) {
+        self.state = Some(self.state.take().unwrap().probe());
+        self.is_active = self.state.as_ref().unwrap().is_available();
     }
 
     fn is_active(&self) -> bool {
@@ -128,6 +135,8 @@ pub(super) mod tests {
                 entry: &str,
                 records: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Box<dyn RemoteBucketState + Sync + Send>;
+
+            fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send>;
 
             fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
 
