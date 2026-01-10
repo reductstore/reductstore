@@ -272,8 +272,16 @@ impl Entry {
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
     pub fn compact(&self) -> Result<(), ReductError> {
-        let mut bm = self.block_manager.write()?;
-        bm.save_cache_on_disk()
+        if let Some(mut bm) = self.block_manager.try_write() {
+            bm.save_cache_on_disk()
+        } else {
+            // Avoid blocking writers; we'll try again on the next sync tick
+            debug!(
+                "Skipping compact for {}/{} because block manager is busy",
+                self.bucket_name, self.name
+            );
+            Ok(())
+        }
     }
 
     pub fn name(&self) -> &str {
