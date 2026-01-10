@@ -2,8 +2,10 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::fallback_runtime::FallbackRuntime;
-use crate::core::sync::{lock_timeout_error, rwlock_timeout};
+use crate::core::sync::{lock_timeout_error_at, rwlock_timeout};
 use reduct_base::error::ReductError;
+use std::future::Future;
+use std::panic::Location;
 use tokio::time::timeout;
 
 /// An async read-write lock with embedded timeouts.
@@ -20,16 +22,38 @@ impl<T> AsyncRwLock<T> {
         }
     }
 
-    pub async fn read(&self) -> Result<tokio::sync::RwLockReadGuard<'_, T>, ReductError> {
-        timeout(rwlock_timeout(), self.inner.read())
-            .await
-            .map_err(|_| lock_timeout_error("Failed to acquire async read lock within timeout"))
+    #[track_caller]
+    pub fn read(
+        &self,
+    ) -> impl Future<Output = Result<tokio::sync::RwLockReadGuard<'_, T>, ReductError>> + '_ {
+        let location = Location::caller();
+        async move {
+            timeout(rwlock_timeout(), self.inner.read())
+                .await
+                .map_err(|_| {
+                    lock_timeout_error_at(
+                        "Failed to acquire async read lock within timeout",
+                        location,
+                    )
+                })
+        }
     }
 
-    pub async fn write(&self) -> Result<tokio::sync::RwLockWriteGuard<'_, T>, ReductError> {
-        timeout(rwlock_timeout(), self.inner.write())
-            .await
-            .map_err(|_| lock_timeout_error("Failed to acquire async write lock within timeout"))
+    #[track_caller]
+    pub fn write(
+        &self,
+    ) -> impl Future<Output = Result<tokio::sync::RwLockWriteGuard<'_, T>, ReductError>> + '_ {
+        let location = Location::caller();
+        async move {
+            timeout(rwlock_timeout(), self.inner.write())
+                .await
+                .map_err(|_| {
+                    lock_timeout_error_at(
+                        "Failed to acquire async write lock within timeout",
+                        location,
+                    )
+                })
+        }
     }
 
     pub fn try_read(&self) -> Option<tokio::sync::RwLockReadGuard<'_, T>> {

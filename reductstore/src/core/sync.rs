@@ -6,6 +6,7 @@ pub mod rw_lock;
 
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::panic::Location;
 use std::sync::atomic::{AtomicU64, AtomicU8, Ordering};
 use std::time::Duration;
 
@@ -69,10 +70,26 @@ pub fn default_rwlock_failure_action() -> RwLockFailureAction {
     DEFAULT_RWLOCK_FAILURE_ACTION
 }
 
+#[allow(dead_code)]
+#[track_caller]
 fn lock_timeout_error(message: &str) -> ReductError {
+    lock_timeout_error_at(message, Location::caller())
+}
+
+pub(crate) fn lock_timeout_error_at(
+    message: &str,
+    location: &'static Location<'static>,
+) -> ReductError {
+    let enriched = format!(
+        "{} (caller: {}:{})",
+        message,
+        location.file(),
+        location.line()
+    );
+
     match rwlock_failure_action() {
-        RwLockFailureAction::Panic => panic!("{message}"),
-        RwLockFailureAction::Error => internal_server_error!(message),
+        RwLockFailureAction::Panic => panic!("{enriched}"),
+        RwLockFailureAction::Error => internal_server_error!(&enriched),
     }
 }
 
@@ -98,7 +115,10 @@ mod tests {
     fn test_lock_timeout_error_returns_error() {
         reset_rwlock_config();
         set_rwlock_failure_action(RwLockFailureAction::Error);
-        assert_eq!(lock_timeout_error("boom"), internal_server_error!("boom"));
+        let err = lock_timeout_error("boom");
+        assert_eq!(err.status, internal_server_error!("boom").status);
+        assert!(err.message.contains("boom"));
+        assert!(err.message.contains("core/sync.rs"));
         reset_rwlock_config();
     }
 
