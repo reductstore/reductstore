@@ -151,6 +151,32 @@ mod tests {
         assert!(state.is_available());
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_available(mut client: MockReductClientApi, bucket: MockReductBucketApi) {
+        client
+            .expect_get_bucket()
+            .with(predicate::eq("test_bucket"))
+            .return_once(move |_| Ok(Box::new(bucket)));
+
+        let state = state_without_timeout(client);
+        let state = state.probe();
+        assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_unavailable(mut client: MockReductClientApi) {
+        client
+            .expect_get_bucket()
+            .with(predicate::eq("test_bucket"))
+            .return_once(move |_| Err(ReductError::not_found("")));
+
+        let state = state_without_timeout(client);
+        let state = state.probe();
+        assert!(!state.is_available());
+    }
+
     fn state_without_timeout(client: MockReductClientApi) -> Box<BucketUnavailableState> {
         Box::new(BucketUnavailableState {
             client: Box::new(client),

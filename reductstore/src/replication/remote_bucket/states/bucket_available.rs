@@ -384,6 +384,18 @@ mod tests {
         assert!(state.is_available());
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_stays_available(client: MockReductClientApi, bucket: MockReductBucketApi) {
+        let state = Box::new(BucketAvailableState::new(
+            Box::new(client),
+            Box::new(bucket),
+        ));
+
+        let state = state.probe();
+        assert!(state.is_available());
+    }
+
     #[fixture]
     fn record_to_write() -> (BoxedReadRecord, Transaction) {
         let (_, rx) = unbounded();

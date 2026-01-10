@@ -203,6 +203,21 @@ pub(super) mod tests {
         assert!(!remote_bucket.is_active());
     }
 
+    #[rstest]
+    fn test_probe_availability() {
+        let mut first_state = MockState::new();
+        let mut second_state = MockState::new();
+        second_state.expect_is_available().return_const(true);
+
+        first_state
+            .expect_probe()
+            .return_once(move || Box::new(second_state));
+
+        let mut remote_bucket = create_dst_bucket(first_state);
+        remote_bucket.probe_availability();
+        assert!(remote_bucket.is_active());
+    }
+
     fn create_dst_bucket(first_state: MockState) -> RemoteBucketImpl {
         let mut remote_bucket = RemoteBucketImpl::new("http://localhost:8080", "test", "api_token");
         remote_bucket.state = Some(Box::new(first_state));
