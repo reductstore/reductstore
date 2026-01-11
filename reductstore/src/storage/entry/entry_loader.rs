@@ -1,4 +1,4 @@
-// Copyright 2024-2025 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use std::collections::{HashMap, HashSet};
@@ -81,8 +81,8 @@ impl EntryLoader {
             "Restored entry `{}` in {}ms: size={}, records={}",
             entry.name,
             start_time.elapsed().as_millis(),
-            bm.size(),
-            bm.record_count()
+            bm.size()?,
+            bm.record_count()?
         );
 
         entry.cfg = cfg;
@@ -172,7 +172,7 @@ impl EntryLoader {
                 remove_bad_block!("begin time mismatch");
             };
 
-            block_index.insert_or_update_with_crc(block, crc.sum64());
+            block_index.insert_or_update_with_crc(block, crc.sum64())?;
         }
 
         block_index.save()?;
@@ -240,11 +240,11 @@ impl EntryLoader {
                 entry.to_str().unwrap_or("").ends_with(DESCRIPTOR_FILE_EXT))
             .count();
 
-        if number_of_descriptors != block_index.tree().len() {
+        if number_of_descriptors != block_index.block_count()? {
             warn!(
                 "Number of descriptors {} does not match block index {} in entry {:?}",
                 number_of_descriptors,
-                block_index.tree().len(),
+                block_index.block_count()?,
                 path
             );
 
@@ -260,7 +260,7 @@ impl EntryLoader {
         block_index: &BlockIndex,
     ) -> Result<(), ReductError> {
         let mut inconsistent_data = false;
-        for block_id in block_index.tree().iter() {
+        for block_id in block_index.block_range(..)? {
             let desc_path = path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT));
             if file_list.contains(&desc_path) {
                 let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
@@ -506,7 +506,7 @@ mod tests {
         let path = path.join("entry");
         FILE_CACHE.create_dir_all(&path).unwrap();
 
-        let mut block_manager = BlockManager::new(
+        let block_manager = BlockManager::new(
             path.clone(),
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
             Cfg::default().into(),
@@ -565,7 +565,7 @@ mod tests {
         assert_eq!(info.latest_record, 2000010);
 
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
-        let mut block_manager = BlockManager::new(path.clone(), block_index, Cfg::default().into());
+        let block_manager = BlockManager::new(path.clone(), block_index, Cfg::default().into());
         let block_v1_9 = block_manager.load_block(1).unwrap().read().unwrap().clone();
         assert_eq!(block_v1_9.record_count(), 2);
         assert_eq!(block_v1_9.size(), 20);
@@ -609,12 +609,7 @@ mod tests {
         let entry = entry(entry_settings.clone(), path.clone());
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
-        entry
-            .block_manager
-            .write()
-            .unwrap()
-            .save_cache_on_disk()
-            .unwrap();
+        entry.block_manager.save_cache_on_disk().unwrap();
 
         EntryLoader::restore_entry(
             path.join(entry.name()),
@@ -741,7 +736,7 @@ mod tests {
         .unwrap()
         .unwrap();
         assert_eq!(
-            entry.block_manager.index().tree().len(),
+            entry.block_manager.index().block_count().unwrap(),
             2,
             "should rebuild index and add the block"
         );
@@ -773,13 +768,7 @@ mod tests {
                     .unwrap()
                     .unwrap();
 
-            let block_ref = entry
-                .block_manager
-                .write()
-                .unwrap()
-                .load_block(3)
-                .unwrap()
-                .clone();
+            let block_ref = entry.block_manager.load_block(3).unwrap();
             let block = block_ref.read().unwrap();
             assert_eq!(block.get_record(2), Some(&record2));
             assert_eq!(block.get_record(3), Some(&record3));
@@ -926,24 +915,26 @@ mod tests {
                 let block_manager = &entry.block_manager;
 
                 let block_ref = block_manager.start_new_block(1, 10).unwrap();
-                let mut block = block_ref.write().unwrap();
-                block.insert_or_update_record(Record {
-                    timestamp: Some(us_to_ts(&0)),
-                    begin: 0,
-                    end: 10,
-                    content_type: "text/plain".to_string(),
-                    state: record::State::Finished as i32,
-                    labels: vec![],
-                });
+                {
+                    let mut block = block_ref.write().unwrap();
+                    block.insert_or_update_record(Record {
+                        timestamp: Some(us_to_ts(&0)),
+                        begin: 0,
+                        end: 10,
+                        content_type: "text/plain".to_string(),
+                        state: record::State::Finished as i32,
+                        labels: vec![],
+                    });
 
-                block.insert_or_update_record(Record {
-                    timestamp: Some(us_to_ts(&1)),
-                    begin: 0,
-                    end: 10,
-                    content_type: "text/plain".to_string(),
-                    state: record::State::Finished as i32,
-                    labels: vec![],
-                });
+                    block.insert_or_update_record(Record {
+                        timestamp: Some(us_to_ts(&1)),
+                        begin: 0,
+                        end: 10,
+                        content_type: "text/plain".to_string(),
+                        state: record::State::Finished as i32,
+                        labels: vec![],
+                    });
+                }
 
                 block_manager.start_new_block(2, 10).unwrap();
                 block_manager.save_cache_on_disk().unwrap();

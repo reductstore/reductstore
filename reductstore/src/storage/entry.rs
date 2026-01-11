@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod entry_loader;
@@ -26,6 +26,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found};
+use reduct_macros::task;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -187,24 +188,24 @@ impl Entry {
         let status_result = self.status();
 
         let index = self.block_manager.update_and_get_index()?;
-        let (oldest_record, latest_record) = if index.tree().is_empty() {
+        let (oldest_record, latest_record) = if index.block_count()? == 0 {
             (0, 0)
         } else {
-            let latest_block_id = index.tree().last().unwrap().clone();
+            let latest_block_id = index.last_block_id()?;
             let latest_record = match index.get_block(latest_block_id) {
                 Some(block) => ts_to_us(&block.latest_record_time.as_ref().unwrap()),
                 None => 0,
             };
-            (*index.tree().first().unwrap(), latest_record)
+            (index.first_block_id()?, latest_record)
         };
 
         let status = status_result?;
 
         Ok(EntryInfo {
             name,
-            size: index.size(),
-            record_count: index.record_count(),
-            block_count: index.tree().len() as u64,
+            size: index.size()?,
+            record_count: index.record_count()?,
+            block_count: index.block_count()? as u64,
             oldest_record,
             latest_record,
             status,
@@ -234,7 +235,7 @@ impl Entry {
     }
 
     pub fn size(&self) -> Result<u64, ReductError> {
-        Ok(self.block_manager.index().size())
+        Ok(self.block_manager.index().size()?)
     }
 
     /// Try to remove the oldest block.
@@ -242,27 +243,23 @@ impl Entry {
     /// # Returns
     ///
     /// HTTTPError - The error if any.
-    pub fn try_remove_oldest_block(&self) -> TaskHandle<Result<(), ReductError>> {
+    #[task("try remove oldest block")]
+    pub fn try_remove_oldest_block(self: Arc<Self>) -> Result<(), ReductError> {
         let index = self.block_manager.index();
-        let index_tree = index.tree();
-        if index_tree.is_empty() {
-            return Err(internal_server_error!("No block to remove")).into();
+        if index.block_count()? == 0 {
+            return Err(internal_server_error!("No block to remove"))?;
         }
 
-        let oldest_block_id = *index_tree.first().unwrap();
-        let block_manager = Arc::clone(&self.block_manager);
-
-        spawn("remove oldest block", move || {
-            block_manager.remove_block(oldest_block_id)?;
-            debug!(
-                "Removing the oldest block {}.blk",
-                block_manager
-                    .path()
-                    .join(oldest_block_id.to_string())
-                    .display()
-            );
-            Ok(())
-        })
+        let oldest_block_id = index.first_block_id()?;
+        self.block_manager.remove_block(oldest_block_id)?;
+        debug!(
+            "Removing the oldest block {}.blk",
+            self.block_manager
+                .path()
+                .join(oldest_block_id.to_string())
+                .display()
+        );
+        Ok(())
     }
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs

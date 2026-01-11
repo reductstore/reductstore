@@ -213,7 +213,6 @@ mod tests {
     use crate::backend::Backend;
     use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
-    use crate::core::sync::RwLock;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;

@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
@@ -143,10 +143,7 @@ impl Query for HistoricalQuery {
                 };
                 block_manager
                     .index()
-                    .tree()
-                    .range(first_block..self.stop_time)
-                    .map(|k| *k)
-                    .collect::<Vec<u64>>()
+                    .block_range(first_block..self.stop_time)?
             };
 
             for block_id in block_range {

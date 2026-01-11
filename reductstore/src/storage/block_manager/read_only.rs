@@ -73,10 +73,10 @@ mod tests {
         let block_manager = BlockManager::new(path.clone(), index, Arc::new(cfg.clone()));
 
         // change index on disc
-        let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
+        let new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
 
         let block = Block::new(1);
-        new_index.insert_or_update(block);
+        new_index.insert_or_update(block).unwrap();
         new_index.save().unwrap();
 
         // wait for the replica update interval to pass

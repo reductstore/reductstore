@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 pub(in crate::storage) mod block;
@@ -96,19 +96,8 @@ impl BlockManager {
     }
 
     pub fn find_block(&self, start: u64) -> Result<BlockRef, ReductError> {
-        let tree = self.update_and_get_index()?.tree();
-        let start_block_id = tree.range(start..).next();
-        let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
-            *start_block_id.unwrap()
-        } else if let Some(block_id) = tree.range(..start).rev().next() {
-            *block_id
-        } else {
-            return Err(ReductError::not_found(&format!(
-                "No record with timestamp {}",
-                start
-            )));
-        };
-
+        let index = self.update_and_get_index()?;
+        let id = index.find_block_by_record(start)?;
         self.load_block(id)
     }
 
@@ -212,7 +201,7 @@ impl BlockManager {
             file.set_len(max_block_size)?;
         }
 
-        self.block_index.insert_or_update(block.clone());
+        self.block_index.insert_or_update(block.clone())?;
 
         let block_ref = Arc::new(RwLock::new(block));
         self.save_block(block_ref.clone())?;
@@ -573,7 +562,7 @@ impl BlockManager {
     fn save_block_on_disk(&self, block_ref: Arc<RwLock<Block>>) -> Result<(), ReductError> {
         // Take a snapshot under a short-lived write lock to avoid blocking readers
         let (block_id, block_snapshot) = {
-            let block = block_ref.write()?;
+            let block = block_ref.read()?;
             (block.block_id(), block.to_owned())
         };
 
@@ -611,7 +600,7 @@ impl BlockManager {
         crc.write(&buf);
         proto.metadata_size = len; // update metadata size because it changed
         self.block_index
-            .insert_or_update_with_crc(proto, crc.sum64());
+            .insert_or_update_with_crc(proto, crc.sum64())?;
 
         if self.cfg.role != InstanceRole::Replica {
             self.block_index.save()?;
@@ -651,7 +640,7 @@ mod tests {
         use reduct_base::io::WriteRecord;
 
         #[rstest]
-        fn test_starting_block(mut block_manager: BlockManager) {
+        fn test_starting_block(block_manager: BlockManager) {
             let block_id = 1_000_005;
 
             let block_ref = block_manager.start_new_block(block_id, 1024).unwrap();
@@ -680,7 +669,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_loading_block(mut block_manager: BlockManager, block_id: u64) {
+        fn test_loading_block(block_manager: BlockManager, block_id: u64) {
             block_manager.start_new_block(block_id, 1024).unwrap();
             let block_ref = block_manager.start_new_block(20000005, 1024).unwrap();
             let block = block_ref.read().unwrap();
@@ -689,7 +678,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_loading_corrupted_block(mut block_manager: BlockManager, block_id: u64) {
+        fn test_loading_corrupted_block(block_manager: BlockManager, block_id: u64) {
             block_manager.start_new_block(block_id, 1024).unwrap();
             block_manager.save_cache_on_disk().unwrap();
             block_manager.block_cache.remove(&block_id);
@@ -703,7 +692,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_recover_being_time_from_id(mut block_manager: BlockManager, block_id: u64) {
+        fn test_recover_being_time_from_id(block_manager: BlockManager, block_id: u64) {
             block_manager.start_new_block(block_id, 1024).unwrap();
             block_manager.block_cache.remove(&block_id);
 
@@ -718,7 +707,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_start_reading(mut block_manager: BlockManager, block_id: u64) {
+        fn test_start_reading(block_manager: BlockManager, block_id: u64) {
             let block = block_manager.start_new_block(block_id, 1024).unwrap();
             let block_id = block.read().unwrap().block_id();
             let loaded_block = block_manager.load_block(block_id).unwrap();
@@ -726,7 +715,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_finish_block(mut block_manager: BlockManager, block_id: u64) {
+        fn test_finish_block(block_manager: BlockManager, block_id: u64) {
             let block = block_manager.start_new_block(block_id + 1, 1024).unwrap();
             let block_id = block.read().unwrap().block_id();
             let loaded_block = block_manager.load_block(block_id).unwrap();
@@ -761,7 +750,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_non_existing_block(mut block_manager: BlockManager) {
+        fn test_remove_non_existing_block(block_manager: BlockManager) {
             block_manager.remove_block(999999).expect("No error");
         }
     }
@@ -870,7 +859,7 @@ mod tests {
             block: BlockRef,
             block_id: u64,
         ) {
-            let mut bm = block_manager;
+            let bm = block_manager;
             let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
             assert_eq!(
                 index.get_block(block_id).unwrap().metadata_size,
@@ -906,7 +895,7 @@ mod tests {
 
         #[rstest]
         fn test_update_index_when_remove_block(block_manager: BlockManager, block_id: u64) {
-            let mut bm = block_manager;
+            let bm = block_manager;
             bm.remove_block(block_id).unwrap();
 
             let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
@@ -919,21 +908,20 @@ mod tests {
             block: BlockRef,
             block_id: u64,
         ) {
-            let block_manager = Arc::new(RwLock::new(block_manager));
+            let block_manager = Arc::new(block_manager);
             write_record(1, 100, &block_manager, block.clone());
 
-            let mut bm = block_manager.write().unwrap();
-            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
+            let index = BlockIndex::try_load(block_manager.path.join(BLOCK_INDEX_FILE)).unwrap();
             assert_eq!(index.get_block(1).unwrap().record_count, 2);
 
-            bm.remove_records(block_id, vec![1]).unwrap();
+            block_manager.remove_records(block_id, vec![1]).unwrap();
 
-            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
+            let index = BlockIndex::try_load(block_manager.path.join(BLOCK_INDEX_FILE)).unwrap();
             assert_eq!(index.get_block(1).unwrap().record_count, 1, "index updated");
         }
 
         #[rstest]
-        fn test_recovering_index_if_no_meta_file(mut block_manager: BlockManager, block_id: u64) {
+        fn test_recovering_index_if_no_meta_file(block_manager: BlockManager, block_id: u64) {
             assert!(block_manager.index().get_block(block_id).is_some());
 
             FILE_CACHE
@@ -966,17 +954,13 @@ mod tests {
             block: BlockRef,
             block_id: u64,
         ) {
-            let block_manager = Arc::new(RwLock::new(block_manager));
+            let block_manager = Arc::new(block_manager);
             let block_ref = block;
             let (record, record_body) =
                 write_record(1, record_size, &block_manager, block_ref.clone());
 
             // remove first record
-            block_manager
-                .write()
-                .unwrap()
-                .remove_records(block_id, vec![0])
-                .unwrap();
+            block_manager.remove_records(block_id, vec![0]).unwrap();
 
             let block = block_ref.read().unwrap();
             assert_eq!(block.record_count(), 1);
@@ -1006,9 +990,9 @@ mod tests {
 
             assert!(
                 block_manager
-                    .write()
-                    .unwrap()
                     .wal
+                    .read()
+                    .unwrap()
                     .read(block.block_id())
                     .is_err(),
                 "wal must be removed after successful update"
@@ -1016,7 +1000,7 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_only_one_record(mut block_manager: BlockManager, block_id: u64) {
+        fn test_remove_only_one_record(block_manager: BlockManager, block_id: u64) {
             block_manager.remove_records(block_id, vec![0]).unwrap();
 
             // block must be removed
@@ -1088,11 +1072,7 @@ mod tests {
         writer.blocking_send(Ok(None)).unwrap();
 
         std::thread::sleep(Duration::from_millis(10)); // wait for thread to finish
-        block_manager
-            .write()
-            .unwrap()
-            .save_block_on_disk(block_ref.clone())
-            .unwrap();
+        block_manager.save_block_on_disk(block_ref.clone()).unwrap();
         (record, record_body)
     }
     #[fixture]
@@ -1101,7 +1081,7 @@ mod tests {
     }
 
     #[fixture]
-    fn block(mut block_manager: BlockManager, block_id: u64) -> BlockRef {
+    fn block(block_manager: BlockManager, block_id: u64) -> BlockRef {
         block_manager.load_block(block_id).unwrap()
     }
 
@@ -1115,7 +1095,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let mut bm = BlockManager::new(
+        let bm = BlockManager::new(
             path.clone(),
             BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
             Cfg::default().into(),

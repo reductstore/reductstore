@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FileWeak;
@@ -61,7 +61,7 @@ impl RecordWriter {
             let block = block_ref.read()?;
 
             let (file, offset) = {
-                block_manager.index().insert_or_update(block.to_owned());
+                block_manager.index().insert_or_update(block.to_owned())?;
                 block_manager.begin_write_record(&block, time)?
             };
 

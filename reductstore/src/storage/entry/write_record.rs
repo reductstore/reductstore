@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockRef;
@@ -37,10 +37,10 @@ impl Entry {
         let bm = &self.block_manager;
         // When we write, the likely case is that we are writing the latest record
         // in the entry. In this case, we can just append to the latest block.
-        let mut block_ref = if bm.index().tree().is_empty() {
+        let mut block_ref = if bm.index().block_count()? == 0 {
             bm.start_new_block(time, settings.max_block_size)?
         } else {
-            let block_id = *bm.index().tree().last().unwrap();
+            let block_id = bm.index().last_block_id()?;
             bm.load_block(block_id)?
         };
 
@@ -55,8 +55,7 @@ impl Entry {
                     time, self.bucket_name, self.name
                 );
                 // The timestamp is belated. We need to find the proper block to write to.
-                let index_tree = bm.index().tree();
-                if *index_tree.first().unwrap() > time {
+                if bm.index().first_block_id()? > time {
                     // The timestamp is the earliest. We need to create a new block.
                     debug!(
                         "Timestamp {} is the earliest for {}/{}. Creating a new block",
@@ -399,8 +398,6 @@ mod tests {
 
         let record = entry
             .block_manager
-            .write()
-            .unwrap()
             .load_block(1000000)
             .unwrap()
             .read()

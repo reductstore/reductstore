@@ -1,23 +1,23 @@
-// Copyright 2024-2025 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::sync::RwLock;
-use bytes::Bytes;
-use crc64fast::Digest;
-use prost::Message;
-use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
-use std::collections::{BTreeSet, HashMap};
-use std::io::{Read, SeekFrom, Write};
-use std::path::PathBuf;
-
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::RwLock;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::DESCRIPTOR_FILE_EXT;
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
     ts_to_us, us_to_ts, Block as BlockProto, BlockIndex as BlockIndexProto, MinimalBlock,
 };
+use bytes::Bytes;
+use crc64fast::Digest;
+use prost::Message;
+use reduct_base::error::ReductError;
+use reduct_base::{internal_server_error, not_found};
+use std::collections::{BTreeSet, HashMap};
+use std::io::{Read, SeekFrom, Write};
+use std::ops::RangeBounds;
+use std::path::PathBuf;
 
 pub(in crate::storage) struct BlockIndex {
     path_buf: PathBuf,
@@ -79,11 +79,11 @@ impl BlockIndex {
     ///
     /// * `entry` - The block entry to insert.
     ///
-    pub fn insert_or_update<T>(&self, entry: T)
+    pub fn insert_or_update<T>(&self, entry: T) -> Result<(), ReductError>
     where
         T: Into<BlockEntry>,
     {
-        self.insert(entry.into());
+        self.insert(entry.into())
     }
 
     /// Insert or update a new block entry into the index with CRC.
@@ -95,13 +95,13 @@ impl BlockIndex {
     /// * `entry` - The block entry to insert.
     /// * `crc` - The CRC value.
     ///
-    pub fn insert_or_update_with_crc<T>(&self, entry: T, crc: u64)
+    pub fn insert_or_update_with_crc<T>(&self, entry: T, crc: u64) -> Result<(), ReductError>
     where
         T: Into<BlockEntry>,
     {
         let mut block = entry.into();
         block.crc64 = Some(crc);
-        self.insert(block);
+        self.insert(block)
     }
 
     pub fn get_block(&self, block_id: u64) -> Option<BlockEntry> {
@@ -169,8 +169,8 @@ impl BlockIndex {
         FILE_CACHE.discard_recursive(&self.path_buf)?;
 
         let updated_index = BlockIndex::try_load(self.path_buf.clone())?;
-        *self.index_info.write().unwrap() = updated_index.info();
-        *self.index.write().unwrap() = updated_index.tree();
+        *self.index_info.write()? = updated_index.index_info.read()?.clone();
+        *self.index.write()? = updated_index.index.read()?.clone();
         Ok(())
     }
 
@@ -213,7 +213,7 @@ impl BlockIndex {
     }
 
     pub fn save(&self) -> Result<(), ReductError> {
-        let info = self.index_info.read().unwrap();
+        let info = self.index_info.read()?;
         let mut block_index_proto = BlockIndexProto {
             blocks: Vec::new(),
             crc64: 0,
@@ -263,35 +263,74 @@ impl BlockIndex {
         Ok(())
     }
 
-    pub fn size(&self) -> u64 {
-        self.index_info
-            .read()
-            .unwrap()
+    pub fn size(&self) -> Result<u64, ReductError> {
+        Ok(self
+            .index_info
+            .read()?
             .iter()
-            .fold(0, |acc, (_, block)| acc + block.size + block.metadata_size)
+            .fold(0, |acc, (_, block)| acc + block.size + block.metadata_size))
     }
 
-    pub fn record_count(&self) -> u64 {
-        self.index_info
-            .read()
-            .unwrap()
+    pub fn record_count(&self) -> Result<u64, ReductError> {
+        Ok(self
+            .index_info
+            .read()?
             .iter()
-            .fold(0, |acc, (_, block)| acc + block.record_count)
+            .fold(0, |acc, (_, block)| acc + block.record_count))
     }
 
     pub fn info(&self) -> HashMap<u64, BlockEntry> {
         self.index_info.read().unwrap().clone()
     }
 
-    pub fn tree(&self) -> BTreeSet<u64> {
-        self.index.read().unwrap().clone()
+    pub fn block_count(&self) -> Result<usize, ReductError> {
+        Ok(self.index_info.read()?.len())
     }
 
-    fn insert(&self, block: BlockEntry) {
-        let mut info = self.index_info.write().unwrap();
-        let mut index = self.index.write().unwrap();
+    pub fn find_block_by_record(&self, record_id: u64) -> Result<u64, ReductError> {
+        let lock = self.index.read()?;
+        let start_block_id = lock.range(record_id..).next();
+        let id = if start_block_id.is_some() && record_id >= *start_block_id.unwrap() {
+            *start_block_id.unwrap()
+        } else if let Some(block_id) = lock.range(..record_id).rev().next() {
+            *block_id
+        } else {
+            return Err(not_found!("No record with timestamp {}", record_id));
+        };
+
+        Ok(id)
+    }
+
+    pub fn block_range<R>(&self, range: R) -> Result<Vec<u64>, ReductError>
+    where
+        R: RangeBounds<u64>,
+    {
+        let index = self.index.read()?;
+        let range: Vec<u64> = index.range(range).cloned().collect();
+        Ok(range)
+    }
+    pub fn first_block_id(&self) -> Result<u64, ReductError> {
+        if let Some(id) = self.index.read()?.iter().next().cloned() {
+            Ok(id)
+        } else {
+            Err(internal_server_error!("Block index is empty"))
+        }
+    }
+
+    pub fn last_block_id(&self) -> Result<u64, ReductError> {
+        if let Some(id) = self.index.read()?.iter().next_back().cloned() {
+            Ok(id)
+        } else {
+            Err(internal_server_error!("Block index is empty"))
+        }
+    }
+
+    fn insert(&self, block: BlockEntry) -> Result<(), ReductError> {
+        let mut info = self.index_info.write()?;
+        let mut index = self.index.write()?;
         info.insert(block.block_id, block);
         index.insert(block.block_id);
+        Ok(())
     }
 }
 
@@ -329,9 +368,9 @@ mod tests {
             fs::write(&path, block_index_proto.encode_to_vec()).unwrap();
 
             let block_index = BlockIndex::try_load(path.clone()).unwrap();
-            assert_eq!(block_index.size(), 2);
-            assert_eq!(block_index.record_count(), 1);
-            assert_eq!(block_index.tree().len(), 1);
+            assert_eq!(block_index.size().unwrap(), 2);
+            assert_eq!(block_index.record_count().unwrap(), 1);
+            assert_eq!(block_index.block_count().unwrap(), 1);
             assert_eq!(block_index.path_buf, path);
         }
 
@@ -386,22 +425,24 @@ mod tests {
         fn test_ok() {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
-            let mut block_index = BlockIndex::new(path.clone());
-            block_index.insert_or_update(BlockEntry {
-                block_id: 1,
-                size: 1,
-                record_count: 1,
-                metadata_size: 1,
-                latest_record_time: Some(Timestamp::default()),
-                crc64: None,
-            });
+            let block_index = BlockIndex::new(path.clone());
+            block_index
+                .insert_or_update(BlockEntry {
+                    block_id: 1,
+                    size: 1,
+                    record_count: 1,
+                    metadata_size: 1,
+                    latest_record_time: Some(Timestamp::default()),
+                    crc64: None,
+                })
+                .unwrap();
 
             block_index.save().unwrap();
 
             let block_index_proto = BlockIndex::try_load(path.clone()).unwrap();
-            assert_eq!(block_index_proto.size(), 2);
-            assert_eq!(block_index_proto.record_count(), 1);
-            assert_eq!(block_index_proto.tree().len(), 1);
+            assert_eq!(block_index_proto.size().unwrap(), 2);
+            assert_eq!(block_index_proto.record_count().unwrap(), 1);
+            assert_eq!(block_index_proto.block_count().unwrap(), 1);
         }
     }
 }
