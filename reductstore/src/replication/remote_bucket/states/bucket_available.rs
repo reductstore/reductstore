@@ -6,6 +6,7 @@ use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavail
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
+use async_trait::async_trait;
 use log::{debug, warn};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
@@ -56,8 +57,9 @@ impl BucketAvailableState {
     }
 }
 
+#[async_trait]
 impl RemoteBucketState for BucketAvailableState {
-    fn write_batch(
+    async fn write_batch(
         mut self: Box<Self>,
         entry_name: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
@@ -76,7 +78,11 @@ impl RemoteBucketState for BucketAvailableState {
         }
 
         let error_map = if !records_to_update.is_empty() {
-            match self.bucket.update_batch(entry_name, &records_to_update) {
+            match self
+                .bucket
+                .update_batch(entry_name, &records_to_update)
+                .await
+            {
                 Ok(error_map) => {
                     // all good keep the state
                     error_map
@@ -121,7 +127,7 @@ impl RemoteBucketState for BucketAvailableState {
         }
 
         if !records_to_write.is_empty() {
-            match self.bucket.write_batch(entry_name, records_to_write) {
+            match self.bucket.write_batch(entry_name, records_to_write).await {
                 Ok(error_map) => {
                     self.last_result = Ok(error_map);
                     self

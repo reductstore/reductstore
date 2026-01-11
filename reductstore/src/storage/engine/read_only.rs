@@ -77,7 +77,9 @@ mod tests {
 
     #[rstest]
     #[serial]
-    fn test_reload_new_bucket(primary_engine: Arc<StorageEngine>) {
+    #[tokio::test]
+    async fn test_reload_new_bucket(#[future] primary_engine: Arc<StorageEngine>) {
+        let primary_engine = primary_engine.await;
         // Create read-only engine
         let mut cfg = primary_engine.cfg().clone();
         cfg.role = InstanceRole::Replica;
@@ -85,7 +87,9 @@ mod tests {
             StorageEngine::builder()
                 .with_cfg(cfg.clone())
                 .with_data_path(cfg.data_path.clone())
-                .build(),
+                .build()
+                .await
+                .unwrap(),
         );
 
         // Initially, read-only engine has one bucket
@@ -98,8 +102,9 @@ mod tests {
         // Create new bucket in primary engine
         let _ = primary_engine
             .create_bucket("bucket-2", BucketSettings::default())
+            .await
             .unwrap();
-        read_only_engine.reload().unwrap();
+        read_only_engine.reload().await.unwrap();
         assert_eq!(
             read_only_engine.buckets.read().unwrap().len(),
             1,
@@ -107,8 +112,8 @@ mod tests {
         );
 
         // Wait for interval and reload
-        std::thread::sleep(primary_engine.cfg.engine_config.replica_update_interval);
-        read_only_engine.reload().unwrap();
+        tokio::time::sleep(primary_engine.cfg.engine_config.replica_update_interval).await;
+        read_only_engine.reload().await.unwrap();
         let buckets = read_only_engine.buckets.read().unwrap();
         assert_eq!(buckets.len(), 2);
         assert!(buckets.contains_key("bucket-1"));
@@ -117,14 +122,18 @@ mod tests {
 
     #[rstest]
     #[serial]
-    fn test_remove_bucket(primary_engine: Arc<StorageEngine>) {
+    #[tokio::test]
+    async fn test_remove_bucket(#[future] primary_engine: Arc<StorageEngine>) {
+        let primary_engine = primary_engine.await;
         let mut cfg = primary_engine.cfg().clone();
         cfg.role = InstanceRole::Replica;
         let read_only_engine = Arc::new(
             StorageEngine::builder()
                 .with_cfg(cfg.clone())
                 .with_data_path(cfg.data_path.clone())
-                .build(),
+                .build()
+                .await
+                .unwrap(),
         );
 
         {
@@ -134,18 +143,18 @@ mod tests {
         }
 
         // Remove bucket in primary engine (fire-and-forget) and wait briefly for completion
-        primary_engine.remove_bucket("bucket-1").unwrap();
-        std::thread::sleep(std::time::Duration::from_millis(50));
-        primary_engine.sync_fs().unwrap();
-        read_only_engine.reload().unwrap();
+        primary_engine.remove_bucket("bucket-1").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        primary_engine.sync_fs().await.unwrap();
+        read_only_engine.reload().await.unwrap();
         assert_eq!(
             read_only_engine.buckets.read().unwrap().len(),
             1,
             "Should not reload before interval"
         );
 
-        std::thread::sleep(primary_engine.cfg.engine_config.replica_update_interval);
-        read_only_engine.reload().unwrap();
+        tokio::time::sleep(primary_engine.cfg.engine_config.replica_update_interval).await;
+        read_only_engine.reload().await.unwrap();
         let buckets = read_only_engine.buckets.read().unwrap();
         assert_eq!(buckets.len(), 0);
     }
@@ -155,26 +164,34 @@ mod tests {
         use reduct_base::forbidden;
         #[rstest]
         #[serial]
-        fn test_prohibited_operations_on_read_only_engine(primary_engine: Arc<StorageEngine>) {
+        #[tokio::test]
+        async fn test_prohibited_operations_on_read_only_engine(
+            #[future] primary_engine: Arc<StorageEngine>,
+        ) {
+            let primary_engine = primary_engine.await;
             let mut cfg = primary_engine.cfg().clone();
             cfg.role = InstanceRole::Replica;
             let read_only_engine = Arc::new(
                 StorageEngine::builder()
                     .with_cfg(cfg.clone())
                     .with_data_path(cfg.data_path.clone())
-                    .build(),
+                    .build()
+                    .await
+                    .unwrap(),
             );
             let err = forbidden!("Cannot perform this operation in read-only mode");
             // Example: try to create bucket
-            let result = read_only_engine.create_bucket("new-bucket", BucketSettings::default());
+            let result = read_only_engine
+                .create_bucket("new-bucket", BucketSettings::default())
+                .await;
             assert_eq!(result.err().unwrap(), err);
 
-            let result = read_only_engine.remove_bucket("bucket-1");
+            let result = read_only_engine.remove_bucket("bucket-1").await;
             assert_eq!(result.err().unwrap(), err);
 
             let result = read_only_engine
                 .rename_bucket("bucket-1".to_string(), "bucket-renamed".to_string())
-                .wait();
+                .await;
             assert_eq!(result.err().unwrap(), err);
         }
     }
@@ -183,14 +200,18 @@ mod tests {
         use super::*;
         #[rstest]
         #[serial]
-        fn test_reload_before_access_buckets(primary_engine: Arc<StorageEngine>) {
+        #[tokio::test]
+        async fn test_reload_before_access_buckets(#[future] primary_engine: Arc<StorageEngine>) {
+            let primary_engine = primary_engine.await;
             let mut cfg = primary_engine.cfg().clone();
             cfg.role = InstanceRole::Replica;
             let read_only_engine = Arc::new(
                 StorageEngine::builder()
                     .with_cfg(cfg.clone())
                     .with_data_path(cfg.data_path.clone())
-                    .build(),
+                    .build()
+                    .await
+                    .unwrap(),
             );
             {
                 let buckets = read_only_engine.buckets.read().unwrap();
@@ -200,20 +221,21 @@ mod tests {
             // Add new bucket to primary engine
             let _ = primary_engine
                 .create_bucket("bucket-2", BucketSettings::default())
+                .await
                 .unwrap();
             {
-                std::thread::sleep(primary_engine.cfg.engine_config.replica_update_interval);
+                tokio::time::sleep(primary_engine.cfg.engine_config.replica_update_interval).await;
                 let buckets = read_only_engine.buckets.read().unwrap();
                 assert_eq!(buckets.len(), 1, "Should not reload before reload call");
             }
-            read_only_engine.reload().unwrap();
+            read_only_engine.reload().await.unwrap();
             let buckets = read_only_engine.buckets.read().unwrap();
             assert_eq!(buckets.len(), 2);
         }
     }
 
     #[fixture]
-    fn primary_engine() -> Arc<StorageEngine> {
+    pub async fn primary_engine() -> Arc<StorageEngine> {
         let path = tempdir().unwrap().keep();
         let cfg = Cfg {
             data_path: path,
@@ -233,10 +255,13 @@ mod tests {
         let storage_engine = StorageEngine::builder()
             .with_cfg(cfg.clone())
             .with_data_path(cfg.data_path.clone())
-            .build();
+            .build()
+            .await
+            .unwrap();
 
         let _ = storage_engine
             .create_bucket("bucket-1", BucketSettings::default())
+            .await
             .unwrap();
         Arc::new(storage_engine)
     }

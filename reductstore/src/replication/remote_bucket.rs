@@ -5,11 +5,11 @@ mod client_wrapper;
 mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
-use std::collections::BTreeMap;
-
 use crate::replication::Transaction;
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
+use std::collections::BTreeMap;
 
 struct RemoteBucketImpl {
     state: Option<Box<dyn RemoteBucketState + Send + Sync>>,
@@ -18,8 +18,9 @@ struct RemoteBucketImpl {
 
 pub(super) type ErrorRecordMap = BTreeMap<u64, ReductError>;
 
+#[async_trait]
 pub(crate) trait RemoteBucket {
-    fn write_batch(
+    async fn write_batch(
         &mut self,
         entry_name: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
@@ -37,14 +38,20 @@ impl RemoteBucketImpl {
     }
 }
 
+#[async_trait]
 impl RemoteBucket for RemoteBucketImpl {
-    fn write_batch(
+    async fn write_batch(
         &mut self,
         entry_name: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError> {
-        self.state = Some(self.state.take().unwrap().write_batch(entry_name, records));
-
+        self.state = Some(
+            self.state
+                .take()
+                .unwrap()
+                .write_batch(entry_name, records)
+                .await,
+        );
         let state = self.state.as_ref().unwrap();
         self.is_active = state.is_available();
         state.last_result().clone()

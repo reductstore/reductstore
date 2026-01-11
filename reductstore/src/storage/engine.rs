@@ -383,7 +383,6 @@ mod tests {
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
-    use std::thread::sleep;
     use std::time::Duration;
     use tempfile::tempdir;
 

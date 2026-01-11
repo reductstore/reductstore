@@ -114,7 +114,7 @@ impl ReplicationSender {
                     }
 
                     let batch_size = batch.len() as u64;
-                    match self.bucket.write_batch(entry_name, batch) {
+                    match self.bucket.write_batch(entry_name, batch).await {
                         Ok(map) => {
                             counter.push((Ok(()), batch_size - map.len() as u64));
                             for (timestamp, err) in map.into_iter() {

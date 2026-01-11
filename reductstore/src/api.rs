@@ -568,7 +568,7 @@ mod tests {
             };
 
             let (tx, rx) = tokio::sync::mpsc::channel(1);
-            tx.send(test_components(cfg.clone())).await.unwrap();
+            tx.send(test_components(cfg.clone()).await).await.unwrap();
 
             let app = AxumAppBuilder::new()
                 .with_cfg(cfg)
@@ -599,7 +599,7 @@ mod tests {
         async fn test_get_anonymous(#[future] keeper: Arc<StateKeeper>) {
             let keeper = keeper.await;
             let components = keeper.get_anonymous().await.unwrap();
-            assert!(components.storage.info().wait().is_ok());
+            assert!(components.storage.info().await.is_ok());
         }
 
         #[rstest]
@@ -613,7 +613,7 @@ mod tests {
                 .get_with_permissions(&headers, FullAccessPolicy {})
                 .await
                 .unwrap();
-            assert!(components.storage.info().wait().is_ok());
+            assert!(components.storage.info().await.is_ok());
         }
 
         #[rstest]
@@ -627,7 +627,7 @@ mod tests {
                 .get_with_permissions(&headers, AuthenticatedPolicy {})
                 .await
                 .unwrap();
-            assert!(components.storage.info().wait().is_ok());
+            assert!(components.storage.info().await.is_ok());
         }
 
         #[rstest]
@@ -641,7 +641,7 @@ mod tests {
                 .get_with_permissions(&headers, ReadAccessPolicy { bucket: "bucket-1" })
                 .await
                 .unwrap();
-            assert!(components.storage.info().wait().is_ok());
+            assert!(components.storage.info().await.is_ok());
         }
 
         #[rstest]
@@ -655,7 +655,7 @@ mod tests {
                 .get_with_permissions(&headers, WriteAccessPolicy { bucket: "bucket-1" })
                 .await
                 .unwrap();
-            assert!(components.storage.info().wait().is_ok());
+            assert!(components.storage.info().await.is_ok());
         }
 
         #[rstest]
@@ -804,7 +804,7 @@ mod tests {
         }
     }
 
-    fn test_components(cfg: Cfg) -> Components {
+    async fn test_components(cfg: Cfg) -> Components {
         let cfg_for_storage = cfg.clone();
         FILE_CACHE.set_storage_backend(
             Backend::builder()
@@ -817,11 +817,14 @@ mod tests {
             StorageEngine::builder()
                 .with_data_path(cfg_for_storage.data_path.clone())
                 .with_cfg(cfg_for_storage.clone())
-                .build(),
+                .build()
+                .await,
         );
 
         let token_repo = TokenRepositoryBuilder::new(cfg.clone()).build(cfg.data_path.clone());
-        let replication_repo = ReplicationRepoBuilder::new(cfg.clone()).build(Arc::clone(&storage));
+        let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
 
         #[cfg(feature = "web-console")]
         let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
@@ -866,14 +869,17 @@ mod tests {
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
             .with_cfg(cfg.clone())
-            .build();
+            .build()
+            .await;
         let mut token_repo = TokenRepositoryBuilder::new(cfg.clone()).build(cfg.data_path.clone());
 
         storage
             .create_bucket("bucket-1", BucketSettings::default())
+            .await
             .unwrap();
         storage
             .create_bucket("bucket-2", BucketSettings::default())
+            .await
             .unwrap();
 
         let labels = HashMap::from_iter(vec![
@@ -883,6 +889,7 @@ mod tests {
 
         let mut sender = storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .begin_write("entry-1", 0, 6, "text/plain".to_string(), labels)
@@ -899,8 +906,9 @@ mod tests {
         token_repo.generate_token("test", permissions).unwrap();
 
         let storage = Arc::new(storage);
-        let mut replication_repo =
-            ReplicationRepoBuilder::new(cfg.clone()).build(Arc::clone(&storage));
+        let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
         replication_repo
             .create_replication(
                 "api-test",
@@ -918,6 +926,7 @@ mod tests {
                     mode: ReplicationMode::Enabled,
                 },
             )
+            .await
             .unwrap();
 
         #[cfg(feature = "web-console")]

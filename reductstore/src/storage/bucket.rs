@@ -306,7 +306,11 @@ impl Bucket {
 
     /// Starts a new record read with
     #[cfg(test)]
-    pub async fn begin_read(&self, name: &str, time: u64) -> Result<RecordReader, ReductError> {
+    pub async fn begin_read(
+        &self,
+        name: &str,
+        time: u64,
+    ) -> Result<crate::storage::entry::RecordReader, ReductError> {
         match self.get_entry(name).await?.upgrade() {
             Ok(entry) => entry.begin_read(time),
             Err(e) => Err(e).into(),
@@ -524,16 +528,18 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_or_create_entry(bucket: Arc<Bucket>) {
-            let entry = bucket.get_or_create_entry("test-1").unwrap();
+        async fn test_get_or_create_entry(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            let entry = bucket.get_or_create_entry("test-1").await.unwrap();
             assert_eq!(entry.upgrade().unwrap().name(), "test-1");
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_or_create_entry_invalid_name(bucket: Arc<Bucket>) {
+        async fn test_get_or_create_entry_invalid_name(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             assert_eq!(
-                bucket.get_or_create_entry("test-1/").err(),
+                bucket.get_or_create_entry("test-1/").await.err(),
                 Some(unprocessable_entity!(
                     "Bucket or entry name can contain only letters, digests and [-,_] symbols"
                 ))
@@ -546,10 +552,11 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_entry(bucket: Arc<Bucket>) {
+        async fn test_remove_entry(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
 
-            bucket.remove_entry("test-1").unwrap();
+            bucket.remove_entry("test-1").await.unwrap();
             let err = bucket.get_entry("test-1").err().unwrap();
             assert!(
                 err == ReductError::conflict("Entry 'test-1' in bucket 'test' is being deleted")
@@ -560,7 +567,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_entry_not_found(bucket: Arc<Bucket>) {
+        async fn test_remove_entry_not_found(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             assert_eq!(
                 bucket.remove_entry("test-1").err(),
                 Some(ReductError::not_found(
@@ -576,7 +584,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry(bucket: Arc<Bucket>) {
+        async fn test_rename_entry(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
 
             bucket.rename_entry("test-1", "test-2").await.unwrap();
@@ -599,7 +608,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry_not_found(bucket: Arc<Bucket>) {
+        async fn test_rename_entry_not_found(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             assert_eq!(
                 bucket.rename_entry("test-1", "test-2").await.err(),
                 Some(not_found!("Entry 'test-1' not found in bucket 'test'"))
@@ -608,7 +618,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry_already_exists(bucket: Arc<Bucket>) {
+        async fn test_rename_entry_already_exists(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
             write(&bucket, "test-2", 1, b"test").await.unwrap();
 
@@ -620,7 +631,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_invalid_name(bucket: Arc<Bucket>) {
+        async fn test_rename_invalid_name(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             assert_eq!(
                 bucket.rename_entry("test-1", "test-2/").await.err(),
                 Some(unprocessable_entity!(
@@ -631,12 +643,15 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry_persisted(bucket: Arc<Bucket>) {
+        async fn test_rename_entry_persisted(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
             bucket.sync_fs().await.unwrap();
             bucket.rename_entry("test-1", "test-2").await.unwrap();
 
-            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
+            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+                .await
+                .unwrap();
             assert_eq!(
                 bucket.get_entry("test-1").err(),
                 Some(ReductError::not_found(
@@ -653,8 +668,10 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_bucket_info_has_status(bucket: Arc<Bucket>) {
-            let info = bucket.info().wait().unwrap();
+        #[tokio::test]
+        async fn test_bucket_info_has_status(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            let info = bucket.info().await.unwrap();
             assert_eq!(info.info.status, ResourceStatus::Ready);
             assert!(info
                 .entries
@@ -663,27 +680,34 @@ mod tests {
         }
 
         #[rstest]
-        fn test_bucket_deleting_rejects_operations(bucket: Arc<Bucket>) {
-            bucket.mark_deleting().unwrap();
-            let err = bucket.get_or_create_entry("new-entry").err().unwrap();
+        #[tokio::test]
+        async fn test_bucket_deleting_rejects_operations(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
+            let err = bucket.get_or_create_entry("new-entry").await.err().unwrap();
             assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
         }
 
         #[rstest]
-        fn bucket_mark_deleting_returns_conflict_when_already_deleting(bucket: Arc<Bucket>) {
-            bucket.mark_deleting().unwrap();
+        #[tokio::test]
+        async fn bucket_mark_deleting_returns_conflict_when_already_deleting(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
             assert_eq!(
-                bucket.mark_deleting(),
+                bucket.mark_deleting().await,
                 Err(conflict!("Bucket 'test' is being deleted"))
             );
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_entry_deleting_rejects_operations(bucket: Arc<Bucket>) {
+        async fn test_entry_deleting_rejects_operations(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
             let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
-            entry.mark_deleting().unwrap();
+            entry.mark_deleting().await.unwrap();
 
             let err = bucket.begin_read("test-1", 1).await.err().unwrap();
             assert_eq!(
@@ -694,12 +718,15 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn entry_mark_deleting_returns_conflict_when_already_deleting(bucket: Arc<Bucket>) {
+        async fn entry_mark_deleting_returns_conflict_when_already_deleting(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
             let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
-            entry.mark_deleting().unwrap();
+            entry.mark_deleting().await.unwrap();
             assert_eq!(
-                entry.mark_deleting(),
+                entry.mark_deleting().await,
                 Err(conflict!(
                     "Entry 'test-1' in bucket 'test' is being deleted"
                 ))
@@ -708,13 +735,16 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn remove_entry_returns_conflict_when_entry_is_being_deleted(bucket: Arc<Bucket>) {
+        async fn remove_entry_returns_conflict_when_entry_is_being_deleted(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
             let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
-            entry.mark_deleting().unwrap();
+            entry.mark_deleting().await.unwrap();
 
             assert_eq!(
-                bucket.remove_entry("test-1"),
+                bucket.remove_entry("test-1").await,
                 Err(conflict!(
                     "Entry 'test-1' in bucket 'test' is being deleted"
                 ))
@@ -723,16 +753,20 @@ mod tests {
     }
 
     #[rstest]
-    fn test_provisioned_info(provisioned_bucket: Arc<Bucket>) {
-        let info = provisioned_bucket.info().wait().unwrap().info;
+    #[tokio::test]
+    async fn test_provisioned_info(#[future] provisioned_bucket: Arc<Bucket>) {
+        let provisioned_bucket = provisioned_bucket.await;
+        let info = provisioned_bucket.info().await.unwrap().info;
         assert_eq!(info.is_provisioned, true);
     }
 
     #[rstest]
-    fn test_provisioned_settings(provisioned_bucket: Arc<Bucket>) {
+    #[tokio::test]
+    async fn test_provisioned_settings(#[future] provisioned_bucket: Arc<Bucket>) {
+        let provisioned_bucket = provisioned_bucket.await;
         let err = provisioned_bucket
             .set_settings(BucketSettings::default())
-            .wait()
+            .await
             .err()
             .unwrap();
         assert_eq!(
@@ -800,15 +834,21 @@ mod tests {
     }
 
     #[fixture]
-    pub fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
+    pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
-        Arc::new(Bucket::try_build("test", &path, settings, Cfg::default()).unwrap())
+        Arc::new(
+            Bucket::try_build("test", &path, settings, Cfg::default())
+                .await
+                .unwrap(),
+        )
     }
 
     #[fixture]
-    pub fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
+    pub async fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
-        let bucket = Bucket::try_build("test", &path, settings, Cfg::default()).unwrap();
+        let bucket = Bucket::try_build("test", &path, settings, Cfg::default())
+            .await
+            .unwrap();
         bucket.set_provisioned(true);
         Arc::new(bucket)
     }

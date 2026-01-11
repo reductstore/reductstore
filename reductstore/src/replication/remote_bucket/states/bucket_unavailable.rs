@@ -1,14 +1,13 @@
-// Copyright 2023 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::replication::remote_bucket::client_wrapper::BoxedClientApi;
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-
-use log::error;
-
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
+use async_trait::async_trait;
+use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use tokio::time::{Duration, Instant};
@@ -21,18 +20,19 @@ pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
     last_result: Result<ErrorRecordMap, ReductError>,
 }
 
+#[async_trait]
 impl RemoteBucketState for BucketUnavailableState {
-    fn write_batch(
+    async fn write_batch(
         self: Box<Self>,
         entry: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         if self.init_time.elapsed() > self.timeout {
-            let bucket = self.client.get_bucket(&self.bucket_name);
+            let bucket = self.client.get_bucket(&self.bucket_name).await;
             return match bucket {
                 Ok(bucket) => {
                     let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
-                    new_state.write_batch(entry, records)
+                    new_state.write_batch(entry, records).await
                 }
                 Err(err) => {
                     error!(

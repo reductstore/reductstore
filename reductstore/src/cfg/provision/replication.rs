@@ -173,11 +173,11 @@ mod tests {
     use test_log::test as log_test;
 
     // Local helper to create a replication repo for tests
-    fn create_replication_repo(
+    async fn create_replication_repo(
         storage: Arc<StorageEngine>,
         cfg: Cfg,
     ) -> Box<dyn ManageReplications + Send + Sync> {
-        ReplicationRepoBuilder::new(cfg).build(storage)
+        ReplicationRepoBuilder::new(cfg).build(storage).await
     }
 
     #[log_test(rstest)]
@@ -204,6 +204,7 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication("replication1").unwrap();
@@ -246,9 +247,10 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -275,9 +277,10 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -303,9 +306,10 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -331,9 +335,10 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -359,9 +364,10 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[rstest]
@@ -374,9 +380,11 @@ mod tests {
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
             .with_cfg(cfg.clone())
-            .build();
+            .build()
+            .await;
         storage
             .create_bucket("bucket1", Default::default())
+            .await
             .unwrap();
         let mut repo = create_replication_repo(
             Arc::new(storage),
@@ -388,7 +396,8 @@ mod tests {
                 },
                 ..Default::default()
             },
-        );
+        )
+        .await;
         repo.create_replication(
             "replication1",
             ReplicationSettings {
@@ -405,6 +414,7 @@ mod tests {
                 mode: ReplicationMode::Enabled,
             },
         )
+        .await
         .unwrap();
 
         env_with_replications
@@ -427,6 +437,7 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication("replication1").unwrap();

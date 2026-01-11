@@ -70,9 +70,9 @@ mod tests {
         assert_eq!(
             info.0,
             FullReplicationInfo {
-                info: repl.info().await,
+                info: repl.info().await.unwrap(),
                 settings: repl.masked_settings().clone(),
-                diagnostics: repl.diagnostics().await,
+                diagnostics: repl.diagnostics().await.unwrap(),
             }
         );
     }

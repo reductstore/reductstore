@@ -78,7 +78,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn removes_records_from_multiple_entries(bucket: Arc<Bucket>) {
+    async fn removes_records_from_multiple_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 1, b"a1").await.unwrap();
         write(&bucket, "entry-b", 2, b"b1").await.unwrap();
         write(&bucket, "entry-b", 3, b"b2").await.unwrap();
@@ -112,7 +113,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn query_remove_records_filters_entries(bucket: Arc<Bucket>) {
+    async fn query_remove_records_filters_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 1, b"a1").await.unwrap();
         write(&bucket, "entry-a", 4, b"a2").await.unwrap();
         write(&bucket, "entry-b", 2, b"b1").await.unwrap();

@@ -132,19 +132,21 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let cfg = CfgParser::from_env(env_with_buckets, "0.0.0");
-        let components = cfg.build().unwrap();
+        let components = cfg.build().await.unwrap();
 
         let bucket1 = components
             .storage
             .get_bucket("bucket1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
         assert!(bucket1.is_provisioned());
-        assert_eq!(bucket1.settings().quota_type, Some(FIFO));
-        assert_eq!(bucket1.settings().quota_size, Some(1_000_000_000));
-        assert_eq!(bucket1.settings().max_block_size, Some(1_000_000));
-        assert_eq!(bucket1.settings().max_block_records, Some(1000));
+        let settings = bucket1.settings().await.unwrap();
+        assert_eq!(settings.quota_type, Some(FIFO));
+        assert_eq!(settings.quota_size, Some(1_000_000_000));
+        assert_eq!(settings.max_block_size, Some(1_000_000));
+        assert_eq!(settings.max_block_records, Some(1000));
     }
 
     #[log_test(rstest)]
@@ -160,15 +162,16 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let cfg = CfgParser::from_env(env_with_buckets, "0.0.0");
-        let components = cfg.build().unwrap();
+        let components = cfg.build().await.unwrap();
         let bucket1 = components
             .storage
             .get_bucket("bucket1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
         assert_eq!(
-            bucket1.settings(),
+            bucket1.settings().await.unwrap(),
             Bucket::defaults(),
             "use defaults if env vars are not set"
         );
@@ -187,10 +190,10 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let cfg = CfgParser::from_env(env_with_buckets, "0.0.0");
-        let components = cfg.build().unwrap();
+        let components = cfg.build().await.unwrap();
 
         assert_eq!(
-            components.storage.get_bucket("$$$$$").err().unwrap(),
+            components.storage.get_bucket("$$$$$").await.err().unwrap(),
             not_found!("Bucket '$$$$$' is not found")
         );
     }

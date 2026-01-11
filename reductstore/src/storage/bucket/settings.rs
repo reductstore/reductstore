@@ -139,12 +139,19 @@ mod tests {
     use std::sync::Arc;
 
     #[rstest]
-    fn test_keep_settings_persistent(settings: BucketSettings, bucket: Arc<Bucket>) {
-        assert_eq!(bucket.settings(), settings);
+    #[tokio::test]
+    async fn test_keep_settings_persistent(
+        settings: BucketSettings,
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        assert_eq!(bucket.settings().await.unwrap(), settings);
 
-        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
+        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+            .await
+            .unwrap();
         assert_eq!(bucket.name(), "test");
-        assert_eq!(bucket.settings(), settings);
+        assert_eq!(bucket.settings().await.unwrap(), settings);
     }
 
     #[rstest]
@@ -162,7 +169,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_set_settings_partially(settings: BucketSettings, bucket: Arc<Bucket>) {
+    #[tokio::test]
+    async fn test_set_settings_partially(settings: BucketSettings, #[future] bucket: Arc<Bucket>) {
         let new_settings = BucketSettings {
             max_block_size: Some(100),
             quota_type: None,
@@ -170,34 +178,44 @@ mod tests {
             max_block_records: None,
         };
 
-        bucket.set_settings(new_settings).wait().unwrap();
-        assert_eq!(bucket.settings().max_block_size.unwrap(), 100);
-        assert_eq!(bucket.settings().quota_type, settings.quota_type);
-        assert_eq!(bucket.settings().quota_size, settings.quota_size);
+        let bucket = bucket.await;
+        bucket.set_settings(new_settings).await.unwrap();
+        let bucket_settings = bucket.settings().await.unwrap();
+        assert_eq!(bucket_settings.max_block_size.unwrap(), 100);
+        assert_eq!(bucket_settings.quota_type, settings.quota_type);
+        assert_eq!(bucket_settings.quota_size, settings.quota_size);
         assert_eq!(
-            bucket.settings().max_block_records,
+            bucket_settings.max_block_records,
             settings.max_block_records
         );
     }
 
     #[rstest]
-    fn test_apply_settings_to_entries(settings: BucketSettings, bucket: Arc<Bucket>) {
-        bucket.get_or_create_entry("entry-1").unwrap();
-        bucket.get_or_create_entry("entry-2").unwrap();
+    #[tokio::test]
+    async fn test_apply_settings_to_entries(
+        settings: BucketSettings,
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        bucket.get_or_create_entry("entry-1").await.unwrap();
+        bucket.get_or_create_entry("entry-2").await.unwrap();
 
         let mut new_settings = settings.clone();
         new_settings.max_block_size = Some(200);
         new_settings.max_block_records = Some(200);
-        bucket.set_settings(new_settings).wait().unwrap();
+        bucket.set_settings(new_settings).await.unwrap();
 
-        for entry in bucket.entries.read().unwrap().values() {
-            assert_eq!(entry.settings().max_block_size, 200);
-            assert_eq!(entry.settings().max_block_records, 200);
+        for entry in bucket.entries.read().await.unwrap().values() {
+            let entry_settings = entry.settings().await.unwrap();
+            assert_eq!(entry_settings.max_block_size, 200);
+            assert_eq!(entry_settings.max_block_records, 200);
         }
     }
 
     #[rstest]
-    fn test_overwrite_whole_settings_file(bucket: Arc<Bucket>) {
+    #[tokio::test]
+    async fn test_overwrite_whole_settings_file(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         bucket
             .set_settings(BucketSettings {
                 max_block_size: Some(5000000000000000000),
@@ -205,10 +223,12 @@ mod tests {
                 quota_size: Some(500),
                 max_block_records: Some(50),
             })
-            .wait()
+            .await
             .unwrap();
-        bucket.set_settings(Bucket::defaults()).wait().unwrap();
-        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
-        assert_eq!(bucket.settings(), Bucket::defaults());
+        bucket.set_settings(Bucket::defaults()).await.unwrap();
+        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+            .await
+            .unwrap();
+        assert_eq!(bucket.settings().await.unwrap(), Bucket::defaults());
     }
 }

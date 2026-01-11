@@ -439,7 +439,6 @@ mod tests {
         use reduct_base::error::ErrorCode;
         use reduct_base::io::ReadRecord;
         use reduct_base::{no_content, not_found};
-        use std::thread::sleep;
 
         #[rstest]
         #[tokio::test]
@@ -483,7 +482,7 @@ mod tests {
                 );
             }
 
-            sleep(Duration::from_secs(ttl_s * 2)); // let query task finish
+            tokio::time::sleep(Duration::from_secs(ttl_s * 2)).await; // let query task finish
 
             assert_eq!(
                 entry.get_query_receiver(id).err(),
@@ -618,7 +617,6 @@ mod tests {
 
     mod try_remove_oldest_block {
         use super::*;
-        use std::thread::sleep;
 
         use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 

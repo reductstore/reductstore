@@ -311,7 +311,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn aggregates_by_timestamp(bucket: Arc<Bucket>) {
+    async fn aggregates_by_timestamp(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 10, b"a1").await.unwrap();
         write(&bucket, "entry-b", 20, b"b1").await.unwrap();
         write(&bucket, "entry-b", 25, b"b2").await.unwrap();
@@ -323,7 +324,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.query(query).unwrap();
+        let id = bucket.query(query).await.unwrap();
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
 
         let records = collect_records(rx).await;
@@ -341,7 +342,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn filters_requested_entries(bucket: Arc<Bucket>) {
+    async fn filters_requested_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 10, b"a1").await.unwrap();
         write(&bucket, "entry-b", 20, b"b1").await.unwrap();
         write(&bucket, "entry-c", 15, b"c1").await.unwrap();
@@ -352,7 +354,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.query(query).unwrap();
+        let id = bucket.query(query).await.unwrap();
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
 
         let records = collect_records(rx).await;
@@ -365,7 +367,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn filters_by_prefix_wildcard(bucket: Arc<Bucket>) {
+    async fn filters_by_prefix_wildcard(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "acc-a", 10, b"a1").await.unwrap();
         write(&bucket, "acc-b", 20, b"b1").await.unwrap();
         write(&bucket, "other", 15, b"c1").await.unwrap();
@@ -376,7 +379,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.query(query).unwrap();
+        let id = bucket.query(query).await.unwrap();
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
 
         let records = collect_records(rx).await;
@@ -389,7 +392,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn wildcard_all_entries(bucket: Arc<Bucket>) {
+    async fn wildcard_all_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 10, b"a1").await.unwrap();
         write(&bucket, "entry-b", 20, b"b1").await.unwrap();
 
@@ -399,7 +403,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.query(query).unwrap();
+        let id = bucket.query(query).await.unwrap();
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
 
         let records = collect_records(rx).await;
@@ -412,7 +416,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn removes_expired_queries(bucket: Arc<Bucket>) {
+    async fn removes_expired_queries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 10, b"a1").await.unwrap();
         write(&bucket, "entry-b", 20, b"b1").await.unwrap();
 
@@ -423,7 +428,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.query(query).unwrap();
+        let id = bucket.query(query).await.unwrap();
         let _ = bucket.get_query_receiver(id).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(1100)).await;

@@ -84,11 +84,12 @@ mod tests {
     use reduct_base::io::ReadRecord;
     use reduct_base::not_found;
     use rstest::rstest;
+    use std::sync::Arc;
 
     async fn write_with_labels(entry: &Arc<Entry>, time: u64, labels: Labels) {
         let mut sender = entry
             .begin_write(time, 1, "text/plain".to_string(), labels)
-            .wait()
+            .await
             .unwrap();
         sender
             .send(Ok(Some(Bytes::from_static(b"x"))))
@@ -99,14 +100,17 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn updates_labels_across_entries(bucket: Arc<Bucket>) {
+    async fn updates_labels_across_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         let entry1 = bucket
             .get_or_create_entry("entry-1")
+            .await
             .unwrap()
             .upgrade()
             .unwrap();
         let entry2 = bucket
             .get_or_create_entry("entry-2")
+            .await
             .unwrap()
             .upgrade()
             .unwrap();
@@ -142,7 +146,7 @@ mod tests {
                     remove: HashSet::new(),
                 },
             ])
-            .wait()
+            .await
             .unwrap();
 
         let entry1_labels = result
@@ -173,15 +177,16 @@ mod tests {
         );
 
         // Verify stored records were updated.
-        let stored1 = entry1.begin_read(1).wait().unwrap();
+        let stored1 = entry1.begin_read(1).await.unwrap();
         assert_eq!(stored1.meta().labels(), entry1_labels);
-        let stored2 = entry2.begin_read(2).wait().unwrap();
+        let stored2 = entry2.begin_read(2).await.unwrap();
         assert_eq!(stored2.meta().labels(), entry2_labels);
     }
 
     #[rstest]
     #[tokio::test]
-    async fn returns_error_for_missing_entry(bucket: Arc<Bucket>) {
+    async fn returns_error_for_missing_entry(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "present", 1, b"a").await.unwrap();
 
         let result = bucket
@@ -199,7 +204,7 @@ mod tests {
                     remove: HashSet::new(),
                 },
             ])
-            .wait()
+            .await
             .unwrap();
 
         assert!(result
