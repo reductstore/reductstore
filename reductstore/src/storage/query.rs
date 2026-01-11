@@ -84,7 +84,7 @@ pub(super) fn spawn_query_task(
     task_group: String,
     query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
-    block_manager: Arc<RwLock<BlockManager>>,
+    block_manager: Arc<BlockManager>,
 ) -> (QueryRx, JoinHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
@@ -247,7 +247,7 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_expired(block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_expired(block_manager: Arc<BlockManager>) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             ..Default::default()
@@ -272,7 +272,7 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_ok(block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_ok(block_manager: Arc<BlockManager>) {
         let options = QueryOptions::default();
         let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
 
@@ -294,7 +294,7 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_continuous_ok(block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_continuous_ok(block_manager: Arc<BlockManager>) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             continuous: true,
@@ -313,8 +313,6 @@ mod tests {
         assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
 
         block_manager
-            .write()
-            .unwrap()
             .load_block(0)
             .unwrap()
             .write()
@@ -341,7 +339,7 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test]
-    async fn test_query_task_err(block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_err(block_manager: Arc<BlockManager>) {
         let options = QueryOptions::default();
         let query = build_query(0, 10, options.clone(), IoConfig::default()).unwrap();
 
@@ -364,10 +362,7 @@ mod tests {
     }
 
     impl Query for PanickingQuery {
-        fn next(
-            &mut self,
-            _block_manager: Arc<RwLock<BlockManager>>,
-        ) -> Result<RecordReader, ReductError> {
+        fn next(&mut self, _block_manager: Arc<BlockManager>) -> Result<RecordReader, ReductError> {
             panic!("force JoinError from spawn_blocking");
         }
 
@@ -378,7 +373,7 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_blocking_error(block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_blocking_error(block_manager: Arc<BlockManager>) {
         let options = QueryOptions::default();
         let query: Box<dyn Query + Send + Sync> = Box::new(PanickingQuery {
             io: IoConfig::default(),
@@ -407,7 +402,7 @@ mod tests {
     }
 
     #[fixture]
-    fn block_manager() -> Arc<RwLock<BlockManager>> {
+    fn block_manager() -> Arc<BlockManager> {
         let path = tempfile::tempdir()
             .unwrap()
             .keep()
@@ -421,7 +416,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let mut block_manager = BlockManager::new(
+        let block_manager = BlockManager::new(
             path.clone(),
             BlockIndex::new(path.join("index")),
             Cfg::default().into(),
@@ -452,7 +447,7 @@ mod tests {
         });
 
         block_manager.finish_block(block_ref).unwrap();
-        Arc::new(RwLock::new(block_manager))
+        Arc::new(block_manager)
     }
 
     mod task_watcher {

@@ -1,6 +1,7 @@
 // Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::core::sync::RwLock;
 use bytes::Bytes;
 use crc64fast::Digest;
 use prost::Message;
@@ -18,11 +19,10 @@ use crate::storage::proto::{
     ts_to_us, us_to_ts, Block as BlockProto, BlockIndex as BlockIndexProto, MinimalBlock,
 };
 
-#[derive(Debug)]
 pub(in crate::storage) struct BlockIndex {
     path_buf: PathBuf,
-    index_info: HashMap<u64, BlockEntry>,
-    index: BTreeSet<u64>,
+    index_info: RwLock<HashMap<u64, BlockEntry>>,
+    index: RwLock<BTreeSet<u64>>,
 }
 
 impl Into<BlockEntry> for MinimalBlock {
@@ -66,13 +66,11 @@ impl Into<BlockEntry> for Block {
 
 impl BlockIndex {
     pub fn new(path_buf: PathBuf) -> Self {
-        let index = BlockIndex {
+        BlockIndex {
             path_buf,
-            index_info: HashMap::new(),
-            index: BTreeSet::new(),
-        };
-
-        index
+            index_info: RwLock::new(HashMap::new()),
+            index: RwLock::new(BTreeSet::new()),
+        }
     }
 
     /// Insert  or update a new block entry into the index.
@@ -81,7 +79,7 @@ impl BlockIndex {
     ///
     /// * `entry` - The block entry to insert.
     ///
-    pub fn insert_or_update<T>(&mut self, entry: T)
+    pub fn insert_or_update<T>(&self, entry: T)
     where
         T: Into<BlockEntry>,
     {
@@ -97,7 +95,7 @@ impl BlockIndex {
     /// * `entry` - The block entry to insert.
     /// * `crc` - The CRC value.
     ///
-    pub fn insert_or_update_with_crc<T>(&mut self, entry: T, crc: u64)
+    pub fn insert_or_update_with_crc<T>(&self, entry: T, crc: u64)
     where
         T: Into<BlockEntry>,
     {
@@ -106,13 +104,18 @@ impl BlockIndex {
         self.insert(block);
     }
 
-    pub fn get_block(&self, block_id: u64) -> Option<&BlockEntry> {
-        self.index_info.get(&block_id)
+    pub fn get_block(&self, block_id: u64) -> Option<BlockEntry> {
+        self.index_info
+            .read()
+            .ok()
+            .and_then(|info| info.get(&block_id).cloned())
     }
 
-    pub fn remove_block(&mut self, block_id: u64) -> Option<BlockEntry> {
-        let block = self.index_info.remove(&block_id);
-        self.index.remove(&block_id);
+    pub fn remove_block(&self, block_id: u64) -> Option<BlockEntry> {
+        let mut info = self.index_info.write().unwrap();
+        let mut index = self.index.write().unwrap();
+        let block = info.remove(&block_id);
+        index.remove(&block_id);
 
         block
     }
@@ -162,25 +165,23 @@ impl BlockIndex {
         Ok(block_index)
     }
 
-    pub fn update_from_disc(&mut self) -> Result<(), ReductError> {
+    pub fn update_from_disc(&self) -> Result<(), ReductError> {
         FILE_CACHE.discard_recursive(&self.path_buf)?;
 
         let updated_index = BlockIndex::try_load(self.path_buf.clone())?;
-        *self = updated_index;
+        *self.index_info.write().unwrap() = updated_index.info();
+        *self.index.write().unwrap() = updated_index.tree();
         Ok(())
     }
 
     pub fn from_proto(path: PathBuf, value: BlockIndexProto) -> Result<Self, ReductError> {
-        let mut block_index = BlockIndex {
-            path_buf: path.clone(),
-            index_info: HashMap::new(),
-            index: BTreeSet::new(),
-        };
+        let mut index_info = HashMap::new();
+        let mut index = BTreeSet::new();
 
         let mut crc = Digest::new();
         value.blocks.into_iter().for_each(|block| {
             // Count total numbers
-            block_index.index_info.insert(block.block_id, block);
+            index_info.insert(block.block_id, block);
 
             // Update CRC
             crc.write(&block.block_id.to_be_bytes());
@@ -193,8 +194,8 @@ impl BlockIndex {
                 crc.write(&crc64.to_be_bytes());
             }
 
-            block_index.index.insert(block.block_id);
-            block_index.index_info.insert(block.block_id, block);
+            index.insert(block.block_id);
+            index_info.insert(block.block_id, block);
         });
 
         if crc.sum64() != value.crc64 {
@@ -204,17 +205,21 @@ impl BlockIndex {
             ));
         }
 
-        Ok(block_index)
+        Ok(BlockIndex {
+            path_buf: path.clone(),
+            index_info: RwLock::new(index_info),
+            index: RwLock::new(index),
+        })
     }
 
     pub fn save(&self) -> Result<(), ReductError> {
+        let info = self.index_info.read().unwrap();
         let mut block_index_proto = BlockIndexProto {
             blocks: Vec::new(),
             crc64: 0,
         };
 
-        block_index_proto.blocks = self
-            .index_info
+        block_index_proto.blocks = info
             .values()
             .map(|block| {
                 let mut block_entry = BlockEntry::default();
@@ -260,27 +265,33 @@ impl BlockIndex {
 
     pub fn size(&self) -> u64 {
         self.index_info
+            .read()
+            .unwrap()
             .iter()
             .fold(0, |acc, (_, block)| acc + block.size + block.metadata_size)
     }
 
     pub fn record_count(&self) -> u64 {
         self.index_info
+            .read()
+            .unwrap()
             .iter()
             .fold(0, |acc, (_, block)| acc + block.record_count)
     }
 
-    pub fn tree(&self) -> &BTreeSet<u64> {
-        &self.index
+    pub fn info(&self) -> HashMap<u64, BlockEntry> {
+        self.index_info.read().unwrap().clone()
     }
 
-    pub fn info(&self) -> &HashMap<u64, BlockEntry> {
-        &self.index_info
+    pub fn tree(&self) -> BTreeSet<u64> {
+        self.index.read().unwrap().clone()
     }
 
-    fn insert(&mut self, block: BlockEntry) {
-        self.index_info.insert(block.block_id, block);
-        self.index.insert(block.block_id);
+    fn insert(&self, block: BlockEntry) {
+        let mut info = self.index_info.write().unwrap();
+        let mut index = self.index.write().unwrap();
+        info.insert(block.block_id, block);
+        index.insert(block.block_id);
     }
 }
 

@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::record;
@@ -127,10 +126,7 @@ impl HistoricalQuery {
 }
 
 impl Query for HistoricalQuery {
-    fn next(
-        &mut self,
-        block_manager: Arc<RwLock<BlockManager>>,
-    ) -> Result<RecordReader, ReductError> {
+    fn next(&mut self, block_manager: Arc<BlockManager>) -> Result<RecordReader, ReductError> {
         if self.records_from_current_block.is_empty() && !self.is_interrupted {
             let start = if let Some(block) = &self.current_block {
                 let block = block.read()?;
@@ -140,15 +136,13 @@ impl Query for HistoricalQuery {
             };
 
             let block_range = {
-                let mut bm = block_manager.write()?;
-                let first_block = {
-                    if let Ok(block) = bm.find_block(start) {
-                        block.read()?.block_id()
-                    } else {
-                        0
-                    }
+                let first_block = if let Ok(block) = block_manager.find_block(start) {
+                    block.read()?.block_id()
+                } else {
+                    0
                 };
-                bm.index()
+                block_manager
+                    .index()
                     .tree()
                     .range(first_block..self.stop_time)
                     .map(|k| *k)
@@ -156,8 +150,7 @@ impl Query for HistoricalQuery {
             };
 
             for block_id in block_range {
-                let mut bm = block_manager.write()?;
-                let block_ref = bm.load_block(block_id)?;
+                let block_ref = block_manager.load_block(block_id)?;
 
                 self.current_block = Some(block_ref);
                 let mut found_records = self.filter_records_from_current_block()?;
@@ -296,7 +289,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_1_rec(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query_ok_1_rec(block_manager: Arc<BlockManager>) {
         let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
@@ -306,7 +299,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_2_recs(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query_ok_2_recs(block_manager: Arc<BlockManager>) {
         let mut query = build_query(0, 1000, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
@@ -318,7 +311,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_3_recs(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query_ok_3_recs(block_manager: Arc<BlockManager>) {
         let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager);
 
@@ -332,7 +325,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_include(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query_include(block_manager: Arc<BlockManager>) {
         let mut query = build_query(
             0,
             1001,
@@ -360,7 +353,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_exclude(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query_exclude(block_manager: Arc<BlockManager>) {
         let mut query = build_query(
             0,
             1001,
@@ -390,21 +383,17 @@ mod tests {
     }
 
     #[rstest]
-    fn test_ignoring_errored_records(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_ignoring_errored_records(block_manager: Arc<BlockManager>) {
         let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
         {
-            let block_ref = block_manager.write().unwrap().load_block(0).unwrap();
+            let block_ref = block_manager.load_block(0).unwrap();
             {
                 let mut block = block_ref.write().unwrap();
                 let mut record = block.get_record(0).unwrap().clone();
                 record.state = record::State::Errored as i32;
                 block.insert_or_update_record(record);
             }
-            block_manager
-                .write()
-                .unwrap()
-                .save_block(block_ref)
-                .unwrap();
+            block_manager.save_block(block_ref).unwrap();
         }
 
         assert_eq!(
@@ -414,7 +403,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_each_s_filter(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_each_s_filter(block_manager: Arc<BlockManager>) {
         let mut query = build_query(
             0,
             1001,
@@ -432,7 +421,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_each_n_records(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_each_n_records(block_manager: Arc<BlockManager>) {
         let mut query = build_query(
             0,
             1001,
@@ -450,7 +439,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_when_filter(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_when_filter(block_manager: Arc<BlockManager>) {
         let mut query = build_query(
             0,
             1001,
@@ -467,7 +456,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_when_filter_strict(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_when_filter_strict(block_manager: Arc<BlockManager>) {
         let mut query = build_query(
             0,
             1001,
@@ -485,7 +474,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_when_with_interruption(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_when_with_interruption(block_manager: Arc<BlockManager>) {
         let mut query = build_query(
             0,
             1001,
@@ -504,7 +493,7 @@ mod tests {
     }
 
     #[rstest]
-    fn test_when_filter_non_strict(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_when_filter_non_strict(block_manager: Arc<BlockManager>) {
         let mut query = build_query(
             0,
             1001,
@@ -524,7 +513,7 @@ mod tests {
 
     fn read_to_vector(
         query: &mut HistoricalQuery,
-        block_manager: Arc<RwLock<BlockManager>>,
+        block_manager: Arc<BlockManager>,
     ) -> Vec<(BoxedReadRecord, String)> {
         let mut records: Vec<(BoxedReadRecord, String)> = Vec::new();
         loop {

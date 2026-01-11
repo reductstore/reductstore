@@ -7,12 +7,17 @@ use crate::storage::block_manager::BlockManager;
 use std::time::Instant;
 
 impl BlockManager {
-    pub(super) fn reload_if_readonly(&mut self) -> Result<(), reduct_base::error::ReductError> {
-        if self.cfg.role == InstanceRole::Replica
-            && self.last_replica_sync.elapsed() > self.cfg.engine_config.replica_update_interval
-        {
-            // we need to update the index from disk and chaned blocks for read-only instances
-            let previous_state = self.block_index.info().clone();
+    pub(super) fn reload_if_readonly(&self) -> Result<(), reduct_base::error::ReductError> {
+        let needs_reload = {
+            let last_sync = self.last_replica_sync.read()?;
+            self.cfg.role == InstanceRole::Replica
+                && last_sync.elapsed() > self.cfg.engine_config.replica_update_interval
+        };
+
+        if needs_reload {
+            // we need to update the index from disk and changed blocks for read-only instances
+            let previous_state = self.block_index.info();
+
             self.block_index.update_from_disc()?;
 
             for (block_id, new_block_info) in self.block_index.info().iter() {
@@ -26,7 +31,7 @@ impl BlockManager {
             }
 
             self.block_cache.clear();
-            self.last_replica_sync = Instant::now();
+            *self.last_replica_sync.write()? = Instant::now();
         }
 
         Ok(())
@@ -65,7 +70,7 @@ mod tests {
 
         let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
         index.save().unwrap();
-        let mut block_manager = BlockManager::new(path.clone(), index, Arc::new(cfg.clone()));
+        let block_manager = BlockManager::new(path.clone(), index, Arc::new(cfg.clone()));
 
         // change index on disc
         let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();

@@ -1,7 +1,6 @@
 // Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::sync::RwLock;
 use crate::core::thread_pool::spawn;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
@@ -122,7 +121,7 @@ impl Entry {
 
     fn inner_remove_records(
         timestamps: Vec<u64>,
-        block_manager: Arc<RwLock<BlockManager>>,
+        block_manager: Arc<BlockManager>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let mut error_map = BTreeMap::new();
         let mut records_per_block = BTreeMap::new();
@@ -131,7 +130,7 @@ impl Entry {
             for time in timestamps {
                 // Find the block that contains the record
                 // TODO: Try to avoid the lookup for each record
-                match block_manager.write()?.find_block(time) {
+                match block_manager.find_block(time) {
                     Ok(block_ref) => {
                         // Check if the record exists
                         let block = block_ref.read()?;
@@ -157,8 +156,7 @@ impl Entry {
             let local_block_manager = block_manager.clone();
             let handler = spawn("remove records from block", move || {
                 // TODO: we don't parallelize the removal of records in different blocks
-                let mut bm = local_block_manager.write()?;
-                bm.remove_records(block_id, timestamps)
+                local_block_manager.remove_records(block_id, timestamps)
             });
             handlers.push(handler);
         }

@@ -34,7 +34,7 @@ impl Entry {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         let settings = self.settings.read()?;
-        let mut bm = self.block_manager.write()?;
+        let bm = &self.block_manager;
         // When we write, the likely case is that we are writing the latest record
         // in the entry. In this case, we can just append to the latest block.
         let mut block_ref = if bm.index().tree().is_empty() {
@@ -94,7 +94,6 @@ impl Entry {
                                 block.insert_or_update_record(record);
                             }
 
-                            drop(bm); // drop the lock to avoid deadlock
                             let writer = RecordWriter::try_new(
                                 Arc::clone(&self.block_manager),
                                 block_ref,
@@ -132,8 +131,6 @@ impl Entry {
                 block_ref.clone()
             }
         };
-
-        drop(bm);
 
         Self::prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)?;
 
@@ -193,7 +190,7 @@ mod tests {
 
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
-        let mut bm = entry.block_manager.write().unwrap();
+        let bm = &entry.block_manager;
 
         assert_eq!(
             bm.load_block(1)
@@ -248,7 +245,7 @@ mod tests {
         write_stub_record(&entry, 2).await;
         write_stub_record(&entry, 2000010).await;
 
-        let mut bm = entry.block_manager.write().unwrap();
+        let bm = &entry.block_manager;
         let records = bm
             .load_block(1)
             .unwrap()
@@ -296,7 +293,7 @@ mod tests {
         write_stub_record(&entry, 3000000).await;
         write_stub_record(&entry, 2000000).await;
 
-        let mut bm = entry.block_manager.write().unwrap();
+        let bm = &entry.block_manager;
         let records = bm
             .load_block(1000000)
             .unwrap()
@@ -326,7 +323,7 @@ mod tests {
         write_stub_record(&entry, 3000000).await;
         write_stub_record(&entry, 1000000).await;
 
-        let mut bm = entry.block_manager.write().unwrap();
+        let bm = &entry.block_manager;
         let records = bm
             .load_block(1000000)
             .unwrap()

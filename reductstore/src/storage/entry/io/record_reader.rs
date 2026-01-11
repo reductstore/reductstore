@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FileWeak;
-use crate::core::sync::RwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::Record;
@@ -42,15 +41,14 @@ impl RecordReader {
     ///
     /// * `Result<RecordReader, ReductError>` - The record reader to read the record content in chunks
     pub(in crate::storage) fn try_new(
-        block_manager: Arc<RwLock<BlockManager>>,
+        block_manager: Arc<BlockManager>,
         block_ref: BlockRef,
         record_timestamp: u64,
         processed_record: Option<Record>,
     ) -> Result<Self, ReductError> {
-        let bm = block_manager.write()?;
         let block = block_ref.read()?;
 
-        let (file_ref, offset) = bm.begin_read_record(&block, record_timestamp)?;
+        let (file_ref, offset) = block_manager.begin_read_record(&block, record_timestamp)?;
 
         let record = block.get_record(record_timestamp).unwrap();
         let content_size = record.end - record.begin;
@@ -63,7 +61,7 @@ impl RecordReader {
             };
 
             RecordMeta::builder_from(meta)
-                .entry_name(bm.entry_name().clone())
+                .entry_name(block_manager.entry_name().clone())
                 .build()
         };
 

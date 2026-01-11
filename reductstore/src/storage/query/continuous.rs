@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -39,10 +38,7 @@ impl ContinuousQuery {
     }
 }
 impl Query for ContinuousQuery {
-    fn next(
-        &mut self,
-        block_manager: Arc<RwLock<BlockManager>>,
-    ) -> Result<RecordReader, ReductError> {
+    fn next(&mut self, block_manager: Arc<BlockManager>) -> Result<RecordReader, ReductError> {
         match self.query.next(block_manager) {
             Ok(reader) => {
                 self.next_start = reader.meta().timestamp() + 1;
@@ -83,7 +79,7 @@ mod tests {
     use crate::storage::query::base::tests::block_manager;
 
     #[rstest]
-    fn test_query(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_query(block_manager: Arc<BlockManager>) {
         let mut query = ContinuousQuery::try_new(
             900,
             QueryOptions {

@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -32,10 +31,7 @@ impl LimitedQuery {
 }
 
 impl Query for LimitedQuery {
-    fn next(
-        &mut self,
-        block_manager: Arc<RwLock<BlockManager>>,
-    ) -> Result<RecordReader, ReductError> {
+    fn next(&mut self, block_manager: Arc<BlockManager>) -> Result<RecordReader, ReductError> {
         if self.limit_count == 0 {
             return Err(no_content!("No content"));
         }
@@ -58,7 +54,7 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    fn test_limit(block_manager: Arc<RwLock<BlockManager>>) {
+    fn test_limit(block_manager: Arc<BlockManager>) {
         let mut query = LimitedQuery::try_new(
             0,
             u64::MAX,

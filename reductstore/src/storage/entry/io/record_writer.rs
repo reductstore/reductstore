@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FileWeak;
-use crate::core::sync::RwLock;
 use crate::core::thread_pool::spawn;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
@@ -36,7 +35,7 @@ struct WriteContext {
     file_ref: FileWeak,
     offset: u64,
     content_size: u64,
-    block_manager: Arc<RwLock<BlockManager>>,
+    block_manager: Arc<BlockManager>,
 }
 
 impl RecordWriter {
@@ -54,26 +53,25 @@ impl RecordWriter {
     ///
     /// * `RecordWriter` - The record writer.
     pub(in crate::storage) fn try_new(
-        block_manager: Arc<RwLock<BlockManager>>,
+        block_manager: Arc<BlockManager>,
         block_ref: BlockRef,
         time: u64,
     ) -> Result<Self, ReductError> {
         let (file_ref, offset, bucket_name, entry_name) = {
-            let mut bm = block_manager.write()?;
             let block = block_ref.read()?;
 
             let (file, offset) = {
-                bm.index_mut().insert_or_update(block.to_owned());
-                bm.begin_write_record(&block, time)?
+                block_manager.index().insert_or_update(block.to_owned());
+                block_manager.begin_write_record(&block, time)?
             };
 
-            bm.save_block(block_ref.clone())?;
+            block_manager.save_block(block_ref.clone())?;
 
             (
                 file,
                 offset,
-                bm.bucket_name().to_string(),
-                bm.entry_name().to_string(),
+                block_manager.bucket_name().to_string(),
+                block_manager.entry_name().to_string(),
             )
         };
 
@@ -162,10 +160,9 @@ impl RecordWriter {
             }
         };
 
-        if let Err(err) = ctx
-            .block_manager
-            .write()
-            .and_then(|mut bm| bm.finish_write_record(ctx.block_id, state, ctx.record_timestamp))
+        if let Err(err) =
+            ctx.block_manager
+                .finish_write_record(ctx.block_id, state, ctx.record_timestamp)
         {
             error!(
                 "Failed to finish writing {}/{}/{} record: {}",
@@ -279,7 +276,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_small_ok(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+        async fn test_small_ok(block_manager: Arc<BlockManager>, block_ref: BlockRef) {
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME).unwrap();
 
@@ -287,11 +284,7 @@ mod tests {
             writer.send(Ok(Some(Bytes::from("st")))).await.unwrap();
             writer.send(Ok(None)).await.unwrap();
 
-            let block_ref = block_manager
-                .write()
-                .unwrap()
-                .load_block(SMALL_RECORD_TIME)
-                .unwrap();
+            let block_ref = block_manager.load_block(SMALL_RECORD_TIME).unwrap();
             assert_eq!(
                 block_ref
                     .read()
@@ -303,7 +296,7 @@ mod tests {
             );
 
             let mut content = vec![0u8; 4];
-            fs::File::open(block_manager.read().unwrap().path().join("1.blk"))
+            fs::File::open(block_manager.path().join("1.blk"))
                 .unwrap()
                 .read(&mut content)
                 .unwrap();
@@ -313,7 +306,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_big_ok(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+        async fn test_big_ok(block_manager: Arc<BlockManager>, block_ref: BlockRef) {
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, BIG_RECORD_TIME).unwrap();
 
@@ -325,7 +318,7 @@ mod tests {
             writer.send(Ok(None)).await.unwrap();
 
             sleep(Duration::from_millis(100)).await;
-            let block_ref = block_manager.write().unwrap().load_block(1).unwrap();
+            let block_ref = block_manager.load_block(1).unwrap();
             assert_eq!(
                 block_ref
                     .read()
@@ -337,7 +330,7 @@ mod tests {
             );
 
             let mut block_content = vec![0u8; content.len() + 4];
-            fs::File::open(block_manager.read().unwrap().path().join("1.blk"))
+            fs::File::open(block_manager.path().join("1.blk"))
                 .unwrap()
                 .read(&mut block_content)
                 .unwrap();
@@ -347,7 +340,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_too_long(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+        async fn test_too_long(block_manager: Arc<BlockManager>, block_ref: BlockRef) {
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME).unwrap();
             writer
@@ -358,7 +351,7 @@ mod tests {
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let block_ref = block_manager.write().unwrap().load_block(1).unwrap();
+            let block_ref = block_manager.load_block(1).unwrap();
             assert_eq!(
                 block_ref.read().unwrap().get_record(1).unwrap().state,
                 record::State::Errored as i32
@@ -367,14 +360,14 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_too_short(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+        async fn test_too_short(block_manager: Arc<BlockManager>, block_ref: BlockRef) {
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME).unwrap();
             writer.send(Ok(Some(Bytes::from("xx")))).await.unwrap();
             writer.send(Ok(None)).await.unwrap();
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let block_ref = block_manager.write().unwrap().load_block(1).unwrap();
+            let block_ref = block_manager.load_block(1).unwrap();
             assert_eq!(
                 block_ref.read().unwrap().get_record(1).unwrap().state,
                 record::State::Errored as i32
@@ -383,7 +376,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_timeout(block_manager: Arc<RwLock<BlockManager>>, block_ref: BlockRef) {
+        async fn test_timeout(block_manager: Arc<BlockManager>, block_ref: BlockRef) {
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME).unwrap();
 
@@ -408,7 +401,7 @@ mod tests {
         #[serial]
         #[tokio::test]
         async fn test_finish_write_record_lock_timeout(
-            block_manager: Arc<RwLock<BlockManager>>,
+            block_manager: Arc<BlockManager>,
             block_ref: BlockRef,
         ) {
             struct ResetGuard;
@@ -425,13 +418,11 @@ mod tests {
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME).unwrap();
 
-            let lock = block_manager.write_blocking();
             writer.send(Ok(Some(Bytes::from("te")))).await.unwrap();
             writer.send(Ok(Some(Bytes::from("st")))).await.unwrap();
             writer.send(Ok(None)).await.unwrap();
-            drop(lock);
 
-            let block_ref = block_manager.write().unwrap().load_block(1).unwrap();
+            let block_ref = block_manager.load_block(1).unwrap();
             assert_eq!(
                 block_ref
                     .read()
@@ -439,7 +430,7 @@ mod tests {
                     .get_record(SMALL_RECORD_TIME)
                     .unwrap()
                     .state,
-                record::State::Started as i32
+                record::State::Finished as i32
             );
         }
 
@@ -449,21 +440,17 @@ mod tests {
         }
 
         #[fixture]
-        fn block_manager(path: PathBuf) -> Arc<RwLock<BlockManager>> {
-            Arc::new(RwLock::new(BlockManager::new(
+        fn block_manager(path: PathBuf) -> Arc<BlockManager> {
+            Arc::new(BlockManager::new(
                 path.clone(),
                 BlockIndex::new(path.clone()),
                 Cfg::default().into(),
-            )))
+            ))
         }
 
         #[fixture]
-        fn block_ref(block_manager: Arc<RwLock<BlockManager>>) -> BlockRef {
-            let block_ref = block_manager
-                .write()
-                .unwrap()
-                .start_new_block(1, 1000)
-                .unwrap();
+        fn block_ref(block_manager: Arc<BlockManager>) -> BlockRef {
+            let block_ref = block_manager.start_new_block(1, 1000).unwrap();
             block_ref.write().unwrap().insert_or_update_record(Record {
                 timestamp: Some(us_to_ts(&SMALL_RECORD_TIME)),
                 begin: 0,

@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use reduct_base::error::ReductError;
@@ -29,10 +28,7 @@ pub(in crate::storage) trait Query {
     ///
     /// * `HTTPError` - If the record cannot be read.
     /// * `HTTPError(NoContent)` - If all records have been read.
-    fn next(
-        &mut self,
-        block_manager: Arc<RwLock<BlockManager>>,
-    ) -> Result<RecordReader, ReductError>;
+    fn next(&mut self, block_manager: Arc<BlockManager>) -> Result<RecordReader, ReductError>;
 
     /// Get the IO settings for the query.
     ///
@@ -126,7 +122,7 @@ pub(crate) mod tests {
     use tempfile::tempdir;
 
     #[fixture]
-    pub(crate) fn block_manager() -> Arc<RwLock<BlockManager>> {
+    pub(crate) fn block_manager() -> Arc<BlockManager> {
         // Two blocks
         // the first block has two records: 0, 5
         // the second block has a record: 1000
@@ -137,7 +133,7 @@ pub(crate) mod tests {
                 .try_build()
                 .unwrap(),
         );
-        let mut block_manager = BlockManager::new(
+        let block_manager = BlockManager::new(
             dir.clone(),
             BlockIndex::new(dir.join("index")),
             Cfg::default().into(),
@@ -244,7 +240,7 @@ pub(crate) mod tests {
         write_record!(block_ref, 1000, b"0123456789");
 
         block_manager.finish_block(block_ref).unwrap();
-        let block_manager = Arc::new(RwLock::new(block_manager));
+        let block_manager = Arc::new(block_manager);
         block_manager
     }
 }

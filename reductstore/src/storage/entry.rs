@@ -49,7 +49,7 @@ pub(crate) struct Entry {
     name: String,
     bucket_name: String,
     settings: RwLock<EntrySettings>,
-    block_manager: Arc<RwLock<BlockManager>>,
+    block_manager: Arc<BlockManager>,
     queries: QueryHandleMapRef,
     status: RwLock<ResourceStatus>,
     path: PathBuf,
@@ -89,11 +89,11 @@ impl Entry {
                 .unwrap()
                 .to_string(),
             settings: RwLock::new(settings),
-            block_manager: Arc::new(RwLock::new(BlockManager::new(
+            block_manager: Arc::new(BlockManager::new(
                 path.clone(),
                 BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
                 cfg.clone(),
-            ))),
+            )),
             queries: Arc::new(RwLock::new(HashMap::new())),
             status: RwLock::new(ResourceStatus::Ready),
             path,
@@ -186,13 +186,12 @@ impl Entry {
         let name = self.name.clone();
         let status_result = self.status();
 
-        let mut bm = self.block_manager.write()?;
-        let index = bm.update_and_get_index()?;
+        let index = self.block_manager.update_and_get_index()?;
         let (oldest_record, latest_record) = if index.tree().is_empty() {
             (0, 0)
         } else {
-            let latest_block_id = index.tree().last().unwrap();
-            let latest_record = match index.get_block(*latest_block_id) {
+            let latest_block_id = index.tree().last().unwrap().clone();
+            let latest_record = match index.get_block(latest_block_id) {
                 Some(block) => ts_to_us(&block.latest_record_time.as_ref().unwrap()),
                 None => 0,
             };
@@ -235,8 +234,7 @@ impl Entry {
     }
 
     pub fn size(&self) -> Result<u64, ReductError> {
-        let bm = self.block_manager.read()?;
-        Ok(bm.index().size())
+        Ok(self.block_manager.index().size())
     }
 
     /// Try to remove the oldest block.
@@ -245,26 +243,23 @@ impl Entry {
     ///
     /// HTTTPError - The error if any.
     pub fn try_remove_oldest_block(&self) -> TaskHandle<Result<(), ReductError>> {
-        let bm = match self.block_manager.read() {
-            Ok(bm) => bm,
-            Err(e) => return Err(e).into(),
-        };
-
-        let index_tree = bm.index().tree();
+        let index = self.block_manager.index();
+        let index_tree = index.tree();
         if index_tree.is_empty() {
             return Err(internal_server_error!("No block to remove")).into();
         }
 
         let oldest_block_id = *index_tree.first().unwrap();
         let block_manager = Arc::clone(&self.block_manager);
-        drop(bm); // release read lock before acquiring write lock
 
         spawn("remove oldest block", move || {
-            let mut bm = block_manager.write()?;
-            bm.remove_block(oldest_block_id)?;
+            block_manager.remove_block(oldest_block_id)?;
             debug!(
                 "Removing the oldest block {}.blk",
-                bm.path().join(oldest_block_id.to_string()).display()
+                block_manager
+                    .path()
+                    .join(oldest_block_id.to_string())
+                    .display()
             );
             Ok(())
         })
@@ -272,16 +267,7 @@ impl Entry {
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
     pub fn compact(&self) -> Result<(), ReductError> {
-        if let Some(mut bm) = self.block_manager.try_write() {
-            bm.save_cache_on_disk()
-        } else {
-            // Avoid blocking writers; we'll try again on the next sync tick
-            debug!(
-                "Skipping compact for {}/{} because block manager is busy",
-                self.bucket_name, self.name
-            );
-            Ok(())
-        }
+        self.block_manager.save_cache_on_disk()
     }
 
     pub fn name(&self) -> &str {
@@ -374,8 +360,8 @@ mod tests {
             write_stub_record(&entry, 1).await;
             write_stub_record(&entry, 2000010).await;
 
-            let mut bm = entry.block_manager.write().unwrap();
-            let records = bm
+            let records = entry
+                .block_manager
                 .load_block(1)
                 .unwrap()
                 .read()
@@ -407,7 +393,7 @@ mod tests {
                 }
             );
 
-            bm.save_cache_on_disk().unwrap();
+            entry.block_manager.save_cache_on_disk().unwrap();
             let entry = Entry::restore(
                 path.join(entry.name()),
                 entry_settings,

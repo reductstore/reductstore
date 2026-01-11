@@ -43,7 +43,7 @@ impl Entry {
         let mut records_per_block = BTreeMap::new();
 
         {
-            let mut bm = self.block_manager.write()?;
+            let bm = &self.block_manager;
             for UpdateLabels {
                 time,
                 update,
@@ -87,8 +87,7 @@ impl Entry {
             let local_block_manager = self.block_manager.clone();
             let handler: TaskHandle<Result<(), ReductError>> =
                 spawn("update labels in block", move || {
-                    let mut bm = local_block_manager.write().unwrap();
-                    bm.update_records(block_id, records)?;
+                    local_block_manager.update_records(block_id, records)?;
                     Ok(())
                 });
 
@@ -240,7 +239,7 @@ mod tests {
                 .collect::<Labels>()
         );
 
-        let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
+        let block = entry.block_manager.load_block(1).unwrap();
         let mut record = block.read().unwrap().get_record(1).unwrap().clone();
         record.labels.sort_by(|a, b| a.name.cmp(&b.name));
         assert_eq!(record.labels, expected_labels);

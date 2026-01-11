@@ -36,17 +36,16 @@ pub(crate) type BlockRef = Arc<RwLock<Block>>;
 ///
 /// ## Notes
 ///
-/// It is not thread safe and may cause data corruption if used from multiple threads,
-/// because it does not lock the block descriptor file. Use it with RwLock<BlockManager>
+/// It uses internal locks for index/cache/WAL access and can be shared across threads safely.
 pub(in crate::storage) struct BlockManager {
     path: PathBuf,
     bucket: String,
     entry: String,
     block_index: BlockIndex,
     block_cache: BlockCache,
-    wal: Box<dyn Wal + Sync + Send>,
+    wal: RwLock<Box<dyn Wal + Sync + Send>>,
     cfg: Arc<Cfg>,
-    last_replica_sync: Instant,
+    last_replica_sync: RwLock<Instant>,
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -82,13 +81,13 @@ impl BlockManager {
                 READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
             ),
-            wal: create_wal(path.clone()),
+            wal: RwLock::new(create_wal(path.clone())),
             cfg,
-            last_replica_sync: Instant::now(),
+            last_replica_sync: RwLock::new(Instant::now()),
         }
     }
 
-    pub fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
+    pub fn save_cache_on_disk(&self) -> Result<(), ReductError> {
         for block in self.block_cache.write_values() {
             self.save_block_on_disk(block)?;
         }
@@ -96,27 +95,24 @@ impl BlockManager {
         Ok(())
     }
 
-    pub fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
-        self.update_and_get_index()?;
-
-        let start_block_id = self.block_index.tree().range(start..).next();
+    pub fn find_block(&self, start: u64) -> Result<BlockRef, ReductError> {
+        let tree = self.update_and_get_index()?.tree();
+        let start_block_id = tree.range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
-            start_block_id.unwrap().clone()
+            *start_block_id.unwrap()
+        } else if let Some(block_id) = tree.range(..start).rev().next() {
+            *block_id
         } else {
-            if let Some(block_id) = self.block_index.tree().range(..start).rev().next() {
-                block_id.clone()
-            } else {
-                return Err(ReductError::not_found(&format!(
-                    "No record with timestamp {}",
-                    start
-                )));
-            }
+            return Err(ReductError::not_found(&format!(
+                "No record with timestamp {}",
+                start
+            )));
         };
 
         self.load_block(id)
     }
 
-    pub fn load_block(&mut self, block_id: u64) -> Result<BlockRef, ReductError> {
+    pub fn load_block(&self, block_id: u64) -> Result<BlockRef, ReductError> {
         // first check if we have the block in write cache
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
@@ -147,7 +143,8 @@ impl BlockManager {
             let mut crc = Digest::new();
             crc.write(&buf);
 
-            if let Some(block) = self.block_index.get_block(block_id) {
+            let block_entry = self.block_index.get_block(block_id);
+            if let Some(block) = block_entry.as_ref() {
                 if let Some(block_crc) = block.crc64 {
                     // we check crc if the crc is stored in the index for backward compatibility
                     if block_crc != crc.sum64() {
@@ -189,7 +186,7 @@ impl BlockManager {
         Ok(cached_block)
     }
 
-    pub fn save_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
+    pub fn save_block(&self, block: BlockRef) -> Result<(), ReductError> {
         // save the current block in cache and write on the disk the evicted one
         let id = block.read()?.block_id();
         for (_, block) in self.block_cache.insert_write(id, block.clone()) {
@@ -200,7 +197,7 @@ impl BlockManager {
     }
 
     pub fn start_new_block(
-        &mut self,
+        &self,
         block_id: u64,
         max_block_size: u64,
     ) -> Result<BlockRef, ReductError> {
@@ -233,7 +230,7 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If file system operation failed.
-    pub fn finish_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
+    pub fn finish_block(&self, block: BlockRef) -> Result<(), ReductError> {
         let block = block.read()?;
         /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block.block_id());
@@ -264,8 +261,8 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If the block is still in use or file system operation failed.
-    pub fn remove_block(&mut self, block_id: u64) -> Result<(), ReductError> {
-        self.wal.append(block_id, WalEntry::RemoveBlock)?;
+    pub fn remove_block(&self, block_id: u64) -> Result<(), ReductError> {
+        self.wal.write()?.append(block_id, WalEntry::RemoveBlock)?;
 
         let data_block_path = self.path_to_data(block_id);
         if FILE_CACHE.try_exists(&data_block_path)? {
@@ -284,7 +281,7 @@ impl BlockManager {
 
         self.block_cache.remove(&block_id);
 
-        self.wal.remove(block_id)?;
+        self.wal.read()?.remove(block_id)?;
         Ok(())
     }
 
@@ -313,11 +310,7 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If failed to append to WAL or save the block on disk.
-    pub fn update_records(
-        &mut self,
-        block_id: u64,
-        records: Vec<Record>,
-    ) -> Result<(), ReductError> {
+    pub fn update_records(&self, block_id: u64, records: Vec<Record>) -> Result<(), ReductError> {
         let block_ref = self.load_block(block_id)?;
 
         {
@@ -325,6 +318,7 @@ impl BlockManager {
 
             for record in records.into_iter() {
                 self.wal
+                    .write()?
                     .append(block.block_id(), WalEntry::UpdateRecord(record.clone()))?;
                 block.insert_or_update_record(record);
             }
@@ -346,7 +340,7 @@ impl BlockManager {
     /// # Returns
     ///
     /// * `Ok(())` - If the records were removed successfully.
-    pub fn remove_records(&mut self, block_id: u64, records: Vec<u64>) -> Result<(), ReductError> {
+    pub fn remove_records(&self, block_id: u64, records: Vec<u64>) -> Result<(), ReductError> {
         let block_ref = self.load_block(block_id)?;
         {
             let mut block = block_ref.write()?;
@@ -354,6 +348,7 @@ impl BlockManager {
                 block.remove_record(record_time);
 
                 self.wal
+                    .write()?
                     .append(block.block_id(), WalEntry::RemoveRecord(record_time))?;
             }
 
@@ -482,7 +477,7 @@ impl BlockManager {
     ///
     /// * `ReductError` - If file system operation failed.
     pub(crate) fn finish_write_record(
-        &mut self,
+        &self,
         block_id: u64,
         state: record::State,
         record_timestamp: u64,
@@ -504,7 +499,7 @@ impl BlockManager {
             block.change_record_state(record_timestamp, i32::from(state))?;
 
             // write to WAL
-            self.wal.append(
+            self.wal.write()?.append(
                 block_id,
                 WalEntry::WriteRecord(block.get_record(record_timestamp).unwrap().clone()),
             )?;
@@ -545,15 +540,11 @@ impl BlockManager {
         Ok((file, offset))
     }
 
-    pub fn index_mut(&mut self) -> &mut BlockIndex {
-        &mut self.block_index
-    }
-
     pub fn index(&self) -> &BlockIndex {
         &self.block_index
     }
 
-    pub fn update_and_get_index(&mut self) -> Result<&BlockIndex, ReductError> {
+    pub fn update_and_get_index(&self) -> Result<&BlockIndex, ReductError> {
         self.reload_if_readonly()?;
         Ok(&self.block_index)
     }
@@ -579,7 +570,7 @@ impl BlockManager {
         self.path.join(format!("{}{}", block_id, DATA_FILE_EXT))
     }
 
-    fn save_block_on_disk(&mut self, block_ref: Arc<RwLock<Block>>) -> Result<(), ReductError> {
+    fn save_block_on_disk(&self, block_ref: Arc<RwLock<Block>>) -> Result<(), ReductError> {
         // Take a snapshot under a short-lived write lock to avoid blocking readers
         let (block_id, block_snapshot) = {
             let block = block_ref.write()?;
@@ -627,7 +618,7 @@ impl BlockManager {
 
             trace!("Block {}/{}/{} saved", self.bucket, self.entry, block_id);
             // clean WAL
-            self.wal.remove(block_id)?;
+            self.wal.read()?.remove(block_id)?;
         }
         Ok(())
     }
@@ -759,13 +750,13 @@ mod tests {
             block: BlockRef,
             block_id: u64,
         ) {
-            let block_manager = Arc::new(RwLock::new(block_manager));
+            let block_manager = Arc::new(block_manager);
             let mut writer = RecordWriter::try_new(Arc::clone(&block_manager), block, 0).unwrap();
 
             writer.send(Ok(None)).await.unwrap();
             tokio::time::sleep(Duration::from_millis(10)).await; // wait for thread to finish
 
-            let block_ref = block_manager.write().unwrap().load_block(block_id).unwrap();
+            let block_ref = block_manager.load_block(block_id).unwrap();
             assert_eq!(block_ref.read().unwrap().get_record(0).unwrap().state, 2);
         }
 
@@ -787,7 +778,7 @@ mod tests {
             block: BlockRef,
             block_id: u64,
         ) {
-            let block_manager = Arc::new(RwLock::new(block_manager));
+            let block_manager = Arc::new(block_manager);
             let record = Record {
                 timestamp: Some(Timestamp {
                     seconds: 1,
@@ -811,17 +802,15 @@ mod tests {
             sleep(Duration::from_millis(10)); // wait for thread to finish
 
             // must save record in WAL
-            let mut bm = block_manager.write().unwrap();
-            {
-                let entries = bm.wal.read(block_id).unwrap();
-                assert_eq!(entries.len(), 1);
-                let record_from_wall = match &entries[0] {
-                    WalEntry::WriteRecord(record) => record,
-                    _ => panic!("Expected WriteRecord"),
-                };
+            let bm = &block_manager;
+            let entries = bm.wal.read().unwrap().read(block_id).unwrap();
+            assert_eq!(entries.len(), 1);
+            let record_from_wall = match &entries[0] {
+                WalEntry::WriteRecord(record) => record,
+                _ => panic!("Expected WriteRecord"),
+            };
 
-                assert_eq!(record, *record_from_wall);
-            }
+            assert_eq!(record, *record_from_wall);
 
             let index = BlockIndex::from_proto(
                 PathBuf::new(),
@@ -843,7 +832,7 @@ mod tests {
             let _ = bm.start_new_block(block_id + 1, 1024).unwrap();
             let _ = bm.start_new_block(block_id + 2, 1024).unwrap();
 
-            let err = bm.wal.read(block_id).err().unwrap();
+            let err = bm.wal.read().unwrap().read(block_id).err().unwrap();
             assert_eq!(
                 err.status(),
                 ErrorCode::InternalServerError,
@@ -866,7 +855,7 @@ mod tests {
                 "index update"
             );
 
-            let er = bm.wal.read(block_id + 1).err().unwrap();
+            let er = bm.wal.read().unwrap().read(block_id + 1).err().unwrap();
             assert_eq!(
                 er.status(),
                 ErrorCode::InternalServerError,
@@ -1039,21 +1028,21 @@ mod tests {
 
         #[rstest]
         fn test_remove_records_wal(block_manager: BlockManager, block: BlockRef) {
-            let block_manager = Arc::new(RwLock::new(block_manager));
+            let block_manager = Arc::new(block_manager);
             write_record(1, 5, &block_manager, block.clone());
 
-            let mut bm = block_manager.write().unwrap();
-
             let block_id = block.read().unwrap().block_id();
-            FILE_CACHE.remove(&bm.path_to_data(block_id)).unwrap();
+            FILE_CACHE
+                .remove(&block_manager.path_to_data(block_id))
+                .unwrap();
 
-            let res = bm.remove_records(block_id, vec![1]);
+            let res = block_manager.remove_records(block_id, vec![1]);
             assert!(
                 res.is_err(),
                 "we broke the method removing the source block"
             );
 
-            let entries = bm.wal.read(block_id).unwrap();
+            let entries = block_manager.wal.read().unwrap().read(block_id).unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(
                 entries[0],
@@ -1066,7 +1055,7 @@ mod tests {
     fn write_record(
         record_time: u64,
         record_size: usize,
-        block_manager: &Arc<RwLock<BlockManager>>,
+        block_manager: &Arc<BlockManager>,
         block_ref: BlockRef,
     ) -> (Record, String) {
         let block_size = block_ref.read().unwrap().size();
