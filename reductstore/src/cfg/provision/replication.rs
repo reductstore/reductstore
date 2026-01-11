@@ -21,7 +21,11 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         for (name, settings) in &self.cfg.replications {
             if let Err(e) = repo.create_replication(&name, settings.clone()) {
                 if e.status() == ErrorCode::Conflict {
-                    repo.update_replication(&name, settings.clone())?;
+                    let mut settings = settings.clone();
+                    if let Ok(replication) = repo.get_replication(&name) {
+                        settings.mode = replication.mode();
+                    }
+                    repo.update_replication(&name, settings)?;
                 } else {
                     error!("Failed to provision replication '{}': {}", name, e);
                     continue;
@@ -404,6 +408,8 @@ mod tests {
             },
         )
         .unwrap();
+        repo.set_mode("replication1", ReplicationMode::Disabled)
+            .unwrap();
 
         env_with_replications
             .expect_get()
@@ -432,6 +438,7 @@ mod tests {
             replication.settings().when,
             Some(serde_json::json!({"$and": [true, false]}))
         );
+        assert_eq!(replication.mode(), ReplicationMode::Disabled);
     }
 
     #[fixture]
