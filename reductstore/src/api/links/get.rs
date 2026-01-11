@@ -71,20 +71,22 @@ pub(super) async fn get(
     } else {
         let entry = components
             .storage
-            .get_bucket(&query.bucket)?
+            .get_bucket(&query.bucket)
+            .await?
             .upgrade()?
-            .get_entry(&query.entry)?
+            .get_entry(&query.entry)
+            .await?
             .upgrade()?;
 
         let repo_ext = &components.ext_repo;
 
         // Execute the query with extension mechanism
-        let id = entry.query(query.query.clone())?;
+        let id = entry.query(query.query.clone()).await?;
         repo_ext
             .register_query(id, &query.bucket, &query.entry, query.query)
             .await?;
 
-        let (rx, _) = entry.get_query_receiver(id.clone())?;
+        let (rx, _): (_, _) = entry.get_query_receiver(id.clone()).await?;
         let record =
             process_query_and_fetch_record(record_num, repo_ext, id, rx.upgrade()?).await?;
 

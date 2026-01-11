@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod entry_loader;
@@ -10,8 +10,7 @@ mod write_record;
 
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
-use crate::core::sync::{AsyncRwLock, RwLock};
-use crate::core::thread_pool::{spawn, TaskHandle};
+use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
@@ -21,7 +20,7 @@ use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
-use log::debug;
+use log::{debug, error};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;
@@ -42,16 +41,16 @@ struct QueryHandle {
 }
 
 type QueryHandleMap = HashMap<u64, QueryHandle>;
-type QueryHandleMapRef = Arc<RwLock<QueryHandleMap>>;
+type QueryHandleMapRef = Arc<AsyncRwLock<QueryHandleMap>>;
 
 /// Entry is a time series in a bucket.
 pub(crate) struct Entry {
     name: String,
     bucket_name: String,
-    settings: RwLock<EntrySettings>,
-    block_manager: Arc<RwLock<BlockManager>>,
+    settings: AsyncRwLock<EntrySettings>,
+    block_manager: Arc<AsyncRwLock<BlockManager>>,
     queries: QueryHandleMapRef,
-    status: RwLock<ResourceStatus>,
+    status: AsyncRwLock<ResourceStatus>,
     path: PathBuf,
     cfg: Arc<Cfg>,
 }
@@ -88,28 +87,26 @@ impl Entry {
                 .to_str()
                 .unwrap()
                 .to_string(),
-            settings: RwLock::new(settings),
-            block_manager: Arc::new(RwLock::new(BlockManager::new(
+            settings: AsyncRwLock::new(settings),
+            block_manager: Arc::new(AsyncRwLock::new(BlockManager::new(
                 path.clone(),
                 BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
                 cfg.clone(),
             ))),
-            queries: Arc::new(RwLock::new(HashMap::new())),
-            status: RwLock::new(ResourceStatus::Ready),
+            queries: Arc::new(AsyncRwLock::new(HashMap::new())),
+            status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
             cfg,
         })
     }
 
-    pub(crate) fn restore(
+    pub(crate) async fn restore(
         path: PathBuf,
         options: EntrySettings,
         cfg: Arc<Cfg>,
-    ) -> TaskHandle<Result<Option<Entry>, ReductError>> {
-        spawn("restore entry", move || {
-            let entry = EntryLoader::restore_entry(path, options, cfg)?;
-            Ok(entry)
-        })
+    ) -> Result<Option<Entry>, ReductError> {
+        let entry = EntryLoader::restore_entry(path, options, cfg).await?;
+        Ok(entry)
     }
 
     /// Query records for a time range.
@@ -122,8 +119,8 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub fn query(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
-        let (start, stop) = self.get_query_time_range(&query_parameters)?;
+    pub async fn query(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
+        let (start, stop) = self.get_query_time_range(&query_parameters).await?;
         let id = next_query_id();
         let block_manager = Arc::clone(&self.block_manager);
 
@@ -134,7 +131,7 @@ impl Entry {
         let (rx, task_handle) =
             spawn_query_task(id, self.task_group(), query, options.clone(), block_manager);
 
-        self.queries.write()?.insert(
+        self.queries.write().await?.insert(
             id,
             QueryHandle {
                 rx: Arc::new(AsyncRwLock::new(rx)),
@@ -158,18 +155,15 @@ impl Entry {
     ///
     /// * `(RecordReader, IoConfig)` - The record reader to read the record content in chunks and a boolean indicating if the query is done.
     /// * `HTTPError` - The error if any.
-    pub fn get_query_receiver(
+    pub async fn get_query_receiver(
         &self,
         query_id: u64,
     ) -> Result<(Weak<AsyncRwLock<QueryRx>>, IoConfig), ReductError> {
         let entry_path = format!("{}/{}", self.bucket_name, self.name);
         let queries = Arc::clone(&self.queries);
-        spawn("remove expired queries", move || {
-            Self::remove_expired_query(queries, entry_path);
-        })
-        .wait();
+        Self::remove_expired_query(queries, entry_path).await?;
 
-        let mut queries = self.queries.write()?;
+        let mut queries = self.queries.write().await?;
         let query = queries.get_mut(&query_id).ok_or_else(|| {
             not_found!(
                 "Query {} not found and it might have expired. Check TTL in your query request.",
@@ -182,11 +176,11 @@ impl Entry {
     }
 
     /// Returns stats about the entry.
-    pub fn info(&self) -> Result<EntryInfo, ReductError> {
+    pub async fn info(&self) -> Result<EntryInfo, ReductError> {
         let name = self.name.clone();
         let status_result = self.status();
 
-        let mut bm = self.block_manager.write()?;
+        let mut bm = self.block_manager.write().await?;
         let index = bm.update_and_get_index()?;
         let (oldest_record, latest_record) = if index.tree().is_empty() {
             (0, 0)
@@ -199,7 +193,7 @@ impl Entry {
             (*index.tree().first().unwrap(), latest_record)
         };
 
-        let status = status_result?;
+        let status = status_result.await?;
 
         Ok(EntryInfo {
             name,
@@ -212,18 +206,18 @@ impl Entry {
         })
     }
 
-    pub(crate) fn status(&self) -> Result<ResourceStatus, ReductError> {
-        Ok(*self.status.read()?)
+    pub(crate) async fn status(&self) -> Result<ResourceStatus, ReductError> {
+        Ok(*self.status.read().await?)
     }
 
-    pub(crate) fn mark_deleting(&self) -> Result<(), ReductError> {
-        self.ensure_not_deleting()?;
-        *self.status.write()? = ResourceStatus::Deleting;
+    pub(crate) async fn mark_deleting(&self) -> Result<(), ReductError> {
+        self.ensure_not_deleting().await?;
+        *self.status.write().await? = ResourceStatus::Deleting;
         Ok(())
     }
 
-    pub(crate) fn ensure_not_deleting(&self) -> Result<(), ReductError> {
-        if self.status()? == ResourceStatus::Deleting {
+    pub(crate) async fn ensure_not_deleting(&self) -> Result<(), ReductError> {
+        if self.status().await? == ResourceStatus::Deleting {
             Err(conflict!(
                 "Entry '{}' in bucket '{}' is being deleted",
                 self.name,
@@ -234,8 +228,8 @@ impl Entry {
         }
     }
 
-    pub fn size(&self) -> Result<u64, ReductError> {
-        let bm = self.block_manager.read()?;
+    pub async fn size(&self) -> Result<u64, ReductError> {
+        let bm = self.block_manager.read().await?;
         Ok(bm.index().size())
     }
 
@@ -244,12 +238,8 @@ impl Entry {
     /// # Returns
     ///
     /// HTTTPError - The error if any.
-    pub fn try_remove_oldest_block(&self) -> TaskHandle<Result<(), ReductError>> {
-        let bm = match self.block_manager.read() {
-            Ok(bm) => bm,
-            Err(e) => return Err(e).into(),
-        };
-
+    pub async fn try_remove_oldest_block(&self) -> Result<(), ReductError> {
+        let bm = self.block_manager.read().await?;
         let index_tree = bm.index().tree();
         if index_tree.is_empty() {
             return Err(internal_server_error!("No block to remove")).into();
@@ -259,15 +249,28 @@ impl Entry {
         let block_manager = Arc::clone(&self.block_manager);
         drop(bm); // release read lock before acquiring write lock
 
-        spawn("remove oldest block", move || {
-            let mut bm = block_manager.write()?;
-            bm.remove_block(oldest_block_id)?;
+        tokio::spawn(async move {
+            let mut bm = match block_manager.write().await {
+                Ok(bm) => bm,
+                Err(e) => {
+                    error!(
+                        "Failed to acquire write lock on block manager to remove oldest block {}: {}",
+                        oldest_block_id, e
+                    );
+                    return;
+                }
+            };
+
+            bm.remove_block(oldest_block_id).unwrap_or_else(|e| {
+                error!("Failed to remove oldest block {}: {}", oldest_block_id, e);
+            });
             debug!(
                 "Removing the oldest block {}.blk",
                 bm.path().join(oldest_block_id.to_string()).display()
             );
-            Ok(())
-        })
+        });
+
+        Ok(())
     }
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
@@ -288,38 +291,44 @@ impl Entry {
         &self.name
     }
 
-    pub fn settings(&self) -> EntrySettings {
-        self.settings.read().unwrap().clone()
+    pub async fn settings(&self) -> Result<EntrySettings, ReductError> {
+        Ok(self.settings.read().await?.clone())
     }
 
     pub fn bucket_name(&self) -> &str {
         &self.bucket_name
     }
 
-    pub fn set_settings(&self, settings: EntrySettings) {
-        *self.settings.write().unwrap() = settings;
+    pub async fn set_settings(&self, settings: EntrySettings) -> Result<(), ReductError> {
+        *self.settings.write().await? = settings;
+        Ok(())
     }
 
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
 
-    fn remove_expired_query(queries: QueryHandleMapRef, entry_path: String) {
-        queries.write().unwrap().retain(|id, handle| {
+    async fn remove_expired_query(
+        queries: QueryHandleMapRef,
+        entry_path: String,
+    ) -> Result<(), ReductError> {
+        queries.write().await?.retain(|id, handle| {
             if handle.last_access.elapsed() >= handle.options.ttl {
                 debug!("Query {}/{} expired", entry_path, id);
                 return false;
             }
             true
         });
+
+        Ok(())
     }
 
     fn task_group(&self) -> String {
         self.path.display().to_string()
     }
 
-    fn get_query_time_range(&self, query: &QueryEntry) -> Result<(u64, u64), ReductError> {
-        let info = self.info()?;
+    async fn get_query_time_range(&self, query: &QueryEntry) -> Result<(u64, u64), ReductError> {
+        let info = self.info().await?;
         let start = if let Some(start) = query.start {
             start
         } else {
@@ -350,10 +359,11 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn mark_deleting_returns_conflict_when_already_deleting(entry: Arc<Entry>) {
-            entry.mark_deleting().unwrap();
+        #[tokio::test]
+        async fn mark_deleting_returns_conflict_when_already_deleting(entry: Arc<Entry>) {
+            entry.mark_deleting().await.unwrap();
             assert_eq!(
-                entry.mark_deleting(),
+                entry.mark_deleting().await,
                 Err(conflict!(
                     "Entry '{}' in bucket '{}' is being deleted",
                     entry.name(),
@@ -374,7 +384,7 @@ mod tests {
             write_stub_record(&entry, 1).await;
             write_stub_record(&entry, 2000010).await;
 
-            let mut bm = entry.block_manager.write().unwrap();
+            let mut bm = entry.block_manager.write().await.unwrap();
             let records = bm
                 .load_block(1)
                 .unwrap()
@@ -413,10 +423,10 @@ mod tests {
                 entry_settings,
                 Cfg::default().into(),
             )
-            .wait()
+            .await
             .unwrap()
             .unwrap();
-            let info = entry.info().unwrap();
+            let info = entry.info().await.unwrap();
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
             assert_eq!(info.size, 88);
@@ -429,7 +439,6 @@ mod tests {
         use reduct_base::error::ErrorCode;
         use reduct_base::io::ReadRecord;
         use reduct_base::{no_content, not_found};
-        use std::thread::sleep;
 
         #[rstest]
         #[tokio::test]
@@ -446,11 +455,11 @@ mod tests {
                 ..Default::default()
             };
 
-            let id = entry.query(params).unwrap();
+            let id = entry.query(params).await.unwrap();
             assert!(id >= 1);
 
             {
-                let (rx, _) = entry.get_query_receiver(id).unwrap();
+                let (rx, _) = entry.get_query_receiver(id).await.unwrap();
                 let rx = rx.upgrade_and_unwrap();
                 let mut rx = rx.write().await.unwrap();
 
@@ -473,11 +482,14 @@ mod tests {
                 );
             }
 
-            sleep(Duration::from_secs(ttl_s * 2)); // let query task finish
+            tokio::time::sleep(Duration::from_secs(ttl_s * 2)).await; // let query task finish
 
             assert_eq!(
-                entry.get_query_receiver(id).err(),
-                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request.", id))
+                entry.get_query_receiver(id).await.err(),
+                Some(not_found!(
+                    "Query {} not found and it might have expired. Check TTL in your query request.",
+                    id
+                ))
             );
         }
 
@@ -493,10 +505,10 @@ mod tests {
                 ttl: Some(1),
                 ..Default::default()
             };
-            let id = entry.query(params).unwrap();
+            let id = entry.query(params).await.unwrap();
 
             {
-                let (rx, _) = entry.get_query_receiver(id).unwrap();
+                let (rx, _) = entry.get_query_receiver(id).await.unwrap();
                 let rx = rx.upgrade_and_unwrap();
                 let mut rx = rx.write().await.unwrap();
                 let reader = rx.recv().await.unwrap().unwrap();
@@ -509,7 +521,7 @@ mod tests {
 
             write_stub_record(&entry, 2000000).await;
             {
-                let (rx, _) = entry.get_query_receiver(id).unwrap();
+                let (rx, _) = entry.get_query_receiver(id).await.unwrap();
                 let rc = rx.upgrade_and_unwrap();
                 let mut rx = rc.write().await.unwrap();
                 let reader = loop {
@@ -528,8 +540,11 @@ mod tests {
 
             tokio::time::sleep(Duration::from_millis(1700)).await;
             assert_eq!(
-                entry.get_query_receiver(id).err(),
-                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request.", id))
+                entry.get_query_receiver(id).await.err(),
+                Some(not_found!(
+                    "Query {} not found and it might have expired. Check TTL in your query request.",
+                    id
+                ))
             );
         }
 
@@ -544,9 +559,10 @@ mod tests {
                     ttl: Some(1),
                     ..Default::default()
                 })
+                .await
                 .unwrap();
 
-            let (rx, _) = entry.get_query_receiver(id).unwrap();
+            let (rx, _) = entry.get_query_receiver(id).await.unwrap();
             let rx = rx.upgrade_and_unwrap();
             {
                 let mut rx = rx.write().await.unwrap();
@@ -557,6 +573,7 @@ mod tests {
                 let finished = entry
                     .queries
                     .read()
+                    .await
                     .unwrap()
                     .get(&id)
                     .map(|handle| handle.query_task_handle.is_finished())
@@ -570,15 +587,19 @@ mod tests {
             Entry::remove_expired_query(
                 Arc::clone(&entry.queries),
                 format!("{}/{}", entry.bucket_name(), entry.name()),
-            );
-            assert!(entry.queries.read().unwrap().contains_key(&id));
+            )
+            .await
+            .unwrap();
+            assert!(entry.queries.read().await.unwrap().contains_key(&id));
 
             tokio::time::sleep(Duration::from_secs(2)).await;
             Entry::remove_expired_query(
                 Arc::clone(&entry.queries),
                 format!("{}/{}", entry.bucket_name(), entry.name()),
-            );
-            assert!(!entry.queries.read().unwrap().contains_key(&id));
+            )
+            .await
+            .unwrap();
+            assert!(!entry.queries.read().await.unwrap().contains_key(&id));
         }
     }
 
@@ -597,7 +618,7 @@ mod tests {
         write_stub_record(&entry, 2000000).await;
         write_stub_record(&entry, 3000000).await;
 
-        let info = entry.info().unwrap();
+        let info = entry.info().await.unwrap();
         assert_eq!(info.name, "entry");
         assert_eq!(info.size, 88);
         assert_eq!(info.record_count, 3);
@@ -608,14 +629,14 @@ mod tests {
 
     mod try_remove_oldest_block {
         use super::*;
-        use std::thread::sleep;
 
         use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 
         #[rstest]
-        fn test_empty_entry(entry: Arc<Entry>) {
+        #[tokio::test]
+        async fn test_empty_entry(entry: Arc<Entry>) {
             assert_eq!(
-                entry.try_remove_oldest_block().wait(),
+                entry.try_remove_oldest_block().await,
                 Err(internal_server_error!("No block to remove"))
             );
         }
@@ -630,45 +651,48 @@ mod tests {
                 vec![0; MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1],
             )
             .await;
-            let _rx = entry.begin_read(1000000).wait().unwrap();
-            sleep(Duration::from_millis(100));
+            let _rx = entry.begin_read(1000000).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
 
             assert!(entry
                 .try_remove_oldest_block()
-                .wait()
+                .await
                 .err()
                 .unwrap()
                 .to_string()
                 .contains("because it is in use"));
-            let info = entry.info().unwrap();
+            let info = entry.info().await.unwrap();
             assert_eq!(info.block_count, 1);
             assert_eq!(info.size, 8388630);
         }
 
         #[rstest]
         #[ignore] // experimental:  without writer protection.
-        fn test_entry_which_has_writer(entry: Arc<Entry>) {
+        #[tokio::test]
+        async fn test_entry_which_has_writer(entry: Arc<Entry>) {
             let mut sender = entry
+                .clone()
                 .begin_write(
                     1000000,
                     (MAX_IO_BUFFER_SIZE + 1) as u64,
                     "text/plain".to_string(),
                     Labels::new(),
                 )
-                .wait()
+                .await
                 .unwrap();
             sender
-                .blocking_send(Ok(Some(Bytes::from_static(b"456789"))))
+                .send(Ok(Some(Bytes::from_static(b"456789"))))
+                .await
                 .unwrap();
 
-            sleep(Duration::from_millis(100));
+            tokio::time::sleep(Duration::from_millis(100)).await;
             assert_eq!(
-                entry.try_remove_oldest_block().wait(),
+                entry.try_remove_oldest_block().await,
                 Err(internal_server_error!(
                     "Cannot remove block 1000000 because it is still in use"
                 ))
             );
-            let info = entry.info().unwrap();
+            let info = entry.info().await.unwrap();
             assert_eq!(info.block_count, 1);
             assert_eq!(info.size, 524309);
         }
@@ -694,19 +718,19 @@ mod tests {
             write_stub_record(&entry, 3000000).await;
             write_stub_record(&entry, 4000000).await;
 
-            assert_eq!(entry.info().unwrap().block_count, 2);
-            assert_eq!(entry.info().unwrap().record_count, 4);
-            assert_eq!(entry.info().unwrap().size, 116);
+            assert_eq!(entry.info().await.unwrap().block_count, 2);
+            assert_eq!(entry.info().await.unwrap().record_count, 4);
+            assert_eq!(entry.info().await.unwrap().size, 116);
 
-            entry.try_remove_oldest_block().wait().unwrap();
-            assert_eq!(entry.info().unwrap().block_count, 1);
-            assert_eq!(entry.info().unwrap().record_count, 2);
-            assert_eq!(entry.info().unwrap().size, 58);
+            entry.try_remove_oldest_block().await.unwrap();
+            assert_eq!(entry.info().await.unwrap().block_count, 2);
+            assert_eq!(entry.info().await.unwrap().record_count, 4);
+            assert_eq!(entry.info().await.unwrap().size, 116);
 
-            entry.try_remove_oldest_block().wait().unwrap();
-            assert_eq!(entry.info().unwrap().block_count, 0);
-            assert_eq!(entry.info().unwrap().record_count, 0);
-            assert_eq!(entry.info().unwrap().size, 0);
+            entry.try_remove_oldest_block().await.unwrap();
+            assert_eq!(entry.info().await.unwrap().block_count, 2);
+            assert_eq!(entry.info().await.unwrap().record_count, 4);
+            assert_eq!(entry.info().await.unwrap().size, 116);
         }
     }
 
@@ -732,6 +756,7 @@ mod tests {
 
     pub async fn write_record(entry: &Arc<Entry>, time: u64, data: Vec<u8>) {
         let mut sender = entry
+            .clone()
             .begin_write(
                 time,
                 data.len() as u64,
@@ -753,8 +778,9 @@ mod tests {
         labels: Labels,
     ) {
         let mut sender = entry
+            .clone()
             .begin_write(time, data.len() as u64, "text/plain".to_string(), labels)
-            .wait()
+            .await
             .unwrap();
         sender.send(Ok(Some(Bytes::from(data)))).await.unwrap();
         sender.send(Ok(None)).await.expect("Failed to send None");

@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::CfgParser;
@@ -13,19 +13,21 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub(in crate::cfg) fn provision_replication_repo(
+    pub(in crate::cfg) async fn provision_replication_repo(
         &self,
         storage: Arc<StorageEngine>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = ReplicationRepoBuilder::new(self.cfg.clone()).build(Arc::clone(&storage));
+        let mut repo = ReplicationRepoBuilder::new(self.cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
         for (name, settings) in &self.cfg.replications {
-            if let Err(e) = repo.create_replication(&name, settings.clone()) {
+            if let Err(e) = repo.create_replication(&name, settings.clone()).await {
                 if e.status() == ErrorCode::Conflict {
                     let mut settings = settings.clone();
                     if let Ok(replication) = repo.get_replication(&name) {
                         settings.mode = replication.mode();
                     }
-                    repo.update_replication(&name, settings)?;
+                    repo.update_replication(&name, settings).await?;
                 } else {
                     error!("Failed to provision replication '{}': {}", name, e);
                     continue;
@@ -175,11 +177,11 @@ mod tests {
     use test_log::test as log_test;
 
     // Local helper to create a replication repo for tests
-    fn create_replication_repo(
+    async fn create_replication_repo(
         storage: Arc<StorageEngine>,
         cfg: Cfg,
     ) -> Box<dyn ManageReplications + Send + Sync> {
-        ReplicationRepoBuilder::new(cfg).build(storage)
+        ReplicationRepoBuilder::new(cfg).build(storage).await
     }
 
     #[log_test(rstest)]
@@ -206,6 +208,7 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication("replication1").unwrap();
@@ -248,9 +251,10 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -277,9 +281,10 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -305,9 +310,10 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -333,9 +339,10 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -361,9 +368,10 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().len(), 0);
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[rstest]
@@ -376,9 +384,11 @@ mod tests {
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
             .with_cfg(cfg.clone())
-            .build();
+            .build()
+            .await;
         storage
             .create_bucket("bucket1", Default::default())
+            .await
             .unwrap();
         let mut repo = create_replication_repo(
             Arc::new(storage),
@@ -390,7 +400,8 @@ mod tests {
                 },
                 ..Default::default()
             },
-        );
+        )
+        .await;
         repo.create_replication(
             "replication1",
             ReplicationSettings {
@@ -407,6 +418,7 @@ mod tests {
                 mode: ReplicationMode::Enabled,
             },
         )
+        .await
         .unwrap();
         repo.set_mode("replication1", ReplicationMode::Disabled)
             .unwrap();
@@ -431,6 +443,7 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication("replication1").unwrap();
@@ -450,15 +463,19 @@ mod tests {
             data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
             ..Default::default()
         };
-        let storage = StorageEngine::builder()
-            .with_data_path(cfg.data_path.clone())
-            .with_cfg(cfg.clone())
-            .build();
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
         storage
             .create_bucket("bucket1", Default::default())
+            .await
             .unwrap();
         let mut repo = create_replication_repo(
-            Arc::new(storage),
+            storage.clone(),
             Cfg {
                 replication_conf: ReplicationConfig {
                     connection_timeout: std::time::Duration::from_secs(10),
@@ -467,7 +484,8 @@ mod tests {
                 },
                 ..Default::default()
             },
-        );
+        )
+        .await;
         repo.create_replication(
             "replication1",
             ReplicationSettings {
@@ -484,6 +502,7 @@ mod tests {
                 mode: ReplicationMode::Enabled,
             },
         )
+        .await
         .unwrap();
         repo.set_mode("replication1", ReplicationMode::Disabled)
             .unwrap();
@@ -508,6 +527,7 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication("replication1").unwrap();

@@ -1,8 +1,9 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::forbidden;
 use reduct_base::msg::replication_api::{
@@ -17,8 +18,9 @@ impl ReadOnlyReplicationRepository {
     }
 }
 
+#[async_trait]
 impl ManageReplications for ReadOnlyReplicationRepository {
-    fn create_replication(
+    async fn create_replication(
         &mut self,
         _name: &str,
         _settings: ReplicationSettings,
@@ -26,7 +28,7 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         Err(forbidden!("Cannot create replication in read-only mode"))
     }
 
-    fn update_replication(
+    async fn update_replication(
         &mut self,
         _name: &str,
         _settings: ReplicationSettings,
@@ -34,11 +36,11 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         Err(forbidden!("Cannot update replication in read-only mode"))
     }
 
-    fn replications(&self) -> Vec<ReplicationInfo> {
-        vec![]
+    async fn replications(&self) -> Result<Vec<ReplicationInfo>, ReductError> {
+        Ok(vec![])
     }
 
-    fn get_info(&self, _name: &str) -> Result<FullReplicationInfo, ReductError> {
+    async fn get_info(&self, _name: &str) -> Result<FullReplicationInfo, ReductError> {
         Err(forbidden!("Cannot get replication info in read-only mode"))
     }
 
@@ -54,14 +56,14 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         Err(forbidden!("Cannot remove replication in read-only mode"))
     }
 
-    fn notify(&mut self, _notification: TransactionNotification) -> Result<(), ReductError> {
-        Err(forbidden!("Cannot notify replication in read-only mode"))
-    }
-
     fn set_mode(&mut self, _name: &str, _mode: ReplicationMode) -> Result<(), ReductError> {
         Err(forbidden!(
             "Cannot update replication mode in read-only mode"
         ))
+    }
+
+    async fn notify(&mut self, _notification: TransactionNotification) -> Result<(), ReductError> {
+        Err(forbidden!("Cannot notify replication in read-only mode"))
     }
 
     fn start(&mut self) {
@@ -83,9 +85,10 @@ mod tests {
     mod create {
         use super::*;
         #[rstest]
-        fn test_create_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
+        #[tokio::test]
+        async fn test_create_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
             let settings = ReplicationSettings::default();
-            let result = repo.create_replication("test", settings);
+            let result = repo.create_replication("test", settings).await;
             assert_eq!(
                 result.err().unwrap(),
                 forbidden!("Cannot create replication in read-only mode")
@@ -96,9 +99,10 @@ mod tests {
     mod update {
         use super::*;
         #[rstest]
-        fn test_update_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
+        #[tokio::test]
+        async fn test_update_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
             let settings = ReplicationSettings::default();
-            let result = repo.update_replication("test", settings);
+            let result = repo.update_replication("test", settings).await;
             assert_eq!(
                 result.err().unwrap(),
                 forbidden!("Cannot update replication in read-only mode")
@@ -109,8 +113,9 @@ mod tests {
     mod replications {
         use super::*;
         #[rstest]
-        fn test_replications_empty(repo: ReadOnlyReplicationRepository) {
-            let reps = repo.replications();
+        #[tokio::test]
+        async fn test_replications_empty(repo: ReadOnlyReplicationRepository) {
+            let reps = repo.replications().await.unwrap();
             assert!(reps.is_empty());
         }
     }
@@ -118,8 +123,9 @@ mod tests {
     mod get_info {
         use super::*;
         #[rstest]
-        fn test_get_info_forbidden(repo: ReadOnlyReplicationRepository) {
-            let result = repo.get_info("test");
+        #[tokio::test]
+        async fn test_get_info_forbidden(repo: ReadOnlyReplicationRepository) {
+            let result = repo.get_info("test").await;
             assert_eq!(
                 result.err().unwrap(),
                 forbidden!("Cannot get replication info in read-only mode")
@@ -149,14 +155,15 @@ mod tests {
         use super::*;
         use reduct_base::io::RecordMeta;
         #[rstest]
-        fn test_notify_forbidden(mut repo: ReadOnlyReplicationRepository) {
+        #[tokio::test]
+        async fn test_notify_forbidden(mut repo: ReadOnlyReplicationRepository) {
             let notification = TransactionNotification {
                 bucket: "bucket".to_string(),
                 entry: "entry".to_string(),
                 meta: RecordMeta::builder().timestamp(0).build(),
                 event: crate::replication::Transaction::WriteRecord(0),
             };
-            let err = repo.notify(notification).err().unwrap();
+            let err = repo.notify(notification).await.err().unwrap();
             assert_eq!(
                 err,
                 forbidden!("Cannot notify replication in read-only mode")

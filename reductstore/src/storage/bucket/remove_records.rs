@@ -1,10 +1,9 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
-use reduct_macros::task;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
@@ -14,18 +13,17 @@ impl Bucket {
     /// # Arguments
     ///
     /// * `record_ids` - A map where the key is the entry name and the value is a vector of record IDs to remove.
-    #[task("remove records")]
-    pub fn remove_records(
+    pub async fn remove_records(
         self: Arc<Self>,
         record_ids: HashMap<String, Vec<u64>>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let mut results = BTreeMap::new();
 
         for (entry_name, ids) in record_ids {
-            match self.get_entry(&entry_name) {
+            match self.get_entry(&entry_name).await {
                 Ok(entry) => {
                     let entry = entry.upgrade()?;
-                    let entry_results = entry.remove_records(ids).wait()?;
+                    let entry_results = entry.remove_records(ids).await?;
                     results.extend(entry_results);
                 }
                 Err(e) => {
@@ -51,7 +49,7 @@ impl Bucket {
         self: Arc<Self>,
         options: QueryEntry,
     ) -> Result<u64, ReductError> {
-        let entries = self.entries.read()?.clone();
+        let entries = self.entries.read().await?.clone();
         let mut total_removed = 0;
 
         for (entry_name, entry) in entries {
@@ -80,12 +78,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn removes_records_from_multiple_entries(bucket: Arc<Bucket>) {
+    async fn removes_records_from_multiple_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 1, b"a1").await.unwrap();
         write(&bucket, "entry-b", 2, b"b1").await.unwrap();
         write(&bucket, "entry-b", 3, b"b2").await.unwrap();
 
         let errors = bucket
+            .clone()
             .remove_records(HashMap::from([
                 ("entry-a".to_string(), vec![1]),
                 ("entry-b".to_string(), vec![2, 4]),
@@ -107,14 +107,15 @@ mod tests {
         );
         assert_eq!(
             bucket.begin_read("entry-b", 2).await.err().unwrap(),
-            not_found!("No record with timestamp 2")
+            not_found!("Record 2 not found in block test/entry-b/2")
         );
         assert!(bucket.begin_read("entry-b", 3).await.is_ok());
     }
 
     #[rstest]
     #[tokio::test]
-    async fn query_remove_records_filters_entries(bucket: Arc<Bucket>) {
+    async fn query_remove_records_filters_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 1, b"a1").await.unwrap();
         write(&bucket, "entry-a", 4, b"a2").await.unwrap();
         write(&bucket, "entry-b", 2, b"b1").await.unwrap();
@@ -133,7 +134,7 @@ mod tests {
 
         assert_eq!(
             bucket.begin_read("entry-a", 1).await.err().unwrap(),
-            not_found!("No record with timestamp 1")
+            not_found!("Record 1 not found in block test/entry-a/1")
         );
         assert_eq!(
             bucket.begin_read("entry-b", 2).await.err().unwrap(),

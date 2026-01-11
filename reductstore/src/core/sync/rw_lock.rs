@@ -52,6 +52,10 @@ impl<T> RwLock<T> {
 #[cfg(test)]
 mod tests {
     use super::RwLock;
+    use crate::core::sync::{
+        reset_rwlock_config, set_rwlock_failure_action, set_rwlock_timeout, RwLockFailureAction,
+    };
+    use serial_test::serial;
     use std::sync::Arc;
     use std::thread;
     use std::time::Duration;
@@ -99,7 +103,10 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_rwlock_timeout_panics() {
+        set_rwlock_timeout(Duration::from_millis(200));
+        set_rwlock_failure_action(RwLockFailureAction::Panic);
         let lock = Arc::new(RwLock::new(5));
         let write_guard = lock.write_blocking();
 
@@ -111,5 +118,6 @@ mod tests {
         thread::sleep(Duration::from_millis(1200));
         drop(write_guard);
         assert!(handle.join().is_err());
+        reset_rwlock_config();
     }
 }

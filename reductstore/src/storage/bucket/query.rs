@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::{AsyncRwLock, RwLock};
+use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::{Entry, RecordReader};
@@ -39,20 +39,18 @@ impl Bucket {
     /// # Returns
     /// A unique identifier for the initiated query.
     ///
-    pub(crate) fn query(&self, request: QueryEntry) -> Result<u64, ReductError> {
-        let entries = self.filter_entries(&request)?;
+    pub(crate) async fn query(&self, request: QueryEntry) -> Result<u64, ReductError> {
+        let entries = self.filter_entries(&request).await?;
         let query_id = next_query_id();
         let options: QueryOptions = request.clone().into();
 
-        let entry_queries = entries
-            .into_iter()
-            .map(|(entry_name, entry)| {
-                let entry_query_id = entry.query(request.clone())?;
-                Ok((entry_name, entry_query_id))
-            })
-            .collect::<Result<HashMap<_, _>, ReductError>>()?;
+        let mut entry_queries = HashMap::new();
+        for (entry_name, entry) in entries {
+            let entry_query_id = entry.query(request.clone()).await?;
+            entry_queries.insert(entry_name, entry_query_id);
+        }
 
-        let (aggregated_rx, io_settings) = self.init_aggregator(&entry_queries)?;
+        let (aggregated_rx, io_settings) = self.init_aggregator(&entry_queries).await?;
 
         let multi_query = MultiEntryQuery {
             entry_queries,
@@ -62,7 +60,7 @@ impl Bucket {
             last_access: Instant::now(),
         };
 
-        self.queries.write()?.insert(query_id, multi_query);
+        self.queries.write().await?.insert(query_id, multi_query);
 
         Ok(query_id)
     }
@@ -80,9 +78,9 @@ impl Bucket {
         &self,
         query_id: u64,
     ) -> Result<(Weak<AsyncRwLock<QueryRx>>, IoConfig), ReductError> {
-        Self::remove_expired_query(&self.queries, &self.name);
+        Self::remove_expired_query(&self.queries, &self.name).await;
 
-        let mut queries = self.queries.write()?;
+        let mut queries = self.queries.write().await?;
         let multi_query = queries.get_mut(&query_id).ok_or_else(|| {
             not_found!(
                 "Query {} not found and it might have expired. Check TTL in your query request.",
@@ -98,11 +96,11 @@ impl Bucket {
         ))
     }
 
-    fn filter_entries(
+    async fn filter_entries(
         &self,
         request: &QueryEntry,
     ) -> Result<Vec<(String, Arc<Entry>)>, ReductError> {
-        let entries = self.entries.read()?;
+        let entries = self.entries.read().await?;
         let requested_entries = match &request.entries {
             Some(entries) if entries.iter().any(|entry| entry == "*") => None,
             Some(entries) => Some(entries.clone()),
@@ -133,7 +131,7 @@ impl Bucket {
         Ok(results)
     }
 
-    fn init_aggregator(
+    async fn init_aggregator(
         &self,
         entry_queries: &HashMap<String, u64>,
     ) -> Result<(Arc<AsyncRwLock<QueryRx>>, IoConfig), ReductError> {
@@ -141,8 +139,8 @@ impl Bucket {
         let mut io_settings: Option<IoConfig> = None;
 
         for (entry_name, entry_query_id) in entry_queries {
-            let entry = self.get_entry(entry_name)?.upgrade()?;
-            let (rx, settings) = entry.get_query_receiver(*entry_query_id)?;
+            let entry = self.get_entry(entry_name).await?.upgrade()?;
+            let (rx, settings) = entry.get_query_receiver(*entry_query_id).await?;
             let rx = rx.upgrade()?;
 
             if io_settings.is_none() {
@@ -164,8 +162,11 @@ impl Bucket {
         ))
     }
 
-    fn remove_expired_query(queries: &RwLock<HashMap<u64, MultiEntryQuery>>, bucket: &str) {
-        if let Ok(mut queries) = queries.write() {
+    async fn remove_expired_query(
+        queries: &AsyncRwLock<HashMap<u64, MultiEntryQuery>>,
+        bucket: &str,
+    ) {
+        if let Ok(mut queries) = queries.write().await {
             queries.retain(|id, handle| {
                 if handle.last_access.elapsed() >= handle.options.ttl {
                     debug!("Query {}/{} expired", bucket, id);
@@ -310,7 +311,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn aggregates_by_timestamp(bucket: Arc<Bucket>) {
+    async fn aggregates_by_timestamp(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 10, b"a1").await.unwrap();
         write(&bucket, "entry-b", 20, b"b1").await.unwrap();
         write(&bucket, "entry-b", 25, b"b2").await.unwrap();
@@ -322,7 +324,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.query(query).unwrap();
+        let id = bucket.query(query).await.unwrap();
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
 
         let records = collect_records(rx).await;
@@ -340,7 +342,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn filters_requested_entries(bucket: Arc<Bucket>) {
+    async fn filters_requested_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 10, b"a1").await.unwrap();
         write(&bucket, "entry-b", 20, b"b1").await.unwrap();
         write(&bucket, "entry-c", 15, b"c1").await.unwrap();
@@ -351,7 +354,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.query(query).unwrap();
+        let id = bucket.query(query).await.unwrap();
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
 
         let records = collect_records(rx).await;
@@ -364,7 +367,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn filters_by_prefix_wildcard(bucket: Arc<Bucket>) {
+    async fn filters_by_prefix_wildcard(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "acc-a", 10, b"a1").await.unwrap();
         write(&bucket, "acc-b", 20, b"b1").await.unwrap();
         write(&bucket, "other", 15, b"c1").await.unwrap();
@@ -375,7 +379,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.query(query).unwrap();
+        let id = bucket.query(query).await.unwrap();
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
 
         let records = collect_records(rx).await;
@@ -388,7 +392,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn wildcard_all_entries(bucket: Arc<Bucket>) {
+    async fn wildcard_all_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 10, b"a1").await.unwrap();
         write(&bucket, "entry-b", 20, b"b1").await.unwrap();
 
@@ -398,7 +403,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.query(query).unwrap();
+        let id = bucket.query(query).await.unwrap();
         let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
 
         let records = collect_records(rx).await;
@@ -411,7 +416,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn removes_expired_queries(bucket: Arc<Bucket>) {
+    async fn removes_expired_queries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "entry-a", 10, b"a1").await.unwrap();
         write(&bucket, "entry-b", 20, b"b1").await.unwrap();
 
@@ -422,7 +428,7 @@ mod tests {
             ..Default::default()
         };
 
-        let id = bucket.query(query).unwrap();
+        let id = bucket.query(query).await.unwrap();
         let _ = bucket.get_query_receiver(id).await.unwrap();
 
         tokio::time::sleep(Duration::from_millis(1100)).await;

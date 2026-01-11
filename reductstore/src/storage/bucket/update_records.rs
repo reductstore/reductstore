@@ -1,13 +1,11 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::update_labels::UpdateLabels;
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
-use reduct_macros::task;
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct UpdateLabelsMulti {
@@ -33,9 +31,8 @@ impl Bucket {
     ///
     /// A map of timestamps to the result of the update operation. The result is either a vector of labels
     /// or an error if the record was not found.
-    #[task("update labels")]
-    pub fn update_labels(
-        self: Arc<Self>,
+    pub async fn update_labels(
+        &self,
         updates: Vec<UpdateLabelsMulti>,
     ) -> Result<UpdateResult, ReductError> {
         let mut result: UpdateResult = BTreeMap::new();
@@ -50,7 +47,7 @@ impl Bucket {
         }
 
         for (entry_name, entry_updates) in updates_per_entry {
-            match self.get_entry(&entry_name) {
+            match self.get_entry(&entry_name).await {
                 Ok(entry) => {
                     let entry = entry.upgrade()?;
                     let formatted_updates = entry_updates
@@ -61,7 +58,7 @@ impl Bucket {
                             remove,
                         })
                         .collect();
-                    let entry_results = entry.update_labels(formatted_updates).wait()?;
+                    let entry_results = entry.update_labels(formatted_updates).await?;
                     result.insert(entry_name, entry_results);
                 }
                 Err(e) => {
@@ -87,11 +84,13 @@ mod tests {
     use reduct_base::io::ReadRecord;
     use reduct_base::not_found;
     use rstest::rstest;
+    use std::sync::Arc;
 
     async fn write_with_labels(entry: &Arc<Entry>, time: u64, labels: Labels) {
         let mut sender = entry
+            .clone()
             .begin_write(time, 1, "text/plain".to_string(), labels)
-            .wait()
+            .await
             .unwrap();
         sender
             .send(Ok(Some(Bytes::from_static(b"x"))))
@@ -102,14 +101,17 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn updates_labels_across_entries(bucket: Arc<Bucket>) {
+    async fn updates_labels_across_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         let entry1 = bucket
             .get_or_create_entry("entry-1")
+            .await
             .unwrap()
             .upgrade()
             .unwrap();
         let entry2 = bucket
             .get_or_create_entry("entry-2")
+            .await
             .unwrap()
             .upgrade()
             .unwrap();
@@ -145,7 +147,7 @@ mod tests {
                     remove: HashSet::new(),
                 },
             ])
-            .wait()
+            .await
             .unwrap();
 
         let entry1_labels = result
@@ -176,15 +178,16 @@ mod tests {
         );
 
         // Verify stored records were updated.
-        let stored1 = entry1.begin_read(1).wait().unwrap();
+        let stored1 = entry1.begin_read(1).await.unwrap();
         assert_eq!(stored1.meta().labels(), entry1_labels);
-        let stored2 = entry2.begin_read(2).wait().unwrap();
+        let stored2 = entry2.begin_read(2).await.unwrap();
         assert_eq!(stored2.meta().labels(), entry2_labels);
     }
 
     #[rstest]
     #[tokio::test]
-    async fn returns_error_for_missing_entry(bucket: Arc<Bucket>) {
+    async fn returns_error_for_missing_entry(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         write(&bucket, "present", 1, b"a").await.unwrap();
 
         let result = bucket
@@ -202,7 +205,7 @@ mod tests {
                     remove: HashSet::new(),
                 },
             ])
-            .wait()
+            .await
             .unwrap();
 
         assert!(result

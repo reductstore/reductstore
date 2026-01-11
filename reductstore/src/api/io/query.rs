@@ -40,8 +40,12 @@ pub(super) async fn query(
                 .cloned()
                 .unwrap_or_default();
 
-            let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
-            let id = bucket.query(request.clone())?;
+            let bucket = components
+                .storage
+                .get_bucket(bucket_name)
+                .await?
+                .upgrade()?;
+            let id = bucket.query(request.clone()).await?;
 
             components
                 .ext_repo
@@ -71,7 +75,11 @@ pub(super) async fn query(
                 .into());
             }
 
-            let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
+            let bucket = components
+                .storage
+                .get_bucket(bucket_name)
+                .await?
+                .upgrade()?;
             let removed_records = bucket.query_remove_records(request).await?;
 
             Ok(RemoveQueryInfoAxum::from(RemoveQueryInfo { removed_records }).into_response())
@@ -148,6 +156,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
@@ -202,6 +211,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 

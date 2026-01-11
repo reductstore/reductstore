@@ -1,8 +1,8 @@
-// Copyright 2024-2025 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FileWeak;
-use crate::core::sync::RwLock;
+use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::Record;
@@ -41,13 +41,13 @@ impl RecordReader {
     /// # Returns
     ///
     /// * `Result<RecordReader, ReductError>` - The record reader to read the record content in chunks
-    pub(in crate::storage) fn try_new(
-        block_manager: Arc<RwLock<BlockManager>>,
+    pub(in crate::storage) async fn try_new(
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
         block_ref: BlockRef,
         record_timestamp: u64,
         processed_record: Option<Record>,
     ) -> Result<Self, ReductError> {
-        let bm = block_manager.write()?;
+        let bm = block_manager.write().await?;
         let block = block_ref.read()?;
 
         let (file_ref, offset) = bm.begin_read_record(&block, record_timestamp)?;
@@ -290,7 +290,7 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn test_read_chunk(entry: Arc<Entry>) {
             write_stub_record(&entry, 1000).await;
-            let mut reader = entry.begin_read(1000).wait().unwrap();
+            let mut reader = entry.begin_read(1000).await.unwrap();
             assert_eq!(
                 reader.read_chunk().unwrap().unwrap(),
                 Bytes::from("0123456789")
@@ -301,7 +301,7 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn test_read(entry: Arc<Entry>) {
             write_stub_record(&entry, 1000).await;
-            let mut reader = entry.begin_read(1000).wait().unwrap();
+            let mut reader = entry.begin_read(1000).await.unwrap();
             let mut buf = vec![0; 4];
             let read = reader.read(&mut buf).unwrap();
             assert_eq!(read, 4);
@@ -333,7 +333,7 @@ pub(crate) mod tests {
             #[case] expected_data: &[u8],
         ) {
             write_stub_record(&entry, 1000).await;
-            let mut reader = entry.begin_read(1000).wait().unwrap();
+            let mut reader = entry.begin_read(1000).await.unwrap();
             let new_pos = reader.seek(seek_from).unwrap();
             assert_eq!(new_pos, expected_pos);
             let mut buf = vec![0; read_size];
@@ -349,7 +349,7 @@ pub(crate) mod tests {
         #[tokio::test]
         async fn test_seek_wrong(entry: Arc<Entry>, #[case] seek_from: SeekFrom) {
             write_stub_record(&entry, 1000).await;
-            let mut reader = entry.begin_read(1000).wait().unwrap();
+            let mut reader = entry.begin_read(1000).await.unwrap();
             let err = reader.seek(seek_from).err().unwrap();
             assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
             assert_eq!(err.to_string(), "Seek position out of bounds");
@@ -361,7 +361,7 @@ pub(crate) mod tests {
             write_record(&entry, 1000, vec![0; 100]).await;
 
             fs::write(entry.path().join("1000.blk"), "").unwrap();
-            let mut reader = entry.begin_read(1000).wait().unwrap();
+            let mut reader = entry.begin_read(1000).await.unwrap();
 
             assert_eq!(
                 reader.read_chunk().unwrap().err().unwrap(),

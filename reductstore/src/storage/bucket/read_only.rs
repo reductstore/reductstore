@@ -1,23 +1,25 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::{Cfg, InstanceRole};
 use crate::storage::bucket::Bucket;
 use crate::storage::engine::ReadOnlyMode;
 use crate::storage::entry::{Entry, EntrySettings};
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
+#[async_trait]
 impl ReadOnlyMode for Bucket {
     fn cfg(&self) -> &Cfg {
         &self.cfg
     }
 
     /// List directory and update bucket list
-    fn reload(&self) -> Result<(), ReductError> {
-        let mut last_sync = self.last_replica_sync.write()?;
+    async fn reload(&self) -> Result<(), ReductError> {
+        let mut last_sync = self.last_replica_sync.write().await?;
         if self.cfg().role != InstanceRole::Replica
             || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
         {
@@ -30,7 +32,8 @@ impl ReadOnlyMode for Bucket {
 
         let current_bucket_paths = self
             .entries
-            .read()?
+            .read()
+            .await?
             .values()
             .map(|b| b.path().clone())
             .collect::<HashSet<_>>();
@@ -44,7 +47,7 @@ impl ReadOnlyMode for Bucket {
             }
 
             // Restore new bucket
-            let settings = self.settings.read()?;
+            let settings = self.settings.read().await?;
             let handler = Entry::restore(
                 path,
                 EntrySettings {
@@ -59,12 +62,12 @@ impl ReadOnlyMode for Bucket {
 
         let mut new_entries = BTreeMap::new();
         for task in task_set {
-            if let Some(entry) = task.wait()? {
+            if let Some(entry) = task.await? {
                 new_entries.insert(entry.name().to_string(), Arc::new(entry));
             }
         }
 
-        let mut entries = self.entries.write()?;
+        let mut entries = self.entries.write().await?;
         entries.retain(|_, v| entries_to_retain.contains(v.path()));
         entries.extend(new_entries.into_iter());
 
@@ -79,23 +82,28 @@ mod tests {
     use crate::cfg::storage_engine::StorageEngineConfig;
     use crate::storage::bucket::tests::write;
     use crate::storage::bucket::FILE_CACHE;
-    use futures::executor::block_on;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 
     #[rstest]
     #[tokio::test]
-    async fn test_reload_new_entry(primary_bucket: Arc<Bucket>) {
+    async fn test_reload_new_entry(#[future] primary_bucket: Arc<Bucket>) {
+        let primary_bucket = primary_bucket.await;
         // Create read-only bucket
         let mut cfg = primary_bucket.cfg().clone();
         cfg.role = InstanceRole::Replica;
-        let read_only_bucket =
-            Arc::new(Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap());
+        let read_only_bucket = Arc::new(
+            Bucket::restore(primary_bucket.path().clone(), cfg.clone())
+                .await
+                .unwrap(),
+        );
+        tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
+        read_only_bucket.reload().await.unwrap();
 
         // Initially, read-only bucket has one entry
         {
-            let entries = read_only_bucket.entries.read().unwrap();
+            let entries = read_only_bucket.entries.read().await.unwrap();
             assert_eq!(entries.len(), 1);
             assert!(entries.contains_key("test-1"));
         }
@@ -106,21 +114,21 @@ mod tests {
             .unwrap();
 
         primary_bucket.sync_fs().await.unwrap();
-        read_only_bucket.reload().unwrap();
+        read_only_bucket.reload().await.unwrap();
 
         assert_eq!(
-            read_only_bucket.entries.read().unwrap().len(),
+            read_only_bucket.entries.read().await.unwrap().len(),
             1,
             "Should not reload before interval"
         );
 
         // Reload read-only bucket
         tokio::time::sleep(cfg.engine_config.replica_update_interval * 2).await;
-        read_only_bucket.reload().unwrap();
+        read_only_bucket.reload().await.unwrap();
 
         // Now, read-only bucket should have two entries
         {
-            let entries = read_only_bucket.entries.read().unwrap();
+            let entries = read_only_bucket.entries.read().await.unwrap();
             assert_eq!(entries.len(), 2);
             assert!(entries.contains_key("test-1"));
             assert!(entries.contains_key("test-2"));
@@ -129,38 +137,44 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_entry(primary_bucket: Arc<Bucket>) {
+    async fn test_remove_entry(#[future] primary_bucket: Arc<Bucket>) {
+        let primary_bucket = primary_bucket.await;
         // Create read-only bucket
         let mut cfg = primary_bucket.cfg().clone();
         cfg.role = InstanceRole::Replica;
-        let read_only_bucket =
-            Arc::new(Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap());
+        let read_only_bucket = Arc::new(
+            Bucket::restore(primary_bucket.path().clone(), cfg.clone())
+                .await
+                .unwrap(),
+        );
+        tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
+        read_only_bucket.reload().await.unwrap();
 
         // Initially, read-only bucket has one entry
         {
-            let entries = read_only_bucket.entries.read().unwrap();
+            let entries = read_only_bucket.entries.read().await.unwrap();
             assert_eq!(entries.len(), 1);
             assert!(entries.contains_key("test-1"));
         }
 
         // Remove entry in primary bucket
-        primary_bucket.remove_entry("test-1").unwrap();
-        primary_bucket.sync_fs().wait().unwrap();
-        read_only_bucket.reload().unwrap();
+        primary_bucket.remove_entry("test-1").await.unwrap();
+        primary_bucket.sync_fs().await.unwrap();
+        read_only_bucket.reload().await.unwrap();
 
         assert_eq!(
-            read_only_bucket.entries.read().unwrap().len(),
+            read_only_bucket.entries.read().await.unwrap().len(),
             1,
             "Should not reload before interval"
         );
 
         // Reload read-only bucket
         tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
-        read_only_bucket.reload().unwrap();
+        read_only_bucket.reload().await.unwrap();
 
         // Now, read-only bucket should have zero entries
         {
-            let entries = read_only_bucket.entries.read().unwrap();
+            let entries = read_only_bucket.entries.read().await.unwrap();
             assert_eq!(entries.len(), 0);
         }
     }
@@ -171,20 +185,26 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_prohibited_operations_on_read_only_bucket(primary_bucket: Arc<Bucket>) {
+        async fn test_prohibited_operations_on_read_only_bucket(
+            #[future] primary_bucket: Arc<Bucket>,
+        ) {
+            let primary_bucket = primary_bucket.await;
             // Create read-only bucket
             let mut cfg = primary_bucket.cfg().clone();
             cfg.role = InstanceRole::Replica;
-            let read_only_bucket =
-                Arc::new(Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap());
+            let read_only_bucket = Arc::new(
+                Bucket::restore(primary_bucket.path().clone(), cfg.clone())
+                    .await
+                    .unwrap(),
+            );
 
             let err = forbidden!("Cannot perform this operation in read-only mode");
 
             // Attempt to perform prohibited operations
-            let write_result = read_only_bucket.get_or_create_entry("new-entry");
+            let write_result = read_only_bucket.get_or_create_entry("new-entry").await;
             assert_eq!(write_result.err().unwrap(), err);
 
-            let remove_result = read_only_bucket.remove_entry("test-1");
+            let remove_result = read_only_bucket.remove_entry("test-1").await;
             assert_eq!(remove_result.err().unwrap(), err);
 
             let compact_result = read_only_bucket.rename_entry("test-1", "new-name").await;
@@ -198,14 +218,20 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_reload_before_access_entries(primary_bucket: Arc<Bucket>) {
+        async fn test_reload_before_access_entries(#[future] primary_bucket: Arc<Bucket>) {
+            let primary_bucket = primary_bucket.await;
             let mut cfg = primary_bucket.cfg().clone();
             cfg.role = InstanceRole::Replica;
-            let read_only_bucket =
-                Arc::new(Bucket::restore(primary_bucket.path().clone(), cfg.clone()).unwrap());
+            let read_only_bucket = Arc::new(
+                Bucket::restore(primary_bucket.path().clone(), cfg.clone())
+                    .await
+                    .unwrap(),
+            );
+            tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
+            read_only_bucket.reload().await.unwrap();
 
             {
-                let entries = read_only_bucket.entries.read().unwrap();
+                let entries = read_only_bucket.entries.read().await.unwrap();
                 assert_eq!(entries.len(), 1);
                 assert!(entries.contains_key("test-1"));
             }
@@ -218,14 +244,14 @@ mod tests {
 
             tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
             {
-                let entries = read_only_bucket.info().wait().unwrap().entries;
+                let entries = read_only_bucket.info().await.unwrap().entries;
                 assert_eq!(entries.len(), 2);
             }
         }
     }
 
     #[fixture]
-    fn primary_bucket() -> Arc<Bucket> {
+    pub async fn primary_bucket() -> Arc<Bucket> {
         let path = tempdir().unwrap().keep();
         let mut cfg = Cfg {
             data_path: path,
@@ -250,16 +276,17 @@ mod tests {
             .create_dir_all(&cfg.data_path.join("bucket"))
             .unwrap();
         let bucket = Arc::new(
-            Bucket::new(
+            Bucket::try_build(
                 "bucket",
                 &cfg.data_path.clone(),
                 BucketSettings::default(),
                 cfg,
             )
+            .await
             .unwrap(),
         );
-        block_on(write(&bucket, "test-1", 1, b"test data")).unwrap();
-        bucket.sync_fs().wait().unwrap();
+        write(&bucket, "test-1", 1, b"test data").await.unwrap();
+        bucket.sync_fs().await.unwrap();
         bucket
     }
 }

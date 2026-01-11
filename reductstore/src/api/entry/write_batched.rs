@@ -59,7 +59,7 @@ pub(super) async fn write_batched_records(
 
         let content_length = check_and_get_content_length(&headers, &timed_headers)?;
         let (rx_writer, spawn_handler) =
-            spawn_getting_writers(&components, &bucket, &entry_name, timed_headers)?;
+            spawn_getting_writers(&components, &bucket, &entry_name, timed_headers).await?;
         receive_body_and_write_records(
             bucket,
             entry_name,
@@ -113,7 +113,8 @@ async fn notify_replication_write(
                 .labels(ctx.header.labels.clone())
                 .build(),
             event: Transaction::WriteRecord(ctx.time),
-        })?;
+        })
+        .await?;
     Ok(())
 }
 
@@ -192,7 +193,7 @@ async fn receive_body_and_write_records(
     Ok(())
 }
 
-fn spawn_getting_writers(
+async fn spawn_getting_writers(
     components: &Arc<Components>,
     bucket_name: &str,
     entry_name: &str,
@@ -202,7 +203,8 @@ fn spawn_getting_writers(
 
     let bucket = components
         .storage
-        .get_bucket(&bucket_name)?
+        .get_bucket(&bucket_name)
+        .await?
         .upgrade_and_unwrap();
 
     let entry_name = entry_name.to_string();
@@ -401,12 +403,14 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
         {
             let mut reader = bucket
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_read(1)
@@ -420,6 +424,7 @@ mod tests {
         {
             let mut reader = bucket
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_read(2)
@@ -436,6 +441,7 @@ mod tests {
         {
             let mut reader = bucket
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_read(10)
@@ -456,6 +462,7 @@ mod tests {
             .await
             .unwrap()
             .get_info("api-test")
+            .await
             .unwrap();
         assert_eq!(info.info.pending_records, 3);
     }
@@ -482,12 +489,14 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
         {
             let mut reader = bucket
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_read(1)
@@ -499,6 +508,7 @@ mod tests {
         {
             let mut reader = bucket
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_read(2)
@@ -538,12 +548,14 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
         {
             let reader = bucket
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_read(1)
@@ -554,6 +566,7 @@ mod tests {
         {
             let mut reader = bucket
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_read(2)
@@ -565,6 +578,7 @@ mod tests {
         {
             let reader = bucket
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_read(3)
@@ -575,6 +589,7 @@ mod tests {
         {
             let mut reader = bucket
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_read(4)
@@ -599,6 +614,7 @@ mod tests {
             let mut writer = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_write("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
@@ -634,6 +650,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
         {

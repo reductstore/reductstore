@@ -28,9 +28,11 @@ pub(super) async fn remove_record(
     let entry_name = path.get("entry_name").unwrap();
     let err_map = components
         .storage
-        .get_bucket(bucket)?
+        .get_bucket(bucket)
+        .await?
         .upgrade()?
-        .get_entry(entry_name)?
+        .get_entry(entry_name)
+        .await?
         .upgrade()?
         .remove_records(vec![ts])
         .await?;
@@ -79,9 +81,11 @@ mod tests {
         let err = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .get_entry("entry-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .begin_read(0)

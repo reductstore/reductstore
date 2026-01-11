@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 pub mod io;
@@ -8,7 +8,6 @@ pub mod remote_storage;
 pub mod replication;
 pub mod rw_lock;
 pub mod storage_engine;
-pub mod thread_pool;
 
 use crate::api::Components;
 use crate::asset::asset_manager::create_asset_manager;
@@ -20,7 +19,6 @@ use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
-use crate::cfg::thread_pool::ThreadPoolConfig;
 use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv};
 use crate::core::file_cache::FILE_CACHE;
@@ -84,7 +82,6 @@ pub struct Cfg {
     pub lock_file_config: LockFileConfig,
     pub rw_lock_config: RwLockConfig,
     pub engine_config: StorageEngineConfig,
-    pub thread_pool: ThreadPoolConfig,
 }
 
 impl Default for Cfg {
@@ -112,7 +109,6 @@ impl Default for Cfg {
             lock_file_config: LockFileConfig::default(),
             rw_lock_config: RwLockConfig::default(),
             engine_config: StorageEngineConfig::default(),
-            thread_pool: ThreadPoolConfig::default(),
         }
     }
 }
@@ -192,10 +188,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
-            thread_pool: Self::parse_thread_pool_config(&mut env),
         };
-
-        thread_pool::configure_thread_pool(cfg.thread_pool.clone());
 
         set_rwlock_timeout(cfg.rw_lock_config.timeout);
         set_rwlock_failure_action(cfg.rw_lock_config.failure_action);
@@ -250,14 +243,16 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         Ok(lock_file)
     }
 
-    pub fn build(&self) -> Result<Components, ReductError> {
+    pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
-        let storage = Arc::new(self.provision_buckets(&data_path));
+        let storage = Arc::new(self.provision_buckets(&data_path).await);
         let token_repo = self.provision_tokens(&data_path);
         let console = create_asset_manager(load_console());
         let select_ext = create_asset_manager(load_select_ext());
         let ros_ext = create_asset_manager(load_ros_ext());
-        let replication_engine = self.provision_replication_repo(Arc::clone(&storage))?;
+        let replication_engine = self
+            .provision_replication_repo(Arc::clone(&storage))
+            .await?;
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
                 internal_server_error!(
@@ -270,7 +265,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             None
         };
 
-        let server_info = storage.info().wait()?;
+        let server_info = storage.info().await?;
 
         Ok(Components {
             storage,
@@ -706,7 +701,8 @@ mod tests {
 
     #[cfg(feature = "fs-backend")]
     #[rstest]
-    fn test_remote_storage_s3() {
+    #[tokio::test]
+    async fn test_remote_storage_s3() {
         // we cover only s3 parts here, filesystem is used as backend
         let mut env_getter = MockEnvGetter::new();
         env_getter
@@ -746,7 +742,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
         env_getter.expect_all().returning(|| BTreeMap::new());
         let parser = CfgParser::from_env(env_getter, "0.0.0");
-        parser.build().unwrap();
+        parser.build().await.unwrap();
     }
 
     mod role {

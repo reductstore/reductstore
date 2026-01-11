@@ -57,7 +57,11 @@ pub(super) async fn read_batched_records(
     };
 
     fetch_and_response_batched_records(
-        components.storage.get_bucket(bucket_name)?.upgrade()?,
+        components
+            .storage
+            .get_bucket(bucket_name)
+            .await?
+            .upgrade()?,
         entry_name,
         query_id,
         method.name == "HEAD",
@@ -106,9 +110,11 @@ async fn fetch_and_response_batched_records(
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
     let (rx, io_settings) = bucket
-        .get_entry(entry_name)?
+        .get_entry(entry_name)
+        .await?
         .upgrade()?
-        .get_query_receiver(query_id)?;
+        .get_query_receiver(query_id)
+        .await?;
 
     let mut header_size = 0usize;
     let mut body_size = 0u64;
@@ -181,9 +187,11 @@ async fn fetch_and_response_batched_records(
     if readers.is_empty() {
         tokio::time::sleep(Duration::from_millis(5)).await;
         match bucket
-            .get_entry(entry_name)?
+            .get_entry(entry_name)
+            .await?
             .upgrade()?
             .get_query_receiver(query_id)
+            .await
         {
             Err(err) if err.status() == ErrorCode::NotFound => {
                 return Err(no_content!("No more records").into());
@@ -264,13 +272,16 @@ mod tests {
             let entry = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             for time in 10..100 {
                 let mut writer = entry
+                    .clone()
                     .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
                     .await
                     .unwrap();
@@ -373,10 +384,12 @@ mod tests {
         components
             .storage
             .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+            .await
             .unwrap()
             .upgrade()
             .unwrap()
             .remove_entry(path_to_entry_1.get("entry_name").unwrap())
+            .await
             .unwrap();
 
         sleep(Duration::from_millis(100)).await;
@@ -564,13 +577,20 @@ mod tests {
             let bucket = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap();
-            let entry = bucket.get_entry("entry-1").unwrap().upgrade().unwrap();
+            let entry = bucket
+                .get_entry("entry-1")
+                .await
+                .unwrap()
+                .upgrade()
+                .unwrap();
 
             for time in 10..100 {
                 let mut writer = entry
+                    .clone()
                     .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
                     .await
                     .unwrap();
@@ -587,6 +607,7 @@ mod tests {
                     }
                     .into(),
                 )
+                .await
                 .unwrap();
 
             fetch_and_response_batched_records(

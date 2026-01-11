@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use axum_server::tls_rustls::RustlsConfig;
@@ -28,11 +28,14 @@ struct ContextGuard {
 }
 
 impl ContextGuard {
-    fn shutdown(self) {
+    async fn shutdown(self) {
         info!("Shutting down server...");
         self.server_handle
             .graceful_shutdown(Some(Duration::from_secs(5)));
-        self.storage.sync_fs().expect("Failed to shutdown storage");
+        self.storage
+            .sync_fs()
+            .await
+            .expect("Failed to shutdown storage");
         self.lock_file.release();
     }
 }
@@ -84,7 +87,7 @@ async fn launch_server() {
             panic!("Another ReductStore instance is holding the lock. Exiting.");
         }
 
-        let components = parser.build().unwrap();
+        let components = parser.build().await.unwrap();
         let ctx = ContextGuard {
             server_handle: signal_handle.clone(),
             storage: components.storage.clone(),
@@ -164,14 +167,14 @@ async fn launch_server() {
     };
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     launch_server().await;
 }
 
 async fn shutdown_ctrl_c(ctx: ContextGuard) {
     tokio::signal::ctrl_c().await.unwrap();
-    ctx.shutdown();
+    ctx.shutdown().await;
 }
 
 #[cfg(unix)]
@@ -180,7 +183,7 @@ async fn shutdown_signal(ctx: ContextGuard) {
         .unwrap()
         .recv()
         .await;
-    ctx.shutdown()
+    ctx.shutdown().await;
 }
 
 async fn periodical_compact_storage(storage: Arc<StorageEngine>, sync_interval: Duration) {
@@ -289,7 +292,7 @@ mod tests {
         let data_path = tempdir().unwrap().keep();
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
         let parser = CfgParser::from_env(StdEnvGetter::default(), "0.0.0");
-        let storage = parser.build().unwrap().storage;
+        let storage = parser.build().await.unwrap().storage;
 
         let handler = tokio::spawn(periodical_compact_storage(
             storage,
@@ -317,14 +320,14 @@ mod tests {
 
         let handle = Handle::new();
         let cfg = CfgParser::from_env(StdEnvGetter::default(), "0.0.0"); // init file cache
-        let storage = cfg.build().unwrap().storage;
+        let storage = cfg.build().await.unwrap().storage;
         let ctx = ContextGuard {
             server_handle: handle.clone(),
             storage,
             lock_file: Arc::new(cfg.build_lock_file().unwrap()),
         };
 
-        ctx.shutdown();
+        ctx.shutdown().await;
     }
 
     async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {

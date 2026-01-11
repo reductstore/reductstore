@@ -62,7 +62,7 @@ pub(super) async fn write_record(
         }
 
         let sender = {
-            let bucket = components.storage.get_bucket(bucket)?.upgrade()?;
+            let bucket = components.storage.get_bucket(bucket).await?.upgrade()?;
             bucket
                 .begin_write(
                     path.get("entry_name").unwrap(),
@@ -115,7 +115,8 @@ pub(super) async fn write_record(
                     entry: path.get("entry_name").unwrap().to_string(),
                     meta: RecordMeta::builder().timestamp(ts).labels(labels).build(),
                     event: WriteRecord(ts),
-                })?;
+                })
+                .await?;
             Ok(())
         }
         Err(e) => {
@@ -167,6 +168,7 @@ mod tests {
         let record = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .begin_read("entry-1", 1)
@@ -181,6 +183,7 @@ mod tests {
             .await
             .unwrap()
             .get_info("api-test")
+            .await
             .unwrap();
         assert_eq!(info.info.pending_records, 1);
     }

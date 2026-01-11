@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::{Cfg, DEFAULT_PORT};
@@ -13,6 +13,7 @@ use crate::replication::{ManageReplications, TransactionNotification};
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::WhenFilter;
+use async_trait::async_trait;
 use bytes::Bytes;
 use log::{debug, error};
 use prost::Message;
@@ -140,8 +141,9 @@ pub(crate) struct ReplicationRepository {
     started: bool,
 }
 
+#[async_trait]
 impl ManageReplications for ReplicationRepository {
-    fn create_replication(
+    async fn create_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
@@ -155,9 +157,10 @@ impl ManageReplications for ReplicationRepository {
         }
 
         self.create_or_update_replication_task(&name, settings)
+            .await
     }
 
-    fn update_replication(
+    async fn update_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
@@ -181,22 +184,23 @@ impl ManageReplications for ReplicationRepository {
         }?;
 
         self.create_or_update_replication_task(&name, settings)
+            .await
     }
 
-    fn replications(&self) -> Vec<ReplicationInfo> {
+    async fn replications(&self) -> Result<Vec<ReplicationInfo>, ReductError> {
         let mut replications = Vec::new();
         for (_, replication) in self.replications.iter() {
-            replications.push(replication.info());
+            replications.push(replication.info().await?);
         }
-        replications
+        Ok(replications)
     }
 
-    fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError> {
+    async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError> {
         let replication = self.get_replication(name)?;
         let info = FullReplicationInfo {
-            info: replication.info(),
+            info: replication.info().await?,
             settings: replication.masked_settings().clone(),
-            diagnostics: replication.diagnostics(),
+            diagnostics: replication.diagnostics().await?,
         };
         Ok(info)
     }
@@ -231,13 +235,13 @@ impl ManageReplications for ReplicationRepository {
         self.save_repo()
     }
 
-    fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
+    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
         for (_, replication) in self.replications.iter_mut() {
             if replication.settings().src_bucket != notification.bucket {
                 continue; // skip if the replication is not for the source bucket
             }
 
-            let _ = replication.notify(notification.clone())?;
+            let _ = replication.notify(notification.clone()).await?;
         }
         Ok(())
     }
@@ -248,7 +252,7 @@ impl ManageReplications for ReplicationRepository {
 }
 
 impl ReplicationRepository {
-    pub(crate) fn load_or_create(storage: Arc<StorageEngine>, config: Cfg) -> Self {
+    pub(crate) async fn load_or_create(storage: Arc<StorageEngine>, config: Cfg) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
 
         let mut repo = Self {
@@ -280,8 +284,9 @@ impl ReplicationRepository {
                 let proto_repo = ProtoReplicationRepo::decode(&mut Bytes::from(buf))
                     .expect("Error decoding replication repository");
                 for item in proto_repo.replications {
-                    if let Err(err) =
-                        repo.create_replication(&item.name, item.settings.unwrap().into())
+                    if let Err(err) = repo
+                        .create_replication(&item.name, item.settings.unwrap().into())
+                        .await
                     {
                         error!("Failed to load replication '{}': {}", item.name, err);
                     }
@@ -321,7 +326,7 @@ impl ReplicationRepository {
         Ok(())
     }
 
-    fn create_or_update_replication_task(
+    async fn create_or_update_replication_task(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
@@ -339,7 +344,7 @@ impl ReplicationRepository {
         };
 
         // check if source bucket exists
-        if self.storage.get_bucket(&settings.src_bucket).is_err() {
+        if self.storage.get_bucket(&settings.src_bucket).await.is_err() {
             return Err(not_found!(
                 "Source bucket '{}' for replication '{}' does not exist",
                 settings.src_bucket,
@@ -423,16 +428,22 @@ mod tests {
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::{conflict, Labels};
     use rstest::*;
-    use std::thread::sleep;
-    use std::time::Duration;
+    use tokio::time::{sleep, Duration};
 
     mod create {
         use super::*;
         #[rstest]
-        fn create_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
-            repo.create_replication("test", settings.clone()).unwrap();
+        #[tokio::test]
+        async fn create_replication(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
-            let repls = repo.replications();
+            let repls = repo.replications().await.unwrap();
             assert_eq!(repls.len(), 1);
             assert_eq!(repls[0].name, "test");
             assert_eq!(
@@ -443,29 +454,35 @@ mod tests {
         }
 
         #[rstest]
-        fn create_replication_with_same_name(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn create_replication_with_same_name(
+            #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            repo.create_replication("test", settings.clone()).unwrap();
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             assert_eq!(
-                repo.create_replication("test", settings),
+                repo.create_replication("test", settings).await,
                 Err(conflict!("Replication 'test' already exists")),
                 "Should not create replication with the same name"
             );
         }
 
         #[rstest]
-        fn create_replication_with_invalid_url(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn create_replication_with_invalid_url(
+            #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
+            let mut repo = repo.await;
             let mut settings = settings;
             settings.dst_host = "invalid_url".to_string();
 
             assert_eq!(
-                repo.create_replication("test", settings),
+                repo.create_replication("test", settings).await,
                 Err(unprocessable_entity!(
                     "Invalid destination host 'invalid_url'"
                 )),
@@ -474,16 +491,18 @@ mod tests {
         }
 
         #[rstest]
-        fn create_replication_to_same_bucket(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn create_replication_to_same_bucket(
+            #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
+            let mut repo = repo.await;
             let mut settings = settings;
             settings.dst_host = format!("http://localhost:{}", DEFAULT_PORT);
             settings.dst_bucket = "bucket-1".to_string();
 
             assert_eq!(
-                repo.create_replication("test", settings),
+                repo.create_replication("test", settings).await,
                 Err(unprocessable_entity!(
                     "Source and destination buckets must be different"
                 )),
@@ -492,13 +511,15 @@ mod tests {
         }
 
         #[rstest]
-        fn test_replication_src_bucket_not_found(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn test_replication_src_bucket_not_found(
+            #[future] mut repo: ReplicationRepository,
             mut settings: ReplicationSettings,
         ) {
+            let mut repo = repo.await;
             settings.src_bucket = "bucket-2".to_string();
             assert_eq!(
-                repo.create_replication("test", settings),
+                repo.create_replication("test", settings).await,
                 Err(not_found!(
                     "Source bucket 'bucket-2' for replication 'test' does not exist"
                 )),
@@ -507,14 +528,16 @@ mod tests {
         }
 
         #[rstest]
-        fn test_replication_with_invalid_when_condition(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn test_replication_with_invalid_when_condition(
+            #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
+            let mut repo = repo.await;
             let mut settings = settings;
             settings.when = Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y"]}));
             assert_eq!(
-                repo.create_replication("test", settings),
+                repo.create_replication("test", settings).await,
                 Err(unprocessable_entity!(
                     "Invalid replication condition: Operator '$UNKNOWN_OP' not supported"
                 )),
@@ -523,16 +546,21 @@ mod tests {
         }
 
         #[rstest]
-        fn create_and_load_replications(
-            storage: Arc<StorageEngine>,
+        #[tokio::test]
+        async fn create_and_load_replications(
+            #[future] storage: Arc<StorageEngine>,
             settings: ReplicationSettings,
         ) {
+            let storage = storage.await;
             let mut repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default());
-            repo.create_replication("test", settings.clone()).unwrap();
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
-            let repo = ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default());
-            assert_eq!(repo.replications().len(), 1);
+            let repo =
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
+            assert_eq!(repo.replications().await.unwrap().len(), 1);
             assert_eq!(
                 repo.get_replication("test").unwrap().settings(),
                 &settings,
@@ -544,55 +572,75 @@ mod tests {
     mod update {
         use super::*;
         #[rstest]
-        fn test_update_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
-            repo.create_replication("test", settings.clone()).unwrap();
+        #[tokio::test]
+        async fn test_update_replication(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             let mut settings = settings;
             settings.dst_bucket = "bucket-3".to_string();
-            repo.update_replication("test", settings.clone()).unwrap();
+            repo.update_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             let replication = repo.get_replication("test").unwrap();
             assert_eq!(replication.settings().dst_bucket, "bucket-3");
         }
 
         #[rstest]
-        fn test_update_provisioned_replication(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn test_update_provisioned_replication(
+            #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            repo.create_replication("test", settings.clone()).unwrap();
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             let replication = repo.get_mut_replication("test").unwrap();
             replication.set_provisioned(true);
 
             assert_eq!(
-                repo.update_replication("test", settings),
+                repo.update_replication("test", settings).await,
                 Err(conflict!("Can't update provisioned replication 'test'")),
                 "Should not update provisioned replication"
             );
         }
 
         #[rstest]
-        fn test_update_non_existing_replication(mut repo: ReplicationRepository) {
+        #[tokio::test]
+        async fn test_update_non_existing_replication(#[future] mut repo: ReplicationRepository) {
+            let mut repo = repo.await;
             assert_eq!(
-                repo.update_replication("test-2", ReplicationSettings::default()),
+                repo.update_replication("test-2", ReplicationSettings::default())
+                    .await,
                 Err(not_found!("Replication 'test-2' does not exist")),
                 "Should not update non existing replication"
             );
         }
 
         #[rstest]
-        fn test_update_replication_with_invalid_url(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn test_update_replication_with_invalid_url(
+            #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            repo.create_replication("test", settings.clone()).unwrap();
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             let mut settings = settings;
             settings.dst_host = "invalid_url".to_string();
 
             assert_eq!(
-                repo.update_replication("test", settings),
+                repo.update_replication("test", settings).await,
                 Err(unprocessable_entity!(
                     "Invalid destination host 'invalid_url'"
                 )),
@@ -601,18 +649,22 @@ mod tests {
         }
 
         #[rstest]
-        fn test_update_replication_to_same_bucket(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn test_update_replication_to_same_bucket(
+            #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            repo.create_replication("test", settings.clone()).unwrap();
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             let mut settings = settings;
             settings.dst_host = format!("http://localhost:{}", DEFAULT_PORT);
             settings.dst_bucket = "bucket-1".to_string();
 
             assert_eq!(
-                repo.update_replication("test", settings),
+                repo.update_replication("test", settings).await,
                 Err(unprocessable_entity!(
                     "Source and destination buckets must be different"
                 )),
@@ -621,17 +673,21 @@ mod tests {
         }
 
         #[rstest]
-        fn test_update_replication_src_bucket_not_found(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn test_update_replication_src_bucket_not_found(
+            #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            repo.create_replication("test", settings.clone()).unwrap();
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             let mut settings = settings;
             settings.src_bucket = "bucket-2".to_string();
 
             assert_eq!(
-                repo.update_replication("test", settings),
+                repo.update_replication("test", settings).await,
                 Err(not_found!(
                     "Source bucket 'bucket-2' for replication 'test' does not exist"
                 )),
@@ -640,14 +696,22 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_old_replication_only_for_valid(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn test_remove_old_replication_only_for_valid(
+            #[future] mut repo: ReplicationRepository,
             mut settings: ReplicationSettings,
         ) {
-            repo.create_replication("test", settings.clone()).unwrap();
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
             settings.when = Some(serde_json::json!({"$not-exist": [true, true]}));
 
-            let err = repo.update_replication("test", settings).err().unwrap();
+            let err = repo
+                .update_replication("test", settings)
+                .await
+                .err()
+                .unwrap();
             assert_eq!(
                 err,
                 unprocessable_entity!(
@@ -663,27 +727,35 @@ mod tests {
     mod remove {
         use super::*;
         #[rstest]
-        fn test_remove_replication(
-            mut repo: ReplicationRepository,
-            storage: Arc<StorageEngine>,
+        #[tokio::test]
+        async fn test_remove_replication(
+            #[future] mut repo: ReplicationRepository,
+            #[future] storage: Arc<StorageEngine>,
             settings: ReplicationSettings,
         ) {
-            repo.create_replication("test", settings.clone()).unwrap();
+            let mut repo = repo.await;
+            let storage = storage.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             repo.remove_replication("test").unwrap();
-            assert_eq!(repo.replications().len(), 0);
+            assert_eq!(repo.replications().await.unwrap().len(), 0);
 
             // check if replication is removed from file
-            let repo = ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default());
+            let repo =
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
             assert_eq!(
-                repo.replications().len(),
+                repo.replications().await.unwrap().len(),
                 0,
                 "Should remove replication permanently"
             );
         }
 
         #[rstest]
-        fn test_remove_non_existing_replication(mut repo: ReplicationRepository) {
+        #[tokio::test]
+        async fn test_remove_non_existing_replication(#[future] mut repo: ReplicationRepository) {
+            let mut repo = repo.await;
             assert_eq!(
                 repo.remove_replication("test-2"),
                 Err(not_found!("Replication 'test-2' does not exist")),
@@ -692,11 +764,15 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_provisioned_replication(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn test_remove_provisioned_replication(
+            #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            repo.create_replication("test", settings.clone()).unwrap();
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             let replication = repo.get_mut_replication("test").unwrap();
             replication.set_provisioned(true);
@@ -714,8 +790,15 @@ mod tests {
         use reduct_base::io::RecordMeta;
 
         #[rstest]
-        fn test_get_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
-            repo.create_replication("test", settings.clone()).unwrap();
+        #[tokio::test]
+        async fn test_get_replication(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
             {
                 let repl = repo.get_mut_replication("test").unwrap();
                 repl.notify(TransactionNotification {
@@ -724,28 +807,33 @@ mod tests {
                     meta: RecordMeta::builder().build(),
                     event: WriteRecord(0),
                 })
+                .await
                 .unwrap();
-                sleep(Duration::from_millis(100));
+                sleep(Duration::from_millis(100)).await;
             }
 
-            let info = repo.get_info("test").unwrap();
+            let info = repo.get_info("test").await.unwrap();
             let repl = repo.get_replication("test").unwrap();
             assert_eq!(info.settings, repl.masked_settings().clone());
-            assert_eq!(info.info, repl.info());
-            assert_eq!(info.diagnostics, repl.diagnostics());
+            assert_eq!(info.info, repl.info().await.unwrap());
+            assert_eq!(info.diagnostics, repl.diagnostics().await.unwrap());
         }
 
         #[rstest]
-        fn test_get_non_existing_replication(repo: ReplicationRepository) {
+        #[tokio::test]
+        async fn test_get_non_existing_replication(#[future] repo: ReplicationRepository) {
+            let repo = repo.await;
             assert_eq!(
-                repo.get_info("test-2").err(),
+                repo.get_info("test-2").await.err(),
                 Some(not_found!("Replication 'test-2' does not exist")),
                 "Should not get non existing replication"
             );
         }
 
         #[rstest]
-        fn test_get_mut_non_existing_replication(mut repo: ReplicationRepository) {
+        #[tokio::test]
+        async fn test_get_mut_non_existing_replication(#[future] mut repo: ReplicationRepository) {
+            let mut repo = repo.await;
             assert_eq!(
                 repo.get_mut_replication("test-2").err(),
                 Some(not_found!("Replication 'test-2' does not exist")),
@@ -759,8 +847,15 @@ mod tests {
         use reduct_base::io::RecordMeta;
 
         #[rstest]
-        fn test_notify_replication(mut repo: ReplicationRepository, settings: ReplicationSettings) {
-            repo.create_replication("test", settings.clone()).unwrap();
+        #[tokio::test]
+        async fn test_notify_replication(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             let notification = TransactionNotification {
                 bucket: "bucket-1".to_string(),
@@ -769,17 +864,21 @@ mod tests {
                 event: WriteRecord(0),
             };
 
-            repo.notify(notification.clone()).unwrap();
+            repo.notify(notification.clone()).await.unwrap();
             let repl = repo.get_replication("test").unwrap();
-            assert_eq!(repl.info().pending_records, 1);
+            assert_eq!(repl.info().await.unwrap().pending_records, 1);
         }
 
         #[rstest]
-        fn test_notify_wrong_bucket(
-            mut repo: ReplicationRepository,
+        #[tokio::test]
+        async fn test_notify_wrong_bucket(
+            #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            repo.create_replication("test", settings.clone()).unwrap();
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
 
             let notification = TransactionNotification {
                 bucket: "bucket-2".to_string(),
@@ -788,10 +887,10 @@ mod tests {
                 event: WriteRecord(0),
             };
 
-            repo.notify(notification).unwrap();
+            repo.notify(notification).await.unwrap();
             let repl = repo.get_replication("test").unwrap();
             assert_eq!(
-                repl.info().pending_records,
+                repl.info().await.unwrap().pending_records,
                 0,
                 "Should not notify replication for wrong bucket"
             );
@@ -869,9 +968,18 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_start_all(mut repo: ReplicationRepository, settings: ReplicationSettings) {
-            repo.create_replication("test-1", settings.clone()).unwrap();
-            repo.create_replication("test-2", settings.clone()).unwrap();
+        #[tokio::test]
+        async fn test_start_all(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test-1", settings.clone())
+                .await
+                .unwrap();
+            repo.create_replication("test-2", settings.clone())
+                .await
+                .unwrap();
 
             repo.start();
 
@@ -883,8 +991,15 @@ mod tests {
         }
 
         #[rstest]
-        fn test_double_start(mut repo: ReplicationRepository, settings: ReplicationSettings) {
-            repo.create_replication("test-1", settings.clone()).unwrap();
+        #[tokio::test]
+        async fn test_double_start(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test-1", settings.clone())
+                .await
+                .unwrap();
 
             repo.start();
             repo.start(); // second start should have no effect
@@ -899,8 +1014,15 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_set_mode(mut repo: ReplicationRepository, settings: ReplicationSettings) {
-            repo.create_replication("test-1", settings.clone()).unwrap();
+        #[tokio::test]
+        async fn test_set_mode(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test-1", settings.clone())
+                .await
+                .unwrap();
             repo.set_mode("test-1", ReplicationMode::Paused).unwrap();
 
             assert_eq!(
@@ -928,7 +1050,7 @@ mod tests {
     }
 
     #[fixture]
-    fn storage() -> Arc<StorageEngine> {
+    async fn storage() -> Arc<StorageEngine> {
         let tmp_dir = tempfile::tempdir().unwrap();
         let cfg = Cfg {
             data_path: tmp_dir.keep(),
@@ -937,18 +1059,21 @@ mod tests {
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
             .with_cfg(cfg)
-            .build();
+            .build()
+            .await;
 
         let bucket = storage
             .create_bucket("bucket-1", BucketSettings::default())
+            .await
             .unwrap()
             .upgrade_and_unwrap();
-        let _ = bucket.get_or_create_entry("entry-1").unwrap();
+        let _ = bucket.get_or_create_entry("entry-1").await.unwrap();
         Arc::new(storage)
     }
 
     #[fixture]
-    fn repo(storage: Arc<StorageEngine>) -> ReplicationRepository {
-        ReplicationRepository::load_or_create(storage, Cfg::default())
+    async fn repo(#[future] storage: Arc<StorageEngine>) -> ReplicationRepository {
+        let storage = storage.await;
+        ReplicationRepository::load_or_create(storage, Cfg::default()).await
     }
 }

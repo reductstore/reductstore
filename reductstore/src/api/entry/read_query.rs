@@ -31,9 +31,13 @@ pub(super) async fn read_query(
         )
         .await?;
 
-    let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
-    let entry = bucket.get_entry(entry_name)?.upgrade()?;
-    let id = entry.query(parse_query_params(params, false)?)?;
+    let bucket = components
+        .storage
+        .get_bucket(bucket_name)
+        .await?
+        .upgrade()?;
+    let entry = bucket.get_entry(entry_name).await?.upgrade()?;
+    let id = entry.query(parse_query_params(params, false)?).await?;
 
     Ok(QueryInfoAxum::from(QueryInfo { id }))
 }
@@ -70,15 +74,17 @@ mod tests {
         let entry = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade()
             .unwrap()
             .get_entry("entry-1")
+            .await
             .unwrap()
             .upgrade()
             .unwrap();
 
-        let (rx, _) = entry.get_query_receiver(query.id).unwrap();
+        let (rx, _) = entry.get_query_receiver(query.id).await.unwrap();
         let rx = rx.upgrade().unwrap();
         let mut rx = rx.write().await.unwrap();
         assert!(rx.recv().await.unwrap().is_ok());

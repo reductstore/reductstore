@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
+use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::record;
@@ -13,6 +13,7 @@ use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -126,10 +127,11 @@ impl HistoricalQuery {
     }
 }
 
+#[async_trait]
 impl Query for HistoricalQuery {
-    fn next(
+    async fn next(
         &mut self,
-        block_manager: Arc<RwLock<BlockManager>>,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         if self.records_from_current_block.is_empty() && !self.is_interrupted {
             let start = if let Some(block) = &self.current_block {
@@ -140,7 +142,7 @@ impl Query for HistoricalQuery {
             };
 
             let block_range = {
-                let mut bm = block_manager.write()?;
+                let mut bm = block_manager.write().await?;
                 let first_block = {
                     if let Ok(block) = bm.find_block(start) {
                         block.read()?.block_id()
@@ -156,7 +158,7 @@ impl Query for HistoricalQuery {
             };
 
             for block_id in block_range {
-                let mut bm = block_manager.write()?;
+                let mut bm = block_manager.write().await?;
                 let block_ref = bm.load_block(block_id)?;
 
                 self.current_block = Some(block_ref);
@@ -186,6 +188,7 @@ impl Query for HistoricalQuery {
                 ts_to_us(&record.timestamp.unwrap()),
                 Some(record),
             )
+            .await
         }
     }
 
@@ -296,9 +299,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_1_rec(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_query_ok_1_rec(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
-        let records = read_to_vector(&mut query, block_manager);
+        let records = read_to_vector(&mut query, block_manager).await;
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0.meta().timestamp(), 0);
@@ -306,9 +310,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_2_recs(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_query_ok_2_recs(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(0, 1000, QueryOptions::default()).unwrap();
-        let records = read_to_vector(&mut query, block_manager);
+        let records = read_to_vector(&mut query, block_manager).await;
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.meta().timestamp(), 0);
@@ -318,9 +323,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_ok_3_recs(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_query_ok_3_recs(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
-        let records = read_to_vector(&mut query, block_manager);
+        let records = read_to_vector(&mut query, block_manager).await;
 
         assert_eq!(records.len(), 3);
         assert_eq!(records[0].0.meta().timestamp(), 0);
@@ -332,7 +338,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_include(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_query_include(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(
             0,
             1001,
@@ -345,7 +352,7 @@ mod tests {
             },
         )
         .unwrap();
-        let records = read_to_vector(&mut query, block_manager);
+        let records = read_to_vector(&mut query, block_manager).await;
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0.meta().timestamp(), 1000);
@@ -360,7 +367,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_query_exclude(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_query_exclude(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(
             0,
             1001,
@@ -374,7 +382,7 @@ mod tests {
         )
         .unwrap();
 
-        let records = read_to_vector(&mut query, block_manager);
+        let records = read_to_vector(&mut query, block_manager).await;
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.meta().timestamp(), 5);
@@ -390,10 +398,11 @@ mod tests {
     }
 
     #[rstest]
-    fn test_ignoring_errored_records(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_ignoring_errored_records(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
         {
-            let block_ref = block_manager.write().unwrap().load_block(0).unwrap();
+            let block_ref = block_manager.write().await.unwrap().load_block(0).unwrap();
             {
                 let mut block = block_ref.write().unwrap();
                 let mut record = block.get_record(0).unwrap().clone();
@@ -402,19 +411,21 @@ mod tests {
             }
             block_manager
                 .write()
+                .await
                 .unwrap()
                 .save_block(block_ref)
                 .unwrap();
         }
 
         assert_eq!(
-            query.next(block_manager.clone()).err(),
+            query.next(block_manager.clone()).await.err(),
             Some(no_content!("No content"))
         );
     }
 
     #[rstest]
-    fn test_each_s_filter(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_each_s_filter(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(
             0,
             1001,
@@ -424,7 +435,7 @@ mod tests {
             },
         )
         .unwrap();
-        let records = read_to_vector(&mut query, block_manager);
+        let records = read_to_vector(&mut query, block_manager).await;
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.meta().timestamp(), 0);
@@ -432,7 +443,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_each_n_records(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_each_n_records(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(
             0,
             1001,
@@ -442,7 +454,7 @@ mod tests {
             },
         )
         .unwrap();
-        let records = read_to_vector(&mut query, block_manager);
+        let records = read_to_vector(&mut query, block_manager).await;
 
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.meta().timestamp(), 0);
@@ -450,7 +462,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_when_filter(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_when_filter(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(
             0,
             1001,
@@ -460,14 +473,15 @@ mod tests {
             },
         )
         .unwrap();
-        let records = read_to_vector(&mut query, block_manager);
+        let records = read_to_vector(&mut query, block_manager).await;
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0.meta().timestamp(), 0);
     }
 
     #[rstest]
-    fn test_when_filter_strict(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_when_filter_strict(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(
             0,
             1001,
@@ -479,13 +493,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            query.next(block_manager.clone()).err(),
+            query.next(block_manager.clone()).await.err(),
             Some(not_found!("Reference 'NOT_EXIST' not found"))
         );
     }
 
     #[rstest]
-    fn test_when_with_interruption(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_when_with_interruption(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(
             0,
             1001,
@@ -497,14 +512,15 @@ mod tests {
         )
         .unwrap();
 
-        let records = read_to_vector(&mut query, block_manager);
+        let records = read_to_vector(&mut query, block_manager).await;
 
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0.meta().timestamp(), 0);
     }
 
     #[rstest]
-    fn test_when_filter_non_strict(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_when_filter_non_strict(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(
             0,
             1001,
@@ -516,19 +532,19 @@ mod tests {
         )
         .unwrap();
         assert_eq!(
-            query.next(block_manager.clone()).err(),
+            query.next(block_manager.clone()).await.err(),
             Some(no_content!("No content")),
             "errored condition should be ignored in non-strict mode"
         );
     }
 
-    fn read_to_vector(
+    async fn read_to_vector(
         query: &mut HistoricalQuery,
-        block_manager: Arc<RwLock<BlockManager>>,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Vec<(BoxedReadRecord, String)> {
         let mut records: Vec<(BoxedReadRecord, String)> = Vec::new();
         loop {
-            match query.next(block_manager.clone()) {
+            match query.next(block_manager.clone()).await {
                 Ok(mut reader) => {
                     let mut content = String::new();
                     while let Some(chunk) = reader.read_chunk() {

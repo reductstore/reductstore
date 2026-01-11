@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::EntrySettings;
 use bytes::BytesMut;
@@ -78,11 +77,11 @@ impl Bucket {
         settings
     }
 
-    pub fn settings(&self) -> BucketSettings {
-        self.settings.read().unwrap().clone()
+    pub async fn settings(&self) -> Result<BucketSettings, ReductError> {
+        Ok(self.settings.read().await?.clone())
     }
 
-    pub fn set_settings(&self, settings: BucketSettings) -> TaskHandle<Result<(), ReductError>> {
+    pub async fn set_settings(&self, settings: BucketSettings) -> Result<(), ReductError> {
         if self
             .is_provisioned
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -95,39 +94,38 @@ impl Bucket {
         }
 
         {
-            let mut my_settings = self.settings.write().unwrap();
-            let entries = self.entries.write().unwrap();
+            let mut my_settings = self.settings.write().await?;
+            let entries = self.entries.write().await?;
 
             *my_settings = Self::fill_settings(settings, my_settings.clone());
             for entry in entries.values() {
-                entry.set_settings(EntrySettings {
-                    max_block_size: my_settings.max_block_size.unwrap(),
-                    max_block_records: my_settings.max_block_records.unwrap(),
-                });
+                entry
+                    .set_settings(EntrySettings {
+                        max_block_size: my_settings.max_block_size.unwrap(),
+                        max_block_records: my_settings.max_block_records.unwrap(),
+                    })
+                    .await?;
             }
         }
-        self.save_settings()
+        self.save_settings().await
     }
-    pub(super) fn save_settings(&self) -> TaskHandle<Result<(), ReductError>> {
-        let settings = self.settings.read().unwrap().clone();
+    pub(super) async fn save_settings(&self) -> Result<(), ReductError> {
         let path = self.path.join(SETTINGS_NAME);
 
-        spawn("save settings", move || {
-            let mut buf = BytesMut::new();
-            crate::storage::proto::BucketSettings::from(settings)
-                .encode(&mut buf)
-                .map_err(|e| internal_server_error!("Failed to encode bucket settings: {}", e))?;
+        let mut buf = BytesMut::new();
+        crate::storage::proto::BucketSettings::from(self.settings.read().await?.clone())
+            .encode(&mut buf)
+            .map_err(|e| internal_server_error!("Failed to encode bucket settings: {}", e))?;
 
-            let lock = FILE_CACHE
-                .write_or_create(&path, SeekFrom::Start(0))?
-                .upgrade()?;
-            let mut file = lock.write()?;
+        let lock = FILE_CACHE
+            .write_or_create(&path, SeekFrom::Start(0))?
+            .upgrade()?;
+        let mut file = lock.write()?;
 
-            file.set_len(0)?;
-            file.write_all(&buf)?;
-            file.sync_all()?;
-            Ok(())
-        })
+        file.set_len(0)?;
+        file.write_all(&buf)?;
+        file.sync_all()?;
+        Ok(())
     }
 }
 
@@ -141,12 +139,19 @@ mod tests {
     use std::sync::Arc;
 
     #[rstest]
-    fn test_keep_settings_persistent(settings: BucketSettings, bucket: Arc<Bucket>) {
-        assert_eq!(bucket.settings(), settings);
+    #[tokio::test]
+    async fn test_keep_settings_persistent(
+        settings: BucketSettings,
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        assert_eq!(bucket.settings().await.unwrap(), settings);
 
-        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
+        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+            .await
+            .unwrap();
         assert_eq!(bucket.name(), "test");
-        assert_eq!(bucket.settings(), settings);
+        assert_eq!(bucket.settings().await.unwrap(), settings);
     }
 
     #[rstest]
@@ -164,7 +169,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_set_settings_partially(settings: BucketSettings, bucket: Arc<Bucket>) {
+    #[tokio::test]
+    async fn test_set_settings_partially(settings: BucketSettings, #[future] bucket: Arc<Bucket>) {
         let new_settings = BucketSettings {
             max_block_size: Some(100),
             quota_type: None,
@@ -172,34 +178,44 @@ mod tests {
             max_block_records: None,
         };
 
-        bucket.set_settings(new_settings).wait().unwrap();
-        assert_eq!(bucket.settings().max_block_size.unwrap(), 100);
-        assert_eq!(bucket.settings().quota_type, settings.quota_type);
-        assert_eq!(bucket.settings().quota_size, settings.quota_size);
+        let bucket = bucket.await;
+        bucket.set_settings(new_settings).await.unwrap();
+        let bucket_settings = bucket.settings().await.unwrap();
+        assert_eq!(bucket_settings.max_block_size.unwrap(), 100);
+        assert_eq!(bucket_settings.quota_type, settings.quota_type);
+        assert_eq!(bucket_settings.quota_size, settings.quota_size);
         assert_eq!(
-            bucket.settings().max_block_records,
+            bucket_settings.max_block_records,
             settings.max_block_records
         );
     }
 
     #[rstest]
-    fn test_apply_settings_to_entries(settings: BucketSettings, bucket: Arc<Bucket>) {
-        bucket.get_or_create_entry("entry-1").unwrap();
-        bucket.get_or_create_entry("entry-2").unwrap();
+    #[tokio::test]
+    async fn test_apply_settings_to_entries(
+        settings: BucketSettings,
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        bucket.get_or_create_entry("entry-1").await.unwrap();
+        bucket.get_or_create_entry("entry-2").await.unwrap();
 
         let mut new_settings = settings.clone();
         new_settings.max_block_size = Some(200);
         new_settings.max_block_records = Some(200);
-        bucket.set_settings(new_settings).wait().unwrap();
+        bucket.set_settings(new_settings).await.unwrap();
 
-        for entry in bucket.entries.read().unwrap().values() {
-            assert_eq!(entry.settings().max_block_size, 200);
-            assert_eq!(entry.settings().max_block_records, 200);
+        for entry in bucket.entries.read().await.unwrap().values() {
+            let entry_settings = entry.settings().await.unwrap();
+            assert_eq!(entry_settings.max_block_size, 200);
+            assert_eq!(entry_settings.max_block_records, 200);
         }
     }
 
     #[rstest]
-    fn test_overwrite_whole_settings_file(bucket: Arc<Bucket>) {
+    #[tokio::test]
+    async fn test_overwrite_whole_settings_file(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
         bucket
             .set_settings(BucketSettings {
                 max_block_size: Some(5000000000000000000),
@@ -207,10 +223,12 @@ mod tests {
                 quota_size: Some(500),
                 max_block_records: Some(50),
             })
-            .wait()
+            .await
             .unwrap();
-        bucket.set_settings(Bucket::defaults()).wait().unwrap();
-        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
-        assert_eq!(bucket.settings(), Bucket::defaults());
+        bucket.set_settings(Bucket::defaults()).await.unwrap();
+        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+            .await
+            .unwrap();
+        assert_eq!(bucket.settings().await.unwrap(), Bucket::defaults());
     }
 }

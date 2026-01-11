@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
@@ -146,7 +146,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
-        let components = cfg.build().unwrap();
+        let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token1 = repo.get_token("token1").unwrap().clone();
@@ -180,7 +180,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
-        let components = cfg.build().unwrap();
+        let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token1 = repo.get_token("token1").unwrap().clone();
@@ -206,7 +206,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
-        let components = cfg.build().unwrap();
+        let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
         let err = repo.get_token("token1").err().unwrap();
@@ -235,7 +235,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
-        let components = cfg.build().unwrap();
+        let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token = repo.get_token("token1").unwrap();

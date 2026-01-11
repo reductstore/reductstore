@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod query;
@@ -10,8 +10,7 @@ pub(crate) mod update_records;
 
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::RwLock;
-use crate::core::thread_pool::{spawn, TaskHandle};
+use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
@@ -20,7 +19,7 @@ use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
 use crate::storage::engine::{check_name_convention, ReadOnlyMode};
-use crate::storage::entry::{Entry, EntrySettings, RecordReader};
+use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::folder_keeper::FolderKeeper;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::{debug, error};
@@ -31,7 +30,6 @@ use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found, Labels};
-use reduct_macros::task;
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
@@ -43,15 +41,15 @@ use std::time::Instant;
 pub(crate) struct Bucket {
     name: String,
     path: PathBuf,
-    entries: Arc<RwLock<BTreeMap<String, Arc<Entry>>>>,
-    settings: RwLock<BucketSettings>,
+    entries: Arc<AsyncRwLock<BTreeMap<String, Arc<Entry>>>>,
+    settings: AsyncRwLock<BucketSettings>,
     folder_keeper: Arc<FolderKeeper>,
     cfg: Arc<Cfg>,
-    last_replica_sync: RwLock<Instant>,
+    last_replica_sync: AsyncRwLock<Instant>,
     is_provisioned: AtomicBool,
-    status: RwLock<ResourceStatus>,
+    status: AsyncRwLock<ResourceStatus>,
     #[allow(dead_code)]
-    queries: RwLock<HashMap<u64, MultiEntryQuery>>,
+    queries: AsyncRwLock<HashMap<u64, MultiEntryQuery>>,
 }
 
 impl Bucket {
@@ -67,7 +65,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub(crate) fn new(
+    pub(crate) async fn try_build(
         name: &str,
         path: &PathBuf,
         settings: BucketSettings,
@@ -80,17 +78,17 @@ impl Bucket {
         let bucket = Bucket {
             name: name.to_string(),
             path,
-            entries: Arc::new(RwLock::new(BTreeMap::new())),
-            settings: RwLock::new(settings),
+            entries: Arc::new(AsyncRwLock::new(BTreeMap::new())),
+            settings: AsyncRwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
-            status: RwLock::new(ResourceStatus::Ready),
+            status: AsyncRwLock::new(ResourceStatus::Ready),
             cfg: Arc::new(cfg),
-            last_replica_sync: RwLock::new(Instant::now()),
+            last_replica_sync: AsyncRwLock::new(Instant::now()),
             folder_keeper: Arc::new(folder_keeper),
-            queries: RwLock::new(HashMap::new()),
+            queries: AsyncRwLock::new(HashMap::new()),
         };
 
-        bucket.save_settings().wait()?;
+        bucket.save_settings().await?;
         Ok(bucket)
     }
 
@@ -104,7 +102,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
+    pub async fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
         let buf = {
             let lock = FILE_CACHE
                 .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))?
@@ -139,7 +137,7 @@ impl Bucket {
         }
 
         for task in task_set {
-            if let Some(entry) = task.wait()? {
+            if let Some(entry) = task.await? {
                 entries.insert(entry.name().to_string(), entry);
             }
         }
@@ -147,16 +145,16 @@ impl Bucket {
         Ok(Bucket {
             name: bucket_name,
             path,
-            entries: Arc::new(RwLock::new(
+            entries: Arc::new(AsyncRwLock::new(
                 entries.into_iter().map(|(k, v)| (k, Arc::new(v))).collect(),
             )),
-            settings: RwLock::new(settings),
+            settings: AsyncRwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
-            status: RwLock::new(ResourceStatus::Ready),
-            last_replica_sync: RwLock::new(Instant::now()),
+            status: AsyncRwLock::new(ResourceStatus::Ready),
+            last_replica_sync: AsyncRwLock::new(Instant::now()),
             cfg,
             folder_keeper: Arc::new(folder_keeper),
-            queries: RwLock::new(HashMap::new()),
+            queries: AsyncRwLock::new(HashMap::new()),
         })
     }
 
@@ -169,12 +167,12 @@ impl Bucket {
     /// # Returns
     ///
     /// * `&mut Entry` - The entry or an HTTPError
-    pub fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
+    pub async fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
         check_name_convention(key)?;
-        self.ensure_not_deleting()?;
+        self.ensure_not_deleting().await?;
 
         let entry = {
-            let entries = self.entries.read()?;
+            let entries = self.entries.read().await?;
             entries.get(key).cloned()
         };
 
@@ -182,7 +180,7 @@ impl Bucket {
             entry
         } else {
             self.check_mode()?;
-            let settings = self.settings.read()?;
+            let settings = self.settings.read().await?;
             self.folder_keeper.add_folder(key)?;
             let entry = Arc::new(Entry::try_new(
                 &key,
@@ -193,13 +191,13 @@ impl Bucket {
                 },
                 self.cfg.clone(),
             )?);
-            let mut entries = self.entries.write()?;
+            let mut entries = self.entries.write().await?;
             entries
                 .entry(key.to_string())
                 .or_insert_with(|| Arc::clone(&entry))
                 .clone()
         };
-        entry.ensure_not_deleting()?;
+        entry.ensure_not_deleting().await?;
         Ok(entry.into())
     }
 
@@ -212,38 +210,37 @@ impl Bucket {
     /// # Returns
     ///
     /// * `&Entry` - The entry or an HTTPError
-    pub fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
-        self.reload()?;
-        let entries = self.entries.read()?;
+    pub async fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
+        self.reload().await?;
+        let entries = self.entries.read().await?;
         let entry = entries.get(name).ok_or_else(|| {
             ReductError::not_found(&format!(
                 "Entry '{}' not found in bucket '{}'",
                 name, self.name
             ))
         })?;
-        entry.ensure_not_deleting()?;
+        entry.ensure_not_deleting().await?;
         Ok(entry.clone().into())
     }
 
     /// Return bucket stats
-    #[task("bucket info")]
-    pub fn info(self: Arc<Self>) -> Result<FullBucketInfo, ReductError> {
-        self.reload()?;
+    pub async fn info(self: Arc<Self>) -> Result<FullBucketInfo, ReductError> {
+        self.reload().await?;
 
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
         let mut entry_infos = Vec::new();
 
-        let infos = self
-            .entries
-            .read()?
+        let entries = self.entries.read().await?;
+        let infos = entries
             .values()
             .into_iter()
             .map(|entry| entry.info())
             .collect::<Vec<_>>();
+
         for info in infos {
-            let info = info?;
+            let info = info.await?;
             size += info.size;
             oldest_record = oldest_record.min(info.oldest_record);
             latest_record = latest_record.max(info.latest_record);
@@ -258,9 +255,9 @@ impl Bucket {
                 oldest_record,
                 latest_record,
                 is_provisioned: self.is_provisioned.load(Ordering::Relaxed),
-                status: self.status()?,
+                status: self.status().await?,
             },
-            settings: self.settings.read()?.clone(),
+            settings: self.settings.read().await?.clone(),
             entries: entry_infos,
         })
     }
@@ -279,106 +276,95 @@ impl Bucket {
     ///
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub fn begin_write(
+    pub async fn begin_write(
         self: &Arc<Self>,
         name: &str,
         time: u64,
         content_size: u64,
         content_type: String,
         labels: Labels,
-    ) -> TaskHandle<Result<Box<dyn WriteRecord + Sync + Send>, ReductError>> {
-        if let Err(e) = self.check_mode() {
-            return Err(e).into();
-        }
+    ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        self.check_mode()?;
 
-        let get_entry = || {
-            self.keep_quota_for(content_size)?;
-            self.get_or_create_entry(name)?.upgrade()
+        let get_entry = async || {
+            self.keep_quota_for(content_size).await?;
+            self.get_or_create_entry(name).await?.upgrade()
         };
 
-        let entry = match get_entry() {
+        let entry = match get_entry().await {
             Ok(entry) => entry,
             Err(e) => {
                 return Err(e).into();
             }
         };
 
-        entry.begin_write(time, content_size, content_type, labels)
+        entry
+            .begin_write(time, content_size, content_type, labels)
+            .await
     }
 
     /// Starts a new record read with
-    #[allow(dead_code)]
-    pub fn begin_read(
+    #[cfg(test)]
+    pub async fn begin_read(
         &self,
         name: &str,
         time: u64,
-    ) -> TaskHandle<Result<RecordReader, ReductError>> {
-        let entry = || self.get_entry(name)?.upgrade();
-
-        match entry() {
-            Ok(entry) => entry.begin_read(time),
+    ) -> Result<crate::storage::entry::RecordReader, ReductError> {
+        match self.get_entry(name).await?.upgrade() {
+            Ok(entry) => entry.begin_read(time).await,
             Err(e) => Err(e).into(),
         }
     }
 
-    pub fn rename_entry(
-        &self,
-        old_name: &str,
-        new_name: &str,
-    ) -> TaskHandle<Result<(), ReductError>> {
-        if let Err(e) = self.check_mode() {
-            return Err(e).into();
-        }
+    pub async fn rename_entry(&self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
+        self.check_mode()?;
 
         let new_path = self.path.join(new_name);
         let bucket_name = self.name.clone();
         let entries = self.entries.clone();
-        let old_name = old_name.to_string();
-        let new_name = new_name.to_string();
-        let settings = self.settings();
+        let settings = self.settings().await?;
         let cfg = self.cfg.clone();
         let folder_keeper = self.folder_keeper.clone();
 
-        spawn("rename entry", move || {
-            check_name_convention(&new_name)?;
-            if new_path.exists() {
-                return Err(conflict!(
-                    "Entry '{}' already exists in bucket '{}'",
-                    new_name,
-                    bucket_name
-                ));
-            }
+        check_name_convention(&new_name)?;
+        if new_path.exists() {
+            return Err(conflict!(
+                "Entry '{}' already exists in bucket '{}'",
+                new_name,
+                bucket_name
+            ));
+        }
 
-            if let Some(entry) = entries.read()?.get(&old_name) {
-                entry.ensure_not_deleting()?;
-                entry.compact()?;
-            } else {
-                return Err(not_found!(
-                    "Entry '{}' not found in bucket '{}'",
-                    old_name,
-                    bucket_name
-                ));
-            }
+        if let Some(entry) = entries.read().await?.get(old_name) {
+            entry.ensure_not_deleting().await?;
+            entry.compact()?;
+        } else {
+            return Err(not_found!(
+                "Entry '{}' not found in bucket '{}'",
+                old_name,
+                bucket_name
+            ));
+        }
 
-            folder_keeper.rename_folder(&old_name, &new_name)?;
-            entries.write()?.remove(&old_name);
+        folder_keeper.rename_folder(old_name, new_name)?;
+        entries.write().await?.remove(old_name);
 
-            if let Some(entry) = Entry::restore(
-                new_path,
-                EntrySettings {
-                    max_block_size: settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
-                    max_block_records: settings.max_block_records.unwrap_or(DEFAULT_MAX_RECORDS),
-                },
-                cfg.clone(),
-            )
-            .wait()?
-            {
-                entries
-                    .write()?
-                    .insert(new_name.to_string(), Arc::new(entry));
-            }
-            Ok(())
-        })
+        if let Some(entry) = Entry::restore(
+            new_path,
+            EntrySettings {
+                max_block_size: settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
+                max_block_records: settings.max_block_records.unwrap_or(DEFAULT_MAX_RECORDS),
+            },
+            cfg.clone(),
+        )
+        .await?
+        {
+            entries
+                .write()
+                .await?
+                .insert(new_name.to_string(), Arc::new(entry));
+        }
+        Ok(())
     }
 
     /// Remove entry from the bucket
@@ -390,12 +376,12 @@ impl Bucket {
     /// # Returns
     ///
     /// * `HTTPError` - The error if any.
-    pub fn remove_entry(&self, name: &str) -> Result<(), ReductError> {
-        self.ensure_not_deleting()?;
+    pub async fn remove_entry(&self, name: &str) -> Result<(), ReductError> {
+        self.ensure_not_deleting().await?;
         self.check_mode()?;
 
-        let entry = self.get_entry(name)?.upgrade()?;
-        entry.mark_deleting()?;
+        let entry = self.get_entry(name).await?.upgrade()?;
+        entry.mark_deleting().await?;
 
         let entries = self.entries.clone();
         let path = self.path.join(name);
@@ -420,7 +406,7 @@ impl Bucket {
 
         match folder_remove_result {
             Ok(()) => {
-                entries.write()?.remove(&entry_name);
+                entries.write().await?.remove(&entry_name);
             }
             Err(err) => {
                 error!(
@@ -435,25 +421,30 @@ impl Bucket {
     }
 
     /// Sync all entries to the file system
-    pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
+    pub async fn sync_fs(&self) -> Result<(), ReductError> {
         if self.cfg.role == InstanceRole::Replica {
-            return Ok(()).into();
+            return Ok(());
         }
 
         let bucket_name = self.name.clone();
         debug!("Syncing bucket '{}'", bucket_name);
         let time_start = Instant::now();
 
-        if let Err(e) = self.save_settings().wait() {
-            return Err(e).into();
-        }
+        self.save_settings().await?;
 
         let entries = self.entries.clone();
         // use shared task to avoid locking in graceful shutdown
-        spawn("sync entries", move || {
+        tokio::spawn(async move {
             let mut count = 0usize;
-            for entry in entries.read()?.values() {
-                entry.compact()?;
+            for entry in entries.read().await?.values() {
+                if let Err(err) = entry.compact() {
+                    error!(
+                        "Failed to compact entry '{}' in bucket '{}': {}",
+                        entry.name(),
+                        bucket_name,
+                        err
+                    );
+                }
                 count += 1;
             }
             debug!(
@@ -462,8 +453,11 @@ impl Bucket {
                 count,
                 Instant::now().duration_since(time_start)
             );
-            Ok(())
-        })
+
+            Ok::<(), ReductError>(())
+        });
+
+        Ok(())
     }
 
     pub fn name(&self) -> &str {
@@ -486,26 +480,21 @@ impl Bucket {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    #[allow(dead_code)]
-    pub fn entries(&self) -> Result<BTreeMap<String, Arc<Entry>>, ReductError> {
-        Ok(self.entries.read()?.clone())
+    pub(super) async fn status(&self) -> Result<ResourceStatus, ReductError> {
+        Ok(*self.status.read().await?)
     }
 
-    pub(super) fn status(&self) -> Result<ResourceStatus, ReductError> {
-        Ok(*self.status.read()?)
-    }
-
-    pub(super) fn mark_deleting(&self) -> Result<(), ReductError> {
-        self.ensure_not_deleting()?;
-        *self.status.write()? = ResourceStatus::Deleting;
-        for entry in self.entries.read()?.values() {
-            entry.mark_deleting()?;
+    pub(super) async fn mark_deleting(&self) -> Result<(), ReductError> {
+        self.ensure_not_deleting().await?;
+        *self.status.write().await? = ResourceStatus::Deleting;
+        for entry in self.entries.read().await?.values() {
+            entry.mark_deleting().await?;
         }
         Ok(())
     }
 
-    pub(super) fn ensure_not_deleting(&self) -> Result<(), ReductError> {
-        if self.status()? == ResourceStatus::Deleting {
+    pub(super) async fn ensure_not_deleting(&self) -> Result<(), ReductError> {
+        if self.status().await? == ResourceStatus::Deleting {
             Err(conflict!("Bucket '{}' is being deleted", self.name))
         } else {
             Ok(())
@@ -531,16 +520,18 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_or_create_entry(bucket: Arc<Bucket>) {
-            let entry = bucket.get_or_create_entry("test-1").unwrap();
+        async fn test_get_or_create_entry(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            let entry = bucket.get_or_create_entry("test-1").await.unwrap();
             assert_eq!(entry.upgrade().unwrap().name(), "test-1");
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_or_create_entry_invalid_name(bucket: Arc<Bucket>) {
+        async fn test_get_or_create_entry_invalid_name(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             assert_eq!(
-                bucket.get_or_create_entry("test-1/").err(),
+                bucket.get_or_create_entry("test-1/").await.err(),
                 Some(unprocessable_entity!(
                     "Bucket or entry name can contain only letters, digests and [-,_] symbols"
                 ))
@@ -553,11 +544,12 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_entry(bucket: Arc<Bucket>) {
+        async fn test_remove_entry(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
 
-            bucket.remove_entry("test-1").unwrap();
-            let err = bucket.get_entry("test-1").err().unwrap();
+            bucket.remove_entry("test-1").await.unwrap();
+            let err = bucket.get_entry("test-1").await.err().unwrap();
             assert!(
                 err == ReductError::conflict("Entry 'test-1' in bucket 'test' is being deleted")
                     || err == ReductError::not_found("Entry 'test-1' not found in bucket 'test'"),
@@ -567,9 +559,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_entry_not_found(bucket: Arc<Bucket>) {
+        async fn test_remove_entry_not_found(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             assert_eq!(
-                bucket.remove_entry("test-1").err(),
+                bucket.remove_entry("test-1").await.err(),
                 Some(ReductError::not_found(
                     "Entry 'test-1' not found in bucket 'test'"
                 ))
@@ -583,12 +576,13 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry(bucket: Arc<Bucket>) {
+        async fn test_rename_entry(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
 
             bucket.rename_entry("test-1", "test-2").await.unwrap();
             assert_eq!(
-                bucket.get_entry("test-1").err(),
+                bucket.get_entry("test-1").await.err(),
                 Some(ReductError::not_found(
                     "Entry 'test-1' not found in bucket 'test'"
                 ))
@@ -596,6 +590,7 @@ mod tests {
             assert_eq!(
                 bucket
                     .get_entry("test-2")
+                    .await
                     .unwrap()
                     .upgrade()
                     .unwrap()
@@ -606,7 +601,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry_not_found(bucket: Arc<Bucket>) {
+        async fn test_rename_entry_not_found(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             assert_eq!(
                 bucket.rename_entry("test-1", "test-2").await.err(),
                 Some(not_found!("Entry 'test-1' not found in bucket 'test'"))
@@ -615,7 +611,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry_already_exists(bucket: Arc<Bucket>) {
+        async fn test_rename_entry_already_exists(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
             write(&bucket, "test-2", 1, b"test").await.unwrap();
 
@@ -627,7 +624,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_invalid_name(bucket: Arc<Bucket>) {
+        async fn test_rename_invalid_name(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             assert_eq!(
                 bucket.rename_entry("test-1", "test-2/").await.err(),
                 Some(unprocessable_entity!(
@@ -638,14 +636,17 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_entry_persisted(bucket: Arc<Bucket>) {
+        async fn test_rename_entry_persisted(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
             bucket.sync_fs().await.unwrap();
             bucket.rename_entry("test-1", "test-2").await.unwrap();
 
-            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default()).unwrap();
+            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+                .await
+                .unwrap();
             assert_eq!(
-                bucket.get_entry("test-1").err(),
+                bucket.get_entry("test-1").await.err(),
                 Some(ReductError::not_found(
                     "Entry 'test-1' not found in bucket 'test'"
                 ))
@@ -660,8 +661,10 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_bucket_info_has_status(bucket: Arc<Bucket>) {
-            let info = bucket.info().wait().unwrap();
+        #[tokio::test]
+        async fn test_bucket_info_has_status(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            let info = bucket.info().await.unwrap();
             assert_eq!(info.info.status, ResourceStatus::Ready);
             assert!(info
                 .entries
@@ -670,27 +673,34 @@ mod tests {
         }
 
         #[rstest]
-        fn test_bucket_deleting_rejects_operations(bucket: Arc<Bucket>) {
-            bucket.mark_deleting().unwrap();
-            let err = bucket.get_or_create_entry("new-entry").err().unwrap();
+        #[tokio::test]
+        async fn test_bucket_deleting_rejects_operations(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
+            let err = bucket.get_or_create_entry("new-entry").await.err().unwrap();
             assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
         }
 
         #[rstest]
-        fn bucket_mark_deleting_returns_conflict_when_already_deleting(bucket: Arc<Bucket>) {
-            bucket.mark_deleting().unwrap();
+        #[tokio::test]
+        async fn bucket_mark_deleting_returns_conflict_when_already_deleting(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
             assert_eq!(
-                bucket.mark_deleting(),
+                bucket.mark_deleting().await,
                 Err(conflict!("Bucket 'test' is being deleted"))
             );
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_entry_deleting_rejects_operations(bucket: Arc<Bucket>) {
+        async fn test_entry_deleting_rejects_operations(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
-            let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
-            entry.mark_deleting().unwrap();
+            let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+            entry.mark_deleting().await.unwrap();
 
             let err = bucket.begin_read("test-1", 1).await.err().unwrap();
             assert_eq!(
@@ -701,12 +711,15 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn entry_mark_deleting_returns_conflict_when_already_deleting(bucket: Arc<Bucket>) {
+        async fn entry_mark_deleting_returns_conflict_when_already_deleting(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
-            let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
-            entry.mark_deleting().unwrap();
+            let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+            entry.mark_deleting().await.unwrap();
             assert_eq!(
-                entry.mark_deleting(),
+                entry.mark_deleting().await,
                 Err(conflict!(
                     "Entry 'test-1' in bucket 'test' is being deleted"
                 ))
@@ -715,13 +728,16 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn remove_entry_returns_conflict_when_entry_is_being_deleted(bucket: Arc<Bucket>) {
+        async fn remove_entry_returns_conflict_when_entry_is_being_deleted(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
-            let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
-            entry.mark_deleting().unwrap();
+            let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+            entry.mark_deleting().await.unwrap();
 
             assert_eq!(
-                bucket.remove_entry("test-1"),
+                bucket.remove_entry("test-1").await,
                 Err(conflict!(
                     "Entry 'test-1' in bucket 'test' is being deleted"
                 ))
@@ -730,16 +746,20 @@ mod tests {
     }
 
     #[rstest]
-    fn test_provisioned_info(provisioned_bucket: Arc<Bucket>) {
-        let info = provisioned_bucket.info().wait().unwrap().info;
+    #[tokio::test]
+    async fn test_provisioned_info(#[future] provisioned_bucket: Arc<Bucket>) {
+        let provisioned_bucket = provisioned_bucket.await;
+        let info = provisioned_bucket.info().await.unwrap().info;
         assert_eq!(info.is_provisioned, true);
     }
 
     #[rstest]
-    fn test_provisioned_settings(provisioned_bucket: Arc<Bucket>) {
+    #[tokio::test]
+    async fn test_provisioned_settings(#[future] provisioned_bucket: Arc<Bucket>) {
+        let provisioned_bucket = provisioned_bucket.await;
         let err = provisioned_bucket
             .set_settings(BucketSettings::default())
-            .wait()
+            .await
             .err()
             .unwrap();
         assert_eq!(
@@ -807,15 +827,21 @@ mod tests {
     }
 
     #[fixture]
-    pub fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
+    pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
-        Arc::new(Bucket::new("test", &path, settings, Cfg::default()).unwrap())
+        Arc::new(
+            Bucket::try_build("test", &path, settings, Cfg::default())
+                .await
+                .unwrap(),
+        )
     }
 
     #[fixture]
-    pub fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
+    pub async fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
-        let bucket = Bucket::new("test", &path, settings, Cfg::default()).unwrap();
+        let bucket = Bucket::try_build("test", &path, settings, Cfg::default())
+            .await
+            .unwrap();
         bucket.set_provisioned(true);
         Arc::new(bucket)
     }

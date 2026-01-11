@@ -1,15 +1,14 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::Record;
 use reduct_base::error::ReductError;
 use reduct_base::{not_found, Labels};
-use reduct_macros::task;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 
 /// A struct that contains the timestamp of the record to update, the labels to update and the labels to remove.
 pub(crate) struct UpdateLabels {
@@ -34,8 +33,7 @@ impl Entry {
     ///
     /// A map of timestamps to the result of the update operation. The result is either a vector of labels
     /// or an error if the record was not found.
-    #[task("update labels")]
-    pub fn update_labels(
+    pub async fn update_labels(
         self: Arc<Self>,
         updates: Vec<UpdateLabels>,
     ) -> Result<UpdateResult, ReductError> {
@@ -43,7 +41,7 @@ impl Entry {
         let mut records_per_block = BTreeMap::new();
 
         {
-            let mut bm = self.block_manager.write()?;
+            let mut bm = self.block_manager.write().await?;
             for UpdateLabels {
                 time,
                 update,
@@ -85,19 +83,18 @@ impl Entry {
         let mut handlers = Vec::new();
         for (block_id, records) in records_per_block.into_iter() {
             let local_block_manager = self.block_manager.clone();
-            let handler: TaskHandle<Result<(), ReductError>> =
-                spawn("update labels in block", move || {
-                    let mut bm = local_block_manager.write().unwrap();
-                    bm.update_records(block_id, records)?;
-                    Ok(())
-                });
+            let handler: JoinHandle<Result<_, ReductError>> = tokio::spawn(async move {
+                let mut bm = local_block_manager.write().await?;
+                bm.update_records(block_id, records)?;
+                Ok(())
+            });
 
             handlers.push(handler);
         }
 
         // Wait for all handlers to finish
         for handler in handlers {
-            handler.wait()?;
+            handler.await.unwrap()?;
         }
         Ok(result)
     }
@@ -151,16 +148,20 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_labels(entry: Arc<Entry>) {
-        entry.set_settings(EntrySettings {
-            max_block_records: 2,
-            ..entry.settings()
-        });
+        entry
+            .set_settings(EntrySettings {
+                max_block_records: 2,
+                ..entry.settings().await.unwrap()
+            })
+            .await
+            .unwrap();
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2).await;
         write_stub_record(&entry, 3).await;
 
         // update, remove and add labels
         let result = entry
+            .clone()
             .update_labels(vec![
                 make_update(0),
                 make_update(1),
@@ -168,7 +169,7 @@ mod tests {
                 make_update(3),
                 make_update(5),
             ])
-            .wait()
+            .await
             .unwrap();
 
         // check results
@@ -195,13 +196,13 @@ mod tests {
         assert_eq!(updated_labels, &expected_labels_3);
 
         // check if the records were updated
-        let labels = entry.begin_read(1).wait().unwrap().meta().labels().clone();
+        let labels = entry.begin_read(1).await.unwrap().meta().labels().clone();
         assert_eq!(labels, expected_labels_1);
 
-        let labels = entry.begin_read(2).wait().unwrap().meta().labels().clone();
+        let labels = entry.begin_read(2).await.unwrap().meta().labels().clone();
         assert_eq!(labels, expected_labels_2);
 
-        let labels = entry.begin_read(3).wait().unwrap().meta().labels().clone();
+        let labels = entry.begin_read(3).await.unwrap().meta().labels().clone();
         assert_eq!(labels, expected_labels_3);
     }
 
@@ -210,12 +211,13 @@ mod tests {
     async fn test_update_nothing(entry: Arc<Entry>) {
         write_stub_record(&entry, 1).await;
         let result = entry
+            .clone()
             .update_labels(vec![UpdateLabels {
                 time: 1,
                 update: Labels::new(),
                 remove: HashSet::new(),
             }])
-            .wait()
+            .await
             .unwrap();
 
         assert_eq!(result.len(), 1);
@@ -240,7 +242,13 @@ mod tests {
                 .collect::<Labels>()
         );
 
-        let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
+        let block = entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .load_block(1)
+            .unwrap();
         let mut record = block.read().unwrap().get_record(1).unwrap().clone();
         record.labels.sort_by(|a, b| a.name.cmp(&b.name));
         assert_eq!(record.labels, expected_labels);

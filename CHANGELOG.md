@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Replication `is_active` flag now reflects remote bucket availability when paused, [PR-1106](https://github.com/reductstore/reductstore/pull/1106)
+- Refactor storage/replication engines to tokio, [PR-1110](https://github.com/reductstore/reductstore/pull/1110)
 
 ### Added
 

@@ -23,11 +23,11 @@ impl ReplicationRepoBuilder {
         ReplicationRepoBuilder { cfg }
     }
 
-    pub fn build(self, storage: Arc<StorageEngine>) -> BoxedReplicationRepository {
+    pub async fn build(self, storage: Arc<StorageEngine>) -> BoxedReplicationRepository {
         if self.cfg.role == Replica {
             Box::new(ReadOnlyReplicationRepository::new())
         } else {
-            Box::new(ReplicationRepository::load_or_create(storage, self.cfg))
+            Box::new(ReplicationRepository::load_or_create(storage, self.cfg).await)
         }
     }
 }

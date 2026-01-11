@@ -1,20 +1,19 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 mod read_only;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::RwLock;
-use crate::core::thread_pool::spawn;
+use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::FolderKeeper;
+use async_trait::async_trait;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
 use reduct_base::{conflict, forbidden, not_found, unprocessable_entity};
-use reduct_macros::task;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -28,10 +27,12 @@ pub struct StorageEngineBuilder {
     license: Option<License>,
     data_path: Option<PathBuf>,
 }
+
+#[async_trait]
 pub(super) trait ReadOnlyMode {
     fn cfg(&self) -> &Cfg;
 
-    fn reload(&self) -> Result<(), ReductError>;
+    async fn reload(&self) -> Result<(), ReductError>;
 
     fn check_mode(&self) -> Result<(), ReductError> {
         if self.cfg().role == InstanceRole::Replica {
@@ -59,7 +60,7 @@ impl StorageEngineBuilder {
         self
     }
 
-    pub fn build(self) -> StorageEngine {
+    pub async fn build(self) -> StorageEngine {
         let cfg = self.cfg.expect("Config must be set");
         let data_path = self.data_path.expect("Data path must be set");
 
@@ -79,7 +80,7 @@ impl StorageEngineBuilder {
             .list_folders()
             .expect("Failed to list folders")
         {
-            match Bucket::restore(data_path.join(&path), cfg.clone()) {
+            match Bucket::restore(data_path.join(&path), cfg.clone()).await {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
                     buckets.insert(bucket.name().to_string(), bucket);
@@ -95,10 +96,10 @@ impl StorageEngineBuilder {
         StorageEngine {
             data_path,
             start_time: Instant::now(),
-            buckets: Arc::new(RwLock::new(buckets)),
+            buckets: Arc::new(AsyncRwLock::new(buckets)),
             license: self.license,
             cfg,
-            last_replica_sync: RwLock::new(Instant::now()),
+            last_replica_sync: AsyncRwLock::new(Instant::now()),
             folder_keeper: Arc::new(folder_keeper),
         }
     }
@@ -108,10 +109,10 @@ impl StorageEngineBuilder {
 pub struct StorageEngine {
     data_path: PathBuf,
     start_time: Instant,
-    buckets: Arc<RwLock<BTreeMap<String, Arc<Bucket>>>>,
+    buckets: Arc<AsyncRwLock<BTreeMap<String, Arc<Bucket>>>>,
     license: Option<License>,
     cfg: Cfg,
-    last_replica_sync: RwLock<Instant>,
+    last_replica_sync: AsyncRwLock<Instant>,
     folder_keeper: Arc<FolderKeeper>,
 }
 
@@ -130,22 +131,21 @@ impl StorageEngine {
     ///
     /// * `ServerInfo` - The reductstore info or an HTTPError
     ///
-    #[task("get server info")]
-    pub fn info(self: Arc<Self>) -> Result<ServerInfo, ReductError> {
-        self.reload()?;
+    pub async fn info(&self) -> Result<ServerInfo, ReductError> {
+        self.reload().await?;
 
         let mut usage = 0u64;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
 
-        let buckets = self.buckets.read()?;
-        let handlers = buckets
+        let buckets = self.buckets.read().await?;
+        let infos = buckets
             .values()
-            .map(|bucket| bucket.info())
+            .map(|bucket| bucket.clone().info())
             .collect::<Vec<_>>();
 
-        for task in handlers {
-            let bucket = task.wait()?.info;
+        for task in infos {
+            let bucket = task.await?.info;
             usage += bucket.size;
             oldest_record = oldest_record.min(bucket.oldest_record);
             latest_record = latest_record.max(bucket.latest_record);
@@ -168,7 +168,7 @@ impl StorageEngine {
     }
 
     /// Creat a new bucket.
-    pub(crate) fn create_bucket(
+    pub(crate) async fn create_bucket(
         &self,
         name: &str,
         settings: BucketSettings,
@@ -176,18 +176,14 @@ impl StorageEngine {
         self.check_mode()?;
 
         check_name_convention(name)?;
-        let mut buckets = self.buckets.write()?;
+        let mut buckets = self.buckets.write().await?;
         if buckets.contains_key(name) {
             return Err(conflict!("Bucket '{}' already exists", name));
         }
 
         self.folder_keeper.add_folder(name)?;
-        let bucket = Arc::new(Bucket::new(
-            name,
-            &self.data_path,
-            settings,
-            self.cfg.clone(),
-        )?);
+        let bucket =
+            Arc::new(Bucket::try_build(name, &self.data_path, settings, self.cfg.clone()).await?);
         buckets.insert(name.to_string(), Arc::clone(&bucket));
 
         Ok(bucket.into())
@@ -202,12 +198,12 @@ impl StorageEngine {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub(crate) fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
-        self.reload()?;
-        let buckets = self.buckets.read()?;
+    pub(crate) async fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
+        self.reload().await?;
+        let buckets = self.buckets.read().await?;
         match buckets.get(name) {
             Some(bucket) => {
-                bucket.ensure_not_deleting()?;
+                bucket.ensure_not_deleting().await?;
                 Ok(Arc::clone(bucket).into())
             }
             None => Err(ReductError::not_found(
@@ -225,12 +221,12 @@ impl StorageEngine {
     /// # Returns
     ///
     /// * HTTPError - An error if the bucket doesn't exist
-    pub(crate) fn remove_bucket(&self, name: &str) -> Result<(), ReductError> {
+    pub(crate) async fn remove_bucket(&self, name: &str) -> Result<(), ReductError> {
         self.check_mode()?;
 
         let buckets = self.buckets.clone();
         let bucket = {
-            let buckets = buckets.read()?;
+            let buckets = buckets.read().await?;
             buckets
                 .get(name)
                 .cloned()
@@ -244,22 +240,22 @@ impl StorageEngine {
             ));
         }
 
-        bucket.mark_deleting()?;
+        bucket.mark_deleting().await?;
 
         let path = self.data_path.join(name);
         let name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
 
-        let _ = spawn("remove bucket", move || {
-            let remove_bucket_from_backend = || {
-                let mut buckets = buckets.write()?;
+        let _ = tokio::spawn(async move {
+            let remove_bucket_from_backend = async || {
+                let mut buckets = buckets.write().await?;
                 folder_keeper.remove_folder(&name)?;
                 debug!("Bucket '{}' and folder {:?} are removed", name, path);
                 buckets.remove(&name);
                 Ok::<(), ReductError>(())
             };
 
-            if let Err(err) = remove_bucket_from_backend() {
+            if let Err(err) = remove_bucket_from_backend().await {
                 error!("Failed to sync bucket '{}': {}", name, err);
             }
         });
@@ -267,16 +263,15 @@ impl StorageEngine {
         Ok(())
     }
 
-    #[task("rename bucket")]
-    pub(crate) fn rename_bucket(
-        self: Arc<Self>,
+    pub(crate) async fn rename_bucket(
+        &self,
         old_name: String,
         new_name: String,
     ) -> Result<(), ReductError> {
         self.check_mode()?;
         check_name_convention(&new_name)?;
         {
-            let buckets = self.buckets.read()?;
+            let buckets = self.buckets.read().await?;
             if let Some(bucket) = buckets.get(&new_name) {
                 return Err(conflict!("Bucket '{}' already exists", bucket.name()));
             }
@@ -289,7 +284,7 @@ impl StorageEngine {
                     ));
                 }
 
-                bucket.sync_fs().wait()?;
+                bucket.sync_fs().await?;
             } else {
                 Err(not_found!("Bucket '{}' is not found", old_name))?;
             }
@@ -299,59 +294,63 @@ impl StorageEngine {
         let cfg = self.cfg.clone();
         let folder_keeper = self.folder_keeper.clone();
 
-        let mut buckets = self.buckets.write()?;
+        let mut buckets = self.buckets.write().await?;
 
         folder_keeper.rename_folder(&old_name, &new_name)?;
 
         buckets.remove(&old_name);
-        let bucket = Bucket::restore(new_path, cfg)?;
+        let bucket = Bucket::restore(new_path, cfg).await?;
         buckets.insert(new_name.to_string(), Arc::new(bucket));
         debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
         Ok(())
     }
 
-    #[task("get bucket list")]
-    pub(crate) fn get_bucket_list(self: Arc<Self>) -> Result<BucketInfoList, ReductError> {
-        self.reload()?;
+    pub(crate) async fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
+        self.reload().await?;
         let mut buckets = Vec::new();
 
-        let handlers = {
-            let buckets = self.buckets.read()?;
+        let infos = {
+            let buckets = self.buckets.read().await?;
             buckets
                 .values()
-                .map(|bucket| bucket.info())
+                .map(|bucket| bucket.clone().info())
                 .collect::<Vec<_>>()
         };
 
-        for task in handlers {
-            let bucket = task.wait()?.info;
+        for task in infos {
+            let bucket = task.await?.info;
             buckets.push(bucket);
         }
 
         Ok(BucketInfoList { buckets })
     }
 
-    pub fn sync_fs(self: &Arc<Self>) -> Result<(), ReductError> {
-        self.compact().wait()?;
+    pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        self.compact().await?;
         FILE_CACHE.force_sync_all()?;
         Ok(())
     }
 
     /// Update index from WALs and remove them
-    #[task("compact storage")]
-    pub fn compact(self: Arc<Self>) -> Result<(), ReductError> {
+    pub async fn compact(&self) -> Result<(), ReductError> {
         if self.cfg.role == InstanceRole::Replica {
             return Ok(());
         }
 
         let mut handlers = vec![];
-        let buckets = self.buckets.read()?;
-        for bucket in buckets.values() {
-            handlers.push(bucket.sync_fs());
+        let buckets = self
+            .buckets
+            .read()
+            .await?
+            .values()
+            .map(|bucket| Arc::clone(bucket))
+            .collect::<Vec<_>>();
+        for bucket in buckets {
+            handlers.push(tokio::spawn(async move { bucket.sync_fs().await }));
         }
 
         for handler in handlers {
-            match handler.wait() {
+            match handler.await.unwrap() {
                 Ok(_) => {}
                 Err(e) => {
                     error!("Failed to sync bucket: {}", e);
@@ -377,6 +376,14 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 }
 
 #[cfg(test)]
+impl StorageEngine {
+    pub async fn reset_last_replica_sync(&self) {
+        let mut sync = self.last_replica_sync.write().await.unwrap();
+        *sync = Instant::now();
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::Backend;
@@ -384,12 +391,12 @@ mod tests {
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
-    use std::thread::sleep;
     use std::time::Duration;
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_create_folder() {
+    #[tokio::test]
+    async fn test_create_folder() {
         let path = tempdir().unwrap().keep().join("data_path");
         let cfg = Cfg {
             data_path: path.clone(),
@@ -400,15 +407,18 @@ mod tests {
         let _ = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
             .with_cfg(cfg)
-            .build();
+            .build()
+            .await;
         assert!(path.exists(), "Engine creates a folder if it doesn't exist");
     }
 
     #[rstest]
-    fn test_info(storage: Arc<StorageEngine>) {
-        sleep(Duration::from_secs(1)); // uptime is 1 second
+    #[tokio::test]
+    async fn test_info(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        tokio::time::sleep(Duration::from_secs(1)).await; // uptime is 1 second
 
-        let info = storage.info().wait().unwrap();
+        let info = storage.info().await.unwrap();
         assert_eq!(
             info,
             ServerInfo {
@@ -427,7 +437,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_license_info(storage: Arc<StorageEngine>) {
+    #[tokio::test]
+    async fn test_license_info(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
         let license = License {
             licensee: "ReductSoftware UG".to_string(),
             invoice: "2021-0001".to_string(),
@@ -447,16 +459,19 @@ mod tests {
                 .with_data_path(cfg.data_path.clone())
                 .with_cfg(cfg)
                 .with_license(license.clone())
-                .build(),
+                .build()
+                .await,
         );
-        assert_eq!(storage.info().wait().unwrap().license, Some(license));
+        assert_eq!(storage.info().await.unwrap().license, Some(license));
     }
 
     mod recovery {
         use super::*;
         use crate::storage::bucket::settings::SETTINGS_NAME;
         #[rstest]
-        fn test_recover_from_fs(storage: Arc<StorageEngine>) {
+        #[tokio::test]
+        async fn test_recover_from_fs(#[future] storage: Arc<StorageEngine>) {
+            let storage = storage.await;
             let bucket_settings = BucketSettings {
                 quota_size: Some(100),
                 quota_type: Some(QuotaType::FIFO),
@@ -464,6 +479,7 @@ mod tests {
             };
             let bucket = storage
                 .create_bucket("test", bucket_settings.clone())
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
@@ -472,17 +488,19 @@ mod tests {
                 ($bucket:expr, $entry_name:expr, $record_ts:expr) => {
                     let entry = $bucket
                         .get_or_create_entry($entry_name)
+                        .await
                         .unwrap()
                         .upgrade_and_unwrap();
                     let mut sender = entry
                         .begin_write($record_ts, 10, "text/plain".to_string(), Labels::new())
-                        .wait()
+                        .await
                         .unwrap();
                     sender
-                        .blocking_send(Ok(Some(Bytes::from("0123456789"))))
+                        .send(Ok(Some(Bytes::from("0123456789"))))
+                        .await
                         .unwrap();
 
-                    sender.blocking_send(Ok(None)).unwrap();
+                    sender.send(Ok(None)).await.unwrap();
                 };
             }
 
@@ -490,8 +508,8 @@ mod tests {
             write_entry!(bucket, "entry-2", 2000);
             write_entry!(bucket, "entry-2", 5000);
 
-            sleep(Duration::from_millis(10)); // to make sure that write tasks are completed
-            storage.sync_fs().unwrap();
+            tokio::time::sleep(Duration::from_millis(10)).await; // to make sure that write tasks are completed
+            storage.sync_fs().await.unwrap();
             let cfg = Cfg {
                 data_path: storage.data_path.clone(),
                 ..Cfg::default()
@@ -500,10 +518,11 @@ mod tests {
                 StorageEngine::builder()
                     .with_data_path(cfg.data_path.clone())
                     .with_cfg(cfg)
-                    .build(),
+                    .build()
+                    .await,
             );
             assert_eq!(
-                storage.info().wait().unwrap(),
+                storage.info().await.unwrap(),
                 ServerInfo {
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     bucket_count: 1,
@@ -518,14 +537,20 @@ mod tests {
                 }
             );
 
-            let bucket = storage.get_bucket("test").unwrap().upgrade_and_unwrap();
+            let bucket = storage
+                .get_bucket("test")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
-            assert_eq!(bucket.settings(), bucket_settings);
+            assert_eq!(bucket.settings().await.unwrap(), bucket_settings);
         }
 
         #[rstest]
+        #[tokio::test]
         #[should_panic(expected = "Failed to load bucket from")]
-        fn test_broken_bucket(storage: Arc<StorageEngine>) {
+        async fn test_broken_bucket(#[future] storage: Arc<StorageEngine>) {
+            let storage = storage.await;
             let bucket_settings = BucketSettings {
                 quota_size: Some(100),
                 quota_type: Some(QuotaType::FIFO),
@@ -534,6 +559,7 @@ mod tests {
 
             let bucket = storage
                 .create_bucket("test", bucket_settings.clone())
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
@@ -548,10 +574,11 @@ mod tests {
                 StorageEngine::builder()
                     .with_data_path(cfg.data_path.clone())
                     .with_cfg(cfg)
-                    .build(),
+                    .build()
+                    .await,
             );
             assert_eq!(
-                storage.info().wait().unwrap(),
+                storage.info().await.unwrap(),
                 ServerInfo {
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     bucket_count: 0,
@@ -569,17 +596,24 @@ mod tests {
     }
 
     #[rstest]
-    fn test_create_bucket(storage: Arc<StorageEngine>) {
+    #[tokio::test]
+    async fn test_create_bucket(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
+            .await
             .unwrap()
             .upgrade_and_unwrap();
         assert_eq!(bucket.name(), "test");
     }
 
     #[rstest]
-    fn test_create_bucket_with_invalid_name(storage: Arc<StorageEngine>) {
-        let result = storage.create_bucket("test$", BucketSettings::default());
+    #[tokio::test]
+    async fn test_create_bucket_with_invalid_name(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        let result = storage
+            .create_bucket("test$", BucketSettings::default())
+            .await;
         assert_eq!(
             result.err(),
             Some(unprocessable_entity!(
@@ -589,14 +623,19 @@ mod tests {
     }
 
     #[rstest]
-    fn test_create_bucket_with_existing_name(storage: Arc<StorageEngine>) {
+    #[tokio::test]
+    async fn test_create_bucket_with_existing_name(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
+            .await
             .unwrap()
             .upgrade_and_unwrap();
         assert_eq!(bucket.name(), "test");
 
-        let result = storage.create_bucket("test", BucketSettings::default());
+        let result = storage
+            .create_bucket("test", BucketSettings::default())
+            .await;
         assert_eq!(
             result.err(),
             Some(conflict!("Bucket 'test' already exists"))
@@ -604,20 +643,29 @@ mod tests {
     }
 
     #[rstest]
-    fn test_get_bucket(storage: Arc<StorageEngine>) {
+    #[tokio::test]
+    async fn test_get_bucket(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
+            .await
             .unwrap()
             .upgrade_and_unwrap();
         assert_eq!(bucket.name(), "test");
 
-        let bucket = storage.get_bucket("test").unwrap().upgrade_and_unwrap();
+        let bucket = storage
+            .get_bucket("test")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
         assert_eq!(bucket.name(), "test");
     }
 
     #[rstest]
-    fn test_get_bucket_with_non_existing_name(storage: Arc<StorageEngine>) {
-        let result = storage.get_bucket("test");
+    #[tokio::test]
+    async fn test_get_bucket_with_non_existing_name(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        let result = storage.get_bucket("test").await;
         assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
     }
 
@@ -625,17 +673,20 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_remove_bucket(storage: Arc<StorageEngine>) {
+        #[tokio::test]
+        async fn test_remove_bucket(#[future] storage: Arc<StorageEngine>) {
+            let storage = storage.await;
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
 
-            let result = storage.remove_bucket("test");
+            let result = storage.remove_bucket("test").await;
             assert_eq!(result, Ok(()));
 
-            let result = storage.get_bucket("test");
+            let result = storage.get_bucket("test").await;
             let err = result.err().unwrap();
             assert!(
                 err == conflict!("Bucket 'test' is being deleted")
@@ -645,70 +696,107 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_bucket_with_non_existing_name(storage: Arc<StorageEngine>) {
-            let result = storage.remove_bucket("test");
+        #[tokio::test]
+        async fn test_remove_bucket_with_non_existing_name(#[future] storage: Arc<StorageEngine>) {
+            let storage = storage.await;
+            let result = storage.remove_bucket("test").await;
             assert_eq!(result, Err(not_found!("Bucket 'test' is not found")));
         }
 
         #[rstest]
-        fn remove_bucket_returns_conflict_when_bucket_is_already_deleting(
-            storage: Arc<StorageEngine>,
+        #[tokio::test]
+        async fn remove_bucket_returns_conflict_when_bucket_is_already_deleting(
+            #[future] storage: Arc<StorageEngine>,
         ) {
+            let storage = storage.await;
             storage
                 .create_bucket("test", BucketSettings::default())
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
 
-            let bucket = storage.buckets.read().unwrap().get("test").unwrap().clone();
-            bucket.mark_deleting().unwrap();
+            let bucket = storage
+                .buckets
+                .read()
+                .await
+                .unwrap()
+                .get("test")
+                .unwrap()
+                .clone();
+            bucket.mark_deleting().await.unwrap();
 
             assert_eq!(
-                storage.remove_bucket("test"),
+                storage.remove_bucket("test").await,
                 Err(conflict!("Bucket 'test' is being deleted"))
             );
         }
 
         #[rstest]
-        fn test_remove_bucket_persistent(cfg: Cfg, storage: Arc<StorageEngine>) {
+        #[tokio::test]
+        async fn test_remove_bucket_persistent(cfg: Cfg, #[future] storage: Arc<StorageEngine>) {
+            let storage = storage.await;
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
 
-            let result = storage.remove_bucket("test");
+            let result = storage.remove_bucket("test").await;
             assert_eq!(result, Ok(()));
 
             let storage = Arc::new(
                 StorageEngine::builder()
                     .with_data_path(cfg.data_path.clone())
                     .with_cfg(cfg)
-                    .build(),
+                    .build()
+                    .await,
             );
 
-            let result = storage.get_bucket("test");
+            let result = storage.get_bucket("test").await;
             assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
         }
     }
 
     mod rename_bucket {
         use super::*;
+        use crate::core::sync::{
+            reset_rwlock_config, set_rwlock_failure_action, set_rwlock_timeout, RwLockFailureAction,
+        };
         use reduct_base::io::ReadRecord;
         use reduct_base::logger::Logger;
+        use serial_test::serial;
+
+        struct ResetGuard;
+        impl Drop for ResetGuard {
+            fn drop(&mut self) {
+                reset_rwlock_config();
+            }
+        }
+
+        fn relax_locks() -> ResetGuard {
+            set_rwlock_timeout(Duration::from_secs(2));
+            set_rwlock_failure_action(RwLockFailureAction::Error);
+            ResetGuard
+        }
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_bucket(storage: Arc<StorageEngine>) {
+        #[serial]
+        async fn test_rename_bucket(#[future] storage: Arc<StorageEngine>) {
+            let _reset = relax_locks();
+            let storage = storage.await;
             Logger::init("TRACE");
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
 
             let mut writer = bucket
                 .begin_write("entry-1", 0, 10, "text/plain".to_string(), Labels::new())
-                .wait()
+                .await
                 .unwrap();
             writer
                 .send(Ok(Some(Bytes::from("0123456789"))))
@@ -720,53 +808,71 @@ mod tests {
 
             let result = storage
                 .rename_bucket("test".to_string(), "new".to_string())
-                .wait();
+                .await;
             assert_eq!(result, Ok(()));
 
-            let result = storage.get_bucket("test");
+            let result = storage.get_bucket("test").await;
             assert_eq!(result.err(), Some(not_found!("Bucket 'test' is not found")));
 
-            let bucket = storage.get_bucket("new").unwrap().upgrade_and_unwrap();
+            let bucket = storage
+                .get_bucket("new")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "new");
 
-            let mut reader = bucket.begin_read("entry-1", 0).wait().unwrap();
+            let mut reader = bucket.begin_read("entry-1", 0).await.unwrap();
             let record = reader.read_chunk().unwrap().unwrap();
             assert_eq!(record, Bytes::from("0123456789"));
         }
 
         #[rstest]
-        fn test_rename_bucket_with_non_existing_name(storage: Arc<StorageEngine>) {
+        #[tokio::test]
+        #[serial]
+        async fn test_rename_bucket_with_non_existing_name(#[future] storage: Arc<StorageEngine>) {
+            let _reset = relax_locks();
+            let storage = storage.await;
             let result = storage
                 .rename_bucket("test".to_string(), "new".to_string())
-                .wait();
+                .await;
             assert_eq!(result, Err(not_found!("Bucket 'test' is not found")));
         }
 
         #[rstest]
-        fn test_rename_bucket_with_existing_name(storage: Arc<StorageEngine>) {
+        #[tokio::test]
+        #[serial]
+        async fn test_rename_bucket_with_existing_name(#[future] storage: Arc<StorageEngine>) {
+            let _reset = relax_locks();
+            let storage = storage.await;
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
 
             let bucket = storage
                 .create_bucket("new", BucketSettings::default())
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "new");
 
             let result = storage
                 .rename_bucket("test".to_string(), "new".to_string())
-                .wait();
+                .await;
             assert_eq!(result, Err(conflict!("Bucket 'new' already exists")));
         }
 
         #[rstest]
-        fn test_rename_bucket_with_invalid_name(storage: Arc<StorageEngine>) {
+        #[tokio::test]
+        #[serial]
+        async fn test_rename_bucket_with_invalid_name(#[future] storage: Arc<StorageEngine>) {
+            let _reset = relax_locks();
+            let storage = storage.await;
             let result = storage
                 .rename_bucket("test".to_string(), "new$".to_string())
-                .wait();
+                .await;
             assert_eq!(
                 result,
                 Err(unprocessable_entity!(
@@ -776,15 +882,18 @@ mod tests {
         }
 
         #[rstest]
-        fn test_rename_provisioned_bucket(storage: Arc<StorageEngine>) {
+        #[tokio::test]
+        async fn test_rename_provisioned_bucket(#[future] storage: Arc<StorageEngine>) {
+            let storage = storage.await;
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             bucket.set_provisioned(true);
             let result = storage
                 .rename_bucket("test".to_string(), "new".to_string())
-                .wait();
+                .await;
             assert_eq!(
                 result,
                 Err(conflict!("Can't rename provisioned bucket 'test'"))
@@ -793,24 +902,35 @@ mod tests {
     }
 
     #[rstest]
-    fn test_get_bucket_list(storage: Arc<StorageEngine>) {
-        storage.create_bucket("test1", Bucket::defaults()).unwrap();
-        storage.create_bucket("test2", Bucket::defaults()).unwrap();
+    #[tokio::test]
+    async fn test_get_bucket_list(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        storage
+            .create_bucket("test1", Bucket::defaults())
+            .await
+            .unwrap();
+        storage
+            .create_bucket("test2", Bucket::defaults())
+            .await
+            .unwrap();
 
-        let bucket_list = storage.get_bucket_list().wait().unwrap();
+        let bucket_list = storage.get_bucket_list().await.unwrap();
         assert_eq!(bucket_list.buckets.len(), 2);
         assert_eq!(bucket_list.buckets[0].name, "test1");
         assert_eq!(bucket_list.buckets[1].name, "test2");
     }
 
     #[rstest]
-    fn test_provisioned_remove(storage: Arc<StorageEngine>) {
+    #[tokio::test]
+    async fn test_provisioned_remove(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
         let bucket = storage
             .create_bucket("test", BucketSettings::default())
+            .await
             .unwrap()
             .upgrade_and_unwrap();
         bucket.set_provisioned(true);
-        let err = storage.remove_bucket("test").err().unwrap();
+        let err = storage.remove_bucket("test").await.err().unwrap();
         assert_eq!(
             err,
             ReductError::conflict("Can't remove provisioned bucket 'test'")
@@ -826,7 +946,7 @@ mod tests {
     }
 
     #[fixture]
-    fn storage(cfg: Cfg) -> Arc<StorageEngine> {
+    async fn storage(cfg: Cfg) -> Arc<StorageEngine> {
         FILE_CACHE.set_storage_backend(
             Backend::builder()
                 .local_data_path(cfg.data_path.clone())
@@ -837,7 +957,8 @@ mod tests {
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())
                 .with_cfg(cfg)
-                .build(),
+                .build()
+                .await,
         )
     }
 }

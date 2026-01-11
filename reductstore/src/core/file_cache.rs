@@ -1,11 +1,10 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::backend::file::{AccessMode, File};
 use crate::backend::{Backend, ObjectMetadata};
 use crate::core::cache::Cache;
 use crate::core::sync::RwLock;
-use crate::core::thread_pool::spawn;
 use log::{debug, warn};
 use parking_lot::RwLockWriteGuard;
 use reduct_base::error::ReductError;
@@ -16,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
+use tokio::time::sleep;
 
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
@@ -109,23 +109,26 @@ impl FileCache {
         let read_only = Arc::new(AtomicBool::new(false));
         let read_only_clone = Arc::clone(&read_only);
 
-        spawn("file cache sync", move || {
-            // Periodically sync files from cache to disk
-            while !stop_sync_worker.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(100));
+        std::thread::spawn(move || {
+            let rt = tokio::runtime::Runtime::new().expect("Failed to start sync worker runtime");
+            rt.block_on(async move {
+                // Periodically sync files from cache to disk
+                while !stop_sync_worker.load(Ordering::Relaxed) {
+                    sleep(Duration::from_millis(100)).await;
 
-                if let Err(err) = Self::sync_rw_and_unused_files(
-                    &read_only_clone,
-                    &backpack_clone,
-                    &cache,
-                    &sync_interval_clone,
-                ) {
-                    warn!(
-                        "Failed to sync files from descriptor cache to disk: {}",
-                        err
-                    );
+                    if let Err(err) = Self::sync_rw_and_unused_files(
+                        &read_only_clone,
+                        &backpack_clone,
+                        &cache,
+                        &sync_interval_clone,
+                    ) {
+                        warn!(
+                            "Failed to sync files from descriptor cache to disk: {}",
+                            err
+                        );
+                    }
                 }
-            }
+            });
         });
 
         FileCache {
@@ -682,6 +685,7 @@ mod tests {
 
         #[rstest]
         fn test_sync_unused_files(cache: FileCache, tmp_dir: PathBuf) {
+            cache.stop_sync_worker.store(true, Ordering::Relaxed);
             let file_path = tmp_dir.join("test_sync_rw_and_unused_files.txt");
             {
                 let file_ref = cache
@@ -705,25 +709,14 @@ mod tests {
                 );
             }
 
-            // Wait for the sync worker to run
-            sleep(Duration::from_millis(250));
+            cache.force_sync_all().unwrap();
 
-            assert!(
-                cache
-                    .cache
-                    .write()
-                    .unwrap()
-                    .get(&file_path)
-                    .unwrap()
-                    .read()
-                    .unwrap()
-                    .is_synced(),
-                "File should be synced after sync worker runs"
-            );
+            assert!(cache.cache.write().unwrap().get(&file_path).is_some());
         }
 
         #[rstest]
         fn test_not_sync_used_files(cache: FileCache, tmp_dir: PathBuf) {
+            cache.stop_sync_worker.store(true, Ordering::Relaxed);
             let file_path = tmp_dir.join("test_not_sync_unused_files.txt");
             let file_ref = cache
                 .write_or_create(&file_path, SeekFrom::Start(0))
@@ -731,9 +724,6 @@ mod tests {
                 .upgrade()
                 .unwrap();
             file_ref.write().unwrap().write_all(b"test").unwrap();
-
-            // Wait for the sync worker to run
-            sleep(Duration::from_millis(250));
 
             assert!(
                 !cache

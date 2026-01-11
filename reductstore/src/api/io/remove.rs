@@ -41,6 +41,7 @@ pub(super) async fn remove_batched_records(
     let parsed_headers = sort_headers_by_entry_and_time(&headers)?;
 
     let mut records_by_entry: HashMap<String, Vec<IndexedTimestamp>> = HashMap::new();
+    let mut records_by_timestamp: HashMap<u64, Vec<IndexedTimestamp>> = HashMap::new();
     for (entry_index, delta, _) in parsed_headers {
         let entry_name = entries.get(entry_index).ok_or_else(|| {
             HttpError::from(unprocessable_entity!(
@@ -50,37 +51,42 @@ pub(super) async fn remove_batched_records(
             ))
         })?;
 
+        let record = IndexedTimestamp {
+            entry_index,
+            delta,
+            timestamp: start_ts + delta,
+        };
+
+        records_by_timestamp
+            .entry(record.timestamp)
+            .or_default()
+            .push(record.clone());
+
         records_by_entry
             .entry(entry_name.to_string())
             .or_default()
-            .push(IndexedTimestamp {
-                entry_index,
-                delta,
-                timestamp: start_ts + delta,
-            });
+            .push(record);
     }
 
-    let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
+    let bucket = components
+        .storage
+        .get_bucket(bucket_name)
+        .await?
+        .upgrade()?;
     let mut resp_headers = HeaderMap::new();
 
-    for (entry_name, records) in records_by_entry {
-        match bucket.get_entry(&entry_name) {
-            Ok(entry) => {
-                let entry = entry.upgrade()?;
-                let timestamps = records.iter().map(|record| record.timestamp).collect();
-                let errors = entry.remove_records(timestamps).await?;
+    if !records_by_entry.is_empty() {
+        let mut record_ids: HashMap<String, Vec<u64>> = HashMap::new();
+        for (entry_name, records) in &records_by_entry {
+            record_ids.insert(
+                entry_name.clone(),
+                records.iter().map(|record| record.timestamp).collect(),
+            );
+        }
 
-                for (timestamp, err) in errors {
-                    if let Some(record) =
-                        records.iter().find(|record| record.timestamp == timestamp)
-                    {
-                        let (name, value) =
-                            make_error_batched_header(record.entry_index, record.delta, &err);
-                        resp_headers.insert(name, value);
-                    }
-                }
-            }
-            Err(err) => {
+        let errors = bucket.clone().remove_records(record_ids).await?;
+        for (timestamp, err) in errors {
+            if let Some(records) = records_by_timestamp.get(&timestamp) {
                 for record in records {
                     let (name, value) =
                         make_error_batched_header(record.entry_index, record.delta, &err);
@@ -125,6 +131,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
@@ -234,6 +241,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 

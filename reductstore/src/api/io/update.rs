@@ -81,7 +81,11 @@ pub(super) async fn update_batched_records(
         });
     }
 
-    let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
+    let bucket = components
+        .storage
+        .get_bucket(bucket_name)
+        .await?
+        .upgrade()?;
     let result = bucket
         .update_labels(
             updates
@@ -94,7 +98,7 @@ pub(super) async fn update_batched_records(
                 })
                 .collect(),
         )
-        .wait()?;
+        .await?;
 
     let mut resp_headers = HeaderMap::new();
     for update in updates {
@@ -103,15 +107,17 @@ pub(super) async fn update_batched_records(
                 match res {
                     Ok(labels) => {
                         let mut replication_repo = components.replication_repo.write().await?;
-                        replication_repo.notify(TransactionNotification {
-                            bucket: bucket_name.clone(),
-                            entry: update.labels.entry_name.clone(),
-                            meta: RecordMeta::builder()
-                                .timestamp(update.labels.time)
-                                .labels(labels.clone())
-                                .build(),
-                            event: Transaction::UpdateRecord(update.labels.time),
-                        })?;
+                        replication_repo
+                            .notify(TransactionNotification {
+                                bucket: bucket_name.clone(),
+                                entry: update.labels.entry_name.clone(),
+                                meta: RecordMeta::builder()
+                                    .timestamp(update.labels.time)
+                                    .labels(labels.clone())
+                                    .build(),
+                                event: Transaction::UpdateRecord(update.labels.time),
+                            })
+                            .await?;
                     }
                     Err(err) => {
                         let (name, value) =
@@ -188,6 +194,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
@@ -259,6 +266,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
         write_record_with_labels(&bucket, "entry-1", 1000, Labels::new()).await;
@@ -325,6 +333,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 

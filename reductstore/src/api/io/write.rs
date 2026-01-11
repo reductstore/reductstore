@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::common::parse_content_length_from_header;
@@ -64,7 +64,7 @@ pub(super) async fn write_batched_records(
 
     let process_stream = async {
         let (rx_writer, spawn_handler) =
-            spawn_getting_writers(&components, bucket, parsed_headers)?;
+            spawn_getting_writers(&components, bucket, parsed_headers).await?;
 
         receive_body_and_write_records(
             bucket,
@@ -171,7 +171,8 @@ async fn notify_replication_write(
                 .labels(ctx.header.header.labels.clone())
                 .build(),
             event: Transaction::WriteRecord(ctx.time),
-        })?;
+        })
+        .await?;
     Ok(())
 }
 
@@ -249,7 +250,7 @@ async fn receive_body_and_write_records(
     Ok(())
 }
 
-fn spawn_getting_writers(
+async fn spawn_getting_writers(
     components: &Arc<Components>,
     bucket_name: &str,
     records: Vec<IndexedRecordHeader>,
@@ -258,7 +259,8 @@ fn spawn_getting_writers(
 
     let bucket = components
         .storage
-        .get_bucket(&bucket_name)?
+        .get_bucket(&bucket_name)
+        .await?
         .upgrade_and_unwrap();
 
     let spawn_handler = tokio::spawn(async move {
@@ -411,6 +413,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
@@ -447,6 +450,7 @@ mod tests {
             .await
             .unwrap()
             .get_info("api-test")
+            .await
             .unwrap();
         assert_eq!(info.info.pending_records, 4);
     }
@@ -527,6 +531,7 @@ mod tests {
         let mut reader = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .begin_read("new-entry", 0)
@@ -544,10 +549,6 @@ mod tests {
     #[async_trait::async_trait]
     impl WriteRecord for TestWriter {
         async fn send(&mut self, chunk: reduct_base::io::WriteChunk) -> Result<(), ReductError> {
-            self.blocking_send(chunk)
-        }
-
-        fn blocking_send(&mut self, chunk: reduct_base::io::WriteChunk) -> Result<(), ReductError> {
             if self.fail {
                 return Err(bad_request!("Simulated write error"));
             }
@@ -562,7 +563,7 @@ mod tests {
             chunk: reduct_base::io::WriteChunk,
             _timeout: Duration,
         ) -> Result<(), ReductError> {
-            self.blocking_send(chunk)
+            self.send(chunk).await
         }
     }
 

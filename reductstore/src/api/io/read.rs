@@ -69,7 +69,11 @@ pub(super) async fn read_batched_records(
     let query_id = parse_query_id(&headers)?;
 
     fetch_and_response_batched_records(
-        components.storage.get_bucket(bucket_name)?.upgrade()?,
+        components
+            .storage
+            .get_bucket(bucket_name)
+            .await?
+            .upgrade()?,
         query_id,
         method.name() == "HEAD",
         &components.ext_repo,
@@ -321,6 +325,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
@@ -397,6 +402,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
@@ -485,6 +491,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 

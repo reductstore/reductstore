@@ -30,9 +30,11 @@ pub(super) async fn remove_entry(
 
     components
         .storage
-        .get_bucket(bucket_name)?
+        .get_bucket(bucket_name)
+        .await?
         .upgrade()?
-        .remove_entry(entry_name)?;
+        .remove_entry(entry_name)
+        .await?;
     Ok(())
 }
 
@@ -62,9 +64,11 @@ mod tests {
         let status = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .get_entry("entry-1")
+            .await
             .err()
             .unwrap()
             .status();

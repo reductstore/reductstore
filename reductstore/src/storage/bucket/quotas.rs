@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::Bucket;
@@ -10,16 +10,24 @@ use reduct_base::{bad_request, internal_server_error};
 use std::sync::Arc;
 
 impl Bucket {
-    pub(super) fn keep_quota_for(self: &Arc<Self>, content_size: u64) -> Result<(), ReductError> {
-        let settings = self.settings.read()?;
+    pub(super) async fn keep_quota_for(
+        self: &Arc<Self>,
+        content_size: u64,
+    ) -> Result<(), ReductError> {
+        let settings = self.settings.read().await?;
         let quota_size = settings.quota_size.unwrap_or(0);
         match settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
             QuotaType::NONE => Ok(()),
-            QuotaType::FIFO => self.remove_oldest_block(content_size, quota_size),
+            QuotaType::FIFO => self.remove_oldest_block(content_size, quota_size).await,
             QuotaType::HARD => {
-                let total_size = self.entries.read()?.values().try_fold(0u64, |acc, entry| {
-                    entry.size().map(|entry_size| acc + entry_size)
-                })?;
+                let entries = self.entries.read().await?;
+                let entry_list: Vec<_> = entries.values().cloned().collect();
+                drop(entries);
+
+                let mut total_size = 0u64;
+                for entry in entry_list {
+                    total_size += entry.size().await?;
+                }
                 if total_size + content_size as u64 > quota_size {
                     Err(bad_request!("Quota of '{}' exceeded", self.name()))
                 } else {
@@ -29,18 +37,22 @@ impl Bucket {
         }
     }
 
-    fn remove_oldest_block(&self, content_size: u64, quota_size: u64) -> Result<(), ReductError> {
-        let get_bucket_size = || {
-            let entries = self.entries.read()?;
+    async fn remove_oldest_block(
+        &self,
+        content_size: u64,
+        quota_size: u64,
+    ) -> Result<(), ReductError> {
+        let get_bucket_size = async || {
+            let entries = self.entries.read().await?;
 
             let mut total_size = 0u64;
             for entry in entries.values() {
-                total_size += entry.size()?;
+                total_size += entry.size().await?;
             }
             Ok::<u64, ReductError>(total_size)
         };
 
-        let mut size = get_bucket_size()? + content_size as u64;
+        let mut size = get_bucket_size().await? + content_size as u64;
         while size > quota_size {
             let mut success = false;
 
@@ -51,9 +63,9 @@ impl Bucket {
                 );
 
                 let mut candidates: Vec<(u64, &Entry)> = vec![];
-                let entries = self.entries.read()?;
+                let entries = self.entries.read().await?;
                 for (_, entry) in entries.iter() {
-                    let info = entry.info()?;
+                    let info = entry.info().await?;
                     candidates.push((info.oldest_record, entry));
                 }
                 candidates.sort_by_key(|entry| entry.0);
@@ -65,7 +77,7 @@ impl Bucket {
 
                 for name in candidates {
                     debug!("Remove an oldest block from entry '{}'", name);
-                    match entries.get(&name).unwrap().try_remove_oldest_block().wait() {
+                    match entries.get(&name).unwrap().try_remove_oldest_block().await {
                         Ok(_) => {
                             success = true;
                             break;
@@ -84,14 +96,14 @@ impl Bucket {
                 ));
             }
 
-            size = get_bucket_size()? + content_size;
+            size = get_bucket_size().await? + content_size;
         }
 
         // Remove empty entries
-        let mut entries = self.entries.write()?;
+        let mut entries = self.entries.write().await?;
         let mut names_to_remove = vec![];
         for (name, entry) in entries.iter() {
-            if entry.info()?.record_count != 0 {
+            if entry.info().await?.record_count != 0 {
                 continue;
             }
             names_to_remove.push(name.clone());
@@ -123,18 +135,19 @@ mod tests {
                 max_block_records: Some(100),
             },
             path,
-        );
+        )
+        .await;
 
         let blob: &[u8] = &[0u8; 40];
 
         write(&bucket, "test-1", 0, blob).await.unwrap();
-        assert_eq!(bucket.info().wait().unwrap().info.size, 44);
+        assert_eq!(bucket.clone().info().await.unwrap().info.size, 44);
 
         write(&bucket, "test-2", 1, blob).await.unwrap();
-        assert_eq!(bucket.info().wait().unwrap().info.size, 91);
+        assert_eq!(bucket.clone().info().await.unwrap().info.size, 91);
 
         write(&bucket, "test-3", 2, blob).await.unwrap();
-        assert_eq!(bucket.info().wait().unwrap().info.size, 94);
+        assert_eq!(bucket.clone().info().await.unwrap().info.size, 94);
 
         assert_eq!(
             crate::storage::bucket::tests::read(&bucket, "test-1", 0)
@@ -156,7 +169,8 @@ mod tests {
                 ..BucketSettings::default()
             },
             path,
-        );
+        )
+        .await;
 
         let blob: &[u8] = &[0u8; 40];
         write(&bucket, "test-1", 0, blob).await.unwrap();
@@ -177,11 +191,12 @@ mod tests {
                 max_block_records: Some(100),
             },
             path,
-        );
+        )
+        .await;
 
         write(&bucket, "test-1", 0, b"test").await.unwrap();
         bucket.sync_fs().await.unwrap(); // we need to sync to get the correct size
-        assert_eq!(bucket.info().wait().unwrap().info.size, 22);
+        assert_eq!(bucket.clone().info().await.unwrap().info.size, 8);
 
         let result = write(&bucket, "test-2", 1, b"0123456789___").await;
         assert_eq!(

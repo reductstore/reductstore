@@ -57,16 +57,18 @@ pub(super) async fn update_record(
     let entry_name = path.get("entry_name").unwrap();
     let batched_result = components
         .storage
-        .get_bucket(bucket)?
+        .get_bucket(bucket)
+        .await?
         .upgrade()?
-        .get_entry(entry_name)?
+        .get_entry(entry_name)
+        .await?
         .upgrade()?
         .update_labels(vec![UpdateLabels {
             time: ts,
             update: labels_to_update,
             remove: labels_to_remove,
         }])
-        .wait()?;
+        .await;
 
     components
         .replication_repo
@@ -77,10 +79,11 @@ pub(super) async fn update_record(
             entry: entry_name.clone(),
             meta: RecordMeta::builder()
                 .timestamp(ts)
-                .labels(batched_result.get(&ts).unwrap().clone()?.clone())
+                .labels(batched_result?.get(&ts).unwrap().clone()?.clone())
                 .build(),
             event: Transaction::UpdateRecord(ts),
-        })?;
+        })
+        .await?;
 
     Ok(())
 }
@@ -119,9 +122,11 @@ mod tests {
         let record = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .get_entry("entry-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .begin_read(0)
@@ -138,6 +143,7 @@ mod tests {
             .await
             .unwrap()
             .get_info("api-test")
+            .await
             .unwrap();
         assert_eq!(info.info.pending_records, 1);
     }
