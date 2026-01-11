@@ -64,7 +64,7 @@ pub(super) async fn write_batched_records(
 
     let process_stream = async {
         let (rx_writer, spawn_handler) =
-            spawn_getting_writers(&components, bucket, parsed_headers)?;
+            spawn_getting_writers(&components, bucket, parsed_headers).await?;
 
         receive_body_and_write_records(
             bucket,
@@ -171,7 +171,8 @@ async fn notify_replication_write(
                 .labels(ctx.header.header.labels.clone())
                 .build(),
             event: Transaction::WriteRecord(ctx.time),
-        })?;
+        })
+        .await?;
     Ok(())
 }
 
@@ -249,7 +250,7 @@ async fn receive_body_and_write_records(
     Ok(())
 }
 
-fn spawn_getting_writers(
+async fn spawn_getting_writers(
     components: &Arc<Components>,
     bucket_name: &str,
     records: Vec<IndexedRecordHeader>,
@@ -258,7 +259,8 @@ fn spawn_getting_writers(
 
     let bucket = components
         .storage
-        .get_bucket(&bucket_name)?
+        .get_bucket(&bucket_name)
+        .await?
         .upgrade_and_unwrap();
 
     let spawn_handler = tokio::spawn(async move {

@@ -15,7 +15,7 @@ use prost::Message;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole::Replica;
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
@@ -31,7 +31,7 @@ pub(super) struct EntryLoader {}
 
 impl EntryLoader {
     // Restore the entry from the given path
-    pub fn restore_entry(
+    pub async fn restore_entry(
         path: PathBuf,
         options: EntrySettings,
         cfg: Arc<Cfg>,
@@ -55,12 +55,12 @@ impl EntryLoader {
                 }
             }?;
 
-        Self::restore_uncommitted_changes(path.clone(), &mut entry)?;
+        Self::restore_uncommitted_changes(path.clone(), &mut entry).await?;
 
         let mut entry = {
             // integrity check after restoring WAL
-            let check_result = || {
-                let bm = entry.block_manager.read()?;
+            let check_result = async || {
+                let bm = entry.block_manager.read().await?;
                 let file_list = FILE_CACHE
                     .read_dir(&path)?
                     .into_iter()
@@ -69,7 +69,7 @@ impl EntryLoader {
                 Self::check_descriptor_count(&path, &file_list, &bm.index())
             };
 
-            if cfg.engine_config.enable_integrity_checks && check_result().is_err() {
+            if cfg.engine_config.enable_integrity_checks && check_result().await.is_err() {
                 warn!("Block index is inconsistent. Rebuilding the block index from blocks");
                 Self::restore_entry_from_blocks(path.clone(), options, cfg.clone())?
             } else {
@@ -78,7 +78,7 @@ impl EntryLoader {
         };
 
         {
-            let bm = entry.block_manager.read()?;
+            let bm = entry.block_manager.read().await?;
             debug!(
                 "Restored entry `{}` in {}ms: size={}, records={}",
                 entry.name,
@@ -192,14 +192,14 @@ impl EntryLoader {
         Ok(Entry {
             name,
             bucket_name,
-            settings: RwLock::new(options),
-            block_manager: Arc::new(RwLock::new(BlockManager::new(
+            settings: AsyncRwLock::new(options),
+            block_manager: Arc::new(AsyncRwLock::new(BlockManager::new(
                 path.clone(),
                 block_index,
                 cfg.clone(),
             ))),
-            queries: Arc::new(RwLock::new(HashMap::new())),
-            status: RwLock::new(ResourceStatus::Ready),
+            queries: Arc::new(AsyncRwLock::new(HashMap::new())),
+            status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
             cfg,
         })
@@ -226,14 +226,14 @@ impl EntryLoader {
         Ok(Entry {
             name,
             bucket_name,
-            settings: RwLock::new(options),
-            block_manager: Arc::new(RwLock::new(BlockManager::new(
+            settings: AsyncRwLock::new(options),
+            block_manager: Arc::new(AsyncRwLock::new(BlockManager::new(
                 path.clone(),
                 block_index,
                 cfg.clone(),
             ))),
-            queries: Arc::new(RwLock::new(HashMap::new())),
-            status: RwLock::new(ResourceStatus::Ready),
+            queries: Arc::new(AsyncRwLock::new(HashMap::new())),
+            status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
             cfg,
         })
@@ -296,7 +296,7 @@ impl EntryLoader {
         }
     }
 
-    fn restore_uncommitted_changes(
+    async fn restore_uncommitted_changes(
         entry_path: PathBuf,
         entry: &mut Entry,
     ) -> Result<(), ReductError> {
@@ -309,7 +309,7 @@ impl EntryLoader {
                 entry_path
             );
 
-            let mut block_manager = entry.block_manager.write()?;
+            let mut block_manager = entry.block_manager.write().await?;
             for block_id in wal_blocks {
                 let wal_entries = wal.read(block_id);
                 if let Err(err) = wal_entries {

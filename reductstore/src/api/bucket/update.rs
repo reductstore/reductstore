@@ -21,7 +21,8 @@ pub(super) async fn update_bucket(
         .await?;
     Ok(components
         .storage
-        .get_bucket(&bucket_name)?
+        .get_bucket(&bucket_name)
+        .await?
         .upgrade()?
         .set_settings(settings.into())
         .await?)

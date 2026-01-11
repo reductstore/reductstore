@@ -31,7 +31,8 @@ pub(super) async fn rename_entry(
 
     components
         .storage
-        .get_bucket(bucket_name)?
+        .get_bucket(bucket_name)
+        .await?
         .upgrade()?
         .rename_entry(entry_name, &request.new_name.clone())
         .await?;

@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockRef;
@@ -25,16 +25,15 @@ impl Entry {
     ///
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
-    #[task("begin write")]
-    pub fn begin_write(
+    pub async fn begin_write(
         self: Arc<Self>,
         time: u64,
         content_size: u64,
         content_type: String,
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
-        let settings = self.settings.read()?;
-        let mut bm = self.block_manager.write()?;
+        let settings = self.settings.read().await?;
+        let mut bm = self.block_manager.write().await?;
         // When we write, the likely case is that we are writing the latest record
         // in the entry. In this case, we can just append to the latest block.
         let mut block_ref = if bm.index().tree().is_empty() {
@@ -99,7 +98,8 @@ impl Entry {
                                 Arc::clone(&self.block_manager),
                                 block_ref,
                                 time,
-                            )?;
+                            )
+                            .await?;
 
                             return Ok(Box::new(writer));
                         };
@@ -137,7 +137,8 @@ impl Entry {
 
         Self::prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)?;
 
-        let writer = RecordWriter::try_new(Arc::clone(&self.block_manager), block_ref, time)?;
+        let writer =
+            RecordWriter::try_new(Arc::clone(&self.block_manager), block_ref, time).await?;
         Ok(Box::new(writer))
     }
 

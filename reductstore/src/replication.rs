@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::replication::replication_task::ReplicationTask;
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::{
@@ -73,6 +74,8 @@ pub struct TransactionNotification {
     pub meta: RecordMeta,
     pub event: Transaction,
 }
+
+#[async_trait]
 pub trait ManageReplications {
     /// Create a new replication.
     ///
@@ -85,7 +88,7 @@ pub trait ManageReplications {
     /// * `ReductError::Conflict` - Replication already exists.
     /// * `ReductError::BadRequest` - Invalid destination host.
     /// * `ReductError::NotFound` - Source bucket does not exist.
-    fn create_replication(
+    async fn create_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
@@ -101,17 +104,17 @@ pub trait ManageReplications {
     /// # Errors
     ///
     /// A `ReductError` is returned if the update fails.
-    fn update_replication(
+    async fn update_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError>;
 
     /// List all replications.
-    fn replications(&self) -> Vec<ReplicationInfo>;
+    async fn replications(&self) -> Result<Vec<ReplicationInfo>, ReductError>;
 
     /// Get replication information.
-    fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
+    async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
 
     /// Get replication task.
     fn get_replication(&self, name: &str) -> Result<&ReplicationTask, ReductError>;
@@ -134,7 +137,7 @@ pub trait ManageReplications {
     /// # Errors
     ///
     /// A `ReductError` is returned if the notification fails.
-    fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
+    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
 
     /// Start background workers if they are not running yet.
     fn start(&mut self);

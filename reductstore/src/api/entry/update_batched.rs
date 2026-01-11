@@ -64,11 +64,13 @@ pub(super) async fn update_batched_records(
     let result = {
         let entry = components
             .storage
-            .get_bucket(bucket_name)?
+            .get_bucket(bucket_name)
+            .await?
             .upgrade()?
-            .get_entry(entry_name)?
+            .get_entry(entry_name)
+            .await?
             .upgrade()?;
-        entry.update_labels(records_to_update).wait()?
+        entry.update_labels(records_to_update).await?
     };
 
     let mut headers = HeaderMap::new();
@@ -79,15 +81,17 @@ pub(super) async fn update_batched_records(
             }
             Ok(new_labels) => {
                 let mut replication_repo = components.replication_repo.write().await?;
-                replication_repo.notify(TransactionNotification {
-                    bucket: bucket_name.clone(),
-                    entry: entry_name.clone(),
-                    meta: RecordMeta::builder()
-                        .timestamp(time)
-                        .labels(new_labels)
-                        .build(),
-                    event: Transaction::UpdateRecord(time),
-                })?;
+                replication_repo
+                    .notify(TransactionNotification {
+                        bucket: bucket_name.clone(),
+                        entry: entry_name.clone(),
+                        meta: RecordMeta::builder()
+                            .timestamp(time)
+                            .labels(new_labels)
+                            .build(),
+                        event: Transaction::UpdateRecord(time),
+                    })
+                    .await?;
             }
         };
     }

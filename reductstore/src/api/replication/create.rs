@@ -22,7 +22,8 @@ pub(super) async fn create_replication(
         .replication_repo
         .write()
         .await?
-        .create_replication(&replication_name, settings.into())?;
+        .create_replication(&replication_name, settings.into())
+        .await?;
     Ok(())
 }
 

@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FileWeak;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::core::thread_pool::spawn;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
@@ -36,7 +36,7 @@ struct WriteContext {
     file_ref: FileWeak,
     offset: u64,
     content_size: u64,
-    block_manager: Arc<RwLock<BlockManager>>,
+    block_manager: Arc<AsyncRwLock<BlockManager>>,
 }
 
 impl RecordWriter {
@@ -53,13 +53,13 @@ impl RecordWriter {
     /// # Returns
     ///
     /// * `RecordWriter` - The record writer.
-    pub(in crate::storage) fn try_new(
-        block_manager: Arc<RwLock<BlockManager>>,
+    pub(in crate::storage) async fn try_new(
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
         block_ref: BlockRef,
         time: u64,
     ) -> Result<Self, ReductError> {
         let (file_ref, offset, bucket_name, entry_name) = {
-            let mut bm = block_manager.write()?;
+            let mut bm = block_manager.write().await?;
             let block = block_ref.read()?;
 
             let (file, offset) = {
@@ -116,7 +116,7 @@ impl RecordWriter {
         Ok(me)
     }
 
-    fn receive(mut rx: Rx, ctx: WriteContext) {
+    async fn receive(mut rx: Rx, ctx: WriteContext) {
         let mut recv = || {
             let mut written_bytes = 0u64;
             while let Some(chunk) = rx.blocking_recv() {
@@ -162,10 +162,10 @@ impl RecordWriter {
             }
         };
 
-        if let Err(err) = ctx
-            .block_manager
-            .write()
-            .and_then(|mut bm| bm.finish_write_record(ctx.block_id, state, ctx.record_timestamp))
+        if let Err(err) =
+            ctx.block_manager.write().await.and_then(|mut bm| {
+                bm.finish_write_record(ctx.block_id, state, ctx.record_timestamp)
+            })
         {
             error!(
                 "Failed to finish writing {}/{}/{} record: {}",

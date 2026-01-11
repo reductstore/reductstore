@@ -51,22 +51,28 @@ impl ReplicationSender {
         }
     }
 
-    pub fn run(&mut self) -> Result<SyncState, ReductError> {
-        let entries = self.log_map.read()?.keys().cloned().collect::<Vec<_>>();
+    pub async fn run(&mut self) -> Result<SyncState, ReductError> {
+        let entries = self
+            .log_map
+            .read()
+            .await?
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
 
         let mut counter = Vec::new();
 
         for entry_name in entries.iter() {
             let log = {
                 // Take only the handle, drop the map lock before touching the log itself.
-                let map = self.log_map.read()?;
+                let map = self.log_map.read().await?;
                 match map.get(entry_name) {
                     Some(log) => Arc::clone(log),
                     None => continue, // log might be removed
                 }
             };
 
-            let transactions = log.write()?.front(self.io_config.batch_max_records);
+            let transactions = log.write().await?.front(self.io_config.batch_max_records);
             match transactions {
                 Ok(vec) => {
                     if vec.is_empty() {
@@ -81,7 +87,7 @@ impl ReplicationSender {
                             self.settings.src_bucket, entry_name, transaction
                         );
 
-                        let record_to_sync = self.read_record(entry_name, &transaction);
+                        let record_to_sync = self.read_record(entry_name, &transaction).await;
                         processed_transactions += 1;
 
                         match record_to_sync {
@@ -134,7 +140,7 @@ impl ReplicationSender {
                     }
 
                     // remove processed transactions from the log
-                    if let Err(err) = log.write()?.pop_front(processed_transactions) {
+                    if let Err(err) = log.write().await?.pop_front(processed_transactions) {
                         error!("Failed to remove transaction: {:?}", err);
                     }
                 }
@@ -157,24 +163,26 @@ impl ReplicationSender {
         })
     }
 
-    fn read_record(
+    async fn read_record(
         &self,
         entry_name: &str,
         transaction: &Transaction,
     ) -> Result<BoxedReadRecord, ReductError> {
-        let read_record_from_storage = || {
+        let read_record_from_storage = async || {
             let mut attempts = 3;
             loop {
-                let read_record = || {
+                let read_record = async || {
                     self.storage
-                        .get_bucket(&self.settings.src_bucket)?
+                        .get_bucket(&self.settings.src_bucket)
+                        .await?
                         .upgrade()?
-                        .get_entry(&entry_name)?
+                        .get_entry(&entry_name)
+                        .await?
                         .upgrade()?
                         .begin_read(*transaction.timestamp())
-                        .wait()
+                        .await
                 };
-                let record = read_record();
+                let record = read_record().await;
                 match record {
                     Err(ReductError {
                         status: ErrorCode::TooEarly,
@@ -196,7 +204,7 @@ impl ReplicationSender {
             }
         };
 
-        match read_record_from_storage() {
+        match read_record_from_storage().await {
             Ok(record) => Ok(Box::new(record)),
             Err(err) => Err(err),
         }

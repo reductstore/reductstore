@@ -62,7 +62,7 @@ pub(super) async fn write_record(
         }
 
         let sender = {
-            let bucket = components.storage.get_bucket(bucket)?.upgrade()?;
+            let bucket = components.storage.get_bucket(bucket).await?.upgrade()?;
             bucket
                 .begin_write(
                     path.get("entry_name").unwrap(),
@@ -115,7 +115,8 @@ pub(super) async fn write_record(
                     entry: path.get("entry_name").unwrap().to_string(),
                     meta: RecordMeta::builder().timestamp(ts).labels(labels).build(),
                     event: WriteRecord(ts),
-                })?;
+                })
+                .await?;
             Ok(())
         }
         Err(e) => {

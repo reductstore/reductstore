@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
 use crate::storage::proto::record;
@@ -13,6 +13,7 @@ use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -126,10 +127,11 @@ impl HistoricalQuery {
     }
 }
 
+#[async_trait]
 impl Query for HistoricalQuery {
-    fn next(
+    async fn next(
         &mut self,
-        block_manager: Arc<RwLock<BlockManager>>,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
         if self.records_from_current_block.is_empty() && !self.is_interrupted {
             let start = if let Some(block) = &self.current_block {
@@ -140,7 +142,7 @@ impl Query for HistoricalQuery {
             };
 
             let block_range = {
-                let mut bm = block_manager.write()?;
+                let mut bm = block_manager.write().await?;
                 let first_block = {
                     if let Ok(block) = bm.find_block(start) {
                         block.read()?.block_id()
@@ -156,7 +158,7 @@ impl Query for HistoricalQuery {
             };
 
             for block_id in block_range {
-                let mut bm = block_manager.write()?;
+                let mut bm = block_manager.write().await?;
                 let block_ref = bm.load_block(block_id)?;
 
                 self.current_block = Some(block_ref);
@@ -186,6 +188,7 @@ impl Query for HistoricalQuery {
                 ts_to_us(&record.timestamp.unwrap()),
                 Some(record),
             )
+            .await
         }
     }
 

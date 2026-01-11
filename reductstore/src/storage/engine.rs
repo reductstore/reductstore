@@ -4,11 +4,12 @@ mod read_only;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::core::thread_pool::spawn;
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::FolderKeeper;
+use async_trait::async_trait;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::BucketSettings;
@@ -28,10 +29,12 @@ pub struct StorageEngineBuilder {
     license: Option<License>,
     data_path: Option<PathBuf>,
 }
+
+#[async_trait]
 pub(super) trait ReadOnlyMode {
     fn cfg(&self) -> &Cfg;
 
-    fn reload(&self) -> Result<(), ReductError>;
+    async fn reload(&self) -> Result<(), ReductError>;
 
     fn check_mode(&self) -> Result<(), ReductError> {
         if self.cfg().role == InstanceRole::Replica {
@@ -59,7 +62,7 @@ impl StorageEngineBuilder {
         self
     }
 
-    pub fn build(self) -> StorageEngine {
+    pub async fn build(self) -> StorageEngine {
         let cfg = self.cfg.expect("Config must be set");
         let data_path = self.data_path.expect("Data path must be set");
 
@@ -79,7 +82,7 @@ impl StorageEngineBuilder {
             .list_folders()
             .expect("Failed to list folders")
         {
-            match Bucket::restore(data_path.join(&path), cfg.clone()) {
+            match Bucket::restore(data_path.join(&path), cfg.clone()).await {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
                     buckets.insert(bucket.name().to_string(), bucket);
@@ -95,10 +98,10 @@ impl StorageEngineBuilder {
         StorageEngine {
             data_path,
             start_time: Instant::now(),
-            buckets: Arc::new(RwLock::new(buckets)),
+            buckets: Arc::new(AsyncRwLock::new(buckets)),
             license: self.license,
             cfg,
-            last_replica_sync: RwLock::new(Instant::now()),
+            last_replica_sync: AsyncRwLock::new(Instant::now()),
             folder_keeper: Arc::new(folder_keeper),
         }
     }
@@ -108,10 +111,10 @@ impl StorageEngineBuilder {
 pub struct StorageEngine {
     data_path: PathBuf,
     start_time: Instant,
-    buckets: Arc<RwLock<BTreeMap<String, Arc<Bucket>>>>,
+    buckets: Arc<AsyncRwLock<BTreeMap<String, Arc<Bucket>>>>,
     license: Option<License>,
     cfg: Cfg,
-    last_replica_sync: RwLock<Instant>,
+    last_replica_sync: AsyncRwLock<Instant>,
     folder_keeper: Arc<FolderKeeper>,
 }
 
@@ -130,22 +133,21 @@ impl StorageEngine {
     ///
     /// * `ServerInfo` - The reductstore info or an HTTPError
     ///
-    #[task("get server info")]
-    pub fn info(self: Arc<Self>) -> Result<ServerInfo, ReductError> {
-        self.reload()?;
+    pub async fn info(&self) -> Result<ServerInfo, ReductError> {
+        self.reload().await?;
 
         let mut usage = 0u64;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
 
-        let buckets = self.buckets.read()?;
-        let handlers = buckets
+        let buckets = self.buckets.read().await?;
+        let infos = buckets
             .values()
-            .map(|bucket| bucket.info())
+            .map(|bucket| bucket.clone().info())
             .collect::<Vec<_>>();
 
-        for task in handlers {
-            let bucket = task.wait()?.info;
+        for task in infos {
+            let bucket = task.await?.info;
             usage += bucket.size;
             oldest_record = oldest_record.min(bucket.oldest_record);
             latest_record = latest_record.max(bucket.latest_record);
@@ -168,7 +170,7 @@ impl StorageEngine {
     }
 
     /// Creat a new bucket.
-    pub(crate) fn create_bucket(
+    pub(crate) async fn create_bucket(
         &self,
         name: &str,
         settings: BucketSettings,
@@ -176,18 +178,14 @@ impl StorageEngine {
         self.check_mode()?;
 
         check_name_convention(name)?;
-        let mut buckets = self.buckets.write()?;
+        let mut buckets = self.buckets.write().await?;
         if buckets.contains_key(name) {
             return Err(conflict!("Bucket '{}' already exists", name));
         }
 
         self.folder_keeper.add_folder(name)?;
-        let bucket = Arc::new(Bucket::new(
-            name,
-            &self.data_path,
-            settings,
-            self.cfg.clone(),
-        )?);
+        let bucket =
+            Arc::new(Bucket::try_build(name, &self.data_path, settings, self.cfg.clone()).await?);
         buckets.insert(name.to_string(), Arc::clone(&bucket));
 
         Ok(bucket.into())
@@ -202,12 +200,12 @@ impl StorageEngine {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub(crate) fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
-        self.reload()?;
-        let buckets = self.buckets.read()?;
+    pub(crate) async fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
+        self.reload().await?;
+        let buckets = self.buckets.read().await?;
         match buckets.get(name) {
             Some(bucket) => {
-                bucket.ensure_not_deleting()?;
+                bucket.ensure_not_deleting().await?;
                 Ok(Arc::clone(bucket).into())
             }
             None => Err(ReductError::not_found(
@@ -225,12 +223,12 @@ impl StorageEngine {
     /// # Returns
     ///
     /// * HTTPError - An error if the bucket doesn't exist
-    pub(crate) fn remove_bucket(&self, name: &str) -> Result<(), ReductError> {
+    pub(crate) async fn remove_bucket(&self, name: &str) -> Result<(), ReductError> {
         self.check_mode()?;
 
         let buckets = self.buckets.clone();
         let bucket = {
-            let buckets = buckets.read()?;
+            let buckets = buckets.read().await?;
             buckets
                 .get(name)
                 .cloned()
@@ -244,22 +242,22 @@ impl StorageEngine {
             ));
         }
 
-        bucket.mark_deleting()?;
+        bucket.mark_deleting().await?;
 
         let path = self.data_path.join(name);
         let name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
 
-        let _ = spawn("remove bucket", move || {
-            let remove_bucket_from_backend = || {
-                let mut buckets = buckets.write()?;
+        let _ = tokio::spawn(async move {
+            let remove_bucket_from_backend = async || {
+                let mut buckets = buckets.write().await?;
                 folder_keeper.remove_folder(&name)?;
                 debug!("Bucket '{}' and folder {:?} are removed", name, path);
                 buckets.remove(&name);
                 Ok::<(), ReductError>(())
             };
 
-            if let Err(err) = remove_bucket_from_backend() {
+            if let Err(err) = remove_bucket_from_backend().await {
                 error!("Failed to sync bucket '{}': {}", name, err);
             }
         });
@@ -267,16 +265,15 @@ impl StorageEngine {
         Ok(())
     }
 
-    #[task("rename bucket")]
-    pub(crate) fn rename_bucket(
-        self: Arc<Self>,
+    pub(crate) async fn rename_bucket(
+        &self,
         old_name: String,
         new_name: String,
     ) -> Result<(), ReductError> {
         self.check_mode()?;
         check_name_convention(&new_name)?;
         {
-            let buckets = self.buckets.read()?;
+            let buckets = self.buckets.read().await?;
             if let Some(bucket) = buckets.get(&new_name) {
                 return Err(conflict!("Bucket '{}' already exists", bucket.name()));
             }
@@ -289,7 +286,7 @@ impl StorageEngine {
                     ));
                 }
 
-                bucket.sync_fs().wait()?;
+                bucket.sync_fs().await?;
             } else {
                 Err(not_found!("Bucket '{}' is not found", old_name))?;
             }
@@ -299,59 +296,63 @@ impl StorageEngine {
         let cfg = self.cfg.clone();
         let folder_keeper = self.folder_keeper.clone();
 
-        let mut buckets = self.buckets.write()?;
+        let mut buckets = self.buckets.write().await?;
 
         folder_keeper.rename_folder(&old_name, &new_name)?;
 
         buckets.remove(&old_name);
-        let bucket = Bucket::restore(new_path, cfg)?;
+        let bucket = Bucket::restore(new_path, cfg).await?;
         buckets.insert(new_name.to_string(), Arc::new(bucket));
         debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
         Ok(())
     }
 
-    #[task("get bucket list")]
-    pub(crate) fn get_bucket_list(self: Arc<Self>) -> Result<BucketInfoList, ReductError> {
-        self.reload()?;
+    pub(crate) async fn get_bucket_list(&self) -> Result<BucketInfoList, ReductError> {
+        self.reload().await?;
         let mut buckets = Vec::new();
 
-        let handlers = {
-            let buckets = self.buckets.read()?;
+        let infos = {
+            let buckets = self.buckets.read().await?;
             buckets
                 .values()
-                .map(|bucket| bucket.info())
+                .map(|bucket| bucket.clone().info())
                 .collect::<Vec<_>>()
         };
 
-        for task in handlers {
-            let bucket = task.wait()?.info;
+        for task in infos {
+            let bucket = task.await?.info;
             buckets.push(bucket);
         }
 
         Ok(BucketInfoList { buckets })
     }
 
-    pub fn sync_fs(self: &Arc<Self>) -> Result<(), ReductError> {
-        self.compact().wait()?;
+    pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        self.compact().await?;
         FILE_CACHE.force_sync_all()?;
         Ok(())
     }
 
     /// Update index from WALs and remove them
-    #[task("compact storage")]
-    pub fn compact(self: Arc<Self>) -> Result<(), ReductError> {
+    pub async fn compact(&self) -> Result<(), ReductError> {
         if self.cfg.role == InstanceRole::Replica {
             return Ok(());
         }
 
         let mut handlers = vec![];
-        let buckets = self.buckets.read()?;
-        for bucket in buckets.values() {
-            handlers.push(bucket.sync_fs());
+        let buckets = self
+            .buckets
+            .read()
+            .await?
+            .values()
+            .map(|bucket| Arc::clone(bucket))
+            .collect::<Vec<_>>();
+        for bucket in buckets {
+            handlers.push(tokio::spawn(async move { bucket.sync_fs().await }));
         }
 
         for handler in handlers {
-            match handler.wait() {
+            match handler.await.unwrap() {
                 Ok(_) => {}
                 Err(e) => {
                     error!("Failed to sync bucket: {}", e);

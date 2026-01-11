@@ -33,9 +33,8 @@ impl Bucket {
     ///
     /// A map of timestamps to the result of the update operation. The result is either a vector of labels
     /// or an error if the record was not found.
-    #[task("update labels")]
-    pub fn update_labels(
-        self: Arc<Self>,
+    pub async fn update_labels(
+        &self,
         updates: Vec<UpdateLabelsMulti>,
     ) -> Result<UpdateResult, ReductError> {
         let mut result: UpdateResult = BTreeMap::new();
@@ -50,7 +49,7 @@ impl Bucket {
         }
 
         for (entry_name, entry_updates) in updates_per_entry {
-            match self.get_entry(&entry_name) {
+            match self.get_entry(&entry_name).await {
                 Ok(entry) => {
                     let entry = entry.upgrade()?;
                     let formatted_updates = entry_updates
@@ -61,7 +60,7 @@ impl Bucket {
                             remove,
                         })
                         .collect();
-                    let entry_results = entry.update_labels(formatted_updates).wait()?;
+                    let entry_results = entry.update_labels(formatted_updates).await?;
                     result.insert(entry_name, entry_results);
                 }
                 Err(e) => {

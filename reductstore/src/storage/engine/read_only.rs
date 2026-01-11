@@ -4,18 +4,20 @@
 use crate::cfg::{Cfg, InstanceRole};
 use crate::storage::bucket::Bucket;
 use crate::storage::engine::{ReadOnlyMode, StorageEngine};
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
+#[async_trait]
 impl ReadOnlyMode for StorageEngine {
     fn cfg(&self) -> &Cfg {
         &self.cfg
     }
 
-    fn reload(&self) -> Result<(), ReductError> {
-        let mut last_sync = self.last_replica_sync.write()?;
+    async fn reload(&self) -> Result<(), ReductError> {
+        let mut last_sync = self.last_replica_sync.write().await?;
         if self.cfg.role != InstanceRole::Replica
             || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
         {
@@ -28,7 +30,8 @@ impl ReadOnlyMode for StorageEngine {
         let mut new_buckets = BTreeMap::new();
         let current_bucket_paths = self
             .buckets
-            .read()?
+            .read()
+            .await?
             .values()
             .map(|b| b.path().clone())
             .collect::<HashSet<_>>();
@@ -42,7 +45,7 @@ impl ReadOnlyMode for StorageEngine {
             }
 
             // Restore new bucket
-            match Bucket::restore(path.clone(), self.cfg.clone()) {
+            match Bucket::restore(path.clone(), self.cfg.clone()).await {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
                     new_buckets.insert(bucket.name().to_string(), bucket);
@@ -53,7 +56,7 @@ impl ReadOnlyMode for StorageEngine {
             }
         }
 
-        let mut buckets = self.buckets.write()?;
+        let mut buckets = self.buckets.write().await?;
         buckets.retain(|_, b| buckets_to_retain.contains(&b.path()));
         buckets.extend(new_buckets);
         Ok(())

@@ -3,6 +3,7 @@
 
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::forbidden;
 use reduct_base::msg::replication_api::{
@@ -17,8 +18,9 @@ impl ReadOnlyReplicationRepository {
     }
 }
 
+#[async_trait]
 impl ManageReplications for ReadOnlyReplicationRepository {
-    fn create_replication(
+    async fn create_replication(
         &mut self,
         _name: &str,
         _settings: ReplicationSettings,
@@ -26,7 +28,7 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         Err(forbidden!("Cannot create replication in read-only mode"))
     }
 
-    fn update_replication(
+    async fn update_replication(
         &mut self,
         _name: &str,
         _settings: ReplicationSettings,
@@ -34,11 +36,11 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         Err(forbidden!("Cannot update replication in read-only mode"))
     }
 
-    fn replications(&self) -> Vec<ReplicationInfo> {
-        vec![]
+    async fn replications(&self) -> Result<Vec<ReplicationInfo>, ReductError> {
+        Ok(vec![])
     }
 
-    fn get_info(&self, _name: &str) -> Result<FullReplicationInfo, ReductError> {
+    async fn get_info(&self, _name: &str) -> Result<FullReplicationInfo, ReductError> {
         Err(forbidden!("Cannot get replication info in read-only mode"))
     }
 
@@ -54,14 +56,14 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         Err(forbidden!("Cannot remove replication in read-only mode"))
     }
 
-    fn notify(&mut self, _notification: TransactionNotification) -> Result<(), ReductError> {
-        Err(forbidden!("Cannot notify replication in read-only mode"))
-    }
-
     fn set_mode(&mut self, _name: &str, _mode: ReplicationMode) -> Result<(), ReductError> {
         Err(forbidden!(
             "Cannot update replication mode in read-only mode"
         ))
+    }
+
+    async fn notify(&mut self, _notification: TransactionNotification) -> Result<(), ReductError> {
+        Err(forbidden!("Cannot notify replication in read-only mode"))
     }
 
     fn start(&mut self) {

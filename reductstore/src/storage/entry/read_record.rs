@@ -19,49 +19,47 @@ impl Entry {
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub(crate) fn begin_read(&self, time: u64) -> TaskHandle<Result<RecordReader, ReductError>> {
+    pub(crate) async fn begin_read(&self, time: u64) -> Result<RecordReader, ReductError> {
         let block_manager = self.block_manager.clone();
-        spawn("begin read", move || {
-            debug!("Reading record for ts={}", time);
+        debug!("Reading record for ts={}", time);
 
-            let (block_ref, record) = {
-                let mut bm = block_manager.write()?;
-                let block_ref = bm.find_block(time)?;
-                let block = block_ref.read()?;
-                let record = block
-                    .get_record(time)
-                    .ok_or_else(|| {
-                        let keys: Vec<u64> = block.record_index().keys().cloned().collect();
-                        debug!(
-                            "Record {} not found in block {}/{}/{}; available range: {:?}",
-                            time,
-                            bm.bucket_name(),
-                            bm.entry_name(),
-                            block.block_id(),
-                            keys
-                        );
-                        not_found!("No record with timestamp {}", time)
-                    })?
-                    .clone();
-                (block_ref.clone(), record)
-            };
+        let (block_ref, record) = {
+            let mut bm = block_manager.write().await?;
+            let block_ref = bm.find_block(time)?;
+            let block = block_ref.read()?;
+            let record = block
+                .get_record(time)
+                .ok_or_else(|| {
+                    let keys: Vec<u64> = block.record_index().keys().cloned().collect();
+                    debug!(
+                        "Record {} not found in block {}/{}/{}; available range: {:?}",
+                        time,
+                        bm.bucket_name(),
+                        bm.entry_name(),
+                        block.block_id(),
+                        keys
+                    );
+                    not_found!("No record with timestamp {}", time)
+                })?
+                .clone();
+            (block_ref.clone(), record)
+        };
 
-            if record.state == record::State::Started as i32 {
-                return Err(too_early!(
-                    "Record with timestamp {} is still being written",
-                    time
-                ));
-            }
+        if record.state == record::State::Started as i32 {
+            return Err(too_early!(
+                "Record with timestamp {} is still being written",
+                time
+            ));
+        }
 
-            if record.state == record::State::Errored as i32 {
-                return Err(internal_server_error!(
-                    "Record with timestamp {} is broken",
-                    time
-                ));
-            }
+        if record.state == record::State::Errored as i32 {
+            return Err(internal_server_error!(
+                "Record with timestamp {} is broken",
+                time
+            ));
+        }
 
-            RecordReader::try_new(block_manager, block_ref, time, None)
-        })
+        RecordReader::try_new(block_manager, block_ref, time, None).await
     }
 }
 

@@ -14,18 +14,17 @@ impl Bucket {
     /// # Arguments
     ///
     /// * `record_ids` - A map where the key is the entry name and the value is a vector of record IDs to remove.
-    #[task("remove records")]
-    pub fn remove_records(
+    pub async fn remove_records(
         self: Arc<Self>,
         record_ids: HashMap<String, Vec<u64>>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let mut results = BTreeMap::new();
 
         for (entry_name, ids) in record_ids {
-            match self.get_entry(&entry_name) {
+            match self.get_entry(&entry_name).await {
                 Ok(entry) => {
                     let entry = entry.upgrade()?;
-                    let entry_results = entry.remove_records(ids).wait()?;
+                    let entry_results = entry.remove_records(ids).await?;
                     results.extend(entry_results);
                 }
                 Err(e) => {
@@ -51,7 +50,7 @@ impl Bucket {
         self: Arc<Self>,
         options: QueryEntry,
     ) -> Result<u64, ReductError> {
-        let entries = self.entries.read()?.clone();
+        let entries = self.entries.read().await?.clone();
         let mut total_removed = 0;
 
         for (entry_name, entry) in entries {

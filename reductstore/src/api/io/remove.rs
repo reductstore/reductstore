@@ -60,11 +60,15 @@ pub(super) async fn remove_batched_records(
             });
     }
 
-    let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
+    let bucket = components
+        .storage
+        .get_bucket(bucket_name)
+        .await?
+        .upgrade()?;
     let mut resp_headers = HeaderMap::new();
 
     for (entry_name, records) in records_by_entry {
-        match bucket.get_entry(&entry_name) {
+        match bucket.get_entry(&entry_name).await {
             Ok(entry) => {
                 let entry = entry.upgrade()?;
                 let timestamps = records.iter().map(|record| record.timestamp).collect();

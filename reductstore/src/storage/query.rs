@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 pub mod base;
@@ -9,7 +9,7 @@ mod historical;
 mod limited;
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -82,14 +82,13 @@ pub(in crate::storage) fn build_query(
 pub(super) fn spawn_query_task(
     id: u64,
     task_group: String,
-    query: Box<dyn Query + Send + Sync>,
+    mut query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
-    block_manager: Arc<RwLock<BlockManager>>,
+    block_manager: Arc<AsyncRwLock<BlockManager>>,
 ) -> (QueryRx, JoinHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
     // we spawn a new task to run the query outside hierarchical task group to avoid deadlocks
-    let query = Arc::new(RwLock::new(query));
     let handle = tokio::spawn(async move {
         trace!("Query task for '{}' id={} running", task_group, id);
         let mut watcher = QueryWatcher::new();
@@ -115,33 +114,7 @@ pub(super) fn spawn_query_task(
                 sleep(timeout).await;
             }
 
-            // Heavy synchronous IO work must not block Tokio workers.
-            let next_result = spawn_blocking({
-                let group = group.clone();
-                let query = Arc::clone(&query);
-                let block_manager = Arc::clone(&block_manager);
-                move || match query.write() {
-                    Ok(mut guard) => Some(guard.next(block_manager)),
-                    Err(_) => {
-                        warn!("Error acquiring query lock for query '{}' id={}", group, id);
-                        None
-                    }
-                }
-            })
-            .await;
-
-            let next_result = match next_result {
-                Ok(result) => result,
-                Err(err) => {
-                    warn!("Query '{}' id={} blocking task failed: {}", group, id, err);
-                    break;
-                }
-            };
-
-            let Some(next_result) = next_result else {
-                break;
-            };
-
+            let next_result = query.next(block_manager.clone()).await;
             let query_err = next_result.as_ref().err().cloned();
 
             let send_result = tx.send(next_result).await;

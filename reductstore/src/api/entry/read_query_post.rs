@@ -30,9 +30,13 @@ pub(super) async fn read_query_json(
         )
         .await?;
 
-    let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
-    let entry = bucket.get_entry(entry_name)?.upgrade()?;
-    let id = entry.query(request.clone())?;
+    let bucket = components
+        .storage
+        .get_bucket(bucket_name)
+        .await?
+        .upgrade()?;
+    let entry = bucket.get_entry(entry_name).await?.upgrade()?;
+    let id = entry.query(request.clone()).await?;
 
     components
         .ext_repo

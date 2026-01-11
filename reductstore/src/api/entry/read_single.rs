@@ -45,10 +45,12 @@ pub(super) async fn read_record(
 
     let entry = components
         .storage
-        .get_bucket(bucket_name)?
+        .get_bucket(bucket_name)
+        .await?
         .upgrade()?
-        .get_entry(entry_name)?;
-    let last_record = entry.upgrade()?.info()?.latest_record;
+        .get_entry(entry_name)
+        .await?;
+    let last_record = entry.upgrade()?.info().await?.latest_record;
 
     let (query_id, ts) = check_and_extract_ts_or_query_id(params, last_record)?;
 
@@ -72,7 +74,7 @@ async fn fetch_and_response_single_record(
         entry.begin_read(ts).await?
     } else {
         let query_id = query_id.unwrap();
-        let (rx, _) = entry.get_query_receiver(query_id)?;
+        let (rx, _) = entry.get_query_receiver(query_id).await?;
         let query_path = format!("{}/{}/{}", entry.bucket_name(), entry.name(), query_id);
         next_record_reader(rx, &query_path).await?
     };

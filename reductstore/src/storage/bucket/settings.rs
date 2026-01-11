@@ -11,6 +11,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
 use reduct_base::{conflict, internal_server_error};
 use std::io::{SeekFrom, Write};
+use tower_http::follow_redirect::policy::PolicyExt;
 
 pub(super) const DEFAULT_MAX_RECORDS: u64 = 1024;
 pub(super) const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -78,11 +79,11 @@ impl Bucket {
         settings
     }
 
-    pub fn settings(&self) -> BucketSettings {
-        self.settings.read().unwrap().clone()
+    pub async fn settings(&self) -> Result<BucketSettings, ReductError> {
+        Ok(self.settings.read().await?.clone())
     }
 
-    pub fn set_settings(&self, settings: BucketSettings) -> TaskHandle<Result<(), ReductError>> {
+    pub async fn set_settings(&self, settings: BucketSettings) -> Result<(), ReductError> {
         if self
             .is_provisioned
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -95,8 +96,8 @@ impl Bucket {
         }
 
         {
-            let mut my_settings = self.settings.write().unwrap();
-            let entries = self.entries.write().unwrap();
+            let mut my_settings = self.settings.write().await?;
+            let entries = self.entries.write().await?;
 
             *my_settings = Self::fill_settings(settings, my_settings.clone());
             for entry in entries.values() {
@@ -106,28 +107,25 @@ impl Bucket {
                 });
             }
         }
-        self.save_settings()
+        self.save_settings().await
     }
-    pub(super) fn save_settings(&self) -> TaskHandle<Result<(), ReductError>> {
-        let settings = self.settings.read().unwrap().clone();
+    pub(super) async fn save_settings(&self) -> Result<(), ReductError> {
         let path = self.path.join(SETTINGS_NAME);
 
-        spawn("save settings", move || {
-            let mut buf = BytesMut::new();
-            crate::storage::proto::BucketSettings::from(settings)
-                .encode(&mut buf)
-                .map_err(|e| internal_server_error!("Failed to encode bucket settings: {}", e))?;
+        let mut buf = BytesMut::new();
+        crate::storage::proto::BucketSettings::from(self.settings.read().await?.clone())
+            .encode(&mut buf)
+            .map_err(|e| internal_server_error!("Failed to encode bucket settings: {}", e))?;
 
-            let lock = FILE_CACHE
-                .write_or_create(&path, SeekFrom::Start(0))?
-                .upgrade()?;
-            let mut file = lock.write()?;
+        let lock = FILE_CACHE
+            .write_or_create(&path, SeekFrom::Start(0))?
+            .upgrade()?;
+        let mut file = lock.write()?;
 
-            file.set_len(0)?;
-            file.write_all(&buf)?;
-            file.sync_all()?;
-            Ok(())
-        })
+        file.set_len(0)?;
+        file.write_all(&buf)?;
+        file.sync_all()?;
+        Ok(())
     }
 }
 

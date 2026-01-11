@@ -28,11 +28,14 @@ struct ContextGuard {
 }
 
 impl ContextGuard {
-    fn shutdown(self) {
+    async fn shutdown(self) {
         info!("Shutting down server...");
         self.server_handle
             .graceful_shutdown(Some(Duration::from_secs(5)));
-        self.storage.sync_fs().expect("Failed to shutdown storage");
+        self.storage
+            .sync_fs()
+            .await
+            .expect("Failed to shutdown storage");
         self.lock_file.release();
     }
 }
@@ -84,7 +87,7 @@ async fn launch_server() {
             panic!("Another ReductStore instance is holding the lock. Exiting.");
         }
 
-        let components = parser.build().unwrap();
+        let components = parser.build().await.unwrap();
         let ctx = ContextGuard {
             server_handle: signal_handle.clone(),
             storage: components.storage.clone(),
@@ -164,7 +167,7 @@ async fn launch_server() {
     };
 }
 
-#[tokio::main(flavor = "multi_thread", worker_threads = 4)]
+#[tokio::main(flavor = "multi_thread")]
 async fn main() {
     launch_server().await;
 }
@@ -180,7 +183,7 @@ async fn shutdown_signal(ctx: ContextGuard) {
         .unwrap()
         .recv()
         .await;
-    ctx.shutdown()
+    ctx.shutdown().await;
 }
 
 async fn periodical_compact_storage(storage: Arc<StorageEngine>, sync_interval: Duration) {

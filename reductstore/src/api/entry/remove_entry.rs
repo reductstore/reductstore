@@ -30,9 +30,11 @@ pub(super) async fn remove_entry(
 
     components
         .storage
-        .get_bucket(bucket_name)?
+        .get_bucket(bucket_name)
+        .await?
         .upgrade()?
-        .remove_entry(entry_name)?;
+        .remove_entry(entry_name)
+        .await?;
     Ok(())
 }
 

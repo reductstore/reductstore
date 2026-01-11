@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::replication::Transaction;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
@@ -12,8 +12,8 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 
-pub(super) type TransactionLogRef = Arc<RwLock<TransactionLog>>;
-pub(super) type TransactionLogMap = Arc<RwLock<HashMap<String, TransactionLogRef>>>;
+pub(super) type TransactionLogRef = Arc<AsyncRwLock<TransactionLog>>;
+pub(super) type TransactionLogMap = Arc<AsyncRwLock<HashMap<String, TransactionLogRef>>>;
 
 /// Transaction log for replication.
 ///

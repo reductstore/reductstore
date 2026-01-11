@@ -24,8 +24,12 @@ pub(super) async fn get_bucket(
             },
         )
         .await?;
-    let bucket_info = components.storage.get_bucket(&bucket_name)?.upgrade()?;
-    Ok(bucket_info.info().wait()?.into())
+    let bucket_info = components
+        .storage
+        .get_bucket(&bucket_name)
+        .await?
+        .upgrade()?;
+    Ok(bucket_info.info().await?.into())
 }
 
 #[cfg(test)]

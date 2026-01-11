@@ -1,12 +1,13 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
+use async_trait::async_trait;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::ReadRecord;
 use std::sync::Arc;
@@ -38,12 +39,14 @@ impl ContinuousQuery {
         })
     }
 }
+
+#[async_trait]
 impl Query for ContinuousQuery {
-    fn next(
+    async fn next(
         &mut self,
-        block_manager: Arc<RwLock<BlockManager>>,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        match self.query.next(block_manager) {
+        match self.query.next(block_manager).await {
             Ok(reader) => {
                 self.next_start = reader.meta().timestamp() + 1;
                 self.count += 1;

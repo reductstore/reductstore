@@ -10,6 +10,7 @@ use reduct_base::{not_found, Labels};
 use reduct_macros::task;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 
 /// A struct that contains the timestamp of the record to update, the labels to update and the labels to remove.
 pub(crate) struct UpdateLabels {
@@ -34,8 +35,7 @@ impl Entry {
     ///
     /// A map of timestamps to the result of the update operation. The result is either a vector of labels
     /// or an error if the record was not found.
-    #[task("update labels")]
-    pub fn update_labels(
+    pub async fn update_labels(
         self: Arc<Self>,
         updates: Vec<UpdateLabels>,
     ) -> Result<UpdateResult, ReductError> {
@@ -43,7 +43,7 @@ impl Entry {
         let mut records_per_block = BTreeMap::new();
 
         {
-            let mut bm = self.block_manager.write()?;
+            let mut bm = self.block_manager.write().await?;
             for UpdateLabels {
                 time,
                 update,
@@ -85,19 +85,18 @@ impl Entry {
         let mut handlers = Vec::new();
         for (block_id, records) in records_per_block.into_iter() {
             let local_block_manager = self.block_manager.clone();
-            let handler: TaskHandle<Result<(), ReductError>> =
-                spawn("update labels in block", move || {
-                    let mut bm = local_block_manager.write().unwrap();
-                    bm.update_records(block_id, records)?;
-                    Ok(())
-                });
+            let handler: JoinHandle<Result<_, ReductError>> = tokio::spawn(async move {
+                let mut bm = local_block_manager.write().await?;
+                bm.update_records(block_id, records)?;
+                Ok(())
+            });
 
             handlers.push(handler);
         }
 
         // Wait for all handlers to finish
         for handler in handlers {
-            handler.wait()?;
+            handler.await.unwrap()?;
         }
         Ok(result)
     }

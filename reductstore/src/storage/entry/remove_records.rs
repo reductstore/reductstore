@@ -1,7 +1,7 @@
 // Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::core::thread_pool::spawn;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
@@ -13,6 +13,7 @@ use reduct_base::not_found;
 use reduct_macros::task;
 use std::collections::BTreeMap;
 use std::sync::Arc;
+use tower_http::follow_redirect::policy::PolicyExt;
 
 impl Entry {
     /// Remove multiple records.
@@ -28,13 +29,12 @@ impl Entry {
     ///
     /// A map of timestamps to the result of the remove operation. The result is either a vector of labels
     /// or an error if the record was not found.
-    #[task("remove records")]
-    pub fn remove_records(
+    pub async fn remove_records(
         self: Arc<Self>,
         timestamps: Vec<u64>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let block_manager = self.block_manager.clone();
-        Self::inner_remove_records(timestamps, block_manager)
+        Self::inner_remove_records(timestamps, block_manager).await
     }
 
     /// Query and remove multiple records over a range of timestamps.
@@ -55,19 +55,19 @@ impl Entry {
     pub async fn query_remove_records(&self, mut options: QueryEntry) -> Result<u64, ReductError> {
         options.continuous = None; // force non-continuous query
 
-        let rx = || {
+        let rx = async || {
             // io defaults isn't used in remove queries
-            let query_id = self.query(options)?;
-            self.get_query_receiver(query_id)
+            let query_id = self.query(options).await?;
+            self.get_query_receiver(query_id).await
         };
 
-        let rx = match rx() {
+        let rx = match rx().await {
             Ok((rx, _)) => rx,
             Err(e) => return Err(e).into(),
         };
 
         let block_manager = self.block_manager.clone();
-        let max_block_records = self.settings().max_block_records; // max records per block
+        let max_block_records = self.settings().await?.max_block_records; // max records per block
 
         // Loop until the query is done
         let mut continue_query = true;
@@ -101,7 +101,7 @@ impl Entry {
             total_records += records_to_remove.len() as u64;
             let copy_block_manager = block_manager.clone();
 
-            match Self::inner_remove_records(records_to_remove, copy_block_manager) {
+            match Self::inner_remove_records(records_to_remove, copy_block_manager).await {
                 Ok(error_map) => {
                     for (timestamp, error) in error_map {
                         // TODO: send the error to the client
@@ -120,9 +120,9 @@ impl Entry {
         Ok(total_records)
     }
 
-    fn inner_remove_records(
+    async fn inner_remove_records(
         timestamps: Vec<u64>,
-        block_manager: Arc<RwLock<BlockManager>>,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let mut error_map = BTreeMap::new();
         let mut records_per_block = BTreeMap::new();
@@ -131,7 +131,7 @@ impl Entry {
             for time in timestamps {
                 // Find the block that contains the record
                 // TODO: Try to avoid the lookup for each record
-                match block_manager.write()?.find_block(time) {
+                match block_manager.write().await?.find_block(time) {
                     Ok(block_ref) => {
                         // Check if the record exists
                         let block = block_ref.read()?;
@@ -155,16 +155,16 @@ impl Entry {
         let mut handlers = vec![];
         for (block_id, timestamps) in records_per_block {
             let local_block_manager = block_manager.clone();
-            let handler = spawn("remove records from block", move || {
+            let handler = tokio::spawn(async move {
                 // TODO: we don't parallelize the removal of records in different blocks
-                let mut bm = local_block_manager.write()?;
+                let mut bm = local_block_manager.write().await?;
                 bm.remove_records(block_id, timestamps)
             });
             handlers.push(handler);
         }
 
         for handler in handlers {
-            handler.wait()?;
+            handler.await.unwrap()?;
         }
 
         Ok(error_map)

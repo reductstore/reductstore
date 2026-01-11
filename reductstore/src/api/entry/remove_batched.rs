@@ -38,9 +38,11 @@ pub(super) async fn remove_batched_records(
     let err_map = {
         let entry = components
             .storage
-            .get_bucket(bucket_name)?
+            .get_bucket(bucket_name)
+            .await?
             .upgrade()?
-            .get_entry(entry_name)?
+            .get_entry(entry_name)
+            .await?
             .upgrade()?;
         entry
             .remove_records(record_headers.iter().map(|(time, _)| *time).collect())

@@ -57,7 +57,11 @@ pub(super) async fn read_batched_records(
     };
 
     fetch_and_response_batched_records(
-        components.storage.get_bucket(bucket_name)?.upgrade()?,
+        components
+            .storage
+            .get_bucket(bucket_name)
+            .await?
+            .upgrade()?,
         entry_name,
         query_id,
         method.name == "HEAD",
@@ -106,9 +110,11 @@ async fn fetch_and_response_batched_records(
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
     let (rx, io_settings) = bucket
-        .get_entry(entry_name)?
+        .get_entry(entry_name)
+        .await?
         .upgrade()?
-        .get_query_receiver(query_id)?;
+        .get_query_receiver(query_id)
+        .await?;
 
     let mut header_size = 0usize;
     let mut body_size = 0u64;
@@ -181,9 +187,11 @@ async fn fetch_and_response_batched_records(
     if readers.is_empty() {
         tokio::time::sleep(Duration::from_millis(5)).await;
         match bucket
-            .get_entry(entry_name)?
+            .get_entry(entry_name)
+            .await?
             .upgrade()?
             .get_query_receiver(query_id)
+            .await
         {
             Err(err) if err.status() == ErrorCode::NotFound => {
                 return Err(no_content!("No more records").into());

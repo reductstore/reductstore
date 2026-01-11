@@ -4,7 +4,7 @@
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::Duration;
+use tokio::task::JoinHandle;
 
 #[derive(Clone)]
 struct ReplicationSystemOptions {
@@ -41,11 +42,11 @@ pub struct ReplicationTask {
     filter_map: HashMap<String, TransactionFilter>,
     log_map: TransactionLogMap,
     storage: Arc<StorageEngine>,
-    hourly_diagnostics: Arc<RwLock<DiagnosticsCounter>>,
+    hourly_diagnostics: Arc<AsyncRwLock<DiagnosticsCounter>>,
     stop_flag: Arc<AtomicBool>,
     is_active: Arc<AtomicBool>,
     mode: Arc<AtomicU8>,
-    worker_handle: Option<TaskHandle<()>>,
+    worker_handle: Option<JoinHandle<()>>,
     worker_bucket: Option<Box<dyn RemoteBucket + Send + Sync>>,
 }
 
@@ -103,8 +104,8 @@ impl ReplicationTask {
         storage: Arc<StorageEngine>,
     ) -> Self {
         let log_map: TransactionLogMap =
-            Arc::new(RwLock::new(HashMap::<String, TransactionLogRef>::new()));
-        let hourly_diagnostics = Arc::new(RwLock::new(DiagnosticsCounter::new(
+            Arc::new(AsyncRwLock::new(HashMap::<String, TransactionLogRef>::new()));
+        let hourly_diagnostics = Arc::new(AsyncRwLock::new(DiagnosticsCounter::new(
             Duration::from_secs(3600),
         )));
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -148,14 +149,15 @@ impl ReplicationTask {
         let thr_is_active = Arc::clone(&self.is_active);
         let thr_mode = Arc::clone(&self.mode);
 
-        let handle = spawn("replication task", move || {
-            let init_transaction_logs = || {
-                let mut logs = thr_log_map.write()?;
+        let handle = tokio::spawn(async move {
+            let init_transaction_logs = async || {
+                let mut logs = thr_log_map.write().await?;
                 for entry in thr_storage
-                    .get_bucket(&thr_settings.src_bucket)?
+                    .get_bucket(&thr_settings.src_bucket)
+                    .await?
                     .upgrade()?
                     .info()
-                    .wait()?
+                    .await?
                     .entries
                 {
                     let path = Self::build_path_to_transaction_log(
@@ -183,13 +185,13 @@ impl ReplicationTask {
                         }
                     };
 
-                    logs.insert(entry.name, Arc::new(RwLock::new(log)));
+                    logs.insert(entry.name, Arc::new(AsyncRwLock::new(log)));
                 }
 
                 Ok::<(), ReductError>(())
             };
 
-            if let Err(err) = init_transaction_logs() {
+            if let Err(err) = init_transaction_logs().await {
                 error!("Failed to initialize transaction logs: {:?}", err);
             }
 
@@ -223,7 +225,7 @@ impl ReplicationTask {
                 }
 
                 let mut counter = None;
-                match sender.run() {
+                match sender.run().await {
                     Ok(SyncState::SyncedOrRemoved(c)) => {
                         thr_is_active.store(true, Ordering::Relaxed);
                         counter = Some(c);
@@ -266,8 +268,9 @@ impl ReplicationTask {
                             Ok(log) => {
                                 thr_log_map
                                     .write()
+                                    .await
                                     .unwrap()
-                                    .insert(entry_name, Arc::new(RwLock::new(log)));
+                                    .insert(entry_name, Arc::new(AsyncRwLock::new(log)));
                             }
 
                             Err(err) => {
@@ -290,7 +293,7 @@ impl ReplicationTask {
                 }
 
                 if let Some(c) = counter {
-                    match thr_hourly_diagnostics.write() {
+                    match thr_hourly_diagnostics.write().await {
                         Ok(mut diagnostics) => {
                             for (result, count) in c.into_iter() {
                                 diagnostics.count(result, count);
@@ -305,7 +308,10 @@ impl ReplicationTask {
         self.worker_handle = Some(handle);
     }
 
-    pub fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
+    pub async fn notify(
+        &mut self,
+        notification: TransactionNotification,
+    ) -> Result<(), ReductError> {
         if matches!(self.load_mode(), ReplicationMode::Disabled) {
             return Ok(());
         }
@@ -329,7 +335,7 @@ impl ReplicationTask {
 
         // NOTE: very important not to lock the log_map for too long
         // because it is used by the replication thread
-        let exists = { self.log_map.read()?.contains_key(&entry_name) };
+        let exists = { self.log_map.read().await?.contains_key(&entry_name) };
         if !exists {
             let log = TransactionLog::try_load_or_create(
                 &Self::build_path_to_transaction_log(
@@ -340,18 +346,18 @@ impl ReplicationTask {
                 ),
                 self.system_options.transaction_log_size,
             )?;
-            let mut map = self.log_map.write()?;
+            let mut map = self.log_map.write().await?;
             map.entry(entry_name.clone())
-                .or_insert_with(|| Arc::new(RwLock::new(log)));
+                .or_insert_with(|| Arc::new(AsyncRwLock::new(log)));
         };
 
         let log = {
-            let map = self.log_map.read()?;
+            let map = self.log_map.read().await?;
             Arc::clone(map.get(&entry_name).unwrap())
         };
 
         for notification in notifications.into_iter() {
-            if let Some(_) = log.write()?.push_back(notification.event)? {
+            if let Some(_) = log.write().await?.push_back(notification.event)? {
                 error!(
                     "Transaction log is full, dropping the oldest transaction without replication"
                 );
@@ -398,26 +404,26 @@ impl ReplicationTask {
         self.worker_handle.is_some()
     }
 
-    pub fn info(&self) -> ReplicationInfo {
+    pub async fn info(&self) -> Result<ReplicationInfo, ReductError> {
         let mut pending_records = 0;
-        for (_, log) in self.log_map.read().unwrap().iter() {
-            pending_records += log.read().unwrap().len() as u64;
+        for (_, log) in self.log_map.read().await?.iter() {
+            pending_records += log.read().await?.len() as u64;
         }
 
-        ReplicationInfo {
+        Ok(ReplicationInfo {
             name: self.name.clone(),
             mode: self.load_mode(),
             is_active: matches!(self.load_mode(), ReplicationMode::Enabled)
                 && self.is_active.load(Ordering::Relaxed),
             is_provisioned: self.is_provisioned,
             pending_records,
-        }
+        })
     }
 
-    pub fn diagnostics(&self) -> Diagnostics {
-        Diagnostics {
-            hourly: self.hourly_diagnostics.read().unwrap().diagnostics(),
-        }
+    pub async fn diagnostics(&self) -> Result<Diagnostics, ReductError> {
+        Ok(Diagnostics {
+            hourly: self.hourly_diagnostics.read().await?.diagnostics(),
+        })
     }
 
     fn sleep_with_stop(stop_flag: &Arc<AtomicBool>, duration: Duration) {
@@ -458,7 +464,11 @@ impl Drop for ReplicationTask {
         if let Some(handle) = self.worker_handle.take() {
             // Use recv() without unwrap to avoid panic if the channel is disconnected
             // (e.g., during test cleanup or thread pool shutdown)
-            let _ = handle.wait_or_ignore();
+            tokio::spawn(async move {
+                if let Err(err) = handle.await {
+                    error!("Replication worker task failed to join: {:?}", err);
+                }
+            });
         }
     }
 }
@@ -542,7 +552,7 @@ mod tests {
             FILE_CACHE
                 .create_dir_all(&path.join(&settings.src_bucket))
                 .unwrap();
-            Bucket::new(
+            Bucket::try_build(
                 &settings.src_bucket,
                 &path,
                 BucketSettings::default(),

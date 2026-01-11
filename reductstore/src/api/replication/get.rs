@@ -22,7 +22,8 @@ pub(super) async fn get_replication(
         .replication_repo
         .read()
         .await?
-        .get_info(&replication_name)?;
+        .get_info(&replication_name)
+        .await?;
     Ok(info.into())
 }
 

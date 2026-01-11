@@ -250,14 +250,16 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         Ok(lock_file)
     }
 
-    pub fn build(&self) -> Result<Components, ReductError> {
+    pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
-        let storage = Arc::new(self.provision_buckets(&data_path));
+        let storage = Arc::new(self.provision_buckets(&data_path).await);
         let token_repo = self.provision_tokens(&data_path);
         let console = create_asset_manager(load_console());
         let select_ext = create_asset_manager(load_select_ext());
         let ros_ext = create_asset_manager(load_ros_ext());
-        let replication_engine = self.provision_replication_repo(Arc::clone(&storage))?;
+        let replication_engine = self
+            .provision_replication_repo(Arc::clone(&storage))
+            .await?;
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
                 internal_server_error!(
@@ -270,7 +272,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             None
         };
 
-        let server_info = storage.info().wait()?;
+        let server_info = storage.info().await?;
 
         Ok(Components {
             storage,

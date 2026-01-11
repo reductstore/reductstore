@@ -13,15 +13,17 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub(in crate::cfg) fn provision_replication_repo(
+    pub(in crate::cfg) async fn provision_replication_repo(
         &self,
         storage: Arc<StorageEngine>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = ReplicationRepoBuilder::new(self.cfg.clone()).build(Arc::clone(&storage));
+        let mut repo = ReplicationRepoBuilder::new(self.cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
         for (name, settings) in &self.cfg.replications {
-            if let Err(e) = repo.create_replication(&name, settings.clone()) {
+            if let Err(e) = repo.create_replication(&name, settings.clone()).await {
                 if e.status() == ErrorCode::Conflict {
-                    repo.update_replication(&name, settings.clone())?;
+                    repo.update_replication(&name, settings.clone()).await?;
                 } else {
                     error!("Failed to provision replication '{}': {}", name, e);
                     continue;

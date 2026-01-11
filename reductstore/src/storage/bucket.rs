@@ -10,7 +10,7 @@ pub(crate) mod update_records;
 
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
@@ -38,20 +38,21 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::task::block_in_place;
 
 /// Bucket is a single storage bucket.
 pub(crate) struct Bucket {
     name: String,
     path: PathBuf,
-    entries: Arc<RwLock<BTreeMap<String, Arc<Entry>>>>,
-    settings: RwLock<BucketSettings>,
+    entries: Arc<AsyncRwLock<BTreeMap<String, Arc<Entry>>>>,
+    settings: AsyncRwLock<BucketSettings>,
     folder_keeper: Arc<FolderKeeper>,
     cfg: Arc<Cfg>,
-    last_replica_sync: RwLock<Instant>,
+    last_replica_sync: AsyncRwLock<Instant>,
     is_provisioned: AtomicBool,
-    status: RwLock<ResourceStatus>,
+    status: AsyncRwLock<ResourceStatus>,
     #[allow(dead_code)]
-    queries: RwLock<HashMap<u64, MultiEntryQuery>>,
+    queries: AsyncRwLock<HashMap<u64, MultiEntryQuery>>,
 }
 
 impl Bucket {
@@ -67,7 +68,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub(crate) fn new(
+    pub(crate) async fn try_build(
         name: &str,
         path: &PathBuf,
         settings: BucketSettings,
@@ -80,17 +81,17 @@ impl Bucket {
         let bucket = Bucket {
             name: name.to_string(),
             path,
-            entries: Arc::new(RwLock::new(BTreeMap::new())),
-            settings: RwLock::new(settings),
+            entries: Arc::new(AsyncRwLock::new(BTreeMap::new())),
+            settings: AsyncRwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
-            status: RwLock::new(ResourceStatus::Ready),
+            status: AsyncRwLock::new(ResourceStatus::Ready),
             cfg: Arc::new(cfg),
-            last_replica_sync: RwLock::new(Instant::now()),
+            last_replica_sync: AsyncRwLock::new(Instant::now()),
             folder_keeper: Arc::new(folder_keeper),
-            queries: RwLock::new(HashMap::new()),
+            queries: AsyncRwLock::new(HashMap::new()),
         };
 
-        bucket.save_settings().wait()?;
+        bucket.save_settings().await?;
         Ok(bucket)
     }
 
@@ -104,7 +105,7 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
-    pub fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
+    pub async fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
         let buf = {
             let lock = FILE_CACHE
                 .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))?
@@ -139,7 +140,7 @@ impl Bucket {
         }
 
         for task in task_set {
-            if let Some(entry) = task.wait()? {
+            if let Some(entry) = task.await? {
                 entries.insert(entry.name().to_string(), entry);
             }
         }
@@ -147,16 +148,16 @@ impl Bucket {
         Ok(Bucket {
             name: bucket_name,
             path,
-            entries: Arc::new(RwLock::new(
+            entries: Arc::new(AsyncRwLock::new(
                 entries.into_iter().map(|(k, v)| (k, Arc::new(v))).collect(),
             )),
-            settings: RwLock::new(settings),
+            settings: AsyncRwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
-            status: RwLock::new(ResourceStatus::Ready),
-            last_replica_sync: RwLock::new(Instant::now()),
+            status: AsyncRwLock::new(ResourceStatus::Ready),
+            last_replica_sync: AsyncRwLock::new(Instant::now()),
             cfg,
             folder_keeper: Arc::new(folder_keeper),
-            queries: RwLock::new(HashMap::new()),
+            queries: AsyncRwLock::new(HashMap::new()),
         })
     }
 
@@ -169,12 +170,12 @@ impl Bucket {
     /// # Returns
     ///
     /// * `&mut Entry` - The entry or an HTTPError
-    pub fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
+    pub async fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
         check_name_convention(key)?;
-        self.ensure_not_deleting()?;
+        self.ensure_not_deleting().await?;
 
         let entry = {
-            let entries = self.entries.read()?;
+            let entries = self.entries.read().await?;
             entries.get(key).cloned()
         };
 
@@ -182,7 +183,7 @@ impl Bucket {
             entry
         } else {
             self.check_mode()?;
-            let settings = self.settings.read()?;
+            let settings = self.settings.read().await?;
             self.folder_keeper.add_folder(key)?;
             let entry = Arc::new(Entry::try_new(
                 &key,
@@ -193,13 +194,13 @@ impl Bucket {
                 },
                 self.cfg.clone(),
             )?);
-            let mut entries = self.entries.write()?;
+            let mut entries = self.entries.write().await?;
             entries
                 .entry(key.to_string())
                 .or_insert_with(|| Arc::clone(&entry))
                 .clone()
         };
-        entry.ensure_not_deleting()?;
+        entry.ensure_not_deleting().await?;
         Ok(entry.into())
     }
 
@@ -212,38 +213,37 @@ impl Bucket {
     /// # Returns
     ///
     /// * `&Entry` - The entry or an HTTPError
-    pub fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
-        self.reload()?;
-        let entries = self.entries.read()?;
+    pub async fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
+        self.reload().await?;
+        let entries = self.entries.read().await?;
         let entry = entries.get(name).ok_or_else(|| {
             ReductError::not_found(&format!(
                 "Entry '{}' not found in bucket '{}'",
                 name, self.name
             ))
         })?;
-        entry.ensure_not_deleting()?;
+        entry.ensure_not_deleting().await?;
         Ok(entry.clone().into())
     }
 
     /// Return bucket stats
-    #[task("bucket info")]
-    pub fn info(self: Arc<Self>) -> Result<FullBucketInfo, ReductError> {
-        self.reload()?;
+    pub async fn info(self: Arc<Self>) -> Result<FullBucketInfo, ReductError> {
+        self.reload().await?;
 
         let mut size = 0;
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
         let mut entry_infos = Vec::new();
 
-        let infos = self
-            .entries
-            .read()?
+        let entries = self.entries.read().await?;
+        let infos = entries
             .values()
             .into_iter()
             .map(|entry| entry.info())
             .collect::<Vec<_>>();
+
         for info in infos {
-            let info = info?;
+            let info = info.await?;
             size += info.size;
             oldest_record = oldest_record.min(info.oldest_record);
             latest_record = latest_record.max(info.latest_record);
@@ -258,9 +258,9 @@ impl Bucket {
                 oldest_record,
                 latest_record,
                 is_provisioned: self.is_provisioned.load(Ordering::Relaxed),
-                status: self.status()?,
+                status: self.status().await?,
             },
-            settings: self.settings.read()?.clone(),
+            settings: self.settings.read().await?.clone(),
             entries: entry_infos,
         })
     }
@@ -279,106 +279,91 @@ impl Bucket {
     ///
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub fn begin_write(
+    pub async fn begin_write(
         self: &Arc<Self>,
         name: &str,
         time: u64,
         content_size: u64,
         content_type: String,
         labels: Labels,
-    ) -> TaskHandle<Result<Box<dyn WriteRecord + Sync + Send>, ReductError>> {
-        if let Err(e) = self.check_mode() {
-            return Err(e).into();
-        }
+    ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        self.check_mode()?;
 
-        let get_entry = || {
-            self.keep_quota_for(content_size)?;
-            self.get_or_create_entry(name)?.upgrade()
+        let get_entry = async || {
+            self.keep_quota_for(content_size).await?;
+            self.get_or_create_entry(name).await?.upgrade()
         };
 
-        let entry = match get_entry() {
+        let entry = match get_entry().await {
             Ok(entry) => entry,
             Err(e) => {
                 return Err(e).into();
             }
         };
 
-        entry.begin_write(time, content_size, content_type, labels)
+        entry
+            .begin_write(time, content_size, content_type, labels)
+            .await
     }
 
     /// Starts a new record read with
-    #[allow(dead_code)]
-    pub fn begin_read(
-        &self,
-        name: &str,
-        time: u64,
-    ) -> TaskHandle<Result<RecordReader, ReductError>> {
-        let entry = || self.get_entry(name)?.upgrade();
-
-        match entry() {
+    #[cfg(test)]
+    pub async fn begin_read(&self, name: &str, time: u64) -> Result<RecordReader, ReductError> {
+        match self.get_entry(name).await?.upgrade() {
             Ok(entry) => entry.begin_read(time),
             Err(e) => Err(e).into(),
         }
     }
 
-    pub fn rename_entry(
-        &self,
-        old_name: &str,
-        new_name: &str,
-    ) -> TaskHandle<Result<(), ReductError>> {
-        if let Err(e) = self.check_mode() {
-            return Err(e).into();
-        }
+    pub async fn rename_entry(&self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
+        self.check_mode()?;
 
         let new_path = self.path.join(new_name);
         let bucket_name = self.name.clone();
         let entries = self.entries.clone();
-        let old_name = old_name.to_string();
-        let new_name = new_name.to_string();
-        let settings = self.settings();
+        let settings = self.settings().await?;
         let cfg = self.cfg.clone();
         let folder_keeper = self.folder_keeper.clone();
 
-        spawn("rename entry", move || {
-            check_name_convention(&new_name)?;
-            if new_path.exists() {
-                return Err(conflict!(
-                    "Entry '{}' already exists in bucket '{}'",
-                    new_name,
-                    bucket_name
-                ));
-            }
+        check_name_convention(&new_name)?;
+        if new_path.exists() {
+            return Err(conflict!(
+                "Entry '{}' already exists in bucket '{}'",
+                new_name,
+                bucket_name
+            ));
+        }
 
-            if let Some(entry) = entries.read()?.get(&old_name) {
-                entry.ensure_not_deleting()?;
-                entry.compact()?;
-            } else {
-                return Err(not_found!(
-                    "Entry '{}' not found in bucket '{}'",
-                    old_name,
-                    bucket_name
-                ));
-            }
+        if let Some(entry) = entries.read().await?.get(old_name) {
+            entry.ensure_not_deleting().await?;
+            entry.compact()?;
+        } else {
+            return Err(not_found!(
+                "Entry '{}' not found in bucket '{}'",
+                old_name,
+                bucket_name
+            ));
+        }
 
-            folder_keeper.rename_folder(&old_name, &new_name)?;
-            entries.write()?.remove(&old_name);
+        folder_keeper.rename_folder(old_name, new_name)?;
+        entries.write().await?.remove(old_name);
 
-            if let Some(entry) = Entry::restore(
-                new_path,
-                EntrySettings {
-                    max_block_size: settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
-                    max_block_records: settings.max_block_records.unwrap_or(DEFAULT_MAX_RECORDS),
-                },
-                cfg.clone(),
-            )
-            .wait()?
-            {
-                entries
-                    .write()?
-                    .insert(new_name.to_string(), Arc::new(entry));
-            }
-            Ok(())
-        })
+        if let Some(entry) = Entry::restore(
+            new_path,
+            EntrySettings {
+                max_block_size: settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
+                max_block_records: settings.max_block_records.unwrap_or(DEFAULT_MAX_RECORDS),
+            },
+            cfg.clone(),
+        )
+        .await?
+        {
+            entries
+                .write()
+                .await?
+                .insert(new_name.to_string(), Arc::new(entry));
+        }
+        Ok(())
     }
 
     /// Remove entry from the bucket
@@ -390,12 +375,12 @@ impl Bucket {
     /// # Returns
     ///
     /// * `HTTPError` - The error if any.
-    pub fn remove_entry(&self, name: &str) -> Result<(), ReductError> {
-        self.ensure_not_deleting()?;
+    pub async fn remove_entry(&self, name: &str) -> Result<(), ReductError> {
+        self.ensure_not_deleting().await?;
         self.check_mode()?;
 
-        let entry = self.get_entry(name)?.upgrade()?;
-        entry.mark_deleting()?;
+        let entry = self.get_entry(name).await?.upgrade()?;
+        entry.mark_deleting().await?;
 
         let entries = self.entries.clone();
         let path = self.path.join(name);
@@ -420,7 +405,7 @@ impl Bucket {
 
         match folder_remove_result {
             Ok(()) => {
-                entries.write()?.remove(&entry_name);
+                entries.write().await?.remove(&entry_name);
             }
             Err(err) => {
                 error!(
@@ -435,25 +420,32 @@ impl Bucket {
     }
 
     /// Sync all entries to the file system
-    pub fn sync_fs(&self) -> TaskHandle<Result<(), ReductError>> {
+    pub async fn sync_fs(&self) -> Result<(), ReductError> {
         if self.cfg.role == InstanceRole::Replica {
-            return Ok(()).into();
+            return Ok(());
         }
 
         let bucket_name = self.name.clone();
         debug!("Syncing bucket '{}'", bucket_name);
         let time_start = Instant::now();
 
-        if let Err(e) = self.save_settings().wait() {
-            return Err(e).into();
-        }
+        self.save_settings().await?;
 
         let entries = self.entries.clone();
         // use shared task to avoid locking in graceful shutdown
-        spawn("sync entries", move || {
+        tokio::spawn(async move {
             let mut count = 0usize;
-            for entry in entries.read()?.values() {
-                entry.compact()?;
+            for entry in entries.read().await?.values() {
+                block_in_place(|| {
+                    if let Err(err) = entry.compact() {
+                        error!(
+                            "Failed to compact entry '{}' in bucket '{}': {}",
+                            entry.name(),
+                            bucket_name,
+                            err
+                        );
+                    }
+                });
                 count += 1;
             }
             debug!(
@@ -462,8 +454,11 @@ impl Bucket {
                 count,
                 Instant::now().duration_since(time_start)
             );
-            Ok(())
-        })
+
+            Ok::<(), ReductError>(())
+        });
+
+        Ok(())
     }
 
     pub fn name(&self) -> &str {
@@ -486,26 +481,26 @@ impl Bucket {
             .load(std::sync::atomic::Ordering::Relaxed)
     }
 
-    #[allow(dead_code)]
-    pub fn entries(&self) -> Result<BTreeMap<String, Arc<Entry>>, ReductError> {
-        Ok(self.entries.read()?.clone())
+    #[cfg(test)]
+    pub async fn entries(&self) -> Result<BTreeMap<String, Arc<Entry>>, ReductError> {
+        Ok(self.entries.read().await?.clone())
     }
 
-    pub(super) fn status(&self) -> Result<ResourceStatus, ReductError> {
-        Ok(*self.status.read()?)
+    pub(super) async fn status(&self) -> Result<ResourceStatus, ReductError> {
+        Ok(*self.status.read().await?)
     }
 
-    pub(super) fn mark_deleting(&self) -> Result<(), ReductError> {
-        self.ensure_not_deleting()?;
-        *self.status.write()? = ResourceStatus::Deleting;
-        for entry in self.entries.read()?.values() {
-            entry.mark_deleting()?;
+    pub(super) async fn mark_deleting(&self) -> Result<(), ReductError> {
+        self.ensure_not_deleting().await?;
+        *self.status.write().await? = ResourceStatus::Deleting;
+        for entry in self.entries.read().await?.values() {
+            entry.mark_deleting().await?;
         }
         Ok(())
     }
 
-    pub(super) fn ensure_not_deleting(&self) -> Result<(), ReductError> {
-        if self.status()? == ResourceStatus::Deleting {
+    pub(super) async fn ensure_not_deleting(&self) -> Result<(), ReductError> {
+        if self.status().await? == ResourceStatus::Deleting {
             Err(conflict!("Bucket '{}' is being deleted", self.name))
         } else {
             Ok(())
@@ -809,13 +804,13 @@ mod tests {
     #[fixture]
     pub fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
-        Arc::new(Bucket::new("test", &path, settings, Cfg::default()).unwrap())
+        Arc::new(Bucket::try_build("test", &path, settings, Cfg::default()).unwrap())
     }
 
     #[fixture]
     pub fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
-        let bucket = Bucket::new("test", &path, settings, Cfg::default()).unwrap();
+        let bucket = Bucket::try_build("test", &path, settings, Cfg::default()).unwrap();
         bucket.set_provisioned(true);
         Arc::new(bucket)
     }
