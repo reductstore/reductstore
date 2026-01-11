@@ -65,6 +65,8 @@ impl<T> AsyncRwLock<T> {
 #[cfg(test)]
 mod tests {
     use super::AsyncRwLock;
+    use crate::core::sync::{reset_rwlock_config, set_rwlock_timeout};
+    use serial_test::serial;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::sleep;
@@ -91,7 +93,16 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_async_rwlock_timeout() {
+        struct ResetGuard;
+        impl Drop for ResetGuard {
+            fn drop(&mut self) {
+                reset_rwlock_config();
+            }
+        }
+        let _reset = ResetGuard;
+        set_rwlock_timeout(Duration::from_millis(100));
         let lock = Arc::new(AsyncRwLock::new(5));
         let _guard = lock.write().await.unwrap();
         let res = lock.read().await;
@@ -110,7 +121,16 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn test_async_rwlock_write_timeout() {
+        struct ResetGuard;
+        impl Drop for ResetGuard {
+            fn drop(&mut self) {
+                reset_rwlock_config();
+            }
+        }
+        let _reset = ResetGuard;
+        set_rwlock_timeout(Duration::from_millis(100));
         let lock = Arc::new(AsyncRwLock::new(5));
         let _guard = lock.read().await.unwrap();
         let res = lock.write().await;
