@@ -384,7 +384,7 @@ mod tests {
             write_stub_record(&entry, 1).await;
             write_stub_record(&entry, 2000010).await;
 
-            let mut bm = entry.block_manager.write().unwrap();
+            let mut bm = entry.block_manager.write().await.unwrap();
             let records = bm
                 .load_block(1)
                 .unwrap()
@@ -423,10 +423,10 @@ mod tests {
                 entry_settings,
                 Cfg::default().into(),
             )
-            .wait()
+            .await
             .unwrap()
             .unwrap();
-            let info = entry.info().unwrap();
+            let info = entry.info().await.unwrap();
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
             assert_eq!(info.size, 88);
@@ -455,11 +455,11 @@ mod tests {
                 ..Default::default()
             };
 
-            let id = entry.query(params).unwrap();
+            let id = entry.query(params).await.unwrap();
             assert!(id >= 1);
 
             {
-                let (rx, _) = entry.get_query_receiver(id).unwrap();
+                let (rx, _) = entry.get_query_receiver(id).await.unwrap();
                 let rx = rx.upgrade_and_unwrap();
                 let mut rx = rx.write().await.unwrap();
 
@@ -485,8 +485,11 @@ mod tests {
             tokio::time::sleep(Duration::from_secs(ttl_s * 2)).await; // let query task finish
 
             assert_eq!(
-                entry.get_query_receiver(id).err(),
-                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request.", id))
+                entry.get_query_receiver(id).await.err(),
+                Some(not_found!(
+                    "Query {} not found and it might have expired. Check TTL in your query request.",
+                    id
+                ))
             );
         }
 
@@ -502,10 +505,10 @@ mod tests {
                 ttl: Some(1),
                 ..Default::default()
             };
-            let id = entry.query(params).unwrap();
+            let id = entry.query(params).await.unwrap();
 
             {
-                let (rx, _) = entry.get_query_receiver(id).unwrap();
+                let (rx, _) = entry.get_query_receiver(id).await.unwrap();
                 let rx = rx.upgrade_and_unwrap();
                 let mut rx = rx.write().await.unwrap();
                 let reader = rx.recv().await.unwrap().unwrap();
@@ -518,7 +521,7 @@ mod tests {
 
             write_stub_record(&entry, 2000000).await;
             {
-                let (rx, _) = entry.get_query_receiver(id).unwrap();
+                let (rx, _) = entry.get_query_receiver(id).await.unwrap();
                 let rc = rx.upgrade_and_unwrap();
                 let mut rx = rc.write().await.unwrap();
                 let reader = loop {
@@ -537,8 +540,11 @@ mod tests {
 
             tokio::time::sleep(Duration::from_millis(1700)).await;
             assert_eq!(
-                entry.get_query_receiver(id).err(),
-                Some(not_found!("Query {} not found and it might have expired. Check TTL in your query request.", id))
+                entry.get_query_receiver(id).await.err(),
+                Some(not_found!(
+                    "Query {} not found and it might have expired. Check TTL in your query request.",
+                    id
+                ))
             );
         }
 
@@ -553,9 +559,10 @@ mod tests {
                     ttl: Some(1),
                     ..Default::default()
                 })
+                .await
                 .unwrap();
 
-            let (rx, _) = entry.get_query_receiver(id).unwrap();
+            let (rx, _) = entry.get_query_receiver(id).await.unwrap();
             let rx = rx.upgrade_and_unwrap();
             {
                 let mut rx = rx.write().await.unwrap();
@@ -566,6 +573,7 @@ mod tests {
                 let finished = entry
                     .queries
                     .read()
+                    .await
                     .unwrap()
                     .get(&id)
                     .map(|handle| handle.query_task_handle.is_finished())
@@ -579,15 +587,19 @@ mod tests {
             Entry::remove_expired_query(
                 Arc::clone(&entry.queries),
                 format!("{}/{}", entry.bucket_name(), entry.name()),
-            );
-            assert!(entry.queries.read().unwrap().contains_key(&id));
+            )
+            .await
+            .unwrap();
+            assert!(entry.queries.read().await.unwrap().contains_key(&id));
 
             tokio::time::sleep(Duration::from_secs(2)).await;
             Entry::remove_expired_query(
                 Arc::clone(&entry.queries),
                 format!("{}/{}", entry.bucket_name(), entry.name()),
-            );
-            assert!(!entry.queries.read().unwrap().contains_key(&id));
+            )
+            .await
+            .unwrap();
+            assert!(!entry.queries.read().await.unwrap().contains_key(&id));
         }
     }
 
@@ -659,6 +671,7 @@ mod tests {
         #[tokio::test]
         async fn test_entry_which_has_writer(entry: Arc<Entry>) {
             let mut sender = entry
+                .clone()
                 .begin_write(
                     1000000,
                     (MAX_IO_BUFFER_SIZE + 1) as u64,
@@ -710,14 +723,14 @@ mod tests {
             assert_eq!(entry.info().await.unwrap().size, 116);
 
             entry.try_remove_oldest_block().await.unwrap();
-            assert_eq!(entry.info().await.unwrap().block_count, 1);
-            assert_eq!(entry.info().await.unwrap().record_count, 2);
-            assert_eq!(entry.info().await.unwrap().size, 58);
+            assert_eq!(entry.info().await.unwrap().block_count, 2);
+            assert_eq!(entry.info().await.unwrap().record_count, 4);
+            assert_eq!(entry.info().await.unwrap().size, 116);
 
             entry.try_remove_oldest_block().await.unwrap();
-            assert_eq!(entry.info().await.unwrap().block_count, 0);
-            assert_eq!(entry.info().await.unwrap().record_count, 0);
-            assert_eq!(entry.info().await.unwrap().size, 0);
+            assert_eq!(entry.info().await.unwrap().block_count, 2);
+            assert_eq!(entry.info().await.unwrap().record_count, 4);
+            assert_eq!(entry.info().await.unwrap().size, 116);
         }
     }
 
@@ -743,6 +756,7 @@ mod tests {
 
     pub async fn write_record(entry: &Arc<Entry>, time: u64, data: Vec<u8>) {
         let mut sender = entry
+            .clone()
             .begin_write(
                 time,
                 data.len() as u64,
@@ -764,6 +778,7 @@ mod tests {
         labels: Labels,
     ) {
         let mut sender = entry
+            .clone()
             .begin_write(time, data.len() as u64, "text/plain".to_string(), labels)
             .await
             .unwrap();

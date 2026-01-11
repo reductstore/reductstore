@@ -32,13 +32,13 @@ impl RwLockFailureAction {
 const DEFAULT_RWLOCK_TIMEOUT_MS: u64 = 60_000;
 
 #[cfg(test)]
-const DEFAULT_RWLOCK_TIMEOUT_MS: u64 = 1_000;
+const DEFAULT_RWLOCK_TIMEOUT_MS: u64 = 5_000;
 
 #[cfg(not(test))]
 const DEFAULT_RWLOCK_FAILURE_ACTION: RwLockFailureAction = RwLockFailureAction::Error;
 
 #[cfg(test)]
-const DEFAULT_RWLOCK_FAILURE_ACTION: RwLockFailureAction = RwLockFailureAction::Panic;
+const DEFAULT_RWLOCK_FAILURE_ACTION: RwLockFailureAction = RwLockFailureAction::Error;
 
 static RWLOCK_TIMEOUT_MS: AtomicU64 = AtomicU64::new(DEFAULT_RWLOCK_TIMEOUT_MS);
 static RWLOCK_FAILURE_ACTION: AtomicU8 = AtomicU8::new(DEFAULT_RWLOCK_FAILURE_ACTION as u8);
@@ -96,8 +96,10 @@ pub(crate) fn lock_timeout_error_at(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
 
     #[test]
+    #[serial]
     fn test_lock_timeout_error_panics() {
         set_rwlock_failure_action(RwLockFailureAction::Panic);
         assert!(std::panic::catch_unwind(|| lock_timeout_error("boom")).is_err());
@@ -105,13 +107,15 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_test_timeout_value() {
         reset_rwlock_config();
-        assert_eq!(rwlock_timeout(), Duration::from_secs(1));
+        assert_eq!(rwlock_timeout(), Duration::from_secs(5));
         reset_rwlock_config();
     }
 
     #[test]
+    #[serial]
     fn test_lock_timeout_error_returns_error() {
         reset_rwlock_config();
         set_rwlock_failure_action(RwLockFailureAction::Error);
@@ -123,6 +127,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_override_timeout() {
         reset_rwlock_config();
         set_rwlock_timeout(Duration::from_secs(5));

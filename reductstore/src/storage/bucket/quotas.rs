@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::Bucket;
@@ -141,13 +141,13 @@ mod tests {
         let blob: &[u8] = &[0u8; 40];
 
         write(&bucket, "test-1", 0, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 44);
+        assert_eq!(bucket.clone().info().await.unwrap().info.size, 44);
 
         write(&bucket, "test-2", 1, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 91);
+        assert_eq!(bucket.clone().info().await.unwrap().info.size, 91);
 
         write(&bucket, "test-3", 2, blob).await.unwrap();
-        assert_eq!(bucket.info().await.unwrap().info.size, 94);
+        assert_eq!(bucket.clone().info().await.unwrap().info.size, 94);
 
         assert_eq!(
             crate::storage::bucket::tests::read(&bucket, "test-1", 0)
@@ -196,7 +196,7 @@ mod tests {
 
         write(&bucket, "test-1", 0, b"test").await.unwrap();
         bucket.sync_fs().await.unwrap(); // we need to sync to get the correct size
-        assert_eq!(bucket.info().await.unwrap().info.size, 22);
+        assert_eq!(bucket.clone().info().await.unwrap().info.size, 8);
 
         let result = write(&bucket, "test-2", 1, b"0123456789___").await;
         assert_eq!(

@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedClientApi};
@@ -199,7 +199,7 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let state = state.write_batch("test_entry", vec![record_to_write]);
+        let state = state.write_batch("test_entry", vec![record_to_write]).await;
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -226,7 +226,9 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let state = state.write_batch("test_entry", vec![record_to_update]);
+        let state = state
+            .write_batch("test_entry", vec![record_to_update])
+            .await;
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -241,9 +243,10 @@ mod tests {
         mut bucket: MockReductBucketApi,
         record_to_write: (BoxedReadRecord, Transaction),
     ) {
-        bucket
-            .expect_write_batch()
-            .returning(move |_, _| Err(ReductError::new(err.clone(), "")));
+        bucket.expect_write_batch().returning(move |_, _| {
+            let err = err.clone();
+            Err(ReductError::new(err, ""))
+        });
         bucket.expect_update_batch().times(0);
 
         let state = Box::new(BucketAvailableState::new(
@@ -251,7 +254,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]);
+        let state = state.write_batch("test", vec![record_to_write]).await;
         assert_eq!(state.last_result(), &Err(ReductError::new(err, "")));
         assert!(!state.is_available());
     }
@@ -267,16 +270,17 @@ mod tests {
         record_to_update: (BoxedReadRecord, Transaction),
     ) {
         bucket.expect_write_batch().times(0);
-        bucket
-            .expect_update_batch()
-            .returning(move |_, _| Err(ReductError::new(err.clone(), "")));
+        bucket.expect_update_batch().returning(move |_, _| {
+            let err = err.clone();
+            Err(ReductError::new(err, ""))
+        });
 
         let state = Box::new(BucketAvailableState::new(
             Box::new(client),
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_update]);
+        let state = state.write_batch("test", vec![record_to_update]).await;
         assert_eq!(state.last_result(), &Err(ReductError::new(err, "")));
         assert!(!state.is_available());
     }
@@ -291,16 +295,17 @@ mod tests {
         mut bucket: MockReductBucketApi,
         record_to_write: (BoxedReadRecord, Transaction),
     ) {
-        bucket
-            .expect_write_batch()
-            .returning(move |_, _| Err(ReductError::new(err.clone(), "")));
+        bucket.expect_write_batch().returning(move |_, _| {
+            let err = err.clone();
+            Err(ReductError::new(err, ""))
+        });
 
         let state = Box::new(BucketAvailableState::new(
             Box::new(client),
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]);
+        let state = state.write_batch("test", vec![record_to_write]).await;
         assert_eq!(state.last_result(), &Err(ReductError::new(err, "")));
         assert!(state.is_available());
     }
@@ -324,7 +329,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]);
+        let state = state.write_batch("test", vec![record_to_write]).await;
         let error_map = state.last_result().as_ref().unwrap();
 
         assert_eq!(error_map.len(), 1);
@@ -356,7 +361,9 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_update, record_to_write()]);
+        let state = state
+            .write_batch("test", vec![record_to_update, record_to_write()])
+            .await;
         assert!(
             state.last_result().is_ok(),
             "we should not have any errors because wrote errored records"
@@ -385,7 +392,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_update]);
+        let state = state.write_batch("test", vec![record_to_update]).await;
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -398,7 +405,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.probe();
+        let state = state.probe().await;
         assert!(state.is_available());
     }
 

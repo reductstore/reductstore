@@ -25,7 +25,7 @@ impl Entry {
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
     pub async fn begin_write(
-        self: Arc<Self>,
+        &self,
         time: u64,
         content_size: u64,
         content_type: String,
@@ -193,7 +193,7 @@ mod tests {
 
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
-        let mut bm = entry.block_manager.write().unwrap();
+        let mut bm = entry.block_manager.write().await.unwrap();
 
         assert_eq!(
             bm.load_block(1)
@@ -248,7 +248,7 @@ mod tests {
         write_stub_record(&entry, 2).await;
         write_stub_record(&entry, 2000010).await;
 
-        let mut bm = entry.block_manager.write().unwrap();
+        let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1)
             .unwrap()
@@ -296,7 +296,7 @@ mod tests {
         write_stub_record(&entry, 3000000).await;
         write_stub_record(&entry, 2000000).await;
 
-        let mut bm = entry.block_manager.write().unwrap();
+        let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1000000)
             .unwrap()
@@ -326,7 +326,7 @@ mod tests {
         write_stub_record(&entry, 3000000).await;
         write_stub_record(&entry, 1000000).await;
 
-        let mut bm = entry.block_manager.write().unwrap();
+        let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1000000)
             .unwrap()
@@ -349,7 +349,7 @@ mod tests {
         write_stub_record(&entry, 2000000).await;
         let err = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-            .wait();
+            .await;
         assert_eq!(
             err.err(),
             Some(ReductError::conflict(
@@ -366,7 +366,7 @@ mod tests {
         write_stub_record(&entry, 1000000).await;
         let err = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-            .wait();
+            .await;
         assert_eq!(
             err.err(),
             Some(ReductError::conflict(
@@ -380,6 +380,7 @@ mod tests {
     #[tokio::test]
     async fn test_begin_override_errored(entry: Arc<Entry>) {
         let mut sender = entry
+            .clone()
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .await
             .unwrap();
@@ -387,6 +388,7 @@ mod tests {
         sender.send(Ok(None)).await.unwrap();
 
         let mut sender = entry
+            .clone()
             .begin_write(
                 1000000,
                 10,
@@ -403,6 +405,7 @@ mod tests {
         let record = entry
             .block_manager
             .write()
+            .await
             .unwrap()
             .load_block(1000000)
             .unwrap()
@@ -422,12 +425,14 @@ mod tests {
     #[tokio::test]
     async fn test_begin_not_override_if_different_size(entry: Arc<Entry>) {
         let mut sender = entry
+            .clone()
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .await
             .unwrap();
         sender.send(Ok(None)).await.unwrap();
 
         let err = entry
+            .clone()
             .begin_write(
                 1000000,
                 5,
@@ -456,7 +461,7 @@ mod tests {
         write_stub_record(&entry, 2000000).await;
 
         // We must be able to read the belated record back
-        let reader = entry.begin_read(2000000).wait();
+        let reader = entry.begin_read(2000000).await;
         assert!(reader.is_ok(), "Belated record should be readable");
     }
 }

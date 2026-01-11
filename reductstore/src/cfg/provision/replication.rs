@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::CfgParser;
@@ -463,15 +463,19 @@ mod tests {
             data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
             ..Default::default()
         };
-        let storage = StorageEngine::builder()
-            .with_data_path(cfg.data_path.clone())
-            .with_cfg(cfg.clone())
-            .build();
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
         storage
             .create_bucket("bucket1", Default::default())
+            .await
             .unwrap();
         let mut repo = create_replication_repo(
-            Arc::new(storage),
+            storage.clone(),
             Cfg {
                 replication_conf: ReplicationConfig {
                     connection_timeout: std::time::Duration::from_secs(10),
@@ -480,7 +484,8 @@ mod tests {
                 },
                 ..Default::default()
             },
-        );
+        )
+        .await;
         repo.create_replication(
             "replication1",
             ReplicationSettings {
@@ -497,6 +502,7 @@ mod tests {
                 mode: ReplicationMode::Enabled,
             },
         )
+        .await
         .unwrap();
         repo.set_mode("replication1", ReplicationMode::Disabled)
             .unwrap();
@@ -521,6 +527,7 @@ mod tests {
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
             .build()
+            .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication("replication1").unwrap();

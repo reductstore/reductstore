@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::Bucket;
@@ -85,6 +85,7 @@ mod tests {
         write(&bucket, "entry-b", 3, b"b2").await.unwrap();
 
         let errors = bucket
+            .clone()
             .remove_records(HashMap::from([
                 ("entry-a".to_string(), vec![1]),
                 ("entry-b".to_string(), vec![2, 4]),
@@ -106,7 +107,7 @@ mod tests {
         );
         assert_eq!(
             bucket.begin_read("entry-b", 2).await.err().unwrap(),
-            not_found!("No record with timestamp 2")
+            not_found!("Record 2 not found in block test/entry-b/2")
         );
         assert!(bucket.begin_read("entry-b", 3).await.is_ok());
     }
@@ -133,7 +134,7 @@ mod tests {
 
         assert_eq!(
             bucket.begin_read("entry-a", 1).await.err().unwrap(),
-            not_found!("No record with timestamp 1")
+            not_found!("Record 1 not found in block test/entry-a/1")
         );
         assert_eq!(
             bucket.begin_read("entry-b", 2).await.err().unwrap(),

@@ -20,7 +20,6 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::thread::sleep;
 use std::time::Duration;
 use tokio::task::JoinHandle;
 
@@ -209,7 +208,8 @@ impl ReplicationTask {
                         ReplicationTask::sleep_with_stop(
                             &thr_stop_flag,
                             thr_system_options.next_transaction_timeout,
-                        );
+                        )
+                        .await;
                         continue;
                     }
                     ReplicationMode::Paused => {
@@ -218,7 +218,8 @@ impl ReplicationTask {
                         ReplicationTask::sleep_with_stop(
                             &thr_stop_flag,
                             thr_system_options.next_transaction_timeout,
-                        );
+                        )
+                        .await;
                         continue;
                     }
                     ReplicationMode::Enabled => {}
@@ -236,7 +237,8 @@ impl ReplicationTask {
                         ReplicationTask::sleep_with_stop(
                             &thr_stop_flag,
                             thr_system_options.remote_bucket_unavailable_timeout,
-                        );
+                        )
+                        .await;
                     }
                     Ok(SyncState::NoTransactions) => {
                         // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available
@@ -244,7 +246,8 @@ impl ReplicationTask {
                         ReplicationTask::sleep_with_stop(
                             &thr_stop_flag,
                             thr_system_options.next_transaction_timeout,
-                        );
+                        )
+                        .await;
                     }
                     Ok(SyncState::BrokenLog(entry_name)) => {
                         thr_is_active.store(false, Ordering::Relaxed);
@@ -278,7 +281,8 @@ impl ReplicationTask {
                                 ReplicationTask::sleep_with_stop(
                                     &thr_stop_flag,
                                     thr_system_options.log_recovery_timeout,
-                                );
+                                )
+                                .await;
                             }
                         }
                     }
@@ -288,7 +292,8 @@ impl ReplicationTask {
                         ReplicationTask::sleep_with_stop(
                             &thr_stop_flag,
                             thr_system_options.next_transaction_timeout,
-                        );
+                        )
+                        .await;
                     }
                 }
 
@@ -427,12 +432,12 @@ impl ReplicationTask {
         })
     }
 
-    fn sleep_with_stop(stop_flag: &Arc<AtomicBool>, duration: Duration) {
+    async fn sleep_with_stop(stop_flag: &Arc<AtomicBool>, duration: Duration) {
         const SLICE: Duration = Duration::from_millis(50);
         let mut remaining = duration;
         while remaining > Duration::ZERO && !stop_flag.load(Ordering::Relaxed) {
             let step = remaining.min(SLICE);
-            sleep(step);
+            tokio::time::sleep(step).await;
             remaining = remaining.saturating_sub(step);
         }
     }
@@ -478,6 +483,7 @@ impl Drop for ReplicationTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use bytes::Bytes;
     use std::fs;
     use std::io::Write;
@@ -497,18 +503,20 @@ mod tests {
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::diagnostics::DiagnosticsItem;
     use reduct_base::Labels;
+    use tokio::time::sleep as tokio_sleep;
 
     mock! {
         RmBucket {}
 
+        #[async_trait]
         impl RemoteBucket for RmBucket {
-            fn write_batch(
+            async fn write_batch(
                 &mut self,
                 entry_name: &str,
                 record: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
-            fn probe_availability(&mut self);
+            async fn probe_availability(&mut self);
 
             fn is_active(&self) -> bool;
         }
@@ -516,25 +524,28 @@ mod tests {
     }
 
     #[rstest]
-    fn test_transaction_log_init(
+    #[tokio::test]
+    async fn test_transaction_log_init(
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
         path: PathBuf,
     ) {
-        let replication = build_replication(path, remote_bucket, settings);
-        assert_eq!(replication.log_map.read().unwrap().len(), 2);
+        let replication = build_replication(path, remote_bucket, settings).await;
+        let log_map = replication.log_map.read().await.unwrap();
+        assert_eq!(log_map.len(), 2);
         assert!(
-            replication.log_map.read().unwrap().contains_key("test1"),
+            log_map.contains_key("test1"),
             "Transaction log is initialized"
         );
         assert!(
-            replication.log_map.read().unwrap().contains_key("test2"),
+            log_map.contains_key("test2"),
             "Transaction log is initialized"
         );
     }
 
     #[rstest]
-    fn test_transaction_log_init_err(
+    #[tokio::test]
+    async fn test_transaction_log_init_err(
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
         path: PathBuf,
@@ -561,6 +572,7 @@ mod tests {
                 BucketSettings::default(),
                 Cfg::default(),
             )
+            .await
             .unwrap();
 
             fs::create_dir_all(log_path.parent().unwrap()).unwrap();
@@ -571,17 +583,10 @@ mod tests {
                 .unwrap();
         }
 
-        let replication = build_replication(path, remote_bucket, settings);
-        assert_eq!(replication.log_map.read().unwrap().len(), 2);
-        let log_len = replication
-            .log_map
-            .read()
-            .unwrap()
-            .get("test1")
-            .unwrap()
-            .read()
-            .unwrap()
-            .len();
+        let replication = build_replication(path, remote_bucket, settings).await;
+        let log_map = replication.log_map.read().await.unwrap();
+        assert_eq!(log_map.len(), 2);
+        let log_len = log_map.get("test1").unwrap().read().await.unwrap().len();
         assert_eq!(
             log_len, 0,
             "Task recreated a new transaction log for 'test1' after broken log"
@@ -589,7 +594,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_add_new_entry(
+    #[tokio::test]
+    async fn test_add_new_entry(
         mut remote_bucket: MockRmBucket,
         mut notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -599,7 +605,7 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(path, remote_bucket, settings.clone());
+        let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
 
         notification.entry = "new_entry".to_string();
         fs::create_dir_all(
@@ -611,11 +617,11 @@ mod tests {
         )
         .unwrap();
 
-        replication.notify(notification).unwrap();
-        sleep(Duration::from_millis(100));
-        assert!(transaction_log_is_empty(&replication));
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(100)).await;
+        assert!(transaction_log_is_empty(&replication).await);
         assert_eq!(
-            replication.info(),
+            replication.info().await.unwrap(),
             ReplicationInfo {
                 name: "test".to_string(),
                 mode: ReplicationMode::Enabled,
@@ -627,7 +633,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_replication_ok_active(
+    #[tokio::test]
+    async fn test_replication_ok_active(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -637,13 +644,13 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(path, remote_bucket, settings);
+        let mut replication = build_replication(path, remote_bucket, settings).await;
 
-        replication.notify(notification).unwrap();
-        sleep(Duration::from_millis(100));
-        assert!(transaction_log_is_empty(&replication));
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(100)).await;
+        assert!(transaction_log_is_empty(&replication).await);
         assert_eq!(
-            replication.info(),
+            replication.info().await.unwrap(),
             ReplicationInfo {
                 name: "test".to_string(),
                 mode: ReplicationMode::Enabled,
@@ -653,7 +660,7 @@ mod tests {
             }
         );
         assert_eq!(
-            replication.diagnostics(),
+            replication.diagnostics().await.unwrap(),
             Diagnostics {
                 hourly: DiagnosticsItem {
                     ok: 60,
@@ -665,7 +672,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_replication_inactive(
+    #[tokio::test]
+    async fn test_replication_inactive(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -675,13 +683,13 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(false);
-        let mut replication = build_replication(path, remote_bucket, settings);
+        let mut replication = build_replication(path, remote_bucket, settings).await;
 
-        replication.notify(notification).unwrap();
-        sleep(Duration::from_millis(100));
-        assert!(!transaction_log_is_empty(&replication));
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(100)).await;
+        assert!(!transaction_log_is_empty(&replication).await);
         assert_eq!(
-            replication.info(),
+            replication.info().await.unwrap(),
             ReplicationInfo {
                 name: "test".to_string(),
                 mode: ReplicationMode::Enabled,
@@ -691,7 +699,7 @@ mod tests {
             }
         );
         assert_eq!(
-            replication.diagnostics(),
+            replication.diagnostics().await.unwrap(),
             Diagnostics {
                 hourly: DiagnosticsItem {
                     ok: 0,
@@ -703,67 +711,71 @@ mod tests {
     }
 
     #[rstest]
-    fn test_replication_paused_mode_available(
+    #[tokio::test]
+    async fn test_replication_paused_mode_available(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         mut settings: ReplicationSettings,
         path: PathBuf,
     ) {
         settings.mode = ReplicationMode::Paused;
-        remote_bucket.expect_probe_availability().return_const(());
+        remote_bucket.expect_probe_availability().returning(|| ());
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(path, remote_bucket, settings);
+        let mut replication = build_replication(path, remote_bucket, settings).await;
 
-        replication.notify(notification).unwrap();
-        sleep(Duration::from_millis(100));
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(100)).await;
         assert_eq!(
-            replication.info().is_active,
+            replication.info().await.unwrap().is_active,
             true,
             "is_active should reflect remote availability when paused"
         );
-        assert_eq!(replication.info().pending_records, 1);
+        assert_eq!(replication.info().await.unwrap().pending_records, 1);
     }
 
     #[rstest]
-    fn test_replication_paused_mode_unavailable(
+    #[tokio::test]
+    async fn test_replication_paused_mode_unavailable(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         mut settings: ReplicationSettings,
         path: PathBuf,
     ) {
         settings.mode = ReplicationMode::Paused;
-        remote_bucket.expect_probe_availability().return_const(());
+        remote_bucket.expect_probe_availability().returning(|| ());
         remote_bucket.expect_is_active().return_const(false);
-        let mut replication = build_replication(path, remote_bucket, settings);
+        let mut replication = build_replication(path, remote_bucket, settings).await;
 
-        replication.notify(notification).unwrap();
-        sleep(Duration::from_millis(100));
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(100)).await;
         assert_eq!(
-            replication.info().is_active,
+            replication.info().await.unwrap().is_active,
             false,
             "is_active should be false when remote unavailable"
         );
-        assert_eq!(replication.info().pending_records, 1);
+        assert_eq!(replication.info().await.unwrap().pending_records, 1);
     }
 
     #[rstest]
-    fn test_replication_disabled_mode(
+    #[tokio::test]
+    async fn test_replication_disabled_mode(
         remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         mut settings: ReplicationSettings,
         path: PathBuf,
     ) {
         settings.mode = ReplicationMode::Disabled;
-        let mut replication = build_replication(path, remote_bucket, settings);
+        let mut replication = build_replication(path, remote_bucket, settings).await;
 
-        replication.notify(notification).unwrap();
-        sleep(Duration::from_millis(100));
-        assert_eq!(replication.info().pending_records, 0);
-        assert_eq!(replication.info().is_active, false);
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(100)).await;
+        assert_eq!(replication.info().await.unwrap().pending_records, 0);
+        assert_eq!(replication.info().await.unwrap().is_active, false);
     }
 
     #[rstest]
-    fn test_replication_filter_each_entry(
+    #[tokio::test]
+    async fn test_replication_filter_each_entry(
         mut notification: TransactionNotification,
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
@@ -771,38 +783,39 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .return_const(Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
 
         let settings = ReplicationSettings {
             each_n: Some(2),
             ..settings
         };
 
-        let mut replication = build_replication(path, MockRmBucket::new(), settings.clone());
+        let mut replication = build_replication(path, MockRmBucket::new(), settings.clone()).await;
 
         let mut time = 10;
         for entry in &["test1", "test2"] {
             for _ in 0..3 {
                 notification.entry = entry.to_string();
                 notification.event = Transaction::WriteRecord(time.clone());
-                replication.notify(notification.clone()).unwrap();
+                replication.notify(notification.clone()).await.unwrap();
                 time += 10;
             }
         }
 
-        assert_eq!(replication.log_map.read().unwrap().len(), 2);
+        assert_eq!(replication.log_map.read().await.unwrap().len(), 2);
         assert_eq!(
-            get_entries_from_transaction_log(&mut replication, "test1"),
+            get_entries_from_transaction_log(&mut replication, "test1").await,
             vec![Transaction::WriteRecord(10), Transaction::WriteRecord(30)]
         );
         assert_eq!(
-            get_entries_from_transaction_log(&mut replication, "test2"),
+            get_entries_from_transaction_log(&mut replication, "test2").await,
             vec![Transaction::WriteRecord(40), Transaction::WriteRecord(60)]
         );
     }
 
     #[rstest]
-    fn test_broken_transaction_log(
+    #[tokio::test]
+    async fn test_broken_transaction_log(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -810,10 +823,10 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .return_const(Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(path, remote_bucket, settings.clone());
-        replication.notify(notification.clone()).unwrap();
+        let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
+        replication.notify(notification.clone()).await.unwrap();
 
         let path = ReplicationTask::build_path_to_transaction_log(
             replication.storage.data_path(),
@@ -822,17 +835,18 @@ mod tests {
             &replication.name,
         );
         fs::write(path.clone(), "broken").unwrap();
-        sleep(Duration::from_millis(100));
+        tokio_sleep(Duration::from_millis(100)).await;
 
         assert_eq!(
-            get_entries_from_transaction_log(&mut replication, "test1"),
+            get_entries_from_transaction_log(&mut replication, "test1").await,
             vec![],
             "Transaction log is empty"
         );
     }
 
     #[rstest]
-    fn test_broken_transaction_log_failed_recover(
+    #[tokio::test]
+    async fn test_broken_transaction_log_failed_recover(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -840,10 +854,10 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .return_const(Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut replication = build_replication(path, remote_bucket, settings.clone());
-        replication.notify(notification.clone()).unwrap();
+        let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
+        replication.notify(notification.clone()).await.unwrap();
 
         let path = ReplicationTask::build_path_to_transaction_log(
             replication.storage.data_path(),
@@ -855,7 +869,7 @@ mod tests {
         FILE_CACHE
             .remove_dir(&path.parent().unwrap().parent().unwrap().to_path_buf())
             .unwrap();
-        sleep(Duration::from_millis(100));
+        tokio_sleep(Duration::from_millis(100)).await;
 
         assert!(
                 !path.exists(),
@@ -863,18 +877,18 @@ mod tests {
             );
 
         fs::create_dir_all(path.parent().unwrap()).unwrap();
-        sleep(Duration::from_millis(200));
+        tokio_sleep(Duration::from_millis(200)).await;
 
         assert_eq!(
-            get_entries_from_transaction_log(&mut replication, "test1"),
+            get_entries_from_transaction_log(&mut replication, "test1").await,
             vec![],
             "Transaction log recovered"
         );
     }
 
     #[rstest]
-    #[should_panic] // because RWLock timeout is exceeded and test thread panics
-    fn test_sender_error_handling(
+    #[tokio::test]
+    async fn test_sender_error_handling(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -885,15 +899,15 @@ mod tests {
         remote_bucket.expect_is_active().return_const(true);
 
         let path = tempfile::tempdir().unwrap().keep();
-        let mut replication = build_replication(path, remote_bucket, settings.clone());
-        replication.notify(notification.clone()).unwrap();
+        let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
+        replication.notify(notification.clone()).await.unwrap();
         {
-            let _lock = replication.log_map.write().unwrap();
-            sleep(rwlock_timeout() + Duration::from_millis(100));
+            let _lock = replication.log_map.write().await.unwrap();
+            tokio_sleep(rwlock_timeout() + Duration::from_millis(100)).await;
         }
 
         assert_eq!(
-            replication.info(),
+            replication.info().await.unwrap(),
             ReplicationInfo {
                 name: "test".to_string(),
                 mode: ReplicationMode::Enabled,
@@ -905,7 +919,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_stop_interrupts_long_sleep(
+    #[tokio::test]
+    async fn test_stop_interrupts_long_sleep(
         mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         settings: ReplicationSettings,
@@ -916,9 +931,9 @@ mod tests {
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(false);
 
-        let mut replication = build_replication(path, remote_bucket, settings);
-        replication.notify(notification).unwrap();
-        sleep(Duration::from_millis(100)); // allow worker to start processing
+        let mut replication = build_replication(path, remote_bucket, settings).await;
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(100)).await; // allow worker to start processing
 
         let start = Instant::now();
         drop(replication);
@@ -929,9 +944,10 @@ mod tests {
     }
 
     #[rstest]
-    fn test_double_start(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
+    #[tokio::test]
+    async fn test_double_start(remote_bucket: MockRmBucket, settings: ReplicationSettings) {
         let path = tempfile::tempdir().unwrap().keep();
-        let mut replication = build_replication(path, remote_bucket, settings);
+        let mut replication = build_replication(path, remote_bucket, settings).await;
 
         let handle_before = replication.worker_handle.as_ref().unwrap().id();
         replication.start();
@@ -943,7 +959,7 @@ mod tests {
         );
     }
 
-    fn build_replication(
+    async fn build_replication(
         path: PathBuf,
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
@@ -963,13 +979,15 @@ mod tests {
         let storage = StorageEngine::builder()
             .with_data_path(path)
             .with_cfg(cfg)
-            .build();
+            .build()
+            .await;
         let storage = Arc::new(storage);
 
-        let bucket = match storage.get_bucket(&settings.src_bucket) {
+        let bucket = match storage.get_bucket(&settings.src_bucket).await {
             Ok(bucket) => bucket.upgrade().unwrap(),
             Err(_) => storage
                 .create_bucket("src", BucketSettings::default())
+                .await
                 .unwrap()
                 .upgrade_and_unwrap(),
         };
@@ -979,10 +997,10 @@ mod tests {
             for _ in 0..3 {
                 let mut writer = bucket
                     .begin_write(entry, time, 4, "text/plain".to_string(), Labels::new())
-                    .wait()
+                    .await
                     .unwrap();
-                writer.blocking_send(Ok(Some(Bytes::from("test")))).unwrap();
-                writer.blocking_send(Ok(None)).unwrap_or(());
+                writer.send(Ok(Some(Bytes::from("test")))).await.unwrap();
+                writer.send(Ok(None)).await.unwrap_or(());
                 time += 10;
             }
 
@@ -1004,7 +1022,7 @@ mod tests {
         );
 
         repl.start();
-        sleep(Duration::from_millis(10)); // wait for the transaction log to be initialized in worker
+        tokio_sleep(Duration::from_millis(10)).await; // wait for the transaction log to be initialized in worker
         repl
     }
 
@@ -1046,32 +1064,36 @@ mod tests {
         tempfile::tempdir().unwrap().keep()
     }
 
-    fn transaction_log_is_empty(replication: &ReplicationTask) -> bool {
-        sleep(Duration::from_millis(50));
-        sleep(Duration::from_millis(50));
+    async fn transaction_log_is_empty(replication: &ReplicationTask) -> bool {
+        tokio_sleep(Duration::from_millis(50)).await;
+        tokio_sleep(Duration::from_millis(50)).await;
 
         replication
             .log_map
             .read()
+            .await
             .unwrap()
             .get("test1")
             .unwrap()
             .read()
+            .await
             .unwrap()
             .is_empty()
     }
 
-    fn get_entries_from_transaction_log(
+    async fn get_entries_from_transaction_log(
         replication: &mut ReplicationTask,
         entry: &str,
     ) -> Vec<Transaction> {
         replication
             .log_map
             .read()
+            .await
             .unwrap()
             .get(entry)
             .unwrap()
             .read()
+            .await
             .unwrap()
             .front(10)
             .unwrap()

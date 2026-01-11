@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::entry::{Entry, RecordReader};
@@ -19,26 +19,25 @@ impl Entry {
     /// * `RecordReader` - The record reader to read the record content in chunks.
     /// * `HTTPError` - The error if any.
     pub(crate) async fn begin_read(&self, time: u64) -> Result<RecordReader, ReductError> {
-        let block_manager = self.block_manager.clone();
-        debug!("Reading record for ts={}", time);
+        debug!(
+            "Reading record for ts={} in {}/{}",
+            time, self.bucket_name, self.name
+        );
 
         let (block_ref, record) = {
-            let mut bm = block_manager.write().await?;
+            let mut bm = self.block_manager.write().await?;
             let block_ref = bm.find_block(time)?;
             let block = block_ref.read()?;
             let record = block
                 .get_record(time)
                 .ok_or_else(|| {
-                    let keys: Vec<u64> = block.record_index().keys().cloned().collect();
-                    debug!(
-                        "Record {} not found in block {}/{}/{}; available range: {:?}",
+                    not_found!(
+                        "Record {} not found in block {}/{}/{}",
                         time,
-                        bm.bucket_name(),
-                        bm.entry_name(),
+                        self.bucket_name,
+                        self.name,
                         block.block_id(),
-                        keys
-                    );
-                    not_found!("No record with timestamp {}", time)
+                    )
                 })?
                 .clone();
             (block_ref.clone(), record)
@@ -46,19 +45,23 @@ impl Entry {
 
         if record.state == record::State::Started as i32 {
             return Err(too_early!(
-                "Record with timestamp {} is still being written",
-                time
+                "Record with timestamp {} in {}/{} is still being written",
+                time,
+                self.bucket_name,
+                self.name
             ));
         }
 
         if record.state == record::State::Errored as i32 {
             return Err(internal_server_error!(
-                "Record with timestamp {} is broken",
-                time
+                "Record with timestamp {} in {}/{} is broken",
+                time,
+                self.bucket_name,
+                self.name
             ));
         }
 
-        RecordReader::try_new(block_manager, block_ref, time, None).await
+        RecordReader::try_new(self.block_manager.clone(), block_ref, time, None).await
     }
 }
 
@@ -104,7 +107,9 @@ mod tests {
         let reader = entry.begin_read(2000000).await;
         assert_eq!(
             reader.err(),
-            Some(not_found!("No record with timestamp 2000000"))
+            Some(not_found!(
+                "Record 2000000 not found in block bucket/entry/1000000"
+            ))
         );
     }
 
@@ -112,6 +117,7 @@ mod tests {
     #[tokio::test]
     async fn test_begin_read_broken(entry: Arc<Entry>) {
         let mut sender = entry
+            .clone()
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .await
             .unwrap();
@@ -125,7 +131,7 @@ mod tests {
         assert_eq!(
             reader.err(),
             Some(internal_server_error!(
-                "Record with timestamp 1000000 is broken"
+                "Record with timestamp 1000000 in bucket/entry is broken"
             ))
         );
     }
@@ -134,6 +140,7 @@ mod tests {
     #[tokio::test]
     async fn test_begin_read_still_written(entry: Arc<Entry>) {
         let mut sender = entry
+            .clone()
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
             .await
             .unwrap();
@@ -146,7 +153,7 @@ mod tests {
         assert_eq!(
             reader.err(),
             Some(too_early!(
-                "Record with timestamp 1000000 is still being written"
+                "Record with timestamp 1000000 in bucket/entry is still being written"
             ))
         );
     }
@@ -160,7 +167,9 @@ mod tests {
         let reader = entry.begin_read(2000000).await;
         assert_eq!(
             reader.err(),
-            Some(not_found!("No record with timestamp 2000000"))
+            Some(not_found!(
+                "Record 2000000 not found in block bucket/entry/1000000"
+            ))
         );
     }
 
@@ -219,7 +228,7 @@ mod tests {
             write_stub_record(&entry, i * step).await;
         }
 
-        let reader = entry.begin_read(5 * step).wait().unwrap();
+        let reader = entry.begin_read(5 * step).await.unwrap();
         assert_eq!(reader.meta().timestamp(), 500000);
     }
 }

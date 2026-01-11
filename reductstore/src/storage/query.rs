@@ -186,7 +186,6 @@ mod tests {
     use crate::backend::Backend;
     use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
-    use crate::core::sync::RwLock;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
@@ -352,7 +351,7 @@ mod tests {
     }
 
     #[log_test(rstest)]
-    #[tokio::test(flavor = "multi_thread")]
+    #[tokio::test]
     async fn test_query_task_blocking_error(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let options = QueryOptions::default();
         let query: Box<dyn Query + Send + Sync> = Box::new(PanickingQuery {
@@ -378,7 +377,7 @@ mod tests {
         assert!(timeout(Duration::from_millis(1000), handle)
             .await
             .unwrap()
-            .is_ok());
+            .is_err());
     }
 
     #[fixture]

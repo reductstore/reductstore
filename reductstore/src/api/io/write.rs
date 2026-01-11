@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::common::parse_content_length_from_header;
@@ -563,7 +563,7 @@ mod tests {
             chunk: reduct_base::io::WriteChunk,
             _timeout: Duration,
         ) -> Result<(), ReductError> {
-            self.blocking_send(chunk)
+            self.send(chunk).await
         }
     }
 

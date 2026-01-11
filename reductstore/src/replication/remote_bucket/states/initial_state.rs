@@ -123,7 +123,7 @@ mod tests {
             last_result: Ok(ErrorRecordMap::new()),
         });
 
-        let state = state.write_batch("test_entry", vec![]);
+        let state = state.write_batch("test_entry", vec![]).await;
 
         assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
         assert_eq!(state.is_available(), true);
@@ -142,7 +142,7 @@ mod tests {
             last_result: Ok(ErrorRecordMap::new()),
         });
 
-        let state = state.write_batch("test_entry", vec![]);
+        let state = state.write_batch("test_entry", vec![]).await;
 
         assert_eq!(
             state.last_result(),
@@ -164,7 +164,7 @@ mod tests {
             last_result: Ok(ErrorRecordMap::new()),
         });
 
-        let state = state.probe();
+        let state = state.probe().await;
         assert!(state.is_available());
     }
 
@@ -181,7 +181,7 @@ mod tests {
             last_result: Ok(ErrorRecordMap::new()),
         });
 
-        let state = state.probe();
+        let state = state.probe().await;
         assert!(!state.is_available());
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::{Cfg, InstanceRole};
@@ -98,10 +98,12 @@ mod tests {
                 .await
                 .unwrap(),
         );
+        tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
+        read_only_bucket.reload().await.unwrap();
 
         // Initially, read-only bucket has one entry
         {
-            let entries = read_only_bucket.entries.read().unwrap();
+            let entries = read_only_bucket.entries.read().await.unwrap();
             assert_eq!(entries.len(), 1);
             assert!(entries.contains_key("test-1"));
         }
@@ -115,7 +117,7 @@ mod tests {
         read_only_bucket.reload().await.unwrap();
 
         assert_eq!(
-            read_only_bucket.entries.read().unwrap().len(),
+            read_only_bucket.entries.read().await.unwrap().len(),
             1,
             "Should not reload before interval"
         );
@@ -126,7 +128,7 @@ mod tests {
 
         // Now, read-only bucket should have two entries
         {
-            let entries = read_only_bucket.entries.read().unwrap();
+            let entries = read_only_bucket.entries.read().await.unwrap();
             assert_eq!(entries.len(), 2);
             assert!(entries.contains_key("test-1"));
             assert!(entries.contains_key("test-2"));
@@ -145,10 +147,12 @@ mod tests {
                 .await
                 .unwrap(),
         );
+        tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
+        read_only_bucket.reload().await.unwrap();
 
         // Initially, read-only bucket has one entry
         {
-            let entries = read_only_bucket.entries.read().unwrap();
+            let entries = read_only_bucket.entries.read().await.unwrap();
             assert_eq!(entries.len(), 1);
             assert!(entries.contains_key("test-1"));
         }
@@ -159,7 +163,7 @@ mod tests {
         read_only_bucket.reload().await.unwrap();
 
         assert_eq!(
-            read_only_bucket.entries.read().unwrap().len(),
+            read_only_bucket.entries.read().await.unwrap().len(),
             1,
             "Should not reload before interval"
         );
@@ -170,7 +174,7 @@ mod tests {
 
         // Now, read-only bucket should have zero entries
         {
-            let entries = read_only_bucket.entries.read().unwrap();
+            let entries = read_only_bucket.entries.read().await.unwrap();
             assert_eq!(entries.len(), 0);
         }
     }
@@ -223,9 +227,11 @@ mod tests {
                     .await
                     .unwrap(),
             );
+            tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
+            read_only_bucket.reload().await.unwrap();
 
             {
-                let entries = read_only_bucket.entries.read().unwrap();
+                let entries = read_only_bucket.entries.read().await.unwrap();
                 assert_eq!(entries.len(), 1);
                 assert!(entries.contains_key("test-1"));
             }

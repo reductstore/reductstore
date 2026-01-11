@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use axum_server::tls_rustls::RustlsConfig;
@@ -327,7 +327,7 @@ mod tests {
             lock_file: Arc::new(cfg.build_lock_file().unwrap()),
         };
 
-        ctx.shutdown();
+        ctx.shutdown().await;
     }
 
     async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {

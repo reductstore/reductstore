@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 mod read_only;
 use crate::cfg::Cfg;
@@ -376,6 +376,14 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 }
 
 #[cfg(test)]
+impl StorageEngine {
+    pub async fn reset_last_replica_sync(&self) {
+        let mut sync = self.last_replica_sync.write().await.unwrap();
+        *sync = Instant::now();
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::Backend;
@@ -387,7 +395,8 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_create_folder() {
+    #[tokio::test]
+    async fn test_create_folder() {
         let path = tempdir().unwrap().keep().join("data_path");
         let cfg = Cfg {
             data_path: path.clone(),
@@ -398,7 +407,8 @@ mod tests {
         let _ = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
             .with_cfg(cfg)
-            .build();
+            .build()
+            .await;
         assert!(path.exists(), "Engine creates a folder if it doesn't exist");
     }
 
@@ -450,8 +460,7 @@ mod tests {
                 .with_cfg(cfg)
                 .with_license(license.clone())
                 .build()
-                .await
-                .unwrap(),
+                .await,
         );
         assert_eq!(storage.info().await.unwrap().license, Some(license));
     }
@@ -510,8 +519,7 @@ mod tests {
                     .with_data_path(cfg.data_path.clone())
                     .with_cfg(cfg)
                     .build()
-                    .await
-                    .unwrap(),
+                    .await,
             );
             assert_eq!(
                 storage.info().await.unwrap(),
@@ -529,9 +537,13 @@ mod tests {
                 }
             );
 
-            let bucket = storage.get_bucket("test").unwrap().upgrade_and_unwrap();
+            let bucket = storage
+                .get_bucket("test")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
-            assert_eq!(bucket.settings(), bucket_settings);
+            assert_eq!(bucket.settings().await.unwrap(), bucket_settings);
         }
 
         #[rstest]
@@ -563,8 +575,7 @@ mod tests {
                     .with_data_path(cfg.data_path.clone())
                     .with_cfg(cfg)
                     .build()
-                    .await
-                    .unwrap(),
+                    .await,
             );
             assert_eq!(
                 storage.info().await.unwrap(),
@@ -739,8 +750,7 @@ mod tests {
                     .with_data_path(cfg.data_path.clone())
                     .with_cfg(cfg)
                     .build()
-                    .await
-                    .unwrap(),
+                    .await,
             );
 
             let result = storage.get_bucket("test").await;
@@ -750,12 +760,31 @@ mod tests {
 
     mod rename_bucket {
         use super::*;
+        use crate::core::sync::{
+            reset_rwlock_config, set_rwlock_failure_action, set_rwlock_timeout, RwLockFailureAction,
+        };
         use reduct_base::io::ReadRecord;
         use reduct_base::logger::Logger;
+        use serial_test::serial;
+
+        struct ResetGuard;
+        impl Drop for ResetGuard {
+            fn drop(&mut self) {
+                reset_rwlock_config();
+            }
+        }
+
+        fn relax_locks() -> ResetGuard {
+            set_rwlock_timeout(Duration::from_secs(2));
+            set_rwlock_failure_action(RwLockFailureAction::Error);
+            ResetGuard
+        }
 
         #[rstest]
         #[tokio::test]
+        #[serial]
         async fn test_rename_bucket(#[future] storage: Arc<StorageEngine>) {
+            let _reset = relax_locks();
             let storage = storage.await;
             Logger::init("TRACE");
             let bucket = storage
@@ -799,7 +828,9 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        #[serial]
         async fn test_rename_bucket_with_non_existing_name(#[future] storage: Arc<StorageEngine>) {
+            let _reset = relax_locks();
             let storage = storage.await;
             let result = storage
                 .rename_bucket("test".to_string(), "new".to_string())
@@ -809,7 +840,9 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        #[serial]
         async fn test_rename_bucket_with_existing_name(#[future] storage: Arc<StorageEngine>) {
+            let _reset = relax_locks();
             let storage = storage.await;
             let bucket = storage
                 .create_bucket("test", BucketSettings::default())
@@ -833,7 +866,9 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        #[serial]
         async fn test_rename_bucket_with_invalid_name(#[future] storage: Arc<StorageEngine>) {
+            let _reset = relax_locks();
             let storage = storage.await;
             let result = storage
                 .rename_bucket("test".to_string(), "new$".to_string())
@@ -923,8 +958,7 @@ mod tests {
                 .with_data_path(cfg.data_path.clone())
                 .with_cfg(cfg)
                 .build()
-                .await
-                .unwrap(),
+                .await,
         )
     }
 }

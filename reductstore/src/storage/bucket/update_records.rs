@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::Bucket;
@@ -88,6 +88,7 @@ mod tests {
 
     async fn write_with_labels(entry: &Arc<Entry>, time: u64, labels: Labels) {
         let mut sender = entry
+            .clone()
             .begin_write(time, 1, "text/plain".to_string(), labels)
             .await
             .unwrap();

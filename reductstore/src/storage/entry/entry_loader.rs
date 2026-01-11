@@ -1,4 +1,4 @@
-// Copyright 2024-2025 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use std::collections::{HashMap, HashSet};
@@ -774,7 +774,7 @@ mod tests {
         // Restore the entry
         let entry = EntryLoader::restore_entry(
             path.join(entry.name.clone()),
-            entry.settings().await,
+            entry.settings().await.unwrap(),
             Cfg::default().into(),
         )
         .await
@@ -818,7 +818,7 @@ mod tests {
 
             let entry = EntryLoader::restore_entry(
                 path.clone(),
-                entry.settings().await,
+                entry.settings().await.unwrap(),
                 Cfg::default().into(),
             )
             .await
@@ -863,7 +863,7 @@ mod tests {
 
             let entry = EntryLoader::restore_entry(
                 path.clone(),
-                entry.settings().await,
+                entry.settings().await.unwrap(),
                 Cfg::default().into(),
             )
             .await
@@ -898,11 +898,14 @@ mod tests {
             // Record #1 was removed
             wal.append(1, WalEntry::RemoveRecord(0)).unwrap();
 
-            let entry =
-                EntryLoader::restore_entry(path, entry.settings().await, Cfg::default().into())
-                    .await
-                    .unwrap()
-                    .unwrap();
+            let entry = EntryLoader::restore_entry(
+                path,
+                entry.settings().await.unwrap(),
+                Cfg::default().into(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
 
             let block = entry
                 .block_manager
@@ -925,11 +928,14 @@ mod tests {
 
             // Block #1 was removed
             wal.append(1, WalEntry::RemoveBlock).unwrap();
-            let entry =
-                EntryLoader::restore_entry(path, entry.settings().await, Cfg::default().into())
-                    .await
-                    .unwrap()
-                    .unwrap();
+            let entry = EntryLoader::restore_entry(
+                path,
+                entry.settings().await.unwrap(),
+                Cfg::default().into(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
 
             let block = entry
                 .block_manager
@@ -949,7 +955,7 @@ mod tests {
             fs::write(path.join("wal/1.wal"), b"bad data").unwrap();
             let entry = EntryLoader::restore_entry(
                 path.clone(),
-                entry.settings().await,
+                entry.settings().await.unwrap(),
                 Cfg::default().into(),
             )
             .await;
@@ -989,7 +995,7 @@ mod tests {
             // Restore the entry
             let entry = EntryLoader::restore_entry(
                 path.clone(),
-                entry.settings().await,
+                entry.settings().await.unwrap(),
                 Cfg::default().into(),
             )
             .await

@@ -244,7 +244,10 @@ mod tests {
         .err()
         .unwrap();
 
-        assert_eq!(err, HttpError::new(NotFound, "No record with timestamp 1"));
+        assert_eq!(
+            err,
+            HttpError::new(NotFound, "Record 1 not found in block bucket-1/entry-1/0")
+        );
     }
 
     #[rstest]

@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod query;
@@ -36,7 +36,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::task::block_in_place;
 
 /// Bucket is a single storage bucket.
 pub(crate) struct Bucket {
@@ -312,7 +311,7 @@ impl Bucket {
         time: u64,
     ) -> Result<crate::storage::entry::RecordReader, ReductError> {
         match self.get_entry(name).await?.upgrade() {
-            Ok(entry) => entry.begin_read(time),
+            Ok(entry) => entry.begin_read(time).await,
             Err(e) => Err(e).into(),
         }
     }
@@ -438,16 +437,14 @@ impl Bucket {
         tokio::spawn(async move {
             let mut count = 0usize;
             for entry in entries.read().await?.values() {
-                block_in_place(|| {
-                    if let Err(err) = entry.compact() {
-                        error!(
-                            "Failed to compact entry '{}' in bucket '{}': {}",
-                            entry.name(),
-                            bucket_name,
-                            err
-                        );
-                    }
-                });
+                if let Err(err) = entry.compact() {
+                    error!(
+                        "Failed to compact entry '{}' in bucket '{}': {}",
+                        entry.name(),
+                        bucket_name,
+                        err
+                    );
+                }
                 count += 1;
             }
             debug!(
@@ -481,11 +478,6 @@ impl Bucket {
     pub fn is_provisioned(&self) -> bool {
         self.is_provisioned
             .load(std::sync::atomic::Ordering::Relaxed)
-    }
-
-    #[cfg(test)]
-    pub async fn entries(&self) -> Result<BTreeMap<String, Arc<Entry>>, ReductError> {
-        Ok(self.entries.read().await?.clone())
     }
 
     pub(super) async fn status(&self) -> Result<ResourceStatus, ReductError> {
@@ -557,7 +549,7 @@ mod tests {
             write(&bucket, "test-1", 1, b"test").await.unwrap();
 
             bucket.remove_entry("test-1").await.unwrap();
-            let err = bucket.get_entry("test-1").err().unwrap();
+            let err = bucket.get_entry("test-1").await.err().unwrap();
             assert!(
                 err == ReductError::conflict("Entry 'test-1' in bucket 'test' is being deleted")
                     || err == ReductError::not_found("Entry 'test-1' not found in bucket 'test'"),
@@ -570,7 +562,7 @@ mod tests {
         async fn test_remove_entry_not_found(#[future] bucket: Arc<Bucket>) {
             let bucket = bucket.await;
             assert_eq!(
-                bucket.remove_entry("test-1").err(),
+                bucket.remove_entry("test-1").await.err(),
                 Some(ReductError::not_found(
                     "Entry 'test-1' not found in bucket 'test'"
                 ))
@@ -590,7 +582,7 @@ mod tests {
 
             bucket.rename_entry("test-1", "test-2").await.unwrap();
             assert_eq!(
-                bucket.get_entry("test-1").err(),
+                bucket.get_entry("test-1").await.err(),
                 Some(ReductError::not_found(
                     "Entry 'test-1' not found in bucket 'test'"
                 ))
@@ -598,6 +590,7 @@ mod tests {
             assert_eq!(
                 bucket
                     .get_entry("test-2")
+                    .await
                     .unwrap()
                     .upgrade()
                     .unwrap()
@@ -653,7 +646,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(
-                bucket.get_entry("test-1").err(),
+                bucket.get_entry("test-1").await.err(),
                 Some(ReductError::not_found(
                     "Entry 'test-1' not found in bucket 'test'"
                 ))
@@ -706,7 +699,7 @@ mod tests {
         async fn test_entry_deleting_rejects_operations(#[future] bucket: Arc<Bucket>) {
             let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
-            let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
+            let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
             entry.mark_deleting().await.unwrap();
 
             let err = bucket.begin_read("test-1", 1).await.err().unwrap();
@@ -723,7 +716,7 @@ mod tests {
         ) {
             let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
-            let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
+            let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
             entry.mark_deleting().await.unwrap();
             assert_eq!(
                 entry.mark_deleting().await,
@@ -740,7 +733,7 @@ mod tests {
         ) {
             let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
-            let entry = bucket.get_entry("test-1").unwrap().upgrade().unwrap();
+            let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
             entry.mark_deleting().await.unwrap();
 
             assert_eq!(

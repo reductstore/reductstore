@@ -1,4 +1,4 @@
-// Copyright 2024-2025 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::core::sync::AsyncRwLock;
@@ -171,40 +171,51 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::sync::{
+        reset_rwlock_config, set_rwlock_failure_action, set_rwlock_timeout, RwLockFailureAction,
+    };
     use crate::storage::entry::tests::{entry, write_stub_record};
     use crate::storage::entry::EntrySettings;
     use rstest::{fixture, rstest};
+    use serial_test::serial;
     use std::sync::Arc;
+    use std::time::Duration;
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_remove_records(#[future] entry_with_data: Arc<Entry>) {
         let entry_with_data = entry_with_data.await;
 
         let timestamps = vec![0, 2, 4, 5];
-        let error_map = entry_with_data.remove_records(timestamps).wait().unwrap();
+        let error_map = entry_with_data
+            .clone()
+            .remove_records(timestamps)
+            .await
+            .unwrap();
 
         assert_eq!(error_map.len(), 2, "Only two records are not found");
         assert_eq!(error_map[&0], not_found!("No record with timestamp 0"));
         assert_eq!(error_map[&5], not_found!("No record with timestamp 5"));
 
         // check existing records
-        assert!(entry_with_data.begin_read(1).wait().is_ok());
-        assert!(entry_with_data.begin_read(3).wait().is_ok());
+        assert!(entry_with_data.begin_read(1).await.is_ok());
+        assert!(entry_with_data.begin_read(3).await.is_ok());
 
         // check removed records
         assert_eq!(
-            entry_with_data.begin_read(2).wait().err().unwrap(),
-            not_found!("No record with timestamp 2")
+            entry_with_data.begin_read(2).await.err().unwrap(),
+            not_found!("Record 2 not found in block bucket/entry/1")
         );
         assert_eq!(
-            entry_with_data.begin_read(4).wait().err().unwrap(),
-            not_found!("No record with timestamp 4")
+            entry_with_data.begin_read(4).await.err().unwrap(),
+            not_found!("Record 4 not found in block bucket/entry/3")
         );
     }
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_query_remove_records(#[future] entry_with_data: Arc<Entry>) {
         let entry_with_data = entry_with_data.await;
 
@@ -220,22 +231,35 @@ mod tests {
 
         // check removed records
         assert_eq!(
-            entry_with_data.begin_read(2).wait().err().unwrap(),
-            not_found!("No record with timestamp 2")
+            entry_with_data.begin_read(2).await.err().unwrap(),
+            not_found!("Record 2 not found in block bucket/entry/1")
         );
         assert_eq!(
-            entry_with_data.begin_read(3).wait().err().unwrap(),
-            not_found!("No record with timestamp 3")
+            entry_with_data.begin_read(3).await.err().unwrap(),
+            not_found!("Record 3 not found in block bucket/entry/3")
         );
     }
 
     // TODO: replace with multiple add/remove on RwLock
     #[fixture]
     async fn entry_with_data(entry: Arc<Entry>) -> Arc<Entry> {
-        entry.set_settings(EntrySettings {
-            max_block_records: 2,
-            ..entry.settings()
-        });
+        struct ResetGuard;
+        impl Drop for ResetGuard {
+            fn drop(&mut self) {
+                reset_rwlock_config();
+            }
+        }
+        let _reset = ResetGuard;
+        set_rwlock_failure_action(RwLockFailureAction::Error);
+        set_rwlock_timeout(Duration::from_secs(10));
+
+        entry
+            .set_settings(EntrySettings {
+                max_block_records: 2,
+                ..entry.settings().await.unwrap()
+            })
+            .await
+            .unwrap();
 
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2).await;

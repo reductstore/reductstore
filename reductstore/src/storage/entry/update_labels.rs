@@ -1,4 +1,4 @@
-// Copyright 2024 ReductSoftware UG
+// Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::entry::Entry;
@@ -148,16 +148,20 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_update_labels(entry: Arc<Entry>) {
-        entry.set_settings(EntrySettings {
-            max_block_records: 2,
-            ..entry.settings()
-        });
+        entry
+            .set_settings(EntrySettings {
+                max_block_records: 2,
+                ..entry.settings().await.unwrap()
+            })
+            .await
+            .unwrap();
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2).await;
         write_stub_record(&entry, 3).await;
 
         // update, remove and add labels
         let result = entry
+            .clone()
             .update_labels(vec![
                 make_update(0),
                 make_update(1),
@@ -165,7 +169,7 @@ mod tests {
                 make_update(3),
                 make_update(5),
             ])
-            .wait()
+            .await
             .unwrap();
 
         // check results
@@ -192,13 +196,13 @@ mod tests {
         assert_eq!(updated_labels, &expected_labels_3);
 
         // check if the records were updated
-        let labels = entry.begin_read(1).wait().unwrap().meta().labels().clone();
+        let labels = entry.begin_read(1).await.unwrap().meta().labels().clone();
         assert_eq!(labels, expected_labels_1);
 
-        let labels = entry.begin_read(2).wait().unwrap().meta().labels().clone();
+        let labels = entry.begin_read(2).await.unwrap().meta().labels().clone();
         assert_eq!(labels, expected_labels_2);
 
-        let labels = entry.begin_read(3).wait().unwrap().meta().labels().clone();
+        let labels = entry.begin_read(3).await.unwrap().meta().labels().clone();
         assert_eq!(labels, expected_labels_3);
     }
 
@@ -207,12 +211,13 @@ mod tests {
     async fn test_update_nothing(entry: Arc<Entry>) {
         write_stub_record(&entry, 1).await;
         let result = entry
+            .clone()
             .update_labels(vec![UpdateLabels {
                 time: 1,
                 update: Labels::new(),
                 remove: HashSet::new(),
             }])
-            .wait()
+            .await
             .unwrap();
 
         assert_eq!(result.len(), 1);
@@ -237,7 +242,13 @@ mod tests {
                 .collect::<Labels>()
         );
 
-        let block = entry.block_manager.write().unwrap().load_block(1).unwrap();
+        let block = entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .load_block(1)
+            .unwrap();
         let mut record = block.read().unwrap().get_record(1).unwrap().clone();
         record.labels.sort_by(|a, b| a.name.cmp(&b.name));
         assert_eq!(record.labels, expected_labels);

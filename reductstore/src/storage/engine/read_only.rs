@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::{Cfg, InstanceRole};
@@ -88,13 +88,13 @@ mod tests {
                 .with_cfg(cfg.clone())
                 .with_data_path(cfg.data_path.clone())
                 .build()
-                .await
-                .unwrap(),
+                .await,
         );
+        read_only_engine.reset_last_replica_sync().await;
 
         // Initially, read-only engine has one bucket
         {
-            let buckets = read_only_engine.buckets.read().unwrap();
+            let buckets = read_only_engine.buckets.read().await.unwrap();
             assert_eq!(buckets.len(), 1);
             assert!(buckets.contains_key("bucket-1"));
         }
@@ -106,7 +106,7 @@ mod tests {
             .unwrap();
         read_only_engine.reload().await.unwrap();
         assert_eq!(
-            read_only_engine.buckets.read().unwrap().len(),
+            read_only_engine.buckets.read().await.unwrap().len(),
             1,
             "Should not reload before interval"
         );
@@ -114,7 +114,7 @@ mod tests {
         // Wait for interval and reload
         tokio::time::sleep(primary_engine.cfg.engine_config.replica_update_interval).await;
         read_only_engine.reload().await.unwrap();
-        let buckets = read_only_engine.buckets.read().unwrap();
+        let buckets = read_only_engine.buckets.read().await.unwrap();
         assert_eq!(buckets.len(), 2);
         assert!(buckets.contains_key("bucket-1"));
         assert!(buckets.contains_key("bucket-2"));
@@ -132,12 +132,12 @@ mod tests {
                 .with_cfg(cfg.clone())
                 .with_data_path(cfg.data_path.clone())
                 .build()
-                .await
-                .unwrap(),
+                .await,
         );
+        read_only_engine.reset_last_replica_sync().await;
 
         {
-            let buckets = read_only_engine.buckets.read().unwrap();
+            let buckets = read_only_engine.buckets.read().await.unwrap();
             assert_eq!(buckets.len(), 1);
             assert!(buckets.contains_key("bucket-1"));
         }
@@ -148,14 +148,14 @@ mod tests {
         primary_engine.sync_fs().await.unwrap();
         read_only_engine.reload().await.unwrap();
         assert_eq!(
-            read_only_engine.buckets.read().unwrap().len(),
+            read_only_engine.buckets.read().await.unwrap().len(),
             1,
             "Should not reload before interval"
         );
 
         tokio::time::sleep(primary_engine.cfg.engine_config.replica_update_interval).await;
         read_only_engine.reload().await.unwrap();
-        let buckets = read_only_engine.buckets.read().unwrap();
+        let buckets = read_only_engine.buckets.read().await.unwrap();
         assert_eq!(buckets.len(), 0);
     }
 
@@ -176,8 +176,7 @@ mod tests {
                     .with_cfg(cfg.clone())
                     .with_data_path(cfg.data_path.clone())
                     .build()
-                    .await
-                    .unwrap(),
+                    .await,
             );
             let err = forbidden!("Cannot perform this operation in read-only mode");
             // Example: try to create bucket
@@ -210,11 +209,11 @@ mod tests {
                     .with_cfg(cfg.clone())
                     .with_data_path(cfg.data_path.clone())
                     .build()
-                    .await
-                    .unwrap(),
+                    .await,
             );
+            read_only_engine.reset_last_replica_sync().await;
             {
-                let buckets = read_only_engine.buckets.read().unwrap();
+                let buckets = read_only_engine.buckets.read().await.unwrap();
                 assert_eq!(buckets.len(), 1);
                 assert!(buckets.contains_key("bucket-1"));
             }
@@ -225,11 +224,11 @@ mod tests {
                 .unwrap();
             {
                 tokio::time::sleep(primary_engine.cfg.engine_config.replica_update_interval).await;
-                let buckets = read_only_engine.buckets.read().unwrap();
+                let buckets = read_only_engine.buckets.read().await.unwrap();
                 assert_eq!(buckets.len(), 1, "Should not reload before reload call");
             }
             read_only_engine.reload().await.unwrap();
-            let buckets = read_only_engine.buckets.read().unwrap();
+            let buckets = read_only_engine.buckets.read().await.unwrap();
             assert_eq!(buckets.len(), 2);
         }
     }
@@ -256,8 +255,7 @@ mod tests {
             .with_cfg(cfg.clone())
             .with_data_path(cfg.data_path.clone())
             .build()
-            .await
-            .unwrap();
+            .await;
 
         let _ = storage_engine
             .create_bucket("bucket-1", BucketSettings::default())

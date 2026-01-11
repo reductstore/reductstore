@@ -87,8 +87,8 @@ pub(super) mod tests {
     use crate::replication::remote_bucket::client_wrapper::{
         BoxedBucketApi, ReductBucketApi, ReductClientApi,
     };
-
     use crate::storage::proto::Record;
+    use async_trait::async_trait;
 
     use crate::replication::remote_bucket::client_wrapper::tests::MockRecordReader;
 
@@ -101,11 +101,9 @@ pub(super) mod tests {
     mock! {
         pub(super) ReductClientApi {}
 
+        #[async_trait]
         impl ReductClientApi for ReductClientApi {
-             fn get_bucket(
-                &self,
-                bucket_name: &str,
-            ) -> Result<BoxedBucketApi, ReductError>;
+            async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
 
             fn url(&self) -> &str;
         }
@@ -114,14 +112,15 @@ pub(super) mod tests {
     mock! {
         pub(super) ReductBucketApi {}
 
+        #[async_trait]
         impl ReductBucketApi for ReductBucketApi {
-            fn write_batch(
+            async fn write_batch(
                 &self,
                 entry: &str,
                 records: Vec<BoxedReadRecord>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
-            fn update_batch(
+            async fn update_batch(
                 &self,
                 entry: &str,
                 records: &Vec<BoxedReadRecord>,
@@ -136,14 +135,15 @@ pub(super) mod tests {
     mock! {
         State{}
 
+        #[async_trait]
         impl RemoteBucketState for State {
-            fn write_batch(
+            async fn write_batch(
                 self: Box<Self>,
                 entry: &str,
                 records: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
-            fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send>;
+            async fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send>;
 
             fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
 
@@ -171,7 +171,8 @@ pub(super) mod tests {
     }
 
     #[rstest]
-    fn test_write_record_ok() {
+    #[tokio::test]
+    async fn test_write_record_ok() {
         let mut first_state = MockState::new();
         let mut second_state = MockState::new();
         second_state
@@ -185,12 +186,13 @@ pub(super) mod tests {
             .return_once(move |_, _| Box::new(second_state));
 
         let mut remote_bucket = create_dst_bucket(first_state);
-        write_record(&mut remote_bucket).unwrap();
+        write_record(&mut remote_bucket).await.unwrap();
         assert!(remote_bucket.is_active());
     }
 
     #[rstest]
-    fn test_write_record_err() {
+    #[tokio::test]
+    async fn test_write_record_err() {
         let mut first_state = MockState::new();
         let mut second_state = MockState::new();
         second_state
@@ -204,14 +206,15 @@ pub(super) mod tests {
 
         let mut remote_bucket = create_dst_bucket(first_state);
         assert_eq!(
-            write_record(&mut remote_bucket).unwrap_err(),
+            write_record(&mut remote_bucket).await.unwrap_err(),
             ReductError::new(ErrorCode::ConnectionError, "test")
         );
         assert!(!remote_bucket.is_active());
     }
 
     #[rstest]
-    fn test_probe_availability() {
+    #[tokio::test]
+    async fn test_probe_availability() {
         let mut first_state = MockState::new();
         let mut second_state = MockState::new();
         second_state.expect_is_available().return_const(true);
@@ -221,7 +224,7 @@ pub(super) mod tests {
             .return_once(move || Box::new(second_state));
 
         let mut remote_bucket = create_dst_bucket(first_state);
-        remote_bucket.probe_availability();
+        remote_bucket.probe_availability().await;
         assert!(remote_bucket.is_active());
     }
 
@@ -231,11 +234,15 @@ pub(super) mod tests {
         remote_bucket
     }
 
-    fn write_record(remote_bucket: &mut RemoteBucketImpl) -> Result<ErrorRecordMap, ReductError> {
+    async fn write_record(
+        remote_bucket: &mut RemoteBucketImpl,
+    ) -> Result<ErrorRecordMap, ReductError> {
         let (_tx, rx) = crossbeam_channel::unbounded();
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());
         let record = MockRecordReader::form_record_with_rx(rx, rec);
-        remote_bucket.write_batch("test", vec![(record, Transaction::WriteRecord(0))])
+        remote_bucket
+            .write_batch("test", vec![(record, Transaction::WriteRecord(0))])
+            .await
     }
 }
