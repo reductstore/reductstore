@@ -1,7 +1,6 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::proto::record;
 use log::debug;
@@ -91,7 +90,7 @@ mod tests {
     #[tokio::test]
     async fn test_begin_read_early(entry: Arc<Entry>) {
         write_stub_record(&entry, 1000000).await;
-        let writer = entry.begin_read(1000).wait();
+        let writer = entry.begin_read(1000).await;
         assert_eq!(
             writer.err(),
             Some(not_found!("No record with timestamp 1000"))
@@ -102,7 +101,7 @@ mod tests {
     #[tokio::test]
     async fn test_begin_read_late(entry: Arc<Entry>) {
         write_stub_record(&entry, 1000000).await;
-        let reader = entry.begin_read(2000000).wait();
+        let reader = entry.begin_read(2000000).await;
         assert_eq!(
             reader.err(),
             Some(not_found!("No record with timestamp 2000000"))
@@ -110,17 +109,19 @@ mod tests {
     }
 
     #[rstest]
-    fn test_begin_read_broken(entry: Arc<Entry>) {
+    #[tokio::test]
+    async fn test_begin_read_broken(entry: Arc<Entry>) {
         let mut sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-            .wait()
+            .await
             .unwrap();
         sender
-            .blocking_send(Ok(Some(Bytes::from(vec![0; 50]))))
+            .send(Ok(Some(Bytes::from(vec![0; 50]))))
+            .await
             .unwrap();
-        sender.blocking_send(Ok(None)).unwrap();
+        sender.send(Ok(None)).await.unwrap();
 
-        let reader = entry.begin_read(1000000).wait();
+        let reader = entry.begin_read(1000000).await;
         assert_eq!(
             reader.err(),
             Some(internal_server_error!(
@@ -130,16 +131,18 @@ mod tests {
     }
 
     #[rstest]
-    fn test_begin_read_still_written(entry: Arc<Entry>) {
+    #[tokio::test]
+    async fn test_begin_read_still_written(entry: Arc<Entry>) {
         let mut sender = entry
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
-            .wait()
+            .await
             .unwrap();
         sender
-            .blocking_send(Ok(Some(Bytes::from(vec![0; 5]))))
+            .send(Ok(Some(Bytes::from(vec![0; 5]))))
+            .await
             .unwrap();
 
-        let reader = entry.begin_read(1000000).wait();
+        let reader = entry.begin_read(1000000).await;
         assert_eq!(
             reader.err(),
             Some(too_early!(
@@ -154,7 +157,7 @@ mod tests {
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 3000000).await;
 
-        let reader = entry.begin_read(2000000).wait();
+        let reader = entry.begin_read(2000000).await;
         assert_eq!(
             reader.err(),
             Some(not_found!("No record with timestamp 2000000"))
@@ -165,7 +168,7 @@ mod tests {
     #[tokio::test]
     async fn test_begin_read_ok1(entry: Arc<Entry>) {
         write_stub_record(&entry, 1000000).await;
-        let mut reader = entry.begin_read(1000000).wait().unwrap();
+        let mut reader = entry.begin_read(1000000).await.unwrap();
         assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
     }
 
@@ -175,7 +178,7 @@ mod tests {
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 1010000).await;
 
-        let mut reader = entry.begin_read(1010000).wait().unwrap();
+        let mut reader = entry.begin_read(1010000).await.unwrap();
         assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
     }
 
@@ -188,7 +191,7 @@ mod tests {
 
         write_record(&entry, 1000000, data.clone()).await;
 
-        let mut reader = entry.begin_read(1000000).wait().unwrap();
+        let mut reader = entry.begin_read(1000000).await.unwrap();
         assert_eq!(
             reader.read_chunk().unwrap().unwrap().to_vec(),
             data[0..MAX_IO_BUFFER_SIZE]

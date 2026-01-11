@@ -8,7 +8,6 @@ use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::Labels;
-use reduct_macros::task;
 use std::sync::Arc;
 
 impl Entry {

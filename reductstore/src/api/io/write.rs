@@ -413,6 +413,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
@@ -449,6 +450,7 @@ mod tests {
             .await
             .unwrap()
             .get_info("api-test")
+            .await
             .unwrap();
         assert_eq!(info.info.pending_records, 4);
     }
@@ -529,6 +531,7 @@ mod tests {
         let mut reader = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .begin_read("new-entry", 0)
@@ -546,10 +549,6 @@ mod tests {
     #[async_trait::async_trait]
     impl WriteRecord for TestWriter {
         async fn send(&mut self, chunk: reduct_base::io::WriteChunk) -> Result<(), ReductError> {
-            self.blocking_send(chunk)
-        }
-
-        fn blocking_send(&mut self, chunk: reduct_base::io::WriteChunk) -> Result<(), ReductError> {
             if self.fail {
                 return Err(bad_request!("Simulated write error"));
             }

@@ -53,6 +53,7 @@ mod tests {
             .await
             .unwrap()
             .create_replication("test", settings)
+            .await
             .unwrap();
 
         set_mode(

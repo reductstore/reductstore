@@ -1,13 +1,11 @@
 // Copyright 2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::Record;
 use reduct_base::error::ReductError;
 use reduct_base::{not_found, Labels};
-use reduct_macros::task;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use tokio::task::JoinHandle;

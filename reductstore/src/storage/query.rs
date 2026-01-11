@@ -9,11 +9,11 @@ mod historical;
 mod limited;
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::{AsyncRwLock, RwLock};
+use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
-use log::{debug, trace, warn};
+use log::{debug, trace};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
@@ -22,7 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::Receiver;
-use tokio::task::{spawn_blocking, JoinHandle};
+use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
@@ -220,7 +220,7 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_expired(block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_expired(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             ..Default::default()
@@ -245,7 +245,7 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_ok(block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_ok(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let options = QueryOptions::default();
         let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
 
@@ -267,7 +267,7 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_continuous_ok(block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_continuous_ok(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             continuous: true,
@@ -287,6 +287,7 @@ mod tests {
 
         block_manager
             .write()
+            .await
             .unwrap()
             .load_block(0)
             .unwrap()
@@ -314,7 +315,7 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test]
-    async fn test_query_task_err(block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_err(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let options = QueryOptions::default();
         let query = build_query(0, 10, options.clone(), IoConfig::default()).unwrap();
 
@@ -336,10 +337,11 @@ mod tests {
         io: IoConfig,
     }
 
+    #[async_trait::async_trait]
     impl Query for PanickingQuery {
-        fn next(
+        async fn next(
             &mut self,
-            _block_manager: Arc<RwLock<BlockManager>>,
+            _block_manager: Arc<AsyncRwLock<BlockManager>>,
         ) -> Result<RecordReader, ReductError> {
             panic!("force JoinError from spawn_blocking");
         }
@@ -351,7 +353,7 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_blocking_error(block_manager: Arc<RwLock<BlockManager>>) {
+    async fn test_query_task_blocking_error(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let options = QueryOptions::default();
         let query: Box<dyn Query + Send + Sync> = Box::new(PanickingQuery {
             io: IoConfig::default(),
@@ -380,7 +382,7 @@ mod tests {
     }
 
     #[fixture]
-    fn block_manager() -> Arc<RwLock<BlockManager>> {
+    fn block_manager() -> Arc<AsyncRwLock<BlockManager>> {
         let path = tempfile::tempdir()
             .unwrap()
             .keep()
@@ -425,7 +427,7 @@ mod tests {
         });
 
         block_manager.finish_block(block_ref).unwrap();
-        Arc::new(RwLock::new(block_manager))
+        Arc::new(AsyncRwLock::new(block_manager))
     }
 
     mod task_watcher {

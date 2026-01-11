@@ -122,9 +122,11 @@ mod tests {
         let record = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .get_entry("entry-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .begin_read(0)
@@ -141,6 +143,7 @@ mod tests {
             .await
             .unwrap()
             .get_info("api-test")
+            .await
             .unwrap();
         assert_eq!(info.info.pending_records, 1);
     }

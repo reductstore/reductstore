@@ -4,7 +4,6 @@
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
-use reduct_macros::task;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 

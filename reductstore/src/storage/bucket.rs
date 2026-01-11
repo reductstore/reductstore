@@ -10,8 +10,7 @@ pub(crate) mod update_records;
 
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::{AsyncRwLock, RwLock};
-use crate::core::thread_pool::{spawn, TaskHandle};
+use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
@@ -20,7 +19,7 @@ use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
 use crate::storage::engine::{check_name_convention, ReadOnlyMode};
-use crate::storage::entry::{Entry, EntrySettings, RecordReader};
+use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::folder_keeper::FolderKeeper;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::{debug, error};
@@ -31,7 +30,6 @@ use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found, Labels};
-use reduct_macros::task;
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;

@@ -49,6 +49,7 @@ mod tests {
             .await
             .unwrap()
             .create_replication("test", settings)
+            .await
             .unwrap();
 
         remove_replication(

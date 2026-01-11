@@ -272,13 +272,16 @@ mod tests {
             let entry = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             for time in 10..100 {
                 let mut writer = entry
+                    .clone()
                     .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
                     .await
                     .unwrap();
@@ -381,10 +384,12 @@ mod tests {
         components
             .storage
             .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+            .await
             .unwrap()
             .upgrade()
             .unwrap()
             .remove_entry(path_to_entry_1.get("entry_name").unwrap())
+            .await
             .unwrap();
 
         sleep(Duration::from_millis(100)).await;
@@ -572,13 +577,20 @@ mod tests {
             let bucket = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap();
-            let entry = bucket.get_entry("entry-1").unwrap().upgrade().unwrap();
+            let entry = bucket
+                .get_entry("entry-1")
+                .await
+                .unwrap()
+                .upgrade()
+                .unwrap();
 
             for time in 10..100 {
                 let mut writer = entry
+                    .clone()
                     .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
                     .await
                     .unwrap();
@@ -595,6 +607,7 @@ mod tests {
                     }
                     .into(),
                 )
+                .await
                 .unwrap();
 
             fetch_and_response_batched_records(

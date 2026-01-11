@@ -76,9 +76,11 @@ mod tests {
             components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .get_entry("entry-1")
+                .await
                 .err()
                 .unwrap()
                 .status(),
@@ -88,9 +90,11 @@ mod tests {
             components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .get_entry("entry-2")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .name(),

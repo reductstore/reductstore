@@ -74,15 +74,17 @@ mod tests {
         let entry = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade()
             .unwrap()
             .get_entry("entry-1")
+            .await
             .unwrap()
             .upgrade()
             .unwrap();
 
-        let (rx, _) = entry.get_query_receiver(query.id).unwrap();
+        let (rx, _) = entry.get_query_receiver(query.id).await.unwrap();
         let rx = rx.upgrade().unwrap();
         let mut rx = rx.write().await.unwrap();
         assert!(rx.recv().await.unwrap().is_ok());

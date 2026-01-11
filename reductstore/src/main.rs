@@ -174,7 +174,7 @@ async fn main() {
 
 async fn shutdown_ctrl_c(ctx: ContextGuard) {
     tokio::signal::ctrl_c().await.unwrap();
-    ctx.shutdown();
+    ctx.shutdown().await;
 }
 
 #[cfg(unix)]
@@ -292,7 +292,7 @@ mod tests {
         let data_path = tempdir().unwrap().keep();
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
         let parser = CfgParser::from_env(StdEnvGetter::default(), "0.0.0");
-        let storage = parser.build().unwrap().storage;
+        let storage = parser.build().await.unwrap().storage;
 
         let handler = tokio::spawn(periodical_compact_storage(
             storage,
@@ -320,7 +320,7 @@ mod tests {
 
         let handle = Handle::new();
         let cfg = CfgParser::from_env(StdEnvGetter::default(), "0.0.0"); // init file cache
-        let storage = cfg.build().unwrap().storage;
+        let storage = cfg.build().await.unwrap().storage;
         let ctx = ContextGuard {
             server_handle: handle.clone(),
             storage,

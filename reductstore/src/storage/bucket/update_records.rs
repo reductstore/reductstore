@@ -5,9 +5,7 @@ use crate::storage::bucket::Bucket;
 use crate::storage::entry::update_labels::UpdateLabels;
 use reduct_base::error::ReductError;
 use reduct_base::Labels;
-use reduct_macros::task;
 use std::collections::{BTreeMap, HashSet};
-use std::sync::Arc;
 
 #[derive(Clone)]
 pub(crate) struct UpdateLabelsMulti {

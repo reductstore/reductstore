@@ -64,9 +64,11 @@ mod tests {
         let status = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .get_entry("entry-1")
+            .await
             .err()
             .unwrap()
             .status();

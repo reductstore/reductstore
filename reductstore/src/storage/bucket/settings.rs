@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::thread_pool::{spawn, TaskHandle};
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::EntrySettings;
 use bytes::BytesMut;
@@ -11,7 +10,6 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
 use reduct_base::{conflict, internal_server_error};
 use std::io::{SeekFrom, Write};
-use tower_http::follow_redirect::policy::PolicyExt;
 
 pub(super) const DEFAULT_MAX_RECORDS: u64 = 1024;
 pub(super) const DEFAULT_MAX_BLOCK_SIZE: u64 = 64000000;
@@ -101,10 +99,12 @@ impl Bucket {
 
             *my_settings = Self::fill_settings(settings, my_settings.clone());
             for entry in entries.values() {
-                entry.set_settings(EntrySettings {
-                    max_block_size: my_settings.max_block_size.unwrap(),
-                    max_block_records: my_settings.max_block_records.unwrap(),
-                });
+                entry
+                    .set_settings(EntrySettings {
+                        max_block_size: my_settings.max_block_size.unwrap(),
+                        max_block_records: my_settings.max_block_records.unwrap(),
+                    })
+                    .await?;
             }
         }
         self.save_settings().await

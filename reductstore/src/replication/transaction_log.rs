@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::{AsyncRwLock, RwLock};
+use crate::core::sync::AsyncRwLock;
 use crate::replication::Transaction;
 use log::{debug, warn};
 use reduct_base::error::ReductError;

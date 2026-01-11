@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::{AsyncRwLock, RwLock};
+use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use async_trait::async_trait;
@@ -128,7 +128,7 @@ pub(crate) mod tests {
     use tempfile::tempdir;
 
     #[fixture]
-    pub(crate) fn block_manager() -> Arc<RwLock<BlockManager>> {
+    pub(crate) fn block_manager() -> Arc<AsyncRwLock<BlockManager>> {
         // Two blocks
         // the first block has two records: 0, 5
         // the second block has a record: 1000
@@ -246,7 +246,6 @@ pub(crate) mod tests {
         write_record!(block_ref, 1000, b"0123456789");
 
         block_manager.finish_block(block_ref).unwrap();
-        let block_manager = Arc::new(RwLock::new(block_manager));
-        block_manager
+        Arc::new(AsyncRwLock::new(block_manager))
     }
 }

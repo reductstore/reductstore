@@ -10,8 +10,7 @@ mod write_record;
 
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
-use crate::core::sync::{AsyncRwLock, RwLock};
-use crate::core::thread_pool::{spawn, TaskHandle};
+use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
@@ -162,10 +161,7 @@ impl Entry {
     ) -> Result<(Weak<AsyncRwLock<QueryRx>>, IoConfig), ReductError> {
         let entry_path = format!("{}/{}", self.bucket_name, self.name);
         let queries = Arc::clone(&self.queries);
-        spawn("remove expired queries", move || {
-            Self::remove_expired_query(queries, entry_path);
-        })
-        .wait();
+        Self::remove_expired_query(queries, entry_path).await?;
 
         let mut queries = self.queries.write().await?;
         let query = queries.get_mut(&query_id).ok_or_else(|| {
@@ -363,10 +359,11 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn mark_deleting_returns_conflict_when_already_deleting(entry: Arc<Entry>) {
-            entry.mark_deleting().unwrap();
+        #[tokio::test]
+        async fn mark_deleting_returns_conflict_when_already_deleting(entry: Arc<Entry>) {
+            entry.mark_deleting().await.unwrap();
             assert_eq!(
-                entry.mark_deleting(),
+                entry.mark_deleting().await,
                 Err(conflict!(
                     "Entry '{}' in bucket '{}' is being deleted",
                     entry.name(),
@@ -610,7 +607,7 @@ mod tests {
         write_stub_record(&entry, 2000000).await;
         write_stub_record(&entry, 3000000).await;
 
-        let info = entry.info().unwrap();
+        let info = entry.info().await.unwrap();
         assert_eq!(info.name, "entry");
         assert_eq!(info.size, 88);
         assert_eq!(info.record_count, 3);
@@ -626,9 +623,10 @@ mod tests {
         use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
 
         #[rstest]
-        fn test_empty_entry(entry: Arc<Entry>) {
+        #[tokio::test]
+        async fn test_empty_entry(entry: Arc<Entry>) {
             assert_eq!(
-                entry.try_remove_oldest_block().wait(),
+                entry.try_remove_oldest_block().await,
                 Err(internal_server_error!("No block to remove"))
             );
         }
@@ -643,24 +641,25 @@ mod tests {
                 vec![0; MAX_IO_BUFFER_SIZE * CHANNEL_BUFFER_SIZE + 1],
             )
             .await;
-            let _rx = entry.begin_read(1000000).wait().unwrap();
-            sleep(Duration::from_millis(100));
+            let _rx = entry.begin_read(1000000).await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
 
             assert!(entry
                 .try_remove_oldest_block()
-                .wait()
+                .await
                 .err()
                 .unwrap()
                 .to_string()
                 .contains("because it is in use"));
-            let info = entry.info().unwrap();
+            let info = entry.info().await.unwrap();
             assert_eq!(info.block_count, 1);
             assert_eq!(info.size, 8388630);
         }
 
         #[rstest]
         #[ignore] // experimental:  without writer protection.
-        fn test_entry_which_has_writer(entry: Arc<Entry>) {
+        #[tokio::test]
+        async fn test_entry_which_has_writer(entry: Arc<Entry>) {
             let mut sender = entry
                 .begin_write(
                     1000000,
@@ -668,20 +667,21 @@ mod tests {
                     "text/plain".to_string(),
                     Labels::new(),
                 )
-                .wait()
+                .await
                 .unwrap();
             sender
-                .blocking_send(Ok(Some(Bytes::from_static(b"456789"))))
+                .send(Ok(Some(Bytes::from_static(b"456789"))))
+                .await
                 .unwrap();
 
-            sleep(Duration::from_millis(100));
+            tokio::time::sleep(Duration::from_millis(100)).await;
             assert_eq!(
-                entry.try_remove_oldest_block().wait(),
+                entry.try_remove_oldest_block().await,
                 Err(internal_server_error!(
                     "Cannot remove block 1000000 because it is still in use"
                 ))
             );
-            let info = entry.info().unwrap();
+            let info = entry.info().await.unwrap();
             assert_eq!(info.block_count, 1);
             assert_eq!(info.size, 524309);
         }
@@ -707,19 +707,19 @@ mod tests {
             write_stub_record(&entry, 3000000).await;
             write_stub_record(&entry, 4000000).await;
 
-            assert_eq!(entry.info().unwrap().block_count, 2);
-            assert_eq!(entry.info().unwrap().record_count, 4);
-            assert_eq!(entry.info().unwrap().size, 116);
+            assert_eq!(entry.info().await.unwrap().block_count, 2);
+            assert_eq!(entry.info().await.unwrap().record_count, 4);
+            assert_eq!(entry.info().await.unwrap().size, 116);
 
-            entry.try_remove_oldest_block().wait().unwrap();
-            assert_eq!(entry.info().unwrap().block_count, 1);
-            assert_eq!(entry.info().unwrap().record_count, 2);
-            assert_eq!(entry.info().unwrap().size, 58);
+            entry.try_remove_oldest_block().await.unwrap();
+            assert_eq!(entry.info().await.unwrap().block_count, 1);
+            assert_eq!(entry.info().await.unwrap().record_count, 2);
+            assert_eq!(entry.info().await.unwrap().size, 58);
 
-            entry.try_remove_oldest_block().wait().unwrap();
-            assert_eq!(entry.info().unwrap().block_count, 0);
-            assert_eq!(entry.info().unwrap().record_count, 0);
-            assert_eq!(entry.info().unwrap().size, 0);
+            entry.try_remove_oldest_block().await.unwrap();
+            assert_eq!(entry.info().await.unwrap().block_count, 0);
+            assert_eq!(entry.info().await.unwrap().record_count, 0);
+            assert_eq!(entry.info().await.unwrap().size, 0);
         }
     }
 
@@ -767,7 +767,7 @@ mod tests {
     ) {
         let mut sender = entry
             .begin_write(time, data.len() as u64, "text/plain".to_string(), labels)
-            .wait()
+            .await
             .unwrap();
         sender.send(Ok(Some(Bytes::from(data)))).await.unwrap();
         sender.send(Ok(None)).await.expect("Failed to send None");

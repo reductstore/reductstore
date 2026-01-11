@@ -1,8 +1,7 @@
 // Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::sync::{AsyncRwLock, RwLock};
-use crate::core::thread_pool::spawn;
+use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::Entry;
 use log::warn;
@@ -10,10 +9,8 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::not_found;
-use reduct_macros::task;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tower_http::follow_redirect::policy::PolicyExt;
 
 impl Entry {
     /// Remove multiple records.

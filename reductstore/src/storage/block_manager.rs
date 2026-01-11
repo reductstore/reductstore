@@ -639,6 +639,7 @@ pub type RecordTx = Sender<Result<Option<Bytes>, ReductError>>;
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::sync::AsyncRwLock;
     use crate::storage::proto::record::Label;
     use crate::storage::proto::Record;
     use crate::storage::proto::{us_to_ts, BlockIndex as BlockIndexProto};
@@ -759,13 +760,20 @@ mod tests {
             block: BlockRef,
             block_id: u64,
         ) {
-            let block_manager = Arc::new(RwLock::new(block_manager));
-            let mut writer = RecordWriter::try_new(Arc::clone(&block_manager), block, 0).unwrap();
+            let block_manager = Arc::new(AsyncRwLock::new(block_manager));
+            let mut writer = RecordWriter::try_new(Arc::clone(&block_manager), block, 0)
+                .await
+                .unwrap();
 
             writer.send(Ok(None)).await.unwrap();
             tokio::time::sleep(Duration::from_millis(10)).await; // wait for thread to finish
 
-            let block_ref = block_manager.write().unwrap().load_block(block_id).unwrap();
+            let block_ref = block_manager
+                .write()
+                .await
+                .unwrap()
+                .load_block(block_id)
+                .unwrap();
             assert_eq!(block_ref.read().unwrap().get_record(0).unwrap().state, 2);
         }
 
@@ -787,7 +795,7 @@ mod tests {
             block: BlockRef,
             block_id: u64,
         ) {
-            let block_manager = Arc::new(RwLock::new(block_manager));
+            let block_manager = Arc::new(AsyncRwLock::new(block_manager));
             let record = Record {
                 timestamp: Some(Timestamp {
                     seconds: 1,
@@ -804,14 +812,15 @@ mod tests {
                 .unwrap()
                 .insert_or_update_record(record.clone());
 
-            let mut writer =
-                RecordWriter::try_new(Arc::clone(&block_manager), block, 1000_000).unwrap();
+            let mut writer = RecordWriter::try_new(Arc::clone(&block_manager), block, 1000_000)
+                .await
+                .unwrap();
             writer.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
             writer.send(Ok(None)).await.unwrap();
             sleep(Duration::from_millis(10)); // wait for thread to finish
 
             // must save record in WAL
-            let mut bm = block_manager.write().unwrap();
+            let mut bm = block_manager.write().await.unwrap();
             {
                 let entries = bm.wal.read(block_id).unwrap();
                 assert_eq!(entries.len(), 1);
@@ -925,15 +934,16 @@ mod tests {
         }
 
         #[rstest]
-        fn test_update_index_when_remove_record(
+        #[tokio::test]
+        async fn test_update_index_when_remove_record(
             block_manager: BlockManager,
             block: BlockRef,
             block_id: u64,
         ) {
-            let block_manager = Arc::new(RwLock::new(block_manager));
-            write_record(1, 100, &block_manager, block.clone());
+            let block_manager = Arc::new(AsyncRwLock::new(block_manager));
+            write_record(1, 100, &block_manager, block.clone()).await;
 
-            let mut bm = block_manager.write().unwrap();
+            let mut bm = block_manager.write().await.unwrap();
             let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
             assert_eq!(index.get_block(1).unwrap().record_count, 2);
 
@@ -971,20 +981,22 @@ mod tests {
         #[case(0)]
         #[case(500)]
         #[case(MAX_IO_BUFFER_SIZE+1)]
-        fn test_remove_records(
+        #[tokio::test]
+        async fn test_remove_records(
             #[case] record_size: usize,
             block_manager: BlockManager,
             block: BlockRef,
             block_id: u64,
         ) {
-            let block_manager = Arc::new(RwLock::new(block_manager));
+            let block_manager = Arc::new(AsyncRwLock::new(block_manager));
             let block_ref = block;
             let (record, record_body) =
-                write_record(1, record_size, &block_manager, block_ref.clone());
+                write_record(1, record_size, &block_manager, block_ref.clone()).await;
 
             // remove first record
             block_manager
                 .write()
+                .await
                 .unwrap()
                 .remove_records(block_id, vec![0])
                 .unwrap();
@@ -1006,6 +1018,7 @@ mod tests {
                 record_time,
                 None,
             )
+            .await
             .unwrap();
 
             let mut received = BytesMut::new();
@@ -1018,6 +1031,7 @@ mod tests {
             assert!(
                 block_manager
                     .write()
+                    .await
                     .unwrap()
                     .wal
                     .read(block.block_id())
@@ -1038,11 +1052,12 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_records_wal(block_manager: BlockManager, block: BlockRef) {
-            let block_manager = Arc::new(RwLock::new(block_manager));
-            write_record(1, 5, &block_manager, block.clone());
+        #[tokio::test]
+        async fn test_remove_records_wal(block_manager: BlockManager, block: BlockRef) {
+            let block_manager = Arc::new(AsyncRwLock::new(block_manager));
+            write_record(1, 5, &block_manager, block.clone()).await;
 
-            let mut bm = block_manager.write().unwrap();
+            let mut bm = block_manager.write().await.unwrap();
 
             let block_id = block.read().unwrap().block_id();
             FILE_CACHE.remove(&bm.path_to_data(block_id)).unwrap();
@@ -1063,10 +1078,10 @@ mod tests {
         }
     }
 
-    fn write_record(
+    async fn write_record(
         record_time: u64,
         record_size: usize,
-        block_manager: &Arc<RwLock<BlockManager>>,
+        block_manager: &Arc<AsyncRwLock<BlockManager>>,
         block_ref: BlockRef,
     ) -> (Record, String) {
         let block_size = block_ref.read().unwrap().size();
@@ -1092,15 +1107,16 @@ mod tests {
         let block_copy = block_ref.clone();
         let body_copy = record_body.clone();
         let bm_copy = Arc::clone(block_manager);
-        let mut writer = RecordWriter::try_new(bm_copy, block_copy, record_time).unwrap();
-        writer
-            .blocking_send(Ok(Some(Bytes::from(body_copy))))
+        let mut writer = RecordWriter::try_new(bm_copy, block_copy, record_time)
+            .await
             .unwrap();
-        writer.blocking_send(Ok(None)).unwrap();
+        writer.send(Ok(Some(Bytes::from(body_copy)))).await.unwrap();
+        writer.send(Ok(None)).await.unwrap();
 
-        std::thread::sleep(Duration::from_millis(10)); // wait for thread to finish
+        tokio::time::sleep(Duration::from_millis(10)).await; // wait for thread to finish
         block_manager
             .write()
+            .await
             .unwrap()
             .save_block_on_disk(block_ref.clone())
             .unwrap();

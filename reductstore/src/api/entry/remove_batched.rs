@@ -121,12 +121,14 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade()
             .unwrap();
 
         let err = bucket
             .get_entry("entry-1")
+            .await
             .unwrap()
             .upgrade()
             .unwrap()

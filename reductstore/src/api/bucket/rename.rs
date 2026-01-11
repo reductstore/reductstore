@@ -80,6 +80,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("new-bucket")
+            .await
             .unwrap()
             .upgrade()
             .unwrap();

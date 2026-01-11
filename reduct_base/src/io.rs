@@ -191,8 +191,6 @@ pub trait WriteRecord {
     /// Stops the writer if the chunk is an error or None.
     async fn send(&mut self, chunk: WriteChunk) -> Result<(), ReductError>;
 
-    fn blocking_send(&mut self, chunk: WriteChunk) -> Result<(), ReductError>;
-
     async fn send_timeout(
         &mut self,
         chunk: WriteChunk,

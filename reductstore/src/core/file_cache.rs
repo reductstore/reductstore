@@ -5,7 +5,6 @@ use crate::backend::file::{AccessMode, File};
 use crate::backend::{Backend, ObjectMetadata};
 use crate::core::cache::Cache;
 use crate::core::sync::RwLock;
-use crate::core::thread_pool::spawn;
 use log::{debug, warn};
 use parking_lot::RwLockWriteGuard;
 use reduct_base::error::ReductError;
@@ -16,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
+use tokio::time::sleep;
 
 const FILE_CACHE_MAX_SIZE: usize = 1024;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
@@ -109,10 +109,10 @@ impl FileCache {
         let read_only = Arc::new(AtomicBool::new(false));
         let read_only_clone = Arc::clone(&read_only);
 
-        spawn("file cache sync", move || {
+        tokio::spawn(async move {
             // Periodically sync files from cache to disk
             while !stop_sync_worker.load(Ordering::Relaxed) {
-                std::thread::sleep(Duration::from_millis(100));
+                sleep(Duration::from_millis(100)).await;
 
                 if let Err(err) = Self::sync_rw_and_unused_files(
                     &read_only_clone,

@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::{AsyncRwLock, RwLock};
+use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
@@ -86,7 +86,8 @@ mod tests {
     use crate::storage::query::base::tests::block_manager;
 
     #[rstest]
-    fn test_query(block_manager: Arc<RwLock<BlockManager>>) {
+    #[tokio::test]
+    async fn test_query(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = ContinuousQuery::try_new(
             900,
             QueryOptions {
@@ -98,18 +99,18 @@ mod tests {
         )
         .unwrap();
         {
-            let reader = query.next(block_manager.clone()).unwrap();
+            let reader = query.next(block_manager.clone()).await.unwrap();
             assert_eq!(reader.meta().timestamp(), 1000);
         }
         assert_eq!(
-            query.next(block_manager.clone()).err(),
+            query.next(block_manager.clone()).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),
             })
         );
         assert_eq!(
-            query.next(block_manager).err(),
+            query.next(block_manager).await.err(),
             Some(ReductError {
                 status: ErrorCode::NoContent,
                 message: "No content".to_string(),

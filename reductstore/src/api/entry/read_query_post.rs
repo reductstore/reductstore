@@ -128,12 +128,14 @@ mod tests {
         let query: QueryInfo = response.into();
         let entry = components
             .storage
-            .get_bucket("bucket-1")?
+            .get_bucket("bucket-1")
+            .await?
             .upgrade()?
-            .get_entry("entry-1")?
+            .get_entry("entry-1")
+            .await?
             .upgrade()?;
 
-        let (rx, _) = entry.get_query_receiver(query.id)?;
+        let (rx, _) = entry.get_query_receiver(query.id).await?;
         Ok(rx)
     }
 }

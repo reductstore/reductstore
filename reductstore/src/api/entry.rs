@@ -259,10 +259,12 @@ mod tests {
             let err = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap()
                 .get_entry("entry-1")
+                .await
                 .err()
                 .unwrap();
 
@@ -294,10 +296,12 @@ mod tests {
             let entry = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap()
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
 
@@ -371,14 +375,17 @@ mod tests {
             components
                 .storage
                 .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap()
                 .get_entry(path_to_entry_1.get("entry_name").unwrap())
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap()
                 .query(options)
+                .await
                 .unwrap()
         };
         query_id
