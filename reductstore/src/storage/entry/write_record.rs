@@ -42,7 +42,7 @@ impl Entry {
             bm.load_block(block_id)?
         };
 
-        let record_type = {
+        let _record_type = {
             let is_belated = {
                 let block = block_ref.write()?;
                 block.record_count() > 0 && block.latest_record_time() >= time
@@ -118,7 +118,7 @@ impl Entry {
             let has_too_many_records = block.record_count() + 1 > settings.max_block_records;
 
             drop(block);
-            if record_type == RecordType::Latest && (has_no_space || has_too_many_records) {
+            if has_no_space || has_too_many_records {
                 // We need to create a new block.
                 debug!(
                     "Creating a new block for {}/{} (has_no_space={}, has_too_many_records={})",
@@ -373,6 +373,45 @@ mod tests {
                 "A record with timestamp 1000000 already exists"
             ))
         );
+    }
+
+    #[rstest]
+    #[serial]
+    #[tokio::test]
+    async fn test_begin_write_belated_new_block_when_full(path: PathBuf) {
+        let entry = entry(
+            EntrySettings {
+                max_block_size: 10000,
+                max_block_records: 2,
+            },
+            path,
+        );
+
+        write_stub_record(&entry, 1000000).await;
+        write_stub_record(&entry, 3000000).await;
+        write_stub_record(&entry, 2000000).await;
+
+        let mut bm = entry.block_manager.write().await.unwrap();
+        let records = bm
+            .load_block(1000000)
+            .unwrap()
+            .read()
+            .unwrap()
+            .record_index()
+            .clone();
+        assert_eq!(records.len(), 2);
+        assert!(records.contains_key(&1000000));
+        assert!(records.contains_key(&3000000));
+
+        let records = bm
+            .load_block(2000000)
+            .unwrap()
+            .read()
+            .unwrap()
+            .record_index()
+            .clone();
+        assert_eq!(records.len(), 1);
+        assert!(records.contains_key(&2000000));
     }
 
     #[rstest]
