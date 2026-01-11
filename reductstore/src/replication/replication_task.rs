@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
@@ -213,7 +213,8 @@ impl ReplicationTask {
                         continue;
                     }
                     ReplicationMode::Paused => {
-                        thr_is_active.store(false, Ordering::Relaxed);
+                        let available = sender.probe_availability().await;
+                        thr_is_active.store(available, Ordering::Relaxed);
                         ReplicationTask::sleep_with_stop(
                             &thr_stop_flag,
                             thr_system_options.next_transaction_timeout,
@@ -409,10 +410,11 @@ impl ReplicationTask {
             pending_records += log.read().await?.len() as u64;
         }
 
+        let mode = self.load_mode();
         Ok(ReplicationInfo {
             name: self.name.clone(),
-            mode: self.load_mode(),
-            is_active: matches!(self.load_mode(), ReplicationMode::Enabled)
+            mode: mode.clone(),
+            is_active: matches!(mode, ReplicationMode::Enabled | ReplicationMode::Paused)
                 && self.is_active.load(Ordering::Relaxed),
             is_provisioned: self.is_provisioned,
             pending_records,
@@ -505,6 +507,8 @@ mod tests {
                 entry_name: &str,
                 record: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
+
+            fn probe_availability(&mut self);
 
             fn is_active(&self) -> bool;
         }
@@ -699,18 +703,46 @@ mod tests {
     }
 
     #[rstest]
-    fn test_replication_paused_mode(
-        remote_bucket: MockRmBucket,
+    fn test_replication_paused_mode_available(
+        mut remote_bucket: MockRmBucket,
         notification: TransactionNotification,
         mut settings: ReplicationSettings,
         path: PathBuf,
     ) {
         settings.mode = ReplicationMode::Paused;
+        remote_bucket.expect_probe_availability().return_const(());
+        remote_bucket.expect_is_active().return_const(true);
         let mut replication = build_replication(path, remote_bucket, settings);
 
         replication.notify(notification).unwrap();
         sleep(Duration::from_millis(100));
-        assert_eq!(replication.info().is_active, false);
+        assert_eq!(
+            replication.info().is_active,
+            true,
+            "is_active should reflect remote availability when paused"
+        );
+        assert_eq!(replication.info().pending_records, 1);
+    }
+
+    #[rstest]
+    fn test_replication_paused_mode_unavailable(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        mut settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        settings.mode = ReplicationMode::Paused;
+        remote_bucket.expect_probe_availability().return_const(());
+        remote_bucket.expect_is_active().return_const(false);
+        let mut replication = build_replication(path, remote_bucket, settings);
+
+        replication.notify(notification).unwrap();
+        sleep(Duration::from_millis(100));
+        assert_eq!(
+            replication.info().is_active,
+            false,
+            "is_active should be false when remote unavailable"
+        );
         assert_eq!(replication.info().pending_records, 1);
     }
 

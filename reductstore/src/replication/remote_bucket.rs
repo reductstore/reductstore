@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod client_wrapper;
@@ -25,6 +25,8 @@ pub(crate) trait RemoteBucket {
         entry_name: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Result<ErrorRecordMap, ReductError>;
+
+    async fn probe_availability(&mut self);
 
     fn is_active(&self) -> bool;
 }
@@ -55,6 +57,11 @@ impl RemoteBucket for RemoteBucketImpl {
         let state = self.state.as_ref().unwrap();
         self.is_active = state.is_available();
         state.last_result().clone()
+    }
+
+    async fn probe_availability(&mut self) {
+        self.state = Some(self.state.take().unwrap().probe().await);
+        self.is_active = self.state.as_ref().unwrap().is_available();
     }
 
     fn is_active(&self) -> bool {
@@ -136,6 +143,8 @@ pub(super) mod tests {
                 records: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
+            fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send>;
+
             fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
 
             fn is_available(&self) -> bool;
@@ -199,6 +208,21 @@ pub(super) mod tests {
             ReductError::new(ErrorCode::ConnectionError, "test")
         );
         assert!(!remote_bucket.is_active());
+    }
+
+    #[rstest]
+    fn test_probe_availability() {
+        let mut first_state = MockState::new();
+        let mut second_state = MockState::new();
+        second_state.expect_is_available().return_const(true);
+
+        first_state
+            .expect_probe()
+            .return_once(move || Box::new(second_state));
+
+        let mut remote_bucket = create_dst_bucket(first_state);
+        remote_bucket.probe_availability();
+        assert!(remote_bucket.is_active());
     }
 
     fn create_dst_bucket(first_state: MockState) -> RemoteBucketImpl {

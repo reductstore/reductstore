@@ -55,6 +55,17 @@ impl RemoteBucketState for BucketUnavailableState {
         Box::new(me)
     }
 
+    async fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send> {
+        match self.client.get_bucket(&self.bucket_name).await {
+            Ok(bucket) => Box::new(BucketAvailableState::new(self.client, bucket)),
+            Err(err) => Box::new(BucketUnavailableState::new(
+                self.client,
+                self.bucket_name,
+                err,
+            )),
+        }
+    }
+
     fn is_available(&self) -> bool {
         false
     }
@@ -138,6 +149,32 @@ mod tests {
         let state = state.write_batch("test_entry", vec![]);
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_available(mut client: MockReductClientApi, bucket: MockReductBucketApi) {
+        client
+            .expect_get_bucket()
+            .with(predicate::eq("test_bucket"))
+            .return_once(move |_| Ok(Box::new(bucket)));
+
+        let state = state_without_timeout(client);
+        let state = state.probe();
+        assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_unavailable(mut client: MockReductClientApi) {
+        client
+            .expect_get_bucket()
+            .with(predicate::eq("test_bucket"))
+            .return_once(move |_| Err(ReductError::not_found("")));
+
+        let state = state_without_timeout(client);
+        let state = state.probe();
+        assert!(!state.is_available());
     }
 
     fn state_without_timeout(client: MockReductClientApi) -> Box<BucketUnavailableState> {

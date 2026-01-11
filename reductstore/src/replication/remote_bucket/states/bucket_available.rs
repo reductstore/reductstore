@@ -153,6 +153,11 @@ impl RemoteBucketState for BucketAvailableState {
         true
     }
 
+    async fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send> {
+        // Already available, stay in this state
+        self
+    }
+
     fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
         &self.last_result
     }
@@ -382,6 +387,18 @@ mod tests {
 
         let state = state.write_batch("test", vec![record_to_update]);
         assert!(state.last_result().is_ok());
+        assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_stays_available(client: MockReductClientApi, bucket: MockReductBucketApi) {
+        let state = Box::new(BucketAvailableState::new(
+            Box::new(client),
+            Box::new(bucket),
+        ));
+
+        let state = state.probe();
         assert!(state.is_available());
     }
 

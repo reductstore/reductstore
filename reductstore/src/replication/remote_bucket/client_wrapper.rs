@@ -1,7 +1,6 @@
 // Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::fallback_runtime::FallbackRuntime;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use async_stream::stream;
 use async_trait::async_trait;

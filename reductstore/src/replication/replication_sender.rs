@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
@@ -49,6 +49,11 @@ impl ReplicationSender {
             io_config,
             bucket,
         }
+    }
+
+    pub async fn probe_availability(&mut self) -> bool {
+        self.bucket.probe_availability().await;
+        self.bucket.is_active()
     }
 
     pub async fn run(&mut self) -> Result<SyncState, ReductError> {
@@ -244,6 +249,8 @@ mod tests {
                 entry_name: &str,
                 record: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
+
+            fn probe_availability(&mut self);
 
             fn is_active(&self) -> bool;
         }
