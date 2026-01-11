@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Replication `is_active` flag now reflects remote bucket availability when paused, [PR-1106](https://github.com/reductstore/reductstore/pull/1106)
+
 ### Added
 
 - Option to disable compaction with `RS_ENGINE_COMPACTION_INTERVAL=0`, [PR-1106](https://github.com/reductstore/reductstore/pull/1107)

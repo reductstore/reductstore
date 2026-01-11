@@ -62,6 +62,17 @@ impl RemoteBucketState for InitialState {
         }
     }
 
+    fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send> {
+        match self.client.get_bucket(&self.bucket_name) {
+            Ok(bucket) => Box::new(BucketAvailableState::new(self.client, bucket)),
+            Err(err) => Box::new(BucketUnavailableState::new(
+                self.client,
+                self.bucket_name,
+                err,
+            )),
+        }
+    }
+
     fn is_available(&self) -> bool {
         false
     }
@@ -138,5 +149,39 @@ mod tests {
             &Err(ReductError::bad_request("test error"))
         );
         assert_eq!(state.is_available(), false);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_available(mut client: MockReductClientApi, bucket: MockReductBucketApi) {
+        client
+            .expect_get_bucket()
+            .return_once(move |_| Ok(Box::new(bucket)));
+
+        let state = Box::new(InitialState {
+            client: Box::new(client),
+            bucket_name: "test_bucket".to_string(),
+            last_result: Ok(ErrorRecordMap::new()),
+        });
+
+        let state = state.probe();
+        assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_unavailable(mut client: MockReductClientApi) {
+        client
+            .expect_get_bucket()
+            .return_once(move |_| Err(ReductError::bad_request("test error")));
+
+        let state = Box::new(InitialState {
+            client: Box::new(client),
+            bucket_name: "test_bucket".to_string(),
+            last_result: Ok(ErrorRecordMap::new()),
+        });
+
+        let state = state.probe();
+        assert!(!state.is_available());
     }
 }

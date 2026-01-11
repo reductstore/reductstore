@@ -51,6 +51,11 @@ impl ReplicationSender {
         }
     }
 
+    pub fn probe_availability(&mut self) -> bool {
+        self.bucket.probe_availability();
+        self.bucket.is_active()
+    }
+
     pub fn run(&mut self) -> Result<SyncState, ReductError> {
         let entries = self.log_map.read()?.keys().cloned().collect::<Vec<_>>();
 
@@ -236,6 +241,8 @@ mod tests {
                 entry_name: &str,
                 record: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
+
+            fn probe_availability(&mut self);
 
             fn is_active(&self) -> bool;
         }

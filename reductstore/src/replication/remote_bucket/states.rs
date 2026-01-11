@@ -17,6 +17,9 @@ pub(super) trait RemoteBucketState {
         records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send>;
 
+    /// Probe the remote bucket to check availability without writing.
+    fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send>;
+
     /// Is the bucket available?
     fn is_available(&self) -> bool;
 
