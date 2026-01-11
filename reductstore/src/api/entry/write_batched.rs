@@ -150,6 +150,20 @@ async fn receive_body_and_write_records(
     while let Some(mut ctx) = rx_writer.recv().await {
         let mut written = 0;
 
+        // Handle empty bodies explicitly to avoid leaving the record in a "writing" state
+        if ctx.header.content_length == 0 {
+            if let Err(err) = ctx
+                .writer
+                .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
+                .await
+            {
+                debug!("Timeout while sending EOF for empty body: {}", err);
+            }
+
+            notify_replication_write(&components, bucket, &entry_name, &ctx).await?;
+            continue;
+        }
+
         if chunk.is_empty() {
             chunk = read_chunk().await?
         }
