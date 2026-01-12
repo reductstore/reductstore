@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.18.0-beta.3 - 2026-01-12
+
 ### Changed
 
 - Replication `is_active` flag now reflects remote bucket availability when paused, [PR-1106](https://github.com/reductstore/reductstore/pull/1106)
@@ -20,7 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Preserve provisioned replication mode changes across restarts, [PR-1108](https://github.com/reductstore/reductstore/pull/1108)
 
-## 1.8.0-beta.2 - 2026-01-09
+## 1.18.0-beta.2 - 2026-01-09
 
 ### Fixed
 
@@ -28,7 +30,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Avoid long block write lock during save, [PR-1104](https://github.com/reductstore/reductstore/pull/1104)
 - Skip compact when block manager busy, [PR-1105](https://github.com/reductstore/reductstore/pull/1105)
 
-## 1.8.0-beta.1 - 2026-01-08
+## 1.18.0-beta.1 - 2026-01-08
 
 ### Added
 
