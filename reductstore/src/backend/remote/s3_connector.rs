@@ -286,15 +286,23 @@ impl RemoteStorageConnector for S3Connector {
 
         block_in_place(|| {
             rt.block_on(async {
-                client
+                let resp = client
                     .delete_object()
                     .bucket(&self.bucket)
                     .key(&key)
                     .send()
-                    .await
-                    .map_err(|e| {
+                    .await;
+
+                match resp {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        if let SdkError::ServiceError(err) = &e {
+                            if err.err().is_not_found() {
+                                return Ok(());
+                            }
+                        }
                         error!("S3 delete_object error: {}", DisplayErrorContext(&e));
-                        io::Error::new(
+                        Err(io::Error::new(
                             io::ErrorKind::Other,
                             format!(
                                 "S3 delete_object error bucket={}, key={}: {}",
@@ -302,9 +310,9 @@ impl RemoteStorageConnector for S3Connector {
                                 &key,
                                 e.message().unwrap_or("connection error")
                             ),
-                        )
-                    })?;
-                Ok(())
+                        ))
+                    }
+                }
             })
         })
     }
@@ -388,14 +396,22 @@ impl RemoteStorageConnector for S3Connector {
                     })?;
 
                 // Optionally, delete the source object after copying
-                client
+                let delete_resp = client
                     .delete_object()
                     .bucket(&self.bucket)
                     .key(&from_key)
                     .send()
-                    .await
-                    .map_err(|e| {
-                        io::Error::new(
+                    .await;
+
+                match delete_resp {
+                    Ok(_) => Ok(()),
+                    Err(e) => {
+                        if let SdkError::ServiceError(err) = &e {
+                            if err.err().is_not_found() {
+                                return Ok(());
+                            }
+                        }
+                        Err(io::Error::new(
                             io::ErrorKind::Other,
                             format!(
                                 "S3 delete_object error bucket={}, key={}: {}",
@@ -403,8 +419,9 @@ impl RemoteStorageConnector for S3Connector {
                                 &from_key,
                                 e.message().unwrap_or("connection error")
                             ),
-                        )
-                    })?;
+                        ))
+                    }
+                }?;
                 Ok(())
             })
         })
