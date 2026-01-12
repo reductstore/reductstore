@@ -33,11 +33,7 @@ pub(super) struct S3Connector {
 fn is_not_found_error(err: &impl ProvideErrorMetadata) -> bool {
     match err.code() {
         Some("NotFound") | Some("NoSuchKey") => true,
-        _ => err
-            .meta()
-            .and_then(|meta| meta.http_status())
-            .map(|status| status.as_u16() == 404)
-            .unwrap_or(false),
+        _ => false,
     }
 }
 
