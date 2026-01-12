@@ -30,6 +30,17 @@ pub(super) struct S3Connector {
     default_storage_class: Option<StorageClass>,
 }
 
+fn is_not_found_error(err: &impl ProvideErrorMetadata) -> bool {
+    match err.code() {
+        Some("NotFound") | Some("NoSuchKey") => true,
+        _ => err
+            .meta()
+            .and_then(|meta| meta.http_status())
+            .map(|status| status.as_u16() == 404)
+            .unwrap_or(false),
+    }
+}
+
 impl S3Connector {
     pub fn new(settings: RemoteBackendSettings) -> Self {
         let rt = Arc::new(
@@ -297,7 +308,7 @@ impl RemoteStorageConnector for S3Connector {
                     Ok(_) => Ok(()),
                     Err(e) => {
                         if let SdkError::ServiceError(err) = &e {
-                            if err.err().is_not_found() {
+                            if is_not_found_error(err.err()) {
                                 return Ok(());
                             }
                         }
@@ -343,7 +354,7 @@ impl RemoteStorageConnector for S3Connector {
                     Err(e) => {
                         // Inspect the error
                         if let SdkError::ServiceError(err) = &e {
-                            if err.err().is_not_found() {
+                            if is_not_found_error(err.err()) {
                                 return Ok(None); // Object does not exist
                             }
                         }
@@ -407,7 +418,7 @@ impl RemoteStorageConnector for S3Connector {
                     Ok(_) => Ok(()),
                     Err(e) => {
                         if let SdkError::ServiceError(err) = &e {
-                            if err.err().is_not_found() {
+                            if is_not_found_error(err.err()) {
                                 return Ok(());
                             }
                         }

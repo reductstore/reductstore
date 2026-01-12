@@ -36,7 +36,7 @@
 - Run coverage locally with ` cargo llvm-cov --workspace --lcov --output-path lcov.info`.
 
 ## Commit & Pull Request Guidelines
-
+~~~~~~~~
 - Commit messages are short, imperative, lower-case; optionally tag issues/PRs (e.g., `fix artifact name`,
   `bump regex from 1.12.1 to 1.12.2 (#1037)`).
 - Keep changes scoped; include tests or a rationale when skipping them.
