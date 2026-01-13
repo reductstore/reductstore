@@ -15,7 +15,7 @@ use prost::Message;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole::Replica;
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::{AsyncRwLock, RwLock};
+use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{

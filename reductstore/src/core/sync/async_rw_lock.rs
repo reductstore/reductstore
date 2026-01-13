@@ -63,16 +63,20 @@ impl<T> AsyncRwLock<T> {
     }
 
     #[track_caller]
-    pub async fn write_owned(&self) -> Result<tokio::sync::OwnedRwLockWriteGuard<T>, ReductError> {
+    pub fn write_owned(
+        &self,
+    ) -> impl Future<Output = Result<tokio::sync::OwnedRwLockWriteGuard<T>, ReductError>> + '_ {
         let location = Location::caller();
-        timeout(rwlock_timeout(), Arc::clone(&self.inner).write_owned())
-            .await
-            .map_err(|_| {
-                lock_timeout_error_at(
-                    "Failed to acquire async owned write lock within timeout",
-                    location,
-                )
-            })
+        async move {
+            timeout(rwlock_timeout(), Arc::clone(&self.inner).write_owned())
+                .await
+                .map_err(|_| {
+                    lock_timeout_error_at(
+                        "Failed to acquire async owned write lock within timeout",
+                        location,
+                    )
+                })
+        }
     }
 }
 

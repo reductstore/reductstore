@@ -391,9 +391,11 @@ mod tests {
             .join("entry");
 
         let rt = tokio::runtime::Handle::current();
-        FILE_CACHE.set_storage_backend(
-            rt.block_on(Backend::builder().local_data_path(path.clone()).try_build())
-                .unwrap(),
+        rt.block_on(
+            FILE_CACHE.set_storage_backend(
+                rt.block_on(Backend::builder().local_data_path(path.clone()).try_build())
+                    .unwrap(),
+            ),
         );
 
         let mut block_manager = rt.block_on(BlockManager::build(

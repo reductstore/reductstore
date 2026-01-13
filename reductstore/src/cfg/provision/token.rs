@@ -255,14 +255,20 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let data_path = tmp.keep();
         fs::create_dir_all(&data_path).unwrap();
-        FILE_CACHE.set_storage_backend(
-            tokio::runtime::Handle::current()
-                .block_on(
-                    Backend::builder()
-                        .local_data_path(data_path.clone())
-                        .try_build(),
-                )
-                .unwrap(),
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        rt.block_on(
+            FILE_CACHE.set_storage_backend(
+                tokio::runtime::Handle::current()
+                    .block_on(
+                        Backend::builder()
+                            .local_data_path(data_path.clone())
+                            .try_build(),
+                    )
+                    .unwrap(),
+            ),
         );
 
         let mut mock_getter = MockEnvGetter::new();

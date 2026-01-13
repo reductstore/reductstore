@@ -568,13 +568,15 @@ mod tests {
             ..Default::default()
         };
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
+        FILE_CACHE
+            .set_storage_backend(
+                Backend::builder()
+                    .local_data_path(cfg.data_path.clone())
+                    .try_build()
+                    .await
+                    .unwrap(),
+            )
+            .await;
 
         let storage = Arc::new(
             StorageEngine::builder()
@@ -661,13 +663,15 @@ mod tests {
             ..Default::default()
         };
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
+        FILE_CACHE
+            .set_storage_backend(
+                Backend::builder()
+                    .local_data_path(cfg.data_path.clone())
+                    .try_build()
+                    .await
+                    .unwrap(),
+            )
+            .await;
 
         let storage = Arc::new(
             StorageEngine::builder()

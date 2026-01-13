@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
-use tower_http::follow_redirect::policy::PolicyExt;
 
 #[derive(Clone)]
 struct ContextGuard {
@@ -320,7 +319,7 @@ mod tests {
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
 
         let handle = Handle::new();
-        let mut cfg = CfgParser::from_env(StdEnvGetter::default(), "0.0.0").await; // init file cache
+        let cfg = CfgParser::from_env(StdEnvGetter::default(), "0.0.0").await; // init file cache
         let storage = cfg.build().await.unwrap().storage;
         let ctx = ContextGuard {
             server_handle: handle.clone(),

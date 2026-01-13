@@ -44,7 +44,6 @@ mod tests {
     // test reloading in read-only mode
 
     use super::*;
-    use crate::backend::Backend;
     use crate::cfg::storage_engine::StorageEngineConfig;
     use crate::cfg::Cfg;
     use crate::storage::block_manager::block::Block;
@@ -53,7 +52,6 @@ mod tests {
     use rstest::{fixture, rstest};
     use std::path::PathBuf;
     use std::sync::Arc;
-    use std::thread::sleep;
     use std::time::Duration;
     use tempfile::tempdir;
 

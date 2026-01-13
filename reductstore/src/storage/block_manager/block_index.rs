@@ -279,13 +279,11 @@ impl BlockIndex {
 mod tests {
     use std::fs;
 
+    use crate::storage::block_manager::BLOCK_INDEX_FILE;
+    use crate::storage::proto::block_index::Block as BlockEntry;
     use prost_wkt_types::Timestamp;
     use rstest::rstest;
     use tempfile::tempdir;
-    use tokio::test as tokio_test;
-
-    use crate::storage::block_manager::BLOCK_INDEX_FILE;
-    use crate::storage::proto::block_index::Block as BlockEntry;
 
     use super::*;
 

@@ -284,6 +284,8 @@ impl FileCache {
         if pos != SeekFrom::Current(0) {
             lock.seek(pos)?;
         }
+
+        lock.access().await?;
         Ok(lock)
     }
 
@@ -322,6 +324,8 @@ impl FileCache {
         if pos != SeekFrom::Current(0) {
             lock.seek(pos)?;
         }
+
+        lock.access().await?;
         Ok(lock)
     }
 
@@ -606,13 +610,15 @@ mod tests {
     async fn test_cache_keeps_entries_with_weak_refs(tmp_dir: PathBuf) {
         let cache = {
             let cache = FileCache::new(1, Duration::from_secs(60), Duration::from_millis(100));
-            cache.set_storage_backend(
-                Backend::builder()
-                    .local_data_path(tempfile::tempdir().unwrap().keep())
-                    .try_build()
-                    .await
-                    .unwrap(),
-            );
+            cache
+                .set_storage_backend(
+                    Backend::builder()
+                        .local_data_path(tempfile::tempdir().unwrap().keep())
+                        .try_build()
+                        .await
+                        .unwrap(),
+                )
+                .await;
             cache
         };
 
@@ -823,14 +829,17 @@ mod tests {
     #[fixture]
     fn cache() -> FileCache {
         let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));
-        cache.set_storage_backend(
-            tokio::runtime::Handle::current()
-                .block_on(
-                    Backend::builder()
-                        .local_data_path(tempfile::tempdir().unwrap().keep())
-                        .try_build(),
-                )
-                .unwrap(),
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(
+            cache.set_storage_backend(
+                tokio::runtime::Handle::current()
+                    .block_on(
+                        Backend::builder()
+                            .local_data_path(tempfile::tempdir().unwrap().keep())
+                            .try_build(),
+                    )
+                    .unwrap(),
+            ),
         );
         cache
     }

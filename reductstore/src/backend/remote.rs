@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -13,7 +13,7 @@ use crate::backend::remote::local_cache::LocalCache;
 #[cfg(feature = "s3-backend")]
 use crate::backend::remote::s3_connector::S3Connector;
 use crate::backend::{BackendType, ObjectMetadata, StorageBackend};
-use crate::core::sync::{AsyncRwLock, RwLock};
+use crate::core::sync::AsyncRwLock;
 use async_trait::async_trait;
 use log::debug;
 use reduct_base::error::ReductError;

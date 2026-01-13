@@ -3,7 +3,7 @@
 
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::{AsyncRwLock, RwLock};
+use crate::core::sync::AsyncRwLock;
 use crate::storage::proto::folder_map::Item;
 use crate::storage::proto::FolderMap;
 use log::warn;
@@ -189,10 +189,13 @@ mod tests {
     #[fixture]
     pub fn path() -> PathBuf {
         let path = tempdir().unwrap().keep();
-        FILE_CACHE.set_storage_backend(
-            tokio::runtime::Handle::current()
-                .block_on(Backend::builder().local_data_path(path.clone()).try_build())
-                .unwrap(),
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(
+            FILE_CACHE.set_storage_backend(
+                tokio::runtime::Handle::current()
+                    .block_on(Backend::builder().local_data_path(path.clone()).try_build())
+                    .unwrap(),
+            ),
         );
         path
     }

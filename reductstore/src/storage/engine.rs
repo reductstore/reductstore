@@ -954,7 +954,7 @@ mod tests {
             .try_build()
             .await
             .unwrap();
-        FILE_CACHE.set_storage_backend(backend);
+        FILE_CACHE.set_storage_backend(backend).await;
         Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())

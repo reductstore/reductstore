@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // This Source Code Form is subject to the terms of the Mozilla Public
 //    License, v. 2.0. If a copy of the MPL was not distributed with this
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
@@ -145,6 +145,7 @@ impl File {
         self.is_synced
     }
 
+    #[allow(dead_code)]
     pub fn path(&self) -> &PathBuf {
         &self.path
     }

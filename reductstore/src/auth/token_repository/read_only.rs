@@ -6,7 +6,7 @@ use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::{AsyncRwLock, RwLock};
+use crate::core::sync::AsyncRwLock;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
@@ -187,7 +187,6 @@ mod tests {
 
     mod repo_methods {
         use super::*;
-        use std::io::Write;
         use std::thread::sleep;
         use std::time::Duration;
 
