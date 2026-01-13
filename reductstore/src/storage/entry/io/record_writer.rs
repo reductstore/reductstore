@@ -459,7 +459,7 @@ mod tests {
 
         #[fixture]
         fn block_manager(path: PathBuf) -> Arc<AsyncRwLock<BlockManager>> {
-            Arc::new(AsyncRwLock::new(BlockManager::new(
+            Arc::new(AsyncRwLock::new(BlockManager::build(
                 path.clone(),
                 BlockIndex::new(path.clone()),
                 Cfg::default().into(),

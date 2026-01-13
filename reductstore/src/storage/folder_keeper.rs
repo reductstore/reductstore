@@ -41,7 +41,7 @@ impl FolderKeeper {
         list_path: &PathBuf,
         save_on_change: bool,
     ) -> FolderMap {
-        if FILE_CACHE.try_exists(list_path).unwrap_or(false) {
+        if FILE_CACHE.try_exists(list_path).await.unwrap_or(false) {
             match Self::read_folder_map(list_path).await {
                 Ok(map) => map,
                 Err(err) => {
@@ -49,11 +49,11 @@ impl FolderKeeper {
                         "Failed to decode folder map at {:?}: {}. Rebuilding cache.",
                         list_path, err
                     );
-                    Self::build_from_fs(path)
+                    Self::build_from_fs(path).await
                 }
             }
         } else {
-            let proto = Self::build_from_fs(path);
+            let proto = Self::build_from_fs(path).await;
             if save_on_change {
                 Self::save_static(list_path, &AsyncRwLock::new(proto.clone()))
                     .await
@@ -81,7 +81,7 @@ impl FolderKeeper {
 
     pub async fn add_folder(&self, folder_name: &str) -> Result<(), ReductError> {
         let folder_path = self.path.join(folder_name);
-        FILE_CACHE.create_dir_all(&folder_path)?;
+        FILE_CACHE.create_dir_all(&folder_path).await?;
         {
             let mut map = self.map.write().await?;
 
@@ -153,13 +153,13 @@ impl FolderKeeper {
         let mut lock = FILE_CACHE.write_or_create(path, Start(0)).await?;
         lock.set_len(0)?; // truncate the file before writing
         lock.write_all(&buf)?;
-        lock.sync_all()?;
+        lock.sync_all().await?;
         Ok(())
     }
 
-    fn build_from_fs(path: &PathBuf) -> FolderMap {
+    async fn build_from_fs(path: &PathBuf) -> FolderMap {
         let mut proto = FolderMap { items: vec![] };
-        for path in FILE_CACHE.read_dir(path).unwrap() {
+        for path in FILE_CACHE.read_dir(path).await.unwrap() {
             if path.is_dir() {
                 if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
                     if !name.starts_with('.') {

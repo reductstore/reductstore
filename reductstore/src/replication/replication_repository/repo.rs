@@ -318,7 +318,7 @@ impl ReplicationRepository {
             .await?;
         file.set_len(0)?;
         file.write_all(&buf)?;
-        file.sync_all()?;
+        file.sync_all().await?;
 
         Ok(())
     }

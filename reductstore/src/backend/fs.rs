@@ -25,35 +25,37 @@ impl StorageBackend for FileSystemBackend {
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
-        std::fs::rename(from, to)
+        tokio::fs::rename(from, to).await
     }
 
     async fn remove(&self, path: &Path) -> std::io::Result<()> {
-        std::fs::remove_file(path)
+        tokio::fs::remove_file(path).await
     }
 
     async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
-        std::fs::remove_dir_all(path)
+        tokio::fs::remove_dir_all(path).await
     }
 
-    fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(path)
+    async fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+        tokio::fs::create_dir_all(path).await
     }
 
-    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>> {
-        std::fs::read_dir(path).map(|read_dir| {
-            read_dir
-                .filter_map(|entry| entry.ok().map(|e| e.path()))
-                .collect()
-        })
+    async fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>> {
+        let mut dir = tokio::fs::read_dir(path).await?;
+        let mut entries = Vec::new();
+        while let Some(entry) = dir.next_entry().await? {
+            entries.push(entry.path());
+        }
+
+        Ok(entries)
     }
 
-    fn try_exists(&self, path: &Path) -> std::io::Result<bool> {
+    async fn try_exists(&self, path: &Path) -> std::io::Result<bool> {
         path.try_exists()
     }
 
-    fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
-        match std::fs::metadata(path) {
+    async fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
+        match tokio::fs::metadata(path).await {
             Ok(metadata) => {
                 let modified = metadata.modified().ok();
                 let size = metadata.len();
@@ -77,17 +79,17 @@ impl StorageBackend for FileSystemBackend {
         Ok(())
     }
 
-    fn update_local_cache(&self, _path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
+    async fn update_local_cache(&self, _path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
         // do nothing because filesystem backend does not need access tracking
         Ok(())
     }
 
-    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
+    async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
         // do nothing because filesystem backend does not have a cache
         vec![]
     }
 
-    fn remove_from_local_cache(&self, _path: &Path) -> std::io::Result<()> {
+    async fn remove_from_local_cache(&self, _path: &Path) -> std::io::Result<()> {
         // do nothing because filesystem backend does not have a cache
         Ok(())
     }

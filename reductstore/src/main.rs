@@ -67,7 +67,7 @@ async fn launch_server() {
         env!("BUILD_TIME")
     );
 
-    let parser = CfgParser::from_env(StdEnvGetter::default(), version);
+    let parser = CfgParser::from_env(StdEnvGetter::default(), version).await;
     let handle = Handle::new();
     let lock_file = Arc::new(parser.build_lock_file().unwrap());
 

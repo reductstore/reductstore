@@ -60,7 +60,7 @@ pub(crate) type FileGuard = OwnedRwLockWriteGuard<File>;
 pub(crate) struct FileCache {
     cache: Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
     stop_sync_worker: Arc<AtomicBool>,
-    backend: Arc<RwLock<Backend>>,
+    backend: Arc<AsyncRwLock<Backend>>,
     sync_interval: Arc<RwLock<Duration>>,
     read_only: Arc<AtomicBool>,
 }
@@ -80,7 +80,7 @@ impl FileCache {
         let cache_clone = Arc::clone(&cache);
         let stop_sync_worker = Arc::new(AtomicBool::new(false));
         let stop_sync_worker_clone = Arc::clone(&stop_sync_worker);
-        let backpack = Arc::new(RwLock::new(Backend::default()));
+        let backpack = Arc::new(AsyncRwLock::new(Backend::default()));
         let backpack_clone = Arc::clone(&backpack);
         let sync_interval = Arc::new(RwLock::new(sync_interval));
         let sync_interval_clone = Some(Arc::clone(&sync_interval));
@@ -119,7 +119,7 @@ impl FileCache {
 
     async fn sync_rw_and_unused_files(
         read_only: &Arc<AtomicBool>,
-        backend: &Arc<RwLock<Backend>>,
+        backend: &Arc<AsyncRwLock<Backend>>,
         cache: &Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
         sync_interval: &Option<Arc<RwLock<Duration>>>,
     ) -> Result<(), ReductError> {
@@ -133,10 +133,14 @@ impl FileCache {
         let sync_interval = sync_interval
             .as_ref()
             .map_or(FILE_CACHE_SYNC_INTERVAL, |si| *si.read_blocking());
-        let invalidated_files = backend.read()?.invalidate_locally_cached_files();
+        let invalidated_files = backend
+            .read()
+            .await?
+            .invalidate_locally_cached_files()
+            .await;
         for path in invalidated_files {
             if let Some(file) = cache.remove(&path) {
-                if let Err(err) = file.write_owned().await?.sync_all() {
+                if let Err(err) = file.write_owned().await?.sync_all().await {
                     warn!("Failed to sync invalidated file {:?}: {}", path, err);
                 }
             }
@@ -166,7 +170,7 @@ impl FileCache {
                 continue;
             }
 
-            if let Err(err) = file_lock.sync_all() {
+            if let Err(err) = file_lock.sync_all().await {
                 warn!("Failed to sync file {}: {}", path.display(), err);
                 continue;
             }
@@ -182,11 +186,13 @@ impl FileCache {
     ) -> Result<Arc<AsyncRwLock<File>>, ReductError> {
         let file = self
             .backend
-            .read()?
+            .read()
+            .await?
             .open_options()
             .read(true)
             .ignore_write(self.read_only.load(Ordering::Relaxed))
-            .open(path)?;
+            .open(path)
+            .await?;
         let arc = Arc::new(AsyncRwLock::new(file));
         Self::insert_file_cached(cache, path.clone(), arc.clone()).await;
         Ok(arc)
@@ -200,13 +206,15 @@ impl FileCache {
     ) -> Result<Arc<AsyncRwLock<File>>, ReductError> {
         let file = self
             .backend
-            .read()?
+            .read()
+            .await?
             .open_options()
             .create(create)
             .write(true)
             .ignore_write(self.read_only.load(Ordering::Relaxed))
             .read(true)
-            .open(path)?;
+            .open(path)
+            .await?;
         let arc = Arc::new(AsyncRwLock::new(file));
         Self::insert_file_cached(cache, path.clone(), arc.clone()).await;
         Ok(arc)
@@ -225,7 +233,7 @@ impl FileCache {
             }
             match file.write_owned().await {
                 Ok(mut lock) => {
-                    if let Err(err) = lock.sync_all() {
+                    if let Err(err) = lock.sync_all().await {
                         warn!("Failed to sync file {:?}: {}", path, err);
                     }
                 }
@@ -235,8 +243,8 @@ impl FileCache {
     }
 
     /// Set the storage backend
-    pub fn set_storage_backend(&self, backpack: Backend) {
-        *self.backend.write_blocking() = backpack;
+    pub async fn set_storage_backend(&self, backpack: Backend) {
+        *self.backend.write().await.unwrap() = backpack;
     }
 
     /// Set sync interval
@@ -351,7 +359,7 @@ impl FileCache {
         }
         drop(cache);
 
-        let backend = self.backend.read()?.clone();
+        let backend = self.backend.read().await?.clone();
         backend.remove(path).await?;
 
         Ok(())
@@ -364,7 +372,7 @@ impl FileCache {
 
         self.discard_recursive(path).await?;
         if path.try_exists()? {
-            let backend = self.backend.read()?.clone();
+            let backend = self.backend.read().await?.clone();
             backend.remove_dir_all(path).await?;
         }
 
@@ -396,12 +404,16 @@ impl FileCache {
             if let Some(file) = cache.remove(&file_path) {
                 let mut lock = file.write_owned().await?;
                 if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
-                    if let Err(err) = lock.sync_all() {
+                    if let Err(err) = lock.sync_all().await {
                         warn!("Failed to sync file {}: {}", file_path.display(), err);
                     }
                 }
                 drop(lock);
-                self.backend.write()?.remove_from_local_cache(&file_path)?;
+                self.backend
+                    .write()
+                    .await?
+                    .remove_from_local_cache(&file_path)
+                    .await?;
             }
         }
 
@@ -426,36 +438,36 @@ impl FileCache {
         let mut cache = self.cache.write().await?;
         cache.remove(old_path);
         drop(cache);
-        let backend = self.backend.read()?.clone();
+        let backend = self.backend.read().await?.clone();
         backend.rename(old_path, new_path).await?;
         Ok(())
     }
 
-    pub fn try_exists(&self, path: &PathBuf) -> Result<bool, ReductError> {
-        let backpack = self.backend.read()?;
-        Ok(backpack.try_exists(path)?)
+    pub async fn try_exists(&self, path: &PathBuf) -> Result<bool, ReductError> {
+        let backpack = self.backend.read().await?;
+        Ok(backpack.try_exists(path).await?)
     }
 
-    pub fn get_stats(&self, path: &PathBuf) -> Result<Option<ObjectMetadata>, ReductError> {
-        let backpack = self.backend.read()?;
-        Ok(backpack.get_stats(path)?)
+    pub async fn get_stats(&self, path: &PathBuf) -> Result<Option<ObjectMetadata>, ReductError> {
+        let backpack = self.backend.read().await?;
+        Ok(backpack.get_stats(path).await?)
     }
 
     pub async fn force_sync_all(&self) -> Result<(), ReductError> {
         Self::sync_rw_and_unused_files(&self.read_only, &self.backend, &self.cache, &None).await
     }
 
-    pub fn create_dir_all(&self, path: &PathBuf) -> Result<(), ReductError> {
+    pub async fn create_dir_all(&self, path: &PathBuf) -> Result<(), ReductError> {
         if self.read_only.load(Ordering::Relaxed) {
             return Ok(());
         }
 
-        self.backend.read()?.create_dir_all(path)?;
+        self.backend.read().await?.create_dir_all(path).await?;
         Ok(())
     }
 
-    pub fn read_dir(&self, path: &PathBuf) -> Result<Vec<PathBuf>, ReductError> {
-        Ok(self.backend.read()?.read_dir(path)?)
+    pub async fn read_dir(&self, path: &PathBuf) -> Result<Vec<PathBuf>, ReductError> {
+        Ok(self.backend.read().await?.read_dir(path).await?)
     }
 }
 

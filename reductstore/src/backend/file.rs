@@ -73,7 +73,7 @@ impl OpenOptions {
         self
     }
 
-    pub fn open<P: AsRef<std::path::Path>>(&mut self, path: P) -> std::io::Result<File> {
+    pub async fn open<P: AsRef<std::path::Path>>(&mut self, path: P) -> std::io::Result<File> {
         if self.ignore_write {
             self.inner.write(false);
             self.inner.create(false);
@@ -82,10 +82,8 @@ impl OpenOptions {
         let full_path = self.backend.path().join(path.as_ref());
         if !full_path.exists() {
             // the call initiates downloading the file from remote storage if needed
-            if self.backend.try_exists(&full_path)? {
-                tokio::task::block_in_place(|| {
-                    tokio::runtime::Handle::current().block_on(self.backend.download(&full_path))
-                })?;
+            if self.backend.try_exists(&full_path).await? {
+                self.backend.download(&full_path).await?;
             } else if !self.create {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
@@ -108,7 +106,7 @@ impl OpenOptions {
 }
 
 impl File {
-    pub fn sync_all(&mut self) -> std::io::Result<()> {
+    pub async fn sync_all(&mut self) -> std::io::Result<()> {
         if self.ignore_write {
             return Ok(());
         }
@@ -120,9 +118,7 @@ impl File {
         debug!("File {} synced to storage backend", self.path.display());
 
         self.inner.sync_all()?;
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.backend.upload(&self.path))
-        })?;
+        self.backend.upload(&self.path).await?;
         self.last_synced = Instant::now();
         self.is_synced = true;
         Ok(())
@@ -157,8 +153,10 @@ impl File {
         &self.mode
     }
 
-    pub fn access(&self) -> std::io::Result<()> {
-        self.backend.update_local_cache(&self.path, &self.mode)
+    pub async fn access(&self) -> std::io::Result<()> {
+        self.backend
+            .update_local_cache(&self.path, &self.mode)
+            .await
     }
 }
 

@@ -113,11 +113,12 @@ impl LockFileBuilder {
         loop {
             // Check if the file is already locked
             let time_start = std::time::Instant::now();
-            while FILE_CACHE.try_exists(&file_path).unwrap_or(true)
+            while FILE_CACHE.try_exists(&file_path).await?
                 && !stop_flag.load(std::sync::atomic::Ordering::SeqCst)
             {
                 if let Some(last_modified) = FILE_CACHE
-                    .get_stats(&file_path)?
+                    .get_stats(&file_path)
+                    .await?
                     .and_then(|meta| meta.modified_time)
                 {
                     // elapsed can fail if system time is changed backwards, so we default to 0 duration
@@ -172,7 +173,7 @@ impl LockFileBuilder {
                 InstanceRole::Secondary => {
                     // Secondary instance waits a bit to ensure the primary has created the lock file
                     tokio::time::sleep(cfg.polling_interval * 3).await;
-                    if !FILE_CACHE.try_exists(&file_path)? {
+                    if !FILE_CACHE.try_exists(&file_path).await? {
                         info!("Secondary instance acquiring lock file: {:?}", file_path);
                         *state.write().await? = State::Locked;
                     } else {
@@ -195,7 +196,7 @@ impl LockFileBuilder {
             let recreate = async {
                 let mut file = FILE_CACHE.write_or_create(&file_path, Start(0)).await?;
                 file.write_all(unique_id.as_bytes())?;
-                file.sync_all()?;
+                file.sync_all().await?;
                 Ok::<(), ReductError>(())
             };
 
@@ -253,7 +254,7 @@ impl Drop for ImplLockFile {
         if let Ok(handle) = tokio::runtime::Handle::try_current() {
             let _ = std::thread::spawn(move || {
                 handle.block_on(async {
-                    std::thread::sleep(Duration::from_millis(100));
+                    tokio::time::sleep(Duration::from_millis(100)).await;
                     if let Err(err) = FILE_CACHE.remove(&path).await {
                         error!("Failed to remove lock file: {:?}", err);
                     }

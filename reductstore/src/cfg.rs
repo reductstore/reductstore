@@ -121,7 +121,7 @@ pub struct CfgParser<EnvGetter: GetEnv> {
 }
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub fn from_env(env_getter: EnvGetter, version: &str) -> Self {
+    pub async fn from_env(env_getter: EnvGetter, version: &str) -> Self {
         let mut env = Env::new(env_getter);
 
         let mut api_base_path = env.get("RS_API_BASE_PATH", "/".to_string());
@@ -215,6 +215,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         }
 
         me.init_storage_backend()
+            .await
             .expect("Failed to initialize storage backend");
         me
     }
@@ -305,7 +306,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         Ok(data_path)
     }
 
-    fn init_storage_backend(&self) -> Result<(), ReductError> {
+    async fn init_storage_backend(&self) -> Result<(), ReductError> {
         // Initialize storage backend
         let mut backend_builder = Backend::builder()
             .backend_type(self.cfg.cs_config.backend_type.clone())
@@ -349,7 +350,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?;
 
-        FILE_CACHE.set_storage_backend(backend);
+        FILE_CACHE.set_storage_backend(backend).await;
         FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
         FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::Replica);
         Ok(())

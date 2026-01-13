@@ -70,7 +70,7 @@ pub struct EntrySettings {
 }
 
 impl Entry {
-    pub fn try_new(
+    pub async fn try_build(
         name: &str,
         path: PathBuf,
         settings: EntrySettings,
@@ -88,11 +88,14 @@ impl Entry {
                 .unwrap()
                 .to_string(),
             settings: AsyncRwLock::new(settings),
-            block_manager: Arc::new(AsyncRwLock::new(BlockManager::new(
-                path.clone(),
-                BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
-                cfg.clone(),
-            ))),
+            block_manager: Arc::new(AsyncRwLock::new(
+                BlockManager::build(
+                    path.clone(),
+                    BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                    cfg.clone(),
+                )
+                .await,
+            )),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
@@ -701,7 +704,7 @@ mod tests {
         #[tokio::test]
         async fn test_size_counting(path: PathBuf) {
             let entry = Arc::new(
-                Entry::try_new(
+                Entry::try_build(
                     "entry",
                     path.clone(),
                     EntrySettings {
@@ -745,7 +748,7 @@ mod tests {
     #[fixture]
     pub(super) fn entry(entry_settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
         Arc::new(
-            Entry::try_new("entry", path.clone(), entry_settings, Cfg::default().into()).unwrap(),
+            Entry::try_build("entry", path.clone(), entry_settings, Cfg::default().into()).unwrap(),
         )
     }
 

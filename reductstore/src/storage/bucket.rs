@@ -179,15 +179,18 @@ impl Bucket {
             self.check_mode()?;
             let settings = self.settings.read().await?;
             self.folder_keeper.add_folder(key).await?;
-            let entry = Arc::new(Entry::try_new(
-                &key,
-                self.path.clone(),
-                EntrySettings {
-                    max_block_size: settings.max_block_size.unwrap(),
-                    max_block_records: settings.max_block_records.unwrap(),
-                },
-                self.cfg.clone(),
-            )?);
+            let entry = Arc::new(
+                Entry::try_build(
+                    &key,
+                    self.path.clone(),
+                    EntrySettings {
+                        max_block_size: settings.max_block_size.unwrap(),
+                        max_block_records: settings.max_block_records.unwrap(),
+                    },
+                    self.cfg.clone(),
+                )
+                .await?,
+            );
             let mut entries = self.entries.write().await?;
             entries
                 .entry(key.to_string())

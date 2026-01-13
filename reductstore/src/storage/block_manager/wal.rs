@@ -148,7 +148,7 @@ const STOP_MARKER: u8 = 255;
 impl Wal for WalImpl {
     async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        let mut file = if !FILE_CACHE.try_exists(&path)? {
+        let mut file = if !FILE_CACHE.try_exists(&path).await? {
             let mut file = FILE_CACHE
                 .write_or_create(&path, SeekFrom::Current(0))
                 .await?;
@@ -227,7 +227,7 @@ impl Wal for WalImpl {
 
     async fn remove(&self, block_id: u64) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        if FILE_CACHE.try_exists(&path)? {
+        if FILE_CACHE.try_exists(&path).await? {
             FILE_CACHE.remove(&path).await?;
         }
         Ok(())
@@ -235,7 +235,7 @@ impl Wal for WalImpl {
 
     async fn list(&self) -> Result<Vec<u64>, ReductError> {
         let mut blocks = Vec::new();
-        for path in FILE_CACHE.read_dir(&self.root_path)? {
+        for path in FILE_CACHE.read_dir(&self.root_path).await? {
             if path.extension().unwrap_or_default() == "wal" {
                 let block_id = path
                     .file_stem()
@@ -267,11 +267,12 @@ impl Wal for WalImpl {
 /// # Panics
 ///
 /// This function will panic if it fails to create the WAL directory.
-pub(in crate::storage) fn create_wal(entry_path: PathBuf) -> Box<dyn Wal + Send + Sync> {
+pub(in crate::storage) async fn create_wal(entry_path: PathBuf) -> Box<dyn Wal + Send + Sync> {
     let wal_folder = entry_path.join("wal");
     if !wal_folder.try_exists().unwrap() {
         FILE_CACHE
             .create_dir_all(&wal_folder)
+            .await
             .expect("Failed to create WAL folder");
     }
     Box::new(WalImpl::new(entry_path.join("wal")))

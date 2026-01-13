@@ -56,7 +56,7 @@ impl TransactionLog {
             file.set_len(init_capacity_in_bytes as u64)?;
             file.write_all(HEADER_SIZE.to_be_bytes().as_ref())?;
             file.write_all(HEADER_SIZE.to_be_bytes().as_ref())?;
-            file.sync_all()?;
+            file.sync_all().await?;
 
             Self {
                 file_path: path.clone(),

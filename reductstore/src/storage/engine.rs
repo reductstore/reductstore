@@ -64,9 +64,9 @@ impl StorageEngineBuilder {
         let cfg = self.cfg.expect("Config must be set");
         let data_path = self.data_path.expect("Data path must be set");
 
-        if !FILE_CACHE.try_exists(&data_path).unwrap_or(false) {
+        if !FILE_CACHE.try_exists(&data_path).await.unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
-            FILE_CACHE.create_dir_all(&data_path).unwrap();
+            FILE_CACHE.create_dir_all(&data_path).await.unwrap();
         }
 
         let data_path = data_path.canonicalize().unwrap();

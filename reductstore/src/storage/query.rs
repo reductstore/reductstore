@@ -395,7 +395,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let mut block_manager = BlockManager::new(
+        let mut block_manager = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join("index")),
             Cfg::default().into(),

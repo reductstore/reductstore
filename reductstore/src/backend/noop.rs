@@ -28,15 +28,15 @@ impl StorageBackend for NoopBackend {
         Ok(())
     }
 
-    fn create_dir_all(&self, _path: &Path) -> std::io::Result<()> {
+    async fn create_dir_all(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 
-    fn read_dir(&self, _path: &Path) -> std::io::Result<Vec<PathBuf>> {
+    async fn read_dir(&self, _path: &Path) -> std::io::Result<Vec<PathBuf>> {
         Ok(vec![])
     }
 
-    fn try_exists(&self, _path: &Path) -> std::io::Result<bool> {
+    async fn try_exists(&self, _path: &Path) -> std::io::Result<bool> {
         Ok(false)
     }
 
@@ -48,19 +48,19 @@ impl StorageBackend for NoopBackend {
         Ok(())
     }
 
-    fn update_local_cache(&self, _path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
+    async fn update_local_cache(&self, _path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
         Ok(())
     }
 
-    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
+    async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
         vec![]
     }
 
-    fn get_stats(&self, _path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
+    async fn get_stats(&self, _path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
         Ok(None)
     }
 
-    fn remove_from_local_cache(&self, _path: &Path) -> std::io::Result<()> {
+    async fn remove_from_local_cache(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 }

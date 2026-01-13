@@ -13,7 +13,7 @@ use crate::backend::remote::local_cache::LocalCache;
 #[cfg(feature = "s3-backend")]
 use crate::backend::remote::s3_connector::S3Connector;
 use crate::backend::{BackendType, ObjectMetadata, StorageBackend};
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use async_trait::async_trait;
 use log::debug;
 use reduct_base::error::ReductError;
@@ -54,7 +54,7 @@ struct LocalCacheEntry {
 pub(crate) struct RemoteBackend {
     cache_path: PathBuf,
     connector: Box<dyn RemoteStorageConnector + Send + Sync>,
-    local_cache: RwLock<LocalCache>,
+    local_cache: AsyncRwLock<LocalCache>,
     #[allow(dead_code)]
     backend_type: BackendType,
 }
@@ -63,7 +63,8 @@ impl RemoteBackend {
     #[allow(dead_code, unused_variables)]
     pub async fn new(settings: RemoteBackendSettings) -> Self {
         let cache_path = settings.cache_path.clone();
-        let local_cache = RwLock::new(LocalCache::new(cache_path.clone(), settings.cache_size));
+        let local_cache =
+            AsyncRwLock::new(LocalCache::new(cache_path.clone(), settings.cache_size));
         let backend_type = settings.backend_type.clone();
 
         let connector: Box<dyn RemoteStorageConnector + Send + Sync> = match settings.backend_type {
@@ -92,7 +93,7 @@ impl RemoteBackend {
         cache_path: PathBuf,
         cache_size: u64,
     ) -> Self {
-        let local_cache = RwLock::new(LocalCache::new(cache_path.clone(), cache_size));
+        let local_cache = AsyncRwLock::new(LocalCache::new(cache_path.clone(), cache_size));
 
         RemoteBackend {
             cache_path,
@@ -122,7 +123,7 @@ impl StorageBackend for RemoteBackend {
         }
 
         let (from_key, to_key) = {
-            let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
+            let mut cache = self.local_cache.write().await.map_err(Self::lock_error)?;
             cache.rename(from, to)?;
             let from_key = cache.build_key(from);
             let to_key = cache.build_key(to);
@@ -156,7 +157,7 @@ impl StorageBackend for RemoteBackend {
 
     async fn remove(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
-            let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
+            let mut cache = self.local_cache.write().await.map_err(Self::lock_error)?;
             cache.remove(&path)?;
             cache.build_key(path)
         };
@@ -167,7 +168,7 @@ impl StorageBackend for RemoteBackend {
 
     async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
-            let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
+            let mut cache = self.local_cache.write().await.map_err(Self::lock_error)?;
             cache.remove_all(&path)?;
             cache.build_key(path)
         };
@@ -183,9 +184,9 @@ impl StorageBackend for RemoteBackend {
         self.connector.remove_object(&format!("{}/", s3_key)).await
     }
 
-    fn create_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn create_dir_all(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
-            let cache = self.local_cache.read().map_err(Self::lock_error)?;
+            let cache = self.local_cache.read().await.map_err(Self::lock_error)?;
             cache.create_dir_all(&path)?;
             cache.build_key(path)
         };
@@ -194,18 +195,14 @@ impl StorageBackend for RemoteBackend {
             return Ok(());
         }
 
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.connector.create_dir_all(&s3_key))
-        })
+        self.connector.create_dir_all(&s3_key).await
     }
 
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
-        let cache = self.local_cache.read().map_err(Self::lock_error)?;
+    async fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
+        let cache = self.local_cache.read().await.map_err(Self::lock_error)?;
         let s3_key = cache.build_key(path);
 
-        let keys = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.connector.list_objects(&s3_key, false))
-        })?;
+        let keys = self.connector.list_objects(&s3_key, false).await?;
 
         let mut paths = vec![];
         for key in keys {
@@ -227,10 +224,10 @@ impl StorageBackend for RemoteBackend {
         Ok(paths)
     }
 
-    fn try_exists(&self, path: &Path) -> io::Result<bool> {
+    async fn try_exists(&self, path: &Path) -> io::Result<bool> {
         // check cache first and then load from remote if not in cache
         let s3_key = {
-            let cache = self.local_cache.read().map_err(Self::lock_error)?;
+            let cache = self.local_cache.read().await.map_err(Self::lock_error)?;
             if cache.try_exists(path)? {
                 return Ok(true);
             }
@@ -239,16 +236,14 @@ impl StorageBackend for RemoteBackend {
         };
 
         debug!("Checking S3 key: {} to local path: {:?}", s3_key, path);
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.connector.head_object(&s3_key))
-        })?;
+        let result = self.connector.head_object(&s3_key).await?;
         Ok(result.is_some())
     }
 
     async fn upload(&self, full_path: &Path) -> io::Result<()> {
         // upload to remote
         let s3_key = {
-            let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
+            let mut cache = self.local_cache.write().await.map_err(Self::lock_error)?;
             cache.register_file(full_path)?;
             cache.build_key(full_path)
         };
@@ -276,7 +271,7 @@ impl StorageBackend for RemoteBackend {
 
     async fn download(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
-            let cache = self.local_cache.read().map_err(Self::lock_error)?;
+            let cache = self.local_cache.read().await.map_err(Self::lock_error)?;
             if cache.try_exists(path)? {
                 return Ok(());
             }
@@ -297,6 +292,7 @@ impl StorageBackend for RemoteBackend {
         self.connector.download_object(&s3_key, &full_path).await?;
         self.local_cache
             .write()
+            .await
             .map_err(Self::lock_error)?
             .register_file(&full_path)?;
 
@@ -309,36 +305,36 @@ impl StorageBackend for RemoteBackend {
         Ok(())
     }
 
-    fn get_stats(&self, path: &Path) -> io::Result<Option<ObjectMetadata>> {
+    async fn get_stats(&self, path: &Path) -> io::Result<Option<ObjectMetadata>> {
         let s3_key = {
-            let cache = self.local_cache.read().map_err(Self::lock_error)?;
+            let cache = self.local_cache.read().await.map_err(Self::lock_error)?;
             cache.build_key(path)
         };
 
         debug!("Getting stats for S3 key: {}", s3_key);
-        tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.connector.head_object(&s3_key))
-        })
+        self.connector.head_object(&s3_key).await
     }
 
-    fn update_local_cache(&self, path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
+    async fn update_local_cache(&self, path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
         self.local_cache
             .write()
+            .await
             .map_err(Self::lock_error)?
             .access_file(path)
     }
 
-    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
+    async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
         let mut cache = self
             .local_cache
             .write()
+            .await
             .map_err(Self::lock_error)
             .expect("Failed to acquire local cache write lock");
         cache.invalidate_old_files()
     }
 
-    fn remove_from_local_cache(&self, path: &Path) -> io::Result<()> {
-        let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
+    async fn remove_from_local_cache(&self, path: &Path) -> io::Result<()> {
+        let mut cache = self.local_cache.write().await.map_err(Self::lock_error)?;
         cache.remove(&path)
     }
 }

@@ -64,7 +64,7 @@ impl BlockManager {
     /// * `path` - Path to the block manager directory.
     /// * `index` - Block index to use.
     /// * `cfg` - Configuration.
-    pub(crate) fn new(path: PathBuf, index: BlockIndex, cfg: Arc<Cfg>) -> Self {
+    pub(crate) async fn build(path: PathBuf, index: BlockIndex, cfg: Arc<Cfg>) -> Self {
         let (bucket, entry) = {
             let mut parts = path.iter().rev();
             let entry = parts.next().unwrap().to_str().unwrap().to_string();
@@ -82,7 +82,7 @@ impl BlockManager {
                 READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
             ),
-            wal: create_wal(path.clone()),
+            wal: create_wal(path.clone()).await,
             cfg,
             last_replica_sync: Instant::now(),
         }
@@ -242,12 +242,12 @@ impl BlockManager {
             .write_or_create(&path, SeekFrom::Current(0))
             .await?;
         data_block.set_len(block_size)?;
-        data_block.sync_all()?;
+        data_block.sync_all().await?;
 
         let mut descr_block = FILE_CACHE
             .write_or_create(&self.path_to_desc(block_id), SeekFrom::Current(0))
             .await?;
-        descr_block.sync_all()?;
+        descr_block.sync_all().await?;
 
         Ok(())
     }
@@ -267,13 +267,13 @@ impl BlockManager {
         self.wal.append(block_id, WalEntry::RemoveBlock).await?;
 
         let data_block_path = self.path_to_data(block_id);
-        if FILE_CACHE.try_exists(&data_block_path)? {
+        if FILE_CACHE.try_exists(&data_block_path).await? {
             // it can be still in WAL only
             FILE_CACHE.remove(&data_block_path).await?;
         }
 
         let desc_block_path = self.path_to_desc(block_id);
-        if FILE_CACHE.try_exists(&desc_block_path)? {
+        if FILE_CACHE.try_exists(&desc_block_path).await? {
             // it can be still in WAL only
             FILE_CACHE.remove(&desc_block_path).await?;
         }
@@ -288,9 +288,9 @@ impl BlockManager {
     }
 
     /// Check if a block exists on disk.
-    pub fn exist(&self, block_id: u64) -> Result<bool, ReductError> {
+    pub async fn exist(&self, block_id: u64) -> Result<bool, ReductError> {
         let path = self.path_to_desc(block_id);
-        Ok(FILE_CACHE.try_exists(&path)?)
+        Ok(FILE_CACHE.try_exists(&path).await?)
     }
 
     /// Update records in a block and save it on disk.
@@ -474,7 +474,7 @@ impl BlockManager {
         let mut block_file = FILE_CACHE
             .write_or_create(&block_path, SeekFrom::Start(0))
             .await?;
-        block_file.sync_all()?;
+        block_file.sync_all().await?;
 
         self.save_block_on_disk(block_ref).await
     }
@@ -638,7 +638,7 @@ impl BlockManager {
                 .await?;
             lock.set_len(len)?;
             lock.write_all(&buf)?;
-            lock.sync_all()?; // fix https://github.com/reductstore/reductstore/issues/642
+            lock.sync_all().await?; // fix https://github.com/reductstore/reductstore/issues/642
         }
 
         trace!("Updating block index");
@@ -1178,7 +1178,7 @@ mod tests {
                 .unwrap(),
         );
 
-        let mut bm = BlockManager::new(
+        let mut bm = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
             Cfg::default().into(),

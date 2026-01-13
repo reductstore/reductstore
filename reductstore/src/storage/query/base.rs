@@ -139,7 +139,7 @@ pub(crate) mod tests {
                 .try_build()
                 .unwrap(),
         );
-        let mut block_manager = BlockManager::new(
+        let mut block_manager = BlockManager::build(
             dir.clone(),
             BlockIndex::new(dir.join("index")),
             Cfg::default().into(),

@@ -64,7 +64,8 @@ impl EntryLoader {
             let needs_rebuild = {
                 let bm = entry.block_manager.read().await?;
                 let file_list = FILE_CACHE
-                    .read_dir(&path)?
+                    .read_dir(&path)
+                    .await?
                     .into_iter()
                     .collect::<HashSet<PathBuf>>();
 
@@ -113,7 +114,7 @@ impl EntryLoader {
         }
 
         let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
-        for path in FILE_CACHE.read_dir(&path)? {
+        for path in FILE_CACHE.read_dir(&path).await? {
             if path.is_dir() {
                 continue;
             }
@@ -197,11 +198,9 @@ impl EntryLoader {
             name,
             bucket_name,
             settings: AsyncRwLock::new(options),
-            block_manager: Arc::new(AsyncRwLock::new(BlockManager::new(
-                path.clone(),
-                block_index,
-                cfg.clone(),
-            ))),
+            block_manager: Arc::new(AsyncRwLock::new(
+                BlockManager::build(path.clone(), block_index, cfg.clone()).await,
+            )),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
@@ -231,11 +230,9 @@ impl EntryLoader {
             name,
             bucket_name,
             settings: AsyncRwLock::new(options),
-            block_manager: Arc::new(AsyncRwLock::new(BlockManager::new(
-                path.clone(),
-                block_index,
-                cfg.clone(),
-            ))),
+            block_manager: Arc::new(AsyncRwLock::new(
+                BlockManager::build(path.clone(), block_index, cfg.clone()).await,
+            )),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
@@ -304,7 +301,7 @@ impl EntryLoader {
         entry_path: PathBuf,
         entry: &mut Entry,
     ) -> Result<(), ReductError> {
-        let wal = create_wal(entry_path.clone());
+        let wal = create_wal(entry_path.clone()).await;
         let wal_blocks = wal.list().await?;
         if !wal_blocks.is_empty() {
             warn!(
@@ -323,7 +320,7 @@ impl EntryLoader {
                     }
                 };
 
-                let block_ref = if block_manager.exist(block_id)? {
+                let block_ref = if block_manager.exist(block_id).await? {
                     debug!(
                         "Loading block {}/{} from block manager",
                         entry.name, block_id
@@ -526,7 +523,7 @@ mod tests {
         let path = path.join("entry");
         FILE_CACHE.create_dir_all(&path).unwrap();
 
-        let mut block_manager = BlockManager::new(
+        let mut block_manager = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
             Cfg::default().into(),
@@ -586,7 +583,8 @@ mod tests {
         assert_eq!(info.latest_record, 2000010);
 
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
-        let mut block_manager = BlockManager::new(path.clone(), block_index, Cfg::default().into());
+        let mut block_manager =
+            BlockManager::build(path.clone(), block_index, Cfg::default().into());
         let block_v1_9 = block_manager.load_block(1).unwrap().read().unwrap().clone();
         assert_eq!(block_v1_9.record_count(), 2);
         assert_eq!(block_v1_9.size(), 20);

@@ -118,7 +118,7 @@ impl BlockIndex {
     }
 
     pub async fn try_load(path: PathBuf) -> Result<Self, ReductError> {
-        if !FILE_CACHE.try_exists(&path)? {
+        if !FILE_CACHE.try_exists(&path).await? {
             return Err(internal_server_error!("Block index {:?} not found", path));
         }
 
@@ -136,7 +136,8 @@ impl BlockIndex {
             // If the index file is empty, check if there are any block descriptors.
             // If there are, the index file is corrupted.
             let has_block_descriptors = FILE_CACHE
-                .read_dir(&path.parent().unwrap().into())?
+                .read_dir(&path.parent().unwrap().into())
+                .await?
                 .iter()
                 .any(|path| path.ends_with(DESCRIPTOR_FILE_EXT));
 
@@ -243,7 +244,7 @@ impl BlockIndex {
             internal_server_error!("Failed to write block index {:?}: {}", self.path_buf, err)
         })?;
 
-        lock.sync_all()?;
+        lock.sync_all().await?;
 
         Ok(())
     }

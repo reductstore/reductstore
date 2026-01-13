@@ -71,7 +71,7 @@ mod tests {
 
         let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
         index.save().unwrap();
-        let mut block_manager = BlockManager::new(path.clone(), index, Arc::new(cfg.clone()));
+        let mut block_manager = BlockManager::build(path.clone(), index, Arc::new(cfg.clone()));
 
         // change index on disc
         let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
