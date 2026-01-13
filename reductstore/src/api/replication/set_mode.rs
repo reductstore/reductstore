@@ -23,7 +23,8 @@ pub(super) async fn set_mode(
         .replication_repo
         .write()
         .await?
-        .set_mode(&replication_name, payload.0.mode)?;
+        .set_mode(&replication_name, payload.0.mode)
+        .await?;
     Ok(())
 }
 

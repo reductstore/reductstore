@@ -83,7 +83,9 @@ impl OpenOptions {
         if !full_path.exists() {
             // the call initiates downloading the file from remote storage if needed
             if self.backend.try_exists(&full_path)? {
-                self.backend.download(&full_path)?;
+                tokio::task::block_in_place(|| {
+                    tokio::runtime::Handle::current().block_on(self.backend.download(&full_path))
+                })?;
             } else if !self.create {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
@@ -118,7 +120,9 @@ impl File {
         debug!("File {} synced to storage backend", self.path.display());
 
         self.inner.sync_all()?;
-        self.backend.upload(&self.path)?;
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.backend.upload(&self.path))
+        })?;
         self.last_synced = Instant::now();
         self.is_synced = true;
         Ok(())

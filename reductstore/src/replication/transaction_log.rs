@@ -45,17 +45,15 @@ impl TransactionLog {
     /// # Returns
     ///
     /// A new transaction log instance or an error.
-    pub fn try_load_or_create(path: &PathBuf, capacity: usize) -> Result<Self, ReductError> {
+    pub async fn try_load_or_create(path: &PathBuf, capacity: usize) -> Result<Self, ReductError> {
         let init_capacity_in_bytes = capacity * ENTRY_SIZE + HEADER_SIZE;
 
         let instance = if !path.try_exists()? {
-            let file = FILE_CACHE
-                .write_or_create(&path, SeekFrom::Current(0))?
-                .upgrade()?;
-            let mut file = file.write()?;
+            let mut file = FILE_CACHE
+                .write_or_create(&path, SeekFrom::Current(0))
+                .await?;
 
             file.set_len(init_capacity_in_bytes as u64)?;
-            file.seek(SeekFrom::Start(0))?;
             file.write_all(HEADER_SIZE.to_be_bytes().as_ref())?;
             file.write_all(HEADER_SIZE.to_be_bytes().as_ref())?;
             file.sync_all()?;
@@ -68,9 +66,7 @@ impl TransactionLog {
             }
         } else {
             let (buf, capacity_in_bytes) = {
-                let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
-                let mut file = file.write()?;
-
+                let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
                 let mut buf = [0u8; 16];
                 file.read_exact(&mut buf)?;
                 let capacity_in_bytes = file.metadata()?.len() as usize;
@@ -95,10 +91,9 @@ impl TransactionLog {
                         "Transaction log {:?}' size changed from {} to {} bytes",
                         path, capacity_in_bytes, init_capacity_in_bytes
                     );
-                    let file = FILE_CACHE
-                        .write_or_create(&path, SeekFrom::Start(0))?
-                        .upgrade()?;
-                    let mut file = file.write()?;
+                    let mut file = FILE_CACHE
+                        .write_or_create(&path, SeekFrom::Start(0))
+                        .await?;
 
                     file.set_len(init_capacity_in_bytes as u64)?;
                     init_capacity_in_bytes
@@ -168,16 +163,14 @@ impl TransactionLog {
     /// # Returns
     ///
     /// The oldest transaction if the log is full, otherwise `None`.
-    pub fn push_back(
+    pub async fn push_back(
         &mut self,
         transaction: Transaction,
     ) -> Result<Option<Transaction>, ReductError> {
         {
-            let file = FILE_CACHE
-                .write_or_create(&self.file_path, SeekFrom::Start(self.write_pos as u64))?
-                .upgrade()?;
-            let mut file = file.write()?;
-
+            let mut file = FILE_CACHE
+                .write_or_create(&self.file_path, SeekFrom::Start(self.write_pos as u64))
+                .await?;
             let mut buf = [0u8; ENTRY_SIZE];
             buf[0] = transaction.clone().into();
             buf[1..9].copy_from_slice(&transaction.timestamp().to_be_bytes());
@@ -194,9 +187,9 @@ impl TransactionLog {
         }
 
         if self.write_pos == self.read_pos {
-            let transaction = self.unsafe_head(1)?.get(0).cloned();
+            let transaction = self.unsafe_head(1).await?.get(0).cloned();
 
-            self.unsafe_pop()?;
+            self.unsafe_pop().await?;
             Ok(transaction)
         } else {
             Ok(None)
@@ -219,35 +212,34 @@ impl TransactionLog {
         (len_in_bytes / ENTRY_SIZE) as usize
     }
 
-    pub fn front(&self, n: usize) -> Result<Vec<Transaction>, ReductError> {
+    pub async fn front(&self, n: usize) -> Result<Vec<Transaction>, ReductError> {
         if self.is_empty() {
             return Ok(Vec::new());
         }
-        let transaction = self.unsafe_head(n)?;
+        let transaction = self.unsafe_head(n).await?;
         Ok(transaction)
     }
 
-    pub fn pop_front(&mut self, n: usize) -> Result<usize, ReductError> {
+    pub async fn pop_front(&mut self, n: usize) -> Result<usize, ReductError> {
         let mut popped = 0usize;
         for _ in 0..n {
             if self.read_pos == self.write_pos {
                 break;
             }
-            self.unsafe_pop()?;
+            self.unsafe_pop().await?;
             popped += 1;
         }
 
         Ok(popped)
     }
 
-    fn unsafe_head(&self, n: usize) -> Result<Vec<Transaction>, ReductError> {
+    async fn unsafe_head(&self, n: usize) -> Result<Vec<Transaction>, ReductError> {
         let mut buf = [0u8; ENTRY_SIZE];
         let mut read_pos = self.read_pos;
         let mut transactions = Vec::with_capacity(n);
-        let file = FILE_CACHE
-            .read(&self.file_path, SeekFrom::Start(read_pos as u64))?
-            .upgrade()?;
-        let mut file = file.write()?;
+        let mut file = FILE_CACHE
+            .read(&self.file_path, SeekFrom::Start(read_pos as u64))
+            .await?;
 
         for _ in 0..n {
             file.seek(SeekFrom::Start(read_pos as u64))?;
@@ -274,7 +266,7 @@ impl TransactionLog {
         Ok(transactions)
     }
 
-    fn unsafe_pop(&mut self) -> Result<(), ReductError> {
+    async fn unsafe_pop(&mut self) -> Result<(), ReductError> {
         self.read_pos += ENTRY_SIZE;
 
         if self.read_pos >= self.capacity_in_bytes {
@@ -282,10 +274,9 @@ impl TransactionLog {
         }
 
         {
-            let file = FILE_CACHE
-                .write_or_create(&self.file_path, SeekFrom::Start(8))?
-                .upgrade()?;
-            let mut file = file.write()?;
+            let mut file = FILE_CACHE
+                .write_or_create(&self.file_path, SeekFrom::Start(8))
+                .await?;
             file.write_all(&self.read_pos.to_be_bytes())?;
         }
 

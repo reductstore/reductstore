@@ -1,7 +1,7 @@
 // Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::file_cache::FileWeak;
+use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
@@ -12,9 +12,9 @@ use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::io::{WriteChunk, WriteRecord};
 use reduct_base::{bad_request, internal_server_error};
-use std::io::Seek;
 use std::io::SeekFrom;
 use std::io::Write;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{channel, Receiver};
@@ -32,7 +32,7 @@ struct WriteContext {
     entry_name: String,
     block_id: u64,
     record_timestamp: u64,
-    file_ref: FileWeak,
+    file_path: PathBuf,
     offset: u64,
     content_size: u64,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
@@ -57,26 +57,26 @@ impl RecordWriter {
         block_ref: BlockRef,
         time: u64,
     ) -> Result<Self, ReductError> {
-        let (file_ref, offset, bucket_name, entry_name) = {
+        let (file_path, offset, bucket_name, entry_name) = {
             let mut bm = block_manager.write().await?;
-            let block = block_ref.read()?;
+            let block = block_ref.read().await?;
 
-            let (file, offset) = {
+            let (file_path, offset) = {
                 bm.index_mut().insert_or_update(block.to_owned());
                 bm.begin_write_record(&block, time)?
             };
 
-            bm.save_block(block_ref.clone())?;
+            bm.save_block(block_ref.clone()).await?;
 
             (
-                file,
+                file_path,
                 offset,
                 bm.bucket_name().to_string(),
                 bm.entry_name().to_string(),
             )
         };
 
-        let block = block_ref.read()?;
+        let block = block_ref.read().await?;
         let block_id = block.block_id();
         let record_index = block.get_record(time).unwrap();
         let content_size = record_index.end - record_index.begin;
@@ -86,7 +86,7 @@ impl RecordWriter {
             entry_name,
             block_id,
             record_timestamp: time,
-            file_ref,
+            file_path,
             offset,
             content_size,
             block_manager,
@@ -115,7 +115,7 @@ impl RecordWriter {
         Ok(me)
     }
 
-    async fn receive(mut rx: Rx, ctx: WriteContext) {
+    async fn receive(mut rx: Rx, mut ctx: WriteContext) {
         let mut recv = async || {
             let mut written_bytes = 0u64;
             while let Some(chunk) = rx.recv().await {
@@ -128,11 +128,15 @@ impl RecordWriter {
                         }
 
                         {
-                            let rc = ctx.file_ref.upgrade()?;
-                            let mut lock = rc.write()?;
-                            lock.seek(SeekFrom::Start(
-                                ctx.offset + written_bytes - chunk.len() as u64,
-                            ))?;
+                            let mut lock = FILE_CACHE
+                                .write_or_create(
+                                    &ctx.file_path,
+                                    SeekFrom::Start(
+                                        ctx.offset + written_bytes - chunk.len() as u64,
+                                    ),
+                                )
+                                .await?;
+
                             lock.write_all(chunk.as_ref())?;
                         }
                     }
@@ -145,7 +149,6 @@ impl RecordWriter {
             if written_bytes < ctx.content_size {
                 Err(bad_request!("Content is smaller than in content-length",))
             } else {
-                ctx.file_ref.upgrade()?.write()?.flush()?;
                 Ok(())
             }
         };
@@ -161,11 +164,21 @@ impl RecordWriter {
             }
         };
 
-        if let Err(err) =
-            ctx.block_manager.write().await.and_then(|mut bm| {
+        let result = match ctx.block_manager.write().await {
+            Ok(mut bm) => {
                 bm.finish_write_record(ctx.block_id, state, ctx.record_timestamp)
-            })
-        {
+                    .await
+            }
+            Err(err) => {
+                error!(
+                    "Failed to acquire block manager lock to finish writing {}/{}/{} record: {}",
+                    ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, err
+                );
+                return;
+            }
+        };
+
+        if let Err(err) = result {
             error!(
                 "Failed to finish writing {}/{}/{} record: {}",
                 ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, err

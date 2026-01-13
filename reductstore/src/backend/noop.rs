@@ -5,24 +5,26 @@
 
 use crate::backend::file::AccessMode;
 use crate::backend::{ObjectMetadata, StorageBackend};
+use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
 pub(super) struct NoopBackend;
 
+#[async_trait]
 impl StorageBackend for NoopBackend {
     fn path(&self) -> &PathBuf {
         panic!("NoopBackend does not have a path");
     }
 
-    fn rename(&self, _from: &Path, _to: &Path) -> std::io::Result<()> {
+    async fn rename(&self, _from: &Path, _to: &Path) -> std::io::Result<()> {
         Ok(())
     }
 
-    fn remove(&self, _path: &Path) -> std::io::Result<()> {
+    async fn remove(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 
-    fn remove_dir_all(&self, _path: &Path) -> std::io::Result<()> {
+    async fn remove_dir_all(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 
@@ -38,11 +40,11 @@ impl StorageBackend for NoopBackend {
         Ok(false)
     }
 
-    fn upload(&self, _path: &Path) -> std::io::Result<()> {
+    async fn upload(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 
-    fn download(&self, _path: &Path) -> std::io::Result<()> {
+    async fn download(&self, _path: &Path) -> std::io::Result<()> {
         Ok(())
     }
 

@@ -5,6 +5,7 @@ use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
 use crate::core::file_cache::FILE_CACHE;
+use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::debug;
@@ -37,7 +38,7 @@ impl TokenRepository {
     /// # Returns
     ///
     /// The repository
-    pub fn new(data_path: PathBuf, api_token: String) -> TokenRepository {
+    pub async fn new(data_path: PathBuf, api_token: String) -> TokenRepository {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
         let repo = HashMap::new();
 
@@ -50,20 +51,18 @@ impl TokenRepository {
             permission_regex,
         };
 
-        let lock = FILE_CACHE.read(&token_repository.config_path, SeekFrom::Start(0));
-        match lock {
-            Ok(lock) => {
+        let mut file = FILE_CACHE
+            .read(&token_repository.config_path, SeekFrom::Start(0))
+            .await;
+        match file {
+            Ok(mut file) => {
                 debug!(
                     "Loading token repository from {}",
                     token_repository.config_path.as_path().display()
                 );
 
                 let mut buf = Vec::new();
-                lock.upgrade()
-                    .unwrap()
-                    .write()
-                    .unwrap()
-                    .read_to_end(&mut buf)
+                file.read_to_end(&mut buf)
                     .expect("Could not read token repository");
 
                 let proto_repo = TokenRepo::decode(&mut Bytes::from(buf))
@@ -81,6 +80,7 @@ impl TokenRepository {
                 );
                 token_repository
                     .save_repo()
+                    .await
                     .expect("Failed to create a new token repository");
             }
         };
@@ -104,7 +104,7 @@ impl TokenRepository {
     }
 
     /// Save the token repository to the file system
-    fn save_repo(&mut self) -> Result<(), ReductError> {
+    async fn save_repo(&mut self) -> Result<(), ReductError> {
         let repo = TokenRepo {
             tokens: self
                 .repo
@@ -116,11 +116,9 @@ impl TokenRepository {
         repo.encode(&mut buf)
             .map_err(|_| ReductError::internal_server_error("Could not encode token repository"))?;
 
-        let lock = FILE_CACHE
-            .write_or_create(&self.config_path, SeekFrom::Start(0))?
-            .upgrade()?;
-
-        let mut file = lock.write()?;
+        let mut file = FILE_CACHE
+            .write_or_create(&self.config_path, SeekFrom::Start(0))
+            .await?;
         file.set_len(0)?;
         file.write_all(&buf)?;
         file.sync_all()?;
@@ -134,8 +132,9 @@ impl AccessTokens for TokenRepository {
     }
 }
 
+#[async_trait]
 impl ManageTokens for TokenRepository {
-    fn generate_token(
+    async fn generate_token(
         &mut self,
         name: &str,
         permissions: Permissions,
@@ -162,45 +161,49 @@ impl ManageTokens for TokenRepository {
         let created_at = DateTime::<Utc>::from(SystemTime::now());
 
         // Create a random hex string
-        let mut rng = rand::rng();
-        let value: String = (0..32)
-            .map(|_| format!("{:x}", rng.random_range(0..16)))
-            .collect();
-        let value = format!("{}-{}", name, value);
-        let token = Token {
-            name: name.to_string(),
-            value: value.clone(),
-            created_at: created_at.clone(),
-            permissions: Some(permissions),
-            is_provisioned: false,
+        let (value, token) = {
+            let mut rng = rand::rng();
+            let value: String = (0..32)
+                .map(|_| format!("{:x}", rng.random_range(0..16)))
+                .collect();
+            (
+                format!("{}-{}", name, value),
+                Token {
+                    name: name.to_string(),
+                    value: value.clone(),
+                    created_at: created_at.clone(),
+                    permissions: Some(permissions),
+                    is_provisioned: false,
+                },
+            )
         };
 
         self.repo.insert(name.to_string(), token);
-        self.save_repo()?;
+        self.save_repo().await?;
 
         Ok(TokenCreateResponse { value, created_at })
     }
 
-    fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
+    async fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
         AccessTokens::get_token(self, name)
     }
 
-    fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError> {
+    async fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError> {
         match self.repo.get_mut(name) {
             Some(token) => Ok(token),
             None => Err(not_found!("Token '{}' doesn't exist", name)),
         }
     }
 
-    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
+    async fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
         AccessTokens::get_token_list(self)
     }
 
-    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
+    async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
         AccessTokens::validate_token(self, header)
     }
 
-    fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
+    async fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
         if let Some(token) = self.repo.get(name) {
             if token.is_provisioned {
                 return Err(conflict!("Can't remove provisioned token '{}'", name));
@@ -210,11 +213,11 @@ impl ManageTokens for TokenRepository {
         if self.repo.remove(name).is_none() {
             Err(not_found!("Token '{}' doesn't exist", name))
         } else {
-            self.save_repo()
+            self.save_repo().await
         }
     }
 
-    fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError> {
+    async fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError> {
         for token in self.repo.values_mut() {
             if let Some(permissions) = &mut token.permissions {
                 permissions.read.retain(|b| b != bucket);
@@ -222,10 +225,10 @@ impl ManageTokens for TokenRepository {
             }
         }
 
-        self.save_repo()
+        self.save_repo().await
     }
 
-    fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
+    async fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
         for token in self.repo.values_mut() {
             if let Some(permissions) = &mut token.permissions {
                 permissions
@@ -246,7 +249,7 @@ impl ManageTokens for TokenRepository {
             }
         }
 
-        self.save_repo()
+        self.save_repo().await
     }
 }
 

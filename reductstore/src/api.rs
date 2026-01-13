@@ -85,13 +85,16 @@ impl StateKeeper {
     {
         let components = self.wait_components().await?;
 
-        components.auth.check(
-            headers
-                .get("Authorization")
-                .map(|header| header.to_str().unwrap_or("")),
-            components.token_repo.write().await?.as_mut(),
-            policy,
-        )?;
+        components
+            .auth
+            .check(
+                headers
+                    .get("Authorization")
+                    .map(|header| header.to_str().unwrap_or("")),
+                components.token_repo.write().await?.as_mut(),
+                policy,
+            )
+            .await?;
 
         Ok(components)
     }

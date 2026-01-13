@@ -76,7 +76,10 @@ impl ReplicationSender {
                 }
             };
 
-            let transactions = log.write().await?.front(self.io_config.batch_max_records);
+            let transactions = {
+                let mut log = log.write().await?;
+                log.front(self.io_config.batch_max_records).await
+            };
             match transactions {
                 Ok(vec) => {
                     if vec.is_empty() {
@@ -144,7 +147,7 @@ impl ReplicationSender {
                     }
 
                     // remove processed transactions from the log
-                    if let Err(err) = log.write().await?.pop_front(processed_transactions) {
+                    if let Err(err) = log.write().await?.pop_front(processed_transactions).await {
                         error!("Failed to remove transaction: {:?}", err);
                     }
                 }

@@ -8,8 +8,8 @@ mod read_only;
 pub(in crate::storage) mod wal;
 
 use crate::cfg::{Cfg, InstanceRole};
-use crate::core::file_cache::{FileWeak, FILE_CACHE};
-use crate::core::sync::RwLock;
+use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
@@ -30,7 +30,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Receiver, Sender};
 
-pub(crate) type BlockRef = Arc<RwLock<Block>>;
+pub(crate) type BlockRef = Arc<AsyncRwLock<Block>>;
 
 /// Helper class for IO operations with blocks and records.
 ///
@@ -88,16 +88,16 @@ impl BlockManager {
         }
     }
 
-    pub fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
+    pub async fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
         for block in self.block_cache.write_values() {
-            self.save_block_on_disk(block)?;
+            self.save_block_on_disk(block).await?;
         }
 
         Ok(())
     }
 
-    pub fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
-        self.update_and_get_index()?;
+    pub async fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
+        self.update_and_get_index().await?;
 
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
@@ -113,16 +113,16 @@ impl BlockManager {
             }
         };
 
-        self.load_block(id)
+        self.load_block(id).await
     }
 
-    pub fn load_block(&mut self, block_id: u64) -> Result<BlockRef, ReductError> {
+    pub async fn load_block(&mut self, block_id: u64) -> Result<BlockRef, ReductError> {
         // first check if we have the block in write cache
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
             let path = self.path_to_desc(block_id);
-            let file = match FILE_CACHE.read(&path, SeekFrom::Start(0)) {
-                Ok(file) => file.upgrade()?,
+            let file = match FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
+                Ok(file) => file,
                 Err(err) => {
                     // here we can't read the block descriptor, it might be corrupted or not exist
                     // we should remove it from the index
@@ -134,13 +134,13 @@ impl BlockManager {
                         self.path_to_data(block_id).display()
                     );
                     self.block_index.remove_block(block_id);
-                    self.block_index.save()?;
+                    self.block_index.save().await?;
                     return Err(internal_server_error!(&err_msg));
                 }
             };
             let mut buf = vec![];
 
-            let mut lock = file.write()?;
+            let mut lock = file;
             lock.read_to_end(&mut buf)?;
 
             // calculate crc of the block descriptor
@@ -181,7 +181,7 @@ impl BlockManager {
                 block_from_disk.begin_time = Some(us_to_ts(&block_id));
             }
 
-            cached_block = Some(Arc::new(RwLock::new(block_from_disk.into())));
+            cached_block = Some(Arc::new(AsyncRwLock::new(block_from_disk.into())));
         }
 
         let cached_block = cached_block.unwrap();
@@ -189,17 +189,16 @@ impl BlockManager {
         Ok(cached_block)
     }
 
-    pub fn save_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
-        // save the current block in cache and write on the disk the evicted one
-        let id = block.read()?.block_id();
+    pub async fn save_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
+        let id = block.read().await?.block_id();
         for (_, block) in self.block_cache.insert_write(id, block.clone()) {
-            self.save_block_on_disk(block)?;
+            self.save_block_on_disk(block).await?;
         }
 
         Ok(())
     }
 
-    pub fn start_new_block(
+    pub async fn start_new_block(
         &mut self,
         block_id: u64,
         max_block_size: u64,
@@ -208,17 +207,16 @@ impl BlockManager {
 
         // create a block with data
         {
-            let file = FILE_CACHE
-                .write_or_create(&self.path_to_data(block_id), SeekFrom::Start(0))?
-                .upgrade()?;
-            let mut file = file.write()?;
+            let mut file = FILE_CACHE
+                .write_or_create(&self.path_to_data(block_id), SeekFrom::Start(0))
+                .await?;
             file.set_len(max_block_size)?;
         }
 
         self.block_index.insert_or_update(block.clone());
 
-        let block_ref = Arc::new(RwLock::new(block));
-        self.save_block(block_ref.clone())?;
+        let block_ref = Arc::new(AsyncRwLock::new(block));
+        self.save_block(block_ref.clone()).await?;
         Ok(block_ref)
     }
 
@@ -233,21 +231,22 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If file system operation failed.
-    pub fn finish_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
-        let block = block.read()?;
+    pub async fn finish_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
+        let (block_id, block_size) = {
+            let block = block.read().await?;
+            (block.block_id(), block.size())
+        };
         /* resize data block then sync descriptor and data */
-        let path = self.path_to_data(block.block_id());
-        let file = FILE_CACHE
-            .write_or_create(&path, SeekFrom::Current(0))?
-            .upgrade()?;
-        let mut data_block = file.write()?;
-        data_block.set_len(block.size())?;
+        let path = self.path_to_data(block_id);
+        let mut data_block = FILE_CACHE
+            .write_or_create(&path, SeekFrom::Current(0))
+            .await?;
+        data_block.set_len(block_size)?;
         data_block.sync_all()?;
 
-        let file = FILE_CACHE
-            .write_or_create(&self.path_to_desc(block.block_id()), SeekFrom::Current(0))?
-            .upgrade()?;
-        let mut descr_block = file.write()?;
+        let mut descr_block = FILE_CACHE
+            .write_or_create(&self.path_to_desc(block_id), SeekFrom::Current(0))
+            .await?;
         descr_block.sync_all()?;
 
         Ok(())
@@ -264,27 +263,27 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If the block is still in use or file system operation failed.
-    pub fn remove_block(&mut self, block_id: u64) -> Result<(), ReductError> {
-        self.wal.append(block_id, WalEntry::RemoveBlock)?;
+    pub async fn remove_block(&mut self, block_id: u64) -> Result<(), ReductError> {
+        self.wal.append(block_id, WalEntry::RemoveBlock).await?;
 
         let data_block_path = self.path_to_data(block_id);
         if FILE_CACHE.try_exists(&data_block_path)? {
             // it can be still in WAL only
-            FILE_CACHE.remove(&data_block_path)?;
+            FILE_CACHE.remove(&data_block_path).await?;
         }
 
         let desc_block_path = self.path_to_desc(block_id);
         if FILE_CACHE.try_exists(&desc_block_path)? {
             // it can be still in WAL only
-            FILE_CACHE.remove(&desc_block_path)?;
+            FILE_CACHE.remove(&desc_block_path).await?;
         }
 
         self.block_index.remove_block(block_id);
-        self.block_index.save()?;
+        self.block_index.save().await?;
 
         self.block_cache.remove(&block_id);
 
-        self.wal.remove(block_id)?;
+        self.wal.remove(block_id).await?;
         Ok(())
     }
 
@@ -313,24 +312,29 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If failed to append to WAL or save the block on disk.
-    pub fn update_records(
+    pub async fn update_records(
         &mut self,
         block_id: u64,
         records: Vec<Record>,
     ) -> Result<(), ReductError> {
-        let block_ref = self.load_block(block_id)?;
+        let block_ref = self.load_block(block_id).await?;
 
+        // First, append all WAL entries
+        for record in records.iter() {
+            self.wal
+                .append(block_id, WalEntry::UpdateRecord(record.clone()))
+                .await?;
+        }
+
+        // Then, update the block in-memory (no await needed here)
         {
-            let mut block = block_ref.write()?;
-
+            let mut block = block_ref.write().await?;
             for record in records.into_iter() {
-                self.wal
-                    .append(block.block_id(), WalEntry::UpdateRecord(record.clone()))?;
                 block.insert_or_update_record(record);
             }
         }
 
-        self.save_block(block_ref)
+        self.save_block(block_ref).await
     }
 
     /// Remove records from a block and save it on disk.
@@ -346,75 +350,108 @@ impl BlockManager {
     /// # Returns
     ///
     /// * `Ok(())` - If the records were removed successfully.
-    pub fn remove_records(&mut self, block_id: u64, records: Vec<u64>) -> Result<(), ReductError> {
-        let block_ref = self.load_block(block_id)?;
+    pub async fn remove_records(
+        &mut self,
+        block_id: u64,
+        records: Vec<u64>,
+    ) -> Result<(), ReductError> {
+        let block_ref = self.load_block(block_id).await?;
+
+        // First, append all WAL entries and remove records from memory
+        for record_time in records.iter() {
+            self.wal
+                .append(block_id, WalEntry::RemoveRecord(*record_time))
+                .await?;
+        }
+
         {
-            let mut block = block_ref.write()?;
+            let mut block = block_ref.write().await?;
             for record_time in records {
                 block.remove_record(record_time);
 
                 self.wal
-                    .append(block.block_id(), WalEntry::RemoveRecord(record_time))?;
+                    .append(block.block_id(), WalEntry::RemoveRecord(record_time))
+                    .await?;
             }
 
             // if the block is empty, remove it
             if block.record_count() == 0 {
                 let block_id = block.block_id();
-                drop(block); // drop the lock before calling remove_block to avoid deadlock
-                return self.remove_block(block_id);
+                drop(block);
+                return self.remove_block(block_id).await;
             }
         }
 
-        let temp_block_path = {
-            let mut block = block_ref.write()?;
+        // Collect record info needed for copying
+        let (temp_block_path, record_info, src_block_path) = {
+            let block = block_ref.read().await?;
             let temp_block_path = self.path.join(format!("{}.blk.tmp", block.block_id()));
-            // create a temporary block file outside of the cache to avoid unnecessary evictions
-            let mut temp_block = OpenOptions::new()
-                .create(true)
-                .write(true)
-                .read(true)
-                .open(&temp_block_path)
-                .map_err(|e| {
-                    internal_server_error!(
-                        "Failed to create temporary block file {:?}: {}",
-                        temp_block_path,
-                        e
-                    )
-                })?;
+            let src_block_path = self.path_to_data(block.block_id());
 
-            let mut total_offset = 0;
-            let block_id = block.block_id();
-            for record in block.record_index_mut().values_mut() {
-                let record_time = ts_to_us(&record.timestamp.unwrap());
+            // Collect record positions
+            let record_info: Vec<(u64, u64, u64)> = block
+                .record_index()
+                .values()
+                .map(|record| {
+                    let record_time = ts_to_us(&record.timestamp.unwrap());
+                    (record_time, record.begin, record.end - record.begin)
+                })
+                .collect();
 
-                let (file, offset) = {
-                    let src_block_path = self.path_to_data(block_id);
-                    let offset = record.begin;
-                    let file = FILE_CACHE.read(&src_block_path, SeekFrom::Start(offset))?;
-                    (file, offset)
-                };
+            (temp_block_path, record_info, src_block_path)
+        };
 
-                let mut read_bytes = 0;
-                let record_size = record.end - record.begin;
-                while read_bytes < record_size {
-                    let (buf, read) = read_in_chunks(&file, offset, record_size, read_bytes)?;
+        // create a temporary block file outside of the cache to avoid unnecessary evictions
+        let mut temp_block = OpenOptions::new()
+            .create(true)
+            .write(true)
+            .read(true)
+            .open(&temp_block_path)
+            .map_err(|e| {
+                internal_server_error!(
+                    "Failed to create temporary block file {:?}: {}",
+                    temp_block_path,
+                    e
+                )
+            })?;
 
-                    read_bytes += read as u64;
-                    temp_block.write_all(&buf)?;
+        // Copy records to temp file and track new positions
+        let mut new_positions: Vec<(u64, u64, u64)> = Vec::new();
+        let mut total_offset = 0u64;
+
+        for (record_time, begin, record_size) in record_info {
+            let mut read_bytes = 0;
+            while read_bytes < record_size {
+                let (buf, read) =
+                    read_in_chunks(&src_block_path, begin, record_size, read_bytes).await?;
+
+                read_bytes += read as u64;
+                temp_block.write_all(&buf)?;
+            }
+
+            let new_begin = total_offset;
+            total_offset += read_bytes;
+            let new_end = total_offset;
+
+            new_positions.push((record_time, new_begin, new_end));
+
+            trace!(
+                "Record {}/{} retained with new position begin={}, end={}",
+                block_id,
+                record_time,
+                new_begin,
+                new_end
+            );
+        }
+
+        // Update record positions in the block
+        {
+            let mut block = block_ref.write().await?;
+            for (record_time, new_begin, new_end) in new_positions {
+                if let Some(record) = block.record_index_mut().get_mut(&record_time) {
+                    record.begin = new_begin;
+                    record.end = new_end;
                 }
-
-                // Set position of content in the new block
-                total_offset += read_bytes;
-                record.begin = total_offset - read_bytes;
-                record.end = total_offset;
-
-                trace!(
-                    "Record {}/{} retained with new position begin={}, end={}",
-                    block_id,
-                    record_time,
-                    record.begin,
-                    record.end
-                );
             }
 
             debug!(
@@ -422,30 +459,24 @@ impl BlockManager {
                 temp_block_path,
                 block.record_count()
             );
-
-            temp_block_path
-        };
-
-        {
-            let block = block_ref.read()?;
-            let block_path = self.path_to_data(block.block_id());
-
-            // replace the old block file with the new one
-            fs::remove_file(&block_path)?;
-            fs::rename(&temp_block_path, &block_path)?;
-
-            // we have a dangling file in the cache, remove it and reopen
-            FILE_CACHE.discard_recursive(&block_path)?;
-            let block_file = FILE_CACHE.write_or_create(&block_path, SeekFrom::Start(0))?;
-            block_file.upgrade()?.write()?.sync_all()?;
-
-            debug!(
-                "Block {:?} is replaced with retained records",
-                self.path_to_data(block.block_id())
-            );
         }
 
-        self.save_block_on_disk(block_ref)
+        // Replace the old block file with the new one
+        let block_path = {
+            let block = block_ref.read().await?;
+            self.path_to_data(block.block_id())
+        };
+
+        fs::remove_file(&block_path)?;
+        fs::rename(&temp_block_path, &block_path)?;
+
+        FILE_CACHE.discard_recursive(&block_path).await?;
+        let mut block_file = FILE_CACHE
+            .write_or_create(&block_path, SeekFrom::Start(0))
+            .await?;
+        block_file.sync_all()?;
+
+        self.save_block_on_disk(block_ref).await
     }
 
     /// Begin writing a record to a block.
@@ -462,11 +493,10 @@ impl BlockManager {
         &self,
         block: &Block,
         record_timestamp: u64,
-    ) -> Result<(FileWeak, u64), ReductError> {
+    ) -> Result<(PathBuf, u64), ReductError> {
         let path = self.path_to_data(block.block_id());
         let offset = block.get_record(record_timestamp).unwrap().begin;
-        let file = FILE_CACHE.write_or_create(&path, SeekFrom::Start(offset))?;
-        Ok((file, offset))
+        Ok((path, offset))
     }
 
     /// Finish writing a record to a block.
@@ -481,7 +511,7 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If file system operation failed.
-    pub(crate) fn finish_write_record(
+    pub async fn finish_write_record(
         &mut self,
         block_id: u64,
         state: record::State,
@@ -489,28 +519,29 @@ impl BlockManager {
     ) -> Result<(), ReductError> {
         // check if the block is still in cache
         let block_ref = if let Some(block_ref) = self.block_cache.get_write(&block_id) {
-            let block = block_ref.read()?;
+            let block = block_ref.read().await?;
             if block.block_id() == block_id {
                 block_ref.clone()
             } else {
-                self.load_block(block_id)?
+                self.load_block(block_id).await?
             }
         } else {
-            self.load_block(block_id)?
+            self.load_block(block_id).await?
         };
 
-        {
-            let mut block = block_ref.write()?;
+        // Get the record for WAL entry before modifying
+        let wal_record = {
+            let mut block = block_ref.write().await?;
             block.change_record_state(record_timestamp, i32::from(state))?;
+            block.get_record(record_timestamp).unwrap().clone()
+        };
 
-            // write to WAL
-            self.wal.append(
-                block_id,
-                WalEntry::WriteRecord(block.get_record(record_timestamp).unwrap().clone()),
-            )?;
-        }
+        // write to WAL (no guard held)
+        self.wal
+            .append(block_id, WalEntry::WriteRecord(wal_record))
+            .await?;
 
-        self.save_block(block_ref)?;
+        self.save_block(block_ref).await?;
 
         debug!(
             "Finished writing record {} to block {}/{}/{}.meta with state {:?}",
@@ -538,11 +569,10 @@ impl BlockManager {
         &self,
         block: &Block,
         record_timestamp: u64,
-    ) -> Result<(FileWeak, u64), ReductError> {
+    ) -> Result<(PathBuf, u64), ReductError> {
         let path = self.path_to_data(block.block_id());
         let offset = block.get_record(record_timestamp).unwrap().begin;
-        let file = FILE_CACHE.read(&path, SeekFrom::Start(offset))?;
-        Ok((file, offset))
+        Ok((path, offset))
     }
 
     pub fn index_mut(&mut self) -> &mut BlockIndex {
@@ -553,8 +583,8 @@ impl BlockManager {
         &self.block_index
     }
 
-    pub fn update_and_get_index(&mut self) -> Result<&BlockIndex, ReductError> {
-        self.reload_if_readonly()?;
+    pub async fn update_and_get_index(&mut self) -> Result<&BlockIndex, ReductError> {
+        self.reload_if_readonly().await?;
         Ok(&self.block_index)
     }
 
@@ -579,10 +609,10 @@ impl BlockManager {
         self.path.join(format!("{}{}", block_id, DATA_FILE_EXT))
     }
 
-    fn save_block_on_disk(&mut self, block_ref: Arc<RwLock<Block>>) -> Result<(), ReductError> {
+    async fn save_block_on_disk(&mut self, block_ref: BlockRef) -> Result<(), ReductError> {
         // Take a snapshot under a short-lived write lock to avoid blocking readers
         let (block_id, block_snapshot) = {
-            let block = block_ref.write()?;
+            let block = block_ref.read().await?;
             (block.block_id(), block.to_owned())
         };
 
@@ -603,12 +633,9 @@ impl BlockManager {
         trace!("Writing block descriptor {:?}", path);
 
         if self.cfg.role != InstanceRole::Replica {
-            // overwrite the file
-
-            let file = FILE_CACHE
-                .write_or_create(&path, SeekFrom::Start(0))?
-                .upgrade()?;
-            let mut lock = file.write()?;
+            let mut lock = FILE_CACHE
+                .write_or_create(&path, SeekFrom::Start(0))
+                .await?;
             lock.set_len(len)?;
             lock.write_all(&buf)?;
             lock.sync_all()?; // fix https://github.com/reductstore/reductstore/issues/642
@@ -623,11 +650,11 @@ impl BlockManager {
             .insert_or_update_with_crc(proto, crc.sum64());
 
         if self.cfg.role != InstanceRole::Replica {
-            self.block_index.save()?;
+            self.block_index.save().await?;
 
             trace!("Block {}/{}/{} saved", self.bucket, self.entry, block_id);
             // clean WAL
-            self.wal.remove(block_id)?;
+            self.wal.remove(block_id).await?;
         }
         Ok(())
     }
@@ -891,7 +918,9 @@ mod tests {
             block_id: u64,
         ) {
             let mut bm = block_manager;
-            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
+            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
+                .await
+                .unwrap();
             assert_eq!(
                 index.get_block(block_id).unwrap().metadata_size,
                 25,
@@ -925,11 +954,14 @@ mod tests {
         }
 
         #[rstest]
-        fn test_update_index_when_remove_block(block_manager: BlockManager, block_id: u64) {
+        #[tokio::test]
+        async fn test_update_index_when_remove_block(block_manager: BlockManager, block_id: u64) {
             let mut bm = block_manager;
             bm.remove_block(block_id).unwrap();
 
-            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
+            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
+                .await
+                .unwrap();
             assert!(index.get_block(block_id).is_none(), "index updated");
         }
 
@@ -944,12 +976,16 @@ mod tests {
             write_record(1, 100, &block_manager, block.clone()).await;
 
             let mut bm = block_manager.write().await.unwrap();
-            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
+            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
+                .await
+                .unwrap();
             assert_eq!(index.get_block(1).unwrap().record_count, 2);
 
             bm.remove_records(block_id, vec![1]).unwrap();
 
-            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE)).unwrap();
+            let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
+                .await
+                .unwrap();
             assert_eq!(index.get_block(1).unwrap().record_count, 1, "index updated");
         }
 

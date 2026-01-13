@@ -117,55 +117,46 @@ impl BlockIndex {
         block
     }
 
-    pub fn try_load(path: PathBuf) -> Result<Self, ReductError> {
+    pub async fn try_load(path: PathBuf) -> Result<Self, ReductError> {
         if !FILE_CACHE.try_exists(&path)? {
             return Err(internal_server_error!("Block index {:?} not found", path));
         }
 
-        let block_index_proto = {
-            let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
-            let mut lock = file.write()?;
-            let mut buf = Vec::new();
-            if let Err(err) = lock.read_to_end(&mut buf) {
-                return Err(internal_server_error!(
-                    "Failed to read block index {:?}: {}",
-                    path,
-                    err
-                ));
-            };
-
-            if lock.metadata()?.len() == 0 {
-                // If the index file is empty, check if there are any block descriptors.
-                // If there are, the index file is corrupted.
-                let has_block_descriptors = FILE_CACHE
-                    .read_dir(&path.parent().unwrap().into())?
-                    .iter()
-                    .any(|path| path.ends_with(DESCRIPTOR_FILE_EXT));
-
-                if has_block_descriptors {
-                    return Err(internal_server_error!("Block index {:?} is empty", path));
-                }
-            }
-
-            BlockIndexProto::decode(Bytes::from(buf))
-        };
-
-        if let Err(err) = block_index_proto {
+        let mut lock = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+        let mut buf = Vec::new();
+        if let Err(err) = lock.read_to_end(&mut buf) {
             return Err(internal_server_error!(
-                "Failed to decode block index {:?}: {}",
+                "Failed to read block index {:?}: {}",
                 path,
                 err
             ));
+        };
+
+        if lock.metadata()?.len() == 0 {
+            // If the index file is empty, check if there are any block descriptors.
+            // If there are, the index file is corrupted.
+            let has_block_descriptors = FILE_CACHE
+                .read_dir(&path.parent().unwrap().into())?
+                .iter()
+                .any(|path| path.ends_with(DESCRIPTOR_FILE_EXT));
+
+            if has_block_descriptors {
+                return Err(internal_server_error!("Block index {:?} is empty", path));
+            }
         }
 
-        let block_index: BlockIndex = BlockIndex::from_proto(path, block_index_proto.unwrap())?;
+        let block_index_proto = BlockIndexProto::decode(Bytes::from(buf)).map_err(|err| {
+            internal_server_error!("Failed to decode block index {:?}: {}", path, err)
+        })?;
+
+        let block_index: BlockIndex = BlockIndex::from_proto(path, block_index_proto)?;
         Ok(block_index)
     }
 
-    pub fn update_from_disc(&mut self) -> Result<(), ReductError> {
-        FILE_CACHE.discard_recursive(&self.path_buf)?;
+    pub async fn update_from_disc(&mut self) -> Result<(), ReductError> {
+        FILE_CACHE.discard_recursive(&self.path_buf).await?;
 
-        let updated_index = BlockIndex::try_load(self.path_buf.clone())?;
+        let updated_index = BlockIndex::try_load(self.path_buf.clone()).await?;
         *self = updated_index;
         Ok(())
     }
@@ -207,7 +198,7 @@ impl BlockIndex {
         Ok(block_index)
     }
 
-    pub fn save(&self) -> Result<(), ReductError> {
+    pub async fn save(&self) -> Result<(), ReductError> {
         let mut block_index_proto = BlockIndexProto {
             blocks: Vec::new(),
             crc64: 0,
@@ -244,10 +235,9 @@ impl BlockIndex {
         block_index_proto.crc64 = crc.sum64();
         let buf = block_index_proto.encode_to_vec();
 
-        let file = FILE_CACHE
-            .write_or_create(&self.path_buf, SeekFrom::Start(0))?
-            .upgrade()?;
-        let mut lock = file.write()?;
+        let mut lock = FILE_CACHE
+            .write_or_create(&self.path_buf, SeekFrom::Start(0))
+            .await?;
         lock.set_len(0)?;
         lock.write_all(&buf).map_err(|err| {
             internal_server_error!("Failed to write block index {:?}: {}", self.path_buf, err)

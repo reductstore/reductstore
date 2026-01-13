@@ -13,6 +13,7 @@ mod noop;
 
 use crate::backend::file::{AccessMode, OpenOptions};
 use crate::backend::noop::NoopBackend;
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use reduct_base::msg::server_api::License;
@@ -27,13 +28,14 @@ pub(super) struct ObjectMetadata {
     pub modified_time: Option<SystemTime>,
 }
 
+#[async_trait]
 pub(crate) trait StorageBackend {
     fn path(&self) -> &PathBuf;
-    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+    async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
 
-    fn remove(&self, path: &Path) -> std::io::Result<()>;
+    async fn remove(&self, path: &Path) -> std::io::Result<()>;
 
-    fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
+    async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
 
     fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
 
@@ -41,9 +43,9 @@ pub(crate) trait StorageBackend {
 
     fn try_exists(&self, _path: &Path) -> std::io::Result<bool>;
 
-    fn upload(&self, path: &Path) -> std::io::Result<()>;
+    async fn upload(&self, path: &Path) -> std::io::Result<()>;
 
-    fn download(&self, path: &Path) -> std::io::Result<()>;
+    async fn download(&self, path: &Path) -> std::io::Result<()>;
 
     fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
 
@@ -139,7 +141,7 @@ impl BackpackBuilder {
         self
     }
 
-    pub fn try_build(self) -> Result<Backend, ReductError> {
+    pub async fn try_build(self) -> Result<Backend, ReductError> {
         let backend: BoxedBackend = match self.backend_type {
             #[cfg(feature = "fs-backend")]
             BackendType::Filesystem => {
@@ -206,7 +208,7 @@ impl BackpackBuilder {
                     default_storage_class: self.remote_default_storage_class,
                 };
 
-                Box::new(remote::RemoteBackend::new(settings))
+                Box::new(remote::RemoteBackend::new(settings).await)
             }
             #[allow(unreachable_patterns)]
             _ => Err(internal_server_error!("Unsupported backend type"))?,
@@ -218,6 +220,7 @@ impl BackpackBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct Backend {
     backend: Arc<BoxedBackend>,
 }
@@ -240,16 +243,20 @@ impl Backend {
         OpenOptions::new(Arc::clone(&self.backend))
     }
 
-    pub fn rename<P: AsRef<Path>, Q: AsRef<Path>>(&self, from: P, to: Q) -> std::io::Result<()> {
-        self.backend.rename(from.as_ref(), to.as_ref())
+    pub async fn rename<P: AsRef<Path>, Q: AsRef<Path>>(
+        &self,
+        from: P,
+        to: Q,
+    ) -> std::io::Result<()> {
+        self.backend.rename(from.as_ref(), to.as_ref()).await
     }
 
-    pub fn remove<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
-        self.backend.remove(path.as_ref())
+    pub async fn remove<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        self.backend.remove(path.as_ref()).await
     }
 
-    pub fn remove_dir_all<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
-        self.backend.remove_dir_all(path.as_ref())
+    pub async fn remove_dir_all<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        self.backend.remove_dir_all(path.as_ref()).await
     }
 
     pub fn create_dir_all<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {

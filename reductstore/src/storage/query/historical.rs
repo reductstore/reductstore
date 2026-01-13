@@ -135,7 +135,7 @@ impl Query for HistoricalQuery {
     ) -> Result<RecordReader, ReductError> {
         if self.records_from_current_block.is_empty() && !self.is_interrupted {
             let start = if let Some(block) = &self.current_block {
-                let block = block.read()?;
+                let block = block.read().await?;
                 block.latest_record_time()
             } else {
                 self.start_time
@@ -144,8 +144,8 @@ impl Query for HistoricalQuery {
             let block_range = {
                 let mut bm = block_manager.write().await?;
                 let first_block = {
-                    if let Ok(block) = bm.find_block(start) {
-                        block.read()?.block_id()
+                    if let Ok(block) = bm.find_block(start).await {
+                        block.read().await?.block_id()
                     } else {
                         0
                     }
@@ -159,10 +159,10 @@ impl Query for HistoricalQuery {
 
             for block_id in block_range {
                 let mut bm = block_manager.write().await?;
-                let block_ref = bm.load_block(block_id)?;
+                let block_ref = bm.load_block(block_id).await?;
 
                 self.current_block = Some(block_ref);
-                let mut found_records = self.filter_records_from_current_block()?;
+                let mut found_records = self.filter_records_from_current_block().await?;
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
 
                 self.records_from_current_block.extend(found_records);
@@ -198,8 +198,8 @@ impl Query for HistoricalQuery {
 }
 
 impl HistoricalQuery {
-    fn filter_records_from_current_block(&mut self) -> Result<Vec<Record>, ReductError> {
-        let block = self.current_block.as_ref().unwrap().read()?;
+    async fn filter_records_from_current_block(&mut self) -> Result<Vec<Record>, ReductError> {
+        let block = self.current_block.as_ref().unwrap().read().await?;
         let mut filtered_records = Vec::new();
         for record in block.record_index().values() {
             match apply_filters_recursively(self.filters.as_mut_slice(), vec![record.clone()], 0)? {

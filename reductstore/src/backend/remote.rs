@@ -14,6 +14,7 @@ use crate::backend::remote::local_cache::LocalCache;
 use crate::backend::remote::s3_connector::S3Connector;
 use crate::backend::{BackendType, ObjectMetadata, StorageBackend};
 use crate::core::sync::RwLock;
+use async_trait::async_trait;
 use log::debug;
 use reduct_base::error::ReductError;
 use std::io;
@@ -21,14 +22,15 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 
 #[allow(dead_code)]
+#[async_trait]
 pub(super) trait RemoteStorageConnector {
-    fn download_object(&self, key: &str, dest: &PathBuf) -> Result<(), io::Error>;
-    fn upload_object(&self, key: &str, src: &PathBuf) -> Result<(), io::Error>;
-    fn create_dir_all(&self, key: &str) -> Result<(), io::Error>;
-    fn list_objects(&self, key: &str, recursive: bool) -> Result<Vec<String>, io::Error>;
-    fn remove_object(&self, key: &str) -> Result<(), io::Error>;
-    fn head_object(&self, key: &str) -> Result<Option<ObjectMetadata>, io::Error>;
-    fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error>;
+    async fn download_object(&self, key: &str, dest: &PathBuf) -> Result<(), io::Error>;
+    async fn upload_object(&self, key: &str, src: &PathBuf) -> Result<(), io::Error>;
+    async fn create_dir_all(&self, key: &str) -> Result<(), io::Error>;
+    async fn list_objects(&self, key: &str, recursive: bool) -> Result<Vec<String>, io::Error>;
+    async fn remove_object(&self, key: &str) -> Result<(), io::Error>;
+    async fn head_object(&self, key: &str) -> Result<Option<ObjectMetadata>, io::Error>;
+    async fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error>;
 }
 
 #[allow(dead_code)]
@@ -59,14 +61,14 @@ pub(crate) struct RemoteBackend {
 
 impl RemoteBackend {
     #[allow(dead_code, unused_variables)]
-    pub fn new(settings: RemoteBackendSettings) -> Self {
+    pub async fn new(settings: RemoteBackendSettings) -> Self {
         let cache_path = settings.cache_path.clone();
         let local_cache = RwLock::new(LocalCache::new(cache_path.clone(), settings.cache_size));
         let backend_type = settings.backend_type.clone();
 
-        let connector = match settings.backend_type {
+        let connector: Box<dyn RemoteStorageConnector + Send + Sync> = match settings.backend_type {
             #[cfg(feature = "s3-backend")]
-            BackendType::S3 => Box::new(S3Connector::new(settings)),
+            BackendType::S3 => Box::new(S3Connector::new(settings).await),
             #[cfg(feature = "fs-backend")]
             BackendType::Filesystem =>
             // panic because we shouldn't be here if filesystem is selected
@@ -105,12 +107,13 @@ impl RemoteBackend {
     }
 }
 
+#[async_trait]
 impl StorageBackend for RemoteBackend {
     fn path(&self) -> &PathBuf {
         &self.cache_path
     }
 
-    fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
+    async fn rename(&self, from: &Path, to: &Path) -> io::Result<()> {
         if self.backend_type == BackendType::S3 {
             return Err(io::Error::new(
                 io::ErrorKind::Unsupported,
@@ -131,24 +134,27 @@ impl StorageBackend for RemoteBackend {
             from_key, to_key
         );
         // at least minio doesn't remove folders recursively, so we need to list and remove all objects
-        for key in self.connector.list_objects(&from_key, true)? {
-            self.connector.rename_object(
-                &format!("{}/{}", from_key, key),
-                &format!("{}/{}", to_key, key),
-            )?;
+        for key in self.connector.list_objects(&from_key, true).await? {
+            self.connector
+                .rename_object(
+                    &format!("{}/{}", from_key, key),
+                    &format!("{}/{}", to_key, key),
+                )
+                .await?;
         }
 
         if to.is_dir() {
             self.connector
-                .rename_object(&format!("{}/", from_key), &format!("{}/", to_key))?;
+                .rename_object(&format!("{}/", from_key), &format!("{}/", to_key))
+                .await?;
         } else {
-            self.connector.rename_object(&from_key, &to_key)?;
+            self.connector.rename_object(&from_key, &to_key).await?;
         }
 
         Ok(())
     }
 
-    fn remove(&self, path: &Path) -> io::Result<()> {
+    async fn remove(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
             let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
             cache.remove(&path)?;
@@ -156,10 +162,10 @@ impl StorageBackend for RemoteBackend {
         };
 
         debug!("Removing S3 object for key: {}", s3_key);
-        self.connector.remove_object(&s3_key)
+        self.connector.remove_object(&s3_key).await
     }
 
-    fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
+    async fn remove_dir_all(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
             let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
             cache.remove_all(&path)?;
@@ -168,12 +174,13 @@ impl StorageBackend for RemoteBackend {
 
         debug!("Removing S3 directory for key: {}", s3_key);
         // at least minio doesn't remove folders recursively, so we need to list and remove all objects
-        for key in self.connector.list_objects(&s3_key, true)? {
+        for key in self.connector.list_objects(&s3_key, true).await? {
             self.connector
-                .remove_object(&format!("{}/{}", s3_key, key))?;
+                .remove_object(&format!("{}/{}", s3_key, key))
+                .await?;
         }
 
-        self.connector.remove_object(&format!("{}/", s3_key))
+        self.connector.remove_object(&format!("{}/", s3_key)).await
     }
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
@@ -187,15 +194,21 @@ impl StorageBackend for RemoteBackend {
             return Ok(());
         }
 
-        self.connector.create_dir_all(&s3_key)
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.connector.create_dir_all(&s3_key))
+        })
     }
 
     fn read_dir(&self, path: &Path) -> io::Result<Vec<PathBuf>> {
         let cache = self.local_cache.read().map_err(Self::lock_error)?;
         let s3_key = cache.build_key(path);
 
+        let keys = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.connector.list_objects(&s3_key, false))
+        })?;
+
         let mut paths = vec![];
-        for key in self.connector.list_objects(&s3_key, false)? {
+        for key in keys {
             if key == s3_key {
                 continue;
             }
@@ -226,10 +239,13 @@ impl StorageBackend for RemoteBackend {
         };
 
         debug!("Checking S3 key: {} to local path: {:?}", s3_key, path);
-        Ok(self.connector.head_object(&s3_key)?.is_some())
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.connector.head_object(&s3_key))
+        })?;
+        Ok(result.is_some())
     }
 
-    fn upload(&self, full_path: &Path) -> io::Result<()> {
+    async fn upload(&self, full_path: &Path) -> io::Result<()> {
         // upload to remote
         let s3_key = {
             let mut cache = self.local_cache.write().map_err(Self::lock_error)?;
@@ -245,7 +261,8 @@ impl StorageBackend for RemoteBackend {
             s3_key
         );
         self.connector
-            .upload_object(&s3_key, &full_path.to_path_buf())?;
+            .upload_object(&s3_key, &full_path.to_path_buf())
+            .await?;
 
         debug!(
             "Uploaded file {} to S3 key: {} in {:?}",
@@ -257,7 +274,7 @@ impl StorageBackend for RemoteBackend {
         Ok(())
     }
 
-    fn download(&self, path: &Path) -> io::Result<()> {
+    async fn download(&self, path: &Path) -> io::Result<()> {
         let s3_key = {
             let cache = self.local_cache.read().map_err(Self::lock_error)?;
             if cache.try_exists(path)? {
@@ -277,7 +294,7 @@ impl StorageBackend for RemoteBackend {
             std::fs::create_dir_all(full_path.parent().unwrap())?;
         }
 
-        self.connector.download_object(&s3_key, &full_path)?;
+        self.connector.download_object(&s3_key, &full_path).await?;
         self.local_cache
             .write()
             .map_err(Self::lock_error)?
@@ -299,7 +316,9 @@ impl StorageBackend for RemoteBackend {
         };
 
         debug!("Getting stats for S3 key: {}", s3_key);
-        self.connector.head_object(&s3_key)
+        tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(self.connector.head_object(&s3_key))
+        })
     }
 
     fn update_local_cache(&self, path: &Path, _mode: &AccessMode) -> std::io::Result<()> {

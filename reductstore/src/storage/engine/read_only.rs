@@ -37,8 +37,8 @@ impl ReadOnlyMode for StorageEngine {
             .collect::<HashSet<_>>();
 
         let mut buckets_to_retain = vec![];
-        self.folder_keeper.reload()?;
-        for path in self.folder_keeper.list_folders()? {
+        self.folder_keeper.reload().await?;
+        for path in self.folder_keeper.list_folders().await? {
             if current_bucket_paths.contains(&path) {
                 buckets_to_retain.push(path);
                 continue;

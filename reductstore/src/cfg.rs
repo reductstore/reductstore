@@ -269,7 +269,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 
         Ok(Components {
             storage,
-            token_repo: AsyncRwLock::new(token_repo),
+            token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(&self.cfg.api_token),
             console,
             replication_repo: AsyncRwLock::new(replication_engine),
@@ -341,9 +341,15 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             backend_builder = backend_builder.license(license.clone());
         }
 
-        FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
+        // Use tokio::task::block_in_place to allow blocking in async context during initialization
+        let backend = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(backend_builder.try_build())
+        })
+        .map_err(|e| {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
-        })?);
+        })?;
+
+        FILE_CACHE.set_storage_backend(backend);
         FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
         FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::Replica);
         Ok(())

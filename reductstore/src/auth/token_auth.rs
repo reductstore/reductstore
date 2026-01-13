@@ -30,10 +30,10 @@ impl TokenAuthorization {
     /// * `authorization_header` - The value of the Authorization header.
     /// * `repo` - The token repository to validate the token value.
     /// * `policy` - The policy to validate the token permissions.
-    pub fn check<Plc>(
+    pub async fn check<Plc>(
         &self,
         authorization_header: Option<&str>,
-        repo: &mut dyn ManageTokens,
+        repo: &mut (dyn ManageTokens + Send),
         policy: Plc,
     ) -> Result<(), ReductError>
     where
@@ -44,7 +44,7 @@ impl TokenAuthorization {
             return Ok(());
         }
 
-        let token = repo.validate_token(authorization_header);
+        let token = repo.validate_token(authorization_header).await;
         policy.validate(token)
     }
 }

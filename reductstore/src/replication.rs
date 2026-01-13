@@ -123,10 +123,10 @@ pub trait ManageReplications {
     fn get_mut_replication(&mut self, name: &str) -> Result<&mut ReplicationTask, ReductError>;
 
     /// Remove a replication task
-    fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
+    async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
 
     /// Update replication mode
-    fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError>;
+    async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError>;
 
     /// Notify replication task about a new transaction.
     ///

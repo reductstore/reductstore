@@ -52,11 +52,11 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         Err(forbidden!("Cannot get replication in read-only mode"))
     }
 
-    fn remove_replication(&mut self, _name: &str) -> Result<(), ReductError> {
+    async fn remove_replication(&mut self, _name: &str) -> Result<(), ReductError> {
         Err(forbidden!("Cannot remove replication in read-only mode"))
     }
 
-    fn set_mode(&mut self, _name: &str, _mode: ReplicationMode) -> Result<(), ReductError> {
+    async fn set_mode(&mut self, _name: &str, _mode: ReplicationMode) -> Result<(), ReductError> {
         Err(forbidden!(
             "Cannot update replication mode in read-only mode"
         ))

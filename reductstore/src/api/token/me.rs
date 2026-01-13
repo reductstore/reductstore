@@ -25,7 +25,8 @@ pub(in crate::api) async fn me(
         .token_repo
         .write()
         .await?
-        .validate_token(header)?;
+        .validate_token(header)
+        .await?;
     token.value.clear();
     Ok(TokenAxum::from(token))
 }

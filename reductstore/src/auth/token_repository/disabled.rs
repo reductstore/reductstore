@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::auth::token_repository::ManageTokens;
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reduct_base::bad_request;
 use reduct_base::error::ReductError;
@@ -17,8 +18,9 @@ impl NoAuthRepository {
     }
 }
 
+#[async_trait]
 impl ManageTokens for NoAuthRepository {
-    fn generate_token(
+    async fn generate_token(
         &mut self,
         _name: &str,
         _permissions: Permissions,
@@ -26,19 +28,19 @@ impl ManageTokens for NoAuthRepository {
         Err(bad_request!("Authentication is disabled"))
     }
 
-    fn get_token(&mut self, _name: &str) -> Result<&Token, ReductError> {
+    async fn get_token(&mut self, _name: &str) -> Result<&Token, ReductError> {
         Err(bad_request!("Authentication is disabled"))
     }
 
-    fn get_mut_token(&mut self, _name: &str) -> Result<&mut Token, ReductError> {
+    async fn get_mut_token(&mut self, _name: &str) -> Result<&mut Token, ReductError> {
         Err(bad_request!("Authentication is disabled"))
     }
 
-    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
+    async fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
         Ok(vec![])
     }
 
-    fn validate_token(&mut self, _header: Option<&str>) -> Result<Token, ReductError> {
+    async fn validate_token(&mut self, _header: Option<&str>) -> Result<Token, ReductError> {
         Ok(Token {
             name: "AUTHENTICATION-DISABLED".to_string(),
             value: "".to_string(),
@@ -52,15 +54,15 @@ impl ManageTokens for NoAuthRepository {
         })
     }
 
-    fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
+    async fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
         Ok(())
     }
 
-    fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
+    async fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
         Ok(())
     }
 
-    fn rename_bucket(&mut self, _old_name: &str, _new_name: &str) -> Result<(), ReductError> {
+    async fn rename_bucket(&mut self, _old_name: &str, _new_name: &str) -> Result<(), ReductError> {
         Ok(())
     }
 }

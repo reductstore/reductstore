@@ -73,7 +73,7 @@ impl Bucket {
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         let settings = Self::fill_settings(settings, Self::defaults());
-        let folder_keeper = FolderKeeper::new(path.clone(), &cfg);
+        let folder_keeper = FolderKeeper::new(path.clone(), &cfg).await;
 
         let bucket = Bucket {
             name: name.to_string(),
@@ -103,14 +103,11 @@ impl Bucket {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     pub async fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
-        let buf = {
-            let lock = FILE_CACHE
-                .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))?
-                .upgrade()?;
-            let mut buf = Vec::new();
-            lock.write()?.read_to_end(&mut buf)?;
-            buf
-        };
+        let mut file = FILE_CACHE
+            .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))
+            .await?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
 
         let cfg = Arc::new(cfg);
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf))
@@ -121,9 +118,9 @@ impl Bucket {
 
         let mut entries = BTreeMap::new();
         let mut task_set = Vec::new();
-        let folder_keeper = FolderKeeper::new(path.clone(), &cfg);
+        let folder_keeper = FolderKeeper::new(path.clone(), cfg.as_ref()).await;
 
-        for path in folder_keeper.list_folders()? {
+        for path in folder_keeper.list_folders().await? {
             let handler = Entry::restore(
                 path,
                 EntrySettings {
@@ -181,7 +178,7 @@ impl Bucket {
         } else {
             self.check_mode()?;
             let settings = self.settings.read().await?;
-            self.folder_keeper.add_folder(key)?;
+            self.folder_keeper.add_folder(key).await?;
             let entry = Arc::new(Entry::try_new(
                 &key,
                 self.path.clone(),
@@ -337,7 +334,7 @@ impl Bucket {
 
         if let Some(entry) = entries.read().await?.get(old_name) {
             entry.ensure_not_deleting().await?;
-            entry.compact()?;
+            entry.compact().await?;
         } else {
             return Err(not_found!(
                 "Entry '{}' not found in bucket '{}'",
@@ -346,7 +343,7 @@ impl Bucket {
             ));
         }
 
-        folder_keeper.rename_folder(old_name, new_name)?;
+        folder_keeper.rename_folder(old_name, new_name).await?;
         entries.write().await?.remove(old_name);
 
         if let Some(entry) = Entry::restore(
@@ -389,23 +386,16 @@ impl Bucket {
         let entry_name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
 
-        let folder_remove_result = {
-            let remove_bucket_from_backend = || -> Result<(), ReductError> {
-                folder_keeper.remove_folder(&entry_name)?;
+        let folder_remove_result = folder_keeper.remove_folder(&entry_name).await;
+
+        match folder_remove_result {
+            Ok(()) => {
                 debug!(
                     "Remove entry '{}' from bucket '{}' and folder '{}'",
                     entry_name,
                     bucket_name,
                     path.display()
                 );
-                Ok(())
-            };
-
-            remove_bucket_from_backend()
-        };
-
-        match folder_remove_result {
-            Ok(()) => {
                 entries.write().await?.remove(&entry_name);
             }
             Err(err) => {
@@ -437,7 +427,7 @@ impl Bucket {
         tokio::spawn(async move {
             let mut count = 0usize;
             for entry in entries.read().await?.values() {
-                if let Err(err) = entry.compact() {
+                if let Err(err) = entry.compact().await {
                     error!(
                         "Failed to compact entry '{}' in bucket '{}': {}",
                         entry.name(),

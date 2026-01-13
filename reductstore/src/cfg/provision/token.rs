@@ -11,13 +11,18 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub(in crate::cfg) fn provision_tokens(&self, data_path: &PathBuf) -> BoxedTokenRepository {
-        let mut token_repo =
-            TokenRepositoryBuilder::new(self.cfg.clone()).build(PathBuf::from(data_path));
+    pub(in crate::cfg) async fn provision_tokens(
+        &self,
+        data_path: &PathBuf,
+    ) -> BoxedTokenRepository {
+        let mut token_repo = TokenRepositoryBuilder::new(self.cfg.clone())
+            .build(PathBuf::from(data_path))
+            .await;
 
         for (name, token) in &self.cfg.tokens {
             let is_generated = match token_repo
                 .generate_token(&name, token.permissions.clone().unwrap_or_default())
+                .await
             {
                 Ok(_) => Ok(()),
                 Err(e) => {
@@ -34,6 +39,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             } else {
                 let update_token = token_repo
                     .get_mut_token(&name)
+                    .await
                     .expect("Token must exist after generation");
                 update_token.clone_from(token);
                 update_token.is_provisioned = true;

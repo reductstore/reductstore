@@ -7,20 +7,26 @@ use crate::storage::block_manager::BlockManager;
 use std::time::Instant;
 
 impl BlockManager {
-    pub(super) fn reload_if_readonly(&mut self) -> Result<(), reduct_base::error::ReductError> {
+    pub(super) async fn reload_if_readonly(
+        &mut self,
+    ) -> Result<(), reduct_base::error::ReductError> {
         if self.cfg.role == InstanceRole::Replica
             && self.last_replica_sync.elapsed() > self.cfg.engine_config.replica_update_interval
         {
             // we need to update the index from disk and chaned blocks for read-only instances
             let previous_state = self.block_index.info().clone();
-            self.block_index.update_from_disc()?;
+            self.block_index.update_from_disc().await?;
 
             for (block_id, new_block_info) in self.block_index.info().iter() {
                 if let Some(previous_block_info) = previous_state.get(block_id) {
                     if previous_block_info.crc64 != new_block_info.crc64 {
                         // block changed, we need to reload it
-                        FILE_CACHE.discard_recursive(&self.path_to_desc(*block_id))?;
-                        FILE_CACHE.discard_recursive(&self.path_to_data(*block_id))?;
+                        FILE_CACHE
+                            .discard_recursive(&self.path_to_desc(*block_id))
+                            .await?;
+                        FILE_CACHE
+                            .discard_recursive(&self.path_to_data(*block_id))
+                            .await?;
                     }
                 }
             }

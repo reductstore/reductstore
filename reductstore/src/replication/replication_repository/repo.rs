@@ -217,7 +217,7 @@ impl ManageReplications for ReplicationRepository {
         })
     }
 
-    fn remove_replication(&mut self, name: &str) -> Result<(), ReductError> {
+    async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError> {
         let repl = self.get_replication(name)?;
         if repl.is_provisioned() {
             return Err(ReductError::conflict(&format!(
@@ -226,13 +226,13 @@ impl ManageReplications for ReplicationRepository {
             )));
         }
         self.replications.remove(name);
-        self.save_repo()
+        self.save_repo().await
     }
 
-    fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
+    async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
         let replication = self.get_mut_replication(name)?;
         replication.set_mode(mode);
-        self.save_repo()
+        self.save_repo().await
     }
 
     async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
@@ -263,19 +263,18 @@ impl ReplicationRepository {
             started: false,
         };
 
-        let read_conf_file = || {
-            let lock = FILE_CACHE
+        let read_conf_file = async || {
+            let mut lock = FILE_CACHE
                 .write_or_create(&repo.repo_path, Start(0))
-                .expect("Failed to create or open replication repository file")
-                .upgrade()
-                .unwrap();
+                .await
+                .expect("Failed to create or open replication repository file");
 
             let mut buf = Vec::new();
-            lock.write().unwrap().read_to_end(&mut buf)?;
+            lock.read_to_end(&mut buf)?;
             Ok::<Vec<u8>, ReductError>(buf)
         };
 
-        match read_conf_file() {
+        match read_conf_file().await {
             Ok(buf) => {
                 debug!(
                     "Reading replication repository from {}",
@@ -297,7 +296,7 @@ impl ReplicationRepository {
         repo
     }
 
-    fn save_repo(&self) -> Result<(), ReductError> {
+    async fn save_repo(&self) -> Result<(), ReductError> {
         let proto_repo = ProtoReplicationRepo {
             replications: self
                 .replications
@@ -314,11 +313,9 @@ impl ReplicationRepository {
             .encode(&mut buf)
             .expect("Error encoding replication repository");
 
-        let lock = FILE_CACHE
-            .write_or_create(&self.repo_path, Start(0))?
-            .upgrade()?;
-
-        let mut file = lock.write()?;
+        let mut file = FILE_CACHE
+            .write_or_create(&self.repo_path, Start(0))
+            .await?;
         file.set_len(0)?;
         file.write_all(&buf)?;
         file.sync_all()?;
@@ -404,7 +401,7 @@ impl ReplicationRepository {
             replication.start();
         }
         self.replications.insert(name.to_string(), replication);
-        self.save_repo()
+        self.save_repo().await
     }
 }
 

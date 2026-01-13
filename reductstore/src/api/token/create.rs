@@ -22,7 +22,8 @@ pub(super) async fn create_token(
         .token_repo
         .write()
         .await?
-        .generate_token(&token_name, permissions.into())?;
+        .generate_token(&token_name, permissions.into())
+        .await?;
     Ok(TokenCreateResponseAxum(token))
 }
 

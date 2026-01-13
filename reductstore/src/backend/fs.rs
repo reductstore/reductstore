@@ -5,6 +5,7 @@
 
 use crate::backend::file::AccessMode;
 use crate::backend::{ObjectMetadata, StorageBackend};
+use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct FileSystemBackend {
@@ -17,20 +18,21 @@ impl FileSystemBackend {
     }
 }
 
+#[async_trait]
 impl StorageBackend for FileSystemBackend {
     fn path(&self) -> &PathBuf {
         &self.path
     }
 
-    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+    async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
         std::fs::rename(from, to)
     }
 
-    fn remove(&self, path: &Path) -> std::io::Result<()> {
+    async fn remove(&self, path: &Path) -> std::io::Result<()> {
         std::fs::remove_file(path)
     }
 
-    fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
+    async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
         std::fs::remove_dir_all(path)
     }
 
@@ -65,12 +67,12 @@ impl StorageBackend for FileSystemBackend {
         }
     }
 
-    fn upload(&self, _path: &Path) -> std::io::Result<()> {
+    async fn upload(&self, _path: &Path) -> std::io::Result<()> {
         // do nothing because the file owner is responsible for syncing with fs
         Ok(())
     }
 
-    fn download(&self, _path: &Path) -> std::io::Result<()> {
+    async fn download(&self, _path: &Path) -> std::io::Result<()> {
         // do nothing because filesystem backend does not need downloading
         Ok(())
     }

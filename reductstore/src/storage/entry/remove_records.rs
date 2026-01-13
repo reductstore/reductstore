@@ -128,10 +128,10 @@ impl Entry {
             for time in timestamps {
                 // Find the block that contains the record
                 // TODO: Try to avoid the lookup for each record
-                match block_manager.write().await?.find_block(time) {
+                match block_manager.write().await?.find_block(time).await {
                     Ok(block_ref) => {
                         // Check if the record exists
-                        let block = block_ref.read()?;
+                        let block = block_ref.read().await?;
                         if let Some(_) = block.get_record(time) {
                             records_per_block
                                 .entry(block.block_id())
@@ -155,7 +155,8 @@ impl Entry {
             let handler = tokio::spawn(async move {
                 // TODO: we don't parallelize the removal of records in different blocks
                 let mut bm = local_block_manager.write().await?;
-                bm.remove_records(block_id, timestamps)
+                bm.remove_records(block_id, timestamps).await?;
+                Ok::<(), ReductError>(())
             });
             handlers.push(handler);
         }

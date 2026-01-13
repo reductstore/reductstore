@@ -47,11 +47,16 @@ pub(super) async fn create(
     let url = check_and_normalize_base_url(&params, components.cfg.public_url.clone())?;
 
     // find current token
-    let token = components.token_repo.write().await?.validate_token(
-        headers
-            .get(AUTHORIZATION.as_str())
-            .map(|header| header.to_str().unwrap_or("invalid-token")),
-    )?;
+    let token = components
+        .token_repo
+        .write()
+        .await?
+        .validate_token(
+            headers
+                .get(AUTHORIZATION.as_str())
+                .map(|header| header.to_str().unwrap_or("invalid-token")),
+        )
+        .await?;
 
     // compress the query to make the link shorter
     let query_string = serde_json::to_string(&params.0)?;

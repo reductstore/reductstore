@@ -1,7 +1,7 @@
 // Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::file_cache::FileWeak;
+use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
@@ -15,12 +15,13 @@ use std::cmp::min;
 use std::io;
 use std::io::Read;
 use std::io::{Seek, SeekFrom};
+use std::path::PathBuf;
 use std::sync::Arc;
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     meta: RecordMeta,
-    file_ref: Option<FileWeak>,
+    file_path: Option<PathBuf>,
     offset: u64,
     content_size: u64,
     pos: u64,
@@ -48,9 +49,9 @@ impl RecordReader {
         processed_record: Option<Record>,
     ) -> Result<Self, ReductError> {
         let bm = block_manager.write().await?;
-        let block = block_ref.read()?;
+        let block = block_ref.read().await?;
 
-        let (file_ref, offset) = bm.begin_read_record(&block, record_timestamp)?;
+        let (file_path, offset) = bm.begin_read_record(&block, record_timestamp)?;
 
         let record = block.get_record(record_timestamp).unwrap();
         let content_size = record.end - record.begin;
@@ -67,9 +68,15 @@ impl RecordReader {
                 .build()
         };
 
+        let file_path = if content_size > 0 {
+            Some(file_path)
+        } else {
+            None
+        };
+
         Ok(Self {
             meta,
-            file_ref: Some(file_ref),
+            file_path,
             offset,
             content_size,
             pos: 0,
@@ -91,31 +98,47 @@ impl RecordReader {
         let meta: RecordMeta = record.into();
         RecordReader {
             meta,
-            file_ref: None,
+            file_path: None,
             offset: 0,
             content_size: 0,
             pos: 0,
+        }
+    }
+
+    /// Read a chunk synchronously using block_in_place
+    fn read_sync(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let file_path = match &self.file_path {
+            Some(path) => path,
+            None => return Ok(0),
+        };
+
+        let offset = self.offset;
+        let pos = self.pos;
+        let path = file_path.clone();
+
+        let result = tokio::task::block_in_place(|| {
+            tokio::runtime::Handle::current().block_on(async {
+                let mut file_guard = FILE_CACHE
+                    .read(&path, SeekFrom::Start(offset + pos))
+                    .await
+                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                file_guard.read(buf)
+            })
+        });
+
+        match result {
+            Ok(read) => {
+                self.pos += read as u64;
+                Ok(read)
+            }
+            Err(e) => Err(e),
         }
     }
 }
 
 impl Read for RecordReader {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let file_ref = match &self.file_ref {
-            Some(file_ref) => file_ref,
-            None => return Ok(0),
-        };
-
-        let rc = file_ref
-            .upgrade()
-            .map_err(|e| io::Error::new(io::ErrorKind::Other, e.message))?;
-        let mut lock = rc.write().unwrap();
-
-        lock.seek(SeekFrom::Start(self.offset + self.pos))?;
-        let read = lock.read(buf)?;
-
-        self.pos += read as u64;
-        Ok(read)
+        self.read_sync(buf)
     }
 }
 
@@ -184,8 +207,8 @@ impl ReadRecord for RecordReader {
 /// # Returns
 ///
 /// * `Result<(Vec<u8>, usize), ReductError>` - The read buffer and the number of bytes read
-pub(in crate::storage) fn read_in_chunks(
-    file: &FileWeak,
+pub(in crate::storage) async fn read_in_chunks(
+    file_path: &PathBuf,
     offset: u64,
     content_size: u64,
     read_bytes: u64,
@@ -193,15 +216,11 @@ pub(in crate::storage) fn read_in_chunks(
     let chunk_size = min(content_size - read_bytes, MAX_IO_BUFFER_SIZE as u64);
     let mut buf = vec![0; chunk_size as usize];
 
-    let seek_and_read = {
-        let rc = file.upgrade()?;
-        let mut lock = rc.write()?;
-        lock.seek(SeekFrom::Start(offset + read_bytes))?;
-        let read = lock.read(&mut buf)?;
-        Ok::<usize, ReductError>(read)
-    };
+    let mut file = FILE_CACHE
+        .read(&file_path, SeekFrom::Start(offset + read_bytes))
+        .await?;
 
-    let read = match seek_and_read {
+    let read = match file.read(&mut buf) {
         Ok(read) => read,
         Err(e) => {
             return Err(internal_server_error!("Failed to read record chunk: {}", e));
@@ -235,21 +254,24 @@ pub(crate) mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_ok(file_to_read: PathBuf, content_size: usize) {
-            let file_ref = FILE_CACHE.read(&file_to_read, SeekFrom::Start(0)).unwrap();
             let content_size = content_size as u64;
-            let (_data, len) = read_in_chunks(&file_ref, 0, content_size, 0).unwrap();
+            let (_data, len) = read_in_chunks(&file_to_read, 0, content_size, 0)
+                .await
+                .unwrap();
             assert_eq!(len, MAX_IO_BUFFER_SIZE);
 
-            let (_data, len) = read_in_chunks(&file_ref, 0, content_size, len as u64).unwrap();
+            let (_data, len) = read_in_chunks(&file_to_read, 0, content_size, len as u64)
+                .await
+                .unwrap();
             assert_eq!(len, content_size as usize - MAX_IO_BUFFER_SIZE);
         }
 
         #[rstest]
         #[tokio::test]
         async fn test_eof(file_to_read: PathBuf, content_size: usize) {
-            let file_ref = FILE_CACHE.read(&file_to_read, SeekFrom::Start(0)).unwrap();
             let content_size = content_size as u64;
-            let err = read_in_chunks(&file_ref, content_size, content_size, 0)
+            let err = read_in_chunks(&file_to_read, content_size, content_size, 0)
+                .await
                 .err()
                 .unwrap();
             assert_eq!(

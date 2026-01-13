@@ -28,7 +28,8 @@ pub(super) async fn rename_bucket(
         .token_repo
         .write()
         .await?
-        .rename_bucket(&bucket_name, &request.new_name)?;
+        .rename_bucket(&bucket_name, &request.new_name)
+        .await?;
     Ok(())
 }
 

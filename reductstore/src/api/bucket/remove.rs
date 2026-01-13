@@ -25,7 +25,8 @@ pub(super) async fn remove_bucket(
         .write()
         .await
         .unwrap()
-        .remove_bucket_from_tokens(&bucket_name)?;
+        .remove_bucket_from_tokens(&bucket_name)
+        .await?;
     Ok(())
 }
 

@@ -36,15 +36,15 @@ impl Entry {
         // When we write, the likely case is that we are writing the latest record
         // in the entry. In this case, we can just append to the latest block.
         let mut block_ref = if bm.index().tree().is_empty() {
-            bm.start_new_block(time, settings.max_block_size)?
+            bm.start_new_block(time, settings.max_block_size).await?
         } else {
             let block_id = *bm.index().tree().last().unwrap();
-            bm.load_block(block_id)?
+            bm.load_block(block_id).await?
         };
 
         let _record_type = {
             let is_belated = {
-                let block = block_ref.write()?;
+                let block = block_ref.write().await?;
                 block.record_count() > 0 && block.latest_record_time() >= time
             };
             if is_belated {
@@ -60,16 +60,16 @@ impl Entry {
                         "Timestamp {} is the earliest for {}/{}. Creating a new block",
                         time, self.bucket_name, self.name
                     );
-                    block_ref = bm.start_new_block(time, settings.max_block_size)?;
+                    block_ref = bm.start_new_block(time, settings.max_block_size).await?;
                     RecordType::BelatedFirst
                 } else {
-                    block_ref = bm.find_block(time)?;
-                    let block_id = block_ref.read()?.block_id();
+                    block_ref = bm.find_block(time).await?;
+                    let block_id = block_ref.read().await?.block_id();
                     debug!(
                         "Timestamp {} is belated for {}/{}. Writing to block {}",
                         time, self.bucket_name, self.name, block_id
                     );
-                    let record = block_ref.read()?.get_record(time).map(|r| r.clone());
+                    let record = block_ref.read().await?.get_record(time).map(|r| r.clone());
                     // check if the record already exists
                     if let Some(mut record) = record {
                         // We overwrite the record if it is errored and the size is the same.
@@ -82,7 +82,7 @@ impl Entry {
                             )))
                         } else {
                             {
-                                let mut block = block_ref.write()?;
+                                let mut block = block_ref.write().await?;
                                 record.labels = labels
                                     .into_iter()
                                     .map(|(name, value)| record::Label { name, value })
@@ -112,7 +112,7 @@ impl Entry {
         };
 
         let mut block_ref = {
-            let block = block_ref.read()?;
+            let block = block_ref.read().await?;
             // Check if the block has enough space for the record.
             let has_no_space = block.size() + content_size as u64 > settings.max_block_size;
             let has_too_many_records = block.record_count() + 1 > settings.max_block_records;
@@ -124,8 +124,8 @@ impl Entry {
                     "Creating a new block for {}/{} (has_no_space={}, has_too_many_records={})",
                     self.bucket_name, self.name, has_no_space, has_too_many_records
                 );
-                bm.finish_block(block_ref.clone())?;
-                bm.start_new_block(time, settings.max_block_size)?
+                bm.finish_block(block_ref.clone()).await?;
+                bm.start_new_block(time, settings.max_block_size).await?
             } else {
                 // We can just append to the latest block.
                 block_ref.clone()
@@ -134,21 +134,22 @@ impl Entry {
 
         drop(bm);
 
-        Self::prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)?;
+        Self::prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)
+            .await?;
 
         let writer =
             RecordWriter::try_new(Arc::clone(&self.block_manager), block_ref, time).await?;
         Ok(Box::new(writer))
     }
 
-    fn prepare_block_for_writing(
+    async fn prepare_block_for_writing(
         block: &mut BlockRef,
         time: u64,
         content_size: u64,
         content_type: String,
         labels: Labels,
     ) -> Result<(), ReductError> {
-        let mut block = block.write()?;
+        let mut block = block.write().await?;
         let record = Record {
             timestamp: Some(us_to_ts(&time)),
             begin: block.size(),

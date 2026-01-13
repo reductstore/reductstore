@@ -74,10 +74,11 @@ impl StorageEngineBuilder {
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
-        let folder_keeper = FolderKeeper::new(data_path.clone(), &cfg);
+        let folder_keeper = FolderKeeper::new(data_path.clone(), &cfg).await;
 
         for path in folder_keeper
             .list_folders()
+            .await
             .expect("Failed to list folders")
         {
             match Bucket::restore(data_path.join(&path), cfg.clone()).await {
@@ -181,7 +182,7 @@ impl StorageEngine {
             return Err(conflict!("Bucket '{}' already exists", name));
         }
 
-        self.folder_keeper.add_folder(name)?;
+        self.folder_keeper.add_folder(name).await?;
         let bucket =
             Arc::new(Bucket::try_build(name, &self.data_path, settings, self.cfg.clone()).await?);
         buckets.insert(name.to_string(), Arc::clone(&bucket));
@@ -248,9 +249,9 @@ impl StorageEngine {
 
         let _ = tokio::spawn(async move {
             let remove_bucket_from_backend = async || {
-                let mut buckets = buckets.write().await?;
-                folder_keeper.remove_folder(&name)?;
+                folder_keeper.remove_folder(&name).await?;
                 debug!("Bucket '{}' and folder {:?} are removed", name, path);
+                let mut buckets = buckets.write().await?;
                 buckets.remove(&name);
                 Ok::<(), ReductError>(())
             };
@@ -296,7 +297,7 @@ impl StorageEngine {
 
         let mut buckets = self.buckets.write().await?;
 
-        folder_keeper.rename_folder(&old_name, &new_name)?;
+        folder_keeper.rename_folder(&old_name, &new_name).await?;
 
         buckets.remove(&old_name);
         let bucket = Bucket::restore(new_path, cfg).await?;
@@ -327,7 +328,7 @@ impl StorageEngine {
 
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
         self.compact().await?;
-        FILE_CACHE.force_sync_all()?;
+        FILE_CACHE.force_sync_all().await?;
         Ok(())
     }
 

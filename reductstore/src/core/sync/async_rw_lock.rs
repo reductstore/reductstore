@@ -5,17 +5,18 @@ use crate::core::sync::{lock_timeout_error_at, rwlock_timeout};
 use reduct_base::error::ReductError;
 use std::future::Future;
 use std::panic::Location;
+use std::sync::Arc;
 use tokio::time::timeout;
 
 /// An async read-write lock with embedded timeouts.
 pub struct AsyncRwLock<T> {
-    inner: tokio::sync::RwLock<T>,
+    inner: Arc<tokio::sync::RwLock<T>>,
 }
 
 impl<T> AsyncRwLock<T> {
     pub fn new(data: T) -> Self {
         Self {
-            inner: tokio::sync::RwLock::new(data),
+            inner: Arc::new(tokio::sync::RwLock::new(data)),
         }
     }
 
@@ -59,6 +60,19 @@ impl<T> AsyncRwLock<T> {
 
     pub fn try_write(&self) -> Option<tokio::sync::RwLockWriteGuard<'_, T>> {
         self.inner.try_write().ok()
+    }
+
+    #[track_caller]
+    pub async fn write_owned(&self) -> Result<tokio::sync::OwnedRwLockWriteGuard<T>, ReductError> {
+        let location = Location::caller();
+        timeout(rwlock_timeout(), Arc::clone(&self.inner).write_owned())
+            .await
+            .map_err(|_| {
+                lock_timeout_error_at(
+                    "Failed to acquire async owned write lock within timeout",
+                    location,
+                )
+            })
     }
 }
 

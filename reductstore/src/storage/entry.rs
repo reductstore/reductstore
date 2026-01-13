@@ -181,7 +181,7 @@ impl Entry {
         let status_result = self.status();
 
         let mut bm = self.block_manager.write().await?;
-        let index = bm.update_and_get_index()?;
+        let index = bm.update_and_get_index().await?;
         let (oldest_record, latest_record) = if index.tree().is_empty() {
             (0, 0)
         } else {
@@ -261,7 +261,7 @@ impl Entry {
                 }
             };
 
-            bm.remove_block(oldest_block_id).unwrap_or_else(|e| {
+            bm.remove_block(oldest_block_id).await.unwrap_or_else(|e| {
                 error!("Failed to remove oldest block {}: {}", oldest_block_id, e);
             });
             debug!(
@@ -274,9 +274,9 @@ impl Entry {
     }
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
-    pub fn compact(&self) -> Result<(), ReductError> {
+    pub async fn compact(&self) -> Result<(), ReductError> {
         if let Some(mut bm) = self.block_manager.try_write() {
-            bm.save_cache_on_disk()
+            bm.save_cache_on_disk().await
         } else {
             // Avoid blocking writers; we'll try again on the next sync tick
             debug!(

@@ -20,7 +20,8 @@ pub(super) async fn remove_token(
         .token_repo
         .write()
         .await?
-        .remove_token(&token_name)?;
+        .remove_token(&token_name)
+        .await?;
     Ok(())
 }
 

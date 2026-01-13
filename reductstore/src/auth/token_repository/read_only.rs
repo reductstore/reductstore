@@ -6,7 +6,8 @@ use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::RwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
+use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::{debug, error};
@@ -24,7 +25,7 @@ pub(super) struct ReadOnlyTokenRepository {
     config_path: PathBuf,
     repo: HashMap<String, Token>,
     cfg: Cfg,
-    last_replica_sync: RwLock<Instant>,
+    last_replica_sync: AsyncRwLock<Instant>,
 }
 
 impl ReadOnlyTokenRepository {
@@ -38,38 +39,38 @@ impl ReadOnlyTokenRepository {
     /// # Returns
     ///
     /// The repository
-    pub fn new(data_path: PathBuf, cfg: Cfg) -> Self {
+    pub async fn new(data_path: PathBuf, cfg: Cfg) -> Self {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
 
         let mut token_repository = Self {
             config_path,
             repo: HashMap::new(),
-            last_replica_sync: RwLock::new(Instant::now()),
+            last_replica_sync: AsyncRwLock::new(Instant::now()),
             cfg,
         };
         let repo = token_repository
             .load_repo()
+            .await
             .expect("Could not load token repository");
 
         token_repository.repo = repo;
         token_repository
     }
 
-    fn load_repo(&self) -> Result<HashMap<String, Token>, ReductError> {
+    async fn load_repo(&self) -> Result<HashMap<String, Token>, ReductError> {
         let api_token = self.cfg.api_token.clone();
 
-        FILE_CACHE.discard_recursive(&self.config_path)?; // ensure we update it from backend
-        let lock = FILE_CACHE.read(&self.config_path, SeekFrom::Start(0));
+        FILE_CACHE.discard_recursive(&self.config_path).await?; // ensure we update it from backend
         let mut repo = HashMap::new();
-        match lock {
-            Ok(lock) => {
+        match FILE_CACHE.read(&self.config_path, SeekFrom::Start(0)).await {
+            Ok(mut lock) => {
                 debug!(
                     "Loading token repository from {}",
                     self.config_path.as_path().display()
                 );
 
                 let mut buf = Vec::new();
-                lock.upgrade()?.write()?.read_to_end(&mut buf)?;
+                lock.read_to_end(&mut buf)?;
 
                 let proto_repo = TokenRepo::decode(&mut Bytes::from(buf)).map_err(|e| {
                     internal_server_error!("Could not decode token repository: {}", e)
@@ -101,8 +102,8 @@ impl ReadOnlyTokenRepository {
         Ok(repo)
     }
 
-    fn update_repo(&mut self) -> Result<(), ReductError> {
-        let mut last_sync = self.last_replica_sync.write()?;
+    async fn update_repo(&mut self) -> Result<(), ReductError> {
+        let mut last_sync = self.last_replica_sync.write().await?;
         if self.cfg.role != InstanceRole::Replica
             || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
         {
@@ -111,7 +112,8 @@ impl ReadOnlyTokenRepository {
         }
 
         *last_sync = Instant::now();
-        self.repo = self.load_repo()?;
+
+        self.repo = self.load_repo().await?;
 
         Ok(())
     }
@@ -123,8 +125,9 @@ impl AccessTokens for ReadOnlyTokenRepository {
     }
 }
 
+#[async_trait]
 impl ManageTokens for ReadOnlyTokenRepository {
-    fn generate_token(
+    async fn generate_token(
         &mut self,
         _name: &str,
         _permissions: Permissions,
@@ -132,38 +135,38 @@ impl ManageTokens for ReadOnlyTokenRepository {
         Err(forbidden!("Cannot generate token in read-only mode"))
     }
 
-    fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
-        self.update_repo()?;
+    async fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
+        self.update_repo().await?;
         AccessTokens::get_token(self, name)
     }
 
-    fn get_mut_token(&mut self, _name: &str) -> Result<&mut Token, ReductError> {
+    async fn get_mut_token(&mut self, _name: &str) -> Result<&mut Token, ReductError> {
         Err(forbidden!("Cannot mutate token in read-only mode"))
     }
 
-    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
-        self.update_repo()?;
+    async fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
+        self.update_repo().await?;
 
         AccessTokens::get_token_list(self)
     }
 
-    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
-        self.update_repo()?;
+    async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
+        self.update_repo().await?;
 
         AccessTokens::validate_token(self, header)
     }
 
-    fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
+    async fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
         Err(forbidden!("Cannot remove token in read-only mode"))
     }
 
-    fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
+    async fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
         Err(forbidden!(
             "Cannot remove bucket from token in read-only mode"
         ))
     }
 
-    fn rename_bucket(&mut self, _old_name: &str, _new_name: &str) -> Result<(), ReductError> {
+    async fn rename_bucket(&mut self, _old_name: &str, _new_name: &str) -> Result<(), ReductError> {
         Err(forbidden!(
             "Cannot rename bucket in token in read-only mode"
         ))

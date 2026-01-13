@@ -22,7 +22,8 @@ pub(super) async fn get_token(
         .token_repo
         .write()
         .await?
-        .get_token(&token_name)?
+        .get_token(&token_name)
+        .await?
         .clone();
     token.value.clear();
     Ok(TokenAxum::from(token))
