@@ -357,20 +357,12 @@ impl BlockManager {
     ) -> Result<(), ReductError> {
         let block_ref = self.load_block(block_id).await?;
 
-        // First, append all WAL entries and remove records from memory
-        for record_time in records.iter() {
-            self.wal
-                .append(block_id, WalEntry::RemoveRecord(*record_time))
-                .await?;
-        }
-
         {
             let mut block = block_ref.write().await?;
             for record_time in records {
                 block.remove_record(record_time);
-
                 self.wal
-                    .append(block.block_id(), WalEntry::RemoveRecord(record_time))
+                    .append(block_id, WalEntry::RemoveRecord(record_time))
                     .await?;
             }
 
@@ -467,8 +459,8 @@ impl BlockManager {
             self.path_to_data(block.block_id())
         };
 
-        fs::remove_file(&block_path)?;
-        fs::rename(&temp_block_path, &block_path)?;
+        tokio::fs::remove_file(&block_path).await?;
+        tokio::fs::rename(&temp_block_path, &block_path).await?;
 
         FILE_CACHE.discard_recursive(&block_path).await?;
         let mut block_file = FILE_CACHE
@@ -688,14 +680,15 @@ mod tests {
         use reduct_base::io::WriteRecord;
 
         #[rstest]
-        fn test_starting_block(mut block_manager: BlockManager) {
+        #[tokio::test]
+        async fn test_starting_block(mut block_manager: BlockManager) {
             let block_id = 1_000_005;
 
-            let block_ref = block_manager.start_new_block(block_id, 1024).unwrap();
-            assert_eq!(block_ref.read().unwrap().block_id(), block_id,);
+            let block_ref = block_manager.start_new_block(block_id, 1024).await.unwrap();
+            assert_eq!(block_ref.read().await.unwrap().block_id(), block_id,);
 
             // Create an empty block
-            block_manager.save_cache_on_disk().unwrap();
+            block_manager.save_cache_on_disk().await.unwrap();
             let file = std::fs::File::open(
                 block_manager
                     .path
@@ -713,41 +706,47 @@ mod tests {
             .unwrap();
 
             let block_from_file: Block = BlockProto::decode(Bytes::from(buf)).unwrap().into();
-            assert_eq!(block_from_file, block_ref.read().unwrap().to_owned());
+            assert_eq!(block_from_file, block_ref.read().await.unwrap().to_owned());
         }
 
         #[rstest]
-        fn test_loading_block(mut block_manager: BlockManager, block_id: u64) {
-            block_manager.start_new_block(block_id, 1024).unwrap();
-            let block_ref = block_manager.start_new_block(20000005, 1024).unwrap();
-            let block = block_ref.read().unwrap();
-            let loaded_block = block_manager.load_block(block.block_id()).unwrap();
-            assert_eq!(loaded_block.read().unwrap().block_id(), block.block_id());
+        #[tokio::test]
+        async fn test_loading_block(mut block_manager: BlockManager, block_id: u64) {
+            block_manager.start_new_block(block_id, 1024).await.unwrap();
+            let block_ref = block_manager.start_new_block(20000005, 1024).await.unwrap();
+            let block = block_ref.read().await.unwrap();
+            let loaded_block = block_manager.load_block(block.block_id()).await.unwrap();
+            assert_eq!(
+                loaded_block.read().await.unwrap().block_id(),
+                block.block_id()
+            );
         }
 
         #[rstest]
-        fn test_loading_corrupted_block(mut block_manager: BlockManager, block_id: u64) {
-            block_manager.start_new_block(block_id, 1024).unwrap();
-            block_manager.save_cache_on_disk().unwrap();
+        #[tokio::test]
+        async fn test_loading_corrupted_block(mut block_manager: BlockManager, block_id: u64) {
+            block_manager.start_new_block(block_id, 1024).await.unwrap();
+            block_manager.save_cache_on_disk().await.unwrap();
             block_manager.block_cache.remove(&block_id);
 
             let path = block_manager.path_to_desc(block_id);
             std::fs::write(&path, b"corrupted").unwrap();
 
-            let err = block_manager.load_block(block_id).err().unwrap();
+            let err = block_manager.load_block(block_id).await.err().unwrap();
             assert_eq!(err.status(), ErrorCode::InternalServerError);
             assert!(err.to_string().contains("corrupted"));
         }
 
         #[rstest]
-        fn test_recover_being_time_from_id(mut block_manager: BlockManager, block_id: u64) {
-            block_manager.start_new_block(block_id, 1024).unwrap();
+        #[tokio::test]
+        async fn test_recover_being_time_from_id(mut block_manager: BlockManager, block_id: u64) {
+            block_manager.start_new_block(block_id, 1024).await.unwrap();
             block_manager.block_cache.remove(&block_id);
 
             let path = block_manager.path_to_desc(block_id);
             std::fs::write(&path, b"").unwrap();
 
-            let result = block_manager.load_block(block_id);
+            let result = block_manager.load_block(block_id).await;
             assert!(
                 result.is_ok(),
                 "It's ok to recover begin time from block id for blocks which aren't synced yet"
@@ -755,21 +754,26 @@ mod tests {
         }
 
         #[rstest]
-        fn test_start_reading(mut block_manager: BlockManager, block_id: u64) {
-            let block = block_manager.start_new_block(block_id, 1024).unwrap();
-            let block_id = block.read().unwrap().block_id();
-            let loaded_block = block_manager.load_block(block_id).unwrap();
-            assert_eq!(loaded_block.read().unwrap().block_id(), block_id);
+        #[tokio::test]
+        async fn test_start_reading(mut block_manager: BlockManager, block_id: u64) {
+            let block = block_manager.start_new_block(block_id, 1024).await.unwrap();
+            let block_id = block.read().await.unwrap().block_id();
+            let loaded_block = block_manager.load_block(block_id).await.unwrap();
+            assert_eq!(loaded_block.read().await.unwrap().block_id(), block_id);
         }
 
         #[rstest]
-        fn test_finish_block(mut block_manager: BlockManager, block_id: u64) {
-            let block = block_manager.start_new_block(block_id + 1, 1024).unwrap();
-            let block_id = block.read().unwrap().block_id();
-            let loaded_block = block_manager.load_block(block_id).unwrap();
-            assert_eq!(loaded_block.read().unwrap().block_id(), block_id);
+        #[tokio::test]
+        async fn test_finish_block(mut block_manager: BlockManager, block_id: u64) {
+            let block = block_manager
+                .start_new_block(block_id + 1, 1024)
+                .await
+                .unwrap();
+            let block_id = block.read().await.unwrap().block_id();
+            let loaded_block = block_manager.load_block(block_id).await.unwrap();
+            assert_eq!(loaded_block.read().await.unwrap().block_id(), block_id);
 
-            block_manager.finish_block(loaded_block).unwrap();
+            block_manager.finish_block(loaded_block).await.unwrap();
 
             let file = std::fs::File::open(
                 block_manager
@@ -800,13 +804,18 @@ mod tests {
                 .await
                 .unwrap()
                 .load_block(block_id)
+                .await
                 .unwrap();
-            assert_eq!(block_ref.read().unwrap().get_record(0).unwrap().state, 2);
+            assert_eq!(
+                block_ref.read().await.unwrap().get_record(0).unwrap().state,
+                2
+            );
         }
 
         #[rstest]
-        fn test_remove_non_existing_block(mut block_manager: BlockManager) {
-            block_manager.remove_block(999999).expect("No error");
+        #[tokio::test]
+        async fn test_remove_non_existing_block(mut block_manager: BlockManager) {
+            block_manager.remove_block(999999).await.expect("No error");
         }
     }
 
@@ -836,6 +845,7 @@ mod tests {
             };
             block
                 .write()
+                .await
                 .unwrap()
                 .insert_or_update_record(record.clone());
 
@@ -844,12 +854,12 @@ mod tests {
                 .unwrap();
             writer.send(Ok(Some(Bytes::from("hallo")))).await.unwrap();
             writer.send(Ok(None)).await.unwrap();
-            sleep(Duration::from_millis(10)); // wait for thread to finish
+            tokio::time::sleep(Duration::from_millis(10)).await; // wait for thread to finish
 
             // must save record in WAL
             let mut bm = block_manager.write().await.unwrap();
             {
-                let entries = bm.wal.read(block_id).unwrap();
+                let entries = bm.wal.read(block_id).await.unwrap();
                 assert_eq!(entries.len(), 1);
                 let record_from_wall = match &entries[0] {
                     WalEntry::WriteRecord(record) => record,
@@ -876,10 +886,10 @@ mod tests {
             );
 
             // drop cache in disk when block is changed (we need two blocks because of cache)
-            let _ = bm.start_new_block(block_id + 1, 1024).unwrap();
-            let _ = bm.start_new_block(block_id + 2, 1024).unwrap();
+            let _ = bm.start_new_block(block_id + 1, 1024).await.unwrap();
+            let _ = bm.start_new_block(block_id + 2, 1024).await.unwrap();
 
-            let err = bm.wal.read(block_id).err().unwrap();
+            let err = bm.wal.read(block_id).await.err().unwrap();
             assert_eq!(
                 err.status(),
                 ErrorCode::InternalServerError,
@@ -902,7 +912,7 @@ mod tests {
                 "index update"
             );
 
-            let er = bm.wal.read(block_id + 1).err().unwrap();
+            let er = bm.wal.read(block_id + 1).await.err().unwrap();
             assert_eq!(
                 er.status(),
                 ErrorCode::InternalServerError,
@@ -929,7 +939,7 @@ mod tests {
 
             let block_ref = block;
             let record = {
-                let lock = block_ref.write().unwrap();
+                let lock = block_ref.write().await.unwrap();
                 let mut record = lock.get_record(0).unwrap().clone();
                 record.labels = vec![Label {
                     name: "key".to_string(),
@@ -939,8 +949,8 @@ mod tests {
                 record
             };
 
-            bm.update_records(block_id, vec![record]).unwrap();
-            bm.save_cache_on_disk().unwrap();
+            bm.update_records(block_id, vec![record]).await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
             let block_index_proto = BlockIndexProto::decode(
                 std::fs::read(bm.path.join(BLOCK_INDEX_FILE))
                     .unwrap()
@@ -957,7 +967,7 @@ mod tests {
         #[tokio::test]
         async fn test_update_index_when_remove_block(block_manager: BlockManager, block_id: u64) {
             let mut bm = block_manager;
-            bm.remove_block(block_id).unwrap();
+            bm.remove_block(block_id).await.unwrap();
 
             let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
                 .await
@@ -981,7 +991,7 @@ mod tests {
                 .unwrap();
             assert_eq!(index.get_block(1).unwrap().record_count, 2);
 
-            bm.remove_records(block_id, vec![1]).unwrap();
+            bm.remove_records(block_id, vec![1]).await.unwrap();
 
             let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
                 .await
@@ -990,15 +1000,25 @@ mod tests {
         }
 
         #[rstest]
-        fn test_recovering_index_if_no_meta_file(mut block_manager: BlockManager, block_id: u64) {
+        #[tokio::test]
+        async fn test_recovering_index_if_no_meta_file(
+            mut block_manager: BlockManager,
+            block_id: u64,
+        ) {
             assert!(block_manager.index().get_block(block_id).is_some());
 
             FILE_CACHE
                 .remove(&block_manager.path_to_desc(block_id))
+                .await
                 .unwrap();
             block_manager.block_cache.remove(&block_id); // remove block from cache to load it from disk
             assert_eq!(
-                block_manager.load_block(block_id).err().unwrap().status(),
+                block_manager
+                    .load_block(block_id)
+                    .await
+                    .err()
+                    .unwrap()
+                    .status(),
                 ErrorCode::InternalServerError
             );
             assert!(
@@ -1035,9 +1055,10 @@ mod tests {
                 .await
                 .unwrap()
                 .remove_records(block_id, vec![0])
+                .await
                 .unwrap();
 
-            let block = block_ref.read().unwrap();
+            let block = block_ref.read().await.unwrap();
             assert_eq!(block.record_count(), 1);
 
             let record_time = ts_to_us(&record.timestamp.unwrap());
@@ -1071,20 +1092,25 @@ mod tests {
                     .unwrap()
                     .wal
                     .read(block.block_id())
+                    .await
                     .is_err(),
                 "wal must be removed after successful update"
             );
         }
 
         #[rstest]
-        fn test_remove_only_one_record(mut block_manager: BlockManager, block_id: u64) {
-            block_manager.remove_records(block_id, vec![0]).unwrap();
+        #[tokio::test]
+        async fn test_remove_only_one_record(mut block_manager: BlockManager, block_id: u64) {
+            block_manager
+                .remove_records(block_id, vec![0])
+                .await
+                .unwrap();
 
             // block must be removed
-            let err = block_manager.load_block(block_id).err().unwrap();
+            let err = block_manager.load_block(block_id).await.err().unwrap();
             assert_eq!(err.status(), ErrorCode::InternalServerError);
             assert!(block_manager.block_index.get_block(block_id).is_none());
-            assert!(!block_manager.exist(block_id).unwrap());
+            assert!(!block_manager.exist(block_id).await.unwrap());
         }
 
         #[rstest]
@@ -1095,16 +1121,16 @@ mod tests {
 
             let mut bm = block_manager.write().await.unwrap();
 
-            let block_id = block.read().unwrap().block_id();
-            FILE_CACHE.remove(&bm.path_to_data(block_id)).unwrap();
+            let block_id = block.read().await.unwrap().block_id();
+            FILE_CACHE.remove(&bm.path_to_data(block_id)).await.unwrap();
 
-            let res = bm.remove_records(block_id, vec![1]);
+            let res = bm.remove_records(block_id, vec![1]).await;
             assert!(
                 res.is_err(),
                 "we broke the method removing the source block"
             );
 
-            let entries = bm.wal.read(block_id).unwrap();
+            let entries = bm.wal.read(block_id).await.unwrap();
             assert_eq!(entries.len(), 1);
             assert_eq!(
                 entries[0],
@@ -1120,7 +1146,7 @@ mod tests {
         block_manager: &Arc<AsyncRwLock<BlockManager>>,
         block_ref: BlockRef,
     ) -> (Record, String) {
-        let block_size = block_ref.read().unwrap().size();
+        let block_size = block_ref.read().await.unwrap().size();
         let record = Record {
             timestamp: Some(us_to_ts(&record_time)),
             begin: block_size,
@@ -1131,6 +1157,7 @@ mod tests {
         };
         block_ref
             .write()
+            .await
             .unwrap()
             .insert_or_update_record(record.clone());
 
@@ -1155,6 +1182,7 @@ mod tests {
             .await
             .unwrap()
             .save_block_on_disk(block_ref.clone())
+            .await
             .unwrap();
         (record, record_body)
     }
@@ -1165,27 +1193,33 @@ mod tests {
 
     #[fixture]
     fn block(mut block_manager: BlockManager, block_id: u64) -> BlockRef {
-        block_manager.load_block(block_id).unwrap()
+        tokio::runtime::Handle::current()
+            .block_on(block_manager.load_block(block_id))
+            .unwrap()
     }
 
     #[fixture]
     fn block_manager(block_id: u64) -> BlockManager {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .unwrap(),
-        );
 
-        let mut bm = BlockManager::build(
-            path.clone(),
-            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
-            Cfg::default().into(),
-        );
-        let block_ref = bm.start_new_block(block_id, 1024).unwrap().clone();
-        {
-            let mut block = block_ref.write().unwrap();
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            FILE_CACHE
+                .set_storage_backend(
+                    tokio::runtime::Handle::current()
+                        .block_on(Backend::builder().local_data_path(path.clone()).try_build())
+                        .unwrap(),
+                )
+                .await;
+
+            let mut bm = rt.block_on(BlockManager::build(
+                path.clone(),
+                BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                Cfg::default().into(),
+            ));
+            let block_ref = bm.start_new_block(block_id, 1024).await.unwrap().clone();
+
+            let mut block = block_ref.write().await.unwrap();
             block.insert_or_update_record(Record {
                 timestamp: Some(Timestamp {
                     seconds: 0,
@@ -1198,18 +1232,21 @@ mod tests {
                 content_type: "".to_string(),
             });
 
-            let (file, _) = bm.begin_write_record(&block, 0).unwrap();
-            file.upgrade()
-                .unwrap()
-                .write()
+            let (file, offset) = bm.begin_write_record(&block, 0).unwrap();
+            drop(block);
+
+            FILE_CACHE
+                .write_or_create(&file, SeekFrom::Start(offset))
+                .await
                 .unwrap()
                 .write(&vec![0; MAX_IO_BUFFER_SIZE + 1])
                 .unwrap();
-        }
 
-        bm.finish_write_record(block_id, record::State::Finished, 0)
-            .unwrap();
-        bm.save_block_on_disk(block_ref).unwrap();
-        bm
+            bm.finish_write_record(block_id, record::State::Finished, 0)
+                .await
+                .unwrap();
+            bm.save_block_on_disk(block_ref).await.unwrap();
+            bm
+        })
     }
 }

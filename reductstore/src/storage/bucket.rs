@@ -811,9 +811,8 @@ mod tests {
     pub fn path() -> PathBuf {
         let path = tempdir().unwrap().keep();
         FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
+            tokio::runtime::Handle::current()
+                .block_on(Backend::builder().local_data_path(path.clone()).try_build())
                 .unwrap(),
         );
         path
@@ -821,7 +820,7 @@ mod tests {
 
     #[fixture]
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
-        FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
+        FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
             Bucket::try_build("test", &path, settings, Cfg::default())
                 .await
@@ -831,7 +830,7 @@ mod tests {
 
     #[fixture]
     pub async fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
-        FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
+        FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         let bucket = Bucket::try_build("test", &path, settings, Cfg::default())
             .await
             .unwrap();

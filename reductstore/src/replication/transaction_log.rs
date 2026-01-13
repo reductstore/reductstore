@@ -292,17 +292,24 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_new_transaction_log(path: PathBuf) {
-        let transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
-        assert_eq!(transaction_log.is_empty(), true);
+    #[tokio::test]
+    async fn test_new_transaction_log(path: PathBuf) {
+        let transaction_log = TransactionLog::try_load_or_create(&path, 100)
+            .await
+            .unwrap();
+        assert!(transaction_log.is_empty());
     }
 
     #[rstest]
-    fn test_write_read_transaction_log(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
+    #[tokio::test]
+    async fn test_write_read_transaction_log(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100)
+            .await
+            .unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
+                .await
                 .unwrap(),
             None
         );
@@ -312,161 +319,178 @@ mod tests {
         assert_eq!(
             transaction_log
                 .push_back(Transaction::UpdateRecord(2))
+                .await
                 .unwrap(),
             None
         );
         assert_eq!(transaction_log.len(), 2);
-        assert_eq!(transaction_log.is_empty(), false);
+        assert!(!transaction_log.is_empty());
         assert_eq!(
-            transaction_log.front(2).unwrap(),
+            transaction_log.front(2).await.unwrap(),
             vec![Transaction::WriteRecord(1), Transaction::UpdateRecord(2),]
         );
 
-        assert_eq!(transaction_log.pop_front(2).unwrap(), 2);
-        assert_eq!(transaction_log.is_empty(), true);
+        assert_eq!(transaction_log.pop_front(2).await.unwrap(), 2);
+        assert!(transaction_log.is_empty());
 
-        assert_eq!(transaction_log.pop_front(1).unwrap(), 0);
+        assert_eq!(transaction_log.pop_front(1).await.unwrap(), 0);
     }
 
     #[rstest]
-    fn test_write_broken_type(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
+    #[tokio::test]
+    async fn test_write_broken_type(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100)
+            .await
+            .unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
+                .await
                 .unwrap(),
             None
         );
         {
-            let file = FILE_CACHE
+            let mut file = FILE_CACHE
                 .write_or_create(
                     &path,
                     SeekFrom::Start((transaction_log.write_pos - ENTRY_SIZE) as u64),
                 )
-                .unwrap()
-                .upgrade()
+                .await
                 .unwrap();
-            let mut file = file.write().unwrap();
             file.write_all(&[99]).unwrap();
-            file.sync_all().unwrap();
+            file.sync_all().await.unwrap();
         }
 
         assert_eq!(
-            transaction_log.front(1).unwrap_err(),
+            transaction_log.front(1).await.unwrap_err(),
             internal_server_error!("Invalid transaction type",)
         );
     }
 
     #[rstest]
-    fn test_out_of_range(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
+    #[tokio::test]
+    async fn test_out_of_range(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100)
+            .await
+            .unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
+                .await
                 .unwrap(),
             None
         );
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(2))
+                .await
                 .unwrap(),
             None
         );
         assert_eq!(transaction_log.len(), 2);
-        assert_eq!(transaction_log.is_empty(), false);
+        assert!(!transaction_log.is_empty());
 
         assert_eq!(
-            transaction_log.front(3).unwrap(),
+            transaction_log.front(3).await.unwrap(),
             vec![Transaction::WriteRecord(1), Transaction::WriteRecord(2),],
             "We return only the available transactions."
         );
 
         assert_eq!(
-            transaction_log.pop_front(3).unwrap(),
+            transaction_log.pop_front(3).await.unwrap(),
             2,
             "We pop only the available transactions."
         );
-        assert_eq!(transaction_log.is_empty(), true);
+        assert!(transaction_log.is_empty());
     }
 
     #[rstest]
-    fn test_overflow(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_overflow(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         for i in 1..5 {
             transaction_log
                 .push_back(Transaction::WriteRecord(i))
+                .await
                 .unwrap();
         }
 
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(
-            transaction_log.front(2).unwrap(),
+            transaction_log.front(2).await.unwrap(),
             vec![Transaction::WriteRecord(3), Transaction::WriteRecord(4),]
         );
     }
 
     #[rstest]
-    fn test_recovery(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_recovery(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         for i in 1..5 {
             transaction_log
                 .push_back(Transaction::WriteRecord(i))
+                .await
                 .unwrap();
         }
 
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(
-            transaction_log.front(2).unwrap(),
+            transaction_log.front(2).await.unwrap(),
             vec![Transaction::WriteRecord(3), Transaction::WriteRecord(4),]
         );
 
-        assert_eq!(transaction_log.pop_front(2).unwrap(), 2);
-        assert_eq!(transaction_log.is_empty(), true);
+        assert_eq!(transaction_log.pop_front(2).await.unwrap(), 2);
+        assert!(transaction_log.is_empty());
     }
 
     #[rstest]
-    fn test_recovery_init(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_recovery_init(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
+            .await
             .unwrap();
         drop(transaction_log);
 
-        let transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+        let transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         assert_eq!(transaction_log.write_pos, HEADER_SIZE + ENTRY_SIZE);
         assert_eq!(transaction_log.read_pos, HEADER_SIZE);
     }
 
     #[rstest]
-    fn test_recovery_empty_cache(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_recovery_empty_cache(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
+            .await
             .unwrap();
 
-        FILE_CACHE.discard_recursive(&path).unwrap(); // discard the cache to simulate restart
+        FILE_CACHE.discard_recursive(&path).await.unwrap(); // discard the cache to simulate restart
 
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
 
         // check if the transaction log is still working after cache discard
         assert_eq!(
-            transaction_log.front(1).unwrap(),
+            transaction_log.front(1).await.unwrap(),
             vec![Transaction::WriteRecord(1)]
         );
-        assert_eq!(transaction_log.pop_front(1).unwrap(), 1);
+        assert_eq!(transaction_log.pop_front(1).await.unwrap(), 1);
         assert!(transaction_log.is_empty());
     }
 
     #[rstest]
-    fn test_resize_empty_log(path: PathBuf) {
-        TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_resize_empty_log(path: PathBuf) {
+        TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 3 + HEADER_SIZE
         );
 
-        TransactionLog::try_load_or_create(&path, 5).unwrap();
+        TransactionLog::try_load_or_create(&path, 5).await.unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 5 + HEADER_SIZE
@@ -474,17 +498,19 @@ mod tests {
     }
 
     #[rstest]
-    fn test_resize_non_empty_log(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_resize_non_empty_log(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
+            .await
             .unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 3 + HEADER_SIZE
         );
 
-        TransactionLog::try_load_or_create(&path, 5).unwrap();
+        TransactionLog::try_load_or_create(&path, 5).await.unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 3 + HEADER_SIZE,
@@ -508,45 +534,43 @@ mod tests {
         )]
         #[case([0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 34], "Invalid read position 34 in transaction log"
         )]
-        fn test_invalid_position(
+        #[tokio::test]
+        async fn test_invalid_position(
             #[case] buf: [u8; 16],
             #[case] expected_error: &str,
             path: PathBuf,
         ) {
             {
-                let file = FILE_CACHE
+                let mut file = FILE_CACHE
                     .write_or_create(&path, SeekFrom::Start(0))
-                    .unwrap()
-                    .upgrade()
+                    .await
                     .unwrap();
-                let mut file = file.write().unwrap();
                 file.write_all(&buf).unwrap();
                 file.set_len((HEADER_SIZE + ENTRY_SIZE * 2) as u64).unwrap();
             }
 
             let result = TransactionLog::try_load_or_create(&path, 3);
             assert_eq!(
-                result.err().unwrap(),
+                result.await.err().unwrap(),
                 internal_server_error!("{} {}", expected_error, path.to_str().unwrap())
             );
         }
 
         #[rstest]
-        fn test_invalid_size(path: PathBuf) {
+        #[tokio::test]
+        async fn test_invalid_size(path: PathBuf) {
             {
-                let file = FILE_CACHE
+                let mut file = FILE_CACHE
                     .write_or_create(&path, SeekFrom::Start(0))
-                    .unwrap()
-                    .upgrade()
+                    .await
                     .unwrap();
-                let mut file = file.write().unwrap();
                 file.write_all(&[0u8; 16]).unwrap();
                 file.set_len((HEADER_SIZE + 1) as u64).unwrap();
             }
 
             let result = TransactionLog::try_load_or_create(&path, 3);
             assert_eq!(
-                result.err().unwrap(),
+                result.await.err().unwrap(),
                 internal_server_error!(
                     "Invalid size 17 of transaction log {}",
                     path.to_str().unwrap()

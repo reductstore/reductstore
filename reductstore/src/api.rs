@@ -732,7 +732,7 @@ mod tests {
                 async fn is_waiting(&self) -> Result<bool, ReductError> {
                     Err(ReductError::internal_server_error("boom"))
                 }
-                fn release(&self) {}
+                async fn release(&self) {}
             }
 
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
@@ -793,7 +793,7 @@ mod tests {
                 async fn is_waiting(&self) -> Result<bool, ReductError> {
                     Ok(true)
                 }
-                fn release(&self) {}
+                async fn release(&self) {}
             }
 
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
@@ -811,8 +811,9 @@ mod tests {
         let cfg_for_storage = cfg.clone();
         FILE_CACHE.set_storage_backend(
             Backend::builder()
-                .local_data_path(cfg_for_storage.data_path.clone())
+                .local_data_path(cfg.data_path.clone())
                 .try_build()
+                .await
                 .unwrap(),
         );
 
@@ -824,7 +825,9 @@ mod tests {
                 .await,
         );
 
-        let token_repo = TokenRepositoryBuilder::new(cfg.clone()).build(cfg.data_path.clone());
+        let token_repo = TokenRepositoryBuilder::new(cfg.clone())
+            .build(cfg.data_path.clone())
+            .await;
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -866,6 +869,7 @@ mod tests {
             Backend::builder()
                 .local_data_path(cfg.data_path.clone())
                 .try_build()
+                .await
                 .unwrap(),
         );
 
@@ -874,7 +878,9 @@ mod tests {
             .with_cfg(cfg.clone())
             .build()
             .await;
-        let mut token_repo = TokenRepositoryBuilder::new(cfg.clone()).build(cfg.data_path.clone());
+        let mut token_repo = TokenRepositoryBuilder::new(cfg.clone())
+            .build(cfg.data_path.clone())
+            .await;
 
         storage
             .create_bucket("bucket-1", BucketSettings::default())
@@ -906,7 +912,10 @@ mod tests {
             ..Default::default()
         };
 
-        token_repo.generate_token("test", permissions).unwrap();
+        token_repo
+            .generate_token("test", permissions)
+            .await
+            .unwrap();
 
         let storage = Arc::new(storage);
         let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
@@ -1024,7 +1033,7 @@ mod tests {
             Ok(true)
         }
 
-        fn release(&self) {}
+        async fn release(&self) {}
     }
 
     struct NotReadyLockFile {}
@@ -1043,6 +1052,6 @@ mod tests {
             Ok(true)
         }
 
-        fn release(&self) {}
+        async fn release(&self) {}
     }
 }

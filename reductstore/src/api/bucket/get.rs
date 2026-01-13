@@ -85,6 +85,7 @@ mod tests {
                     write: vec![],
                 },
             )
+            .await
             .unwrap();
 
         headers.insert(

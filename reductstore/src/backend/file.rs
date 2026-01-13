@@ -193,6 +193,7 @@ impl Seek for File {
 mod tests {
     use super::*;
     use crate::backend::{ObjectMetadata, StorageBackend};
+    use async_trait::async_trait;
     use mockall::mock;
     use rstest::*;
     use std::fs;
@@ -204,7 +205,8 @@ mod tests {
         use std::fs;
 
         #[rstest]
-        fn test_open_options_read(mut mock_backend: MockBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_open_options_read(mut mock_backend: MockBackend) {
             let path = mock_backend.path().to_path_buf();
             let copy_path = path.clone();
 
@@ -224,6 +226,7 @@ mod tests {
             let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
                 .read(true)
                 .open("non-existing.txt")
+                .await
                 .unwrap();
 
             assert_eq!(file.mode(), &AccessMode::Read);
@@ -233,7 +236,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_open_options_read_existing(mut mock_backend: MockBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_open_options_read_existing(mut mock_backend: MockBackend) {
             let path = mock_backend.path().to_path_buf();
 
             // no download because it exists in cache
@@ -242,6 +246,7 @@ mod tests {
             let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
                 .read(true)
                 .open("test.txt")
+                .await
                 .unwrap();
 
             assert_eq!(file.mode(), &AccessMode::Read);
@@ -251,7 +256,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_open_options_create_ignore_file_not_exist(mut mock_backend: MockBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_open_options_create_ignore_file_not_exist(mut mock_backend: MockBackend) {
             let path = mock_backend.path().to_path_buf();
             let copy_path = path.clone();
 
@@ -268,6 +274,7 @@ mod tests {
                 .write(true)
                 .create(true)
                 .open("new_file.txt")
+                .await
                 .unwrap();
 
             assert_eq!(file.mode(), &AccessMode::ReadWrite);
@@ -282,7 +289,8 @@ mod tests {
         use std::io::Write;
 
         #[rstest]
-        fn test_file_sync_all(mut mock_backend: MockBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_file_sync_all(mut mock_backend: MockBackend) {
             let path = mock_backend.path().to_path_buf();
 
             // expect upload when syncing
@@ -294,20 +302,23 @@ mod tests {
             let mut file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
                 .write(true)
                 .open("test.txt")
+                .await
                 .unwrap();
 
             assert!(file.is_synced());
             file.write_all(b" more").unwrap();
             assert!(!file.is_synced());
-            file.sync_all().unwrap();
+            file.sync_all().await.unwrap();
             assert!(file.is_synced());
         }
 
         #[rstest]
-        fn test_is_sync_after_write(mock_backend: MockBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_is_sync_after_write(mock_backend: MockBackend) {
             let mut file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
                 .write(true)
                 .open("test.txt")
+                .await
                 .unwrap();
 
             assert!(file.is_synced());
@@ -316,10 +327,12 @@ mod tests {
         }
 
         #[rstest]
-        fn test_is_sync_after_set_len(mock_backend: MockBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_is_sync_after_set_len(mock_backend: MockBackend) {
             let mut file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
                 .write(true)
                 .open("test.txt")
+                .await
                 .unwrap();
 
             assert!(file.is_synced());
@@ -332,7 +345,8 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_file_access_read(mut mock_backend: MockBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_file_access_read(mut mock_backend: MockBackend) {
             let path = mock_backend.path().to_path_buf();
 
             // expect update_local_cache when accessing
@@ -348,13 +362,15 @@ mod tests {
             let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
                 .read(true)
                 .open("test.txt")
+                .await
                 .unwrap();
 
-            file.access().unwrap();
+            file.access().await.unwrap();
         }
 
         #[rstest]
-        fn test_file_access_read_write(mut mock_backend: MockBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_file_access_read_write(mut mock_backend: MockBackend) {
             let path = mock_backend.path().to_path_buf();
 
             // expect update_local_cache when accessing
@@ -370,9 +386,10 @@ mod tests {
             let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
                 .write(true)
                 .open("test.txt")
+                .await
                 .unwrap();
 
-            file.access().unwrap();
+            file.access().await.unwrap();
         }
     }
 
@@ -381,7 +398,8 @@ mod tests {
         use std::io::Write;
 
         #[rstest]
-        fn test_file_write_ignored(mut mock_backend: MockBackend) {
+        #[tokio::test]
+        async fn test_file_write_ignored(mut mock_backend: MockBackend) {
             let path = mock_backend.path().to_path_buf();
 
             // no upload expected because write is ignored
@@ -393,13 +411,14 @@ mod tests {
                 .create(true)
                 .ignore_write(true)
                 .open("test.txt")
+                .await
                 .unwrap();
 
             assert!(file.is_synced());
             let bytes_written = file.write(b" more").unwrap();
             assert_eq!(bytes_written, 5);
             assert!(file.is_synced());
-            file.sync_all().unwrap();
+            file.sync_all().await.unwrap();
             assert!(file.is_synced());
 
             // check that the file content is unchanged
@@ -411,20 +430,21 @@ mod tests {
     mock! {
         pub Backend {}
 
+        #[async_trait]
         impl StorageBackend for Backend {
             fn path(&self) -> &PathBuf;
-            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
-            fn remove(&self, path: &Path) -> std::io::Result<()>;
-            fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
-            fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
-            fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
-            fn try_exists(&self, path: &Path) -> std::io::Result<bool>;
-            fn upload(&self, path: &Path) -> std::io::Result<()>;
-            fn download(&self, path: &Path) -> std::io::Result<()>;
-            fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
-            fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
-            fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
-            fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
+            async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+            async fn remove(&self, path: &Path) -> std::io::Result<()>;
+            async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
+            async fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
+            async fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
+            async fn try_exists(&self, path: &Path) -> std::io::Result<bool>;
+            async fn upload(&self, path: &Path) -> std::io::Result<()>;
+            async fn download(&self, path: &Path) -> std::io::Result<()>;
+            async fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
+            async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+            async fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
+            async fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
         }
 
     }

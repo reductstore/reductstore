@@ -390,8 +390,10 @@ mod tests {
             let mut bm = entry.block_manager.write().await.unwrap();
             let records = bm
                 .load_block(1)
+                .await
                 .unwrap()
                 .read()
+                .await
                 .unwrap()
                 .record_index()
                 .clone();
@@ -420,7 +422,7 @@ mod tests {
                 }
             );
 
-            bm.save_cache_on_disk().unwrap();
+            bm.save_cache_on_disk().await.unwrap();
             let entry = Entry::restore(
                 path.join(entry.name()),
                 entry_settings,
@@ -713,6 +715,7 @@ mod tests {
                     },
                     Cfg::default().into(),
                 )
+                .await
                 .unwrap(),
             );
 
@@ -747,9 +750,13 @@ mod tests {
 
     #[fixture]
     pub(super) fn entry(entry_settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
-        Arc::new(
-            Entry::try_build("entry", path.clone(), entry_settings, Cfg::default().into()).unwrap(),
-        )
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        let entry = rt.block_on(async {
+            Entry::try_build("entry", path.clone(), entry_settings, Cfg::default().into())
+                .await
+                .unwrap()
+        });
+        Arc::new(entry)
     }
 
     #[fixture]

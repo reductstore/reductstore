@@ -151,11 +151,11 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
         let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
-        let token1 = repo.get_token("token1").unwrap().clone();
+        let token1 = repo.get_token("token1").await.unwrap().clone();
         assert_eq!(token1.value, "TOKEN");
         assert!(token1.is_provisioned);
 
@@ -185,11 +185,11 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
         let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
-        let token1 = repo.get_token("token1").unwrap().clone();
+        let token1 = repo.get_token("token1").await.unwrap().clone();
         assert_eq!(token1.value, "TOKEN");
         assert!(token1.is_provisioned);
 
@@ -211,11 +211,11 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
         let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
-        let err = repo.get_token("token1").err().unwrap();
+        let err = repo.get_token("token1").await.err().unwrap();
         assert_eq!(err, not_found!("Token 'token1' doesn't exist"));
     }
 
@@ -227,9 +227,11 @@ mod tests {
             api_token: "init".to_string(),
             ..Default::default()
         })
-        .build(env_with_tokens.get("RS_DATA_PATH").unwrap().into());
+        .build(env_with_tokens.get("RS_DATA_PATH").unwrap().into())
+        .await;
         let _ = auth_repo
             .generate_token("token1", Permissions::default())
+            .await
             .unwrap();
 
         env_with_tokens
@@ -240,11 +242,11 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
         let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
-        let token = repo.get_token("token1").unwrap();
+        let token = repo.get_token("token1").await.unwrap();
         assert_eq!(token.value, "TOKEN");
     }
 
@@ -254,9 +256,12 @@ mod tests {
         let data_path = tmp.keep();
         fs::create_dir_all(&data_path).unwrap();
         FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(data_path.clone())
-                .try_build()
+            tokio::runtime::Handle::current()
+                .block_on(
+                    Backend::builder()
+                        .local_data_path(data_path.clone())
+                        .try_build(),
+                )
                 .unwrap(),
         );
 

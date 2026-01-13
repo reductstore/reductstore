@@ -402,9 +402,15 @@ mod tests {
     async fn test_ignoring_errored_records(block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
         {
-            let block_ref = block_manager.write().await.unwrap().load_block(0).unwrap();
+            let block_ref = block_manager
+                .write()
+                .await
+                .unwrap()
+                .load_block(0)
+                .await
+                .unwrap();
             {
-                let mut block = block_ref.write().unwrap();
+                let mut block = block_ref.write().await.unwrap();
                 let mut record = block.get_record(0).unwrap().clone();
                 record.state = record::State::Errored as i32;
                 block.insert_or_update_record(record);
@@ -414,6 +420,7 @@ mod tests {
                 .await
                 .unwrap()
                 .save_block(block_ref)
+                .await
                 .unwrap();
         }
 

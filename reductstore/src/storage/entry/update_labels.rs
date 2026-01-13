@@ -248,8 +248,9 @@ mod tests {
             .await
             .unwrap()
             .load_block(1)
+            .await
             .unwrap();
-        let mut record = block.read().unwrap().get_record(1).unwrap().clone();
+        let mut record = block.read().await.unwrap().get_record(1).unwrap().clone();
         record.labels.sort_by(|a, b| a.name.cmp(&b.name));
         assert_eq!(record.labels, expected_labels);
     }

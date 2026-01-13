@@ -77,59 +77,82 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_create_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-        let token = disabled_repo.generate_token(
-            "test",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        );
+    #[tokio::test]
+    async fn test_create_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let token = disabled_repo
+            .generate_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            )
+            .await;
         assert_eq!(token, Err(bad_request!("Authentication is disabled")));
     }
 
     #[rstest]
-    fn test_find_by_name_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-        let token = disabled_repo.get_token("test");
+    #[tokio::test]
+    async fn test_find_by_name_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let token = disabled_repo.get_token("test").await;
         assert_eq!(token, Err(bad_request!("Authentication is disabled")));
     }
 
     #[rstest]
-    fn test_find_mut_by_name_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-        let token = disabled_repo.get_mut_token("test");
+    #[tokio::test]
+    async fn test_find_mut_by_name_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let token = disabled_repo.get_mut_token("test").await;
         assert_eq!(token, Err(bad_request!("Authentication is disabled")));
     }
 
     #[rstest]
-    fn test_get_token_list_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-        let token_list = disabled_repo.get_token_list().unwrap();
+    #[tokio::test]
+    async fn test_get_token_list_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let token_list = disabled_repo.get_token_list().await.unwrap();
         assert_eq!(token_list, vec![]);
     }
 
     #[rstest]
-    fn test_validate_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-        let placeholder = disabled_repo.validate_token(Some("invalid-value")).unwrap();
+    #[tokio::test]
+    async fn test_validate_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let placeholder = disabled_repo
+            .validate_token(Some("invalid-value"))
+            .await
+            .unwrap();
         assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
         assert_eq!(placeholder.value, "");
-        assert_eq!(placeholder.permissions.unwrap().full_access, true);
+        assert!(placeholder.permissions.unwrap().full_access);
     }
 
     #[rstest]
-    fn test_remove_token_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-        let token = disabled_repo.remove_token("test");
+    #[tokio::test]
+    async fn test_remove_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let token = disabled_repo.remove_token("test").await;
         assert_eq!(token, Ok(()));
     }
 
     #[rstest]
-    fn test_rename_bucket_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-        let result = disabled_repo.rename_bucket("bucket-1", "bucket-2");
+    #[tokio::test]
+    async fn test_rename_bucket_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let result = disabled_repo.rename_bucket("bucket-1", "bucket-2").await;
         assert!(result.is_ok());
     }
 
     #[rstest]
-    fn test_remove_bucket_from_tokens_no_init_token(mut disabled_repo: BoxedTokenRepository) {
-        let result = disabled_repo.remove_bucket_from_tokens("bucket-1");
+    #[tokio::test]
+    async fn test_remove_bucket_from_tokens_no_init_token(
+        #[future] disabled_repo: BoxedTokenRepository,
+    ) {
+        let mut disabled_repo = disabled_repo.await;
+        let result = disabled_repo.remove_bucket_from_tokens("bucket-1").await;
         assert!(result.is_ok());
     }
 
@@ -139,7 +162,9 @@ mod tests {
     }
 
     #[fixture]
-    fn disabled_repo(path: PathBuf) -> BoxedTokenRepository {
-        TokenRepositoryBuilder::new(Default::default()).build(path.clone())
+    async fn disabled_repo(path: PathBuf) -> BoxedTokenRepository {
+        TokenRepositoryBuilder::new(Default::default())
+            .build(path.clone())
+            .await
     }
 }

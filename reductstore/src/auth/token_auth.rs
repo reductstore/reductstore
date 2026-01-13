@@ -58,25 +58,33 @@ mod tests {
     use crate::cfg::Cfg;
     use tempfile::tempdir;
 
-    #[test]
-    fn test_anonymous_policy() {
-        let (mut repo, auth) = setup();
-        let result = auth.check(Some("invalid"), repo.as_mut(), AnonymousPolicy {});
+    #[tokio::test]
+    async fn test_anonymous_policy() {
+        let (mut repo, auth) = setup().await;
+        let result = auth
+            .check(Some("invalid"), repo.as_mut(), AnonymousPolicy {})
+            .await;
 
         assert!(result.is_ok());
 
-        let result = auth.check(Some("Bearer invalid"), repo.as_mut(), AnonymousPolicy {});
+        let result = auth
+            .check(Some("Bearer invalid"), repo.as_mut(), AnonymousPolicy {})
+            .await;
 
         assert!(result.is_ok());
 
-        let result = auth.check(Some("Bearer test"), repo.as_mut(), AnonymousPolicy {});
+        let result = auth
+            .check(Some("Bearer test"), repo.as_mut(), AnonymousPolicy {})
+            .await;
         assert!(result.is_ok());
     }
 
-    #[test]
-    fn test_full_access_policy() {
-        let (mut repo, auth) = setup();
-        let result = auth.check(Some("invalid"), repo.as_mut(), FullAccessPolicy {});
+    #[tokio::test]
+    async fn test_full_access_policy() {
+        let (mut repo, auth) = setup().await;
+        let result = auth
+            .check(Some("invalid"), repo.as_mut(), FullAccessPolicy {})
+            .await;
 
         assert_eq!(
             result,
@@ -85,19 +93,25 @@ mod tests {
             ))
         );
 
-        let result = auth.check(Some("Bearer invalid"), repo.as_mut(), FullAccessPolicy {});
+        let result = auth
+            .check(Some("Bearer invalid"), repo.as_mut(), FullAccessPolicy {})
+            .await;
         assert_eq!(result, Err(ReductError::unauthorized("Invalid token")));
 
-        let result = auth.check(Some("Bearer test"), repo.as_mut(), FullAccessPolicy {});
+        let result = auth
+            .check(Some("Bearer test"), repo.as_mut(), FullAccessPolicy {})
+            .await;
         assert!(result.is_ok());
     }
 
-    fn setup() -> (BoxedTokenRepository, TokenAuthorization) {
+    async fn setup() -> (BoxedTokenRepository, TokenAuthorization) {
         let cfg = Cfg {
             api_token: "test".to_string(),
             ..Cfg::default()
         };
-        let repo = TokenRepositoryBuilder::new(cfg).build(tempdir().unwrap().keep());
+        let repo = TokenRepositoryBuilder::new(cfg)
+            .build(tempdir().unwrap().keep())
+            .await;
         let auth = TokenAuthorization::new("test");
 
         (repo, auth)

@@ -634,11 +634,13 @@ mod tests {
     #[fixture]
     fn lock_file_path() -> PathBuf {
         let dir = tempdir().unwrap().keep();
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(dir.clone())
-                .try_build()
-                .unwrap(),
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(
+            FILE_CACHE.set_storage_backend(
+                tokio::runtime::Handle::current()
+                    .block_on(Backend::builder().local_data_path(dir.clone()).try_build())
+                    .unwrap(),
+            ),
         );
 
         let filepath = dir.join("test.lock");

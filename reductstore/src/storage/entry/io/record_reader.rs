@@ -287,12 +287,13 @@ pub(crate) mod tests {
         #[fixture]
         fn file_to_read(content_size: usize) -> PathBuf {
             let path = tempdir().unwrap().keep();
-            FILE_CACHE.set_storage_backend(
-                Backend::builder()
-                    .local_data_path(path.clone())
-                    .try_build()
-                    .unwrap(),
-            );
+            FILE_CACHE
+                .set_storage_backend(
+                    tokio::runtime::Handle::current()
+                        .block_on(Backend::builder().local_data_path(path.clone()).try_build())
+                        .unwrap(),
+                )
+                .await;
 
             let tmp_file = path.join("test_file");
             std::fs::write(&tmp_file, vec![0; content_size]).unwrap();

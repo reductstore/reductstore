@@ -77,7 +77,7 @@ impl ReplicationSender {
             };
 
             let transactions = {
-                let mut log = log.write().await?;
+                let log = log.write().await?;
                 log.front(self.io_config.batch_max_records).await
             };
             match transactions {
@@ -289,7 +289,8 @@ mod tests {
                 .read()
                 .await
                 .unwrap()
-                .front(1),
+                .front(1)
+                .await,
             Ok(vec![]),
         );
     }
@@ -322,7 +323,8 @@ mod tests {
                 .read()
                 .await
                 .unwrap()
-                .front(1),
+                .front(1)
+                .await,
             Ok(vec![transaction]),
         );
     }
@@ -395,6 +397,7 @@ mod tests {
                 .await
                 .unwrap()
                 .push_back(Transaction::WriteRecord(20))
+                .await
                 .unwrap();
         }
 
@@ -439,6 +442,7 @@ mod tests {
                 .await
                 .unwrap()
                 .push_back(Transaction::WriteRecord(20))
+                .await
                 .unwrap();
         }
 
@@ -568,6 +572,7 @@ mod tests {
             Backend::builder()
                 .local_data_path(cfg.data_path.clone())
                 .try_build()
+                .await
                 .unwrap(),
         );
 
@@ -584,6 +589,7 @@ mod tests {
             "gone".to_string(),
             Arc::new(AsyncRwLock::new(
                 TransactionLog::try_load_or_create(&storage.data_path().join("gone.log"), 10)
+                    .await
                     .unwrap(),
             )),
         );
@@ -614,6 +620,7 @@ mod tests {
             .await
             .unwrap()
             .push_back(transaction.clone())
+            .await
             .unwrap();
 
         let bucket = match sender
@@ -658,6 +665,7 @@ mod tests {
             Backend::builder()
                 .local_data_path(cfg.data_path.clone())
                 .try_build()
+                .await
                 .unwrap(),
         );
 
@@ -672,6 +680,7 @@ mod tests {
         let log_map: TransactionLogMap = Arc::new(AsyncRwLock::new(HashMap::new()));
         let log: TransactionLogRef = Arc::new(AsyncRwLock::new(
             TransactionLog::try_load_or_create(&storage.data_path().join("test.log"), 1000)
+                .await
                 .unwrap(),
         ));
 

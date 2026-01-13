@@ -180,7 +180,8 @@ mod tests {
     use crate::backend::Backend;
     use crate::cfg::{Cfg, InstanceRole};
     use reduct_base::msg::token_api::Permissions;
-    use rstest::{fixture, rstest};
+    use rstest::*;
+    use std::io::Write;
     use std::path::PathBuf;
     use tempfile::tempdir;
 
@@ -191,189 +192,207 @@ mod tests {
         use std::time::Duration;
 
         #[rstest]
-        fn test_new_loads_tokens(mut repo: BoxedTokenRepository) {
-            let token_list = repo.get_token_list().unwrap();
+        #[tokio::test]
+        async fn test_new_loads_tokens(mut repo: BoxedTokenRepository) {
+            let token_list = repo.get_token_list().await.unwrap();
             assert_eq!(token_list.len(), 2); // one from file, one from cfg
 
             assert!(token_list.iter().any(|t| t.name == "file_token"));
             assert!(token_list.iter().any(|t| t.name == INIT_TOKEN_NAME));
-
-            #[rstest]
-            fn test_load_repo_with_api_token(mut repo: BoxedTokenRepository, cfg_fixture: Cfg) {
-                let token = repo.get_token(INIT_TOKEN_NAME).unwrap();
-                assert_eq!(token.value, cfg_fixture.api_token);
-                assert!(token.is_provisioned);
-            }
-
-            #[rstest]
-            fn test_reload_from_from_file(repo: BoxedTokenRepository, path: PathBuf) {
-                let mut repo = repo;
-
-                // Modify the token file to add a new token
-                let new_token = Token {
-                    name: "new_file_token".to_string(),
-                    value: "new_file_value".to_string(),
-                    created_at: DateTime::<Utc>::from(SystemTime::now()),
-                    permissions: Some(Permissions {
-                        full_access: true,
-                        read: vec![],
-                        write: vec![],
-                    }),
-                    is_provisioned: true,
-                };
-
-                write_token_to_file(&path, &new_token);
-
-                // Force reload
-                sleep(Duration::from_millis(200));
-
-                // Check if the new token is loaded
-                assert!(repo.get_token("new_file_token").is_ok());
-            }
+        }
+        #[rstest]
+        #[tokio::test]
+        async fn test_load_repo_with_api_token(mut repo: BoxedTokenRepository, cfg_fixture: Cfg) {
+            let token = repo.get_token(INIT_TOKEN_NAME).await.unwrap();
+            assert_eq!(token.value, cfg_fixture.api_token);
+            assert!(token.is_provisioned);
         }
 
-        mod manage_tokens {
-            use super::*;
-            use reduct_base::{not_found, unauthorized};
+        #[rstest]
+        #[tokio::test]
+        async fn test_reload_from_from_file(repo: BoxedTokenRepository, path: PathBuf) {
+            let mut repo = repo;
 
-            #[rstest]
-            fn test_generate_token_forbidden(mut repo: BoxedTokenRepository) {
-                let perms = Permissions {
+            // Modify the token file to add a new token
+            let new_token = Token {
+                name: "new_file_token".to_string(),
+                value: "new_file_value".to_string(),
+                created_at: DateTime::<Utc>::from(SystemTime::now()),
+                permissions: Some(Permissions {
                     full_access: true,
                     read: vec![],
                     write: vec![],
-                };
-                let res = repo.generate_token("test", perms);
-                assert_eq!(
-                    res.err().unwrap(),
-                    forbidden!("Cannot generate token in read-only mode")
-                );
-            }
+                }),
+                is_provisioned: true,
+            };
 
-            #[rstest]
-            fn test_get_token_existing(mut repo: BoxedTokenRepository, cfg_fixture: Cfg) {
-                let token = repo.get_token(INIT_TOKEN_NAME).unwrap().clone();
-                assert_eq!(
-                    token,
-                    Token {
-                        name: INIT_TOKEN_NAME.to_string(),
-                        value: cfg_fixture.api_token.clone(),
-                        created_at: token.created_at,
-                        permissions: Some(Permissions {
-                            full_access: false,
-                            read: vec!["*".to_string()],
-                            write: vec![],
-                        }),
-                        is_provisioned: true,
-                    }
-                );
-            }
+            write_token_to_file(&path, &new_token).await;
 
-            #[rstest]
-            fn test_get_token_missing(mut repo: BoxedTokenRepository) {
-                let token = repo.get_token("missing");
-                assert_eq!(
-                    token.err().unwrap(),
-                    not_found!("Token 'missing' doesn't exist")
-                );
-            }
+            // Force reload
+            sleep(Duration::from_millis(200));
 
-            #[rstest]
-            fn test_get_mut_token_forbidden(mut repo: BoxedTokenRepository) {
-                let res = repo.get_mut_token(INIT_TOKEN_NAME);
-                assert_eq!(
-                    res.err().unwrap(),
-                    forbidden!("Cannot mutate token in read-only mode")
-                );
-            }
-
-            #[rstest]
-            fn test_get_token_list(mut repo: BoxedTokenRepository) {
-                let list = repo.get_token_list().unwrap();
-                assert_eq!(list.len(), 2);
-
-                assert!(list.iter().any(|t| t.name == "file_token"));
-                assert!(list.iter().any(|t| t.name == INIT_TOKEN_NAME));
-            }
-
-            #[rstest]
-            fn test_validate_token_valid(mut repo: BoxedTokenRepository, cfg_fixture: Cfg) {
-                let header = format!("Bearer {}", cfg_fixture.api_token);
-                let res = repo.validate_token(Some(header.as_str())).unwrap();
-                assert_eq!(
-                    res,
-                    Token {
-                        name: INIT_TOKEN_NAME.to_string(),
-                        value: cfg_fixture.api_token.clone(),
-                        created_at: res.created_at,
-                        permissions: Some(Permissions {
-                            full_access: false,
-                            read: vec!["*".to_string()],
-                            write: vec![],
-                        }),
-                        is_provisioned: true,
-                    }
-                );
-            }
-
-            #[rstest]
-            fn test_validate_token_invalid(mut repo: BoxedTokenRepository) {
-                let header = Some("Bearer invalid_token");
-                let res = repo.validate_token(header);
-                assert_eq!(res.err().unwrap(), unauthorized!("Invalid token"));
-            }
-
-            #[rstest]
-            fn test_remove_token_forbidden(mut repo: BoxedTokenRepository) {
-                let res = repo.remove_token(INIT_TOKEN_NAME);
-                assert_eq!(
-                    res.err().unwrap(),
-                    forbidden!("Cannot remove token in read-only mode")
-                );
-            }
-
-            #[rstest]
-            fn test_remove_bucket_from_tokens_forbidden(mut repo: BoxedTokenRepository) {
-                let res = repo.remove_bucket_from_tokens("bucket");
-                assert_eq!(
-                    res.err().unwrap(),
-                    forbidden!("Cannot remove bucket from token in read-only mode")
-                );
-            }
-
-            #[rstest]
-            fn test_rename_bucket_forbidden(mut repo: BoxedTokenRepository) {
-                let res = repo.rename_bucket("old", "new");
-                assert_eq!(
-                    res.err().unwrap(),
-                    forbidden!("Cannot rename bucket in token in read-only mode")
-                );
-            }
+            // Check if the new token is loaded
+            assert!(repo.get_token("new_file_token").await.is_ok());
         }
+    }
 
-        // Fixtures and helpers
-        #[fixture]
-        fn path() -> PathBuf {
-            tempdir().unwrap().keep()
-        }
+    mod manage_tokens {
+        use super::*;
+        use reduct_base::{not_found, unauthorized};
 
-        #[fixture]
-        fn cfg_fixture() -> Cfg {
-            let mut cfg = Cfg::default();
-            cfg.api_token = "test_token".to_string();
-            cfg.role = InstanceRole::Replica;
-            cfg.engine_config.replica_update_interval = std::time::Duration::from_millis(100);
-            cfg
-        }
-
-        #[fixture]
-        fn repo(cfg_fixture: Cfg, path: PathBuf) -> BoxedTokenRepository {
-            FILE_CACHE.set_storage_backend(
-                Backend::builder()
-                    .local_data_path(path.clone())
-                    .try_build()
-                    .unwrap(),
+        #[rstest]
+        #[tokio::test]
+        async fn test_generate_token_forbidden(mut repo: BoxedTokenRepository) {
+            let perms = Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            };
+            let res = repo.generate_token("test", perms).await;
+            assert_eq!(
+                res.err().unwrap(),
+                forbidden!("Cannot generate token in read-only mode")
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_token_existing(mut repo: BoxedTokenRepository, cfg_fixture: Cfg) {
+            let token = repo.get_token(INIT_TOKEN_NAME).await.unwrap().clone();
+            assert_eq!(
+                token,
+                Token {
+                    name: INIT_TOKEN_NAME.to_string(),
+                    value: cfg_fixture.api_token.clone(),
+                    created_at: token.created_at,
+                    permissions: Some(Permissions {
+                        full_access: false,
+                        read: vec!["*".to_string()],
+                        write: vec![],
+                    }),
+                    is_provisioned: true,
+                }
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_token_missing(mut repo: BoxedTokenRepository) {
+            let token = repo.get_token("missing").await;
+            assert_eq!(
+                token.err().unwrap(),
+                not_found!("Token 'missing' doesn't exist")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_mut_token_forbidden(mut repo: BoxedTokenRepository) {
+            let res = repo.get_mut_token(INIT_TOKEN_NAME).await;
+            assert_eq!(
+                res.err().unwrap(),
+                forbidden!("Cannot mutate token in read-only mode")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_token_list(mut repo: BoxedTokenRepository) {
+            let list = repo.get_token_list().await.unwrap();
+            assert_eq!(list.len(), 2);
+
+            assert!(list.iter().any(|t| t.name == "file_token"));
+            assert!(list.iter().any(|t| t.name == INIT_TOKEN_NAME));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_validate_token_valid(mut repo: BoxedTokenRepository, cfg_fixture: Cfg) {
+            let header = format!("Bearer {}", cfg_fixture.api_token);
+            let res = repo.validate_token(Some(header.as_str())).await.unwrap();
+            assert_eq!(
+                res,
+                Token {
+                    name: INIT_TOKEN_NAME.to_string(),
+                    value: cfg_fixture.api_token.clone(),
+                    created_at: res.created_at,
+                    permissions: Some(Permissions {
+                        full_access: false,
+                        read: vec!["*".to_string()],
+                        write: vec![],
+                    }),
+                    is_provisioned: true,
+                }
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_validate_token_invalid(mut repo: BoxedTokenRepository) {
+            let header = Some("Bearer invalid_token");
+            let res = repo.validate_token(header).await;
+            assert_eq!(res.err().unwrap(), unauthorized!("Invalid token"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_token_forbidden(mut repo: BoxedTokenRepository) {
+            let res = repo.remove_token(INIT_TOKEN_NAME).await;
+            assert_eq!(
+                res.err().unwrap(),
+                forbidden!("Cannot remove token in read-only mode")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_bucket_from_tokens_forbidden(mut repo: BoxedTokenRepository) {
+            let res = repo.remove_bucket_from_tokens("bucket").await;
+            assert_eq!(
+                res.err().unwrap(),
+                forbidden!("Cannot remove bucket from token in read-only mode")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rename_bucket_forbidden(mut repo: BoxedTokenRepository) {
+            let res = repo.rename_bucket("old", "new").await;
+            assert_eq!(
+                res.err().unwrap(),
+                forbidden!("Cannot rename bucket in token in read-only mode")
+            );
+        }
+    }
+
+    // Fixtures and helpers
+    #[fixture]
+    fn path() -> PathBuf {
+        tempdir().unwrap().keep()
+    }
+
+    #[fixture]
+    fn cfg_fixture() -> Cfg {
+        let mut cfg = Cfg::default();
+        cfg.api_token = "test_token".to_string();
+        cfg.role = InstanceRole::Replica;
+        cfg.engine_config.replica_update_interval = std::time::Duration::from_millis(100);
+        cfg
+    }
+
+    #[fixture]
+    fn repo(cfg_fixture: Cfg, path: PathBuf) -> BoxedTokenRepository {
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            FILE_CACHE
+                .set_storage_backend(
+                    Backend::builder()
+                        .local_data_path(path.clone())
+                        .try_build()
+                        .await
+                        .unwrap(),
+                )
+                .await;
 
             let token = Token {
                 name: "file_token".to_string(),
@@ -387,26 +406,22 @@ mod tests {
                 is_provisioned: true,
             };
 
-            write_token_to_file(&path, &token);
-            Box::new(ReadOnlyTokenRepository::new(path, cfg_fixture))
-        }
+            write_token_to_file(&path, &token).await;
+            Box::new(ReadOnlyTokenRepository::new(path, cfg_fixture).await)
+        })
+    }
 
-        // Helper to write a token to the token repo file
-        fn write_token_to_file(path: &PathBuf, new_token: &Token) {
-            let mut token_repo = TokenRepo::default();
-            token_repo.tokens.push(new_token.clone().into());
-            let mut buf = Vec::new();
-            token_repo.encode(&mut buf).unwrap();
+    // Helper to write a token to the token repo file
+    async fn write_token_to_file(path: &PathBuf, new_token: &Token) {
+        let mut token_repo = TokenRepo::default();
+        token_repo.tokens.push(new_token.clone().into());
+        let mut buf = Vec::new();
+        token_repo.encode(&mut buf).unwrap();
 
-            FILE_CACHE
-                .write_or_create(&path.join(TOKEN_REPO_FILE_NAME), SeekFrom::Start(0))
-                .unwrap()
-                .upgrade()
-                .unwrap()
-                .write()
-                .unwrap()
-                .write_all(&buf)
-                .unwrap();
-        }
+        let mut lock = FILE_CACHE
+            .write_or_create(&path.join(TOKEN_REPO_FILE_NAME), SeekFrom::Start(0))
+            .await
+            .unwrap();
+        lock.write_all(&buf).unwrap();
     }
 }

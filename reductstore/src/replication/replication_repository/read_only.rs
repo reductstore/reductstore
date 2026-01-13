@@ -174,9 +174,11 @@ mod tests {
     mod set_mode {
         use super::*;
         #[rstest]
-        fn test_set_mode_forbidden(mut repo: ReadOnlyReplicationRepository) {
+        #[tokio::test]
+        async fn test_set_mode_forbidden(mut repo: ReadOnlyReplicationRepository) {
             let err = repo
                 .set_mode("test", ReplicationMode::Paused)
+                .await
                 .err()
                 .unwrap();
             assert_eq!(

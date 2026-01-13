@@ -568,9 +568,11 @@ mod tests {
             // create bucket to avoid error on loading entries
             FILE_CACHE
                 .remove_dir(&path.join(&settings.src_bucket))
+                .await
                 .unwrap();
             FILE_CACHE
                 .create_dir_all(&path.join(&settings.src_bucket))
+                .await
                 .unwrap();
             Bucket::try_build(
                 &settings.src_bucket,
@@ -874,6 +876,7 @@ mod tests {
 
         FILE_CACHE
             .remove_dir(&path.parent().unwrap().parent().unwrap().to_path_buf())
+            .await
             .unwrap();
         tokio_sleep(Duration::from_millis(100)).await;
 
@@ -979,6 +982,7 @@ mod tests {
             Backend::builder()
                 .local_data_path(path.clone())
                 .try_build()
+                .await
                 .unwrap(),
         );
 
@@ -1102,6 +1106,7 @@ mod tests {
             .await
             .unwrap()
             .front(10)
+            .await
             .unwrap()
     }
 }

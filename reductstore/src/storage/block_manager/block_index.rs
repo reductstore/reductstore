@@ -282,6 +282,7 @@ mod tests {
     use prost_wkt_types::Timestamp;
     use rstest::rstest;
     use tempfile::tempdir;
+    use tokio::test as tokio_test;
 
     use crate::storage::block_manager::BLOCK_INDEX_FILE;
     use crate::storage::proto::block_index::Block as BlockEntry;
@@ -292,7 +293,8 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_ok() {
+        #[tokio::test]
+        async fn test_ok() {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let block_index_proto = BlockIndexProto {
@@ -308,7 +310,7 @@ mod tests {
             };
             fs::write(&path, block_index_proto.encode_to_vec()).unwrap();
 
-            let block_index = BlockIndex::try_load(path.clone()).unwrap();
+            let block_index = BlockIndex::try_load(path.clone()).await.unwrap();
             assert_eq!(block_index.size(), 2);
             assert_eq!(block_index.record_count(), 1);
             assert_eq!(block_index.tree().len(), 1);
@@ -316,9 +318,10 @@ mod tests {
         }
 
         #[rstest]
-        fn test_index_file_not_found() {
+        #[tokio::test]
+        async fn test_index_file_not_found() {
             let path = PathBuf::from("not_found");
-            let block_index = BlockIndex::try_load(path.clone()).err().unwrap();
+            let block_index = BlockIndex::try_load(path.clone()).await.err().unwrap();
             assert_eq!(
                 block_index,
                 internal_server_error!("Block index {:?} not found", path)
@@ -326,7 +329,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_index_file_corrupted() {
+        #[tokio::test]
+        async fn test_index_file_corrupted() {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let block_index_proto = BlockIndexProto {
@@ -342,7 +346,7 @@ mod tests {
             };
             fs::write(&path, block_index_proto.encode_to_vec()).unwrap();
 
-            let block_index = BlockIndex::try_load(path.clone()).err().unwrap();
+            let block_index = BlockIndex::try_load(path.clone()).await.err().unwrap();
             assert_eq!(
                 block_index,
                 internal_server_error!("Block index {:?} is corrupted", path)
@@ -350,11 +354,12 @@ mod tests {
         }
 
         #[rstest]
-        fn test_decode_err() {
+        #[tokio::test]
+        async fn test_decode_err() {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
             fs::write(&path, vec![0, 1, 2, 3]).unwrap();
 
-            let block_index = BlockIndex::try_load(path.clone()).err().unwrap();
+            let block_index = BlockIndex::try_load(path.clone()).await.err().unwrap();
             assert_eq!(block_index, internal_server_error!("Failed to decode block index {:?}: failed to decode Protobuf message: invalid tag value: 0", path));
         }
     }
@@ -363,7 +368,8 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_ok() {
+        #[tokio::test]
+        async fn test_ok() {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let mut block_index = BlockIndex::new(path.clone());
@@ -376,9 +382,9 @@ mod tests {
                 crc64: None,
             });
 
-            block_index.save().unwrap();
+            block_index.save().await.unwrap();
 
-            let block_index_proto = BlockIndex::try_load(path.clone()).unwrap();
+            let block_index_proto = BlockIndex::try_load(path.clone()).await.unwrap();
             assert_eq!(block_index_proto.size(), 2);
             assert_eq!(block_index_proto.record_count(), 1);
             assert_eq!(block_index_proto.tree().len(), 1);

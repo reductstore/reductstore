@@ -37,11 +37,13 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
         let temp_dir = tempfile::tempdir()
             .expect("Failed to create temporary directory for FILE_CACHE")
             .keep();
-        cache.set_storage_backend(
-            Backend::builder()
-                .local_data_path(temp_dir)
-                .try_build()
-                .expect("Failed to initialise FILE_CACHE backend for tests"),
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(
+            cache.set_storage_backend(
+                tokio::runtime::Handle::current()
+                    .block_on(Backend::builder().local_data_path(temp_dir).try_build())
+                    .expect("Failed to initialise FILE_CACHE backend for tests"),
+            ),
         );
     }
 
@@ -517,7 +519,7 @@ mod tests {
             .await
             .unwrap();
         file_ref.write_all(b"test").unwrap();
-        file_ref.sync_all().unwrap();
+        file_ref.sync_all().await.unwrap();
 
         assert_eq!(
             fs::read(&file_path).unwrap(),
@@ -530,7 +532,7 @@ mod tests {
             .await
             .unwrap();
         file_ref.write_all(b"xx").unwrap();
-        file_ref.sync_all().unwrap();
+        file_ref.sync_all().await.unwrap();
 
         assert_eq!(
             fs::read(&file_path).unwrap(),
@@ -593,7 +595,7 @@ mod tests {
             .await
             .unwrap();
 
-        let inner_cache = cache.cache.read().await.unwrap();
+        let mut inner_cache = cache.cache.write().await.unwrap();
         let has_file1 = inner_cache.get(&file_path1).is_some();
         drop(inner_cache);
         assert!(!has_file1);
@@ -608,6 +610,7 @@ mod tests {
                 Backend::builder()
                     .local_data_path(tempfile::tempdir().unwrap().keep())
                     .try_build()
+                    .await
                     .unwrap(),
             );
             cache
@@ -652,7 +655,7 @@ mod tests {
             .await
             .unwrap(); // should remove the file_path1 descriptor
 
-        let inner_cache = cache.cache.read().await.unwrap();
+        let mut inner_cache = cache.cache.write().await.unwrap();
         assert_eq!(inner_cache.len(), 1);
         assert!(inner_cache.get(&file_path1).is_none());
     }
@@ -694,7 +697,7 @@ mod tests {
 
             cache.force_sync_all().await.unwrap();
 
-            assert!(cache.cache.read().await.unwrap().get(&file_path).is_some());
+            assert!(cache.cache.write().await.unwrap().get(&file_path).is_some());
         }
 
         #[rstest]
@@ -710,12 +713,13 @@ mod tests {
 
             assert!(!cache
                 .cache
-                .read()
+                .write()
                 .await
                 .unwrap()
                 .get(&file_path)
                 .unwrap()
                 .read()
+                .await
                 .unwrap()
                 .is_synced());
         }
@@ -782,10 +786,11 @@ mod tests {
         }
 
         #[rstest]
-        fn test_create_dir(read_only_cache: FileCache, tmp_dir: PathBuf) {
+        #[tokio::test]
+        async fn test_create_dir(read_only_cache: FileCache, tmp_dir: PathBuf) {
             let dir_path = tmp_dir.join("test_create_dir_in_read_only_mode");
 
-            read_only_cache.create_dir_all(&dir_path).unwrap();
+            read_only_cache.create_dir_all(&dir_path).await.unwrap();
 
             assert_eq!(
                 dir_path.exists(),
@@ -819,9 +824,12 @@ mod tests {
     fn cache() -> FileCache {
         let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));
         cache.set_storage_backend(
-            Backend::builder()
-                .local_data_path(tempfile::tempdir().unwrap().keep())
-                .try_build()
+            tokio::runtime::Handle::current()
+                .block_on(
+                    Backend::builder()
+                        .local_data_path(tempfile::tempdir().unwrap().keep())
+                        .try_build(),
+                )
                 .unwrap(),
         );
         cache

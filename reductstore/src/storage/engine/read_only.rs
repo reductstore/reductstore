@@ -249,6 +249,7 @@ mod tests {
             Backend::builder()
                 .local_data_path(cfg.data_path.clone())
                 .try_build()
+                .await
                 .unwrap(),
         );
         let storage_engine = StorageEngine::builder()

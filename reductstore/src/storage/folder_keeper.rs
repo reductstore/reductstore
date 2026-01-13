@@ -190,9 +190,8 @@ mod tests {
     pub fn path() -> PathBuf {
         let path = tempdir().unwrap().keep();
         FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
+            tokio::runtime::Handle::current()
+                .block_on(Backend::builder().local_data_path(path.clone()).try_build())
                 .unwrap(),
         );
         path
@@ -202,7 +201,7 @@ mod tests {
     #[tokio::test]
     async fn ignores_invalid_folder_map(path: PathBuf) {
         let base_path = path.join("bucket");
-        FILE_CACHE.create_dir_all(&base_path).unwrap();
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
 
         {
             let list_path = base_path.join(".folder");
@@ -216,7 +215,7 @@ mod tests {
 
         let cfg = Cfg::default();
         let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
-        let folders = keeper.list_folders().unwrap();
+        let folders = keeper.list_folders().await.unwrap();
         assert!(folders.is_empty());
     }
 
@@ -225,7 +224,7 @@ mod tests {
     #[tokio::test]
     async fn does_not_persist_folder_map_in_replica_mode(path: PathBuf) {
         let base_path = path.join("replica_bucket");
-        FILE_CACHE.create_dir_all(&base_path).unwrap();
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
 
         let mut cfg = Cfg::default();
         cfg.role = InstanceRole::Replica;
@@ -234,7 +233,7 @@ mod tests {
 
         let list_path = base_path.join(".folder");
         assert!(
-            !FILE_CACHE.try_exists(&list_path).unwrap_or(false),
+            !FILE_CACHE.try_exists(&list_path).await.unwrap_or(false),
             ".folder should not be created in replica mode"
         );
     }

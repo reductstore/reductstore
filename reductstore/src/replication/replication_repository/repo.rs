@@ -736,7 +736,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            repo.remove_replication("test").unwrap();
+            repo.remove_replication("test").await.unwrap();
             assert_eq!(repo.replications().await.unwrap().len(), 0);
 
             // check if replication is removed from file
@@ -754,7 +754,7 @@ mod tests {
         async fn test_remove_non_existing_replication(#[future] mut repo: ReplicationRepository) {
             let mut repo = repo.await;
             assert_eq!(
-                repo.remove_replication("test-2"),
+                repo.remove_replication("test-2").await,
                 Err(not_found!("Replication 'test-2' does not exist")),
                 "Should not remove non existing replication"
             );
@@ -775,7 +775,7 @@ mod tests {
             replication.set_provisioned(true);
 
             assert_eq!(
-                repo.remove_replication("test"),
+                repo.remove_replication("test").await,
                 Err(conflict!("Can't remove provisioned replication 'test'")),
                 "Should not remove provisioned replication"
             );
@@ -894,73 +894,6 @@ mod tests {
         }
     }
 
-    mod from {
-        use super::*;
-
-        #[rstest]
-        fn test_from_proto(settings: ReplicationSettings) {
-            let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, restored_settings);
-        }
-
-        #[rstest]
-        fn test_from_each_n_proto(settings: ReplicationSettings) {
-            let mut settings = settings;
-            settings.each_n = Some(10);
-            let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, restored_settings);
-        }
-
-        #[rstest]
-        fn test_from_each_s_proto(settings: ReplicationSettings) {
-            let mut settings = settings;
-            settings.each_s = Some(10.0);
-            let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, restored_settings);
-        }
-
-        #[rstest]
-        fn test_from_when_proto(settings: ReplicationSettings) {
-            let mut settings = settings;
-            settings.when = Some(serde_json::json!({"$and": [true, true]}));
-            let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, restored_settings);
-        }
-
-        #[rstest]
-        fn test_from_when_proto_invalid(settings: ReplicationSettings) {
-            let mut proto_settings = ProtoReplicationSettings::from(settings.clone());
-            proto_settings.when = Some("invalid".to_string());
-
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert!(restored_settings.when.is_none());
-        }
-
-        #[rstest]
-        fn test_from_mode_proto(settings: ReplicationSettings) {
-            let mut settings = settings;
-            settings.mode = ReplicationMode::Paused;
-            let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            assert_eq!(proto_settings.mode, ProtoReplicationMode::Paused as i32);
-
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(restored_settings.mode, ReplicationMode::Paused);
-        }
-
-        #[rstest]
-        fn test_from_mode_proto_disabled(settings: ReplicationSettings) {
-            let mut proto_settings = ProtoReplicationSettings::from(settings.clone());
-            proto_settings.mode = ProtoReplicationMode::Disabled as i32;
-
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(restored_settings.mode, ReplicationMode::Disabled);
-        }
-    }
-
     mod start {
         use super::*;
 
@@ -1020,7 +953,9 @@ mod tests {
             repo.create_replication("test-1", settings.clone())
                 .await
                 .unwrap();
-            repo.set_mode("test-1", ReplicationMode::Paused).unwrap();
+            repo.set_mode("test-1", ReplicationMode::Paused)
+                .await
+                .unwrap();
 
             assert_eq!(
                 repo.get_replication("test-1").unwrap().mode(),

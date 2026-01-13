@@ -74,6 +74,7 @@ mod tests {
             .await
             .unwrap()
             .get_token("test")
+            .await
             .unwrap()
             .clone();
         assert_eq!(
@@ -96,6 +97,7 @@ mod tests {
             .await
             .unwrap()
             .get_token("test")
+            .await
             .unwrap()
             .clone();
         assert_eq!(

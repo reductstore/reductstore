@@ -115,7 +115,7 @@ impl RecordWriter {
         Ok(me)
     }
 
-    async fn receive(mut rx: Rx, mut ctx: WriteContext) {
+    async fn receive(mut rx: Rx, ctx: WriteContext) {
         let mut recv = async || {
             let mut written_bytes = 0u64;
             while let Some(chunk) = rx.recv().await {
@@ -291,10 +291,12 @@ mod tests {
                 .await
                 .unwrap()
                 .load_block(SMALL_RECORD_TIME)
+                .await
                 .unwrap();
             assert_eq!(
                 block_ref
                     .read()
+                    .await
                     .unwrap()
                     .get_record(SMALL_RECORD_TIME)
                     .unwrap()
@@ -331,10 +333,17 @@ mod tests {
             writer.send(Ok(None)).await.unwrap();
 
             sleep(Duration::from_millis(100)).await;
-            let block_ref = block_manager.write().await.unwrap().load_block(1).unwrap();
+            let block_ref = block_manager
+                .write()
+                .await
+                .unwrap()
+                .load_block(1)
+                .await
+                .unwrap();
             assert_eq!(
                 block_ref
                     .read()
+                    .await
                     .unwrap()
                     .get_record(BIG_RECORD_TIME)
                     .unwrap()
@@ -370,9 +379,15 @@ mod tests {
 
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let block_ref = block_manager.write().await.unwrap().load_block(1).unwrap();
+            let block_ref = block_manager
+                .write()
+                .await
+                .unwrap()
+                .load_block(1)
+                .await
+                .unwrap();
             assert_eq!(
-                block_ref.read().unwrap().get_record(1).unwrap().state,
+                block_ref.read().await.unwrap().get_record(1).unwrap().state,
                 record::State::Errored as i32
             );
         }
@@ -392,9 +407,15 @@ mod tests {
             writer.send(Ok(None)).await.unwrap();
             tokio::time::sleep(Duration::from_millis(100)).await;
 
-            let block_ref = block_manager.write().await.unwrap().load_block(1).unwrap();
+            let block_ref = block_manager
+                .write()
+                .await
+                .unwrap()
+                .load_block(1)
+                .await
+                .unwrap();
             assert_eq!(
-                block_ref.read().unwrap().get_record(1).unwrap().state,
+                block_ref.read().await.unwrap().get_record(1).unwrap().state,
                 record::State::Errored as i32
             );
         }
@@ -459,11 +480,13 @@ mod tests {
 
         #[fixture]
         fn block_manager(path: PathBuf) -> Arc<AsyncRwLock<BlockManager>> {
-            Arc::new(AsyncRwLock::new(BlockManager::build(
+            let handle = tokio::runtime::Handle::current();
+            let manager = handle.block_on(BlockManager::build(
                 path.clone(),
                 BlockIndex::new(path.clone()),
                 Cfg::default().into(),
-            )))
+            ));
+            Arc::new(AsyncRwLock::new(manager))
         }
 
         #[fixture]
@@ -473,24 +496,33 @@ mod tests {
                 .await
                 .unwrap()
                 .start_new_block(1, 1000)
+                .await
                 .unwrap();
-            block_ref.write().unwrap().insert_or_update_record(Record {
-                timestamp: Some(us_to_ts(&SMALL_RECORD_TIME)),
-                begin: 0,
-                end: 4,
-                state: record::State::Started as i32,
-                labels: vec![],
-                content_type: "".to_string(),
-            });
+            block_ref
+                .write()
+                .await
+                .unwrap()
+                .insert_or_update_record(Record {
+                    timestamp: Some(us_to_ts(&SMALL_RECORD_TIME)),
+                    begin: 0,
+                    end: 4,
+                    state: record::State::Started as i32,
+                    labels: vec![],
+                    content_type: "".to_string(),
+                });
 
-            block_ref.write().unwrap().insert_or_update_record(Record {
-                timestamp: Some(us_to_ts(&BIG_RECORD_TIME)),
-                begin: 4,
-                end: MAX_IO_BUFFER_SIZE as u64 + 5,
-                state: record::State::Started as i32,
-                labels: vec![],
-                content_type: "".to_string(),
-            });
+            block_ref
+                .write()
+                .await
+                .unwrap()
+                .insert_or_update_record(Record {
+                    timestamp: Some(us_to_ts(&BIG_RECORD_TIME)),
+                    begin: 4,
+                    end: MAX_IO_BUFFER_SIZE as u64 + 5,
+                    state: record::State::Started as i32,
+                    labels: vec![],
+                    content_type: "".to_string(),
+                });
             block_ref
         }
     }

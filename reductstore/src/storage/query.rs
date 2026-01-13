@@ -289,8 +289,10 @@ mod tests {
             .await
             .unwrap()
             .load_block(0)
+            .await
             .unwrap()
             .write()
+            .await
             .unwrap()
             .insert_or_update_record(Record {
                 timestamp: Some(Timestamp {
@@ -388,44 +390,47 @@ mod tests {
             .join("bucket")
             .join("entry");
 
+        let rt = tokio::runtime::Handle::current();
         FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
+            rt.block_on(Backend::builder().local_data_path(path.clone()).try_build())
                 .unwrap(),
         );
 
-        let mut block_manager = BlockManager::build(
+        let mut block_manager = rt.block_on(BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join("index")),
             Cfg::default().into(),
-        );
-        let block_ref = block_manager.start_new_block(0, 10).unwrap();
-        block_ref.write().unwrap().insert_or_update_record(Record {
-            timestamp: Some(Timestamp {
-                seconds: 0,
-                nanos: 0,
-            }),
-            begin: 0,
-            end: 10,
-            state: 1,
-            labels: vec![],
-            content_type: "".to_string(),
-        });
+        ));
+        let block_ref = rt.block_on(block_manager.start_new_block(0, 10)).unwrap();
+        rt.block_on(block_ref.write())
+            .unwrap()
+            .insert_or_update_record(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 0,
+                    nanos: 0,
+                }),
+                begin: 0,
+                end: 10,
+                state: 1,
+                labels: vec![],
+                content_type: "".to_string(),
+            });
 
-        block_ref.write().unwrap().insert_or_update_record(Record {
-            timestamp: Some(Timestamp {
-                seconds: 0,
-                nanos: 1000,
-            }),
-            begin: 0,
-            end: 10,
-            state: 1,
-            labels: vec![],
-            content_type: "".to_string(),
-        });
+        rt.block_on(block_ref.write())
+            .unwrap()
+            .insert_or_update_record(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 0,
+                    nanos: 1000,
+                }),
+                begin: 0,
+                end: 10,
+                state: 1,
+                labels: vec![],
+                content_type: "".to_string(),
+            });
 
-        block_manager.finish_block(block_ref).unwrap();
+        rt.block_on(block_manager.finish_block(block_ref)).unwrap();
         Arc::new(AsyncRwLock::new(block_manager))
     }
 

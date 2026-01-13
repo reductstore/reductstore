@@ -77,21 +77,34 @@ mod tests {
     use rstest::*;
 
     #[rstest]
-    fn test_noop_backend() {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_noop_backend() {
         let backend = NoopBackend::new();
-        assert!(!backend.try_exists(Path::new("some/path")).unwrap());
-        assert!(backend.read_dir(Path::new("some/path")).unwrap().is_empty());
-        assert!(backend.rename(Path::new("from"), Path::new("to")).is_ok());
-        assert!(backend.remove(Path::new("some/path")).is_ok());
-        assert!(backend.remove_dir_all(Path::new("some/path")).is_ok());
-        assert!(backend.create_dir_all(Path::new("some/path")).is_ok());
-        assert!(backend.upload(Path::new("some/path")).is_ok());
-        assert!(backend.download(Path::new("some/path")).is_ok());
+        assert!(!backend.try_exists(Path::new("some/path")).await.unwrap());
+        assert!(backend
+            .read_dir(Path::new("some/path"))
+            .await
+            .unwrap()
+            .is_empty());
+        assert!(backend
+            .rename(Path::new("from"), Path::new("to"))
+            .await
+            .is_ok());
+        assert!(backend.remove(Path::new("some/path")).await.is_ok());
+        assert!(backend.remove_dir_all(Path::new("some/path")).await.is_ok());
+        assert!(backend.create_dir_all(Path::new("some/path")).await.is_ok());
+        assert!(backend.upload(Path::new("some/path")).await.is_ok());
+        assert!(backend.download(Path::new("some/path")).await.is_ok());
         assert!(backend
             .update_local_cache(Path::new("some/path"), &AccessMode::Read)
+            .await
             .is_ok());
-        assert!(backend.invalidate_locally_cached_files().is_empty());
-        assert!(backend.get_stats(Path::new("some/path")).unwrap().is_none());
+        assert!(backend.invalidate_locally_cached_files().await.is_empty());
+        assert!(backend
+            .get_stats(Path::new("some/path"))
+            .await
+            .unwrap()
+            .is_none());
     }
 
     #[rstest]

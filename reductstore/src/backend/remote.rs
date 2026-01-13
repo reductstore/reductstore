@@ -342,12 +342,17 @@ impl StorageBackend for RemoteBackend {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use async_trait::async_trait;
     use mockall::mock;
     use rstest::*;
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_remote_backend_creation(mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+    #[tokio::test]
+    async fn test_remote_backend_creation(
+        mock_connector: MockRemoteStorageConnector,
+        path: PathBuf,
+    ) {
         let remote_backend = make_remote_backend(mock_connector, path.clone());
         assert_eq!(remote_backend.path(), &path);
     }
@@ -358,7 +363,8 @@ mod tests {
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_rename_file(mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        #[tokio::test]
+        async fn test_rename_file(mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let from_key = "file1.txt";
             let to_key = "file2.txt";
 
@@ -369,14 +375,13 @@ mod tests {
             fs::create_dir_all(&path).unwrap();
             fs::write(&from, b"test").unwrap();
 
-            assert_eq!(
-                remote_backend.rename(&from, &to).err().unwrap().to_string(),
-                "Renaming in S3 backend is not supported"
-            );
+            let err = remote_backend.rename(&from, &to).await.err().unwrap();
+            assert_eq!(err.to_string(), "Renaming in S3 backend is not supported");
         }
 
         #[rstest]
-        fn test_rename_directory(mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        #[tokio::test]
+        async fn test_rename_directory(mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let from_key = "dir1/";
             let to_key = "dir2/";
 
@@ -387,10 +392,8 @@ mod tests {
             fs::create_dir_all(&from).unwrap();
             fs::write(from.join("file_in_dir.txt"), b"test").unwrap();
 
-            assert_eq!(
-                remote_backend.rename(&from, &to).err().unwrap().to_string(),
-                "Renaming in S3 backend is not supported"
-            );
+            let err = remote_backend.rename(&from, &to).await.err().unwrap();
+            assert_eq!(err.to_string(), "Renaming in S3 backend is not supported");
         }
     }
 
@@ -401,7 +404,8 @@ mod tests {
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_remove_file(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        #[tokio::test]
+        async fn test_remove_file(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let key = "file1.txt";
 
             mock_connector
@@ -416,11 +420,15 @@ mod tests {
             fs::create_dir_all(&path).unwrap();
             fs::write(&file_path, b"test").unwrap();
 
-            remote_backend.remove(&file_path).unwrap();
+            remote_backend.remove(&file_path).await.unwrap();
         }
 
         #[rstest]
-        fn test_remove_directory(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        #[tokio::test]
+        async fn test_remove_directory(
+            mut mock_connector: MockRemoteStorageConnector,
+            path: PathBuf,
+        ) {
             let dir_key = "dir1/";
             let file_key = "dir1/file_in_dir.txt";
 
@@ -448,7 +456,7 @@ mod tests {
             fs::create_dir_all(&dir_path).unwrap();
             fs::write(dir_path.join("file_in_dir.txt"), b"test").unwrap();
 
-            remote_backend.remove_dir_all(&dir_path).unwrap();
+            remote_backend.remove_dir_all(&dir_path).await.unwrap();
         }
     }
 
@@ -458,7 +466,11 @@ mod tests {
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_create_dir_all(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        #[tokio::test]
+        async fn test_create_dir_all(
+            mut mock_connector: MockRemoteStorageConnector,
+            path: PathBuf,
+        ) {
             mock_connector
                 .expect_create_dir_all()
                 .with(eq("dir1"))
@@ -468,7 +480,7 @@ mod tests {
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
             let dir_path = path.join("dir1");
-            remote_backend.create_dir_all(&dir_path).unwrap();
+            remote_backend.create_dir_all(&dir_path).await.unwrap();
             assert!(dir_path.exists());
             assert!(dir_path.is_dir());
         }
@@ -481,7 +493,8 @@ mod tests {
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_read_dir(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        #[tokio::test]
+        async fn test_read_dir(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             mock_connector
                 .expect_list_objects()
                 .with(eq("dir1"), eq(false))
@@ -493,7 +506,7 @@ mod tests {
             let dir_path = path.join("dir1");
             fs::create_dir_all(&dir_path).unwrap();
 
-            let entries = remote_backend.read_dir(&dir_path).unwrap();
+            let entries = remote_backend.read_dir(&dir_path).await.unwrap();
             assert_eq!(entries.len(), 2);
             assert!(entries.contains(&dir_path.join("file1.txt")));
             assert!(entries.contains(&dir_path.join("subdir")));
@@ -508,7 +521,8 @@ mod tests {
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_try_exists_file_in_cache(
+        #[tokio::test]
+        async fn test_try_exists_file_in_cache(
             mock_connector: MockRemoteStorageConnector,
             path: PathBuf,
         ) {
@@ -519,11 +533,12 @@ mod tests {
             fs::create_dir_all(&path).unwrap();
             fs::write(&file_path, b"test").unwrap();
 
-            assert!(remote_backend.try_exists(&file_path).unwrap());
+            assert!(remote_backend.try_exists(&file_path).await.unwrap());
         }
 
         #[rstest]
-        fn test_try_exists_file_in_remote(
+        #[tokio::test]
+        async fn test_try_exists_file_in_remote(
             mut mock_connector: MockRemoteStorageConnector,
             path: PathBuf,
         ) {
@@ -538,11 +553,12 @@ mod tests {
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
             let file_path = path.join(file_key);
-            assert!(remote_backend.try_exists(&file_path).unwrap());
+            assert!(remote_backend.try_exists(&file_path).await.unwrap());
         }
 
         #[rstest]
-        fn test_try_exists_file_not_exist(
+        #[tokio::test]
+        async fn test_try_exists_file_not_exist(
             mut mock_connector: MockRemoteStorageConnector,
             path: PathBuf,
         ) {
@@ -557,7 +573,7 @@ mod tests {
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
             let file_path = path.join(file_key);
-            assert!(!remote_backend.try_exists(&file_path).unwrap());
+            assert!(!remote_backend.try_exists(&file_path).await.unwrap());
         }
     }
 
@@ -568,7 +584,8 @@ mod tests {
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_upload_file(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        #[tokio::test]
+        async fn test_upload_file(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let file_key = "file1.txt";
 
             mock_connector
@@ -583,7 +600,7 @@ mod tests {
             fs::create_dir_all(&path).unwrap();
             fs::write(&file_path, b"test").unwrap();
 
-            remote_backend.upload(&file_path).unwrap();
+            remote_backend.upload(&file_path).await.unwrap();
         }
     }
 
@@ -594,7 +611,8 @@ mod tests {
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_download_file(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        #[tokio::test]
+        async fn test_download_file(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let file_key = "file1.txt";
             let file_path = path.join(file_key);
 
@@ -610,11 +628,12 @@ mod tests {
 
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
-            remote_backend.download(&file_path).unwrap();
+            remote_backend.download(&file_path).await.unwrap();
         }
 
         #[rstest]
-        fn test_download_file_with_creating_directory(
+        #[tokio::test]
+        async fn test_download_file_with_creating_directory(
             mut mock_connector: MockRemoteStorageConnector,
             path: PathBuf,
         ) {
@@ -632,7 +651,7 @@ mod tests {
                 });
             let remote_backend = make_remote_backend(mock_connector, path.clone());
 
-            remote_backend.download(&file_path).unwrap();
+            remote_backend.download(&file_path).await.unwrap();
 
             assert!(file_path.exists());
         }
@@ -644,7 +663,8 @@ mod tests {
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_update_local_cache(path: PathBuf) {
+        #[tokio::test]
+        async fn test_update_local_cache(path: PathBuf) {
             let remote_backend =
                 make_remote_backend(MockRemoteStorageConnector::new(), path.clone());
 
@@ -655,6 +675,7 @@ mod tests {
 
             assert!(remote_backend
                 .update_local_cache(&file_path, &AccessMode::Read)
+                .await
                 .is_ok());
         }
     }
@@ -665,7 +686,8 @@ mod tests {
         use std::path::PathBuf;
 
         #[rstest]
-        fn test_invalidate_locally_cached_files(path: PathBuf) {
+        #[tokio::test]
+        async fn test_invalidate_locally_cached_files(path: PathBuf) {
             let remote_backend = make_remote_backend_with_size(
                 MockRemoteStorageConnector::new(),
                 path.clone(),
@@ -679,8 +701,9 @@ mod tests {
 
             remote_backend
                 .update_local_cache(&file_path, &AccessMode::Read)
+                .await
                 .unwrap();
-            let invalidated_files = remote_backend.invalidate_locally_cached_files();
+            let invalidated_files = remote_backend.invalidate_locally_cached_files().await;
             assert_eq!(invalidated_files, vec![file_path])
         }
     }
@@ -693,7 +716,8 @@ mod tests {
         use std::time::SystemTime;
 
         #[rstest]
-        fn test_get_stats(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
+        #[tokio::test]
+        async fn test_get_stats(mut mock_connector: MockRemoteStorageConnector, path: PathBuf) {
             let file_key = "file1.txt";
             let modified_time = Some(SystemTime::now());
 
@@ -714,7 +738,7 @@ mod tests {
             fs::create_dir_all(&path).unwrap();
             fs::write(&file_path, b"test").unwrap();
 
-            let stats = remote_backend.get_stats(&file_path).unwrap().unwrap();
+            let stats = remote_backend.get_stats(&file_path).await.unwrap().unwrap();
             assert_eq!(stats.size.unwrap(), 1234);
             assert_eq!(stats.modified_time, modified_time);
         }
@@ -730,14 +754,15 @@ mod tests {
     mock! {
         pub RemoteStorageConnector {}
 
+        #[async_trait]
         impl RemoteStorageConnector for RemoteStorageConnector {
-            fn download_object(&self, key: &str, dest: &PathBuf) -> Result<(), io::Error>;
-            fn upload_object(&self, key: &str, src: &PathBuf) -> Result<(), io::Error>;
-            fn create_dir_all(&self, key: &str) -> Result<(), io::Error>;
-            fn list_objects(&self, key: &str, recursive: bool) -> Result<Vec<String>, io::Error>;
-            fn remove_object(&self, key: &str) -> Result<(), io::Error>;
-            fn head_object(&self, key: &str) -> Result<std::option::Option<ObjectMetadata>, std::io::Error>;
-            fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error>;
+            async fn download_object(&self, key: &str, dest: &PathBuf) -> Result<(), io::Error>;
+            async fn upload_object(&self, key: &str, src: &PathBuf) -> Result<(), io::Error>;
+            async fn create_dir_all(&self, key: &str) -> Result<(), io::Error>;
+            async fn list_objects(&self, key: &str, recursive: bool) -> Result<Vec<String>, io::Error>;
+            async fn remove_object(&self, key: &str) -> Result<(), io::Error>;
+            async fn head_object(&self, key: &str) -> Result<std::option::Option<ObjectMetadata>, std::io::Error>;
+            async fn rename_object(&self, from: &str, to: &str) -> Result<(), io::Error>;
         }
     }
 

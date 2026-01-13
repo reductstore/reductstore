@@ -207,6 +207,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
             .await
             .unwrap();
@@ -250,6 +251,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
             .await
             .unwrap();
@@ -280,6 +282,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
             .await
             .unwrap();
@@ -309,6 +312,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
             .await
             .unwrap();
@@ -338,6 +342,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
             .await
             .unwrap();
@@ -367,6 +372,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
             .await
             .unwrap();
@@ -421,6 +427,7 @@ mod tests {
         .await
         .unwrap();
         repo.set_mode("replication1", ReplicationMode::Disabled)
+            .await
             .unwrap();
 
         env_with_replications
@@ -442,6 +449,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
             .await
             .unwrap();
@@ -505,6 +513,7 @@ mod tests {
         .await
         .unwrap();
         repo.set_mode("replication1", ReplicationMode::Disabled)
+            .await
             .unwrap();
 
         env_with_replications
@@ -526,6 +535,7 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
             .await
             .unwrap();

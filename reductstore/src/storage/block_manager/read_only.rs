@@ -58,7 +58,8 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_reload_if_readonly(path: PathBuf) {
+    #[tokio::test]
+    async fn test_reload_if_readonly(path: PathBuf) {
         let cfg = Cfg {
             role: InstanceRole::Replica,
             data_path: path.clone(),
@@ -70,19 +71,22 @@ mod tests {
         };
 
         let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
-        index.save().unwrap();
-        let mut block_manager = BlockManager::build(path.clone(), index, Arc::new(cfg.clone()));
+        index.save().await.unwrap();
+        let mut block_manager =
+            BlockManager::build(path.clone(), index, Arc::new(cfg.clone())).await;
 
         // change index on disc
-        let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
+        let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap();
 
         let block = Block::new(1);
         new_index.insert_or_update(block);
-        new_index.save().unwrap();
+        new_index.save().await.unwrap();
 
         // wait for the replica update interval to pass
-        sleep(Duration::from_millis(150));
-        block_manager.reload_if_readonly().unwrap();
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        block_manager.reload_if_readonly().await.unwrap();
 
         assert!(block_manager.block_index.info().get(&1).is_some());
     }
@@ -90,13 +94,13 @@ mod tests {
     #[fixture]
     fn path() -> PathBuf {
         let dir = tempdir().unwrap().keep();
+        let rt = tokio::runtime::Handle::current();
+        rt.block_on(async {
+            tokio::fs::create_dir_all(dir.join("bucket").join("entry"))
+                .await
+                .unwrap();
+        });
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(dir.clone())
-                .try_build()
-                .unwrap(),
-        );
         dir
     }
 }

@@ -131,7 +131,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0").await;
         let components = cfg.build().await.unwrap();
 
         let bucket1 = components
@@ -161,7 +161,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0").await;
         let components = cfg.build().await.unwrap();
         let bucket1 = components
             .storage
@@ -189,7 +189,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0").await;
         let components = cfg.build().await.unwrap();
 
         assert_eq!(

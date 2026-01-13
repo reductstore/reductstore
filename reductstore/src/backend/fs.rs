@@ -108,7 +108,8 @@ mod tests {
         use std::io::Read;
 
         #[rstest]
-        fn test_rename_file(fs_backend: FileSystemBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_rename_file(fs_backend: FileSystemBackend) {
             let path = fs_backend.path().join("old_name.txt");
             let mut file = OpenOptions::new()
                 .write(true)
@@ -118,9 +119,9 @@ mod tests {
             writeln!(file, "This is a test file.").unwrap();
 
             let new_path = path.with_file_name("new_name.txt");
-            fs_backend.rename(&path, &new_path).unwrap();
-            assert!(!fs_backend.try_exists(&path).unwrap());
-            assert!(fs_backend.try_exists(&new_path).unwrap());
+            fs_backend.rename(&path, &new_path).await.unwrap();
+            assert!(!fs_backend.try_exists(&path).await.unwrap());
+            assert!(fs_backend.try_exists(&new_path).await.unwrap());
 
             let mut read_file = OpenOptions::new().read(true).open(&new_path).unwrap();
             let mut content = String::new();
@@ -134,7 +135,8 @@ mod tests {
         use std::fs::OpenOptions;
 
         #[rstest]
-        fn test_remove_file(fs_backend: FileSystemBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_remove_file(fs_backend: FileSystemBackend) {
             let path = fs_backend.path().join("temp_file.txt");
             let mut file = OpenOptions::new()
                 .write(true)
@@ -143,9 +145,9 @@ mod tests {
                 .unwrap();
             writeln!(file, "Temporary file content.").unwrap();
 
-            assert!(fs_backend.try_exists(&path).unwrap());
-            fs_backend.remove(&path).unwrap();
-            assert!(!fs_backend.try_exists(&path).unwrap());
+            assert!(fs_backend.try_exists(&path).await.unwrap());
+            fs_backend.remove(&path).await.unwrap();
+            assert!(!fs_backend.try_exists(&path).await.unwrap());
         }
     }
 
@@ -154,9 +156,10 @@ mod tests {
         use std::fs::OpenOptions;
 
         #[rstest]
-        fn test_remove_dir_all(fs_backend: FileSystemBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_remove_dir_all(fs_backend: FileSystemBackend) {
             let dir_path = fs_backend.path().join("temp_dir");
-            fs_backend.create_dir_all(&dir_path).unwrap();
+            fs_backend.create_dir_all(&dir_path).await.unwrap();
             let file_path = dir_path.join("file.txt");
             let mut file = OpenOptions::new()
                 .write(true)
@@ -166,8 +169,8 @@ mod tests {
             writeln!(file, "File in temporary directory.").unwrap();
             file.sync_all().unwrap();
 
-            fs_backend.remove_dir_all(&dir_path).unwrap();
-            assert!(!fs_backend.try_exists(&dir_path).unwrap());
+            fs_backend.remove_dir_all(&dir_path).await.unwrap();
+            assert!(!fs_backend.try_exists(&dir_path).await.unwrap());
         }
     }
 
@@ -175,10 +178,11 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_create_dir_all(fs_backend: FileSystemBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_create_dir_all(fs_backend: FileSystemBackend) {
             let dir_path = fs_backend.path().join("new_dir/sub_dir");
-            fs_backend.create_dir_all(&dir_path).unwrap();
-            assert!(fs_backend.try_exists(&dir_path).unwrap());
+            fs_backend.create_dir_all(&dir_path).await.unwrap();
+            assert!(fs_backend.try_exists(&dir_path).await.unwrap());
         }
     }
 
@@ -187,9 +191,10 @@ mod tests {
         use std::fs::OpenOptions;
 
         #[rstest]
-        fn test_read_dir(fs_backend: FileSystemBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_read_dir(fs_backend: FileSystemBackend) {
             let dir_path = fs_backend.path().join("read_dir_test");
-            fs_backend.create_dir_all(&dir_path).unwrap();
+            fs_backend.create_dir_all(&dir_path).await.unwrap();
 
             let file1_path = dir_path.join("file1.txt");
             let _ = OpenOptions::new()
@@ -205,9 +210,12 @@ mod tests {
                 .open(&file2_path)
                 .unwrap();
 
-            fs_backend.create_dir_all(&dir_path.join("child/")).unwrap();
+            fs_backend
+                .create_dir_all(&dir_path.join("child/"))
+                .await
+                .unwrap();
 
-            let entries = fs_backend.read_dir(&dir_path).unwrap();
+            let entries = fs_backend.read_dir(&dir_path).await.unwrap();
             let entry_names: Vec<String> = entries
                 .iter()
                 .map(|p| p.file_name().unwrap().to_string_lossy().to_string())

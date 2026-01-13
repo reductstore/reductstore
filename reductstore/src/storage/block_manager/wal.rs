@@ -298,7 +298,7 @@ mod tests {
         wal.append(1, WalEntry::RemoveRecord(1)).await.unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let entries = wal.read(1).await.unwrap();
+        let entries = wal.await.read(1).await.unwrap();
 
         assert_eq!(
             entries,
@@ -322,7 +322,7 @@ mod tests {
         wal.remove(1).await.unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let err = wal.read(1).await.err().unwrap();
+        let err = wal.await.read(1).await.err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
     }
 
@@ -337,7 +337,7 @@ mod tests {
             .unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let blocks = wal.list().await.unwrap();
+        let blocks = wal.await.list().await.unwrap();
         assert_eq!(blocks.len(), 2);
         assert!(blocks.contains(&1));
         assert!(blocks.contains(&2));
@@ -356,7 +356,7 @@ mod tests {
         file.write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 1]).unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let err = wal.read(1).await.err().unwrap();
+        let err = wal.await.read(1).await.err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
     }
 

@@ -267,6 +267,7 @@ mod tests {
             Backend::builder()
                 .local_data_path(cfg.data_path.clone())
                 .try_build()
+                .await
                 .unwrap(),
         );
 
@@ -274,6 +275,7 @@ mod tests {
 
         FILE_CACHE
             .create_dir_all(&cfg.data_path.join("bucket"))
+            .await
             .unwrap();
         let bucket = Arc::new(
             Bucket::try_build(

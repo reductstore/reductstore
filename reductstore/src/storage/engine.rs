@@ -566,7 +566,8 @@ mod tests {
             assert_eq!(bucket.name(), "test");
 
             let path = storage.data_path.join("test");
-            FILE_CACHE.remove(&path.join(SETTINGS_NAME)).unwrap();
+            let settings_path = path.join(SETTINGS_NAME);
+            FILE_CACHE.remove(&settings_path).await.unwrap();
             let cfg = Cfg {
                 data_path: storage.data_path.clone(),
                 ..Cfg::default()
@@ -948,12 +949,12 @@ mod tests {
 
     #[fixture]
     async fn storage(cfg: Cfg) -> Arc<StorageEngine> {
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .unwrap(),
-        );
+        let backend = Backend::builder()
+            .local_data_path(cfg.data_path.clone())
+            .try_build()
+            .await
+            .unwrap();
+        FILE_CACHE.set_storage_backend(backend);
         Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())

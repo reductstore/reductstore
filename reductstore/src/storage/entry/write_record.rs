@@ -198,8 +198,10 @@ mod tests {
 
         assert_eq!(
             bm.load_block(1)
+                .await
                 .unwrap()
                 .write()
+                .await
                 .unwrap()
                 .get_record(1)
                 .unwrap()
@@ -216,8 +218,10 @@ mod tests {
 
         assert_eq!(
             bm.load_block(2000010)
+                .await
                 .unwrap()
                 .write()
+                .await
                 .unwrap()
                 .get_record(2000010)
                 .unwrap()
@@ -252,8 +256,10 @@ mod tests {
         let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1)
+            .await
             .unwrap()
             .write()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -271,8 +277,10 @@ mod tests {
 
         let records = bm
             .load_block(2000010)
+            .await
             .unwrap()
             .write()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -300,8 +308,10 @@ mod tests {
         let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1000000)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -330,8 +340,10 @@ mod tests {
         let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1000000)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -395,8 +407,10 @@ mod tests {
         let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1000000)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -406,8 +420,10 @@ mod tests {
 
         let records = bm
             .load_block(2000000)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -448,8 +464,10 @@ mod tests {
             .await
             .unwrap()
             .load_block(1000000)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .get_record(1000000)
             .unwrap()
