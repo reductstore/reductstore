@@ -238,8 +238,16 @@ impl LockFile for ImplLockFile {
 
         debug!("Releasing lock file: {:?}", self.path);
         let path = self.path.clone();
-        if let Err(err) = FILE_CACHE.remove(&path).await {
-            error!("Failed to remove lock file: {:?}", err);
+        
+        // Try to remove the file, but don't error if it doesn't exist (already removed)
+        match FILE_CACHE.remove(&path).await {
+            Ok(_) => {},
+            Err(err) if err.status == reduct_base::error::ErrorCode::NotFound => {
+                // File already removed, this is okay
+            },
+            Err(err) => {
+                error!("Failed to remove lock file: {:?}", err);
+            }
         }
     }
 }
@@ -255,8 +263,15 @@ impl Drop for ImplLockFile {
             let _ = std::thread::spawn(move || {
                 handle.block_on(async {
                     tokio::time::sleep(Duration::from_millis(100)).await;
-                    if let Err(err) = FILE_CACHE.remove(&path).await {
-                        error!("Failed to remove lock file: {:?}", err);
+                    // Try to remove the file, but don't error if it doesn't exist (already removed)
+                    match FILE_CACHE.remove(&path).await {
+                        Ok(_) => {},
+                        Err(err) if err.status == reduct_base::error::ErrorCode::NotFound => {
+                            // File already removed, this is okay
+                        },
+                        Err(err) => {
+                            error!("Failed to remove lock file: {:?}", err);
+                        }
                     }
                 });
             })
