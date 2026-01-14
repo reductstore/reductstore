@@ -258,7 +258,7 @@ mod tests {
     #[test_log(rstest)]
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_batched_read(
         #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
@@ -528,7 +528,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn max_metadata_size_from_query(#[future] keeper: Arc<StateKeeper>) {
             let components = keeper.await.get_anonymous().await.unwrap();
             let resp =
@@ -541,7 +541,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn max_size_from_settings(#[future] keeper: Arc<StateKeeper>) {
             let components = keeper.await.get_anonymous().await.unwrap();
             let resp = build_bucket_and_query(components.clone(), json!({}), false).await;

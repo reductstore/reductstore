@@ -391,7 +391,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn sorts_entries_by_first_timestamp(
         #[future] keeper: Arc<StateKeeper>,
         path_to_bucket_1: Path<HashMap<String, String>>,

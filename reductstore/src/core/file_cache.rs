@@ -161,8 +161,7 @@ impl FileCache {
             // Sync only writeable files that are not synced yet
             // and are not used by other threads
             if file_lock.mode() != &AccessMode::ReadWrite
-                || Arc::strong_count(&file) > 1
-                || Arc::weak_count(&file) > 0
+                || file.try_write().is_none()
                 || file_lock.is_synced()
                 || file_lock.last_synced().elapsed() < sync_interval
             {
@@ -226,7 +225,8 @@ impl FileCache {
     ) {
         let discarded = cache.insert(path.clone(), Arc::clone(&file));
         for (path, file) in discarded {
-            if Arc::weak_count(&file) > 0 {
+            // return the file to the cache if it is still in use
+            if file.try_write().is_none() {
                 cache.insert(path, Arc::clone(&file));
                 continue;
             }
@@ -356,7 +356,7 @@ impl FileCache {
 
         let mut cache = self.cache.write().await?;
         if let Some(file) = cache.remove(path) {
-            if Arc::strong_count(&file) > 1 {
+            if file.try_write().is_none() {
                 cache.insert(path.clone(), file);
                 return Err(internal_server_error!(
                     "Cannot remove file {} because it is in use",
@@ -441,6 +441,10 @@ impl FileCache {
     ///
     /// A `Result` which is `Ok` if the file was successfully renamed, or an `Err` containing
     pub async fn rename(&self, old_path: &PathBuf, new_path: &PathBuf) -> Result<(), ReductError> {
+        if self.read_only.load(Ordering::Relaxed) {
+            return Ok(());
+        }
+
         self.discard_recursive(old_path).await?;
         let mut cache = self.cache.write().await?;
         cache.remove(old_path);
@@ -504,10 +508,12 @@ mod tests {
         file.sync_all().unwrap();
         drop(file);
 
-        let mut file_ref = cache.read(&file_path, SeekFrom::Start(0)).await.unwrap();
-        let mut data = String::new();
-        file_ref.read_to_string(&mut data).unwrap();
-        assert_eq!(data, "test", "should read from beginning");
+        {
+            let mut file_ref = cache.read(&file_path, SeekFrom::Start(0)).await.unwrap();
+            let mut data = String::new();
+            file_ref.read_to_string(&mut data).unwrap();
+            assert_eq!(data, "test", "should read from beginning");
+        }
 
         let mut file_ref = cache.read(&file_path, SeekFrom::End(-2)).await.unwrap();
         let mut data = String::new();
@@ -521,12 +527,14 @@ mod tests {
         let cache = cache.await;
         let file_path = tmp_dir.join("test_write_or_create.txt");
 
-        let mut file_ref = cache
-            .write_or_create(&file_path, SeekFrom::Start(0))
-            .await
-            .unwrap();
-        file_ref.write_all(b"test").unwrap();
-        file_ref.sync_all().await.unwrap();
+        {
+            let mut file_ref = cache
+                .write_or_create(&file_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            file_ref.write_all(b"test").unwrap();
+            file_ref.sync_all().await.unwrap();
+        }
 
         assert_eq!(
             fs::read(&file_path).unwrap(),
@@ -567,7 +575,7 @@ mod tests {
     async fn test_remove_used(#[future] cache: FileCache, tmp_dir: PathBuf) {
         let cache = cache.await;
         let file_path = tmp_dir.join("test_remove_used.txt");
-        let file_guard = cache
+        let _file_guard = cache
             .write_or_create(&file_path, SeekFrom::Start(0))
             .await
             .unwrap();
@@ -580,7 +588,7 @@ mod tests {
                 file_path.display()
             )
         );
-        drop(file_guard);
+
         assert!(file_path.exists());
     }
 
@@ -675,20 +683,18 @@ mod tests {
     #[tokio::test]
     async fn test_remove_dir(#[future] cache: FileCache, tmp_dir: PathBuf) {
         let cache = cache.await;
-        let file_1 = cache
-            .write_or_create(&tmp_dir.join("test_remove_dir.txt"), SeekFrom::Start(0))
+        cache
+            .write_or_create(&tmp_dir.join("test_remove_dir1.txt"), SeekFrom::Start(0))
             .await
             .unwrap();
-        let file_2 = cache
-            .write_or_create(&tmp_dir.join("test_remove_dir.txt"), SeekFrom::Start(0))
+        cache
+            .write_or_create(&tmp_dir.join("test_remove_dir2.txt"), SeekFrom::Start(0))
             .await
             .unwrap();
 
         cache.remove_dir(&tmp_dir).await.unwrap();
 
-        assert!(tmp_dir.exists());
-        drop(file_1);
-        drop(file_2);
+        assert!(!tmp_dir.exists());
     }
 
     mod sync_rw_and_unused_files {
@@ -719,11 +725,13 @@ mod tests {
             let cache = cache.await;
             cache.stop_sync_worker.store(true, Ordering::Relaxed);
             let file_path = tmp_dir.join("test_not_sync_unused_files.txt");
-            let mut file_ref = cache
-                .write_or_create(&file_path, SeekFrom::Start(0))
-                .await
-                .unwrap();
-            file_ref.write_all(b"test").unwrap();
+            {
+                let mut file_ref = cache
+                    .write_or_create(&file_path, SeekFrom::Start(0))
+                    .await
+                    .unwrap();
+                file_ref.write_all(b"test").unwrap();
+            }
 
             assert!(!cache
                 .cache

@@ -166,11 +166,12 @@ impl ManageTokens for TokenRepository {
             let value: String = (0..32)
                 .map(|_| format!("{:x}", rng.random_range(0..16)))
                 .collect();
+            let value = format!("{}-{}", name, value);
             (
-                format!("{}-{}", name, value),
+                value.clone(),
                 Token {
                     name: name.to_string(),
-                    value: value.clone(),
+                    value,
                     created_at: created_at.clone(),
                     permissions: Some(permissions),
                     is_provisioned: false,

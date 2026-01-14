@@ -628,7 +628,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_rename_entry_persisted(#[future] bucket: Arc<Bucket>) {
             let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();

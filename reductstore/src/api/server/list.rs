@@ -58,7 +58,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_filtered_list(#[future] keeper: Arc<StateKeeper>, mut headers: HeaderMap) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();

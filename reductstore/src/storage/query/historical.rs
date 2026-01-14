@@ -311,7 +311,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_query_ok_2_recs(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let block_manager = block_manager.await;
         let mut query = build_query(0, 1000, QueryOptions::default()).unwrap();

@@ -249,7 +249,7 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_get_query_link(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
@@ -434,7 +434,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_get_query_link_range(#[future] keeper: Arc<StateKeeper>, mut headers: HeaderMap) {
         let keeper = keeper.await;
         let link = create_query_link(

@@ -1059,7 +1059,7 @@ mod tests {
         #[case(0)]
         #[case(500)]
         #[case(MAX_IO_BUFFER_SIZE+1)]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_remove_records(
             #[case] record_size: usize,
             #[future] block_manager: BlockManager,
