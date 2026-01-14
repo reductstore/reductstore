@@ -500,8 +500,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_read(#[future] cache: FileCache, tmp_dir: PathBuf) {
-        let cache = cache.await;
+    async fn test_read(cache: FileCache, tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_read.txt");
         let mut file = fs::File::create(&file_path).unwrap();
         file.write_all(b"test").unwrap();
@@ -523,8 +522,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_write_or_create(#[future] cache: FileCache, tmp_dir: PathBuf) {
-        let cache = cache.await;
+    async fn test_write_or_create(cache: FileCache, tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_write_or_create.txt");
 
         {
@@ -558,8 +556,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove(#[future] cache: FileCache, tmp_dir: PathBuf) {
-        let cache = cache.await;
+    async fn test_remove(cache: FileCache, tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_remove.txt");
         let mut file = fs::File::create(&file_path).unwrap();
         file.write_all(b"test").unwrap();
@@ -572,8 +569,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_used(#[future] cache: FileCache, tmp_dir: PathBuf) {
-        let cache = cache.await;
+    async fn test_remove_used(cache: FileCache, tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_remove_used.txt");
         let _file_guard = cache
             .write_or_create(&file_path, SeekFrom::Start(0))
@@ -594,8 +590,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_cache_max_size(#[future] cache: FileCache, tmp_dir: PathBuf) {
-        let cache = cache.await;
+    async fn test_cache_max_size(cache: FileCache, tmp_dir: PathBuf) {
         let file_path1 = tmp_dir.join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.join("test_cache_max_size2.txt");
         let file_path3 = tmp_dir.join("test_cache_max_size3.txt");
@@ -652,8 +647,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_cache_ttl(#[future] cache: FileCache, tmp_dir: PathBuf) {
-        let cache = cache.await;
+    async fn test_cache_ttl(cache: FileCache, tmp_dir: PathBuf) {
         let file_path1 = tmp_dir.join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.join("test_cache_max_size2.txt");
         let file_path3 = tmp_dir.join("test_cache_max_size3.txt");
@@ -681,8 +675,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_dir(#[future] cache: FileCache, tmp_dir: PathBuf) {
-        let cache = cache.await;
+    async fn test_remove_dir(cache: FileCache, tmp_dir: PathBuf) {
         cache
             .write_or_create(&tmp_dir.join("test_remove_dir1.txt"), SeekFrom::Start(0))
             .await
@@ -702,8 +695,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_sync_unused_files(#[future] cache: FileCache, tmp_dir: PathBuf) {
-            let cache = cache.await;
+        async fn test_sync_unused_files(cache: FileCache, tmp_dir: PathBuf) {
             cache.stop_sync_worker.store(true, Ordering::Relaxed);
             let file_path = tmp_dir.join("test_sync_rw_and_unused_files.txt");
             {
@@ -721,8 +713,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "multi_thread")]
-        async fn test_not_sync_used_files(#[future] cache: FileCache, tmp_dir: PathBuf) {
-            let cache = cache.await;
+        async fn test_not_sync_used_files(cache: FileCache, tmp_dir: PathBuf) {
             cache.stop_sync_worker.store(true, Ordering::Relaxed);
             let file_path = tmp_dir.join("test_not_sync_unused_files.txt");
             {
@@ -752,8 +743,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_write(#[future] read_only_cache: FileCache, tmp_dir: PathBuf) {
-            let read_only_cache = read_only_cache.await;
+        async fn test_write(read_only_cache: FileCache, tmp_dir: PathBuf) {
             let file_path = tmp_dir.join("test_read_only_mode.txt");
             fs::write(&file_path, b"test").unwrap();
 
@@ -770,8 +760,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove(#[future] read_only_cache: FileCache, tmp_dir: PathBuf) {
-            let read_only_cache = read_only_cache.await;
+        async fn test_remove(read_only_cache: FileCache, tmp_dir: PathBuf) {
             let file_path = tmp_dir.join("test_remove_in_read_only_mode.txt");
             fs::write(&file_path, b"test").unwrap();
 
@@ -786,8 +775,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename(#[future] read_only_cache: FileCache, tmp_dir: PathBuf) {
-            let read_only_cache = read_only_cache.await;
+        async fn test_rename(read_only_cache: FileCache, tmp_dir: PathBuf) {
             let old_file_path = tmp_dir.join("test_rename_in_read_only_mode_old.txt");
             let new_file_path = tmp_dir.join("test_rename_in_read_only_mode_new.txt");
 
@@ -812,8 +800,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_create_dir(#[future] read_only_cache: FileCache, tmp_dir: PathBuf) {
-            let read_only_cache = read_only_cache.await;
+        async fn test_create_dir(read_only_cache: FileCache, tmp_dir: PathBuf) {
             let dir_path = tmp_dir.join("test_create_dir_in_read_only_mode");
 
             read_only_cache.create_dir_all(&dir_path).await.unwrap();
@@ -827,8 +814,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_dir(#[future] read_only_cache: FileCache, tmp_dir: PathBuf) {
-            let read_only_cache = read_only_cache.await;
+        async fn test_remove_dir(read_only_cache: FileCache, tmp_dir: PathBuf) {
             let dir_path = tmp_dir.join("test_remove_dir_in_read_only_mode");
             fs::create_dir_all(&dir_path).unwrap();
 
@@ -842,20 +828,16 @@ mod tests {
         }
 
         #[fixture]
-        async fn read_only_cache(#[future] cache: FileCache) -> FileCache {
-            let cache = cache.await;
+        fn read_only_cache(cache: FileCache) -> FileCache {
             cache.set_read_only(true);
             cache
         }
     }
     #[fixture]
-    async fn cache() -> FileCache {
+    fn cache(tmp_dir: PathBuf) -> FileCache {
         let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));
         cache.set_storage_backend(
-            Backend::builder()
-                .local_data_path(tempfile::tempdir().unwrap().keep())
-                .try_build()
-                .await
+            futures::executor::block_on(Backend::builder().local_data_path(tmp_dir).try_build())
                 .unwrap(),
         );
 

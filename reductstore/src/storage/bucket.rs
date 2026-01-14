@@ -498,7 +498,6 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
     use reduct_base::conflict;
     use reduct_base::io::ReadRecord;
     use reduct_base::msg::bucket_api::QuotaType;
@@ -808,22 +807,12 @@ mod tests {
     }
 
     #[fixture]
-    pub async fn path() -> PathBuf {
-        let path = tempdir().unwrap().keep();
-
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-        path
+    pub fn path() -> PathBuf {
+        tempdir().unwrap().keep()
     }
 
     #[fixture]
-    pub async fn bucket(settings: BucketSettings, #[future] path: PathBuf) -> Arc<Bucket> {
-        let path = path.await;
+    pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
             Bucket::try_build("test", &path, settings, Cfg::default())
@@ -833,11 +822,7 @@ mod tests {
     }
 
     #[fixture]
-    pub async fn provisioned_bucket(
-        settings: BucketSettings,
-        #[future] path: PathBuf,
-    ) -> Arc<Bucket> {
-        let path = path.await;
+    pub async fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         let bucket = Bucket::try_build("test", &path, settings, Cfg::default())
             .await

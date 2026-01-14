@@ -252,26 +252,23 @@ impl Entry {
         let block_manager = Arc::clone(&self.block_manager);
         drop(bm); // release read lock before acquiring write lock
 
-        tokio::spawn(async move {
-            let mut bm = match block_manager.write().await {
-                Ok(bm) => bm,
-                Err(e) => {
-                    error!(
-                        "Failed to acquire write lock on block manager to remove oldest block {}: {}",
-                        oldest_block_id, e
-                    );
-                    return;
-                }
-            };
+        let mut bm = match block_manager.write().await {
+            Ok(bm) => bm,
+            Err(_) => {
+                return Err(internal_server_error!(
+                    "Cannot remove block {} because it is in use",
+                    oldest_block_id
+                ));
+            }
+        };
 
-            bm.remove_block(oldest_block_id).await.unwrap_or_else(|e| {
-                error!("Failed to remove oldest block {}: {}", oldest_block_id, e);
-            });
-            debug!(
-                "Removing the oldest block {}.blk",
-                bm.path().join(oldest_block_id.to_string()).display()
-            );
+        bm.remove_block(oldest_block_id).await.unwrap_or_else(|e| {
+            error!("Failed to remove oldest block {}: {}", oldest_block_id, e);
         });
+        debug!(
+            "Removing the oldest block {}.blk",
+            bm.path().join(oldest_block_id.to_string()).display()
+        );
 
         Ok(())
     }
@@ -737,14 +734,14 @@ mod tests {
             assert_eq!(entry.info().await.unwrap().size, 116);
 
             entry.try_remove_oldest_block().await.unwrap();
-            assert_eq!(entry.info().await.unwrap().block_count, 2);
-            assert_eq!(entry.info().await.unwrap().record_count, 4);
-            assert_eq!(entry.info().await.unwrap().size, 116);
+            assert_eq!(entry.info().await.unwrap().block_count, 1);
+            assert_eq!(entry.info().await.unwrap().record_count, 2);
+            assert_eq!(entry.info().await.unwrap().size, 58);
 
             entry.try_remove_oldest_block().await.unwrap();
-            assert_eq!(entry.info().await.unwrap().block_count, 2);
-            assert_eq!(entry.info().await.unwrap().record_count, 4);
-            assert_eq!(entry.info().await.unwrap().size, 116);
+            assert_eq!(entry.info().await.unwrap().block_count, 0);
+            assert_eq!(entry.info().await.unwrap().record_count, 0);
+            assert_eq!(entry.info().await.unwrap().size, 0);
         }
     }
 
