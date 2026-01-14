@@ -9,6 +9,32 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use std::{fs, io};
 
+#[cfg(target_os = "windows")]
+fn retry_on_windows<F>(mut operation: F) -> io::Result<()>
+where
+    F: FnMut() -> io::Result<()>,
+{
+    const MAX_RETRIES: u32 = 5;
+    const INITIAL_DELAY_MS: u64 = 10;
+
+    for attempt in 0..MAX_RETRIES {
+        match operation() {
+            Ok(()) => return Ok(()),
+            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+                if attempt < MAX_RETRIES - 1 {
+                    // Exponential backoff: 10ms, 20ms, 40ms, 80ms
+                    let delay = std::time::Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));
+                    std::thread::sleep(delay);
+                    continue;
+                }
+                return Err(e);
+            }
+            Err(e) => return Err(e),
+        }
+    }
+    unreachable!()
+}
+
 pub(super) struct LocalCache {
     path: PathBuf,
     max_size: u64,
@@ -20,9 +46,28 @@ pub(super) struct LocalCache {
 impl LocalCache {
     pub fn new(path: PathBuf, max_size: u64) -> Self {
         info!("Cleaning up local cache at {:?}", path);
-        if let Err(err) = fs::remove_dir_all(&path) {
-            if err.kind() != io::ErrorKind::NotFound {
+        
+        #[cfg(target_os = "windows")]
+        {
+            if let Err(err) = retry_on_windows(|| {
+                fs::remove_dir_all(&path).or_else(|e| {
+                    if e.kind() == io::ErrorKind::NotFound {
+                        Ok(())
+                    } else {
+                        Err(e)
+                    }
+                })
+            }) {
                 warn!("Failed to clean up local cache at {:?}: {}", path, err);
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Err(err) = fs::remove_dir_all(&path) {
+                if err.kind() != io::ErrorKind::NotFound {
+                    warn!("Failed to clean up local cache at {:?}: {}", path, err);
+                }
             }
         }
 
@@ -46,9 +91,25 @@ impl LocalCache {
     }
 
     pub fn remove(&mut self, path: &Path) -> io::Result<()> {
-        if let Err(err) = fs::remove_file(path) {
-            if err.kind() != io::ErrorKind::NotFound {
-                return Err(err);
+        #[cfg(target_os = "windows")]
+        {
+            retry_on_windows(|| {
+                fs::remove_file(path).or_else(|err| {
+                    if err.kind() == io::ErrorKind::NotFound {
+                        Ok(())
+                    } else {
+                        Err(err)
+                    }
+                })
+            })?;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            if let Err(err) = fs::remove_file(path) {
+                if err.kind() != io::ErrorKind::NotFound {
+                    return Err(err);
+                }
             }
         }
 
@@ -59,7 +120,15 @@ impl LocalCache {
     }
 
     pub fn remove_all(&mut self, dir: &Path) -> io::Result<()> {
-        fs::remove_dir_all(dir)?;
+        #[cfg(target_os = "windows")]
+        {
+            retry_on_windows(|| fs::remove_dir_all(dir))?;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            fs::remove_dir_all(dir)?;
+        }
 
         let paths_to_remove: Vec<PathBuf> = self
             .entries
@@ -78,7 +147,15 @@ impl LocalCache {
     }
 
     pub fn rename(&mut self, from: &Path, to: &Path) -> io::Result<()> {
-        fs::rename(from, to)?;
+        #[cfg(target_os = "windows")]
+        {
+            retry_on_windows(|| fs::rename(from, to))?;
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            fs::rename(from, to)?;
+        }
 
         if let Some(entry) = self.entries.remove(from) {
             self.entries.insert(to.to_path_buf(), entry);
