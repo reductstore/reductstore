@@ -116,7 +116,7 @@ impl Default for QueryOptions {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
     use crate::storage::block_manager::block_index::BlockIndex;

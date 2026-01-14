@@ -66,9 +66,9 @@ impl ReadOnlyMode for StorageEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::storage_engine::StorageEngineConfig;
-    use crate::core::file_cache::FILE_CACHE;
+
     use crate::storage::engine::StorageEngine;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::{fixture, rstest};

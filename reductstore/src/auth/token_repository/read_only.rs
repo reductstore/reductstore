@@ -177,7 +177,7 @@ impl ManageTokens for ReadOnlyTokenRepository {
 mod tests {
     use super::*;
     use crate::auth::token_repository::{BoxedTokenRepository, INIT_TOKEN_NAME};
-    use crate::backend::Backend;
+
     use crate::cfg::{Cfg, InstanceRole};
     use reduct_base::msg::token_api::Permissions;
     use rstest::*;

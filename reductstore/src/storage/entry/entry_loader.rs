@@ -407,7 +407,7 @@ mod tests {
     use std::io::SeekFrom;
 
     use super::*;
-    use crate::backend::Backend;
+
     use crate::core::file_cache::FILE_CACHE;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};

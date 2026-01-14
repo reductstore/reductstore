@@ -113,10 +113,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 #[cfg(not(windows))] // fixme: Windows paths differ in tests
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::tests::MockEnvGetter;
     use crate::cfg::Cfg;
-    use crate::core::file_cache::FILE_CACHE;
+
     use mockall::predicate::eq;
     use reduct_base::error::ReductError;
     use reduct_base::not_found;

@@ -78,7 +78,7 @@ impl ReadOnlyMode for Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::storage_engine::StorageEngineConfig;
     use crate::storage::bucket::tests::write;
     use crate::storage::bucket::FILE_CACHE;

@@ -222,9 +222,9 @@ impl ReplicationSender {
 #[cfg(target_os = "linux")] // we need precise timing
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::Cfg;
-    use crate::core::file_cache::FILE_CACHE;
+
     use crate::core::sync::AsyncRwLock;
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::transaction_log::TransactionLog;

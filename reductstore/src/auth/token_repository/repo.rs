@@ -258,7 +258,7 @@ impl ManageTokens for TokenRepository {
 mod tests {
     use super::*;
     use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
-    use crate::backend::Backend;
+
     use crate::cfg::Cfg;
     use reduct_base::{conflict, unauthorized, unprocessable_entity};
     use rstest::{fixture, rstest};

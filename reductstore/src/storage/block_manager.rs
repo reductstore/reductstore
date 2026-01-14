@@ -665,7 +665,6 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
 
-    use crate::backend::Backend;
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::RecordWriter;
     use rand::distr::Alphanumeric;

@@ -179,7 +179,7 @@ impl FolderKeeper {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::{Cfg, InstanceRole};
     use crate::core::file_cache::FILE_CACHE;
     use rstest::{fixture, rstest};

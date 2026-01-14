@@ -237,7 +237,7 @@ pub(in crate::storage) async fn read_in_chunks(
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::core::file_cache::FILE_CACHE;
+
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::tests::{entry, write_record, write_stub_record};
     use mockall::mock;
@@ -288,13 +288,6 @@ pub(crate) mod tests {
         #[fixture]
         async fn file_to_read(content_size: usize) -> PathBuf {
             let path = tempdir().unwrap().keep();
-
-            let backend = Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .await
-                .unwrap();
-
             let tmp_file = path.join("test_file");
             std::fs::write(&tmp_file, vec![0; content_size]).unwrap();
 

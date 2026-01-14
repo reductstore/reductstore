@@ -503,7 +503,6 @@ mod tests {
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
 
-    use crate::backend::Backend;
     use crate::core::sync::rwlock_timeout;
     use crate::storage::bucket::Bucket;
     use reduct_base::msg::bucket_api::BucketSettings;
