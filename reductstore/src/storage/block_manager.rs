@@ -1231,14 +1231,6 @@ mod tests {
     async fn block_manager(block_id: u64) -> BlockManager {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-
         let mut bm = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join(BLOCK_INDEX_FILE)),

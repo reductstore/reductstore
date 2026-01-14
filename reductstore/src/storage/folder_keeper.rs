@@ -189,14 +189,6 @@ mod tests {
     #[fixture]
     pub async fn path() -> PathBuf {
         let path = tempdir().unwrap().keep();
-
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
         path
     }
 

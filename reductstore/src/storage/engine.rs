@@ -949,12 +949,6 @@ mod tests {
 
     #[fixture]
     async fn storage(cfg: Cfg) -> Arc<StorageEngine> {
-        let backend = Backend::builder()
-            .local_data_path(cfg.data_path.clone())
-            .try_build()
-            .await
-            .unwrap();
-        FILE_CACHE.set_storage_backend(backend);
         Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())

@@ -263,14 +263,6 @@ mod tests {
             ..Cfg::default()
         };
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-
         cfg.role = InstanceRole::Primary;
 
         FILE_CACHE

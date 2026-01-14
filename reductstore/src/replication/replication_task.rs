@@ -978,14 +978,6 @@ mod tests {
             ..Default::default()
         };
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-
         let storage = StorageEngine::builder()
             .with_data_path(path)
             .with_cfg(cfg)

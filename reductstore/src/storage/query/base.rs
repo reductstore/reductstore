@@ -133,13 +133,7 @@ pub(crate) mod tests {
         // the first block has two records: 0, 5
         // the second block has a record: 1000
         let dir = tempdir().unwrap().keep().join("bucket").join("entry");
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(dir.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
+
         let mut block_manager = BlockManager::build(
             dir.clone(),
             BlockIndex::new(dir.join("index")),

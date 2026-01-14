@@ -414,14 +414,6 @@ mod tests {
     async fn repo_fixture(cfg: Cfg) -> (BoxedTokenRepository, PathBuf) {
         let path = tempdir().unwrap().keep();
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-
         let token = Token {
             name: "file_token".to_string(),
             value: "file_value".to_string(),

@@ -398,14 +398,6 @@ mod tests {
             .keep()
             .join("bucket")
             .join("entry");
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-
         let mut block_manager = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join("index")),

@@ -260,14 +260,6 @@ mod tests {
         let data_path = tmp.keep();
         fs::create_dir_all(&data_path).unwrap();
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(data_path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-
         let mut mock_getter = MockEnvGetter::new();
         mock_getter
             .expect_get()

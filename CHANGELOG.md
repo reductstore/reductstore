@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Fix deleting non-synced objects in S3 connector, [PR-1113](https://github.com/reductstore/reductstore/pull/1113)
 
+### Changed
+
+- Migrate replication engine and remote storage backend on Tokio, [PR-1114](https://github.com/reductstore/reductstore/pull/1114)
+
 ## 1.18.0-beta.3 - 2026-01-12
 
 ### Changed

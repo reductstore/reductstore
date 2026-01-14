@@ -809,14 +809,6 @@ mod tests {
 
     async fn test_components(cfg: Cfg) -> Components {
         let cfg_for_storage = cfg.clone();
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-
         let storage = Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg_for_storage.data_path.clone())

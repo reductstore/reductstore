@@ -38,10 +38,12 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
         let temp_dir = tempfile::tempdir()
             .expect("Failed to create temporary directory for FILE_CACHE")
             .keep();
-        cache.set_storage_backend(
-            executor::block_on(Backend::builder().local_data_path(temp_dir).try_build())
-                .expect("Failed to initialise FILE_CACHE backend for tests"),
-        );
+        executor::block_on(async {
+            let mut backend = cache.backend.write().await.unwrap();
+            *backend = (Backend::builder().local_data_path(temp_dir).try_build())
+                .await
+                .expect("Failed to initialise FILE_CACHE backend for tests");
+        });
     }
 
     cache

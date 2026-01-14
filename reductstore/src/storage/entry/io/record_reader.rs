@@ -295,8 +295,6 @@ pub(crate) mod tests {
                 .await
                 .unwrap();
 
-            FILE_CACHE.set_storage_backend(backend);
-
             let tmp_file = path.join("test_file");
             std::fs::write(&tmp_file, vec![0; content_size]).unwrap();
 

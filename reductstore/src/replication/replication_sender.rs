@@ -568,14 +568,6 @@ mod tests {
             ..Default::default()
         };
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-
         let storage = Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())
@@ -660,14 +652,6 @@ mod tests {
             data_path: tempfile::tempdir().unwrap().keep(),
             ..Default::default()
         };
-
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
 
         let storage = Arc::new(
             StorageEngine::builder()

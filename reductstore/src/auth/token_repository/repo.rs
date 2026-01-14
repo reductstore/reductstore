@@ -708,14 +708,6 @@ mod tests {
     }
 
     async fn build_repo_at(path: &PathBuf, cfg: &Cfg) -> BoxedTokenRepository {
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-
         TokenRepositoryBuilder::new(cfg.clone())
             .build(path.clone())
             .await

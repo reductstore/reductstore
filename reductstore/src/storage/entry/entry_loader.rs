@@ -515,14 +515,6 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
-
         let path = path.join("entry");
         FILE_CACHE.create_dir_all(&path).await.unwrap();
 
