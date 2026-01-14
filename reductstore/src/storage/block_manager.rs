@@ -906,7 +906,7 @@ mod tests {
             let err = bm.wal.read(block_id).await.err().unwrap();
             assert_eq!(
                 err.status(),
-                ErrorCode::InternalServerError,
+                ErrorCode::NotFound,
                 "WAL removed after index updated"
             );
 
@@ -929,7 +929,7 @@ mod tests {
             let er = bm.wal.read(block_id + 1).await.err().unwrap();
             assert_eq!(
                 er.status(),
-                ErrorCode::InternalServerError,
+                ErrorCode::NotFound,
                 "WAL not removed after index updated"
             );
         }

@@ -323,7 +323,7 @@ mod tests {
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
         let err = wal.await.read(1).await.err().unwrap();
-        assert_eq!(&err.status, &ErrorCode::InternalServerError);
+        assert_eq!(&err.status, &ErrorCode::NotFound);
     }
 
     #[rstest]
