@@ -403,7 +403,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "current_thread")]
-        async fn download_object(connector: S3Connector) {
+        async fn download_object(#[future] connector: S3Connector) {
+            let connector = connector.await;
             let key = "test_download.txt";
             let dest = PathBuf::from("/tmp/test_download.txt");
 
@@ -420,7 +421,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "current_thread")]
-        async fn upload_object(connector: S3Connector, path: PathBuf) {
+        async fn upload_object(#[future] connector: S3Connector, path: PathBuf) {
+            let connector = connector.await;
             let key = "test_upload.txt";
             let src = path.join("test_upload.txt");
             fs::write(&src, b"test upload content").unwrap();
@@ -438,7 +440,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "current_thread")]
-        async fn create_dir_all(connector: S3Connector) {
+        async fn create_dir_all(#[future] connector: S3Connector) {
+            let connector = connector.await;
             let key = "test_dir/";
 
             assert_eq!(
@@ -454,7 +457,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "current_thread")]
-        async fn list_objects(connector: S3Connector) {
+        async fn list_objects(#[future] connector: S3Connector) {
+            let connector = connector.await;
             let key = "test_list/";
             let recursive = false;
 
@@ -471,7 +475,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "current_thread")]
-        async fn remove_object(connector: S3Connector) {
+        async fn remove_object(#[future] connector: S3Connector) {
+            let connector = connector.await;
             let key = "test_remove.txt";
 
             assert_eq!(
@@ -487,7 +492,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "current_thread")]
-        async fn head_object(connector: S3Connector) {
+        async fn head_object(#[future] connector: S3Connector) {
+            let connector = connector.await;
             let key = "test_head.txt";
 
             assert_eq!(
@@ -498,7 +504,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "current_thread")]
-        async fn rename_object(connector: S3Connector) {
+        async fn rename_object(#[future] connector: S3Connector) {
+            let connector = connector.await;
             let from = "test_rename_from.txt";
             let to = "test_rename_to.txt";
 
@@ -556,9 +563,8 @@ mod tests {
         }
 
         #[fixture]
-        fn connector(settings: RemoteBackendSettings) -> S3Connector {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(S3Connector::new(settings))
+        async fn connector(settings: RemoteBackendSettings) -> S3Connector {
+            S3Connector::new(settings).await
         }
 
         #[fixture]
@@ -589,7 +595,8 @@ mod tests {
         #[rstest]
         #[serial]
         #[tokio::test(flavor = "current_thread")]
-        async fn download_object(connector: S3Connector, path: PathBuf) {
+        async fn download_object(#[future] connector: S3Connector, path: PathBuf) {
+            let connector = connector.await;
             let key = "test/test.txt";
             let dest = path.join("downloaded_test.txt");
             assert!(!dest.exists());
@@ -603,7 +610,8 @@ mod tests {
         #[rstest]
         #[serial]
         #[tokio::test(flavor = "current_thread")]
-        async fn upload_object(connector: S3Connector, path: PathBuf) {
+        async fn upload_object(#[future] connector: S3Connector, path: PathBuf) {
+            let connector = connector.await;
             let key = "test/uploaded_test.txt";
             let src = path.join("uploaded_test.txt");
             fs::write(&src, b"This is a test file for upload.\n").unwrap();
@@ -615,7 +623,8 @@ mod tests {
         #[rstest]
         #[serial]
         #[tokio::test(flavor = "current_thread")]
-        async fn upload_object_with_storage_class(connector: S3Connector, path: PathBuf) {
+        async fn upload_object_with_storage_class(#[future] connector: S3Connector, path: PathBuf) {
+            let connector = connector.await;
             let key = "test/uploaded_test.blk";
             let src = path.join("uploaded_test.blk");
             fs::write(
@@ -631,7 +640,8 @@ mod tests {
         #[rstest]
         #[serial]
         #[tokio::test(flavor = "current_thread")]
-        async fn create_dir_all(connector: S3Connector) {
+        async fn create_dir_all(#[future] connector: S3Connector) {
+            let connector = connector.await;
             let key = "test/new_dir/";
 
             connector.create_dir_all(key).await.unwrap();
@@ -641,7 +651,8 @@ mod tests {
         #[rstest]
         #[serial]
         #[tokio::test(flavor = "current_thread")]
-        async fn list_objects_recursive(connector: S3Connector) {
+        async fn list_objects_recursive(#[future] connector: S3Connector) {
+            let connector = connector.await;
             connector.create_dir_all("test/subdir1/").await.unwrap();
             connector
                 .create_dir_all("test/subdir1/subdir2")
@@ -658,7 +669,8 @@ mod tests {
         #[rstest]
         #[serial]
         #[tokio::test(flavor = "current_thread")]
-        async fn list_objects_non_recursive(connector: S3Connector) {
+        async fn list_objects_non_recursive(#[future] connector: S3Connector) {
+            let connector = connector.await;
             connector.create_dir_all("test/subdir1/").await.unwrap();
             connector
                 .create_dir_all("test/subdir1/subdir2")
@@ -673,7 +685,8 @@ mod tests {
         #[rstest]
         #[serial]
         #[tokio::test]
-        async fn rename_object(connector: S3Connector) {
+        async fn rename_object(#[future] connector: S3Connector) {
+            let connector = connector.await;
             let from = "test/uploaded_test.txt";
             let to = "test/renamed_test.txt";
 
@@ -685,7 +698,8 @@ mod tests {
         #[rstest]
         #[serial]
         #[tokio::test]
-        async fn remove_object(connector: S3Connector) {
+        async fn remove_object(#[future] connector: S3Connector) {
+            let connector = connector.await;
             let key = "test/uploaded_test.txt";
 
             (connector.remove_object(key).await.unwrap());
@@ -695,7 +709,8 @@ mod tests {
         #[rstest]
         #[serial]
         #[tokio::test]
-        async fn head_object(connector: S3Connector) {
+        async fn head_object(#[future] connector: S3Connector) {
+            let connector = connector.await;
             let existing_key = "test/test.txt";
             let non_existing_key = "test/non_existing.txt";
 
@@ -713,28 +728,25 @@ mod tests {
         }
 
         #[fixture]
-        fn connector(settings: RemoteBackendSettings) -> S3Connector {
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(async {
-                let mut connector = S3Connector::new(settings).await;
-                connector.prefix = "ci/";
+        async fn connector(settings: RemoteBackendSettings) -> S3Connector {
+            let mut connector = S3Connector::new(settings).await;
+            connector.prefix = "ci/";
 
-                for key in connector.list_objects("", true).await.unwrap() {
-                    connector
-                        .remove_object(&key)
-                        .await
-                        .expect("Failed to clean up S3 bucket");
-                }
-
-                let key = "test/test.txt";
-                let src = tempdir().unwrap().keep().join("test.txt");
-                fs::write(&src, b"This is a test file for download.\n").unwrap();
+            for key in connector.list_objects("", true).await.unwrap() {
                 connector
-                    .upload_object(key, &src)
+                    .remove_object(&key)
                     .await
-                    .expect("Failed to upload test file to S3");
-                connector
-            })
+                    .expect("Failed to clean up S3 bucket");
+            }
+
+            let key = "test/test.txt";
+            let src = tempdir().unwrap().keep().join("test.txt");
+            fs::write(&src, b"This is a test file for download.\n").unwrap();
+            connector
+                .upload_object(key, &src)
+                .await
+                .expect("Failed to upload test file to S3");
+            connector
         }
 
         #[fixture]

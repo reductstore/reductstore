@@ -297,8 +297,9 @@ mod tests {
     use tokio::time::timeout;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_lock_file_acquire_and_release(lock_file_path: PathBuf) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_lock_file_acquire_and_release(#[future] lock_file_path: PathBuf) {
+        let lock_file_path = lock_file_path.await;
         let lock_file = LockFileBuilder::new(lock_file_path.clone()).build();
 
         // Initially, the lock file should be in waiting state
@@ -326,8 +327,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_lock_file_timeout_abort(lock_file_path: PathBuf) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_lock_file_timeout_abort(#[future] lock_file_path: PathBuf) {
+        let lock_file_path = lock_file_path.await;
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -358,8 +360,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_lock_file_timeout_proceed(lock_file_path: PathBuf) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_lock_file_timeout_proceed(#[future] lock_file_path: PathBuf) {
+        let lock_file_path = lock_file_path.await;
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -391,8 +394,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_secondary_instance_waits(lock_file_path: PathBuf) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_secondary_instance_waits(#[future] lock_file_path: PathBuf) {
+        let lock_file_path = lock_file_path.await;
         let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -442,8 +446,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_ttl_removes_stale_lock(lock_file_path: PathBuf) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ttl_removes_stale_lock(#[future] lock_file_path: PathBuf) {
+        let lock_file_path = lock_file_path.await;
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -466,8 +471,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_secondary_acquires_if_file_missing(lock_file_path: PathBuf) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_secondary_acquires_if_file_missing(#[future] lock_file_path: PathBuf) {
+        let lock_file_path = lock_file_path.await;
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -487,8 +493,9 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_run_lock_task_secondary_timeout_proceed_does_not_acquire_when_file_exists(
-        lock_file_path: PathBuf,
+        #[future] lock_file_path: PathBuf,
     ) {
+        let lock_file_path = lock_file_path.await;
         fs::write(&lock_file_path, "dummy").unwrap();
 
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -522,7 +529,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_run_lock_task_replica_runs_once_and_stops(lock_file_path: PathBuf) {
+    async fn test_run_lock_task_replica_runs_once_and_stops(#[future] lock_file_path: PathBuf) {
+        let lock_file_path = lock_file_path.await;
         let _ = fs::remove_file(&lock_file_path);
         let _ = fs::remove_dir_all(&lock_file_path);
 
@@ -554,7 +562,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_run_lock_task_recreate_error_when_path_is_directory(lock_file_path: PathBuf) {
+    async fn test_run_lock_task_recreate_error_when_path_is_directory(
+        #[future] lock_file_path: PathBuf,
+    ) {
+        let lock_file_path = lock_file_path.await;
         let _ = fs::remove_file(&lock_file_path);
         fs::create_dir(&lock_file_path).unwrap();
 
@@ -601,8 +612,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_drops_lock_file(lock_file_path: PathBuf) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_drops_lock_file(#[future] lock_file_path: PathBuf) {
+        let lock_file_path = lock_file_path.await;
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -632,15 +644,14 @@ mod tests {
     }
 
     #[fixture]
-    fn lock_file_path() -> PathBuf {
+    async fn lock_file_path() -> PathBuf {
         let dir = tempdir().unwrap().keep();
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(
-            FILE_CACHE.set_storage_backend(
-                tokio::runtime::Handle::current()
-                    .block_on(Backend::builder().local_data_path(dir.clone()).try_build())
-                    .unwrap(),
-            ),
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(dir.clone())
+                .try_build()
+                .await
+                .unwrap(),
         );
 
         let filepath = dir.join("test.lock");

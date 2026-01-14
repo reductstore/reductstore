@@ -187,22 +187,23 @@ mod tests {
     use tempfile::tempdir;
 
     #[fixture]
-    pub fn path() -> PathBuf {
+    pub async fn path() -> PathBuf {
         let path = tempdir().unwrap().keep();
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(
-            FILE_CACHE.set_storage_backend(
-                tokio::runtime::Handle::current()
-                    .block_on(Backend::builder().local_data_path(path.clone()).try_build())
-                    .unwrap(),
-            ),
+
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .await
+                .unwrap(),
         );
         path
     }
 
     #[rstest]
     #[tokio::test]
-    async fn ignores_invalid_folder_map(path: PathBuf) {
+    async fn ignores_invalid_folder_map(#[future] path: PathBuf) {
+        let path = path.await;
         let base_path = path.join("bucket");
         FILE_CACHE.create_dir_all(&base_path).await.unwrap();
 
@@ -225,7 +226,8 @@ mod tests {
     #[rstest]
     #[rstest]
     #[tokio::test]
-    async fn does_not_persist_folder_map_in_replica_mode(path: PathBuf) {
+    async fn does_not_persist_folder_map_in_replica_mode(#[future] path: PathBuf) {
+        let path = path.await;
         let base_path = path.join("replica_bucket");
         FILE_CACHE.create_dir_all(&base_path).await.unwrap();
 

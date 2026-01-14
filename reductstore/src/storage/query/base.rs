@@ -128,133 +128,128 @@ pub(crate) mod tests {
     use tempfile::tempdir;
 
     #[fixture]
-    pub(crate) fn block_manager() -> Arc<AsyncRwLock<BlockManager>> {
+    pub(crate) async fn block_manager() -> Arc<AsyncRwLock<BlockManager>> {
         // Two blocks
         // the first block has two records: 0, 5
         // the second block has a record: 1000
         let dir = tempdir().unwrap().keep().join("bucket").join("entry");
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            FILE_CACHE
-                .set_storage_backend(
-                    rt.block_on(Backend::builder().local_data_path(dir.clone()).try_build())
-                        .unwrap(),
-                )
-                .await;
-            let mut block_manager = BlockManager::build(
-                dir.clone(),
-                BlockIndex::new(dir.join("index")),
-                Cfg::default().into(),
-            )
-            .await;
-            let block_ref = block_manager.start_new_block(0, 10).await.unwrap();
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(dir.clone())
+                .try_build()
+                .await
+                .unwrap(),
+        );
+        let mut block_manager = BlockManager::build(
+            dir.clone(),
+            BlockIndex::new(dir.join("index")),
+            Cfg::default().into(),
+        )
+        .await;
+        let block_ref = block_manager.start_new_block(0, 10).await.unwrap();
 
-            {
-                let mut block = block_ref.write().await.unwrap();
-                block.insert_or_update_record(Record {
-                    timestamp: Some(Timestamp {
-                        seconds: 0,
-                        nanos: 0,
-                    }),
-                    begin: 0,
-                    end: 10,
-                    state: RecordState::Finished as i32,
-                    labels: vec![
-                        Label {
-                            name: "block".to_string(),
-                            value: "1".to_string(),
-                        },
-                        Label {
-                            name: "record".to_string(),
-                            value: "1".to_string(),
-                        },
-                        Label {
-                            name: "flag".to_string(),
-                            value: "true".to_string(),
-                        },
-                    ],
-                    content_type: "".to_string(),
-                });
+        {
+            let mut block = block_ref.write().await.unwrap();
+            block.insert_or_update_record(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 0,
+                    nanos: 0,
+                }),
+                begin: 0,
+                end: 10,
+                state: RecordState::Finished as i32,
+                labels: vec![
+                    Label {
+                        name: "block".to_string(),
+                        value: "1".to_string(),
+                    },
+                    Label {
+                        name: "record".to_string(),
+                        value: "1".to_string(),
+                    },
+                    Label {
+                        name: "flag".to_string(),
+                        value: "true".to_string(),
+                    },
+                ],
+                content_type: "".to_string(),
+            });
 
-                block.insert_or_update_record(Record {
-                    timestamp: Some(Timestamp {
-                        seconds: 0,
-                        nanos: 5000,
-                    }),
-                    begin: 10,
-                    end: 20,
-                    state: RecordState::Finished as i32,
-                    labels: vec![
-                        Label {
-                            name: "block".to_string(),
-                            value: "1".to_string(),
-                        },
-                        Label {
-                            name: "record".to_string(),
-                            value: "2".to_string(),
-                        },
-                        Label {
-                            name: "flag".to_string(),
-                            value: "false".to_string(),
-                        },
-                    ],
-                    content_type: "".to_string(),
-                });
-            }
+            block.insert_or_update_record(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 0,
+                    nanos: 5000,
+                }),
+                begin: 10,
+                end: 20,
+                state: RecordState::Finished as i32,
+                labels: vec![
+                    Label {
+                        name: "block".to_string(),
+                        value: "1".to_string(),
+                    },
+                    Label {
+                        name: "record".to_string(),
+                        value: "2".to_string(),
+                    },
+                    Label {
+                        name: "flag".to_string(),
+                        value: "false".to_string(),
+                    },
+                ],
+                content_type: "".to_string(),
+            });
+        }
 
-            block_manager.save_block(block_ref.clone()).await.unwrap();
+        block_manager.save_block(block_ref.clone()).await.unwrap();
 
-            macro_rules! write_record {
-                ($block:expr, $index:expr, $content:expr) => {{
-                    let blk = $block.read().await.unwrap();
-                    let (path, offset) = block_manager.begin_write_record(&blk, $index).unwrap();
-                    let mut file = FILE_CACHE
-                        .write_or_create(&path, SeekFrom::Start(offset))
-                        .await
-                        .unwrap();
-                    file.write($content).unwrap();
-                    file.flush().unwrap();
-                }};
-            }
+        macro_rules! write_record {
+            ($block:expr, $index:expr, $content:expr) => {{
+                let blk = $block.read().await.unwrap();
+                let (path, offset) = block_manager.begin_write_record(&blk, $index).unwrap();
+                let mut file = FILE_CACHE
+                    .write_or_create(&path, SeekFrom::Start(offset))
+                    .await
+                    .unwrap();
+                file.write($content).unwrap();
+                file.flush().unwrap();
+            }};
+        }
 
-            write_record!(block_ref, 0, b"0123456789");
-            write_record!(block_ref, 5, b"0123456789");
+        write_record!(block_ref, 0, b"0123456789");
+        write_record!(block_ref, 5, b"0123456789");
 
-            rt.block_on(block_manager.finish_block(block_ref)).unwrap();
-            let block_ref = rt
-                .block_on(block_manager.start_new_block(1000, 10))
-                .unwrap();
-            {
-                let mut block = rt.block_on(block_ref.write()).unwrap();
+        block_manager.finish_block(block_ref).await.unwrap();
+        let block_ref = block_manager.start_new_block(1000, 10).await.unwrap();
+        {
+            let mut block = block_ref.write().await.unwrap();
 
-                block.insert_or_update_record(Record {
-                    timestamp: Some(Timestamp {
-                        seconds: 0,
-                        nanos: 1000_000,
-                    }),
-                    begin: 0,
-                    end: 10,
-                    state: RecordState::Finished as i32,
-                    labels: vec![
-                        Label {
-                            name: "block".to_string(),
-                            value: "2".to_string(),
-                        },
-                        Label {
-                            name: "record".to_string(),
-                            value: "1".to_string(),
-                        },
-                    ],
-                    content_type: "".to_string(),
-                });
-            }
-            rt.block_on(block_manager.save_block(block_ref.clone()))
-                .unwrap();
+            block.insert_or_update_record(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 0,
+                    nanos: 1000_000,
+                }),
+                begin: 0,
+                end: 10,
+                state: RecordState::Finished as i32,
+                labels: vec![
+                    Label {
+                        name: "block".to_string(),
+                        value: "2".to_string(),
+                    },
+                    Label {
+                        name: "record".to_string(),
+                        value: "1".to_string(),
+                    },
+                ],
+                content_type: "".to_string(),
+            });
+        }
+        block_manager.save_block(block_ref.clone()).await.unwrap();
 
-            write_record!(block_ref, 1000, b"0123456789");
+        write_record!(block_ref, 1000, b"0123456789");
 
-            rt.block_on(block_manager.finish_block(block_ref)).unwrap();
-            Arc::new(AsyncRwLock::new(block_manager))
-        })
+        block_manager.finish_block(block_ref).await.unwrap();
+        Arc::new(AsyncRwLock::new(block_manager))
     }
 }

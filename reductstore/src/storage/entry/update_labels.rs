@@ -147,7 +147,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_labels(entry: Arc<Entry>) {
+    async fn test_update_labels(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
+
         entry
             .set_settings(EntrySettings {
                 max_block_records: 2,
@@ -208,7 +210,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_nothing(entry: Arc<Entry>) {
+    async fn test_update_nothing(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
+
         write_stub_record(&entry, 1).await;
         let result = entry
             .clone()

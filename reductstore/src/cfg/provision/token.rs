@@ -130,7 +130,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_tokens(mut env_with_tokens: MockEnvGetter) {
+    async fn test_tokens(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
         env_with_tokens
             .expect_get()
             .with(eq("RS_TOKEN_1_VALUE"))
@@ -168,7 +169,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_tokens_not_full_permissions(mut env_with_tokens: MockEnvGetter) {
+    async fn test_tokens_not_full_permissions(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
         env_with_tokens
             .expect_get()
             .with(eq("RS_TOKEN_1_VALUE"))
@@ -202,7 +204,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_tokens_no_value(mut env_with_tokens: MockEnvGetter) {
+    async fn test_tokens_no_value(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
         env_with_tokens
             .expect_get()
             .with(eq("RS_TOKEN_1_VALUE"))
@@ -222,7 +225,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_override_token(mut env_with_tokens: MockEnvGetter) {
+    async fn test_override_token(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
         let mut auth_repo = TokenRepositoryBuilder::new(Cfg {
             api_token: "init".to_string(),
             ..Default::default()
@@ -251,24 +255,17 @@ mod tests {
     }
 
     #[fixture]
-    fn env_with_tokens() -> MockEnvGetter {
+    async fn env_with_tokens() -> MockEnvGetter {
         let tmp = tempfile::tempdir().unwrap();
         let data_path = tmp.keep();
         fs::create_dir_all(&data_path).unwrap();
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .unwrap();
-        rt.block_on(
-            FILE_CACHE.set_storage_backend(
-                tokio::runtime::Handle::current()
-                    .block_on(
-                        Backend::builder()
-                            .local_data_path(data_path.clone())
-                            .try_build(),
-                    )
-                    .unwrap(),
-            ),
+
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(data_path.clone())
+                .try_build()
+                .await
+                .unwrap(),
         );
 
         let mut mock_getter = MockEnvGetter::new();

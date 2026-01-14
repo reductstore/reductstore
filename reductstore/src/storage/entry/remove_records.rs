@@ -243,7 +243,8 @@ mod tests {
 
     // TODO: replace with multiple add/remove on RwLock
     #[fixture]
-    async fn entry_with_data(entry: Arc<Entry>) -> Arc<Entry> {
+    async fn entry_with_data(#[future] entry: Arc<Entry>) -> Arc<Entry> {
+        let entry = entry.await;
         struct ResetGuard;
         impl Drop for ResetGuard {
             fn drop(&mut self) {

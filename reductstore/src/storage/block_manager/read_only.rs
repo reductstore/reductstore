@@ -57,7 +57,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_reload_if_readonly(path: PathBuf) {
+    async fn test_reload_if_readonly(#[future] path: PathBuf) {
+        let path = path.await;
         let cfg = Cfg {
             role: InstanceRole::Replica,
             data_path: path.clone(),
@@ -90,14 +91,11 @@ mod tests {
     }
 
     #[fixture]
-    fn path() -> PathBuf {
+    async fn path() -> PathBuf {
         let dir = tempdir().unwrap().keep();
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            tokio::fs::create_dir_all(dir.join("bucket").join("entry"))
-                .await
-                .unwrap();
-        });
+        tokio::fs::create_dir_all(dir.join("bucket").join("entry"))
+            .await
+            .unwrap();
 
         dir
     }

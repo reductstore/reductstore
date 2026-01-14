@@ -299,8 +299,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query_ok_1_rec(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_ok_1_rec(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager).await;
 
@@ -311,7 +312,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_query_ok_2_recs(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_ok_2_recs(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(0, 1000, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager).await;
 
@@ -323,8 +325,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query_ok_3_recs(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_ok_3_recs(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
         let records = read_to_vector(&mut query, block_manager).await;
 
@@ -338,8 +341,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query_include(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_include(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(
             0,
             1001,
@@ -367,8 +371,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_query_exclude(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_exclude(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(
             0,
             1001,
@@ -398,8 +403,11 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_ignoring_errored_records(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_ignoring_errored_records(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
         let mut query = build_query(0, 5, QueryOptions::default()).unwrap();
         {
             let block_ref = block_manager
@@ -431,8 +439,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_each_s_filter(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_each_s_filter(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(
             0,
             1001,
@@ -450,8 +459,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_each_n_records(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_each_n_records(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(
             0,
             1001,
@@ -469,8 +479,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_when_filter(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_when_filter(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(
             0,
             1001,
@@ -487,8 +498,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_when_filter_strict(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_when_filter_strict(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(
             0,
             1001,
@@ -506,8 +518,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_when_with_interruption(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_when_with_interruption(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(
             0,
             1001,
@@ -526,8 +539,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_when_filter_non_strict(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_when_filter_non_strict(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = build_query(
             0,
             1001,

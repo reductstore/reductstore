@@ -413,9 +413,9 @@ mod tests {
     use rstest::{fixture, rstest};
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
 
@@ -515,15 +515,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
-        FILE_CACHE
-            .set_storage_backend(
-                Backend::builder()
-                    .local_data_path(path.clone())
-                    .try_build()
-                    .await
-                    .unwrap(),
-            )
-            .await;
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .await
+                .unwrap(),
+        );
 
         let path = path.join("entry");
         FILE_CACHE.create_dir_all(&path).await.unwrap();
@@ -566,12 +564,14 @@ mod tests {
             .into();
         block_proto.record_count = 0;
 
-        let mut lock = FILE_CACHE
-            .write_or_create(&path.join("1.meta"), SeekFrom::Start(0))
-            .await
-            .unwrap();
+        {
+            let mut lock = FILE_CACHE
+                .write_or_create(&path.join("1.meta"), SeekFrom::Start(0))
+                .await
+                .unwrap();
 
-        lock.write_all(&block_proto.encode_to_vec()).unwrap();
+            lock.write_all(&block_proto.encode_to_vec()).unwrap();
+        }
 
         // repack the block
         let entry = EntryLoader::restore_entry(path.clone(), entry_settings, Cfg::default().into())
@@ -607,7 +607,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_empty_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
         entry.compact().await.unwrap(); // sync WALs
@@ -637,7 +637,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_create_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
         entry
@@ -673,7 +673,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_check_integrity_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
         let _ = entry
@@ -725,7 +725,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_missed_descriptor(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         let _ = entry
             .block_manager
@@ -778,7 +778,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_recovery_with_orphan_block(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         entry.compact().await.unwrap();
 
@@ -1055,7 +1055,7 @@ mod tests {
 
         #[fixture]
         async fn entry_fix(path: PathBuf, entry_settings: EntrySettings) -> (Arc<Entry>, PathBuf) {
-            let entry = entry(entry_settings.clone(), path.clone());
+            let entry = entry(entry_settings.clone(), path.clone()).await;
             let name = entry.name().to_string();
             {
                 let mut block_manager = entry.block_manager.write().await.unwrap();

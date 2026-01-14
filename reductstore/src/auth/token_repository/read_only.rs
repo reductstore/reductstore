@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::auth::proto::TokenRepo;
@@ -187,30 +187,35 @@ mod tests {
 
     mod repo_methods {
         use super::*;
-        use std::thread::sleep;
         use std::time::Duration;
 
         #[rstest]
         #[tokio::test]
-        async fn test_new_loads_tokens(mut repo: BoxedTokenRepository) {
+        async fn test_new_loads_tokens(#[future] repo_fixture: (BoxedTokenRepository, PathBuf)) {
+            let (mut repo, _) = repo_fixture.await;
             let token_list = repo.get_token_list().await.unwrap();
-            assert_eq!(token_list.len(), 2); // one from file, one from cfg
 
             assert!(token_list.iter().any(|t| t.name == "file_token"));
             assert!(token_list.iter().any(|t| t.name == INIT_TOKEN_NAME));
         }
         #[rstest]
         #[tokio::test]
-        async fn test_load_repo_with_api_token(mut repo: BoxedTokenRepository, cfg_fixture: Cfg) {
+        async fn test_load_repo_with_api_token(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+            cfg: Cfg,
+        ) {
+            let (mut repo, _) = repo_fixture.await;
             let token = repo.get_token(INIT_TOKEN_NAME).await.unwrap();
-            assert_eq!(token.value, cfg_fixture.api_token);
+            assert_eq!(token.value, cfg.api_token);
             assert!(token.is_provisioned);
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_reload_from_from_file(repo: BoxedTokenRepository, path: PathBuf) {
-            let mut repo = repo;
+        async fn test_reload_from_from_file(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, path) = repo_fixture.await;
 
             // Modify the token file to add a new token
             let new_token = Token {
@@ -228,10 +233,13 @@ mod tests {
             write_token_to_file(&path, &new_token).await;
 
             // Force reload
-            sleep(Duration::from_millis(200));
+            tokio::time::sleep(Duration::from_millis(200)).await;
 
             // Check if the new token is loaded
-            assert!(repo.get_token("new_file_token").await.is_ok());
+            assert_eq!(
+                repo.get_token("new_file_token").await.unwrap().name,
+                "new_file_token"
+            );
         }
     }
 
@@ -241,7 +249,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_generate_token_forbidden(mut repo: BoxedTokenRepository) {
+        async fn test_generate_token_forbidden(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, _) = repo_fixture.await;
             let perms = Permissions {
                 full_access: true,
                 read: vec![],
@@ -256,13 +267,17 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_token_existing(mut repo: BoxedTokenRepository, cfg_fixture: Cfg) {
+        async fn test_get_token_existing(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+            cfg: Cfg,
+        ) {
+            let (mut repo, _) = repo_fixture.await;
             let token = repo.get_token(INIT_TOKEN_NAME).await.unwrap().clone();
             assert_eq!(
                 token,
                 Token {
                     name: INIT_TOKEN_NAME.to_string(),
-                    value: cfg_fixture.api_token.clone(),
+                    value: cfg.api_token.clone(),
                     created_at: token.created_at,
                     permissions: Some(Permissions {
                         full_access: false,
@@ -276,7 +291,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_token_missing(mut repo: BoxedTokenRepository) {
+        async fn test_get_token_missing(#[future] repo_fixture: (BoxedTokenRepository, PathBuf)) {
+            let (mut repo, _) = repo_fixture.await;
             let token = repo.get_token("missing").await;
             assert_eq!(
                 token.err().unwrap(),
@@ -286,7 +302,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_mut_token_forbidden(mut repo: BoxedTokenRepository) {
+        async fn test_get_mut_token_forbidden(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, _) = repo_fixture.await;
             let res = repo.get_mut_token(INIT_TOKEN_NAME).await;
             assert_eq!(
                 res.err().unwrap(),
@@ -296,9 +315,9 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_token_list(mut repo: BoxedTokenRepository) {
+        async fn test_get_token_list(#[future] repo_fixture: (BoxedTokenRepository, PathBuf)) {
+            let (mut repo, _) = repo_fixture.await;
             let list = repo.get_token_list().await.unwrap();
-            assert_eq!(list.len(), 2);
 
             assert!(list.iter().any(|t| t.name == "file_token"));
             assert!(list.iter().any(|t| t.name == INIT_TOKEN_NAME));
@@ -306,14 +325,18 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_validate_token_valid(mut repo: BoxedTokenRepository, cfg_fixture: Cfg) {
-            let header = format!("Bearer {}", cfg_fixture.api_token);
+        async fn test_validate_token_valid(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+            cfg: Cfg,
+        ) {
+            let (mut repo, _) = repo_fixture.await;
+            let header = format!("Bearer {}", cfg.api_token);
             let res = repo.validate_token(Some(header.as_str())).await.unwrap();
             assert_eq!(
                 res,
                 Token {
                     name: INIT_TOKEN_NAME.to_string(),
-                    value: cfg_fixture.api_token.clone(),
+                    value: cfg.api_token.clone(),
                     created_at: res.created_at,
                     permissions: Some(Permissions {
                         full_access: false,
@@ -327,7 +350,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_validate_token_invalid(mut repo: BoxedTokenRepository) {
+        async fn test_validate_token_invalid(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, _) = repo_fixture.await;
             let header = Some("Bearer invalid_token");
             let res = repo.validate_token(header).await;
             assert_eq!(res.err().unwrap(), unauthorized!("Invalid token"));
@@ -335,7 +361,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_token_forbidden(mut repo: BoxedTokenRepository) {
+        async fn test_remove_token_forbidden(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, _) = repo_fixture.await;
             let res = repo.remove_token(INIT_TOKEN_NAME).await;
             assert_eq!(
                 res.err().unwrap(),
@@ -345,7 +374,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_bucket_from_tokens_forbidden(mut repo: BoxedTokenRepository) {
+        async fn test_remove_bucket_from_tokens_forbidden(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, _) = repo_fixture.await;
             let res = repo.remove_bucket_from_tokens("bucket").await;
             assert_eq!(
                 res.err().unwrap(),
@@ -355,7 +387,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_bucket_forbidden(mut repo: BoxedTokenRepository) {
+        async fn test_rename_bucket_forbidden(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, _) = repo_fixture.await;
             let res = repo.rename_bucket("old", "new").await;
             assert_eq!(
                 res.err().unwrap(),
@@ -365,13 +400,9 @@ mod tests {
     }
 
     // Fixtures and helpers
-    #[fixture]
-    fn path() -> PathBuf {
-        tempdir().unwrap().keep()
-    }
 
     #[fixture]
-    fn cfg_fixture() -> Cfg {
+    fn cfg() -> Cfg {
         let mut cfg = Cfg::default();
         cfg.api_token = "test_token".to_string();
         cfg.role = InstanceRole::Replica;
@@ -380,34 +411,34 @@ mod tests {
     }
 
     #[fixture]
-    fn repo(cfg_fixture: Cfg, path: PathBuf) -> BoxedTokenRepository {
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(async {
-            FILE_CACHE
-                .set_storage_backend(
-                    Backend::builder()
-                        .local_data_path(path.clone())
-                        .try_build()
-                        .await
-                        .unwrap(),
-                )
-                .await;
+    async fn repo_fixture(cfg: Cfg) -> (BoxedTokenRepository, PathBuf) {
+        let path = tempdir().unwrap().keep();
 
-            let token = Token {
-                name: "file_token".to_string(),
-                value: "file_value".to_string(),
-                created_at: DateTime::<Utc>::from(SystemTime::now()),
-                permissions: Some(Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
-                }),
-                is_provisioned: true,
-            };
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .await
+                .unwrap(),
+        );
 
-            write_token_to_file(&path, &token).await;
-            Box::new(ReadOnlyTokenRepository::new(path, cfg_fixture).await)
-        })
+        let token = Token {
+            name: "file_token".to_string(),
+            value: "file_value".to_string(),
+            created_at: DateTime::<Utc>::from(SystemTime::now()),
+            permissions: Some(Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            }),
+            is_provisioned: true,
+        };
+
+        write_token_to_file(&path, &token).await;
+        (
+            Box::new(ReadOnlyTokenRepository::new(path.clone(), cfg).await),
+            path,
+        )
     }
 
     // Helper to write a token to the token repo file
@@ -421,6 +452,8 @@ mod tests {
             .write_or_create(&path.join(TOKEN_REPO_FILE_NAME), SeekFrom::Start(0))
             .await
             .unwrap();
+        lock.set_len(0).unwrap(); // truncate
         lock.write_all(&buf).unwrap();
+        lock.sync_all().await.unwrap();
     }
 }

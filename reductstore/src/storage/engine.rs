@@ -783,7 +783,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         #[serial]
         async fn test_rename_bucket(#[future] storage: Arc<StorageEngine>) {
             let _reset = relax_locks();
@@ -829,7 +829,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         #[serial]
         async fn test_rename_bucket_with_non_existing_name(#[future] storage: Arc<StorageEngine>) {
             let _reset = relax_locks();
@@ -841,7 +841,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         #[serial]
         async fn test_rename_bucket_with_existing_name(#[future] storage: Arc<StorageEngine>) {
             let _reset = relax_locks();
@@ -954,7 +954,7 @@ mod tests {
             .try_build()
             .await
             .unwrap();
-        FILE_CACHE.set_storage_backend(backend).await;
+        FILE_CACHE.set_storage_backend(backend);
         Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())

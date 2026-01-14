@@ -126,7 +126,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_fifo_quota_keeping(path: PathBuf) {
+    async fn test_fifo_quota_keeping(#[future] path: PathBuf) {
         let bucket = bucket(
             BucketSettings {
                 max_block_size: Some(20),
@@ -161,7 +161,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_hard_quota_keeping(path: PathBuf) {
+    async fn test_hard_quota_keeping(#[future] path: PathBuf) {
         let bucket = bucket(
             BucketSettings {
                 quota_type: Some(QuotaType::HARD),
@@ -182,7 +182,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_blob_bigger_than_quota(path: PathBuf) {
+    async fn test_blob_bigger_than_quota(#[future] path: PathBuf) {
         let bucket = bucket(
             BucketSettings {
                 max_block_size: Some(5),

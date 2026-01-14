@@ -250,8 +250,9 @@ pub(crate) mod tests {
         use tempfile::tempdir;
 
         #[rstest]
-        #[tokio::test]
-        async fn test_ok(file_to_read: PathBuf, content_size: usize) {
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_ok(#[future] file_to_read: PathBuf, content_size: usize) {
+            let file_to_read = file_to_read.await;
             let content_size = content_size as u64;
             let (_data, len) = read_in_chunks(&file_to_read, 0, content_size, 0)
                 .await
@@ -265,8 +266,9 @@ pub(crate) mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
-        async fn test_eof(file_to_read: PathBuf, content_size: usize) {
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_eof(#[future] file_to_read: PathBuf, content_size: usize) {
+            let file_to_read = file_to_read.await;
             let content_size = content_size as u64;
             let err = read_in_chunks(&file_to_read, content_size, content_size, 0)
                 .await
@@ -280,19 +282,20 @@ pub(crate) mod tests {
 
         #[fixture]
         fn content_size() -> usize {
-            MAX_IO_BUFFER_SIZE + 1
+            MAX_IO_BUFFER_SIZE + 128
         }
+
         #[fixture]
-        fn file_to_read(content_size: usize) -> PathBuf {
+        async fn file_to_read(content_size: usize) -> PathBuf {
             let path = tempdir().unwrap().keep();
-            let rt = tokio::runtime::Handle::current();
-            rt.block_on(
-                FILE_CACHE.set_storage_backend(
-                    tokio::runtime::Handle::current()
-                        .block_on(Backend::builder().local_data_path(path.clone()).try_build())
-                        .unwrap(),
-                ),
-            );
+
+            let backend = Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .await
+                .unwrap();
+
+            FILE_CACHE.set_storage_backend(backend);
 
             let tmp_file = path.join("test_file");
             std::fs::write(&tmp_file, vec![0; content_size]).unwrap();
@@ -309,8 +312,9 @@ pub(crate) mod tests {
         use std::sync::Arc;
 
         #[rstest]
-        #[tokio::test]
-        async fn test_read_chunk(entry: Arc<Entry>) {
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_read_chunk(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
             write_stub_record(&entry, 1000).await;
             let mut reader = entry.begin_read(1000).await.unwrap();
             assert_eq!(
@@ -320,8 +324,9 @@ pub(crate) mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
-        async fn test_read(entry: Arc<Entry>) {
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_read(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
             write_stub_record(&entry, 1000).await;
             let mut reader = entry.begin_read(1000).await.unwrap();
             let mut buf = vec![0; 4];
@@ -331,7 +336,7 @@ pub(crate) mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_empty_body(record: Record) {
             let mut reader = RecordReader::form_record(record);
             let mut buf = vec![0; 4];
@@ -346,14 +351,15 @@ pub(crate) mod tests {
         #[case(SeekFrom::Start(5), 5, 4, b"5678")]
         #[case(SeekFrom::End(-5), 5, 4, b"5678")]
         #[case(SeekFrom::Current(2), 2, 4, b"2345")]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_seek(
-            entry: Arc<Entry>,
+            #[future] entry: Arc<Entry>,
             #[case] seek_from: SeekFrom,
             #[case] expected_pos: u64,
             #[case] read_size: usize,
             #[case] expected_data: &[u8],
         ) {
+            let entry = entry.await;
             write_stub_record(&entry, 1000).await;
             let mut reader = entry.begin_read(1000).await.unwrap();
             let new_pos = reader.seek(seek_from).unwrap();
@@ -368,8 +374,9 @@ pub(crate) mod tests {
         #[case(SeekFrom::Start(20))]
         #[case(SeekFrom::End(1))]
         #[case(SeekFrom::Current(-1))]
-        #[tokio::test]
-        async fn test_seek_wrong(entry: Arc<Entry>, #[case] seek_from: SeekFrom) {
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_seek_wrong(#[future] entry: Arc<Entry>, #[case] seek_from: SeekFrom) {
+            let entry = entry.await;
             write_stub_record(&entry, 1000).await;
             let mut reader = entry.begin_read(1000).await.unwrap();
             let err = reader.seek(seek_from).err().unwrap();
@@ -378,8 +385,9 @@ pub(crate) mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
-        async fn test_read_with_error(entry: Arc<Entry>) {
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_read_with_error(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
             write_record(&entry, 1000, vec![0; 100]).await;
 
             fs::write(entry.path().join("1000.blk"), "").unwrap();
@@ -392,7 +400,7 @@ pub(crate) mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_state(mut record: Record) {
             record.state = 1;
             let reader = RecordReader::form_record(record);
@@ -400,7 +408,7 @@ pub(crate) mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_meta_mut(record: Record) {
             let mut reader = RecordReader::form_record(record);
             let meta_mut = reader.meta_mut();

@@ -121,7 +121,7 @@ mod tests {
     #[rstest]
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_single_read_ts(
         #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
@@ -158,7 +158,7 @@ mod tests {
     #[rstest]
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_single_read_query(
         #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,

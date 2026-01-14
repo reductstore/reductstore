@@ -245,15 +245,13 @@ mod tests {
             },
             ..Cfg::default()
         };
-        FILE_CACHE
-            .set_storage_backend(
-                Backend::builder()
-                    .local_data_path(cfg.data_path.clone())
-                    .try_build()
-                    .await
-                    .unwrap(),
-            )
-            .await;
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(cfg.data_path.clone())
+                .try_build()
+                .await
+                .unwrap(),
+        );
         let storage_engine = StorageEngine::builder()
             .with_cfg(cfg.clone())
             .with_data_path(cfg.data_path.clone())

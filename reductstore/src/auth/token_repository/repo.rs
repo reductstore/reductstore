@@ -262,7 +262,6 @@ mod tests {
     use reduct_base::{conflict, unauthorized, unprocessable_entity};
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
-    use tokio::runtime::Handle;
 
     #[rstest]
     #[tokio::test]
@@ -708,13 +707,13 @@ mod tests {
     }
 
     async fn build_repo_at(path: &PathBuf, cfg: &Cfg) -> BoxedTokenRepository {
-        FILE_CACHE
-            .set_storage_backend(
-                Handle::current()
-                    .block_on(Backend::builder().local_data_path(path.clone()).try_build())
-                    .unwrap(),
-            )
-            .await;
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .await
+                .unwrap(),
+        );
 
         TokenRepositoryBuilder::new(cfg.clone())
             .build(path.clone())

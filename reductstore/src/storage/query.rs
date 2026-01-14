@@ -219,7 +219,8 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_expired(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_task_expired(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             ..Default::default()
@@ -244,7 +245,8 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_ok(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_task_ok(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let options = QueryOptions::default();
         let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
 
@@ -266,7 +268,10 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_continuous_ok(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_task_continuous_ok(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             continuous: true,
@@ -316,7 +321,8 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test]
-    async fn test_query_task_err(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_task_err(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let options = QueryOptions::default();
         let query = build_query(0, 10, options.clone(), IoConfig::default()).unwrap();
 
@@ -354,7 +360,10 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test]
-    async fn test_query_task_blocking_error(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_task_blocking_error(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
         let options = QueryOptions::default();
         let query: Box<dyn Query + Send + Sync> = Box::new(PanickingQuery {
             io: IoConfig::default(),
@@ -383,28 +392,30 @@ mod tests {
     }
 
     #[fixture]
-    fn block_manager() -> Arc<AsyncRwLock<BlockManager>> {
+    async fn block_manager() -> Arc<AsyncRwLock<BlockManager>> {
         let path = tempfile::tempdir()
             .unwrap()
             .keep()
             .join("bucket")
             .join("entry");
-
-        let rt = tokio::runtime::Handle::current();
-        rt.block_on(
-            FILE_CACHE.set_storage_backend(
-                rt.block_on(Backend::builder().local_data_path(path.clone()).try_build())
-                    .unwrap(),
-            ),
+        FILE_CACHE.set_storage_backend(
+            Backend::builder()
+                .local_data_path(path.clone())
+                .try_build()
+                .await
+                .unwrap(),
         );
 
-        let mut block_manager = rt.block_on(BlockManager::build(
+        let mut block_manager = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join("index")),
             Cfg::default().into(),
-        ));
-        let block_ref = rt.block_on(block_manager.start_new_block(0, 10)).unwrap();
-        rt.block_on(block_ref.write())
+        )
+        .await;
+        let block_ref = block_manager.start_new_block(0, 10).await.unwrap();
+        block_ref
+            .write()
+            .await
             .unwrap()
             .insert_or_update_record(Record {
                 timestamp: Some(Timestamp {
@@ -418,7 +429,9 @@ mod tests {
                 content_type: "".to_string(),
             });
 
-        rt.block_on(block_ref.write())
+        block_ref
+            .write()
+            .await
             .unwrap()
             .insert_or_update_record(Record {
                 timestamp: Some(Timestamp {
@@ -432,7 +445,7 @@ mod tests {
                 content_type: "".to_string(),
             });
 
-        rt.block_on(block_manager.finish_block(block_ref)).unwrap();
+        block_manager.finish_block(block_ref).await.unwrap();
         Arc::new(AsyncRwLock::new(block_manager))
     }
 

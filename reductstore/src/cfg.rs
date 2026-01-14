@@ -342,15 +342,11 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             backend_builder = backend_builder.license(license.clone());
         }
 
-        // Use tokio::task::block_in_place to allow blocking in async context during initialization
-        let backend = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(backend_builder.try_build())
-        })
-        .map_err(|e| {
+        let backend = backend_builder.try_build().await.map_err(|e| {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?;
 
-        FILE_CACHE.set_storage_backend(backend).await;
+        FILE_CACHE.set_storage_backend(backend);
         FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
         FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::Replica);
         Ok(())
@@ -821,7 +817,7 @@ mod tests {
         #[case(InstanceRole::Replica, true)]
         #[case(InstanceRole::Primary, false)]
         #[case(InstanceRole::Secondary, false)]
-        #[tokio::test(flavor = "current_thread")]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_build_no_lock_file(
             #[case] role: InstanceRole,
             #[case] expected_lock: bool,

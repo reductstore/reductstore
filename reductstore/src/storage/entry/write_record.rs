@@ -190,7 +190,8 @@ mod tests {
                 max_block_records: 10000,
             },
             path,
-        );
+        )
+        .await;
 
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
@@ -247,7 +248,8 @@ mod tests {
                 max_block_records: 1,
             },
             path,
-        );
+        )
+        .await;
 
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2).await;
@@ -300,7 +302,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_belated_record(entry: Arc<Entry>) {
+    async fn test_begin_write_belated_record(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 3000000).await;
         write_stub_record(&entry, 2000000).await;
@@ -333,7 +336,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_belated_first(entry: Arc<Entry>) {
+    async fn test_begin_write_belated_first(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 3000000).await;
         write_stub_record(&entry, 1000000).await;
 
@@ -357,7 +361,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_existing_record(entry: Arc<Entry>) {
+    async fn test_begin_write_existing_record(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 2000000).await;
         let err = entry
@@ -374,7 +379,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_existing_record_belated(entry: Arc<Entry>) {
+    async fn test_begin_write_existing_record_belated(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 2000000).await;
         write_stub_record(&entry, 1000000).await;
         let err = entry
@@ -398,7 +404,8 @@ mod tests {
                 max_block_records: 2,
             },
             path,
-        );
+        )
+        .await;
 
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 3000000).await;
@@ -434,7 +441,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_override_errored(entry: Arc<Entry>) {
+    async fn test_begin_override_errored(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         let mut sender = entry
             .clone()
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
@@ -481,7 +489,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_not_override_if_different_size(entry: Arc<Entry>) {
+    async fn test_begin_not_override_if_different_size(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         let mut sender = entry
             .clone()
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
@@ -510,7 +519,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_belated_record_readable_after_rotation(entry: Arc<Entry>) {
+    async fn test_belated_record_readable_after_rotation(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         // Fill the first block
         write_stub_record(&entry, 1000000).await;
         // Rotate to a new block

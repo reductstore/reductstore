@@ -273,10 +273,11 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_small_ok(
-            block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
             #[future] block_ref: BlockRef,
         ) {
             let block_ref = block_ref.await;
+            let block_manager = block_manager.await;
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME)
                     .await
@@ -316,10 +317,11 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_big_ok(
-            block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
             #[future] block_ref: BlockRef,
         ) {
             let block_ref = block_ref.await;
+            let block_manager = block_manager.await;
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, BIG_RECORD_TIME)
                     .await
@@ -363,10 +365,11 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_too_long(
-            block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
             #[future] block_ref: BlockRef,
         ) {
             let block_ref = block_ref.await;
+            let block_manager = block_manager.await;
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME)
                     .await
@@ -395,10 +398,11 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_too_short(
-            block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
             #[future] block_ref: BlockRef,
         ) {
             let block_ref = block_ref.await;
+            let block_manager = block_manager.await;
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME)
                     .await
@@ -423,10 +427,11 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_timeout(
-            block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
             #[future] block_ref: BlockRef,
         ) {
             let block_ref = block_ref.await;
+            let block_manager = block_manager.await;
             let mut writer =
                 RecordWriter::try_new(block_manager.clone(), block_ref, SMALL_RECORD_TIME)
                     .await
@@ -453,10 +458,11 @@ mod tests {
         #[serial]
         #[tokio::test]
         async fn test_finish_write_record_lock_timeout(
-            block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
             #[future] block_ref: BlockRef,
         ) {
             let block_ref = block_ref.await;
+            let block_manager = block_manager.await;
             struct ResetGuard;
             impl Drop for ResetGuard {
                 fn drop(&mut self) {
@@ -479,18 +485,19 @@ mod tests {
         }
 
         #[fixture]
-        fn block_manager(path: PathBuf) -> Arc<AsyncRwLock<BlockManager>> {
-            let handle = tokio::runtime::Handle::current();
-            let manager = handle.block_on(BlockManager::build(
+        async fn block_manager(path: PathBuf) -> Arc<AsyncRwLock<BlockManager>> {
+            let manager = BlockManager::build(
                 path.clone(),
                 BlockIndex::new(path.clone()),
                 Cfg::default().into(),
-            ));
+            )
+            .await;
             Arc::new(AsyncRwLock::new(manager))
         }
 
         #[fixture]
-        async fn block_ref(block_manager: Arc<AsyncRwLock<BlockManager>>) -> BlockRef {
+        async fn block_ref(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) -> BlockRef {
+            let block_manager = block_manager.await;
             let block_ref = block_manager
                 .write()
                 .await

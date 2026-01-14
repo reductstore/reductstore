@@ -377,7 +377,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_write_batched_records(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
@@ -601,7 +601,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_write_batched_records_error(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
