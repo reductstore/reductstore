@@ -189,20 +189,7 @@ impl Wal for WalImpl {
 
     async fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError> {
         let path = self.block_wal_path(block_id);
-        let mut file = FILE_CACHE
-            .read(&path, SeekFrom::Start(0))
-            .await
-            .map_err(|e| {
-                // Convert NotFound IO errors to NotFound error code for proper API response
-                if e.kind() == std::io::ErrorKind::NotFound {
-                    ReductError {
-                        status: reduct_base::error::ErrorCode::NotFound,
-                        message: format!("WAL file not found: {:?}", path),
-                    }
-                } else {
-                    e.into()
-                }
-            })?;
+        let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
 
         let mut entries = Vec::new();
         loop {
