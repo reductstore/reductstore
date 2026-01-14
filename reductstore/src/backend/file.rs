@@ -92,16 +92,55 @@ impl OpenOptions {
             }
         }
 
-        let file = self.inner.open(full_path.clone())?;
-        Ok(File {
-            inner: file,
-            backend: Arc::clone(&self.backend),
-            path: full_path,
-            last_synced: Instant::now(),
-            is_synced: true,
-            mode: self.mode.clone(),
-            ignore_write: self.ignore_write,
-        })
+        // On Windows, file handles may not be released immediately even after closing,
+        // causing "Access is denied" or "Sharing violation" errors. Retry with exponential backoff.
+        #[cfg(target_os = "windows")]
+        {
+            use tokio::time::{sleep, Duration};
+            const MAX_RETRIES: u32 = 5;
+            const INITIAL_DELAY_MS: u64 = 10;
+
+            for attempt in 0..MAX_RETRIES {
+                match self.inner.open(full_path.clone()) {
+                    Ok(file) => {
+                        return Ok(File {
+                            inner: file,
+                            backend: Arc::clone(&self.backend),
+                            path: full_path,
+                            last_synced: Instant::now(),
+                            is_synced: true,
+                            mode: self.mode.clone(),
+                            ignore_write: self.ignore_write,
+                        });
+                    }
+                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                        if attempt < MAX_RETRIES - 1 {
+                            // Exponential backoff: 10ms, 20ms, 40ms, 80ms
+                            let delay = Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));
+                            sleep(delay).await;
+                            continue;
+                        }
+                        return Err(e);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            unreachable!()
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let file = self.inner.open(full_path.clone())?;
+            Ok(File {
+                inner: file,
+                backend: Arc::clone(&self.backend),
+                path: full_path,
+                last_synced: Instant::now(),
+                is_synced: true,
+                mode: self.mode.clone(),
+                ignore_write: self.ignore_write,
+            })
+        }
     }
 }
 
