@@ -22,7 +22,10 @@ inputs:
   secret-access-key:
     description: 'AWS Secret Access Key'
     required: true
-
+  upload-artifacts:
+    description: 'Whether to upload artifacts.'
+    required: false
+    default: 'true'
 runs:
   using: 'composite'
   steps:
@@ -78,7 +81,7 @@ runs:
     - name: Upload binary (PR)
       uses: actions/upload-artifact@v4
       # Only upload Linux binary for PRs for sanity test
-      if: github.event_name == 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
+      if: github.event_name == 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu' && inputs.upload-artifacts == 'true'
       with:
         name: reductstore-${{ inputs.target }}
         path: target/${{inputs.target}}/ci/reductstore
@@ -92,7 +95,7 @@ runs:
 
     - name: Upload binary (Release)
       uses: actions/upload-artifact@v4
-      if: github.event_name != 'pull_request'
+      if: github.event_name != 'pull_request' &&  inputs.upload-artifacts == 'true'
       with:
         name: reductstore-${{ inputs.target }}
         path: target/${{inputs.target}}/release/reductstore${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
@@ -111,6 +114,7 @@ runs:
 
     - name: Upload tests
       uses: actions/upload-artifact@v4
+      if: inputs.upload-artifacts == 'true'
       with:
         name: reductstore-tests-${{ inputs.target }}
         path: target/${{ inputs.target }}/tests

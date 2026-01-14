@@ -35,3 +35,4 @@ jobs:
           compiler: ${{ matrix.compiler }}
           access-key-id: ${{ secrets.S3_CACHE_ACCESS_KEY }}
           secret-access-key: ${{ secrets.S3_CACHE_SECRET_KEY }}
+          upload-artifacts: 'false'
