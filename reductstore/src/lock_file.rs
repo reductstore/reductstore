@@ -238,13 +238,13 @@ impl LockFile for ImplLockFile {
 
         debug!("Releasing lock file: {:?}", self.path);
         let path = self.path.clone();
-        
+
         // Try to remove the file, but don't error if it doesn't exist (already removed)
         match FILE_CACHE.remove(&path).await {
-            Ok(_) => {},
+            Ok(_) => {}
             Err(err) if err.status == reduct_base::error::ErrorCode::NotFound => {
                 // File already removed, this is okay
-            },
+            }
             Err(err) => {
                 error!("Failed to remove lock file: {:?}", err);
             }
@@ -265,10 +265,10 @@ impl Drop for ImplLockFile {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                     // Try to remove the file, but don't error if it doesn't exist (already removed)
                     match FILE_CACHE.remove(&path).await {
-                        Ok(_) => {},
+                        Ok(_) => {}
                         Err(err) if err.status == reduct_base::error::ErrorCode::NotFound => {
                             // File already removed, this is okay
-                        },
+                        }
                         Err(err) => {
                             error!("Failed to remove lock file: {:?}", err);
                         }
