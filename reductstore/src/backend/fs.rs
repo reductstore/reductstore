@@ -8,6 +8,20 @@ use crate::backend::{ObjectMetadata, StorageBackend};
 use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
+#[cfg(target_os = "windows")]
+fn is_windows_file_in_use_error(e: &std::io::Error) -> bool {
+    // Check for Windows-specific error codes that indicate file is in use
+    // ERROR_SHARING_VIOLATION (32) - file is being used by another process
+    // ERROR_ACCESS_DENIED (5) - access denied (mapped to PermissionDenied)
+    // ERROR_LOCK_VIOLATION (33) - file lock violation
+    if let Some(os_error) = e.raw_os_error() {
+        matches!(os_error, 5 | 32 | 33)
+    } else {
+        // Also check for PermissionDenied kind
+        e.kind() == std::io::ErrorKind::PermissionDenied
+    }
+}
+
 pub(crate) struct FileSystemBackend {
     path: PathBuf,
 }
@@ -26,7 +40,7 @@ impl StorageBackend for FileSystemBackend {
 
     async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
         // On Windows, file handles may not be released immediately even after closing,
-        // causing "Access is denied" errors. Retry with exponential backoff.
+        // causing "Access is denied" or "Sharing violation" errors. Retry with exponential backoff.
         #[cfg(target_os = "windows")]
         {
             use tokio::time::{sleep, Duration};
@@ -36,7 +50,7 @@ impl StorageBackend for FileSystemBackend {
             for attempt in 0..MAX_RETRIES {
                 match tokio::fs::rename(from, to).await {
                     Ok(()) => return Ok(()),
-                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    Err(e) if is_windows_file_in_use_error(&e) => {
                         if attempt < MAX_RETRIES - 1 {
                             // Exponential backoff: 10ms, 20ms, 40ms, 80ms
                             let delay = Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));
@@ -59,7 +73,7 @@ impl StorageBackend for FileSystemBackend {
 
     async fn remove(&self, path: &Path) -> std::io::Result<()> {
         // On Windows, file handles may not be released immediately even after closing,
-        // causing "Access is denied" errors. Retry with exponential backoff.
+        // causing "Access is denied" or "Sharing violation" errors. Retry with exponential backoff.
         #[cfg(target_os = "windows")]
         {
             use tokio::time::{sleep, Duration};
@@ -69,7 +83,7 @@ impl StorageBackend for FileSystemBackend {
             for attempt in 0..MAX_RETRIES {
                 match tokio::fs::remove_file(path).await {
                     Ok(()) => return Ok(()),
-                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    Err(e) if is_windows_file_in_use_error(&e) => {
                         if attempt < MAX_RETRIES - 1 {
                             // Exponential backoff: 10ms, 20ms, 40ms, 80ms
                             let delay = Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));
@@ -92,7 +106,7 @@ impl StorageBackend for FileSystemBackend {
 
     async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
         // On Windows, file handles may not be released immediately even after closing,
-        // causing "Access is denied" errors. Retry with exponential backoff.
+        // causing "Access is denied" or "Sharing violation" errors. Retry with exponential backoff.
         #[cfg(target_os = "windows")]
         {
             use tokio::time::{sleep, Duration};
@@ -102,7 +116,7 @@ impl StorageBackend for FileSystemBackend {
             for attempt in 0..MAX_RETRIES {
                 match tokio::fs::remove_dir_all(path).await {
                     Ok(()) => return Ok(()),
-                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    Err(e) if is_windows_file_in_use_error(&e) => {
                         if attempt < MAX_RETRIES - 1 {
                             // Exponential backoff: 10ms, 20ms, 40ms, 80ms
                             let delay = Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));

@@ -10,6 +10,20 @@ use std::time::Instant;
 use std::{fs, io};
 
 #[cfg(target_os = "windows")]
+fn is_windows_file_in_use_error(e: &io::Error) -> bool {
+    // Check for Windows-specific error codes that indicate file is in use
+    // ERROR_SHARING_VIOLATION (32) - file is being used by another process
+    // ERROR_ACCESS_DENIED (5) - access denied (mapped to PermissionDenied)
+    // ERROR_LOCK_VIOLATION (33) - file lock violation
+    if let Some(os_error) = e.raw_os_error() {
+        matches!(os_error, 5 | 32 | 33)
+    } else {
+        // Also check for PermissionDenied kind
+        e.kind() == io::ErrorKind::PermissionDenied
+    }
+}
+
+#[cfg(target_os = "windows")]
 fn retry_on_windows<F>(mut operation: F) -> io::Result<()>
 where
     F: FnMut() -> io::Result<()>,
@@ -20,7 +34,7 @@ where
     for attempt in 0..MAX_RETRIES {
         match operation() {
             Ok(()) => return Ok(()),
-            Err(e) if e.kind() == io::ErrorKind::PermissionDenied => {
+            Err(e) if is_windows_file_in_use_error(&e) => {
                 if attempt < MAX_RETRIES - 1 {
                     // Exponential backoff: 10ms, 20ms, 40ms, 80ms
                     let delay = std::time::Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));

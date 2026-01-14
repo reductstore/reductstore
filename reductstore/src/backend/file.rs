@@ -11,6 +11,20 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 
+#[cfg(target_os = "windows")]
+fn is_windows_file_in_use_error(e: &std::io::Error) -> bool {
+    // Check for Windows-specific error codes that indicate file is in use
+    // ERROR_SHARING_VIOLATION (32) - file is being used by another process
+    // ERROR_ACCESS_DENIED (5) - access denied (mapped to PermissionDenied)
+    // ERROR_LOCK_VIOLATION (33) - file lock violation
+    if let Some(os_error) = e.raw_os_error() {
+        matches!(os_error, 5 | 32 | 33)
+    } else {
+        // Also check for PermissionDenied kind
+        e.kind() == std::io::ErrorKind::PermissionDenied
+    }
+}
+
 #[derive(PartialEq, Clone, Debug)]
 pub enum AccessMode {
     Read,
@@ -113,7 +127,7 @@ impl OpenOptions {
                             ignore_write: self.ignore_write,
                         });
                     }
-                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    Err(e) if is_windows_file_in_use_error(&e) => {
                         if attempt < MAX_RETRIES - 1 {
                             // Exponential backoff: 10ms, 20ms, 40ms, 80ms
                             let delay = Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));
