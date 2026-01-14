@@ -46,7 +46,7 @@ pub(super) struct LocalCache {
 impl LocalCache {
     pub fn new(path: PathBuf, max_size: u64) -> Self {
         info!("Cleaning up local cache at {:?}", path);
-        
+
         #[cfg(target_os = "windows")]
         {
             if let Err(err) = retry_on_windows(|| {
