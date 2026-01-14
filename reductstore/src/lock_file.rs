@@ -245,6 +245,12 @@ impl LockFile for ImplLockFile {
             Err(err) if err.status == reduct_base::error::ErrorCode::NotFound => {
                 // File already removed, this is okay
             }
+            Err(err)
+                if err.status == reduct_base::error::ErrorCode::InternalServerError
+                    && err.message.contains("cannot find the file") =>
+            {
+                // File already removed on Windows, this is okay
+            }
             Err(err) => {
                 error!("Failed to remove lock file: {:?}", err);
             }
@@ -268,6 +274,12 @@ impl Drop for ImplLockFile {
                         Ok(_) => {}
                         Err(err) if err.status == reduct_base::error::ErrorCode::NotFound => {
                             // File already removed, this is okay
+                        }
+                        Err(err)
+                            if err.status == reduct_base::error::ErrorCode::InternalServerError
+                                && err.message.contains("cannot find the file") =>
+                        {
+                            // File already removed on Windows, this is okay
                         }
                         Err(err) => {
                             error!("Failed to remove lock file: {:?}", err);
