@@ -94,6 +94,7 @@ impl Display for ErrorCode {
 impl From<std::io::Error> for ReductError {
     fn from(err: std::io::Error) -> Self {
         let status = match err.kind() {
+            std::io::ErrorKind::NotFound => ErrorCode::NotFound,
             std::io::ErrorKind::Unsupported => ErrorCode::MethodNotAllowed,
             _ => ErrorCode::InternalServerError,
         };
