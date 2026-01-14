@@ -25,11 +25,69 @@ impl StorageBackend for FileSystemBackend {
     }
 
     async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
-        tokio::fs::rename(from, to).await
+        // On Windows, file handles may not be released immediately even after closing,
+        // causing "Access is denied" errors. Retry with exponential backoff.
+        #[cfg(target_os = "windows")]
+        {
+            use tokio::time::{sleep, Duration};
+            const MAX_RETRIES: u32 = 5;
+            const INITIAL_DELAY_MS: u64 = 10;
+
+            for attempt in 0..MAX_RETRIES {
+                match tokio::fs::rename(from, to).await {
+                    Ok(()) => return Ok(()),
+                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                        if attempt < MAX_RETRIES - 1 {
+                            // Exponential backoff: 10ms, 20ms, 40ms, 80ms
+                            let delay = Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));
+                            sleep(delay).await;
+                            continue;
+                        }
+                        return Err(e);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            unreachable!()
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            tokio::fs::rename(from, to).await
+        }
     }
 
     async fn remove(&self, path: &Path) -> std::io::Result<()> {
-        tokio::fs::remove_file(path).await
+        // On Windows, file handles may not be released immediately even after closing,
+        // causing "Access is denied" errors. Retry with exponential backoff.
+        #[cfg(target_os = "windows")]
+        {
+            use tokio::time::{sleep, Duration};
+            const MAX_RETRIES: u32 = 5;
+            const INITIAL_DELAY_MS: u64 = 10;
+
+            for attempt in 0..MAX_RETRIES {
+                match tokio::fs::remove_file(path).await {
+                    Ok(()) => return Ok(()),
+                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                        if attempt < MAX_RETRIES - 1 {
+                            // Exponential backoff: 10ms, 20ms, 40ms, 80ms
+                            let delay = Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));
+                            sleep(delay).await;
+                            continue;
+                        }
+                        return Err(e);
+                    }
+                    Err(e) => return Err(e),
+                }
+            }
+            unreachable!()
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            tokio::fs::remove_file(path).await
+        }
     }
 
     async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
