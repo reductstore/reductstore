@@ -10,7 +10,6 @@ on:
       - CHANGELOG.md
 
   pull_request:
-    branches: [ main, stable ]
     paths-ignore:
       - docs/**
       - README.md
