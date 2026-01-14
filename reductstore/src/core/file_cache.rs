@@ -5,7 +5,6 @@ use crate::backend::file::{AccessMode, File};
 use crate::backend::{Backend, ObjectMetadata};
 use crate::core::cache::Cache;
 use crate::core::sync::{AsyncRwLock, RwLock};
-use futures::executor;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
@@ -33,6 +32,8 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
 
     #[cfg(test)]
     {
+        use futures::executor;
+
         // Use an isolated filesystem backend for tests to avoid relying on
         // other tests to initialise the global cache.
         let temp_dir = tempfile::tempdir()
@@ -244,12 +245,9 @@ impl FileCache {
     }
 
     /// Set the storage backend
-    pub fn set_storage_backend(&self, backpack: Backend) {
-        // to avoid making this function async, we use a blocking executor here
-        executor::block_on(async {
-            let mut backend = self.backend.write().await.unwrap();
-            *backend = backpack;
-        });
+    pub async fn set_storage_backend(&self, backpack: Backend) {
+        let mut backend = self.backend.write().await.unwrap();
+        *backend = backpack;
     }
 
     /// Set sync interval
@@ -494,6 +492,7 @@ impl Drop for FileCache {
 mod tests {
     use super::*;
 
+    use futures::executor;
     use std::fs;
     use std::io::Write;
 
@@ -621,13 +620,15 @@ mod tests {
     async fn test_cache_keeps_entries_with_weak_refs(tmp_dir: PathBuf) {
         let cache = {
             let cache = FileCache::new(1, Duration::from_secs(60), Duration::from_millis(100));
-            cache.set_storage_backend(
-                Backend::builder()
-                    .local_data_path(tempfile::tempdir().unwrap().keep())
-                    .try_build()
-                    .await
-                    .unwrap(),
-            );
+            cache
+                .set_storage_backend(
+                    Backend::builder()
+                        .local_data_path(tempfile::tempdir().unwrap().keep())
+                        .try_build()
+                        .await
+                        .unwrap(),
+                )
+                .await;
             cache
         };
 
@@ -709,7 +710,6 @@ mod tests {
             }
 
             cache.force_sync_all().await.unwrap();
-
             assert!(cache.cache.write().await.unwrap().get(&file_path).is_some());
         }
 
@@ -838,11 +838,17 @@ mod tests {
     #[fixture]
     fn cache(tmp_dir: PathBuf) -> FileCache {
         let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));
-        cache.set_storage_backend(
-            futures::executor::block_on(Backend::builder().local_data_path(tmp_dir).try_build())
-                .unwrap(),
-        );
-
+        executor::block_on(async {
+            cache
+                .set_storage_backend(
+                    Backend::builder()
+                        .local_data_path(tmp_dir)
+                        .try_build()
+                        .await
+                        .unwrap(),
+                )
+                .await;
+        });
         cache
     }
 

@@ -245,7 +245,6 @@ pub(crate) mod tests {
 
     mod read_in_chunks {
         use super::*;
-        use crate::backend::Backend;
         use std::path::PathBuf;
         use tempfile::tempdir;
 

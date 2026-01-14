@@ -383,8 +383,6 @@ mod tests {
     use super::*;
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_repository::TokenRepositoryBuilder;
-    use crate::backend::Backend;
-    use crate::core::file_cache::FILE_CACHE;
     use crate::ext::ext_repository::create_ext_repository;
     use crate::lock_file::{LockFile, LockFileBuilder};
     use crate::replication::ReplicationRepoBuilder;
@@ -856,14 +854,6 @@ mod tests {
             api_token: "init-token".to_string(),
             ..Cfg::default()
         };
-
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .await
-                .unwrap(),
-        );
 
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())

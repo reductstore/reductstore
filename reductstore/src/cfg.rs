@@ -346,7 +346,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?;
 
-        FILE_CACHE.set_storage_backend(backend);
+        FILE_CACHE.set_storage_backend(backend).await;
         FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
         FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::Replica);
         Ok(())
