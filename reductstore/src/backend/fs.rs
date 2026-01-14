@@ -11,11 +11,13 @@ use std::path::{Path, PathBuf};
 #[cfg(target_os = "windows")]
 fn is_windows_file_in_use_error(e: &std::io::Error) -> bool {
     // Check for Windows-specific error codes that indicate file is in use
-    // ERROR_SHARING_VIOLATION (32) - file is being used by another process
     // ERROR_ACCESS_DENIED (5) - access denied (mapped to PermissionDenied)
+    // ERROR_SHARING_VIOLATION (32) - file is being used by another process
     // ERROR_LOCK_VIOLATION (33) - file lock violation
+    // ERROR_BUSY (170) - The requested resource is in use
+    // ERROR_DELETE_PENDING (1141) - The file or directory is marked for deletion
     if let Some(os_error) = e.raw_os_error() {
-        matches!(os_error, 5 | 32 | 33)
+        matches!(os_error, 5 | 32 | 33 | 170 | 1141)
     } else {
         // Also check for PermissionDenied kind
         e.kind() == std::io::ErrorKind::PermissionDenied
@@ -44,15 +46,15 @@ impl StorageBackend for FileSystemBackend {
         #[cfg(target_os = "windows")]
         {
             use tokio::time::{sleep, Duration};
-            const MAX_RETRIES: u32 = 5;
-            const INITIAL_DELAY_MS: u64 = 10;
+            const MAX_RETRIES: u32 = 8;
+            const INITIAL_DELAY_MS: u64 = 50;
 
             for attempt in 0..MAX_RETRIES {
                 match tokio::fs::rename(from, to).await {
                     Ok(()) => return Ok(()),
                     Err(e) if is_windows_file_in_use_error(&e) => {
                         if attempt < MAX_RETRIES - 1 {
-                            // Exponential backoff: 10ms, 20ms, 40ms, 80ms
+                            // Exponential backoff: 50ms, 100ms, 200ms, 400ms, 800ms, 1600ms, 3200ms
                             let delay = Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));
                             sleep(delay).await;
                             continue;
@@ -77,15 +79,15 @@ impl StorageBackend for FileSystemBackend {
         #[cfg(target_os = "windows")]
         {
             use tokio::time::{sleep, Duration};
-            const MAX_RETRIES: u32 = 5;
-            const INITIAL_DELAY_MS: u64 = 10;
+            const MAX_RETRIES: u32 = 8;
+            const INITIAL_DELAY_MS: u64 = 50;
 
             for attempt in 0..MAX_RETRIES {
                 match tokio::fs::remove_file(path).await {
                     Ok(()) => return Ok(()),
                     Err(e) if is_windows_file_in_use_error(&e) => {
                         if attempt < MAX_RETRIES - 1 {
-                            // Exponential backoff: 10ms, 20ms, 40ms, 80ms
+                            // Exponential backoff: 50ms, 100ms, 200ms, 400ms, 800ms, 1600ms, 3200ms
                             let delay = Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));
                             sleep(delay).await;
                             continue;
@@ -110,15 +112,15 @@ impl StorageBackend for FileSystemBackend {
         #[cfg(target_os = "windows")]
         {
             use tokio::time::{sleep, Duration};
-            const MAX_RETRIES: u32 = 5;
-            const INITIAL_DELAY_MS: u64 = 10;
+            const MAX_RETRIES: u32 = 8;
+            const INITIAL_DELAY_MS: u64 = 50;
 
             for attempt in 0..MAX_RETRIES {
                 match tokio::fs::remove_dir_all(path).await {
                     Ok(()) => return Ok(()),
                     Err(e) if is_windows_file_in_use_error(&e) => {
                         if attempt < MAX_RETRIES - 1 {
-                            // Exponential backoff: 10ms, 20ms, 40ms, 80ms
+                            // Exponential backoff: 50ms, 100ms, 200ms, 400ms, 800ms, 1600ms, 3200ms
                             let delay = Duration::from_millis(INITIAL_DELAY_MS * (1 << attempt));
                             sleep(delay).await;
                             continue;
