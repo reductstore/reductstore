@@ -7,35 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
-
-- Fix deleting non-synced objects in S3 connector, [PR-1113](https://github.com/reductstore/reductstore/pull/1113)
-
-## 1.18.0-beta.3 - 2026-01-12
-
-### Changed
-
-- Replication `is_active` flag now reflects remote bucket availability when paused, [PR-1106](https://github.com/reductstore/reductstore/pull/1106)
-- Refactor storage/replication engines to tokio, [PR-1110](https://github.com/reductstore/reductstore/pull/1110)
-
-### Added
-
-- Option to disable compaction with `RS_ENGINE_COMPACTION_INTERVAL=0`, [PR-1106](https://github.com/reductstore/reductstore/pull/1107)
-
-### Fixed
-
-- Preserve provisioned replication mode changes across restarts, [PR-1108](https://github.com/reductstore/reductstore/pull/1108)
-
-## 1.18.0-beta.2 - 2026-01-09
-
-### Fixed
-
-- Fix block cache read access, [PR-1101](https://github.com/reductstore/reductstore/pull/1101)
-- Avoid long block write lock during save, [PR-1104](https://github.com/reductstore/reductstore/pull/1104)
-- Skip compact when block manager busy, [PR-1105](https://github.com/reductstore/reductstore/pull/1105)
-
-## 1.18.0-beta.1 - 2026-01-08
-
 ### Added
 
 - Support for Active/Passive deployment, [PR-1028](https://github.com/reductstore/reductstore/pull/1028)
@@ -47,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `RS_RWLOCK_TIMEOUT` and `RS_RWLOCK_FAILURE_ACTION` to configure lock timeout handling, [PR-1077](https://github.com/reductstore/reductstore/pull/1077)
 - Refactor thread pool, [PR-1080](https://github.com/reductstore/reductstore/pull/1080)
 - Add multi-entry IO batching, wildcard queries, and record update/remove endpoints, [PR-1095](https://github.com/reductstore/reductstore/pull/1095)
+- Option to disable compaction with `RS_ENGINE_COMPACTION_INTERVAL=0`, [PR-1106](https://github.com/reductstore/reductstore/pull/1107)
 
 ### Internal
 
@@ -57,7 +29,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Update dependencies (int-enum 1.2, axum-server 0.8, zip 7.0, jsonwebtoken 10.2) and align status conversions, [PR-1079](https://github.com/reductstore/reductstore/pull/1079)
-
+- Replication `is_active` flag now reflects remote bucket availability when paused, [PR-1106](https://github.com/reductstore/reductstore/pull/1106)
+- Refactor storage/replication engines to tokio, [PR-1110](https://github.com/reductstore/reductstore/pull/1110)
+-
 ### Fixed
 
 - Fix thread pool deadlock in tests when tasks wait for other tasks, [PR-1081](https://github.com/reductstore/reductstore/pull/1081)
@@ -72,6 +46,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prevent query tasks from blocking Tokio workers and surface join failures, [PR-1099](https://github.com/reductstore/reductstore/pull/1099)
 - Fix multi-entry read aggregation returning only one entry and hanging shutdown, [PR-1099](https://github.com/reductstore/reductstore/pull/1099)
 - Fix entry write task panic and update tests, [PR-1100](https://github.com/reductstore/reductstore/pull/1100)
+- Fix deleting non-synced objects in S3 connector, [PR-1113](https://github.com/reductstore/reductstore/pull/1113)
+- Fix block cache read access, [PR-1101](https://github.com/reductstore/reductstore/pull/1101)
+- Avoid long block write lock during save, [PR-1104](https://github.com/reductstore/reductstore/pull/1104)
+- Skip compact when block manager busy, [PR-1105](https://github.com/reductstore/reductstore/pull/1105)
+- Preserve provisioned replication mode changes across restarts, [PR-1108](https://github.com/reductstore/reductstore/pull/1108)
 
 ## 1.17.8 - 2025-12-15
 
