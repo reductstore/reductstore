@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::{Cfg, InstanceRole};
@@ -238,16 +238,8 @@ impl LockFile for ImplLockFile {
 
         debug!("Releasing lock file: {:?}", self.path);
         let path = self.path.clone();
-
-        // Try to remove the file, but don't error if it doesn't exist (already removed)
-        match FILE_CACHE.remove(&path).await {
-            Ok(_) => {}
-            Err(err) if err.status == reduct_base::error::ErrorCode::NotFound => {
-                // File already removed, this is okay
-            }
-            Err(err) => {
-                error!("Failed to remove lock file: {:?}", err);
-            }
+        if let Err(err) = FILE_CACHE.remove(&path).await {
+            error!("Failed to remove lock file: {:?}", err);
         }
     }
 }
@@ -259,24 +251,20 @@ impl Drop for ImplLockFile {
 
         let path = self.path.clone();
         // Use block_in_place to handle async cleanup in drop
-        if let Ok(handle) = tokio::runtime::Handle::try_current() {
-            let _ = std::thread::spawn(move || {
-                handle.block_on(async {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    // Try to remove the file, but don't error if it doesn't exist (already removed)
-                    match FILE_CACHE.remove(&path).await {
-                        Ok(_) => {}
-                        Err(err) if err.status == reduct_base::error::ErrorCode::NotFound => {
-                            // File already removed, this is okay
-                        }
-                        Err(err) => {
-                            error!("Failed to remove lock file: {:?}", err);
-                        }
+        let handle =
+            tokio::runtime::Handle::try_current().expect("Failed to get current Tokio handle");
+        let _ = std::thread::spawn(move || {
+            handle.block_on(async {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+                match FILE_CACHE.remove(&path).await {
+                    Ok(_) => {}
+                    Err(err) => {
+                        error!("Failed to remove lock file: {:?}", err);
                     }
-                });
-            })
-            .join();
-        }
+                }
+            });
+        })
+        .join();
     }
 }
 
