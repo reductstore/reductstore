@@ -22,6 +22,7 @@ permissions:
 
 env:
   REGISTRY_IMAGE: reduct/store
+  AWS_LC_SYS_USE_PREBUILT: 0
 
 jobs:
   rust_fmt:

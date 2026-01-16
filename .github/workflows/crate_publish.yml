@@ -12,6 +12,8 @@ jobs:
     runs-on: ubuntu-latest
     name: Publish crate
     if: github.event.workflow_run.conclusion == 'success'
+    env:
+      AWS_LC_SYS_USE_PREBUILT: 0
     steps:
       - uses: actions/checkout@v2
       - name: Set up Rust
