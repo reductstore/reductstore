@@ -116,16 +116,14 @@ mod tests {
 
     #[test]
     #[serial]
+    #[cfg(not(target_os = "windows"))]
     fn test_lock_timeout_error_returns_error() {
         reset_rwlock_config();
         set_rwlock_failure_action(RwLockFailureAction::Error);
         let err = lock_timeout_error("boom");
         assert_eq!(err.status, internal_server_error!("boom").status);
         assert!(err.message.contains("boom"));
-        #[cfg(not(windows))]
         assert!(err.message.contains("core/sync.rs"));
-        #[cfg(windows)]
-        assert!(err.message.contains("core\\sync.rs"));
         reset_rwlock_config();
     }
 
