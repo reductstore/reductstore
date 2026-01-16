@@ -1,6 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::backend::BackendType;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
@@ -27,7 +28,19 @@ impl FolderKeeper {
     pub async fn new(path: PathBuf, cfg: &Cfg) -> Self {
         let list_path = path.join(".folder");
         let full_access = cfg.role != InstanceRole::Replica;
-        let proto = Self::read_or_build_map(&path, &list_path, full_access).await;
+        let proto = if cfg.cs_config.backend_type == BackendType::Filesystem {
+            let proto = Self::build_from_fs(&path).await;
+            if full_access {
+                if let Err(err) =
+                    Self::save_static(&list_path, &AsyncRwLock::new(proto.clone())).await
+                {
+                    warn!("Failed to persist folder map at {:?}: {}", list_path, err);
+                }
+            }
+            proto
+        } else {
+            Self::read_or_build_map(&path, &list_path, full_access).await
+        };
 
         FolderKeeper {
             path,
@@ -233,5 +246,29 @@ mod tests {
             !FILE_CACHE.try_exists(&list_path).await.unwrap_or(false),
             ".folder should not be created in replica mode"
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rebuilds_folder_map_from_fs_for_filesystem_backend(#[future] path: PathBuf) {
+        let path = path.await;
+        let base_path = path.join("bucket");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+
+        let list_path = base_path.join(".folder");
+        let empty_map = FolderMap { items: vec![] };
+        FolderKeeper::save_static(&list_path, &AsyncRwLock::new(empty_map))
+            .await
+            .unwrap();
+
+        FILE_CACHE
+            .create_dir_all(&base_path.join("entry_1"))
+            .await
+            .unwrap();
+
+        let cfg = Cfg::default();
+        let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
+        let folders = keeper.list_folders().await.unwrap();
+        assert!(folders.iter().any(|path| path.ends_with("entry_1")));
     }
 }
