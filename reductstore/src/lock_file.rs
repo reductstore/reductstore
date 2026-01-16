@@ -295,9 +295,9 @@ mod tests {
     use rstest::{fixture, rstest};
     use std::fs;
     use tempfile::tempdir;
+    use test_log::test as test_log;
     use tokio::time::error::Elapsed;
     use tokio::time::timeout;
-    use test_log::test as test_log;
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
