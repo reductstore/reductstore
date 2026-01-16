@@ -273,13 +273,16 @@ impl FileCache {
     ///
     /// A file reference
     pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileGuard, ReductError> {
-        let mut cache = self.cache.write().await?;
-        let file = if let Some(file) = cache.get_mut(path) {
-            Arc::clone(file)
-        } else {
-            self.open_read_file(&mut cache, path).await?
+        let file = {
+            let cache = self.cache.read().await?;
+            if let Some(file) = cache.get(path) {
+                Arc::clone(file)
+            } else {
+                drop(cache);
+                let mut cache = &mut self.cache.write().await?;
+                self.open_read_file(&mut cache, path).await?
+            }
         };
-        drop(cache);
 
         let mut lock = file.write_owned().await?;
         if pos != SeekFrom::Current(0) {
@@ -308,17 +311,23 @@ impl FileCache {
         path: &PathBuf,
         pos: SeekFrom,
     ) -> Result<FileGuard, ReductError> {
-        let mut cache = self.cache.write().await?;
-        let file = if let Some(file) = cache.get_mut(path) {
-            let lock = file.read().await?;
-            if lock.mode() == &AccessMode::ReadWrite {
-                Arc::clone(file)
+        let file = {
+            let cache = self.cache.read().await?;
+            if let Some(file) = cache.get(path) {
+                let lock = file.read().await?;
+                if lock.mode() == &AccessMode::ReadWrite {
+                    Arc::clone(file)
+                } else {
+                    drop(lock);
+                    drop(cache);
+                    let mut cache = self.cache.write().await?;
+                    self.open_write_file(&mut cache, path, false).await?
+                }
             } else {
-                drop(lock);
-                self.open_write_file(&mut cache, path, false).await?
+                drop(cache);
+                let mut cache = self.cache.write().await?;
+                self.open_write_file(&mut cache, path, true).await?
             }
-        } else {
-            self.open_write_file(&mut cache, path, true).await?
         };
 
         let mut lock = file.write_owned().await?;
@@ -623,7 +632,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut inner_cache = cache.cache.write().await.unwrap();
+        let inner_cache = cache.cache.write().await.unwrap();
         let has_file1 = inner_cache.get(&file_path1).is_some();
         drop(inner_cache);
         assert!(!has_file1);
@@ -685,7 +694,7 @@ mod tests {
             .await
             .unwrap(); // should remove the file_path1 descriptor
 
-        let mut inner_cache = cache.cache.write().await.unwrap();
+        let inner_cache = cache.cache.write().await.unwrap();
         assert_eq!(inner_cache.len(), 1);
         assert!(inner_cache.get(&file_path1).is_none());
     }
