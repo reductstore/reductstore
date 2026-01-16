@@ -42,18 +42,18 @@ runs:
       shell: bash
       run: rustup target add ${{ inputs.target }}
 
-    - name: Install gcc (Linux)
-      if: ${{ inputs.os == 'ubuntu-24.04' }}
+    - name: Install gcc
+      if: ${{ startsWith(matrix.os, 'ubuntu-') }}
       shell: bash
       run: |
         sudo apt-get update
-        sudo apt-get install -y ${{ inputs.compiler }}
+        sudo apt-get install -y ${{ matrix.compiler }}
 
-    - name: Install gcc (macOS)
-      if: ${{ inputs.os == 'macos-latest' }}
+    - name: Install gcc
+      if: ${{ startsWith(matrix.os, 'macos-') && matrix.compiler != '' }}
       shell: bash
       run: |
-        brew install ${{ inputs.compiler }}
+        brew install ${{ matrix.compiler }}
 
     - uses: ilammy/setup-nasm@v1
 
