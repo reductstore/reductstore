@@ -297,6 +297,7 @@ mod tests {
     use tempfile::tempdir;
     use tokio::time::error::Elapsed;
     use tokio::time::timeout;
+    use test_log::test as test_log;
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
@@ -327,9 +328,10 @@ mod tests {
         );
     }
 
-    #[rstest]
+    #[test_log(rstest)]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_lock_file_timeout_abort(lock_file_path: PathBuf) {
+        fs::write(&lock_file_path, "dummy").unwrap();
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -340,7 +342,6 @@ mod tests {
                 InstanceRole::Primary,
             ))
             .build();
-        fs::write(&lock_file_path, "dummy").unwrap();
 
         // Initially, the lock file should be in waiting state
         assert!(lock_file.is_waiting().await.unwrap());
@@ -362,6 +363,7 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_lock_file_timeout_proceed(lock_file_path: PathBuf) {
+        fs::write(&lock_file_path, "dummy").unwrap();
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -373,7 +375,6 @@ mod tests {
                 InstanceRole::Primary,
             ))
             .build();
-        fs::write(&lock_file_path, "dummy").unwrap();
 
         // Initially, the lock file should be in waiting state
         assert!(lock_file.is_waiting().await.unwrap());
@@ -446,6 +447,7 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_ttl_removes_stale_lock(lock_file_path: PathBuf) {
+        fs::write(&lock_file_path, "dummy").unwrap();
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -456,7 +458,6 @@ mod tests {
                 InstanceRole::Primary,
             ))
             .build();
-        fs::write(&lock_file_path, "dummy").unwrap();
 
         // Initially, the lock file should be in waiting state
         assert!(lock_file.is_waiting().await.unwrap());

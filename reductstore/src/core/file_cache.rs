@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
-use tokio::sync::OwnedRwLockWriteGuard;
+use tokio::sync::{OwnedRwLockWriteGuard, RwLockWriteGuard};
 use tokio::time::sleep;
 
 const FILE_CACHE_MAX_SIZE: usize = 1024;
@@ -100,7 +100,7 @@ impl FileCache {
                     &cache,
                     &sync_interval_clone,
                 )
-                .await
+                    .await
                 {
                     warn!(
                         "Failed to sync files from descriptor cache to disk: {}",
@@ -377,7 +377,9 @@ impl FileCache {
             return Ok(());
         }
 
-        self.discard_recursive(path).await?;
+
+        let mut cache = self.cache.write().await?;
+        self.discard_recursive_with_locked_cache(path, &mut cache).await?;
         if path.try_exists()? {
             let backend = self.backend.read().await?.clone();
             backend.remove_dir_all(path).await?;
@@ -394,6 +396,11 @@ impl FileCache {
     ///
     pub async fn discard_recursive(&self, path: &PathBuf) -> Result<(), ReductError> {
         let mut cache = self.cache.write().await?;
+        self.discard_recursive_with_locked_cache(path, &mut cache).await
+    }
+
+    /// We need the method to lock the cache only once across multiple calls so that we prevent race conditions
+    async fn discard_recursive_with_locked_cache(&self, path: &PathBuf, cache: &mut RwLockWriteGuard<'_, Cache<PathBuf, FileLock>>) -> Result<(), ReductError> {
         let normalized_path = fs::canonicalize(path).unwrap_or_else(|_| path.clone());
         let files_to_remove = cache
             .keys()
@@ -401,8 +408,8 @@ impl FileCache {
             .filter(|file_path| {
                 file_path.starts_with(path)
                     || fs::canonicalize(file_path)
-                        .map(|p| p.starts_with(&normalized_path))
-                        .unwrap_or(false)
+                    .map(|p| p.starts_with(&normalized_path))
+                    .unwrap_or(false)
             })
             .map(|file_path| (*file_path).clone())
             .collect::<Vec<PathBuf>>();
@@ -415,13 +422,13 @@ impl FileCache {
                         warn!("Failed to sync file {}: {}", file_path.display(), err);
                     }
                 }
-                drop(lock);
-                self.backend
-                    .write()
-                    .await?
-                    .remove_from_local_cache(&file_path)
-                    .await?;
             }
+
+            self.backend
+                .write()
+                .await?
+                .remove_from_local_cache(&file_path)
+                .await?;
         }
 
         Ok(())
@@ -445,10 +452,11 @@ impl FileCache {
             return Ok(());
         }
 
-        self.discard_recursive(old_path).await?;
+        // important to keep cache preventing race conditions
         let mut cache = self.cache.write().await?;
+        self.discard_recursive_with_locked_cache(old_path, &mut cache).await?;
         cache.remove(old_path);
-        drop(cache);
+
         let backend = self.backend.read().await?.clone();
         backend.rename(old_path, new_path).await?;
         Ok(())
