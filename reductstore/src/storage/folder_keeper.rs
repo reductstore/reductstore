@@ -28,6 +28,8 @@ impl FolderKeeper {
     pub async fn new(path: PathBuf, cfg: &Cfg) -> Self {
         let list_path = path.join(".folder");
         let full_access = cfg.role != InstanceRole::Replica;
+
+        // for Filesystem backend, always rebuild from FS since it is cheap and reliable
         let proto = if cfg.cs_config.backend_type == BackendType::Filesystem {
             let proto = Self::build_from_fs(&path).await;
             if full_access {
@@ -193,6 +195,7 @@ impl FolderKeeper {
 mod tests {
     use super::*;
 
+    use crate::backend::BackendType;
     use crate::cfg::{Cfg, InstanceRole};
     use crate::core::file_cache::FILE_CACHE;
     use rstest::{fixture, rstest};
@@ -203,6 +206,85 @@ mod tests {
     pub async fn path() -> PathBuf {
         let path = tempdir().unwrap().keep();
         path
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn reads_folder_map_from_cache_for_non_filesystem_backend(#[future] path: PathBuf) {
+        let path = path.await;
+        let base_path = path.join("s3_bucket");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+
+        // Create a folder on the filesystem
+        FILE_CACHE
+            .create_dir_all(&base_path.join("entry_1"))
+            .await
+            .unwrap();
+
+        // Pre-create a .folder file with a different entry to verify it reads from cache
+        let list_path = base_path.join(".folder");
+        let cached_map = FolderMap {
+            items: vec![Item {
+                name: "cached_entry".to_string(),
+                folder_name: "cached_entry".to_string(),
+            }],
+        };
+        FolderKeeper::save_static(&list_path, &AsyncRwLock::new(cached_map))
+            .await
+            .unwrap();
+
+        // Configure for S3 backend (non-filesystem)
+        let mut cfg = Cfg::default();
+        cfg.cs_config.backend_type = BackendType::S3;
+
+        let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
+        let folders = keeper.list_folders().await.unwrap();
+
+        // Should read from the cached .folder file, not rebuild from filesystem
+        assert!(
+            folders.iter().any(|path| path.ends_with("cached_entry")),
+            "Should read cached_entry from .folder file"
+        );
+        assert!(
+            !folders.iter().any(|path| path.ends_with("entry_1")),
+            "Should not include entry_1 from filesystem scan"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn builds_folder_map_when_cache_missing_for_non_filesystem_backend(
+        #[future] path: PathBuf,
+    ) {
+        let path = path.await;
+        let base_path = path.join("s3_bucket_no_cache");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+
+        // Create folders on the filesystem but no .folder cache file
+        FILE_CACHE
+            .create_dir_all(&base_path.join("entry_from_fs"))
+            .await
+            .unwrap();
+
+        // Configure for S3 backend (non-filesystem)
+        let mut cfg = Cfg::default();
+        cfg.cs_config.backend_type = BackendType::S3;
+
+        let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
+        let folders = keeper.list_folders().await.unwrap();
+
+        // Should rebuild from filesystem since no cache exists
+        assert!(
+            folders.iter().any(|path| path.ends_with("entry_from_fs")),
+            "Should rebuild from filesystem when cache is missing"
+        );
+
+        // Should persist the .folder file
+        let list_path = base_path.join(".folder");
+        assert!(
+            FILE_CACHE.try_exists(&list_path).await.unwrap_or(false),
+            ".folder should be created after rebuild"
+        );
     }
 
     #[rstest]
