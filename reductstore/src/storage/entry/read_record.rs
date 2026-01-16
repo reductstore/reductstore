@@ -25,8 +25,10 @@ impl Entry {
         );
 
         let (block_ref, record) = {
-            let mut bm = self.block_manager.write().await?;
-            let block_ref = bm.find_block(time).await?;
+            let block_ref = {
+                let mut bm = self.block_manager.write().await?;
+                bm.find_block(time).await?
+            };
             let block = block_ref.read().await?;
             let record = block
                 .get_record(time)

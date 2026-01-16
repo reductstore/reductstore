@@ -5,7 +5,8 @@ use crate::backend::file::{AccessMode, File};
 use crate::backend::{Backend, ObjectMetadata};
 use crate::core::cache::Cache;
 use crate::core::sync::{AsyncRwLock, RwLock};
-use log::{debug, warn};
+use futures_util::future::err;
+use log::{debug, error, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::fs;
@@ -14,6 +15,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
+use tokio::spawn;
 use tokio::sync::{OwnedRwLockWriteGuard, RwLockWriteGuard};
 use tokio::time::sleep;
 
@@ -180,11 +182,7 @@ impl FileCache {
         Ok(())
     }
 
-    async fn open_read_file(
-        &self,
-        cache: &mut Cache<PathBuf, FileLock>,
-        path: &PathBuf,
-    ) -> Result<Arc<AsyncRwLock<File>>, ReductError> {
+    async fn open_read_file(&self, path: &PathBuf) -> Result<Arc<AsyncRwLock<File>>, ReductError> {
         let file = self
             .backend
             .read()
@@ -195,13 +193,11 @@ impl FileCache {
             .open(path)
             .await?;
         let arc = Arc::new(AsyncRwLock::new(file));
-        Self::insert_file_cached(cache, path.clone(), arc.clone()).await;
         Ok(arc)
     }
 
     async fn open_write_file(
         &self,
-        cache: &mut Cache<PathBuf, FileLock>,
         path: &PathBuf,
         create: bool,
     ) -> Result<Arc<AsyncRwLock<File>>, ReductError> {
@@ -217,7 +213,6 @@ impl FileCache {
             .open(path)
             .await?;
         let arc = Arc::new(AsyncRwLock::new(file));
-        Self::insert_file_cached(cache, path.clone(), arc.clone()).await;
         Ok(arc)
     }
 
@@ -227,19 +222,26 @@ impl FileCache {
         file: Arc<AsyncRwLock<File>>,
     ) {
         let discarded = cache.insert(path.clone(), Arc::clone(&file));
+
         for (path, file) in discarded {
-            // return the file to the cache if it is still in use
-            if file.try_write().is_none() {
+            if file.try_write().is_some() {
+                // spawn a task to unlock cache without blocking
+                spawn(async move {
+                    let Ok(mut file) = file.write_owned().await else {
+                        warn!("Failed to write file {}", path.display());
+                        return;
+                    };
+
+                    if file.mode() == &AccessMode::ReadWrite && !file.is_synced() {
+                        if let Err(err) = file.sync_all().await {
+                            warn!("Failed to sync discarded file {:?}: {}", path, err);
+                        }
+                    }
+                });
+            } else {
+                // return the file to the cache if it is still in use
                 cache.insert(path, Arc::clone(&file));
                 continue;
-            }
-            match file.write_owned().await {
-                Ok(mut lock) => {
-                    if let Err(err) = lock.sync_all().await {
-                        warn!("Failed to sync file {:?}: {}", path, err);
-                    }
-                }
-                Err(err) => warn!("Failed to acquire lock for {:?}: {}", path, err),
             }
         }
     }
@@ -274,13 +276,14 @@ impl FileCache {
     /// A file reference
     pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileGuard, ReductError> {
         let file = {
-            let cache = self.cache.read().await?;
-            if let Some(file) = cache.get(path) {
-                Arc::clone(file)
+            let file = self.cache.read().await?.get(path).cloned();
+            if let Some(file) = file {
+                Arc::clone(&file)
             } else {
-                drop(cache);
-                let mut cache = &mut self.cache.write().await?;
-                self.open_read_file(&mut cache, path).await?
+                let file = self.open_read_file(path).await?;
+                let mut cache = self.cache.write().await?;
+                Self::insert_file_cached(&mut cache, path.clone(), file.clone()).await;
+                file
             }
         };
 
@@ -312,21 +315,28 @@ impl FileCache {
         pos: SeekFrom,
     ) -> Result<FileGuard, ReductError> {
         let file = {
-            let cache = self.cache.read().await?;
-            if let Some(file) = cache.get(path) {
-                let lock = file.read().await?;
+            let file = self.cache.read().await?.get(path).cloned();
+            if let Some(file) = file {
+                let Ok(lock) = file.read().await else {
+                    Err(internal_server_error!(
+                        "Failed to acquire read lock for file {}",
+                        path.display()
+                    ))?
+                };
                 if lock.mode() == &AccessMode::ReadWrite {
-                    Arc::clone(file)
+                    Arc::clone(&file)
                 } else {
                     drop(lock);
-                    drop(cache);
+                    let file = self.open_write_file(path, false).await?;
                     let mut cache = self.cache.write().await?;
-                    self.open_write_file(&mut cache, path, false).await?
+                    Self::insert_file_cached(&mut cache, path.clone(), file.clone()).await;
+                    file
                 }
             } else {
-                drop(cache);
+                let file = self.open_write_file(path, true).await?;
                 let mut cache = self.cache.write().await?;
-                self.open_write_file(&mut cache, path, true).await?
+                Self::insert_file_cached(&mut cache, path.clone(), file.clone()).await;
+                file
             }
         };
 
