@@ -122,10 +122,13 @@ mod tests {
         let err = lock_timeout_error("boom");
         assert_eq!(err.status, internal_server_error!("boom").status);
         assert!(err.message.contains("boom"));
-        #[cfg(not(windows))]
-        assert!(err.message.contains("core/sync.rs"));
-        #[cfg(windows)]
-        assert!(err.message.contains("core\\sync.rs"));
+        // On Windows, the path separator in Location::file() can be either / or \
+        // depending on the compilation environment
+        assert!(
+            err.message.contains("core/sync.rs") || err.message.contains("core\\sync.rs"),
+            "Expected error message to contain 'core/sync.rs' or 'core\\sync.rs', got: {}",
+            err.message
+        );
         reset_rwlock_config();
     }
 
