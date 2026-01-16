@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Crash on Ubuntu-22.04, [PR-1120](https://github.com/reductstore/reductstore/pull/1120)
+
 ## 1.17.8 - 2025-12-15
 
 ### Changed
