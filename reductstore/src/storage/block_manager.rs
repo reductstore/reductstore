@@ -120,8 +120,12 @@ impl BlockManager {
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
             let path = self.path_to_desc(block_id);
-            let file = match FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
-                Ok(file) => file,
+            let buf = match FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
+                Ok(mut file) => {
+                    let mut buf = vec![];
+                    file.read_to_end(&mut buf)?;
+                    buf
+                }
                 Err(err) => {
                     // here we can't read the block descriptor, it might be corrupted or not exist
                     // we should remove it from the index
@@ -137,10 +141,6 @@ impl BlockManager {
                     return Err(internal_server_error!(&err_msg));
                 }
             };
-            let mut buf = vec![];
-
-            let mut lock = file;
-            lock.read_to_end(&mut buf)?;
 
             // calculate crc of the block descriptor
             let mut crc = Digest::new();
@@ -237,16 +237,20 @@ impl BlockManager {
         };
         /* resize data block then sync descriptor and data */
         let path = self.path_to_data(block_id);
-        let mut data_block = FILE_CACHE
-            .write_or_create(&path, SeekFrom::Current(0))
-            .await?;
-        data_block.set_len(block_size)?;
-        data_block.sync_all().await?;
+        {
+            let mut data_block = FILE_CACHE
+                .write_or_create(&path, SeekFrom::Current(0))
+                .await?;
+            data_block.set_len(block_size)?;
+            data_block.sync_all().await?;
+        }
 
-        let mut descr_block = FILE_CACHE
-            .write_or_create(&self.path_to_desc(block_id), SeekFrom::Current(0))
-            .await?;
-        descr_block.sync_all().await?;
+        {
+            let mut descr_block = FILE_CACHE
+                .write_or_create(&self.path_to_desc(block_id), SeekFrom::Current(0))
+                .await?;
+            descr_block.sync_all().await?;
+        }
 
         Ok(())
     }

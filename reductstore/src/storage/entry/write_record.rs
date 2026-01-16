@@ -32,14 +32,16 @@ impl Entry {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         let settings = self.settings.read().await?;
-        let mut bm = self.block_manager.write().await?;
-        // When we write, the likely case is that we are writing the latest record
-        // in the entry. In this case, we can just append to the latest block.
-        let mut block_ref = if bm.index().tree().is_empty() {
-            bm.start_new_block(time, settings.max_block_size).await?
-        } else {
-            let block_id = *bm.index().tree().last().unwrap();
-            bm.load_block(block_id).await?
+        let mut block_ref = {
+            let mut bm = self.block_manager.write().await?;
+            // When we write, the likely case is that we are writing the latest record
+            // in the entry. In this case, we can just append to the latest block.
+            if bm.index().tree().is_empty() {
+                bm.start_new_block(time, settings.max_block_size).await?
+            } else {
+                let block_id = *bm.index().tree().last().unwrap();
+                bm.load_block(block_id).await?
+            }
         };
 
         let _record_type = {
@@ -53,6 +55,7 @@ impl Entry {
                     time, self.bucket_name, self.name
                 );
                 // The timestamp is belated. We need to find the proper block to write to.
+                let mut bm = self.block_manager.write().await?;
                 let index_tree = bm.index().tree();
                 if *index_tree.first().unwrap() > time {
                     // The timestamp is the earliest. We need to create a new block.
@@ -64,6 +67,8 @@ impl Entry {
                     RecordType::BelatedFirst
                 } else {
                     block_ref = bm.find_block(time).await?;
+                    drop(bm); // drop the lock early to avoid blocking other operations
+
                     let block_id = block_ref.read().await?.block_id();
                     debug!(
                         "Timestamp {} is belated for {}/{}. Writing to block {}",
@@ -92,7 +97,6 @@ impl Entry {
                                 block.insert_or_update_record(record);
                             }
 
-                            drop(bm); // drop the lock to avoid deadlock
                             let writer = RecordWriter::try_new(
                                 Arc::clone(&self.block_manager),
                                 block_ref,
@@ -124,6 +128,7 @@ impl Entry {
                     "Creating a new block for {}/{} (has_no_space={}, has_too_many_records={})",
                     self.bucket_name, self.name, has_no_space, has_too_many_records
                 );
+                let mut bm = self.block_manager.write().await?;
                 bm.finish_block(block_ref.clone()).await?;
                 bm.start_new_block(time, settings.max_block_size).await?
             } else {
@@ -131,8 +136,6 @@ impl Entry {
                 block_ref.clone()
             }
         };
-
-        drop(bm);
 
         Self::prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)
             .await?;

@@ -62,13 +62,13 @@ impl EntryLoader {
 
         if cfg.engine_config.enable_integrity_checks {
             let needs_rebuild = {
-                let bm = entry.block_manager.read().await?;
                 let file_list = FILE_CACHE
                     .read_dir(&path)
                     .await?
                     .into_iter()
                     .collect::<HashSet<PathBuf>>();
 
+                let bm = entry.block_manager.read().await?;
                 Self::check_if_block_files_exist(&path, &file_list, &bm.index())
                     .await
                     .is_err()
