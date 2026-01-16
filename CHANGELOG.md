@@ -31,7 +31,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Update dependencies (int-enum 1.2, axum-server 0.8, zip 7.0, jsonwebtoken 10.2) and align status conversions, [PR-1079](https://github.com/reductstore/reductstore/pull/1079)
 - Replication `is_active` flag now reflects remote bucket availability when paused, [PR-1106](https://github.com/reductstore/reductstore/pull/1106)
 - Refactor storage/replication engines to tokio, [PR-1110](https://github.com/reductstore/reductstore/pull/1110)
--
+- Migrate replication engine and remote storage backend on Tokio, [PR-1114](https://github.com/reductstore/reductstore/pull/1114)
+
 ### Fixed
 
 - Fix thread pool deadlock in tests when tasks wait for other tasks, [PR-1081](https://github.com/reductstore/reductstore/pull/1081)

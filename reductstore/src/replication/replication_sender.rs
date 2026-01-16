@@ -76,7 +76,10 @@ impl ReplicationSender {
                 }
             };
 
-            let transactions = log.write().await?.front(self.io_config.batch_max_records);
+            let transactions = {
+                let log = log.write().await?;
+                log.front(self.io_config.batch_max_records).await
+            };
             match transactions {
                 Ok(vec) => {
                     if vec.is_empty() {
@@ -144,7 +147,7 @@ impl ReplicationSender {
                     }
 
                     // remove processed transactions from the log
-                    if let Err(err) = log.write().await?.pop_front(processed_transactions) {
+                    if let Err(err) = log.write().await?.pop_front(processed_transactions).await {
                         error!("Failed to remove transaction: {:?}", err);
                     }
                 }
@@ -219,9 +222,9 @@ impl ReplicationSender {
 #[cfg(target_os = "linux")] // we need precise timing
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::Cfg;
-    use crate::core::file_cache::FILE_CACHE;
+
     use crate::core::sync::AsyncRwLock;
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::transaction_log::TransactionLog;
@@ -286,7 +289,8 @@ mod tests {
                 .read()
                 .await
                 .unwrap()
-                .front(1),
+                .front(1)
+                .await,
             Ok(vec![]),
         );
     }
@@ -319,7 +323,8 @@ mod tests {
                 .read()
                 .await
                 .unwrap()
-                .front(1),
+                .front(1)
+                .await,
             Ok(vec![transaction]),
         );
     }
@@ -392,6 +397,7 @@ mod tests {
                 .await
                 .unwrap()
                 .push_back(Transaction::WriteRecord(20))
+                .await
                 .unwrap();
         }
 
@@ -436,6 +442,7 @@ mod tests {
                 .await
                 .unwrap()
                 .push_back(Transaction::WriteRecord(20))
+                .await
                 .unwrap();
         }
 
@@ -561,13 +568,6 @@ mod tests {
             ..Default::default()
         };
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .unwrap(),
-        );
-
         let storage = Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())
@@ -581,6 +581,7 @@ mod tests {
             "gone".to_string(),
             Arc::new(AsyncRwLock::new(
                 TransactionLog::try_load_or_create(&storage.data_path().join("gone.log"), 10)
+                    .await
                     .unwrap(),
             )),
         );
@@ -611,6 +612,7 @@ mod tests {
             .await
             .unwrap()
             .push_back(transaction.clone())
+            .await
             .unwrap();
 
         let bucket = match sender
@@ -651,13 +653,6 @@ mod tests {
             ..Default::default()
         };
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .unwrap(),
-        );
-
         let storage = Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())
@@ -669,6 +664,7 @@ mod tests {
         let log_map: TransactionLogMap = Arc::new(AsyncRwLock::new(HashMap::new()));
         let log: TransactionLogRef = Arc::new(AsyncRwLock::new(
             TransactionLog::try_load_or_create(&storage.data_path().join("test.log"), 1000)
+                .await
                 .unwrap(),
         ));
 

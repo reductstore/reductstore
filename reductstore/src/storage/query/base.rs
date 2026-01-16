@@ -116,7 +116,7 @@ impl Default for QueryOptions {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
     use crate::storage::block_manager::block_index::BlockIndex;
@@ -124,30 +124,26 @@ pub(crate) mod tests {
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
     use rstest::fixture;
-    use std::io::Write;
+    use std::io::{SeekFrom, Write};
     use tempfile::tempdir;
 
     #[fixture]
-    pub(crate) fn block_manager() -> Arc<AsyncRwLock<BlockManager>> {
+    pub(crate) async fn block_manager() -> Arc<AsyncRwLock<BlockManager>> {
         // Two blocks
         // the first block has two records: 0, 5
         // the second block has a record: 1000
         let dir = tempdir().unwrap().keep().join("bucket").join("entry");
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(dir.clone())
-                .try_build()
-                .unwrap(),
-        );
-        let mut block_manager = BlockManager::new(
+
+        let mut block_manager = BlockManager::build(
             dir.clone(),
             BlockIndex::new(dir.join("index")),
             Cfg::default().into(),
-        );
-        let block_ref = block_manager.start_new_block(0, 10).unwrap();
+        )
+        .await;
+        let block_ref = block_manager.start_new_block(0, 10).await.unwrap();
 
         {
-            let mut block = block_ref.write().unwrap();
+            let mut block = block_ref.write().await.unwrap();
             block.insert_or_update_record(Record {
                 timestamp: Some(Timestamp {
                     seconds: 0,
@@ -199,14 +195,16 @@ pub(crate) mod tests {
             });
         }
 
-        block_manager.save_block(block_ref.clone()).unwrap();
+        block_manager.save_block(block_ref.clone()).await.unwrap();
 
         macro_rules! write_record {
             ($block:expr, $index:expr, $content:expr) => {{
-                let blk = $block.read().unwrap();
-                let (file, _) = block_manager.begin_write_record(&blk, $index).unwrap();
-                let rc = file.upgrade().unwrap();
-                let mut file = rc.write().unwrap();
+                let blk = $block.read().await.unwrap();
+                let (path, offset) = block_manager.begin_write_record(&blk, $index).unwrap();
+                let mut file = FILE_CACHE
+                    .write_or_create(&path, SeekFrom::Start(offset))
+                    .await
+                    .unwrap();
                 file.write($content).unwrap();
                 file.flush().unwrap();
             }};
@@ -215,10 +213,10 @@ pub(crate) mod tests {
         write_record!(block_ref, 0, b"0123456789");
         write_record!(block_ref, 5, b"0123456789");
 
-        block_manager.finish_block(block_ref).unwrap();
-        let block_ref = block_manager.start_new_block(1000, 10).unwrap();
+        block_manager.finish_block(block_ref).await.unwrap();
+        let block_ref = block_manager.start_new_block(1000, 10).await.unwrap();
         {
-            let mut block = block_ref.write().unwrap();
+            let mut block = block_ref.write().await.unwrap();
 
             block.insert_or_update_record(Record {
                 timestamp: Some(Timestamp {
@@ -241,11 +239,11 @@ pub(crate) mod tests {
                 content_type: "".to_string(),
             });
         }
-        block_manager.save_block(block_ref.clone()).unwrap();
+        block_manager.save_block(block_ref.clone()).await.unwrap();
 
         write_record!(block_ref, 1000, b"0123456789");
 
-        block_manager.finish_block(block_ref).unwrap();
+        block_manager.finish_block(block_ref).await.unwrap();
         Arc::new(AsyncRwLock::new(block_manager))
     }
 }

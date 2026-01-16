@@ -64,9 +64,9 @@ impl StorageEngineBuilder {
         let cfg = self.cfg.expect("Config must be set");
         let data_path = self.data_path.expect("Data path must be set");
 
-        if !FILE_CACHE.try_exists(&data_path).unwrap_or(false) {
+        if !FILE_CACHE.try_exists(&data_path).await.unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
-            FILE_CACHE.create_dir_all(&data_path).unwrap();
+            FILE_CACHE.create_dir_all(&data_path).await.unwrap();
         }
 
         let data_path = data_path.canonicalize().unwrap();
@@ -74,10 +74,11 @@ impl StorageEngineBuilder {
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
-        let folder_keeper = FolderKeeper::new(data_path.clone(), &cfg);
+        let folder_keeper = FolderKeeper::new(data_path.clone(), &cfg).await;
 
         for path in folder_keeper
             .list_folders()
+            .await
             .expect("Failed to list folders")
         {
             match Bucket::restore(data_path.join(&path), cfg.clone()).await {
@@ -181,7 +182,7 @@ impl StorageEngine {
             return Err(conflict!("Bucket '{}' already exists", name));
         }
 
-        self.folder_keeper.add_folder(name)?;
+        self.folder_keeper.add_folder(name).await?;
         let bucket =
             Arc::new(Bucket::try_build(name, &self.data_path, settings, self.cfg.clone()).await?);
         buckets.insert(name.to_string(), Arc::clone(&bucket));
@@ -248,9 +249,9 @@ impl StorageEngine {
 
         let _ = tokio::spawn(async move {
             let remove_bucket_from_backend = async || {
-                let mut buckets = buckets.write().await?;
-                folder_keeper.remove_folder(&name)?;
+                folder_keeper.remove_folder(&name).await?;
                 debug!("Bucket '{}' and folder {:?} are removed", name, path);
+                let mut buckets = buckets.write().await?;
                 buckets.remove(&name);
                 Ok::<(), ReductError>(())
             };
@@ -296,7 +297,7 @@ impl StorageEngine {
 
         let mut buckets = self.buckets.write().await?;
 
-        folder_keeper.rename_folder(&old_name, &new_name)?;
+        folder_keeper.rename_folder(&old_name, &new_name).await?;
 
         buckets.remove(&old_name);
         let bucket = Bucket::restore(new_path, cfg).await?;
@@ -327,7 +328,7 @@ impl StorageEngine {
 
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
         self.compact().await?;
-        FILE_CACHE.force_sync_all()?;
+        FILE_CACHE.force_sync_all().await?;
         Ok(())
     }
 
@@ -386,7 +387,7 @@ impl StorageEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
@@ -565,7 +566,8 @@ mod tests {
             assert_eq!(bucket.name(), "test");
 
             let path = storage.data_path.join("test");
-            FILE_CACHE.remove(&path.join(SETTINGS_NAME)).unwrap();
+            let settings_path = path.join(SETTINGS_NAME);
+            FILE_CACHE.remove(&settings_path).await.unwrap();
             let cfg = Cfg {
                 data_path: storage.data_path.clone(),
                 ..Cfg::default()
@@ -781,7 +783,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         #[serial]
         async fn test_rename_bucket(#[future] storage: Arc<StorageEngine>) {
             let _reset = relax_locks();
@@ -827,7 +829,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         #[serial]
         async fn test_rename_bucket_with_non_existing_name(#[future] storage: Arc<StorageEngine>) {
             let _reset = relax_locks();
@@ -839,7 +841,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         #[serial]
         async fn test_rename_bucket_with_existing_name(#[future] storage: Arc<StorageEngine>) {
             let _reset = relax_locks();
@@ -947,12 +949,6 @@ mod tests {
 
     #[fixture]
     async fn storage(cfg: Cfg) -> Arc<StorageEngine> {
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .unwrap(),
-        );
         Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())

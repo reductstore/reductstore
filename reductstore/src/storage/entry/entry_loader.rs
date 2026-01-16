@@ -15,7 +15,7 @@ use prost::Message;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole::Replica;
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::{AsyncRwLock, RwLock};
+use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
@@ -39,8 +39,10 @@ impl EntryLoader {
         let start_time = Instant::now();
 
         let mut entry =
-            match Self::try_restore_entry_from_index(path.clone(), options.clone(), cfg.clone()) {
-                Ok(entry) => Ok(entry),
+            match Self::try_restore_entry_from_index(path.clone(), options.clone(), cfg.clone())
+                .await
+            {
+                Ok(entry) => entry,
                 Err(err) => {
                     if cfg.role == Replica {
                         return Ok(None);
@@ -52,30 +54,32 @@ impl EntryLoader {
                     );
                     info!("Rebuilding the block index {:?} from blocks", path);
                     Self::restore_entry_from_blocks(path.clone(), options.clone(), cfg.clone())
+                        .await?
                 }
-            }?;
+            };
 
         Self::restore_uncommitted_changes(path.clone(), &mut entry).await?;
 
-        let mut entry = {
-            // integrity check after restoring WAL
-            let check_result = async || {
-                let bm = entry.block_manager.read().await?;
+        if cfg.engine_config.enable_integrity_checks {
+            let needs_rebuild = {
                 let file_list = FILE_CACHE
-                    .read_dir(&path)?
+                    .read_dir(&path)
+                    .await?
                     .into_iter()
                     .collect::<HashSet<PathBuf>>();
-                Self::check_if_block_files_exist(&path, &file_list, &bm.index())?;
-                Self::check_descriptor_count(&path, &file_list, &bm.index())
+
+                let bm = entry.block_manager.read().await?;
+                Self::check_if_block_files_exist(&path, &file_list, &bm.index())
+                    .await
+                    .is_err()
+                    || Self::check_descriptor_count(&path, &file_list, &bm.index()).is_err()
             };
 
-            if cfg.engine_config.enable_integrity_checks && check_result().await.is_err() {
+            if needs_rebuild {
                 warn!("Block index is inconsistent. Rebuilding the block index from blocks");
-                Self::restore_entry_from_blocks(path.clone(), options, cfg.clone())?
-            } else {
-                entry
+                entry = Self::restore_entry_from_blocks(path.clone(), options, cfg.clone()).await?;
             }
-        };
+        }
 
         {
             let bm = entry.block_manager.read().await?;
@@ -93,13 +97,24 @@ impl EntryLoader {
     }
 
     /// Restore the entry from blocks and create a new block index
-    fn restore_entry_from_blocks(
+    async fn restore_entry_from_blocks(
         path: PathBuf,
         options: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Entry, ReductError> {
+        async fn remove_block_files(path: &PathBuf) -> Result<(), ReductError> {
+            warn!("Removing meta block {:?}", path);
+            FILE_CACHE.remove(path).await?;
+
+            let mut data_path = path.clone();
+            data_path.set_extension(DATA_FILE_EXT[1..].to_string());
+            warn!("Removing data block {:?}", data_path);
+            FILE_CACHE.remove(&data_path).await?;
+            Ok(())
+        }
+
         let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
-        for path in FILE_CACHE.read_dir(&path)? {
+        for path in FILE_CACHE.read_dir(&path).await? {
             if path.is_dir() {
                 continue;
             }
@@ -109,24 +124,10 @@ impl EntryLoader {
                 continue;
             }
 
-            macro_rules! remove_bad_block {
-                ($err:expr) => {{
-                    error!("Failed to decode block {:?}: {}", path, $err);
-                    warn!("Removing meta block {:?}", path);
-                    let mut data_path = path.clone();
-                    FILE_CACHE.remove(&path)?;
-
-                    data_path.set_extension(DATA_FILE_EXT[1..].to_string());
-                    warn!("Removing data block {:?}", data_path);
-                    FILE_CACHE.remove(&data_path)?;
-                    continue;
-                }};
-            }
-
             let buf = {
-                let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
+                let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
                 let mut buf = vec![];
-                file.write()?.read_to_end(&mut buf)?;
+                file.read_to_end(&mut buf)?;
                 buf
             };
 
@@ -137,17 +138,20 @@ impl EntryLoader {
             let mut block = match MinimalBlock::decode(descriptor_content.clone()) {
                 Ok(block) => block,
                 Err(err) => {
-                    remove_bad_block!(err);
+                    error!("Failed to decode block {:?}: {}", path, err);
+                    remove_block_files(&path).await?;
+                    continue;
                 }
             };
 
-            // Migration for old blocks without fields to speed up the restore process
             if block.record_count == 0 {
                 debug!("Record count is 0. Migrate the block");
-                let mut full_block = match Block::decode(descriptor_content) {
+                let mut full_block = match Block::decode(descriptor_content.clone()) {
                     Ok(block) => block,
                     Err(err) => {
-                        remove_bad_block!(err);
+                        error!("Failed to decode block {:?}: {}", path, err);
+                        remove_block_files(&path).await?;
+                        continue;
                     }
                 };
 
@@ -157,10 +161,9 @@ impl EntryLoader {
                 block.record_count = full_block.record_count;
                 block.metadata_size = full_block.metadata_size;
 
-                let lock = FILE_CACHE
-                    .write_or_create(&path, SeekFrom::Start(0))?
-                    .upgrade()?;
-                let mut file = lock.write()?;
+                let mut file = FILE_CACHE
+                    .write_or_create(&path, SeekFrom::Start(0))
+                    .await?;
                 file.set_len(0)?;
 
                 let buf = full_block.encode_to_vec();
@@ -172,13 +175,15 @@ impl EntryLoader {
             if let Some(begin_time) = block.begin_time {
                 ts_to_us(&begin_time)
             } else {
-                remove_bad_block!("begin time mismatch");
+                warn!("Block {:?} has no begin time", path);
+                remove_block_files(&path).await?;
+                continue;
             };
 
             block_index.insert_or_update_with_crc(block, crc.sum64());
         }
 
-        block_index.save()?;
+        block_index.save().await?;
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
         let bucket_name = path
             .parent()
@@ -193,11 +198,9 @@ impl EntryLoader {
             name,
             bucket_name,
             settings: AsyncRwLock::new(options),
-            block_manager: Arc::new(AsyncRwLock::new(BlockManager::new(
-                path.clone(),
-                block_index,
-                cfg.clone(),
-            ))),
+            block_manager: Arc::new(AsyncRwLock::new(
+                BlockManager::build(path.clone(), block_index, cfg.clone()).await,
+            )),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
@@ -206,12 +209,12 @@ impl EntryLoader {
     }
 
     /// Try to restore the entry from the block index
-    fn try_restore_entry_from_index(
+    async fn try_restore_entry_from_index(
         path: PathBuf,
         options: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Entry, ReductError> {
-        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))?;
+        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
         let name = path.file_name().unwrap().to_str().unwrap().to_string();
 
         let bucket_name = path
@@ -227,11 +230,9 @@ impl EntryLoader {
             name,
             bucket_name,
             settings: AsyncRwLock::new(options),
-            block_manager: Arc::new(AsyncRwLock::new(BlockManager::new(
-                path.clone(),
-                block_index,
-                cfg.clone(),
-            ))),
+            block_manager: Arc::new(AsyncRwLock::new(
+                BlockManager::build(path.clone(), block_index, cfg.clone()).await,
+            )),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
@@ -265,7 +266,7 @@ impl EntryLoader {
         }
     }
 
-    fn check_if_block_files_exist(
+    async fn check_if_block_files_exist(
         path: &PathBuf,
         file_list: &HashSet<PathBuf>,
         block_index: &BlockIndex,
@@ -280,7 +281,7 @@ impl EntryLoader {
                         "Data block {:?} not found. Removing its descriptor",
                         data_path
                     );
-                    FILE_CACHE.remove(&desc_path)?;
+                    FILE_CACHE.remove(&desc_path).await?;
                     inconsistent_data = true;
                 }
             } else {
@@ -300,9 +301,8 @@ impl EntryLoader {
         entry_path: PathBuf,
         entry: &mut Entry,
     ) -> Result<(), ReductError> {
-        let wal = create_wal(entry_path.clone());
-        // There are uncommitted changes in the WALs
-        let wal_blocks = wal.list()?;
+        let wal = create_wal(entry_path.clone()).await;
+        let wal_blocks = wal.list().await?;
         if !wal_blocks.is_empty() {
             warn!(
                 "Recovering uncommitted changes from WALs for entry: {:?}",
@@ -311,39 +311,41 @@ impl EntryLoader {
 
             let mut block_manager = entry.block_manager.write().await?;
             for block_id in wal_blocks {
-                let wal_entries = wal.read(block_id);
-                if let Err(err) = wal_entries {
-                    error!("Failed to read WAL for block {}: {}", block_id, err);
-                    wal.remove(block_id)?;
-                    continue;
-                }
+                let wal_entries = match wal.read(block_id).await {
+                    Ok(entries) => entries,
+                    Err(err) => {
+                        error!("Failed to read WAL for block {}: {}", block_id, err);
+                        wal.remove(block_id).await?;
+                        continue;
+                    }
+                };
 
-                let block_ref = if block_manager.exist(block_id)? {
+                let block_ref = if block_manager.exist(block_id).await? {
                     debug!(
                         "Loading block {}/{} from block manager",
                         entry.name, block_id
                     );
-                    match block_manager.load_block(block_id) {
+                    match block_manager.load_block(block_id).await {
                         Ok(block_ref) => block_ref,
                         Err(err) => {
                             warn!("Failed to load block {}/{}: {}", entry.name, block_id, err);
                             info!("Creating block {}/{} from WAL", entry.name, block_id);
-                            Arc::new(RwLock::new(
+                            Arc::new(AsyncRwLock::new(
                                 crate::storage::block_manager::block::Block::new(block_id),
                             ))
                         }
                     }
                 } else {
                     debug!("Creating block {}/{} from WAL", entry.name, block_id);
-                    Arc::new(RwLock::new(
+                    Arc::new(AsyncRwLock::new(
                         crate::storage::block_manager::block::Block::new(block_id),
                     ))
                 };
 
                 let mut block_removed = false;
                 {
-                    let mut block = block_ref.write()?;
-                    for wal_entry in wal_entries? {
+                    let mut block = block_ref.write().await?;
+                    for wal_entry in wal_entries {
                         match wal_entry {
                             WalEntry::WriteRecord(record) => {
                                 trace!(
@@ -382,14 +384,14 @@ impl EntryLoader {
                 }
 
                 if block_removed {
-                    block_manager.remove_block(block_id)?;
+                    block_manager.remove_block(block_id).await?;
                 } else {
-                    block_manager.save_block(block_ref.clone())?;
-                    block_manager.finish_block(block_ref)?;
+                    block_manager.save_block(block_ref.clone()).await?;
+                    block_manager.finish_block(block_ref).await?;
                 }
             }
 
-            block_manager.save_cache_on_disk()?;
+            block_manager.save_cache_on_disk().await?;
         }
 
         Ok(())
@@ -405,23 +407,25 @@ mod tests {
     use std::io::SeekFrom;
 
     use super::*;
-    use crate::backend::Backend;
+
     use crate::core::file_cache::FILE_CACHE;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
 
         let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -451,7 +455,7 @@ mod tests {
             }
         );
 
-        bm.save_cache_on_disk().unwrap();
+        bm.save_cache_on_disk().await.unwrap();
         let entry = EntryLoader::restore_entry(
             path.join(entry.name()),
             entry_settings,
@@ -511,24 +515,18 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .unwrap(),
-        );
-
         let path = path.join("entry");
-        FILE_CACHE.create_dir_all(&path).unwrap();
+        FILE_CACHE.create_dir_all(&path).await.unwrap();
 
-        let mut block_manager = BlockManager::new(
+        let mut block_manager = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
             Cfg::default().into(),
-        );
+        )
+        .await;
         {
-            let block_v1_8_ref = block_manager.start_new_block(1, 100).unwrap();
-            let mut block_v1_8 = block_v1_8_ref.write().unwrap();
+            let block_v1_8_ref = block_manager.start_new_block(1, 100).await.unwrap();
+            let mut block_v1_8 = block_v1_8_ref.write().await.unwrap();
             block_v1_8.insert_or_update_record(Record {
                 timestamp: Some(us_to_ts(&1)),
                 begin: 0,
@@ -549,23 +547,23 @@ mod tests {
 
         let mut block_proto: Block = block_manager
             .load_block(1)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .clone()
             .into();
         block_proto.record_count = 0;
 
-        let lock = FILE_CACHE
-            .write_or_create(&path.join("1.meta"), SeekFrom::Start(0))
-            .unwrap()
-            .upgrade()
-            .unwrap();
+        {
+            let mut lock = FILE_CACHE
+                .write_or_create(&path.join("1.meta"), SeekFrom::Start(0))
+                .await
+                .unwrap();
 
-        lock.write()
-            .unwrap()
-            .write_all(&block_proto.encode_to_vec())
-            .unwrap();
+            lock.write_all(&block_proto.encode_to_vec()).unwrap();
+        }
 
         // repack the block
         let entry = EntryLoader::restore_entry(path.clone(), entry_settings, Cfg::default().into())
@@ -580,9 +578,19 @@ mod tests {
         assert_eq!(info.oldest_record, 1);
         assert_eq!(info.latest_record, 2000010);
 
-        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).unwrap();
-        let mut block_manager = BlockManager::new(path.clone(), block_index, Cfg::default().into());
-        let block_v1_9 = block_manager.load_block(1).unwrap().read().unwrap().clone();
+        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap();
+        let mut block_manager =
+            BlockManager::build(path.clone(), block_index, Cfg::default().into()).await;
+        let block_v1_9 = block_manager
+            .load_block(1)
+            .await
+            .unwrap()
+            .read()
+            .await
+            .unwrap()
+            .clone();
         assert_eq!(block_v1_9.record_count(), 2);
         assert_eq!(block_v1_9.size(), 20);
         assert_eq!(block_v1_9.metadata_size(), 68);
@@ -591,21 +599,19 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_empty_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
-        entry.compact().unwrap(); // sync WALs
+        entry.compact().await.unwrap(); // sync WALs
 
         {
             let block_file_index = path.join(&entry.name).join(BLOCK_INDEX_FILE);
-            let rc = FILE_CACHE
+            let mut file = FILE_CACHE
                 .write_or_create(&block_file_index, SeekFrom::Current(0))
-                .unwrap()
-                .upgrade()
+                .await
                 .unwrap();
-            let mut file = rc.write().unwrap();
             file.set_len(0).unwrap();
-            file.sync_all().unwrap();
+            file.sync_all().await.unwrap();
         }
 
         let entry = EntryLoader::restore_entry(
@@ -623,7 +629,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_create_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
         entry
@@ -632,6 +638,7 @@ mod tests {
             .await
             .unwrap()
             .save_cache_on_disk()
+            .await
             .unwrap();
 
         EntryLoader::restore_entry(
@@ -658,7 +665,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_check_integrity_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
         let _ = entry
@@ -666,7 +673,8 @@ mod tests {
             .write()
             .await
             .unwrap()
-            .save_cache_on_disk();
+            .save_cache_on_disk()
+            .await;
 
         EntryLoader::restore_entry(
             path.join(entry.name.clone()),
@@ -709,14 +717,15 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_missed_descriptor(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         let _ = entry
             .block_manager
             .write()
             .await
             .unwrap()
-            .save_cache_on_disk();
+            .save_cache_on_disk()
+            .await;
 
         let entry = EntryLoader::restore_entry(
             path.join(entry.name.clone()),
@@ -733,6 +742,7 @@ mod tests {
                 .await
                 .unwrap()
                 .load_block(1)
+                .await
                 .is_ok(),
             "should restore the block index from the blocks"
         );
@@ -760,16 +770,16 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_recovery_with_orphan_block(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone());
+        let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
-        entry.compact().unwrap();
+        entry.compact().await.unwrap();
 
         // Create a new block but don't add it to the index
         let mut bm = entry.block_manager.write().await.unwrap();
-        bm.start_new_block(2, 100).unwrap();
-        bm.save_cache_on_disk().unwrap();
+        bm.start_new_block(2, 100).await.unwrap();
+        bm.save_cache_on_disk().await.unwrap();
         bm.index_mut().remove_block(2);
-        bm.index_mut().save().unwrap();
+        bm.index_mut().save().await.unwrap();
 
         // Restore the entry
         let entry = EntryLoader::restore_entry(
@@ -806,14 +816,16 @@ mod tests {
         #[tokio::test]
         async fn test_new_block(#[future] entry_fix: (Arc<Entry>, PathBuf), record2: Record) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone());
+            let mut wal = create_wal(path.clone()).await;
             // Block #3 was created
             wal.append(3, WalEntry::WriteRecord(record2.clone()))
+                .await
                 .unwrap();
 
             let mut record3 = record2.clone();
             record3.timestamp = Some(us_to_ts(&3));
             wal.append(3, WalEntry::WriteRecord(record3.clone()))
+                .await
                 .unwrap();
 
             let entry = EntryLoader::restore_entry(
@@ -831,9 +843,10 @@ mod tests {
                 .await
                 .unwrap()
                 .load_block(3)
+                .await
                 .unwrap()
                 .clone();
-            let block = block_ref.read().unwrap();
+            let block = block_ref.read().await.unwrap();
             assert_eq!(block.get_record(2), Some(&record2));
             assert_eq!(block.get_record(3), Some(&record3));
 
@@ -852,13 +865,15 @@ mod tests {
             mut record2: Record,
         ) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone());
+            let mut wal = create_wal(path.clone()).await;
 
             // Block #1 was updated
             wal.append(1, WalEntry::WriteRecord(record2.clone()))
+                .await
                 .unwrap();
             record2.end = 20; //size 20
             wal.append(1, WalEntry::UpdateRecord(record2.clone()))
+                .await
                 .unwrap();
 
             let entry = EntryLoader::restore_entry(
@@ -876,9 +891,10 @@ mod tests {
                 .await
                 .unwrap()
                 .load_block(1)
+                .await
                 .unwrap();
 
-            let block = block_ref.read().unwrap();
+            let block = block_ref.read().await.unwrap();
             assert_eq!(block.get_record(2), Some(&record2));
 
             let file = File::open(path.join("1.blk")).unwrap();
@@ -893,10 +909,10 @@ mod tests {
         #[tokio::test]
         async fn test_remove_record(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone());
+            let mut wal = create_wal(path.clone()).await;
 
             // Record #1 was removed
-            wal.append(1, WalEntry::RemoveRecord(0)).unwrap();
+            wal.append(1, WalEntry::RemoveRecord(0)).await.unwrap();
 
             let entry = EntryLoader::restore_entry(
                 path,
@@ -913,8 +929,9 @@ mod tests {
                 .await
                 .unwrap()
                 .load_block(1)
+                .await
                 .unwrap();
-            let block = block.read().unwrap();
+            let block = block.read().await.unwrap();
             assert_eq!(block.record_count(), 1);
             assert!(block.get_record(0).is_none());
             assert!(block.get_record(1).is_some());
@@ -924,10 +941,10 @@ mod tests {
         #[tokio::test]
         async fn test_remove_block(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone());
+            let mut wal = create_wal(path.clone()).await;
 
             // Block #1 was removed
-            wal.append(1, WalEntry::RemoveBlock).unwrap();
+            wal.append(1, WalEntry::RemoveBlock).await.unwrap();
             let entry = EntryLoader::restore_entry(
                 path,
                 entry.settings().await.unwrap(),
@@ -943,6 +960,7 @@ mod tests {
                 .await
                 .unwrap()
                 .load_block(1)
+                .await
                 .clone();
             assert_eq!(block.err().unwrap().status, InternalServerError,);
         }
@@ -970,7 +988,7 @@ mod tests {
         #[tokio::test]
         async fn test_recovery_without_index(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone());
+            let mut wal = create_wal(path.clone()).await;
 
             // Block #1 was appended to the WAL
             wal.append(
@@ -984,13 +1002,14 @@ mod tests {
                     labels: vec![],
                 }),
             )
+            .await
             .unwrap();
 
             // Create a new block but don't add it to the index
             let mut bm = entry.block_manager.write().await.unwrap();
-            bm.start_new_block(1, 100).unwrap();
+            bm.start_new_block(1, 100).await.unwrap();
             bm.index_mut().remove_block(1);
-            bm.index_mut().save().unwrap();
+            bm.index_mut().save().await.unwrap();
 
             // Restore the entry
             let entry = EntryLoader::restore_entry(
@@ -1007,8 +1026,9 @@ mod tests {
                 .await
                 .unwrap()
                 .load_block(1)
+                .await
                 .unwrap();
-            let block = block.read().unwrap();
+            let block = block.read().await.unwrap();
 
             assert_eq!(block.record_count(), 1);
         }
@@ -1027,14 +1047,14 @@ mod tests {
 
         #[fixture]
         async fn entry_fix(path: PathBuf, entry_settings: EntrySettings) -> (Arc<Entry>, PathBuf) {
-            let entry = entry(entry_settings.clone(), path.clone());
+            let entry = entry(entry_settings.clone(), path.clone()).await;
             let name = entry.name().to_string();
             {
                 let mut block_manager = entry.block_manager.write().await.unwrap();
 
                 {
-                    let block_ref = block_manager.start_new_block(1, 10).unwrap();
-                    let mut block = block_ref.write().unwrap();
+                    let block_ref = block_manager.start_new_block(1, 10).await.unwrap();
+                    let mut block = block_ref.write().await.unwrap();
                     block.insert_or_update_record(Record {
                         timestamp: Some(us_to_ts(&0)),
                         begin: 0,
@@ -1054,8 +1074,8 @@ mod tests {
                     });
                 }
 
-                block_manager.start_new_block(2, 10).unwrap();
-                block_manager.save_cache_on_disk().unwrap();
+                block_manager.start_new_block(2, 10).await.unwrap();
+                block_manager.save_cache_on_disk().await.unwrap();
             }
 
             (entry, path.join(name))

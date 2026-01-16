@@ -25,9 +25,11 @@ impl Entry {
         );
 
         let (block_ref, record) = {
-            let mut bm = self.block_manager.write().await?;
-            let block_ref = bm.find_block(time)?;
-            let block = block_ref.read()?;
+            let block_ref = {
+                let mut bm = self.block_manager.write().await?;
+                bm.find_block(time).await?
+            };
+            let block = block_ref.read().await?;
             let record = block
                 .get_record(time)
                 .ok_or_else(|| {
@@ -69,7 +71,9 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
-    use crate::storage::entry::tests::{entry, path, write_record, write_stub_record};
+    use crate::storage::entry::tests::{
+        entry, entry_settings, path, write_record, write_stub_record,
+    };
     use crate::storage::entry::EntrySettings;
     use bytes::Bytes;
     use reduct_base::error::ReductError;
@@ -80,8 +84,9 @@ mod tests {
     use std::sync::Arc;
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_empty(entry: Arc<Entry>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_empty(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         let writer = entry.begin_read(1000).await;
         assert_eq!(
             writer.err(),
@@ -90,8 +95,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_early(entry: Arc<Entry>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_early(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         let writer = entry.begin_read(1000).await;
         assert_eq!(
@@ -101,8 +107,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_late(entry: Arc<Entry>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_late(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         let reader = entry.begin_read(2000000).await;
         assert_eq!(
@@ -114,8 +121,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_broken(entry: Arc<Entry>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_broken(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         let mut sender = entry
             .clone()
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
@@ -137,8 +145,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_still_written(entry: Arc<Entry>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_still_written(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         let mut sender = entry
             .clone()
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
@@ -159,8 +168,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_not_found(entry: Arc<Entry>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_not_found(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 3000000).await;
 
@@ -174,16 +184,18 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_ok1(entry: Arc<Entry>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_ok1(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         let mut reader = entry.begin_read(1000000).await.unwrap();
         assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_ok2(entry: Arc<Entry>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_ok2(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 1010000).await;
 
@@ -192,8 +204,9 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn test_begin_read_ok_in_chunks(entry: Arc<Entry>) {
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_ok_in_chunks(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         let mut data = vec![0; MAX_IO_BUFFER_SIZE + 1];
         data[0] = 1;
         data[MAX_IO_BUFFER_SIZE] = 2;
@@ -213,7 +226,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_search(path: PathBuf) {
         let entry = entry(
             EntrySettings {
@@ -221,7 +234,8 @@ mod tests {
                 max_block_records: 5,
             },
             path,
-        );
+        )
+        .await;
 
         let step = 100000;
         for i in 0..10 {
@@ -230,5 +244,28 @@ mod tests {
 
         let reader = entry.begin_read(5 * step).await.unwrap();
         assert_eq!(reader.meta().timestamp(), 500000);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_when_entry_is_deleted(entry_settings: EntrySettings, path: PathBuf) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        entry.mark_deleting().await.unwrap();
+
+        let writer = entry.begin_read(1000).await;
+        assert_eq!(
+            writer.err(),
+            Some(not_found!("No record with timestamp 1000"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read(entry_settings: EntrySettings, path: PathBuf) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+
+        write_stub_record(&entry, 1000000).await;
+        let mut reader = entry.begin_read(1000000).await.unwrap();
+        assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
     }
 }

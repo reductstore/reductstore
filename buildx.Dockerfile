@@ -9,6 +9,8 @@ ARG GCC_COMPILER=gcc-11
 ARG RUST_VERSION
 ARG BUILD_PROFILE=release
 
+ENV AWS_LC_SYS_USE_PREBUILT=0
+
 RUN apt-get update && apt-get install -y \
     cmake \
     build-essential \

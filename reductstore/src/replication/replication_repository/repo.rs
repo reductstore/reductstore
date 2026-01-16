@@ -217,7 +217,7 @@ impl ManageReplications for ReplicationRepository {
         })
     }
 
-    fn remove_replication(&mut self, name: &str) -> Result<(), ReductError> {
+    async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError> {
         let repl = self.get_replication(name)?;
         if repl.is_provisioned() {
             return Err(ReductError::conflict(&format!(
@@ -226,13 +226,13 @@ impl ManageReplications for ReplicationRepository {
             )));
         }
         self.replications.remove(name);
-        self.save_repo()
+        self.save_repo().await
     }
 
-    fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
+    async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
         let replication = self.get_mut_replication(name)?;
         replication.set_mode(mode);
-        self.save_repo()
+        self.save_repo().await
     }
 
     async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
@@ -263,19 +263,18 @@ impl ReplicationRepository {
             started: false,
         };
 
-        let read_conf_file = || {
-            let lock = FILE_CACHE
+        let read_conf_file = async || {
+            let mut lock = FILE_CACHE
                 .write_or_create(&repo.repo_path, Start(0))
-                .expect("Failed to create or open replication repository file")
-                .upgrade()
-                .unwrap();
+                .await
+                .expect("Failed to create or open replication repository file");
 
             let mut buf = Vec::new();
-            lock.write().unwrap().read_to_end(&mut buf)?;
+            lock.read_to_end(&mut buf)?;
             Ok::<Vec<u8>, ReductError>(buf)
         };
 
-        match read_conf_file() {
+        match read_conf_file().await {
             Ok(buf) => {
                 debug!(
                     "Reading replication repository from {}",
@@ -297,7 +296,7 @@ impl ReplicationRepository {
         repo
     }
 
-    fn save_repo(&self) -> Result<(), ReductError> {
+    async fn save_repo(&self) -> Result<(), ReductError> {
         let proto_repo = ProtoReplicationRepo {
             replications: self
                 .replications
@@ -314,14 +313,12 @@ impl ReplicationRepository {
             .encode(&mut buf)
             .expect("Error encoding replication repository");
 
-        let lock = FILE_CACHE
-            .write_or_create(&self.repo_path, Start(0))?
-            .upgrade()?;
-
-        let mut file = lock.write()?;
+        let mut file = FILE_CACHE
+            .write_or_create(&self.repo_path, Start(0))
+            .await?;
         file.set_len(0)?;
         file.write_all(&buf)?;
-        file.sync_all()?;
+        file.sync_all().await?;
 
         Ok(())
     }
@@ -404,7 +401,7 @@ impl ReplicationRepository {
             replication.start();
         }
         self.replications.insert(name.to_string(), replication);
-        self.save_repo()
+        self.save_repo().await
     }
 }
 
@@ -739,7 +736,7 @@ mod tests {
                 .await
                 .unwrap();
 
-            repo.remove_replication("test").unwrap();
+            repo.remove_replication("test").await.unwrap();
             assert_eq!(repo.replications().await.unwrap().len(), 0);
 
             // check if replication is removed from file
@@ -757,7 +754,7 @@ mod tests {
         async fn test_remove_non_existing_replication(#[future] mut repo: ReplicationRepository) {
             let mut repo = repo.await;
             assert_eq!(
-                repo.remove_replication("test-2"),
+                repo.remove_replication("test-2").await,
                 Err(not_found!("Replication 'test-2' does not exist")),
                 "Should not remove non existing replication"
             );
@@ -778,7 +775,7 @@ mod tests {
             replication.set_provisioned(true);
 
             assert_eq!(
-                repo.remove_replication("test"),
+                repo.remove_replication("test").await,
                 Err(conflict!("Can't remove provisioned replication 'test'")),
                 "Should not remove provisioned replication"
             );
@@ -897,73 +894,6 @@ mod tests {
         }
     }
 
-    mod from {
-        use super::*;
-
-        #[rstest]
-        fn test_from_proto(settings: ReplicationSettings) {
-            let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, restored_settings);
-        }
-
-        #[rstest]
-        fn test_from_each_n_proto(settings: ReplicationSettings) {
-            let mut settings = settings;
-            settings.each_n = Some(10);
-            let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, restored_settings);
-        }
-
-        #[rstest]
-        fn test_from_each_s_proto(settings: ReplicationSettings) {
-            let mut settings = settings;
-            settings.each_s = Some(10.0);
-            let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, restored_settings);
-        }
-
-        #[rstest]
-        fn test_from_when_proto(settings: ReplicationSettings) {
-            let mut settings = settings;
-            settings.when = Some(serde_json::json!({"$and": [true, true]}));
-            let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(settings, restored_settings);
-        }
-
-        #[rstest]
-        fn test_from_when_proto_invalid(settings: ReplicationSettings) {
-            let mut proto_settings = ProtoReplicationSettings::from(settings.clone());
-            proto_settings.when = Some("invalid".to_string());
-
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert!(restored_settings.when.is_none());
-        }
-
-        #[rstest]
-        fn test_from_mode_proto(settings: ReplicationSettings) {
-            let mut settings = settings;
-            settings.mode = ReplicationMode::Paused;
-            let proto_settings = ProtoReplicationSettings::from(settings.clone());
-            assert_eq!(proto_settings.mode, ProtoReplicationMode::Paused as i32);
-
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(restored_settings.mode, ReplicationMode::Paused);
-        }
-
-        #[rstest]
-        fn test_from_mode_proto_disabled(settings: ReplicationSettings) {
-            let mut proto_settings = ProtoReplicationSettings::from(settings.clone());
-            proto_settings.mode = ProtoReplicationMode::Disabled as i32;
-
-            let restored_settings = ReplicationSettings::from(proto_settings);
-            assert_eq!(restored_settings.mode, ReplicationMode::Disabled);
-        }
-    }
-
     mod start {
         use super::*;
 
@@ -1023,7 +953,9 @@ mod tests {
             repo.create_replication("test-1", settings.clone())
                 .await
                 .unwrap();
-            repo.set_mode("test-1", ReplicationMode::Paused).unwrap();
+            repo.set_mode("test-1", ReplicationMode::Paused)
+                .await
+                .unwrap();
 
             assert_eq!(
                 repo.get_replication("test-1").unwrap().mode(),

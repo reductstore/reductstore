@@ -3,14 +3,50 @@
 
 use std::collections::HashMap;
 use std::hash::Hash;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 struct ExpiringValue<V> {
     value: V,
-    last_access: Instant,
+    last_access: AtomicU64,
 }
 
 type ExpiringStore<K, V> = HashMap<K, ExpiringValue<V>>;
+
+static START: LazyLock<Instant> = LazyLock::new(Instant::now);
+
+#[inline]
+fn now_since_start() -> u64 {
+    Instant::now()
+        .checked_duration_since(*START)
+        .map(|d| d.as_nanos())
+        .unwrap_or(0)
+        .min(u64::MAX as u128) as u64
+}
+
+impl<V> ExpiringValue<V> {
+    fn new(value: V) -> ExpiringValue<V> {
+        ExpiringValue {
+            value,
+            last_access: AtomicU64::new(now_since_start()),
+        }
+    }
+
+    fn touch(&self) {
+        self.last_access.store(now_since_start(), Ordering::Relaxed);
+    }
+
+    fn last_access_elapsed(&self) -> Duration {
+        let now = now_since_start();
+        let last = self.last_access.load(Ordering::Relaxed);
+        Duration::from_nanos(now.saturating_sub(last))
+    }
+
+    fn last_access_ts(&self) -> u64 {
+        self.last_access.load(Ordering::Relaxed)
+    }
+}
 
 /// A simple cache implementation that removes old entries after a given time.
 ///
@@ -40,10 +76,7 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
     ///
     /// A vector of key-value pairs that were removed from the cache.
     pub fn insert(&mut self, key: K, value: V) -> Vec<(K, V)> {
-        let value = ExpiringValue {
-            value,
-            last_access: Instant::now(),
-        };
+        let value = ExpiringValue::new(value);
         self.store.insert(key, value);
         self.discard_old_descriptors()
     }
@@ -59,8 +92,11 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
     /// # Returns
     ///
     /// An `Option` containing a reference to the value if it exists, or `None` if it does not.
-    pub fn get(&mut self, key: &K) -> Option<&V> {
-        self.get_mut(key).map(|v| &*v)
+    pub fn get(&self, key: &K) -> Option<&V> {
+        self.store.get(key).map(|v| {
+            v.touch();
+            &v.value
+        })
     }
 
     /// Retrieves a mutable reference to a value from the cache by key.
@@ -75,17 +111,12 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
     ///
     /// An `Option` containing a mutable reference to the value if it exists, or `None` if it does not.
     /// ```
+    #[allow(dead_code)]
     pub fn get_mut(&mut self, key: &K) -> Option<&mut V> {
-        let mut value = self.store.get_mut(key);
-        if let Some(ref mut value) = value {
-            value.last_access = Instant::now();
-        }
-
-        if let Some(value) = value {
-            Some(&mut value.value)
-        } else {
-            None
-        }
+        self.store.get_mut(key).map(|value| {
+            value.touch();
+            &mut value.value
+        })
     }
 
     /// Removes a value from the cache by key.
@@ -119,11 +150,11 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
     ///
     /// A vector of references to all values in the cache.
     ///
-    pub fn values(&mut self) -> Vec<&V> {
+    pub fn values(&self) -> Vec<&V> {
         self.store
-            .values_mut()
+            .values()
             .map(|v| {
-                v.last_access = Instant::now();
+                v.touch();
                 &v.value
             })
             .collect()
@@ -151,7 +182,7 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
         // need to collect keys to remove because we can't remove while iterating
         let mut keys_to_remove = Vec::new();
         for (key, value) in self.store.iter() {
-            if value.last_access.elapsed() > self.ttl {
+            if value.last_access_elapsed() > self.ttl {
                 keys_to_remove.push(key.clone());
             }
         }
@@ -164,15 +195,16 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
 
         // check if the cache is full and remove old
         if self.store.len() > self.size {
-            let mut oldest: Option<(&K, &ExpiringValue<V>)> = None;
+            let mut oldest: Option<(&K, u64)> = None;
 
             for (key, value) in self.store.iter() {
-                if let Some(oldest_value) = oldest {
-                    if value.last_access < oldest_value.1.last_access {
-                        oldest = Some((key, value));
+                if let Some((_, ts)) = oldest {
+                    let value_ts = value.last_access_ts();
+                    if value_ts < ts {
+                        oldest = Some((key, value_ts));
                     }
                 } else {
-                    oldest = Some((key, value));
+                    oldest = Some((key, value.last_access_ts()));
                 }
             }
 

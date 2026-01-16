@@ -1,6 +1,7 @@
 // Copyright 2024-2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use async_trait::async_trait;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
 use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -91,6 +92,7 @@ impl WalEntry {
 ///
 /// | Entry Type (8) | Entry Length (64) | Entry Data (variable) | CRC (64) | Stop Marker (8) |
 ///
+#[async_trait]
 pub(in crate::storage) trait Wal {
     /// Append a WAL entry to the WAL file
     ///
@@ -102,7 +104,7 @@ pub(in crate::storage) trait Wal {
     /// # Returns
     ///
     /// * `Ok(())` if the entry was successfully appended
-    fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError>;
+    async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError>;
 
     /// Read all WAL entries for a block
     ///
@@ -113,13 +115,13 @@ pub(in crate::storage) trait Wal {
     /// # Returns
     ///
     /// * A vector of WAL entries
-    fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError>;
+    async fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError>;
 
     /// Remove the WAL file for a block
-    fn remove(&self, block_id: u64) -> Result<(), ReductError>;
+    async fn remove(&self, block_id: u64) -> Result<(), ReductError>;
 
     /// List all WALs
-    fn list(&self) -> Result<Vec<u64>, ReductError>;
+    async fn list(&self) -> Result<Vec<u64>, ReductError>;
 }
 
 struct WalImpl {
@@ -142,16 +144,17 @@ impl WalImpl {
 
 const STOP_MARKER: u8 = 255;
 
+#[async_trait]
 impl Wal for WalImpl {
-    fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
+    async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        let file = if !FILE_CACHE.try_exists(&path)? {
-            let wk = FILE_CACHE.write_or_create(&path, SeekFrom::Current(0))?;
-            let file = wk.upgrade()?;
-            // preallocate file to speed up writes
-            file.write()?.set_len(WAL_FILE_SIZE)?;
+        let mut file = if !FILE_CACHE.try_exists(&path).await? {
+            let mut file = FILE_CACHE
+                .write_or_create(&path, SeekFrom::Current(0))
+                .await?;
+            file.set_len(WAL_FILE_SIZE)?;
             self.file_positions.insert(block_id, 0);
-            wk
+            file
         } else {
             let pos = match self.file_positions.entry(block_id) {
                 Occupied(e) => e.get().clone(),
@@ -164,39 +167,33 @@ impl Wal for WalImpl {
                 }
             };
 
-            FILE_CACHE.write_or_create(&path, SeekFrom::Start(pos))?
+            FILE_CACHE
+                .write_or_create(&path, SeekFrom::Start(pos))
+                .await?
         };
 
-        let rc = file.upgrade()?;
-        let mut lock = rc.write()?;
-        if lock.stream_position()? > 0 {
-            // remove stop marker
-            lock.seek(SeekFrom::Current(-1))?;
+        if file.stream_position()? > 0 {
+            file.seek(SeekFrom::Current(-1))?;
         }
 
         let buf = entry.encode();
-        // write entry
-        lock.write_all(&buf)?;
-        // write crc
+        file.write_all(&buf)?;
         let mut crc = Digest::new();
         crc.write(&buf);
-        lock.write(&crc.sum64().to_be_bytes())?;
-        // write stop marker
-        lock.write_u8(STOP_MARKER)?;
+        file.write(&crc.sum64().to_be_bytes())?;
+        file.write_u8(STOP_MARKER)?;
         self.file_positions
-            .insert(block_id, lock.stream_position()?);
+            .insert(block_id, file.stream_position()?);
         Ok(())
     }
 
-    fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError> {
+    async fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError> {
         let path = self.block_wal_path(block_id);
-        let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
-        let mut lock = file.write()?;
+        let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
 
         let mut entries = Vec::new();
         loop {
-            // read entry type
-            let entry_type = match lock.read_u8() {
+            let entry_type = match file.read_u8() {
                 Ok(t) => t,
                 Err(err) => return Err(err.into()),
             };
@@ -208,17 +205,14 @@ impl Wal for WalImpl {
             let mut crc = Digest::new();
             crc.write(&[entry_type]);
 
-            // read entry length
-            let len = lock.read_u64::<BigEndian>()?;
+            let len = file.read_u64::<BigEndian>()?;
             crc.write(&len.to_be_bytes());
 
-            // read entry data
             let mut buf = vec![0; len as usize];
-            lock.read_exact(&mut buf)?;
+            file.read_exact(&mut buf)?;
             crc.write(&buf);
 
-            // read crc
-            let crc_bytes = lock.read_u64::<BigEndian>()?;
+            let crc_bytes = file.read_u64::<BigEndian>()?;
 
             if crc.sum64() != crc_bytes {
                 return Err(internal_server_error!("WAL {:?} is corrupted", path));
@@ -231,17 +225,17 @@ impl Wal for WalImpl {
         Ok(entries)
     }
 
-    fn remove(&self, block_id: u64) -> Result<(), ReductError> {
+    async fn remove(&self, block_id: u64) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        if FILE_CACHE.try_exists(&path)? {
-            FILE_CACHE.remove(&path)?;
+        if FILE_CACHE.try_exists(&path).await? {
+            FILE_CACHE.remove(&path).await?;
         }
         Ok(())
     }
 
-    fn list(&self) -> Result<Vec<u64>, ReductError> {
+    async fn list(&self) -> Result<Vec<u64>, ReductError> {
         let mut blocks = Vec::new();
-        for path in FILE_CACHE.read_dir(&self.root_path)? {
+        for path in FILE_CACHE.read_dir(&self.root_path).await? {
             if path.extension().unwrap_or_default() == "wal" {
                 let block_id = path
                     .file_stem()
@@ -273,11 +267,12 @@ impl Wal for WalImpl {
 /// # Panics
 ///
 /// This function will panic if it fails to create the WAL directory.
-pub(in crate::storage) fn create_wal(entry_path: PathBuf) -> Box<dyn Wal + Send + Sync> {
+pub(in crate::storage) async fn create_wal(entry_path: PathBuf) -> Box<dyn Wal + Send + Sync> {
     let wal_folder = entry_path.join("wal");
     if !wal_folder.try_exists().unwrap() {
         FILE_CACHE
             .create_dir_all(&wal_folder)
+            .await
             .expect("Failed to create WAL folder");
     }
     Box::new(WalImpl::new(entry_path.join("wal")))
@@ -291,16 +286,19 @@ mod tests {
     use std::fs::OpenOptions;
 
     #[rstest]
-    fn test_read(mut wal: WalImpl) {
+    #[tokio::test]
+    async fn test_read(mut wal: WalImpl) {
         wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
             .unwrap();
         wal.append(1, WalEntry::UpdateRecord(Record::default()))
+            .await
             .unwrap();
-        wal.append(1, WalEntry::RemoveBlock).unwrap();
-        wal.append(1, WalEntry::RemoveRecord(1)).unwrap();
+        wal.append(1, WalEntry::RemoveBlock).await.unwrap();
+        wal.append(1, WalEntry::RemoveRecord(1)).await.unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let entries = wal.read(1).unwrap();
+        let entries = wal.await.read(1).await.unwrap();
 
         assert_eq!(
             entries,
@@ -314,36 +312,42 @@ mod tests {
     }
 
     #[rstest]
-
-    fn test_remove(mut wal: WalImpl) {
+    #[tokio::test]
+    async fn test_remove(mut wal: WalImpl) {
         wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
             .unwrap();
 
-        assert_eq!(wal.read(1).unwrap().len(), 1);
-        wal.remove(1).unwrap();
+        assert_eq!(wal.read(1).await.unwrap().len(), 1);
+        wal.remove(1).await.unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let err = wal.read(1).err().unwrap();
+        let err = wal.await.read(1).await.err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
     }
 
     #[rstest]
-    fn test_list(mut wal: WalImpl) {
+    #[tokio::test]
+    async fn test_list(mut wal: WalImpl) {
         wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
             .unwrap();
         wal.append(2, WalEntry::WriteRecord(Record::default()))
+            .await
             .unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let blocks = wal.list().unwrap();
+        let blocks = wal.await.list().await.unwrap();
         assert_eq!(blocks.len(), 2);
         assert!(blocks.contains(&1));
         assert!(blocks.contains(&2));
     }
 
     #[rstest]
-    fn test_crc_error(mut wal: WalImpl) {
+    #[tokio::test]
+    async fn test_crc_error(mut wal: WalImpl) {
         wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
             .unwrap();
 
         let path = wal.block_wal_path(1);
@@ -352,21 +356,25 @@ mod tests {
         file.write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 1]).unwrap();
 
         let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf());
-        let err = wal.read(1).err().unwrap();
+        let err = wal.await.read(1).await.err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
     }
 
     #[rstest]
-    fn cache_invalidation(mut wal: WalImpl) {
+    #[tokio::test]
+    async fn cache_invalidation(mut wal: WalImpl) {
         wal.append(1, WalEntry::UpdateRecord(Record::default()))
+            .await
             .unwrap();
         FILE_CACHE
             .discard_recursive(&wal.root_path.join("1.wal"))
+            .await
             .unwrap();
         wal.append(1, WalEntry::WriteRecord(Record::default()))
+            .await
             .unwrap();
 
-        let entries = wal.read(1).unwrap();
+        let entries = wal.read(1).await.unwrap();
         assert_eq!(
             entries,
             vec![

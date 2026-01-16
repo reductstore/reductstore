@@ -119,11 +119,11 @@ async fn decrypt_query(
         .map_err(|e| unprocessable_entity!("Invalid 'r' parameter: {}", e))?;
 
     let mut token_repo = components.token_repo.write().await?;
-    let token = if token_repo.get_token_list()?.is_empty() {
+    let token = if token_repo.get_token_list().await?.is_empty() {
         // Authentication is disabled, use empty token
         ""
     } else {
-        token_repo.get_token(issuer)?.value.as_str()
+        token_repo.get_token(issuer).await?.value.as_str()
     };
 
     let ciphertxt = URL_SAFE_NO_PAD
@@ -249,7 +249,7 @@ mod tests {
     use rstest::rstest;
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_get_query_link(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
@@ -434,7 +434,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_get_query_link_range(#[future] keeper: Arc<StateKeeper>, mut headers: HeaderMap) {
         let keeper = keeper.await;
         let link = create_query_link(

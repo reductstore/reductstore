@@ -73,7 +73,7 @@ impl Bucket {
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         let settings = Self::fill_settings(settings, Self::defaults());
-        let folder_keeper = FolderKeeper::new(path.clone(), &cfg);
+        let folder_keeper = FolderKeeper::new(path.clone(), &cfg).await;
 
         let bucket = Bucket {
             name: name.to_string(),
@@ -103,14 +103,11 @@ impl Bucket {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     pub async fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
-        let buf = {
-            let lock = FILE_CACHE
-                .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))?
-                .upgrade()?;
-            let mut buf = Vec::new();
-            lock.write()?.read_to_end(&mut buf)?;
-            buf
-        };
+        let mut file = FILE_CACHE
+            .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))
+            .await?;
+        let mut buf = Vec::new();
+        file.read_to_end(&mut buf)?;
 
         let cfg = Arc::new(cfg);
         let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf))
@@ -121,9 +118,9 @@ impl Bucket {
 
         let mut entries = BTreeMap::new();
         let mut task_set = Vec::new();
-        let folder_keeper = FolderKeeper::new(path.clone(), &cfg);
+        let folder_keeper = FolderKeeper::new(path.clone(), cfg.as_ref()).await;
 
-        for path in folder_keeper.list_folders()? {
+        for path in folder_keeper.list_folders().await? {
             let handler = Entry::restore(
                 path,
                 EntrySettings {
@@ -181,16 +178,19 @@ impl Bucket {
         } else {
             self.check_mode()?;
             let settings = self.settings.read().await?;
-            self.folder_keeper.add_folder(key)?;
-            let entry = Arc::new(Entry::try_new(
-                &key,
-                self.path.clone(),
-                EntrySettings {
-                    max_block_size: settings.max_block_size.unwrap(),
-                    max_block_records: settings.max_block_records.unwrap(),
-                },
-                self.cfg.clone(),
-            )?);
+            self.folder_keeper.add_folder(key).await?;
+            let entry = Arc::new(
+                Entry::try_build(
+                    &key,
+                    self.path.clone(),
+                    EntrySettings {
+                        max_block_size: settings.max_block_size.unwrap(),
+                        max_block_records: settings.max_block_records.unwrap(),
+                    },
+                    self.cfg.clone(),
+                )
+                .await?,
+            );
             let mut entries = self.entries.write().await?;
             entries
                 .entry(key.to_string())
@@ -337,7 +337,7 @@ impl Bucket {
 
         if let Some(entry) = entries.read().await?.get(old_name) {
             entry.ensure_not_deleting().await?;
-            entry.compact()?;
+            entry.compact().await?;
         } else {
             return Err(not_found!(
                 "Entry '{}' not found in bucket '{}'",
@@ -346,7 +346,7 @@ impl Bucket {
             ));
         }
 
-        folder_keeper.rename_folder(old_name, new_name)?;
+        folder_keeper.rename_folder(old_name, new_name).await?;
         entries.write().await?.remove(old_name);
 
         if let Some(entry) = Entry::restore(
@@ -389,23 +389,16 @@ impl Bucket {
         let entry_name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
 
-        let folder_remove_result = {
-            let remove_bucket_from_backend = || -> Result<(), ReductError> {
-                folder_keeper.remove_folder(&entry_name)?;
+        let folder_remove_result = folder_keeper.remove_folder(&entry_name).await;
+
+        match folder_remove_result {
+            Ok(()) => {
                 debug!(
                     "Remove entry '{}' from bucket '{}' and folder '{}'",
                     entry_name,
                     bucket_name,
                     path.display()
                 );
-                Ok(())
-            };
-
-            remove_bucket_from_backend()
-        };
-
-        match folder_remove_result {
-            Ok(()) => {
                 entries.write().await?.remove(&entry_name);
             }
             Err(err) => {
@@ -433,29 +426,24 @@ impl Bucket {
         self.save_settings().await?;
 
         let entries = self.entries.clone();
-        // use shared task to avoid locking in graceful shutdown
-        tokio::spawn(async move {
-            let mut count = 0usize;
-            for entry in entries.read().await?.values() {
-                if let Err(err) = entry.compact() {
-                    error!(
-                        "Failed to compact entry '{}' in bucket '{}': {}",
-                        entry.name(),
-                        bucket_name,
-                        err
-                    );
-                }
-                count += 1;
+        let mut count = 0usize;
+        for entry in entries.read().await?.values() {
+            if let Err(err) = entry.compact().await {
+                error!(
+                    "Failed to compact entry '{}' in bucket '{}': {}",
+                    entry.name(),
+                    bucket_name,
+                    err
+                );
             }
-            debug!(
-                "Bucket '{}' synced {} entries in {:?}",
-                bucket_name,
-                count,
-                Instant::now().duration_since(time_start)
-            );
-
-            Ok::<(), ReductError>(())
-        });
+            count += 1;
+        }
+        debug!(
+            "Bucket '{}' synced {} entries in {:?}",
+            bucket_name,
+            count,
+            Instant::now().duration_since(time_start)
+        );
 
         Ok(())
     }
@@ -505,7 +493,6 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
     use reduct_base::conflict;
     use reduct_base::io::ReadRecord;
     use reduct_base::msg::bucket_api::QuotaType;
@@ -635,7 +622,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_rename_entry_persisted(#[future] bucket: Arc<Bucket>) {
             let bucket = bucket.await;
             write(&bucket, "test-1", 1, b"test").await.unwrap();
@@ -816,19 +803,12 @@ mod tests {
 
     #[fixture]
     pub fn path() -> PathBuf {
-        let path = tempdir().unwrap().keep();
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .unwrap(),
-        );
-        path
+        tempdir().unwrap().keep()
     }
 
     #[fixture]
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
-        FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
+        FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
             Bucket::try_build("test", &path, settings, Cfg::default())
                 .await
@@ -838,7 +818,7 @@ mod tests {
 
     #[fixture]
     pub async fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
-        FILE_CACHE.create_dir_all(&path.join("test")).unwrap();
+        FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         let bucket = Bucket::try_build("test", &path, settings, Cfg::default())
             .await
             .unwrap();

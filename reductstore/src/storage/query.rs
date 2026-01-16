@@ -183,9 +183,9 @@ impl QueryWatcher {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::Cfg;
-    use crate::core::file_cache::FILE_CACHE;
+
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
     use prost_wkt_types::Timestamp;
@@ -219,7 +219,8 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_expired(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_task_expired(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             ..Default::default()
@@ -244,7 +245,8 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_ok(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_task_ok(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let options = QueryOptions::default();
         let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
 
@@ -266,7 +268,10 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_continuous_ok(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_task_continuous_ok(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             continuous: true,
@@ -289,8 +294,10 @@ mod tests {
             .await
             .unwrap()
             .load_block(0)
+            .await
             .unwrap()
             .write()
+            .await
             .unwrap()
             .insert_or_update_record(Record {
                 timestamp: Some(Timestamp {
@@ -314,7 +321,8 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test]
-    async fn test_query_task_err(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_task_err(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let options = QueryOptions::default();
         let query = build_query(0, 10, options.clone(), IoConfig::default()).unwrap();
 
@@ -352,7 +360,10 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test]
-    async fn test_query_task_blocking_error(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query_task_blocking_error(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
         let options = QueryOptions::default();
         let query: Box<dyn Query + Send + Sync> = Box::new(PanickingQuery {
             io: IoConfig::default(),
@@ -381,51 +392,52 @@ mod tests {
     }
 
     #[fixture]
-    fn block_manager() -> Arc<AsyncRwLock<BlockManager>> {
+    async fn block_manager() -> Arc<AsyncRwLock<BlockManager>> {
         let path = tempfile::tempdir()
             .unwrap()
             .keep()
             .join("bucket")
             .join("entry");
-
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .unwrap(),
-        );
-
-        let mut block_manager = BlockManager::new(
+        let mut block_manager = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join("index")),
             Cfg::default().into(),
-        );
-        let block_ref = block_manager.start_new_block(0, 10).unwrap();
-        block_ref.write().unwrap().insert_or_update_record(Record {
-            timestamp: Some(Timestamp {
-                seconds: 0,
-                nanos: 0,
-            }),
-            begin: 0,
-            end: 10,
-            state: 1,
-            labels: vec![],
-            content_type: "".to_string(),
-        });
+        )
+        .await;
+        let block_ref = block_manager.start_new_block(0, 10).await.unwrap();
+        block_ref
+            .write()
+            .await
+            .unwrap()
+            .insert_or_update_record(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 0,
+                    nanos: 0,
+                }),
+                begin: 0,
+                end: 10,
+                state: 1,
+                labels: vec![],
+                content_type: "".to_string(),
+            });
 
-        block_ref.write().unwrap().insert_or_update_record(Record {
-            timestamp: Some(Timestamp {
-                seconds: 0,
-                nanos: 1000,
-            }),
-            begin: 0,
-            end: 10,
-            state: 1,
-            labels: vec![],
-            content_type: "".to_string(),
-        });
+        block_ref
+            .write()
+            .await
+            .unwrap()
+            .insert_or_update_record(Record {
+                timestamp: Some(Timestamp {
+                    seconds: 0,
+                    nanos: 1000,
+                }),
+                begin: 0,
+                end: 10,
+                state: 1,
+                labels: vec![],
+                content_type: "".to_string(),
+            });
 
-        block_manager.finish_block(block_ref).unwrap();
+        block_manager.finish_block(block_ref).await.unwrap();
         Arc::new(AsyncRwLock::new(block_manager))
     }
 

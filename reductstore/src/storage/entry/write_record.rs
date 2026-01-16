@@ -32,19 +32,21 @@ impl Entry {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         let settings = self.settings.read().await?;
-        let mut bm = self.block_manager.write().await?;
-        // When we write, the likely case is that we are writing the latest record
-        // in the entry. In this case, we can just append to the latest block.
-        let mut block_ref = if bm.index().tree().is_empty() {
-            bm.start_new_block(time, settings.max_block_size)?
-        } else {
-            let block_id = *bm.index().tree().last().unwrap();
-            bm.load_block(block_id)?
+        let mut block_ref = {
+            let mut bm = self.block_manager.write().await?;
+            // When we write, the likely case is that we are writing the latest record
+            // in the entry. In this case, we can just append to the latest block.
+            if bm.index().tree().is_empty() {
+                bm.start_new_block(time, settings.max_block_size).await?
+            } else {
+                let block_id = *bm.index().tree().last().unwrap();
+                bm.load_block(block_id).await?
+            }
         };
 
         let _record_type = {
             let is_belated = {
-                let block = block_ref.write()?;
+                let block = block_ref.write().await?;
                 block.record_count() > 0 && block.latest_record_time() >= time
             };
             if is_belated {
@@ -53,6 +55,7 @@ impl Entry {
                     time, self.bucket_name, self.name
                 );
                 // The timestamp is belated. We need to find the proper block to write to.
+                let mut bm = self.block_manager.write().await?;
                 let index_tree = bm.index().tree();
                 if *index_tree.first().unwrap() > time {
                     // The timestamp is the earliest. We need to create a new block.
@@ -60,16 +63,18 @@ impl Entry {
                         "Timestamp {} is the earliest for {}/{}. Creating a new block",
                         time, self.bucket_name, self.name
                     );
-                    block_ref = bm.start_new_block(time, settings.max_block_size)?;
+                    block_ref = bm.start_new_block(time, settings.max_block_size).await?;
                     RecordType::BelatedFirst
                 } else {
-                    block_ref = bm.find_block(time)?;
-                    let block_id = block_ref.read()?.block_id();
+                    block_ref = bm.find_block(time).await?;
+                    drop(bm); // drop the lock early to avoid blocking other operations
+
+                    let block_id = block_ref.read().await?.block_id();
                     debug!(
                         "Timestamp {} is belated for {}/{}. Writing to block {}",
                         time, self.bucket_name, self.name, block_id
                     );
-                    let record = block_ref.read()?.get_record(time).map(|r| r.clone());
+                    let record = block_ref.read().await?.get_record(time).map(|r| r.clone());
                     // check if the record already exists
                     if let Some(mut record) = record {
                         // We overwrite the record if it is errored and the size is the same.
@@ -82,7 +87,7 @@ impl Entry {
                             )))
                         } else {
                             {
-                                let mut block = block_ref.write()?;
+                                let mut block = block_ref.write().await?;
                                 record.labels = labels
                                     .into_iter()
                                     .map(|(name, value)| record::Label { name, value })
@@ -92,7 +97,6 @@ impl Entry {
                                 block.insert_or_update_record(record);
                             }
 
-                            drop(bm); // drop the lock to avoid deadlock
                             let writer = RecordWriter::try_new(
                                 Arc::clone(&self.block_manager),
                                 block_ref,
@@ -112,7 +116,7 @@ impl Entry {
         };
 
         let mut block_ref = {
-            let block = block_ref.read()?;
+            let block = block_ref.read().await?;
             // Check if the block has enough space for the record.
             let has_no_space = block.size() + content_size as u64 > settings.max_block_size;
             let has_too_many_records = block.record_count() + 1 > settings.max_block_records;
@@ -124,31 +128,31 @@ impl Entry {
                     "Creating a new block for {}/{} (has_no_space={}, has_too_many_records={})",
                     self.bucket_name, self.name, has_no_space, has_too_many_records
                 );
-                bm.finish_block(block_ref.clone())?;
-                bm.start_new_block(time, settings.max_block_size)?
+                let mut bm = self.block_manager.write().await?;
+                bm.finish_block(block_ref.clone()).await?;
+                bm.start_new_block(time, settings.max_block_size).await?
             } else {
                 // We can just append to the latest block.
                 block_ref.clone()
             }
         };
 
-        drop(bm);
-
-        Self::prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)?;
+        Self::prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)
+            .await?;
 
         let writer =
             RecordWriter::try_new(Arc::clone(&self.block_manager), block_ref, time).await?;
         Ok(Box::new(writer))
     }
 
-    fn prepare_block_for_writing(
+    async fn prepare_block_for_writing(
         block: &mut BlockRef,
         time: u64,
         content_size: u64,
         content_type: String,
         labels: Labels,
     ) -> Result<(), ReductError> {
-        let mut block = block.write()?;
+        let mut block = block.write().await?;
         let record = Record {
             timestamp: Some(us_to_ts(&time)),
             begin: block.size(),
@@ -189,7 +193,8 @@ mod tests {
                 max_block_records: 10000,
             },
             path,
-        );
+        )
+        .await;
 
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
@@ -197,8 +202,10 @@ mod tests {
 
         assert_eq!(
             bm.load_block(1)
+                .await
                 .unwrap()
                 .write()
+                .await
                 .unwrap()
                 .get_record(1)
                 .unwrap()
@@ -215,8 +222,10 @@ mod tests {
 
         assert_eq!(
             bm.load_block(2000010)
+                .await
                 .unwrap()
                 .write()
+                .await
                 .unwrap()
                 .get_record(2000010)
                 .unwrap()
@@ -242,7 +251,8 @@ mod tests {
                 max_block_records: 1,
             },
             path,
-        );
+        )
+        .await;
 
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2).await;
@@ -251,8 +261,10 @@ mod tests {
         let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1)
+            .await
             .unwrap()
             .write()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -270,8 +282,10 @@ mod tests {
 
         let records = bm
             .load_block(2000010)
+            .await
             .unwrap()
             .write()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -291,7 +305,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_belated_record(entry: Arc<Entry>) {
+    async fn test_begin_write_belated_record(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 3000000).await;
         write_stub_record(&entry, 2000000).await;
@@ -299,8 +314,10 @@ mod tests {
         let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1000000)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -322,15 +339,18 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_belated_first(entry: Arc<Entry>) {
+    async fn test_begin_write_belated_first(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 3000000).await;
         write_stub_record(&entry, 1000000).await;
 
         let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1000000)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -344,7 +364,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_existing_record(entry: Arc<Entry>) {
+    async fn test_begin_write_existing_record(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 2000000).await;
         let err = entry
@@ -361,7 +382,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_existing_record_belated(entry: Arc<Entry>) {
+    async fn test_begin_write_existing_record_belated(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         write_stub_record(&entry, 2000000).await;
         write_stub_record(&entry, 1000000).await;
         let err = entry
@@ -385,7 +407,8 @@ mod tests {
                 max_block_records: 2,
             },
             path,
-        );
+        )
+        .await;
 
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 3000000).await;
@@ -394,8 +417,10 @@ mod tests {
         let mut bm = entry.block_manager.write().await.unwrap();
         let records = bm
             .load_block(1000000)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -405,8 +430,10 @@ mod tests {
 
         let records = bm
             .load_block(2000000)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .record_index()
             .clone();
@@ -417,7 +444,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_override_errored(entry: Arc<Entry>) {
+    async fn test_begin_override_errored(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         let mut sender = entry
             .clone()
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
@@ -447,8 +475,10 @@ mod tests {
             .await
             .unwrap()
             .load_block(1000000)
+            .await
             .unwrap()
             .read()
+            .await
             .unwrap()
             .get_record(1000000)
             .unwrap()
@@ -462,7 +492,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_not_override_if_different_size(entry: Arc<Entry>) {
+    async fn test_begin_not_override_if_different_size(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         let mut sender = entry
             .clone()
             .begin_write(1000000, 10, "text/plain".to_string(), Labels::new())
@@ -491,7 +522,8 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_belated_record_readable_after_rotation(entry: Arc<Entry>) {
+    async fn test_belated_record_readable_after_rotation(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
         // Fill the first block
         write_stub_record(&entry, 1000000).await;
         // Rotate to a new block

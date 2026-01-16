@@ -36,7 +36,7 @@ impl ContextGuard {
             .sync_fs()
             .await
             .expect("Failed to shutdown storage");
-        self.lock_file.release();
+        self.lock_file.release().await;
     }
 }
 
@@ -67,7 +67,7 @@ async fn launch_server() {
         env!("BUILD_TIME")
     );
 
-    let parser = CfgParser::from_env(StdEnvGetter::default(), version);
+    let parser = CfgParser::from_env(StdEnvGetter::default(), version).await;
     let handle = Handle::new();
     let lock_file = Arc::new(parser.build_lock_file().unwrap());
 
@@ -291,7 +291,7 @@ mod tests {
 
         let data_path = tempdir().unwrap().keep();
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
-        let parser = CfgParser::from_env(StdEnvGetter::default(), "0.0.0");
+        let parser = CfgParser::from_env(StdEnvGetter::default(), "0.0.0").await;
         let storage = parser.build().await.unwrap().storage;
 
         let handler = tokio::spawn(periodical_compact_storage(
@@ -319,7 +319,7 @@ mod tests {
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
 
         let handle = Handle::new();
-        let cfg = CfgParser::from_env(StdEnvGetter::default(), "0.0.0"); // init file cache
+        let cfg = CfgParser::from_env(StdEnvGetter::default(), "0.0.0").await; // init file cache
         let storage = cfg.build().await.unwrap().storage;
         let ctx = ContextGuard {
             server_handle: handle.clone(),

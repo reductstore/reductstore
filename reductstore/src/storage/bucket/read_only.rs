@@ -39,8 +39,8 @@ impl ReadOnlyMode for Bucket {
             .collect::<HashSet<_>>();
 
         let mut entries_to_retain = vec![];
-        self.folder_keeper.reload()?;
-        for path in self.folder_keeper.list_folders()? {
+        self.folder_keeper.reload().await?;
+        for path in self.folder_keeper.list_folders().await? {
             if current_bucket_paths.contains(&path) {
                 entries_to_retain.push(path);
                 continue;
@@ -78,7 +78,7 @@ impl ReadOnlyMode for Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::storage_engine::StorageEngineConfig;
     use crate::storage::bucket::tests::write;
     use crate::storage::bucket::FILE_CACHE;
@@ -263,17 +263,11 @@ mod tests {
             ..Cfg::default()
         };
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .unwrap(),
-        );
-
         cfg.role = InstanceRole::Primary;
 
         FILE_CACHE
             .create_dir_all(&cfg.data_path.join("bucket"))
+            .await
             .unwrap();
         let bucket = Arc::new(
             Bucket::try_build(

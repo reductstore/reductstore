@@ -6,11 +6,10 @@ use crate::api::HttpError;
 use crate::api::StateKeeper;
 use crate::auth::policy::ReadAccessPolicy;
 use axum::extract::{Path, State};
-use axum_extra::headers::HeaderMap;
+use axum::http::HeaderMap;
 use std::sync::Arc;
 
 // GET /b/:bucket_name
-
 pub(super) async fn get_bucket(
     State(keeper): State<Arc<StateKeeper>>,
     Path(bucket_name): Path<String>,
@@ -86,6 +85,7 @@ mod tests {
                     write: vec![],
                 },
             )
+            .await
             .unwrap();
 
         headers.insert(

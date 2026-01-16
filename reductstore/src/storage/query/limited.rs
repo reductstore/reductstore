@@ -61,7 +61,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_limit(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_limit(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = LimitedQuery::try_new(
             0,
             u64::MAX,

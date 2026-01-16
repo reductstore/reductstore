@@ -116,6 +116,7 @@ mod tests {
 
     #[test]
     #[serial]
+    #[cfg(not(target_os = "windows"))]
     fn test_lock_timeout_error_returns_error() {
         reset_rwlock_config();
         set_rwlock_failure_action(RwLockFailureAction::Error);

@@ -70,7 +70,7 @@ pub struct EntrySettings {
 }
 
 impl Entry {
-    pub fn try_new(
+    pub async fn try_build(
         name: &str,
         path: PathBuf,
         settings: EntrySettings,
@@ -88,11 +88,14 @@ impl Entry {
                 .unwrap()
                 .to_string(),
             settings: AsyncRwLock::new(settings),
-            block_manager: Arc::new(AsyncRwLock::new(BlockManager::new(
-                path.clone(),
-                BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
-                cfg.clone(),
-            ))),
+            block_manager: Arc::new(AsyncRwLock::new(
+                BlockManager::build(
+                    path.clone(),
+                    BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                    cfg.clone(),
+                )
+                .await,
+            )),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
@@ -181,7 +184,7 @@ impl Entry {
         let status_result = self.status();
 
         let mut bm = self.block_manager.write().await?;
-        let index = bm.update_and_get_index()?;
+        let index = bm.update_and_get_index().await?;
         let (oldest_record, latest_record) = if index.tree().is_empty() {
             (0, 0)
         } else {
@@ -249,34 +252,31 @@ impl Entry {
         let block_manager = Arc::clone(&self.block_manager);
         drop(bm); // release read lock before acquiring write lock
 
-        tokio::spawn(async move {
-            let mut bm = match block_manager.write().await {
-                Ok(bm) => bm,
-                Err(e) => {
-                    error!(
-                        "Failed to acquire write lock on block manager to remove oldest block {}: {}",
-                        oldest_block_id, e
-                    );
-                    return;
-                }
-            };
+        let mut bm = match block_manager.write().await {
+            Ok(bm) => bm,
+            Err(_) => {
+                return Err(internal_server_error!(
+                    "Cannot remove block {} because it is in use",
+                    oldest_block_id
+                ));
+            }
+        };
 
-            bm.remove_block(oldest_block_id).unwrap_or_else(|e| {
-                error!("Failed to remove oldest block {}: {}", oldest_block_id, e);
-            });
-            debug!(
-                "Removing the oldest block {}.blk",
-                bm.path().join(oldest_block_id.to_string()).display()
-            );
+        bm.remove_block(oldest_block_id).await.unwrap_or_else(|e| {
+            error!("Failed to remove oldest block {}: {}", oldest_block_id, e);
         });
+        debug!(
+            "Removing the oldest block {}.blk",
+            bm.path().join(oldest_block_id.to_string()).display()
+        );
 
         Ok(())
     }
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
-    pub fn compact(&self) -> Result<(), ReductError> {
+    pub async fn compact(&self) -> Result<(), ReductError> {
         if let Some(mut bm) = self.block_manager.try_write() {
-            bm.save_cache_on_disk()
+            bm.save_cache_on_disk().await
         } else {
             // Avoid blocking writers; we'll try again on the next sync tick
             debug!(
@@ -360,7 +360,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn mark_deleting_returns_conflict_when_already_deleting(entry: Arc<Entry>) {
+        async fn mark_deleting_returns_conflict_when_already_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
             entry.mark_deleting().await.unwrap();
             assert_eq!(
                 entry.mark_deleting().await,
@@ -380,15 +381,17 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
-            let entry = entry(entry_settings.clone(), path.clone());
+            let entry = entry(entry_settings.clone(), path.clone()).await;
             write_stub_record(&entry, 1).await;
             write_stub_record(&entry, 2000010).await;
 
             let mut bm = entry.block_manager.write().await.unwrap();
             let records = bm
                 .load_block(1)
+                .await
                 .unwrap()
                 .read()
+                .await
                 .unwrap()
                 .record_index()
                 .clone();
@@ -417,7 +420,7 @@ mod tests {
                 }
             );
 
-            bm.save_cache_on_disk().unwrap();
+            bm.save_cache_on_disk().await.unwrap();
             let entry = Entry::restore(
                 path.join(entry.name()),
                 entry_settings,
@@ -442,7 +445,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_historical_query(entry: Arc<Entry>) {
+        async fn test_historical_query(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
             write_stub_record(&entry, 1000000).await;
             write_stub_record(&entry, 2000000).await;
             write_stub_record(&entry, 3000000).await;
@@ -495,7 +499,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_continuous_query(entry: Arc<Entry>) {
+        async fn test_continuous_query(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
             write_stub_record(&entry, 1000000).await;
 
             let params = QueryEntry {
@@ -550,7 +555,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn keep_finished_query_until_ttl(entry: Arc<Entry>) {
+        async fn keep_finished_query_until_ttl(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
             write_stub_record(&entry, 1000000).await;
 
             let id = entry
@@ -612,7 +618,8 @@ mod tests {
                 max_block_records: 10000,
             },
             path,
-        );
+        )
+        .await;
 
         write_stub_record(&entry, 1000000).await;
         write_stub_record(&entry, 2000000).await;
@@ -634,7 +641,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_empty_entry(entry: Arc<Entry>) {
+        async fn test_empty_entry(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
             assert_eq!(
                 entry.try_remove_oldest_block().await,
                 Err(internal_server_error!("No block to remove"))
@@ -644,7 +652,8 @@ mod tests {
         #[rstest]
         #[ignore] // experimental:  without reader protection.
         #[tokio::test]
-        async fn test_entry_which_has_reader(entry: Arc<Entry>) {
+        async fn test_entry_which_has_reader(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
             write_record(
                 &entry,
                 1000000,
@@ -669,7 +678,8 @@ mod tests {
         #[rstest]
         #[ignore] // experimental:  without writer protection.
         #[tokio::test]
-        async fn test_entry_which_has_writer(entry: Arc<Entry>) {
+        async fn test_entry_which_has_writer(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
             let mut sender = entry
                 .clone()
                 .begin_write(
@@ -701,7 +711,7 @@ mod tests {
         #[tokio::test]
         async fn test_size_counting(path: PathBuf) {
             let entry = Arc::new(
-                Entry::try_new(
+                Entry::try_build(
                     "entry",
                     path.clone(),
                     EntrySettings {
@@ -710,6 +720,7 @@ mod tests {
                     },
                     Cfg::default().into(),
                 )
+                .await
                 .unwrap(),
             );
 
@@ -723,14 +734,14 @@ mod tests {
             assert_eq!(entry.info().await.unwrap().size, 116);
 
             entry.try_remove_oldest_block().await.unwrap();
-            assert_eq!(entry.info().await.unwrap().block_count, 2);
-            assert_eq!(entry.info().await.unwrap().record_count, 4);
-            assert_eq!(entry.info().await.unwrap().size, 116);
+            assert_eq!(entry.info().await.unwrap().block_count, 1);
+            assert_eq!(entry.info().await.unwrap().record_count, 2);
+            assert_eq!(entry.info().await.unwrap().size, 58);
 
             entry.try_remove_oldest_block().await.unwrap();
-            assert_eq!(entry.info().await.unwrap().block_count, 2);
-            assert_eq!(entry.info().await.unwrap().record_count, 4);
-            assert_eq!(entry.info().await.unwrap().size, 116);
+            assert_eq!(entry.info().await.unwrap().block_count, 0);
+            assert_eq!(entry.info().await.unwrap().record_count, 0);
+            assert_eq!(entry.info().await.unwrap().size, 0);
         }
     }
 
@@ -743,9 +754,11 @@ mod tests {
     }
 
     #[fixture]
-    pub(super) fn entry(entry_settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
+    pub(super) async fn entry(entry_settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
         Arc::new(
-            Entry::try_new("entry", path.clone(), entry_settings, Cfg::default().into()).unwrap(),
+            Entry::try_build("entry", path.clone(), entry_settings, Cfg::default().into())
+                .await
+                .unwrap(),
         )
     }
 

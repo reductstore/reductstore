@@ -5,6 +5,7 @@ use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
 use crate::core::file_cache::FILE_CACHE;
+use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::debug;
@@ -37,7 +38,7 @@ impl TokenRepository {
     /// # Returns
     ///
     /// The repository
-    pub fn new(data_path: PathBuf, api_token: String) -> TokenRepository {
+    pub async fn new(data_path: PathBuf, api_token: String) -> TokenRepository {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
         let repo = HashMap::new();
 
@@ -50,20 +51,18 @@ impl TokenRepository {
             permission_regex,
         };
 
-        let lock = FILE_CACHE.read(&token_repository.config_path, SeekFrom::Start(0));
-        match lock {
-            Ok(lock) => {
+        let file = FILE_CACHE
+            .read(&token_repository.config_path, SeekFrom::Start(0))
+            .await;
+        match file {
+            Ok(mut file) => {
                 debug!(
                     "Loading token repository from {}",
                     token_repository.config_path.as_path().display()
                 );
 
                 let mut buf = Vec::new();
-                lock.upgrade()
-                    .unwrap()
-                    .write()
-                    .unwrap()
-                    .read_to_end(&mut buf)
+                file.read_to_end(&mut buf)
                     .expect("Could not read token repository");
 
                 let proto_repo = TokenRepo::decode(&mut Bytes::from(buf))
@@ -81,6 +80,7 @@ impl TokenRepository {
                 );
                 token_repository
                     .save_repo()
+                    .await
                     .expect("Failed to create a new token repository");
             }
         };
@@ -104,7 +104,7 @@ impl TokenRepository {
     }
 
     /// Save the token repository to the file system
-    fn save_repo(&mut self) -> Result<(), ReductError> {
+    async fn save_repo(&mut self) -> Result<(), ReductError> {
         let repo = TokenRepo {
             tokens: self
                 .repo
@@ -116,14 +116,12 @@ impl TokenRepository {
         repo.encode(&mut buf)
             .map_err(|_| ReductError::internal_server_error("Could not encode token repository"))?;
 
-        let lock = FILE_CACHE
-            .write_or_create(&self.config_path, SeekFrom::Start(0))?
-            .upgrade()?;
-
-        let mut file = lock.write()?;
+        let mut file = FILE_CACHE
+            .write_or_create(&self.config_path, SeekFrom::Start(0))
+            .await?;
         file.set_len(0)?;
         file.write_all(&buf)?;
-        file.sync_all()?;
+        file.sync_all().await?;
         Ok(())
     }
 }
@@ -134,8 +132,9 @@ impl AccessTokens for TokenRepository {
     }
 }
 
+#[async_trait]
 impl ManageTokens for TokenRepository {
-    fn generate_token(
+    async fn generate_token(
         &mut self,
         name: &str,
         permissions: Permissions,
@@ -162,45 +161,50 @@ impl ManageTokens for TokenRepository {
         let created_at = DateTime::<Utc>::from(SystemTime::now());
 
         // Create a random hex string
-        let mut rng = rand::rng();
-        let value: String = (0..32)
-            .map(|_| format!("{:x}", rng.random_range(0..16)))
-            .collect();
-        let value = format!("{}-{}", name, value);
-        let token = Token {
-            name: name.to_string(),
-            value: value.clone(),
-            created_at: created_at.clone(),
-            permissions: Some(permissions),
-            is_provisioned: false,
+        let (value, token) = {
+            let mut rng = rand::rng();
+            let value: String = (0..32)
+                .map(|_| format!("{:x}", rng.random_range(0..16)))
+                .collect();
+            let value = format!("{}-{}", name, value);
+            (
+                value.clone(),
+                Token {
+                    name: name.to_string(),
+                    value,
+                    created_at: created_at.clone(),
+                    permissions: Some(permissions),
+                    is_provisioned: false,
+                },
+            )
         };
 
         self.repo.insert(name.to_string(), token);
-        self.save_repo()?;
+        self.save_repo().await?;
 
         Ok(TokenCreateResponse { value, created_at })
     }
 
-    fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
+    async fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
         AccessTokens::get_token(self, name)
     }
 
-    fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError> {
+    async fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError> {
         match self.repo.get_mut(name) {
             Some(token) => Ok(token),
             None => Err(not_found!("Token '{}' doesn't exist", name)),
         }
     }
 
-    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
+    async fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
         AccessTokens::get_token_list(self)
     }
 
-    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
+    async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
         AccessTokens::validate_token(self, header)
     }
 
-    fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
+    async fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
         if let Some(token) = self.repo.get(name) {
             if token.is_provisioned {
                 return Err(conflict!("Can't remove provisioned token '{}'", name));
@@ -210,11 +214,11 @@ impl ManageTokens for TokenRepository {
         if self.repo.remove(name).is_none() {
             Err(not_found!("Token '{}' doesn't exist", name))
         } else {
-            self.save_repo()
+            self.save_repo().await
         }
     }
 
-    fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError> {
+    async fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError> {
         for token in self.repo.values_mut() {
             if let Some(permissions) = &mut token.permissions {
                 permissions.read.retain(|b| b != bucket);
@@ -222,10 +226,10 @@ impl ManageTokens for TokenRepository {
             }
         }
 
-        self.save_repo()
+        self.save_repo().await
     }
 
-    fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
+    async fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
         for token in self.repo.values_mut() {
             if let Some(permissions) = &mut token.permissions {
                 permissions
@@ -246,7 +250,7 @@ impl ManageTokens for TokenRepository {
             }
         }
 
-        self.save_repo()
+        self.save_repo().await
     }
 }
 
@@ -254,20 +258,25 @@ impl ManageTokens for TokenRepository {
 mod tests {
     use super::*;
     use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
-    use crate::backend::Backend;
+
     use crate::cfg::Cfg;
-    use reduct_base::{conflict, unprocessable_entity};
+    use reduct_base::{conflict, unauthorized, unprocessable_entity};
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_init_token(mut repo: BoxedTokenRepository) {
-        let token = repo.validate_token(Some("Bearer init-token")).unwrap();
+    #[tokio::test]
+    async fn test_init_token(#[future] repo: BoxedTokenRepository) {
+        let mut repo = repo.await;
+        let token = repo
+            .validate_token(Some("Bearer init-token"))
+            .await
+            .unwrap();
         assert_eq!(token.name, "init-token");
         assert_eq!(token.value, "init-token");
         assert!(token.is_provisioned);
 
-        let token_list = repo.get_token_list().unwrap();
+        let token_list = repo.get_token_list().await.unwrap();
         assert_eq!(token_list.len(), 2);
         assert_eq!(token_list[0].name, "init-token");
     }
@@ -276,15 +285,19 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_create_empty_token(mut repo: BoxedTokenRepository) {
-            let token = repo.generate_token(
-                "",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
-                },
-            );
+        #[tokio::test]
+        async fn test_create_empty_token(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo
+                .generate_token(
+                    "",
+                    Permissions {
+                        full_access: true,
+                        read: vec![],
+                        write: vec![],
+                    },
+                )
+                .await;
 
             assert_eq!(
                 token,
@@ -293,21 +306,27 @@ mod tests {
         }
 
         #[rstest]
-        fn test_create_existing_token(mut repo: BoxedTokenRepository) {
-            let token = repo.generate_token(
-                "test",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
-                },
-            );
+        #[tokio::test]
+        async fn test_create_existing_token(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo
+                .generate_token(
+                    "test",
+                    Permissions {
+                        full_access: true,
+                        read: vec![],
+                        write: vec![],
+                    },
+                )
+                .await;
 
             assert_eq!(token, Err(conflict!("Token 'test' already exists")));
         }
 
         #[rstest]
-        fn test_create_token(mut repo: BoxedTokenRepository) {
+        #[tokio::test]
+        async fn test_create_token(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
             let token = repo
                 .generate_token(
                     "test-1",
@@ -317,6 +336,7 @@ mod tests {
                         write: vec![],
                     },
                 )
+                .await
                 .unwrap();
 
             assert_eq!(token.value.len(), 39);
@@ -325,12 +345,14 @@ mod tests {
         }
 
         #[rstest]
-        fn test_create_token_persistent(path: PathBuf, init_token: &str) {
+        #[tokio::test]
+        async fn test_create_token_persistent(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
                 api_token: init_token.to_string(),
                 ..Default::default()
             };
-            let mut repo = TokenRepositoryBuilder::new(cfg.clone()).build(path.clone());
+
+            let mut repo = build_repo_at(&path, &cfg).await;
             repo.generate_token(
                 "test",
                 Permissions {
@@ -339,54 +361,73 @@ mod tests {
                     write: vec![],
                 },
             )
+            .await
             .unwrap();
 
-            let mut repo = TokenRepositoryBuilder::new(cfg).build(path.clone());
-            assert_eq!(repo.get_token("test").unwrap().name, "test");
+            let mut repo = build_repo_at(&path, &cfg).await;
+            assert_eq!(repo.get_token("test").await.unwrap().name, "test");
         }
 
         #[rstest]
+        #[tokio::test]
         #[case("*", None)]
         #[case("bucket_1", None)]
         #[case("bucket_2", None)]
         #[case("bucket-*", None)]
-        #[case("%!", Some(unprocessable_entity!("Permission can contain only bucket names or wildcard '*', got '%!'")))]
-        fn test_create_token_check_format_read(
-            mut repo: BoxedTokenRepository,
+        #[case(
+            "%!",
+            Some(unprocessable_entity!(
+                "Permission can contain only bucket names or wildcard '*', got '%!'"
+            ))
+        )]
+        async fn test_create_token_check_format_read(
+            #[future] repo: BoxedTokenRepository,
             #[case] bucket: &str,
             #[case] expected: Option<ReductError>,
         ) {
-            let token = repo.generate_token(
-                "test-1",
-                Permissions {
-                    full_access: true,
-                    read: vec![bucket.to_string()],
-                    write: vec![],
-                },
-            );
+            let mut repo = repo.await;
+            let token = repo
+                .generate_token(
+                    "test-1",
+                    Permissions {
+                        full_access: true,
+                        read: vec![bucket.to_string()],
+                        write: vec![],
+                    },
+                )
+                .await;
 
             assert_eq!(token.err(), expected);
         }
 
         #[rstest]
+        #[tokio::test]
         #[case("*", None)]
         #[case("bucket_1", None)]
         #[case("bucket_2", None)]
         #[case("bucket-*", None)]
-        #[case("%!", Some(unprocessable_entity!("Permission can contain only bucket names or wildcard '*', got '%!'")))]
-        fn test_create_token_check_format_write(
-            mut repo: BoxedTokenRepository,
+        #[case(
+            "%!",
+            Some(unprocessable_entity!(
+                "Permission can contain only bucket names or wildcard '*', got '%!'"
+            ))
+        )]
+        async fn test_create_token_check_format_write(
+            #[future] repo: BoxedTokenRepository,
             #[case] bucket: &str,
             #[case] expected: Option<ReductError>,
         ) {
-            let token = repo.generate_token(
-                "test-1",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![bucket.to_string()],
-                },
-            );
+            let mut repo = repo.await;
+            let token = repo
+                .generate_token(
+                    "test-1",
+                    Permissions {
+                        full_access: true,
+                        read: vec![],
+                        write: vec![bucket.to_string()],
+                    },
+                )
+                .await;
 
             assert_eq!(token.err(), expected);
         }
@@ -395,15 +436,19 @@ mod tests {
     mod find_token {
         use super::*;
         #[rstest]
-        fn test_find_by_name(mut repo: BoxedTokenRepository) {
-            let token = repo.get_token("test").unwrap();
+        #[tokio::test]
+        async fn test_find_by_name(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo.get_token("test").await.unwrap();
             assert_eq!(token.name, "test");
             assert!(token.value.starts_with("test-"));
         }
 
         #[rstest]
-        fn test_find_by_name_not_found(mut repo: BoxedTokenRepository) {
-            let token = repo.get_token("test-1");
+        #[tokio::test]
+        async fn test_find_by_name_not_found(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo.get_token("test-1").await;
             assert_eq!(token, Err(not_found!("Token 'test-1' doesn't exist")));
         }
     }
@@ -411,8 +456,10 @@ mod tests {
     mod token_list {
         use super::*;
         #[rstest]
-        fn test_get_token_list(mut repo: BoxedTokenRepository) {
-            let token_list = repo.get_token_list().unwrap();
+        #[tokio::test]
+        async fn test_get_token_list(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token_list = repo.get_token_list().await.unwrap();
 
             assert_eq!(token_list.len(), 2);
             assert_eq!(token_list[1].name, "test");
@@ -430,9 +477,10 @@ mod tests {
 
     mod validate_token {
         use super::*;
-        use reduct_base::unauthorized;
         #[rstest]
-        fn test_validate_token(mut repo: BoxedTokenRepository) {
+        #[tokio::test]
+        async fn test_validate_token(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
             let value = repo
                 .generate_token(
                     "test-1",
@@ -442,11 +490,13 @@ mod tests {
                         write: vec!["bucket-2".to_string()],
                     },
                 )
+                .await
                 .unwrap()
                 .value;
 
             let token = repo
                 .validate_token(Some(&format!("Bearer {}", value)))
+                .await
                 .unwrap();
 
             assert_eq!(
@@ -454,7 +504,7 @@ mod tests {
                 Token {
                     name: "test-1".to_string(),
                     created_at: token.created_at.clone(),
-                    value: token.value.clone(), // generated value
+                    value: token.value.clone(),
                     permissions: Some(Permissions {
                         full_access: true,
                         read: vec!["bucket-1".to_string()],
@@ -463,26 +513,32 @@ mod tests {
                     is_provisioned: false,
                 }
             );
+        }
 
-            #[rstest]
-            fn test_validate_token_not_found(mut repo: BoxedTokenRepository) {
-                let token = repo.validate_token(Some("Bearer invalid-value"));
-                assert_eq!(token, Err(unauthorized!("Invalid token")));
-            }
+        #[rstest]
+        #[tokio::test]
+        async fn test_validate_token_not_found(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo.validate_token(Some("Bearer invalid-value")).await;
+            assert_eq!(token, Err(unauthorized!("Invalid token")));
         }
     }
 
     mod remove_token {
         use super::*;
         #[rstest]
-        fn test_remove_token(mut repo: BoxedTokenRepository) {
-            let token = repo.remove_token("test").unwrap();
+        #[tokio::test]
+        async fn test_remove_token(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo.remove_token("test").await.unwrap();
             assert_eq!(token, ());
         }
 
         #[rstest]
-        fn test_remove_init_token(mut repo: BoxedTokenRepository) {
-            let token = repo.remove_token("init-token");
+        #[tokio::test]
+        async fn test_remove_init_token(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo.remove_token("init-token").await;
             assert_eq!(
                 token,
                 Err(conflict!("Can't remove provisioned token 'init-token'"))
@@ -490,15 +546,20 @@ mod tests {
         }
 
         #[rstest]
-        fn test_remove_token_not_found(mut repo: BoxedTokenRepository) {
-            let token = repo.remove_token("test-1");
+        #[tokio::test]
+        async fn test_remove_token_not_found(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo.remove_token("test-1").await;
             assert_eq!(token, Err(not_found!("Token 'test-1' doesn't exist")));
         }
 
         #[rstest]
-        fn test_remove_token_persistent(path: PathBuf, init_token: &str, cfg: Cfg) {
-            let mut repo = TokenRepositoryBuilder::new(cfg.clone()).build(path.clone());
-            let _ = repo.generate_token(init_token, Permissions::default());
+        #[tokio::test]
+        async fn test_remove_token_persistent(path: PathBuf, init_token: &str, cfg: Cfg) {
+            let mut repo = build_repo_at(&path, &cfg).await;
+            let _ = repo
+                .generate_token(init_token, Permissions::default())
+                .await;
             repo.generate_token(
                 "test",
                 Permissions {
@@ -507,22 +568,25 @@ mod tests {
                     write: vec![],
                 },
             )
+            .await
             .unwrap();
 
-            repo.remove_token("test").unwrap();
+            repo.remove_token("test").await.unwrap();
 
-            let mut repo = TokenRepositoryBuilder::new(cfg).build(path.clone());
-            let token = repo.get_token("test");
+            let mut repo = build_repo_at(&path, &cfg).await;
+            let token = repo.get_token("test").await;
 
             assert_eq!(token, Err(not_found!("Token 'test' doesn't exist")));
         }
 
         #[rstest]
-        fn test_remove_provisioned_token(mut repo: BoxedTokenRepository) {
-            let token = repo.get_mut_token("test").unwrap();
+        #[tokio::test]
+        async fn test_remove_provisioned_token(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo.get_mut_token("test").await.unwrap();
             token.is_provisioned = true;
 
-            let err = repo.remove_token("test").err().unwrap();
+            let err = repo.remove_token("test").await.err().unwrap();
             assert_eq!(err, conflict!("Can't remove provisioned token 'test'"))
         }
     }
@@ -531,7 +595,9 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_rename_bucket(mut repo: BoxedTokenRepository) {
+        #[tokio::test]
+        async fn test_rename_bucket(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
             repo.generate_token(
                 "test-2",
                 Permissions {
@@ -540,11 +606,12 @@ mod tests {
                     write: vec!["bucket-1".to_string()],
                 },
             )
+            .await
             .expect("Failed to generate token");
 
-            repo.rename_bucket("bucket-1", "bucket-2").unwrap();
+            repo.rename_bucket("bucket-1", "bucket-2").await.unwrap();
 
-            let token = repo.get_token("test-2").unwrap();
+            let token = repo.get_token("test-2").await.unwrap();
             let permissions = token.permissions.as_ref().unwrap();
 
             assert_eq!(permissions.read, vec!["bucket-2".to_string()]);
@@ -552,10 +619,12 @@ mod tests {
         }
 
         #[rstest]
-        fn test_rename_bucket_not_exit(mut repo: BoxedTokenRepository) {
-            repo.rename_bucket("bucket-1", "bucket-2").unwrap();
+        #[tokio::test]
+        async fn test_rename_bucket_not_exit(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            repo.rename_bucket("bucket-1", "bucket-2").await.unwrap();
 
-            let token = repo.get_token("test").unwrap();
+            let token = repo.get_token("test").await.unwrap();
             let permissions = token.permissions.as_ref().unwrap();
 
             assert!(permissions.read.is_empty());
@@ -563,9 +632,12 @@ mod tests {
         }
 
         #[rstest]
-        fn test_rename_bucket_persistent(path: PathBuf, init_token: &str, cfg: Cfg) {
-            let mut repo = TokenRepositoryBuilder::new(cfg.clone()).build(path.clone());
-            let _ = repo.generate_token(init_token, Permissions::default());
+        #[tokio::test]
+        async fn test_rename_bucket_persistent(path: PathBuf, init_token: &str, cfg: Cfg) {
+            let mut repo = build_repo_at(&path, &cfg).await;
+            let _ = repo
+                .generate_token(init_token, Permissions::default())
+                .await;
             repo.generate_token(
                 "test-2",
                 Permissions {
@@ -574,12 +646,13 @@ mod tests {
                     write: vec!["bucket-1".to_string()],
                 },
             )
+            .await
             .expect("Failed to generate token");
 
-            repo.rename_bucket("bucket-1", "bucket-2").unwrap();
+            repo.rename_bucket("bucket-1", "bucket-2").await.unwrap();
 
-            let mut repo = TokenRepositoryBuilder::new(cfg).build(path.clone());
-            let token = repo.get_token("test-2").unwrap();
+            let mut repo = build_repo_at(&path, &cfg).await;
+            let token = repo.get_token("test-2").await.unwrap();
             let permissions = token.permissions.as_ref().unwrap();
 
             assert_eq!(permissions.read, vec!["bucket-2".to_string()]);
@@ -606,34 +679,37 @@ mod tests {
     }
 
     #[fixture]
-    fn repo(path: PathBuf, cfg: Cfg) -> BoxedTokenRepository {
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .unwrap(),
-        );
+    async fn repo(path: PathBuf, cfg: Cfg) -> BoxedTokenRepository {
+        let mut repo = build_repo_at(&path, &cfg).await;
 
-        let mut repo = TokenRepositoryBuilder::new(cfg.clone()).build(path.clone());
+        let _ = repo
+            .generate_token(
+                cfg.api_token.as_str(),
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            )
+            .await;
 
-        let _ = repo.generate_token(
-            cfg.api_token.as_str(),
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        );
-
-        let _ = repo.generate_token(
-            "test",
-            Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            },
-        );
+        let _ = repo
+            .generate_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            )
+            .await;
 
         repo
+    }
+
+    async fn build_repo_at(path: &PathBuf, cfg: &Cfg) -> BoxedTokenRepository {
+        TokenRepositoryBuilder::new(cfg.clone())
+            .build(path.clone())
+            .await
     }
 }

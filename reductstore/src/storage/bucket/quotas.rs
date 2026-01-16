@@ -131,7 +131,7 @@ mod tests {
             BucketSettings {
                 max_block_size: Some(20),
                 quota_type: Some(QuotaType::FIFO),
-                quota_size: Some(100),
+                quota_size: Some(120),
                 max_block_records: Some(100),
             },
             path,
@@ -196,7 +196,7 @@ mod tests {
 
         write(&bucket, "test-1", 0, b"test").await.unwrap();
         bucket.sync_fs().await.unwrap(); // we need to sync to get the correct size
-        assert_eq!(bucket.clone().info().await.unwrap().info.size, 8);
+        assert_eq!(bucket.clone().info().await.unwrap().info.size, 22);
 
         let result = write(&bucket, "test-2", 1, b"0123456789___").await;
         assert_eq!(

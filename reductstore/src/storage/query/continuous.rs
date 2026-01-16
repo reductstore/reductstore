@@ -87,7 +87,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_query(block_manager: Arc<AsyncRwLock<BlockManager>>) {
+    async fn test_query(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
+        let block_manager = block_manager.await;
         let mut query = ContinuousQuery::try_new(
             900,
             QueryOptions {

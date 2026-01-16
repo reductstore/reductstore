@@ -20,7 +20,8 @@ pub(super) async fn remove_replication(
         .replication_repo
         .write()
         .await?
-        .remove_replication(&replication_name)?;
+        .remove_replication(&replication_name)
+        .await?;
     Ok(())
 }
 

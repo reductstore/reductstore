@@ -167,7 +167,9 @@ impl ReplicationTask {
                     let log = match TransactionLog::try_load_or_create(
                         &path,
                         thr_system_options.transaction_log_size,
-                    ) {
+                    )
+                    .await
+                    {
                         Ok(log) => log,
                         Err(err) => {
                             error!(
@@ -175,11 +177,12 @@ impl ReplicationTask {
                                 entry.name, err
                             );
                             info!("Creating a new transaction log for entry '{}'", entry.name);
-                            FILE_CACHE.remove(&path)?;
+                            FILE_CACHE.remove(&path).await?;
                             TransactionLog::try_load_or_create(
                                 &path,
                                 thr_system_options.transaction_log_size,
-                            )?
+                            )
+                            .await?
                         }
                     };
 
@@ -259,7 +262,7 @@ impl ReplicationTask {
                             &entry_name,
                             &replication_name,
                         );
-                        if let Err(err) = FILE_CACHE.remove(&path) {
+                        if let Err(err) = FILE_CACHE.remove(&path).await {
                             error!("Failed to remove transaction log: {:?}", err);
                         }
 
@@ -267,7 +270,9 @@ impl ReplicationTask {
                         match TransactionLog::try_load_or_create(
                             &path,
                             thr_system_options.transaction_log_size,
-                        ) {
+                        )
+                        .await
+                        {
                             Ok(log) => {
                                 thr_log_map
                                     .write()
@@ -350,7 +355,8 @@ impl ReplicationTask {
                     &self.name,
                 ),
                 self.system_options.transaction_log_size,
-            )?;
+            )
+            .await?;
             let mut map = self.log_map.write().await?;
             map.entry(entry_name.clone())
                 .or_insert_with(|| Arc::new(AsyncRwLock::new(log)));
@@ -362,7 +368,7 @@ impl ReplicationTask {
         };
 
         for notification in notifications.into_iter() {
-            if let Some(_) = log.write().await?.push_back(notification.event)? {
+            if let Some(_) = log.write().await?.push_back(notification.event).await? {
                 error!(
                     "Transaction log is full, dropping the oldest transaction without replication"
                 );
@@ -497,7 +503,6 @@ mod tests {
     use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
 
-    use crate::backend::Backend;
     use crate::core::sync::rwlock_timeout;
     use crate::storage::bucket::Bucket;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -562,9 +567,11 @@ mod tests {
             // create bucket to avoid error on loading entries
             FILE_CACHE
                 .remove_dir(&path.join(&settings.src_bucket))
+                .await
                 .unwrap();
             FILE_CACHE
                 .create_dir_all(&path.join(&settings.src_bucket))
+                .await
                 .unwrap();
             Bucket::try_build(
                 &settings.src_bucket,
@@ -868,6 +875,7 @@ mod tests {
 
         FILE_CACHE
             .remove_dir(&path.parent().unwrap().parent().unwrap().to_path_buf())
+            .await
             .unwrap();
         tokio_sleep(Duration::from_millis(100)).await;
 
@@ -968,13 +976,6 @@ mod tests {
             data_path: path.clone(),
             ..Default::default()
         };
-
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(path.clone())
-                .try_build()
-                .unwrap(),
-        );
 
         let storage = StorageEngine::builder()
             .with_data_path(path)
@@ -1096,6 +1097,7 @@ mod tests {
             .await
             .unwrap()
             .front(10)
+            .await
             .unwrap()
     }
 }

@@ -121,7 +121,7 @@ pub struct CfgParser<EnvGetter: GetEnv> {
 }
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub fn from_env(env_getter: EnvGetter, version: &str) -> Self {
+    pub async fn from_env(env_getter: EnvGetter, version: &str) -> Self {
         let mut env = Env::new(env_getter);
 
         let mut api_base_path = env.get("RS_API_BASE_PATH", "/".to_string());
@@ -215,6 +215,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         }
 
         me.init_storage_backend()
+            .await
             .expect("Failed to initialize storage backend");
         me
     }
@@ -269,7 +270,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 
         Ok(Components {
             storage,
-            token_repo: AsyncRwLock::new(token_repo),
+            token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(&self.cfg.api_token),
             console,
             replication_repo: AsyncRwLock::new(replication_engine),
@@ -305,7 +306,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         Ok(data_path)
     }
 
-    fn init_storage_backend(&self) -> Result<(), ReductError> {
+    async fn init_storage_backend(&self) -> Result<(), ReductError> {
         // Initialize storage backend
         let mut backend_builder = Backend::builder()
             .backend_type(self.cfg.cs_config.backend_type.clone())
@@ -341,9 +342,11 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             backend_builder = backend_builder.license(license.clone());
         }
 
-        FILE_CACHE.set_storage_backend(backend_builder.try_build().map_err(|e| {
+        let backend = backend_builder.try_build().await.map_err(|e| {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
-        })?);
+        })?;
+
+        FILE_CACHE.set_storage_backend(backend).await;
         FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
         FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::Replica);
         Ok(())
@@ -405,12 +408,14 @@ impl<EnvGetter: GetEnv> Display for CfgParser<EnvGetter> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures::FutureExt;
 
     use mockall::mock;
     use mockall::predicate::eq;
     use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
     use std::env::VarError;
+    use std::panic::AssertUnwindSafe;
 
     mock! {
         pub(super) EnvGetter {}
@@ -421,12 +426,13 @@ mod tests {
     }
 
     #[rstest]
-    fn test_default_settings(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_default_settings(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(parser.cfg.log_level, "INFO");
         assert_eq!(parser.cfg.host, "0.0.0.0");
         assert_eq!(parser.cfg.port, 8383);
@@ -443,7 +449,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_log_level(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_log_level(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .with(eq("RS_LOG_LEVEL"))
@@ -452,12 +459,13 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(parser.cfg.log_level, "DEBUG");
     }
 
     #[rstest]
-    fn test_host(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_host(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .with(eq("RS_HOST"))
@@ -466,12 +474,13 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(parser.cfg.host, "127.0.0.1");
     }
 
     #[rstest]
-    fn test_port(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_port(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .with(eq("RS_PORT"))
@@ -480,7 +489,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(parser.cfg.port, 1234);
     }
 
@@ -489,7 +498,8 @@ mod tests {
     #[case("/api/")]
     #[case("api/")]
     #[case("api")]
-    fn test_api_base_path(mut env_getter: MockEnvGetter, #[case] path: &str) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_api_base_path(mut env_getter: MockEnvGetter, #[case] path: &str) {
         env_getter
             .expect_get()
             .with(eq("RS_API_BASE_PATH"))
@@ -498,7 +508,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(parser.cfg.api_base_path, "/api/");
     }
 
@@ -506,7 +516,8 @@ mod tests {
         use super::*;
         use rstest::rstest;
         #[rstest]
-        fn from_env(mut env_getter: MockEnvGetter) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn from_env(mut env_getter: MockEnvGetter) {
             env_getter
                 .expect_get()
                 .with(eq("RS_PUBLIC_URL"))
@@ -515,12 +526,13 @@ mod tests {
             env_getter
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
-            let parser = CfgParser::from_env(env_getter, "0.0.0");
+            let parser = CfgParser::from_env(env_getter, "0.0.0").await;
             assert_eq!(parser.cfg.public_url, "https://example.com/");
         }
 
         #[rstest]
-        fn from_env_without_slash(mut env_getter: MockEnvGetter) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn from_env_without_slash(mut env_getter: MockEnvGetter) {
             env_getter
                 .expect_get()
                 .with(eq("RS_PUBLIC_URL"))
@@ -529,12 +541,13 @@ mod tests {
             env_getter
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
-            let parser = CfgParser::from_env(env_getter, "0.0.0");
+            let parser = CfgParser::from_env(env_getter, "0.0.0").await;
             assert_eq!(parser.cfg.public_url, "https://example.com/");
         }
 
         #[rstest]
-        fn default_http(mut env_getter: MockEnvGetter) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn default_http(mut env_getter: MockEnvGetter) {
             env_getter
                 .expect_get()
                 .with(eq("RS_HOST"))
@@ -553,12 +566,13 @@ mod tests {
             env_getter
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
-            let parser = CfgParser::from_env(env_getter, "0.0.0");
+            let parser = CfgParser::from_env(env_getter, "0.0.0").await;
             assert_eq!(parser.cfg.public_url, "http://example.com/api/");
         }
 
         #[rstest]
-        fn default_https(mut env_getter: MockEnvGetter) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn default_https(mut env_getter: MockEnvGetter) {
             env_getter
                 .expect_get()
                 .with(eq("RS_HOST"))
@@ -587,13 +601,14 @@ mod tests {
             env_getter
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
-            let parser = CfgParser::from_env(env_getter, "0.0.0");
+            let parser = CfgParser::from_env(env_getter, "0.0.0").await;
             assert_eq!(parser.cfg.public_url, "https://example.com/api/");
         }
     }
 
     #[rstest]
-    fn test_data_path(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_data_path(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .with(eq("RS_DATA_PATH"))
@@ -602,12 +617,13 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(parser.cfg.data_path, PathBuf::from("/tmp"));
     }
 
     #[rstest]
-    fn test_api_token(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_api_token(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .with(eq("RS_API_TOKEN"))
@@ -616,12 +632,13 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(parser.cfg.api_token, "XXX");
     }
 
     #[rstest]
-    fn test_cert_path(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_cert_path(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .with(eq("RS_CERT_PATH"))
@@ -630,12 +647,13 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(parser.cfg.cert_path, Some(PathBuf::from("/tmp/cert.pem")));
     }
 
     #[rstest]
-    fn test_cert_key_path(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_cert_key_path(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .with(eq("RS_CERT_KEY_PATH"))
@@ -644,7 +662,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(
             parser.cfg.cert_key_path,
             Some(PathBuf::from("/tmp/cert.key"))
@@ -652,7 +670,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_license_path(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_license_path(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .with(eq("RS_LICENSE_PATH"))
@@ -661,7 +680,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(
             parser.cfg.license_path,
             Some("/tmp/license.lic".to_string())
@@ -669,7 +688,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_cors_allow_origin(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_cors_allow_origin(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .with(eq("RS_CORS_ALLOW_ORIGIN"))
@@ -678,7 +698,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(
             parser.cfg.cors_allow_origin,
             vec!["http://localhost", "http://example.com"]
@@ -686,7 +706,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_ext_path(mut env_getter: MockEnvGetter) {
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_ext_path(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .with(eq("RS_EXT_PATH"))
@@ -695,7 +716,7 @@ mod tests {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(parser.cfg.ext_path, Some(PathBuf::from("/tmp/ext")));
     }
 
@@ -741,7 +762,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
         env_getter.expect_all().returning(|| BTreeMap::new());
-        let parser = CfgParser::from_env(env_getter, "0.0.0");
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         parser.build().await.unwrap();
     }
 
@@ -753,7 +774,8 @@ mod tests {
         #[case("PRIMARY", InstanceRole::Primary)]
         #[case("SECONDARY", InstanceRole::Secondary)]
         #[case("REPLICA", InstanceRole::Replica)]
-        fn test_instance_role(
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_instance_role(
             mut env_getter: MockEnvGetter,
             #[case] input: &str,
             #[case] expected: InstanceRole,
@@ -766,13 +788,14 @@ mod tests {
             env_getter
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
-            let parser = CfgParser::from_env(env_getter, "0.0.0");
+            let parser = CfgParser::from_env(env_getter, "0.0.0").await;
             assert_eq!(parser.cfg.role, expected);
         }
 
         #[rstest]
         #[case("invalid")]
-        fn test_instance_role_invalid(mut env_getter: MockEnvGetter, #[case] input: &str) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_instance_role_invalid(mut env_getter: MockEnvGetter, #[case] input: &str) {
             env_getter
                 .expect_get()
                 .with(eq("RS_INSTANCE_ROLE"))
@@ -781,9 +804,11 @@ mod tests {
             env_getter
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
-            let result = std::panic::catch_unwind(|| {
-                CfgParser::from_env(env_getter, "0.0.0");
-            });
+            let result = AssertUnwindSafe(async {
+                CfgParser::from_env(env_getter, "0.0.0").await;
+            })
+            .catch_unwind()
+            .await;
             assert!(result.is_err());
         }
 
@@ -792,7 +817,7 @@ mod tests {
         #[case(InstanceRole::Replica, true)]
         #[case(InstanceRole::Primary, false)]
         #[case(InstanceRole::Secondary, false)]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn test_build_no_lock_file(
             #[case] role: InstanceRole,
             #[case] expected_lock: bool,
@@ -812,7 +837,7 @@ mod tests {
                 .expect_get()
                 .return_const(Err(VarError::NotPresent));
 
-            let mut parser = CfgParser::from_env(env_getter, "0.0.0");
+            let mut parser = CfgParser::from_env(env_getter, "0.0.0").await;
             parser.cfg.role = role;
             let lock_file = parser.build_lock_file().unwrap();
 

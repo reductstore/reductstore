@@ -37,8 +37,8 @@ impl ReadOnlyMode for StorageEngine {
             .collect::<HashSet<_>>();
 
         let mut buckets_to_retain = vec![];
-        self.folder_keeper.reload()?;
-        for path in self.folder_keeper.list_folders()? {
+        self.folder_keeper.reload().await?;
+        for path in self.folder_keeper.list_folders().await? {
             if current_bucket_paths.contains(&path) {
                 buckets_to_retain.push(path);
                 continue;
@@ -66,9 +66,9 @@ impl ReadOnlyMode for StorageEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::storage_engine::StorageEngineConfig;
-    use crate::core::file_cache::FILE_CACHE;
+
     use crate::storage::engine::StorageEngine;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::{fixture, rstest};
@@ -245,12 +245,7 @@ mod tests {
             },
             ..Cfg::default()
         };
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .unwrap(),
-        );
+
         let storage_engine = StorageEngine::builder()
             .with_cfg(cfg.clone())
             .with_data_path(cfg.data_path.clone())

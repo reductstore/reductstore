@@ -365,7 +365,7 @@ mod tests {
     use std::time::Duration;
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_write_batched_records_multiple_entries(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,
@@ -489,7 +489,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_write_batched_records_error_header(
         #[future] keeper: Arc<StateKeeper>,
         mut headers: HeaderMap,

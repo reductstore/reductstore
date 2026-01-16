@@ -75,16 +75,16 @@ impl BlockCache {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::sync::RwLock as CoreRwLock;
+    use crate::core::sync::AsyncRwLock;
     use crate::storage::block_manager::block::Block;
     use std::sync::Arc;
 
     fn block_ref(block_id: u64) -> BlockRef {
-        Arc::new(CoreRwLock::new(Block::new(block_id)))
+        Arc::new(AsyncRwLock::new(Block::new(block_id)))
     }
 
-    #[test]
-    fn get_read_falls_back_to_read_cache() {
+    #[tokio::test]
+    async fn get_read_falls_back_to_read_cache() {
         let cache = BlockCache::new(1, 1, Duration::from_secs(60));
         let block = block_ref(1);
 
@@ -92,6 +92,6 @@ mod tests {
 
         let loaded = cache.get_read(&1);
         assert!(loaded.is_some());
-        assert_eq!(loaded.unwrap().read().unwrap().block_id(), 1);
+        assert_eq!(loaded.unwrap().read().await.unwrap().block_id(), 1);
     }
 }

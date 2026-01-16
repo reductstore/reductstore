@@ -9,6 +9,7 @@ use crate::auth::token_repository::disabled::NoAuthRepository;
 use crate::auth::token_repository::read_only::ReadOnlyTokenRepository;
 use crate::auth::token_repository::repo::TokenRepository;
 use crate::cfg::{Cfg, InstanceRole};
+use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use log::warn;
 use prost_wkt_types::Timestamp;
@@ -86,6 +87,7 @@ impl Into<Token> for crate::auth::proto::Token {
     }
 }
 
+#[async_trait]
 pub(crate) trait ManageTokens {
     /// Create a new token
     ///
@@ -97,7 +99,7 @@ pub(crate) trait ManageTokens {
     /// # Returns
     ///
     /// token value and creation time
-    fn generate_token(
+    async fn generate_token(
         &mut self,
         name: &str,
         permissions: Permissions,
@@ -111,7 +113,7 @@ pub(crate) trait ManageTokens {
     ///
     /// # Returns
     /// The token without value
-    fn get_token(&mut self, name: &str) -> Result<&Token, ReductError>;
+    async fn get_token(&mut self, name: &str) -> Result<&Token, ReductError>;
 
     /// Get a token by name (mutable)
     ///
@@ -121,13 +123,13 @@ pub(crate) trait ManageTokens {
     ///
     /// # Returns
     /// The token without value
-    fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError>;
+    async fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError>;
 
     /// Get token list
     ///
     /// # Returns
     /// The token list, it the authentication is disabled, it returns an empty list
-    fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError>;
+    async fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError>;
 
     /// Validate a token
     ///
@@ -137,7 +139,7 @@ pub(crate) trait ManageTokens {
     /// # Returns
     ///
     /// Token with given value
-    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError>;
+    async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError>;
 
     /// Remove a token
     ///
@@ -147,7 +149,7 @@ pub(crate) trait ManageTokens {
     /// # Returns
     ///
     /// `Ok(())` if the token was removed successfully
-    fn remove_token(&mut self, name: &str) -> Result<(), ReductError>;
+    async fn remove_token(&mut self, name: &str) -> Result<(), ReductError>;
 
     /// Remove a bucket from all tokens and save the repository
     /// to the file system
@@ -157,7 +159,7 @@ pub(crate) trait ManageTokens {
     ///
     /// # Returns
     /// `Ok(())` if the bucket was removed successfully
-    fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError>;
+    async fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError>;
 
     /// Rename a bucket in all tokens
     ///
@@ -169,7 +171,7 @@ pub(crate) trait ManageTokens {
     /// # Returns
     ///
     /// `Ok(())` if the bucket was renamed successfully
-    fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError>;
+    async fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError>;
 }
 
 pub(super) trait AccessTokens {
@@ -215,13 +217,13 @@ impl TokenRepositoryBuilder {
         Self { cfg }
     }
 
-    pub fn build(self, config_path: PathBuf) -> BoxedTokenRepository {
+    pub async fn build(self, config_path: PathBuf) -> BoxedTokenRepository {
         if self.cfg.role == InstanceRole::Replica {
-            return Box::new(ReadOnlyTokenRepository::new(config_path, self.cfg.clone()));
+            return Box::new(ReadOnlyTokenRepository::new(config_path, self.cfg.clone()).await);
         }
 
         if !self.cfg.api_token.is_empty() {
-            Box::new(TokenRepository::new(config_path, self.cfg.api_token))
+            Box::new(TokenRepository::new(config_path, self.cfg.api_token).await)
         } else {
             Box::new(NoAuthRepository::new())
         }

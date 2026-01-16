@@ -50,9 +50,9 @@ impl Entry {
             {
                 // Find the block that contains the record
                 // TODO: Try to avoid the lookup for each record
-                match bm.find_block(time) {
+                match bm.find_block(time).await {
                     Ok(block_ref) => {
-                        let block = block_ref.read()?;
+                        let block = block_ref.read().await?;
                         if let Some(record) = block.get_record(time) {
                             let record = Self::update_single_label(record.clone(), update, remove);
                             records_per_block
@@ -85,7 +85,7 @@ impl Entry {
             let local_block_manager = self.block_manager.clone();
             let handler: JoinHandle<Result<_, ReductError>> = tokio::spawn(async move {
                 let mut bm = local_block_manager.write().await?;
-                bm.update_records(block_id, records)?;
+                bm.update_records(block_id, records).await?;
                 Ok(())
             });
 
@@ -147,7 +147,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_labels(entry: Arc<Entry>) {
+    async fn test_update_labels(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
+
         entry
             .set_settings(EntrySettings {
                 max_block_records: 2,
@@ -208,7 +210,9 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_nothing(entry: Arc<Entry>) {
+    async fn test_update_nothing(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
+
         write_stub_record(&entry, 1).await;
         let result = entry
             .clone()
@@ -248,8 +252,9 @@ mod tests {
             .await
             .unwrap()
             .load_block(1)
+            .await
             .unwrap();
-        let mut record = block.read().unwrap().get_record(1).unwrap().clone();
+        let mut record = block.read().await.unwrap().get_record(1).unwrap().clone();
         record.labels.sort_by(|a, b| a.name.cmp(&b.name));
         assert_eq!(record.labels, expected_labels);
     }

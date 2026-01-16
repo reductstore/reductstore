@@ -11,13 +11,18 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub(in crate::cfg) fn provision_tokens(&self, data_path: &PathBuf) -> BoxedTokenRepository {
-        let mut token_repo =
-            TokenRepositoryBuilder::new(self.cfg.clone()).build(PathBuf::from(data_path));
+    pub(in crate::cfg) async fn provision_tokens(
+        &self,
+        data_path: &PathBuf,
+    ) -> BoxedTokenRepository {
+        let mut token_repo = TokenRepositoryBuilder::new(self.cfg.clone())
+            .build(PathBuf::from(data_path))
+            .await;
 
         for (name, token) in &self.cfg.tokens {
             let is_generated = match token_repo
                 .generate_token(&name, token.permissions.clone().unwrap_or_default())
+                .await
             {
                 Ok(_) => Ok(()),
                 Err(e) => {
@@ -34,6 +39,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             } else {
                 let update_token = token_repo
                     .get_mut_token(&name)
+                    .await
                     .expect("Token must exist after generation");
                 update_token.clone_from(token);
                 update_token.is_provisioned = true;
@@ -107,10 +113,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 #[cfg(not(windows))] // fixme: Windows paths differ in tests
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::tests::MockEnvGetter;
     use crate::cfg::Cfg;
-    use crate::core::file_cache::FILE_CACHE;
+
     use mockall::predicate::eq;
     use reduct_base::error::ReductError;
     use reduct_base::not_found;
@@ -124,7 +130,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_tokens(mut env_with_tokens: MockEnvGetter) {
+    async fn test_tokens(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
         env_with_tokens
             .expect_get()
             .with(eq("RS_TOKEN_1_VALUE"))
@@ -145,11 +152,11 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
         let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
-        let token1 = repo.get_token("token1").unwrap().clone();
+        let token1 = repo.get_token("token1").await.unwrap().clone();
         assert_eq!(token1.value, "TOKEN");
         assert!(token1.is_provisioned);
 
@@ -162,7 +169,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_tokens_not_full_permissions(mut env_with_tokens: MockEnvGetter) {
+    async fn test_tokens_not_full_permissions(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
         env_with_tokens
             .expect_get()
             .with(eq("RS_TOKEN_1_VALUE"))
@@ -179,11 +187,11 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
         let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
-        let token1 = repo.get_token("token1").unwrap().clone();
+        let token1 = repo.get_token("token1").await.unwrap().clone();
         assert_eq!(token1.value, "TOKEN");
         assert!(token1.is_provisioned);
 
@@ -196,7 +204,8 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_tokens_no_value(mut env_with_tokens: MockEnvGetter) {
+    async fn test_tokens_no_value(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
         env_with_tokens
             .expect_get()
             .with(eq("RS_TOKEN_1_VALUE"))
@@ -205,25 +214,28 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
         let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
-        let err = repo.get_token("token1").err().unwrap();
+        let err = repo.get_token("token1").await.err().unwrap();
         assert_eq!(err, not_found!("Token 'token1' doesn't exist"));
     }
 
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_override_token(mut env_with_tokens: MockEnvGetter) {
+    async fn test_override_token(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
         let mut auth_repo = TokenRepositoryBuilder::new(Cfg {
             api_token: "init".to_string(),
             ..Default::default()
         })
-        .build(env_with_tokens.get("RS_DATA_PATH").unwrap().into());
+        .build(env_with_tokens.get("RS_DATA_PATH").unwrap().into())
+        .await;
         let _ = auth_repo
             .generate_token("token1", Permissions::default())
+            .await
             .unwrap();
 
         env_with_tokens
@@ -234,25 +246,19 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0");
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
         let components = cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
-        let token = repo.get_token("token1").unwrap();
+        let token = repo.get_token("token1").await.unwrap();
         assert_eq!(token.value, "TOKEN");
     }
 
     #[fixture]
-    fn env_with_tokens() -> MockEnvGetter {
+    async fn env_with_tokens() -> MockEnvGetter {
         let tmp = tempfile::tempdir().unwrap();
         let data_path = tmp.keep();
         fs::create_dir_all(&data_path).unwrap();
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(data_path.clone())
-                .try_build()
-                .unwrap(),
-        );
 
         let mut mock_getter = MockEnvGetter::new();
         mock_getter

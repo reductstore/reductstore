@@ -117,14 +117,13 @@ impl Bucket {
             .encode(&mut buf)
             .map_err(|e| internal_server_error!("Failed to encode bucket settings: {}", e))?;
 
-        let lock = FILE_CACHE
-            .write_or_create(&path, SeekFrom::Start(0))?
-            .upgrade()?;
-        let mut file = lock.write()?;
+        let mut file = FILE_CACHE
+            .write_or_create(&path, SeekFrom::Start(0))
+            .await?;
 
         file.set_len(0)?;
         file.write_all(&buf)?;
-        file.sync_all()?;
+        file.sync_all().await?;
         Ok(())
     }
 }
