@@ -196,7 +196,7 @@ mod tests {
 
         write(&bucket, "test-1", 0, b"test").await.unwrap();
         bucket.sync_fs().await.unwrap(); // we need to sync to get the correct size
-        assert_eq!(bucket.clone().info().await.unwrap().info.size, 8);
+        assert_eq!(bucket.clone().info().await.unwrap().info.size, 22);
 
         let result = write(&bucket, "test-2", 1, b"0123456789___").await;
         assert_eq!(

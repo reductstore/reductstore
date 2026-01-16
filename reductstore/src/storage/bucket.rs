@@ -426,29 +426,24 @@ impl Bucket {
         self.save_settings().await?;
 
         let entries = self.entries.clone();
-        // use shared task to avoid locking in graceful shutdown
-        tokio::spawn(async move {
-            let mut count = 0usize;
-            for entry in entries.read().await?.values() {
-                if let Err(err) = entry.compact().await {
-                    error!(
-                        "Failed to compact entry '{}' in bucket '{}': {}",
-                        entry.name(),
-                        bucket_name,
-                        err
-                    );
-                }
-                count += 1;
+        let mut count = 0usize;
+        for entry in entries.read().await?.values() {
+            if let Err(err) = entry.compact().await {
+                error!(
+                    "Failed to compact entry '{}' in bucket '{}': {}",
+                    entry.name(),
+                    bucket_name,
+                    err
+                );
             }
-            debug!(
-                "Bucket '{}' synced {} entries in {:?}",
-                bucket_name,
-                count,
-                Instant::now().duration_since(time_start)
-            );
-
-            Ok::<(), ReductError>(())
-        });
+            count += 1;
+        }
+        debug!(
+            "Bucket '{}' synced {} entries in {:?}",
+            bucket_name,
+            count,
+            Instant::now().duration_since(time_start)
+        );
 
         Ok(())
     }
