@@ -3,22 +3,16 @@
 
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
-use futures_util::future::err;
 use log::{error, info};
-use reduct_base::internal_server_error;
 use reduct_base::logger::Logger;
-use reductstore::api::{AxumAppBuilder, Components, StateKeeper};
+use reductstore::api::AxumAppBuilder;
 use reductstore::cfg::CfgParser;
 use reductstore::core::env::StdEnvGetter;
-use reductstore::lock_file::BoxedLockFile;
 use reductstore::storage::engine::StorageEngine;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
-#[cfg(test)]
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-#[cfg(test)]
-use std::sync::{LazyLock, Mutex};
+
 use std::time::Duration;
 use tokio::sync::mpsc;
 
@@ -164,6 +158,9 @@ async fn shutdown_signal(server_handle: Handle<SocketAddr>) {
 #[cfg(test)]
 mod test_observer {
     use super::*;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{LazyLock, Mutex};
+
     pub static COMPACTION_OBSERVER: LazyLock<Mutex<Option<Arc<AtomicUsize>>>> =
         LazyLock::new(|| Mutex::new(None));
 
