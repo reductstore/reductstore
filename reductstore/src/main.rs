@@ -3,9 +3,11 @@
 
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
-use log::info;
+use futures_util::future::err;
+use log::{error, info};
+use reduct_base::internal_server_error;
 use reduct_base::logger::Logger;
-use reductstore::api::AxumAppBuilder;
+use reductstore::api::{AxumAppBuilder, Components, StateKeeper};
 use reductstore::cfg::CfgParser;
 use reductstore::core::env::StdEnvGetter;
 use reductstore::lock_file::BoxedLockFile;
@@ -19,42 +21,6 @@ use std::sync::Arc;
 use std::sync::{LazyLock, Mutex};
 use std::time::Duration;
 use tokio::sync::mpsc;
-
-#[derive(Clone)]
-struct ContextGuard {
-    server_handle: Handle<SocketAddr>,
-    storage: Arc<StorageEngine>,
-    lock_file: Arc<BoxedLockFile>,
-}
-
-impl ContextGuard {
-    async fn shutdown(self) {
-        info!("Shutting down server...");
-        self.server_handle
-            .graceful_shutdown(Some(Duration::from_secs(5)));
-        self.storage
-            .sync_fs()
-            .await
-            .expect("Failed to shutdown storage");
-        self.lock_file.release().await;
-    }
-}
-
-#[cfg(test)]
-static COMPACTION_OBSERVER: LazyLock<Mutex<Option<Arc<AtomicUsize>>>> =
-    LazyLock::new(|| Mutex::new(None));
-
-#[cfg(test)]
-fn set_compaction_observer(observer: Option<Arc<AtomicUsize>>) {
-    *COMPACTION_OBSERVER.lock().unwrap() = observer;
-}
-
-#[cfg(test)]
-fn observe_compaction_tick() {
-    if let Some(observer) = COMPACTION_OBSERVER.lock().unwrap().as_ref() {
-        observer.fetch_add(1, Ordering::Relaxed);
-    }
-}
 
 async fn launch_server() {
     let version: &str = env!("CARGO_PKG_VERSION");
@@ -88,11 +54,6 @@ async fn launch_server() {
         }
 
         let components = parser.build().await.unwrap();
-        let ctx = ContextGuard {
-            server_handle: signal_handle.clone(),
-            storage: components.storage.clone(),
-            lock_file: config_lock.clone(),
-        };
 
         if !engine_config.compaction_interval.is_zero() {
             tokio::spawn(periodical_compact_storage(
@@ -101,9 +62,9 @@ async fn launch_server() {
             ));
         }
 
-        tokio::spawn(shutdown_ctrl_c(ctx.clone()));
+        tokio::spawn(shutdown_ctrl_c(signal_handle.clone()));
         #[cfg(unix)]
-        tokio::spawn(shutdown_signal(ctx));
+        tokio::spawn(shutdown_signal(signal_handle.clone()));
         #[cfg(test)]
         tokio::spawn(tests::shutdown_server(signal_handle.clone()));
 
@@ -117,10 +78,10 @@ async fn launch_server() {
         cfg.port,
     );
 
-    let app = AxumAppBuilder::new()
+    let (app, state_keeper) = AxumAppBuilder::new()
         .with_cfg(cfg.clone())
         .with_component_receiver(rx)
-        .with_lock_file(lock_file)
+        .with_lock_file(lock_file.clone())
         .build();
 
     // Ensure that the process exits with a non-zero exit code on panic.
@@ -149,7 +110,7 @@ async fn launch_server() {
         apply_http_settings!(axum_server::bind(addr))
             .serve(app.into_make_service())
             .await
-            .expect("Failed to start HTTP server");
+            .unwrap_or_else(|e| error!("Server error: {}", e));
     } else {
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
@@ -163,8 +124,20 @@ async fn launch_server() {
         apply_http_settings!(axum_server::bind_rustls(addr, config))
             .serve(app.into_make_service())
             .await
-            .expect("Failed to start HTTPS server");
+            .unwrap_or_else(|e| error!("Server error: {}", e));
     };
+
+    // shutdown procedure
+    state_keeper
+        .get_anonymous()
+        .await
+        .expect("Failed to access storage engine")
+        .storage
+        .sync_fs()
+        .await
+        .expect("Failed to shutdown storage");
+    lock_file.release().await;
+    info!("Server has been shut down.");
 }
 
 #[tokio::main(flavor = "multi_thread")]
@@ -172,25 +145,44 @@ async fn main() {
     launch_server().await;
 }
 
-async fn shutdown_ctrl_c(ctx: ContextGuard) {
+async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>) {
     tokio::signal::ctrl_c().await.unwrap();
-    ctx.shutdown().await;
+    info!("Received Ctrl-C, shutting down server...");
+    server_handle.shutdown();
 }
 
 #[cfg(unix)]
-async fn shutdown_signal(ctx: ContextGuard) {
+async fn shutdown_signal(server_handle: Handle<SocketAddr>) {
     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .unwrap()
         .recv()
         .await;
-    ctx.shutdown().await;
+    info!("Received termination signal, shutting down server...");
+    server_handle.shutdown();
+}
+
+#[cfg(test)]
+mod test_observer {
+    use super::*;
+    pub static COMPACTION_OBSERVER: LazyLock<Mutex<Option<Arc<AtomicUsize>>>> =
+        LazyLock::new(|| Mutex::new(None));
+
+    pub fn set_compaction_observer(observer: Option<Arc<AtomicUsize>>) {
+        *COMPACTION_OBSERVER.lock().unwrap() = observer;
+    }
+
+    pub fn observe_compaction_tick() {
+        if let Some(observer) = COMPACTION_OBSERVER.lock().unwrap().as_ref() {
+            observer.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 async fn periodical_compact_storage(storage: Arc<StorageEngine>, sync_interval: Duration) {
     loop {
         tokio::time::sleep(sync_interval).await;
         #[cfg(test)]
-        observe_compaction_tick();
+        test_observer::observe_compaction_tick();
         if let Err(e) = storage.compact().await {
             log::error!("Failed to sync storage: {}", e);
         }
@@ -287,7 +279,7 @@ mod tests {
     #[serial]
     async fn test_compaction_task_runs_when_interval_non_zero() {
         let compactions = Arc::new(AtomicUsize::new(0));
-        set_compaction_observer(Some(compactions.clone()));
+        test_observer::set_compaction_observer(Some(compactions.clone()));
 
         let data_path = tempdir().unwrap().keep();
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
@@ -303,7 +295,7 @@ mod tests {
         handler.abort();
         let _ = handler.await;
 
-        set_compaction_observer(None);
+        test_observer::set_compaction_observer(None);
 
         assert!(
             compactions.load(Ordering::Relaxed) > 0,
@@ -320,14 +312,7 @@ mod tests {
 
         let handle = Handle::new();
         let cfg = CfgParser::from_env(StdEnvGetter::default(), "0.0.0").await; // init file cache
-        let storage = cfg.build().await.unwrap().storage;
-        let ctx = ContextGuard {
-            server_handle: handle.clone(),
-            storage,
-            lock_file: Arc::new(cfg.build_lock_file().unwrap()),
-        };
-
-        ctx.shutdown().await;
+        handle.shutdown().await;
     }
 
     async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {
