@@ -53,6 +53,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Skip compact when block manager busy, [PR-1105](https://github.com/reductstore/reductstore/pull/1105)
 - Preserve provisioned replication mode changes across restarts, [PR-1108](https://github.com/reductstore/reductstore/pull/1108)
 - Fix folder map recovery after crash, [PR-1112](https://github.com/reductstore/reductstore/pull/1121)
+- Fix server shutdown and race condition in file cache, [PR-1122](https://github.com/reductstore/reductstore/pull/1122)
 
 ## 1.17.9 - 2025-01-16
 
