@@ -313,7 +313,7 @@ impl AxumAppBuilder {
         self
     }
 
-    pub fn build(self) -> Router {
+    pub fn build(self) -> (Router, Arc<StateKeeper>) {
         if self.rx.is_none() || self.cfg.is_none() {
             panic!("Components and Cfg must be set before building the app");
         }
@@ -321,43 +321,49 @@ impl AxumAppBuilder {
         let cfg = self.cfg.unwrap();
         let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
         let cors = Self::configure_cors(&cfg.cors_allow_origin);
+        let state_keeper = Arc::new(StateKeeper::new(
+            self.lc
+                .expect("Lock file must be set before building the app"),
+            self.rx
+                .expect("Components must be set before building the app"),
+        ));
 
-        Router::new()
-            // Server API
-            .nest(
-                &format!("{}api/v1", cfg.api_base_path),
-                create_server_api_routes(),
-            )
-            // Token API
-            .nest(
-                &format!("{}api/v1/tokens", cfg.api_base_path),
-                create_token_api_routes(),
-            )
-            // Bucket API + Entry API
-            .nest(&format!("{}api/v1/b", cfg.api_base_path), b_route)
-            // Replication API
-            .nest(
-                &format!("{}api/v1/replications", cfg.api_base_path),
-                create_replication_api_routes(),
-            )
-            .nest(
-                &format!("{}api/v1/io", cfg.api_base_path),
-                create_io_api_routes(),
-            )
-            .nest(
-                &format!("{}api/v1/links", cfg.api_base_path),
-                links::create_query_link_api_routes(),
-            )
-            // UI
-            .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
-            .fallback(get(show_ui))
-            .layer(from_fn(default_headers))
-            .layer(from_fn(print_statuses))
-            .layer(cors)
-            .with_state(Arc::new(StateKeeper::new(
-                self.lc.expect("Lock file must be set"),
-                self.rx.expect("Components must be set"),
-            )))
+        (
+            Router::new()
+                // Server API
+                .nest(
+                    &format!("{}api/v1", cfg.api_base_path),
+                    create_server_api_routes(),
+                )
+                // Token API
+                .nest(
+                    &format!("{}api/v1/tokens", cfg.api_base_path),
+                    create_token_api_routes(),
+                )
+                // Bucket API + Entry API
+                .nest(&format!("{}api/v1/b", cfg.api_base_path), b_route)
+                // Replication API
+                .nest(
+                    &format!("{}api/v1/replications", cfg.api_base_path),
+                    create_replication_api_routes(),
+                )
+                .nest(
+                    &format!("{}api/v1/io", cfg.api_base_path),
+                    create_io_api_routes(),
+                )
+                .nest(
+                    &format!("{}api/v1/links", cfg.api_base_path),
+                    links::create_query_link_api_routes(),
+                )
+                // UI
+                .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
+                .fallback(get(show_ui))
+                .layer(from_fn(default_headers))
+                .layer(from_fn(print_statuses))
+                .layer(cors)
+                .with_state(state_keeper.clone()),
+            state_keeper,
+        )
     }
 
     fn configure_cors(cors_allow_origin: &Vec<String>) -> CorsLayer {
@@ -571,7 +577,7 @@ mod tests {
             let (tx, rx) = tokio::sync::mpsc::channel(1);
             tx.send(test_components(cfg.clone()).await).await.unwrap();
 
-            let app = AxumAppBuilder::new()
+            let (app, _state_keeper) = AxumAppBuilder::new()
                 .with_cfg(cfg)
                 .with_lock_file(Arc::new(LockFileBuilder::noop()))
                 .with_component_receiver(rx)
