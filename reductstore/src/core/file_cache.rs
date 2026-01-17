@@ -216,33 +216,41 @@ impl FileCache {
     }
 
     async fn insert_file_cached(
-        cache: &mut Cache<PathBuf, FileLock>,
-        path: PathBuf,
+        &self,
+        path: &PathBuf,
         file: Arc<AsyncRwLock<File>>,
-    ) {
-        let discarded = cache.insert(path.clone(), Arc::clone(&file));
+    ) -> Result<(usize, usize), ReductError> {
+        let discarded = self
+            .cache
+            .write()
+            .await?
+            .insert(path.clone(), Arc::clone(&file));
 
+        let mut synced_count = 0usize;
+        let mut discarded_count = 0usize;
         for (path, file) in discarded {
-            if file.try_write().is_some() {
-                // spawn a task to unlock cache without blocking
-                spawn(async move {
-                    let Ok(mut file) = file.write_owned().await else {
-                        warn!("Failed to write file {}", path.display());
-                        return;
-                    };
-
-                    if file.mode() == &AccessMode::ReadWrite && !file.is_synced() {
-                        if let Err(err) = file.sync_all().await {
+            if let Some(mut lock) = file.try_write_owned() {
+                discarded_count += 1;
+                if tokio::fs::try_exists(&path).await?
+                    && lock.mode() == &AccessMode::ReadWrite
+                    && !lock.is_synced()
+                {
+                    // spawn a task to sync file in the background sync it can be long operation
+                    synced_count += 1;
+                    spawn(async move {
+                        lock.sync_all().await.unwrap_or_else(|err| {
                             warn!("Failed to sync discarded file {:?}: {}", path, err);
-                        }
-                    }
-                });
+                        });
+                    });
+                }
             } else {
                 // return the file to the cache if it is still in use
-                cache.insert(path, Arc::clone(&file));
+                self.cache.write().await?.insert(path, Arc::clone(&file));
                 continue;
             }
         }
+
+        Ok((discarded_count, synced_count))
     }
 
     /// Set the storage backend
@@ -280,8 +288,7 @@ impl FileCache {
                 Arc::clone(&file)
             } else {
                 let file = self.open_read_file(path).await?;
-                let mut cache = self.cache.write().await?;
-                Self::insert_file_cached(&mut cache, path.clone(), file.clone()).await;
+                self.insert_file_cached(path, file.clone()).await?;
                 file
             }
         };
@@ -327,14 +334,12 @@ impl FileCache {
                 } else {
                     drop(lock);
                     let file = self.open_write_file(path, false).await?;
-                    let mut cache = self.cache.write().await?;
-                    Self::insert_file_cached(&mut cache, path.clone(), file.clone()).await;
+                    self.insert_file_cached(path, file.clone()).await?;
                     file
                 }
             } else {
                 let file = self.open_write_file(path, true).await?;
-                let mut cache = self.cache.write().await?;
-                Self::insert_file_cached(&mut cache, path.clone(), file.clone()).await;
+                self.insert_file_cached(path, file.clone()).await?;
                 file
             }
         };
@@ -723,6 +728,183 @@ mod tests {
         cache.remove_dir(&tmp_dir).await.unwrap();
 
         assert!(!tmp_dir.exists());
+    }
+
+    mod insert_file_cached {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_insert_file_cached_file_in_use(
+            small_cache: FileCache,
+            file_path_1: PathBuf,
+            file_path_2: PathBuf,
+        ) {
+            let file = small_cache
+                .open_write_file(&file_path_1, false)
+                .await
+                .unwrap();
+            let _guard = file.read().await.unwrap();
+            small_cache
+                .insert_file_cached(&file_path_1, Arc::clone(&file))
+                .await
+                .unwrap();
+
+            let file2 = small_cache
+                .open_write_file(&file_path_2, false)
+                .await
+                .unwrap();
+            let (discarded, synced) = small_cache
+                .insert_file_cached(&file_path_2, file2)
+                .await
+                .unwrap();
+
+            assert_eq!((discarded, synced), (0, 0));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_insert_file_cached_missing_on_disk(
+            small_cache: FileCache,
+            file_path_1: PathBuf,
+            file_path_2: PathBuf,
+        ) {
+            let file = small_cache
+                .open_write_file(&file_path_1, false)
+                .await
+                .unwrap();
+            small_cache
+                .insert_file_cached(&file_path_1, file)
+                .await
+                .unwrap();
+            fs::remove_file(&file_path_1).unwrap();
+            assert!(!file_path_1.exists());
+
+            let file2 = small_cache
+                .open_write_file(&file_path_2, false)
+                .await
+                .unwrap();
+            let (discarded, synced) = small_cache
+                .insert_file_cached(&file_path_2, file2)
+                .await
+                .unwrap();
+
+            assert_eq!((discarded, synced), (1, 0));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_insert_file_cached_no_sync_needed(
+            small_cache: FileCache,
+            file_path_1: PathBuf,
+            file_path_2: PathBuf,
+        ) {
+            let file = small_cache
+                .open_write_file(&file_path_1, false)
+                .await
+                .unwrap();
+            small_cache
+                .insert_file_cached(&file_path_1, file)
+                .await
+                .unwrap();
+
+            let file2 = small_cache
+                .open_write_file(&file_path_2, false)
+                .await
+                .unwrap();
+            let (discarded, synced) = small_cache
+                .insert_file_cached(&file_path_2, file2)
+                .await
+                .unwrap();
+
+            assert_eq!((discarded, synced), (1, 0));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_insert_file_cached_read_mode(
+            small_cache: FileCache,
+            file_path_1: PathBuf,
+            file_path_2: PathBuf,
+        ) {
+            let file = small_cache.open_read_file(&file_path_1).await.unwrap();
+            small_cache
+                .insert_file_cached(&file_path_1, file)
+                .await
+                .unwrap();
+
+            let file2 = small_cache
+                .open_write_file(&file_path_2, false)
+                .await
+                .unwrap();
+            let (discarded, synced) = small_cache
+                .insert_file_cached(&file_path_2, file2)
+                .await
+                .unwrap();
+
+            assert_eq!((discarded, synced), (1, 0));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_insert_file_cached_sync_unsynced_file(
+            small_cache: FileCache,
+            file_path_1: PathBuf,
+            file_path_2: PathBuf,
+        ) {
+            let file = small_cache
+                .open_write_file(&file_path_1, false)
+                .await
+                .unwrap();
+            // Write to the file to make it unsynced
+            file.write().await.unwrap().write_all(b"new data").unwrap();
+            small_cache
+                .insert_file_cached(&file_path_1, file)
+                .await
+                .unwrap();
+
+            let file2 = small_cache
+                .open_write_file(&file_path_2, false)
+                .await
+                .unwrap();
+            let (discarded, synced) = small_cache
+                .insert_file_cached(&file_path_2, file2)
+                .await
+                .unwrap();
+
+            assert_eq!((discarded, synced), (1, 1));
+        }
+
+        #[fixture]
+        fn small_cache(tmp_dir: PathBuf) -> FileCache {
+            let cache = FileCache::new(1, Duration::from_secs(60), Duration::from_secs(60));
+            executor::block_on(async {
+                cache
+                    .set_storage_backend(
+                        Backend::builder()
+                            .local_data_path(tmp_dir)
+                            .try_build()
+                            .await
+                            .unwrap(),
+                    )
+                    .await;
+            });
+            cache
+        }
+
+        #[fixture]
+        fn file_path_1(tmp_dir: PathBuf) -> PathBuf {
+            let path = tmp_dir.join("test_file_1.txt");
+            fs::write(&path, b"test").unwrap();
+            path
+        }
+
+        #[fixture]
+        fn file_path_2(tmp_dir: PathBuf) -> PathBuf {
+            let path = tmp_dir.join("test_file_2.txt");
+            fs::write(&path, b"test").unwrap();
+            path
+        }
     }
 
     mod sync_rw_and_unused_files {

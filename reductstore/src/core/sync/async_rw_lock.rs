@@ -62,6 +62,10 @@ impl<T> AsyncRwLock<T> {
         self.inner.try_write().ok()
     }
 
+    pub fn try_write_owned(&self) -> Option<tokio::sync::OwnedRwLockWriteGuard<T>> {
+        self.inner.clone().try_write_owned().ok()
+    }
+
     #[track_caller]
     pub fn write_owned(
         &self,
