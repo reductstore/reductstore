@@ -29,26 +29,6 @@ use tokio::time::timeout;
 const QUERY_ID_HEADER: &str = "x-reduct-query-id";
 const LABELS_HEADER: &str = "x-reduct-labels";
 
-fn parse_query_id(headers: &HeaderMap) -> Result<u64, HttpError> {
-    let value = headers.get(QUERY_ID_HEADER).ok_or_else(|| {
-        HttpError::from(unprocessable_entity!(
-            "{} header is required for batched reads",
-            QUERY_ID_HEADER
-        ))
-    })?;
-
-    let value = value.to_str().map_err(|_| {
-        HttpError::new(
-            ErrorCode::UnprocessableEntity,
-            "Query id header must be valid UTF-8",
-        )
-    })?;
-
-    value
-        .parse::<u64>()
-        .map_err(|_| HttpError::new(ErrorCode::UnprocessableEntity, "Invalid query id"))
-}
-
 // GET /io/:bucket/read (query id provided in header)
 pub(super) async fn read_batched_records(
     State(keeper): State<Arc<StateKeeper>>,
@@ -104,6 +84,26 @@ fn calculate_header_size(records: &[BatchedRecord], start_ts: u64) -> usize {
         .sum()
 }
 
+fn parse_query_id(headers: &HeaderMap) -> Result<u64, HttpError> {
+    let value = headers.get(QUERY_ID_HEADER).ok_or_else(|| {
+        HttpError::from(unprocessable_entity!(
+            "{} header is required for batched reads",
+            QUERY_ID_HEADER
+        ))
+    })?;
+
+    let value = value.to_str().map_err(|_| {
+        HttpError::new(
+            ErrorCode::UnprocessableEntity,
+            "Query id header must be valid UTF-8",
+        )
+    })?;
+
+    value
+        .parse::<u64>()
+        .map_err(|_| HttpError::new(ErrorCode::UnprocessableEntity, "Invalid query id"))
+}
+
 async fn fetch_and_response_batched_records(
     bucket: Arc<Bucket>,
     query_id: u64,
@@ -136,7 +136,13 @@ async fn fetch_and_response_batched_records(
         .await
         {
             Some(value) => value,
-            None => continue,
+            None => {
+                // Check timeout even when no records received to avoid infinite loop on continuous queries
+                if start_time.elapsed() > io_settings.batch_timeout || !records.is_empty() {
+                    break;
+                }
+                continue;
+            }
         };
 
         for reader in batch_of_readers {
@@ -629,5 +635,85 @@ mod tests {
         .unwrap();
 
         assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn continuous_query_returns_after_timeout(
+        #[future] keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        // Write one record to entry
+        let mut writer = bucket
+            .begin_write(
+                "continuous-entry",
+                1000,
+                2,
+                "text/plain".to_string(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        writer.send(Ok(Some(Bytes::from("ok")))).await.unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        // Create a continuous query starting after the record
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["continuous-entry".into()]),
+            start: Some(1001), // Start after the only record
+            continuous: Some(true),
+            ..Default::default()
+        };
+        let path = Path(path_to_bucket_1.0.clone());
+        let response = query(
+            State(keeper.clone()),
+            headers.clone(),
+            path,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
+        );
+
+        // This should not block indefinitely - it should return after batch_timeout
+        let start = std::time::Instant::now();
+        let response = read_batched_records(
+            State(keeper.clone()),
+            headers,
+            path_to_bucket_1,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        // Verify it returned in reasonable time (batch_timeout is typically a few seconds)
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(30),
+            "continuous query should not block indefinitely"
+        );
+
+        // Empty response since no records match
+        let resp_headers = response.headers();
+        assert_eq!(resp_headers["content-length"], "0");
+        assert_eq!(resp_headers["x-reduct-last"], "false");
     }
 }
