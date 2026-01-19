@@ -50,6 +50,8 @@ pub struct HistoricalQuery {
     start_time: u64,
     /// The stop time of the query.
     stop_time: u64,
+    /// Entry name
+    entry_name: String,
     /// The records from the current block that have not been read yet.
     records_from_current_block: VecDeque<Record>,
     /// The current block that is being read. Cached to avoid loading the same block multiple times.
@@ -66,6 +68,7 @@ pub struct HistoricalQuery {
 
 impl HistoricalQuery {
     pub fn try_new(
+        entry_name: String,
         start_time: u64,
         stop_time: u64,
         options: QueryOptions,
@@ -115,6 +118,7 @@ impl HistoricalQuery {
         }
 
         Ok(HistoricalQuery {
+            entry_name,
             start_time,
             stop_time,
             records_from_current_block: VecDeque::new(),
@@ -180,7 +184,7 @@ impl Query for HistoricalQuery {
         let block = self.current_block.as_ref().unwrap();
 
         if self.only_metadata {
-            Ok(RecordReader::form_record(record))
+            Ok(RecordReader::form_record(&self.entry_name, record))
         } else {
             RecordReader::try_new(
                 Arc::clone(&block_manager),
@@ -240,7 +244,13 @@ mod tests {
         stop_time: u64,
         options: QueryOptions,
     ) -> Result<HistoricalQuery, ReductError> {
-        HistoricalQuery::try_new(start_time, stop_time, options, IoConfig::default())
+        HistoricalQuery::try_new(
+            "entry".to_string(),
+            start_time,
+            stop_time,
+            options,
+            IoConfig::default(),
+        )
     }
 
     mod new {
@@ -308,6 +318,31 @@ mod tests {
         assert_eq!(records.len(), 1);
         assert_eq!(records[0].0.meta().timestamp(), 0);
         assert_eq!(records[0].1, "0123456789");
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_only_metadata_returns_entry_name(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let mut query = build_query(
+            0,
+            5,
+            QueryOptions {
+                only_metadata: true,
+                ..QueryOptions::default()
+            },
+        )
+        .unwrap();
+        let reader = query.next(block_manager.clone()).await.unwrap();
+
+        assert_eq!(reader.meta().timestamp(), 0);
+        assert_eq!(
+            reader.meta().entry_name(),
+            "entry",
+            "entry_name should be returned for HEAD request (only_metadata=true)"
+        );
     }
 
     #[rstest]

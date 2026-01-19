@@ -89,13 +89,16 @@ impl RecordReader {
     ///
     /// # Arguments
     ///
+    /// * `entry_name` - The name of the entry
     /// * `record` - The record to read
     ///
     /// # Returns
     ///
     /// * `RecordReader` - The record reader to read the record content in chunks
-    pub fn form_record(record: Record) -> Self {
-        let meta: RecordMeta = record.into();
+    pub fn form_record(entry_name: &str, record: Record) -> Self {
+        let meta: RecordMeta = RecordMeta::builder_from(record.into())
+            .entry_name(entry_name)
+            .build();
         RecordReader {
             meta,
             file_path: None,
@@ -328,7 +331,7 @@ pub(crate) mod tests {
         #[rstest]
         #[tokio::test(flavor = "multi_thread")]
         async fn test_empty_body(record: Record) {
-            let mut reader = RecordReader::form_record(record);
+            let mut reader = RecordReader::form_record("entry", record);
             let mut buf = vec![0; 4];
             let read = reader.read(&mut buf).unwrap();
             assert_eq!(read, 0);
@@ -393,14 +396,14 @@ pub(crate) mod tests {
         #[tokio::test(flavor = "multi_thread")]
         async fn test_state(mut record: Record) {
             record.state = 1;
-            let reader = RecordReader::form_record(record);
+            let reader = RecordReader::form_record("entry", record);
             assert_eq!(reader.meta().state(), 1);
         }
 
         #[rstest]
         #[tokio::test(flavor = "multi_thread")]
         async fn test_meta_mut(record: Record) {
-            let mut reader = RecordReader::form_record(record);
+            let mut reader = RecordReader::form_record("entry", record);
             let meta_mut = reader.meta_mut();
             meta_mut
                 .labels_mut()
