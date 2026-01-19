@@ -9,7 +9,7 @@ use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::batch::v2::{
     make_error_batched_header, parse_batched_headers, parse_entries, parse_label_delta,
-    parse_labels, sort_headers_by_entry_and_time,
+    parse_labels, parse_start_timestamp, sort_headers_by_entry_and_time,
 };
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
@@ -120,8 +120,13 @@ pub(super) async fn update_batched_records(
                             .await?;
                     }
                     Err(err) => {
-                        let (name, value) =
-                            make_error_batched_header(update.entry_index, update.delta, err);
+                        let start_ts = parse_start_timestamp(&headers)?;
+                        let (name, value) = make_error_batched_header(
+                            update.entry_index,
+                            start_ts,
+                            update.delta,
+                            err,
+                        );
                         resp_headers.insert(name, value);
                     }
                 }

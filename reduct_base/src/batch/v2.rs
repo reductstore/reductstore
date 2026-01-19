@@ -39,11 +39,13 @@ use http::{HeaderMap, HeaderName, HeaderValue};
 use std::collections::{HashMap, HashSet};
 use std::str::FromStr;
 
-const HEADER_PREFIX: &str = "x-reduct-";
-const ERROR_HEADER_PREFIX: &str = "x-reduct-error-";
-const ENTRIES_HEADER: &str = "x-reduct-entries";
-const START_TS_HEADER: &str = "x-reduct-start-ts";
-const LABELS_HEADER: &str = "x-reduct-labels";
+pub const HEADER_PREFIX: &str = "x-reduct-";
+pub const ERROR_HEADER_PREFIX: &str = "x-reduct-error-";
+pub const ENTRIES_HEADER: &str = "x-reduct-entries";
+pub const START_TS_HEADER: &str = "x-reduct-start-ts";
+pub const LABELS_HEADER: &str = "x-reduct-labels";
+
+pub const QUERY_ID_HEADER: &str = "x-reduct-query-id";
 
 /// Represents a parsed batched header that includes the entry name and timestamp.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -331,17 +333,29 @@ pub fn parse_batched_header_name(name: &str) -> Result<(usize, u64), ReductError
 
 pub fn make_error_batched_header(
     entry_index: usize,
+    start_ts: u64,
     time_delta: u64,
     err: &ReductError,
 ) -> (HeaderName, HeaderValue) {
     let name = HeaderName::from_str(&format!(
         "{}{}-{}",
-        ERROR_HEADER_PREFIX, entry_index, time_delta
+        ERROR_HEADER_PREFIX,
+        entry_index,
+        time_delta + start_ts
     ))
     .expect("Entry index and time delta must produce a valid header name");
     let value = HeaderValue::from_str(&format!("{},{}", err.status(), err.message()))
         .expect("Status code and message must produce a valid header value");
     (name, value)
+}
+
+pub fn make_entries_header(entries: &[String]) -> HeaderValue {
+    let encoded = entries
+        .iter()
+        .map(|entry| encode_entry_name(entry))
+        .collect::<Vec<_>>()
+        .join(",");
+    encoded.parse().unwrap()
 }
 
 fn parse_start_timestamp_internal(headers: &HeaderMap) -> Result<u64, ReductError> {

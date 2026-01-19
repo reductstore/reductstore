@@ -16,7 +16,8 @@ use axum::response::IntoResponse;
 use axum_extra::headers::HeaderMap;
 use log::debug;
 use reduct_base::batch::v2::{
-    encode_entry_name, make_batched_header_name, make_record_header_value, LabelIndex,
+    encode_entry_name, make_batched_header_name, make_entries_header, make_record_header_value,
+    LabelIndex, ENTRIES_HEADER, LABELS_HEADER, QUERY_ID_HEADER, START_TS_HEADER,
 };
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
@@ -25,9 +26,6 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::time::timeout;
-
-const QUERY_ID_HEADER: &str = "x-reduct-query-id";
-const LABELS_HEADER: &str = "x-reduct-labels";
 
 // GET /io/:bucket/read (query id provided in header)
 pub(super) async fn read_batched_records(
@@ -219,7 +217,6 @@ async fn fetch_and_response_batched_records(
         }
     }
 
-    let start_ts = start_ts.unwrap_or_default();
     // Align entry indices with the chronological order of the first record per entry
     let mut first_ts_by_entry: HashMap<usize, u64> = HashMap::new();
     for record in &records {
@@ -252,17 +249,9 @@ async fn fetch_and_response_batched_records(
     records.sort_by_key(|record| (record.entry_index, record.timestamp));
 
     let mut resp_headers = http::HeaderMap::new();
-    resp_headers.insert(
-        "x-reduct-entries",
-        entries
-            .iter()
-            .map(|entry| encode_entry_name(entry))
-            .collect::<Vec<_>>()
-            .join(",")
-            .parse()
-            .unwrap(),
-    );
-    resp_headers.insert("x-reduct-start-ts", start_ts.to_string().parse().unwrap());
+    let start_ts = start_ts.unwrap_or_default();
+    resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
+    resp_headers.insert(START_TS_HEADER, start_ts.to_string().parse().unwrap());
     if let Some(label_header) = label_index.as_header() {
         resp_headers.insert(LABELS_HEADER, label_header);
     }

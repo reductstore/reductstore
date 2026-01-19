@@ -18,8 +18,8 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::batch::v2::{
-    make_error_batched_header, parse_batched_headers, parse_entries,
-    sort_headers_by_entry_and_time, EntryRecordHeader,
+    make_entries_header, make_error_batched_header, parse_batched_headers, parse_entries,
+    parse_start_timestamp, sort_headers_by_entry_and_time, EntryRecordHeader, ENTRIES_HEADER,
 };
 use reduct_base::error::ReductError;
 use reduct_base::io::{RecordMeta, WriteRecord};
@@ -58,7 +58,8 @@ pub(super) async fn write_batched_records(
         .get_with_permissions(&headers.clone(), WriteAccessPolicy { bucket })
         .await?;
 
-    let parsed_headers = parse_and_index_headers(&headers)?;
+    let entries = parse_entries(&headers)?;
+    let parsed_headers = parse_and_index_headers(&entries, &headers)?;
     let content_length = check_and_get_content_length(&headers, &parsed_headers)?;
     let mut stream = body.into_data_stream();
 
@@ -82,9 +83,12 @@ pub(super) async fn write_batched_records(
 
     match process_stream.await {
         Ok(error_map) => {
+            let start_ts = parse_start_timestamp(&headers)?;
+
             let mut resp_headers = HeaderMap::new();
+            resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
             error_map.iter().for_each(|((entry_idx, delta), err)| {
-                let (name, value) = make_error_batched_header(*entry_idx, *delta, err);
+                let (name, value) = make_error_batched_header(*entry_idx, start_ts, *delta, err);
                 resp_headers.insert(name, value);
             });
 
@@ -100,8 +104,10 @@ pub(super) async fn write_batched_records(
     }
 }
 
-fn parse_and_index_headers(headers: &HeaderMap) -> Result<Vec<IndexedRecordHeader>, ReductError> {
-    let entries = parse_entries(headers)?;
+fn parse_and_index_headers(
+    entries: &Vec<String>,
+    headers: &HeaderMap,
+) -> Result<Vec<IndexedRecordHeader>, ReductError> {
     let records = parse_batched_headers(headers)?;
     let sorted_header_meta = sort_headers_by_entry_and_time(headers)?;
 

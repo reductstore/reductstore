@@ -89,7 +89,7 @@ pub(super) async fn remove_batched_records(
             if let Some(records) = records_by_timestamp.get(&timestamp) {
                 for record in records {
                     let (name, value) =
-                        make_error_batched_header(record.entry_index, record.delta, &err);
+                        make_error_batched_header(record.entry_index, start_ts, record.delta, &err);
                     resp_headers.insert(name, value);
                 }
             }
