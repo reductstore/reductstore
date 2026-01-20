@@ -333,15 +333,12 @@ pub fn parse_batched_header_name(name: &str) -> Result<(usize, u64), ReductError
 
 pub fn make_error_batched_header(
     entry_index: usize,
-    start_ts: u64,
     time_delta: u64,
     err: &ReductError,
 ) -> (HeaderName, HeaderValue) {
     let name = HeaderName::from_str(&format!(
         "{}{}-{}",
-        ERROR_HEADER_PREFIX,
-        entry_index,
-        time_delta + start_ts
+        ERROR_HEADER_PREFIX, entry_index, time_delta
     ))
     .expect("Entry index and time delta must produce a valid header name");
     let value = HeaderValue::from_str(&format!("{},{}", err.status(), err.message()))
@@ -349,6 +346,7 @@ pub fn make_error_batched_header(
     (name, value)
 }
 
+#[inline]
 pub fn make_entries_header(entries: &[String]) -> HeaderValue {
     let encoded = entries
         .iter()
@@ -356,6 +354,11 @@ pub fn make_entries_header(entries: &[String]) -> HeaderValue {
         .collect::<Vec<_>>()
         .join(",");
     encoded.parse().unwrap()
+}
+
+#[inline]
+pub fn make_start_timestamp_header(start_ts: u64) -> HeaderValue {
+    HeaderValue::from_str(&start_ts.to_string()).unwrap()
 }
 
 fn parse_start_timestamp_internal(headers: &HeaderMap) -> Result<u64, ReductError> {

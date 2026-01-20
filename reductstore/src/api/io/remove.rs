@@ -5,8 +5,10 @@ use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
+use reduct_base::batch::build_label_delta;
 use reduct_base::batch::v2::{
-    make_error_batched_header, parse_entries, parse_start_timestamp, sort_headers_by_entry_and_time,
+    make_entries_header, make_error_batched_header, make_start_timestamp_header, parse_entries,
+    parse_start_timestamp, sort_headers_by_entry_and_time, ENTRIES_HEADER, START_TS_HEADER,
 };
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
@@ -73,7 +75,10 @@ pub(super) async fn remove_batched_records(
         .get_bucket(bucket_name)
         .await?
         .upgrade()?;
+
     let mut resp_headers = HeaderMap::new();
+    resp_headers.insert(START_TS_HEADER, make_start_timestamp_header(start_ts));
+    resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
 
     if !records_by_entry.is_empty() {
         let mut record_ids: HashMap<String, Vec<u64>> = HashMap::new();
@@ -89,7 +94,7 @@ pub(super) async fn remove_batched_records(
             if let Some(records) = records_by_timestamp.get(&timestamp) {
                 for record in records {
                     let (name, value) =
-                        make_error_batched_header(record.entry_index, start_ts, record.delta, &err);
+                        make_error_batched_header(record.entry_index, record.delta, &err);
                     resp_headers.insert(name, value);
                 }
             }

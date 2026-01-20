@@ -8,8 +8,9 @@ use crate::storage::bucket::update_records::UpdateLabelsMulti;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::batch::v2::{
-    make_error_batched_header, parse_batched_headers, parse_entries, parse_label_delta,
-    parse_labels, parse_start_timestamp, sort_headers_by_entry_and_time,
+    make_entries_header, make_error_batched_header, make_start_timestamp_header,
+    parse_batched_headers, parse_entries, parse_label_delta, parse_labels, parse_start_timestamp,
+    sort_headers_by_entry_and_time, ENTRIES_HEADER, START_TS_HEADER,
 };
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
@@ -39,12 +40,13 @@ pub(super) async fn update_batched_records(
         )
         .await?;
 
-    let entries = parse_entries(&headers).map_err(HttpError::from)?;
-    let label_names = parse_labels(&headers).map_err(HttpError::from)?;
+    let entries = parse_entries(&headers)?;
+    let label_names = parse_labels(&headers)?;
+    let start_ts = parse_start_timestamp(&headers)?;
 
     // Validate headers and resolve final labels so we mirror protocol v2 behaviour.
-    let parsed_headers = parse_batched_headers(&headers).map_err(HttpError::from)?;
-    let raw_headers = sort_headers_by_entry_and_time(&headers).map_err(HttpError::from)?;
+    let parsed_headers = parse_batched_headers(&headers)?;
+    let raw_headers = sort_headers_by_entry_and_time(&headers)?;
 
     if parsed_headers.len() != raw_headers.len() {
         return Err(HttpError::from(unprocessable_entity!(
@@ -101,6 +103,9 @@ pub(super) async fn update_batched_records(
         .await?;
 
     let mut resp_headers = HeaderMap::new();
+    resp_headers.insert(START_TS_HEADER, make_start_timestamp_header(start_ts));
+    resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
+
     for update in updates {
         if let Some(entry_results) = result.get(&update.labels.entry_name) {
             if let Some(res) = entry_results.get(&update.labels.time) {
@@ -120,13 +125,8 @@ pub(super) async fn update_batched_records(
                             .await?;
                     }
                     Err(err) => {
-                        let start_ts = parse_start_timestamp(&headers)?;
-                        let (name, value) = make_error_batched_header(
-                            update.entry_index,
-                            start_ts,
-                            update.delta,
-                            err,
-                        );
+                        let (name, value) =
+                            make_error_batched_header(update.entry_index, update.delta, err);
                         resp_headers.insert(name, value);
                     }
                 }

@@ -18,8 +18,9 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::batch::v2::{
-    make_entries_header, make_error_batched_header, parse_batched_headers, parse_entries,
-    parse_start_timestamp, sort_headers_by_entry_and_time, EntryRecordHeader, ENTRIES_HEADER,
+    make_entries_header, make_error_batched_header, make_start_timestamp_header,
+    parse_batched_headers, parse_entries, parse_start_timestamp, sort_headers_by_entry_and_time,
+    EntryRecordHeader, ENTRIES_HEADER, START_TS_HEADER,
 };
 use reduct_base::error::ReductError;
 use reduct_base::io::{RecordMeta, WriteRecord};
@@ -59,6 +60,7 @@ pub(super) async fn write_batched_records(
         .await?;
 
     let entries = parse_entries(&headers)?;
+    let start_ts = parse_start_timestamp(&headers)?;
     let parsed_headers = parse_and_index_headers(&entries, &headers)?;
     let content_length = check_and_get_content_length(&headers, &parsed_headers)?;
     let mut stream = body.into_data_stream();
@@ -81,14 +83,14 @@ pub(super) async fn write_batched_records(
             .map_err(|e| internal_server_error!("Failed to complete write operation: {}", e))?)
     };
 
+    let mut resp_headers = HeaderMap::new();
+    resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
+    resp_headers.insert(START_TS_HEADER, make_start_timestamp_header(start_ts));
+
     match process_stream.await {
         Ok(error_map) => {
-            let start_ts = parse_start_timestamp(&headers)?;
-
-            let mut resp_headers = HeaderMap::new();
-            resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
             error_map.iter().for_each(|((entry_idx, delta), err)| {
-                let (name, value) = make_error_batched_header(*entry_idx, start_ts, *delta, err);
+                let (name, value) = make_error_batched_header(*entry_idx, *delta, err);
                 resp_headers.insert(name, value);
             });
 
