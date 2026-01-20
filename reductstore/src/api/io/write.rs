@@ -18,8 +18,9 @@ use bytes::Bytes;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::batch::v2::{
-    make_error_batched_header, parse_batched_headers, parse_entries,
-    sort_headers_by_entry_and_time, EntryRecordHeader,
+    make_entries_header, make_error_batched_header, make_start_timestamp_header,
+    parse_batched_headers, parse_entries, parse_start_timestamp, sort_headers_by_entry_and_time,
+    EntryRecordHeader, ENTRIES_HEADER, START_TS_HEADER,
 };
 use reduct_base::error::ReductError;
 use reduct_base::io::{RecordMeta, WriteRecord};
@@ -58,7 +59,9 @@ pub(super) async fn write_batched_records(
         .get_with_permissions(&headers.clone(), WriteAccessPolicy { bucket })
         .await?;
 
-    let parsed_headers = parse_and_index_headers(&headers)?;
+    let entries = parse_entries(&headers)?;
+    let start_ts = parse_start_timestamp(&headers)?;
+    let parsed_headers = parse_and_index_headers(&entries, &headers)?;
     let content_length = check_and_get_content_length(&headers, &parsed_headers)?;
     let mut stream = body.into_data_stream();
 
@@ -80,9 +83,12 @@ pub(super) async fn write_batched_records(
             .map_err(|e| internal_server_error!("Failed to complete write operation: {}", e))?)
     };
 
+    let mut resp_headers = HeaderMap::new();
+    resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
+    resp_headers.insert(START_TS_HEADER, make_start_timestamp_header(start_ts));
+
     match process_stream.await {
         Ok(error_map) => {
-            let mut resp_headers = HeaderMap::new();
             error_map.iter().for_each(|((entry_idx, delta), err)| {
                 let (name, value) = make_error_batched_header(*entry_idx, *delta, err);
                 resp_headers.insert(name, value);
@@ -100,8 +106,10 @@ pub(super) async fn write_batched_records(
     }
 }
 
-fn parse_and_index_headers(headers: &HeaderMap) -> Result<Vec<IndexedRecordHeader>, ReductError> {
-    let entries = parse_entries(headers)?;
+fn parse_and_index_headers(
+    entries: &Vec<String>,
+    headers: &HeaderMap,
+) -> Result<Vec<IndexedRecordHeader>, ReductError> {
     let records = parse_batched_headers(headers)?;
     let sorted_header_meta = sort_headers_by_entry_and_time(headers)?;
 
@@ -523,7 +531,13 @@ mod tests {
         .into_response();
 
         let headers = resp.headers();
-        assert_eq!(headers.len(), 1);
+        assert_eq!(headers.len(), 3);
+        assert_eq!(
+            headers[ENTRIES_HEADER].to_str().unwrap(),
+            "entry-1,new-entry"
+        );
+        assert_eq!(headers[START_TS_HEADER].to_str().unwrap(), "0");
+
         let err_header = headers.get("x-reduct-error-0-0").unwrap();
         assert!(err_header.to_str().unwrap().starts_with("409,"));
 

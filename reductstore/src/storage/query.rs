@@ -38,6 +38,7 @@ pub(crate) fn next_query_id() -> u64 {
 
 /// Build a query.
 pub(in crate::storage) fn build_query(
+    entry_name: String,
     start: u64,
     stop: u64,
     options: QueryOptions,
@@ -49,6 +50,7 @@ pub(in crate::storage) fn build_query(
 
     Ok(if let Some(_) = options.limit {
         Box::new(limited::LimitedQuery::try_new(
+            entry_name,
             start,
             stop,
             options,
@@ -56,12 +58,14 @@ pub(in crate::storage) fn build_query(
         )?)
     } else if options.continuous {
         Box::new(continuous::ContinuousQuery::try_new(
+            entry_name,
             start,
             options,
             io_defaults,
         )?)
     } else {
         Box::new(historical::HistoricalQuery::try_new(
+            entry_name,
             start,
             stop,
             options,
@@ -198,14 +202,34 @@ mod tests {
     fn test_bad_start_stop() {
         let options = QueryOptions::default();
         assert_eq!(
-            build_query(10, 5, options.clone(), IoConfig::default())
-                .err()
-                .unwrap(),
+            build_query(
+                "entry".to_string(),
+                10,
+                5,
+                options.clone(),
+                IoConfig::default()
+            )
+            .err()
+            .unwrap(),
             ReductError::unprocessable_entity("Start time must be before stop time")
         );
 
-        assert!(build_query(10, 10, options.clone(), IoConfig::default()).is_ok());
-        assert!(build_query(10, 11, options.clone(), IoConfig::default()).is_ok());
+        assert!(build_query(
+            "entry".to_string(),
+            10,
+            10,
+            options.clone(),
+            IoConfig::default()
+        )
+        .is_ok());
+        assert!(build_query(
+            "entry".to_string(),
+            10,
+            11,
+            options.clone(),
+            IoConfig::default()
+        )
+        .is_ok());
     }
 
     #[rstest]
@@ -214,7 +238,14 @@ mod tests {
             continuous: true,
             ..Default::default()
         };
-        assert!(build_query(10, 5, options.clone(), IoConfig::default()).is_ok());
+        assert!(build_query(
+            "entry".to_string(),
+            10,
+            5,
+            options.clone(),
+            IoConfig::default()
+        )
+        .is_ok());
     }
 
     #[log_test(rstest)]
@@ -226,7 +257,14 @@ mod tests {
             ..Default::default()
         };
 
-        let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
+        let query = build_query(
+            "entry".to_string(),
+            0,
+            5,
+            options.clone(),
+            IoConfig::default(),
+        )
+        .unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
 
         let (rx, handle) = spawn_query_task(
@@ -248,7 +286,14 @@ mod tests {
     async fn test_query_task_ok(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let block_manager = block_manager.await;
         let options = QueryOptions::default();
-        let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
+        let query = build_query(
+            "entry".to_string(),
+            0,
+            5,
+            options.clone(),
+            IoConfig::default(),
+        )
+        .unwrap();
 
         let (mut rx, handle) = spawn_query_task(
             0,
@@ -277,7 +322,14 @@ mod tests {
             continuous: true,
             ..Default::default()
         };
-        let query = build_query(0, 5, options.clone(), IoConfig::default()).unwrap();
+        let query = build_query(
+            "entry".to_string(),
+            0,
+            5,
+            options.clone(),
+            IoConfig::default(),
+        )
+        .unwrap();
         let (mut rx, handle) = spawn_query_task(
             0,
             "bucket/entry".to_string(),
@@ -324,7 +376,14 @@ mod tests {
     async fn test_query_task_err(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let block_manager = block_manager.await;
         let options = QueryOptions::default();
-        let query = build_query(0, 10, options.clone(), IoConfig::default()).unwrap();
+        let query = build_query(
+            "entry".to_string(),
+            0,
+            10,
+            options.clone(),
+            IoConfig::default(),
+        )
+        .unwrap();
 
         let (rx, handle) = spawn_query_task(
             0,

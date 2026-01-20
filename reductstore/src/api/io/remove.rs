@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::{HttpError, StateKeeper};
@@ -6,7 +6,8 @@ use crate::auth::policy::WriteAccessPolicy;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::batch::v2::{
-    make_error_batched_header, parse_entries, parse_start_timestamp, sort_headers_by_entry_and_time,
+    make_entries_header, make_error_batched_header, make_start_timestamp_header, parse_entries,
+    parse_start_timestamp, sort_headers_by_entry_and_time, ENTRIES_HEADER, START_TS_HEADER,
 };
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
@@ -73,7 +74,10 @@ pub(super) async fn remove_batched_records(
         .get_bucket(bucket_name)
         .await?
         .upgrade()?;
+
     let mut resp_headers = HeaderMap::new();
+    resp_headers.insert(START_TS_HEADER, make_start_timestamp_header(start_ts));
+    resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
 
     if !records_by_entry.is_empty() {
         let mut record_ids: HashMap<String, Vec<u64>> = HashMap::new();
@@ -164,7 +168,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(resp_headers.is_empty());
+        assert_eq!(resp_headers.get(ENTRIES_HEADER).unwrap(), "entry-1,entry-2");
+        assert_eq!(resp_headers.get(START_TS_HEADER).unwrap(), "1000");
+        assert!(resp_headers.get("x-reduct-error-0-0").is_none());
+        assert!(resp_headers.get("x-reduct-error-1-10").is_none());
         assert!(bucket.begin_read("entry-1", 1000).await.is_err());
         assert!(bucket.begin_read("entry-2", 1010).await.is_err());
     }
@@ -266,7 +273,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(resp_headers.len(), 1);
+        assert_eq!(resp_headers.len(), 3);
+        assert_eq!(resp_headers.get(ENTRIES_HEADER).unwrap(), "entry-1");
+        assert_eq!(resp_headers.get(START_TS_HEADER).unwrap(), "1000");
         assert_eq!(
             resp_headers.get("x-reduct-error-0-1").unwrap(),
             "404,No record with timestamp 1001"

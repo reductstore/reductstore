@@ -13,6 +13,7 @@ use reduct_base::io::ReadRecord;
 use std::sync::Arc;
 
 pub struct ContinuousQuery {
+    entry_name: String,
     query: HistoricalQuery,
     next_start: u64,
     count: usize,
@@ -22,6 +23,7 @@ pub struct ContinuousQuery {
 
 impl ContinuousQuery {
     pub fn try_new(
+        entry_name: String,
         start: u64,
         options: QueryOptions,
         io_defaults: IoConfig,
@@ -31,7 +33,14 @@ impl ContinuousQuery {
         }
 
         Ok(ContinuousQuery {
-            query: HistoricalQuery::try_new(start, u64::MAX, options.clone(), io_defaults.clone())?,
+            entry_name: entry_name.clone(),
+            query: HistoricalQuery::try_new(
+                entry_name,
+                start,
+                u64::MAX,
+                options.clone(),
+                io_defaults.clone(),
+            )?,
             next_start: start,
             count: 0,
             options,
@@ -57,6 +66,7 @@ impl Query for ContinuousQuery {
                 ..
             }) => {
                 self.query = HistoricalQuery::try_new(
+                    self.entry_name.clone(),
                     self.next_start,
                     u64::MAX,
                     self.options.clone(),
@@ -90,6 +100,7 @@ mod tests {
     async fn test_query(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let block_manager = block_manager.await;
         let mut query = ContinuousQuery::try_new(
+            "entry".to_string(),
             900,
             QueryOptions {
                 ttl: std::time::Duration::from_millis(100),

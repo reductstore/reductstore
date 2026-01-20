@@ -128,7 +128,13 @@ impl Entry {
         let block_manager = Arc::clone(&self.block_manager);
 
         let options: QueryOptions = query_parameters.into();
-        let query = build_query(start, stop, options.clone(), self.cfg.io_conf.clone())?;
+        let query = build_query(
+            self.name.clone(),
+            start,
+            stop,
+            options.clone(),
+            self.cfg.io_conf.clone(),
+        )?;
 
         let io_settings = query.as_ref().io_settings().clone();
         let (rx, task_handle) =

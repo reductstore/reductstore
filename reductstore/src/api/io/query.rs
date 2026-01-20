@@ -1,3 +1,6 @@
+// Copyright 2025-2026 ReductSoftware UG
+// Licensed under the Business Source License 1.1
+
 use crate::api::entry::{QueryEntryAxum, QueryInfoAxum, RemoveQueryInfoAxum};
 use crate::api::HttpError;
 use crate::api::StateKeeper;

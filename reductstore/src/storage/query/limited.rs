@@ -20,13 +20,14 @@ pub(crate) struct LimitedQuery {
 
 impl LimitedQuery {
     pub fn try_new(
+        entry_name: String,
         start: u64,
         stop: u64,
         options: QueryOptions,
         io_config: IoConfig,
     ) -> Result<Self, ReductError> {
         Ok(LimitedQuery {
-            query: HistoricalQuery::try_new(start, stop, options.clone(), io_config)?,
+            query: HistoricalQuery::try_new(entry_name, start, stop, options.clone(), io_config)?,
             limit_count: options.limit.unwrap(),
         })
     }
@@ -64,6 +65,7 @@ mod tests {
     async fn test_limit(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let block_manager = block_manager.await;
         let mut query = LimitedQuery::try_new(
+            "entry".to_string(),
             0,
             u64::MAX,
             QueryOptions {

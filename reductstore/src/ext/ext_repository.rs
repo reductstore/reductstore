@@ -922,7 +922,7 @@ pub(super) mod tests {
             }),
             ..Default::default()
         };
-        RecordReader::form_record(record)
+        RecordReader::form_record("entry", record)
     }
 
     #[fixture]

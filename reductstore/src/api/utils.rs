@@ -44,6 +44,10 @@ pub(super) fn make_headers_from_reader(meta: &RecordMeta) -> HeaderMap {
         HeaderValue::from_str("attachment").unwrap(),
     );
     headers.insert("x-reduct-time", HeaderValue::from(meta.timestamp()));
+    headers.insert(
+        "x-reduct-entry",
+        HeaderValue::from_str(meta.entry_name()).unwrap(),
+    );
     headers
 }
 

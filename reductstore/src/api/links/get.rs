@@ -69,24 +69,37 @@ pub(super) async fn get(
             .map_err(|e| ReductError::from(e))?;
         prepare_response(range, Arc::clone(cached)).await
     } else {
-        let entry = components
+        let bucket = components
             .storage
             .get_bucket(&query.bucket)
-            .await?
-            .upgrade()?
-            .get_entry(&query.entry)
             .await?
             .upgrade()?;
 
         let repo_ext = &components.ext_repo;
 
-        // Execute the query with extension mechanism
-        let id = entry.query(query.query.clone()).await?;
+        // Get entries from query.entries first, fallback to query.entry from CreateLink request
+        let mut query_request = query.query.clone();
+        let entry_name = if let Some(ref entries) = query_request.entries {
+            if !entries.is_empty() {
+                entries.first().cloned().unwrap_or_default()
+            } else {
+                // entries is empty, use the entry from CreateLink request
+                query_request.entries = Some(vec![query.entry.clone()]);
+                query.entry.clone()
+            }
+        } else {
+            // entries is None, use the entry from CreateLink request
+            query_request.entries = Some(vec![query.entry.clone()]);
+            query.entry.clone()
+        };
+
+        // Execute the query at bucket level with multi-entry API
+        let id = bucket.query(query_request.clone()).await?;
         repo_ext
-            .register_query(id, &query.bucket, &query.entry, query.query)
+            .register_query(id, &query.bucket, &entry_name, query_request)
             .await?;
 
-        let (rx, _): (_, _) = entry.get_query_receiver(id.clone()).await?;
+        let (rx, _): (_, _) = bucket.get_query_receiver(id.clone()).await?;
         let record =
             process_query_and_fetch_record(record_num, repo_ext, id, rx.upgrade()?).await?;
 
@@ -473,6 +486,54 @@ mod tests {
 
         let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
         assert_eq!(String::from_utf8_lossy(body_bytes.iter().as_slice()), "Hey");
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_query_link_with_entries_specified(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+
+        // Create a query link with entries specified in QueryEntry
+        let link = create_query_link(
+            headers,
+            keeper.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                entries: Some(vec!["entry-1".to_string()]),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let response = get(
+            State(Arc::clone(&keeper)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .unwrap();
+
+        let resp = response.into_response();
+        assert_eq!(resp.headers()["content-type"], "text/plain");
+        assert_eq!(resp.headers()["content-length"], "6");
+
+        let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(body_bytes.iter().as_slice()),
+            "Hey!!!"
+        );
     }
 
     mod validation {
