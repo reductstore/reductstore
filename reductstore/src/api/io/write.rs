@@ -531,7 +531,13 @@ mod tests {
         .into_response();
 
         let headers = resp.headers();
-        assert_eq!(headers.len(), 1);
+        assert_eq!(headers.len(), 3);
+        assert_eq!(
+            headers[ENTRIES_HEADER].to_str().unwrap(),
+            "entry-1,new-entry"
+        );
+        assert_eq!(headers[START_TS_HEADER].to_str().unwrap(), "0");
+
         let err_header = headers.get("x-reduct-error-0-0").unwrap();
         assert!(err_header.to_str().unwrap().starts_with("409,"));
 

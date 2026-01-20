@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
@@ -16,8 +16,8 @@ use axum::response::IntoResponse;
 use axum_extra::headers::HeaderMap;
 use log::debug;
 use reduct_base::batch::v2::{
-    encode_entry_name, make_batched_header_name, make_entries_header, make_record_header_value,
-    LabelIndex, ENTRIES_HEADER, LABELS_HEADER, QUERY_ID_HEADER, START_TS_HEADER,
+    make_batched_header_name, make_entries_header, make_record_header_value, LabelIndex,
+    ENTRIES_HEADER, LABELS_HEADER, QUERY_ID_HEADER, START_TS_HEADER,
 };
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;

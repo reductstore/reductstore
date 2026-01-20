@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::api::{HttpError, StateKeeper};
@@ -244,7 +244,12 @@ mod tests {
         let resp_headers = update_batched_records(State(keeper.clone()), headers, path_to_bucket_1)
             .await
             .unwrap();
-        assert!(resp_headers.is_empty());
+        assert_eq!(resp_headers.len(), 2);
+        assert_eq!(
+            resp_headers[ENTRIES_HEADER].to_str().unwrap(),
+            "entry-1,entry-2"
+        );
+        assert_eq!(resp_headers[START_TS_HEADER].to_str().unwrap(), "1000");
 
         let record1 = bucket.begin_read("entry-1", 1000).await.unwrap();
         assert_eq!(
@@ -302,7 +307,12 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(resp_headers.len(), 1);
+        assert_eq!(resp_headers.len(), 3);
+        assert_eq!(
+            resp_headers[ENTRIES_HEADER].to_str().unwrap(),
+            "entry-1,missing"
+        );
+        assert_eq!(resp_headers[START_TS_HEADER].to_str().unwrap(), "1000");
         let err_value = resp_headers
             .get("x-reduct-error-1-0")
             .unwrap()
@@ -366,7 +376,9 @@ mod tests {
         let resp_headers = update_batched_records(State(keeper.clone()), headers, path_to_bucket_1)
             .await
             .unwrap();
-        assert!(resp_headers.is_empty());
+        assert_eq!(resp_headers.len(), 2);
+        assert_eq!(resp_headers[ENTRIES_HEADER].to_str().unwrap(), "entry-1");
+        assert_eq!(resp_headers[START_TS_HEADER].to_str().unwrap(), "1000");
 
         let record = bucket.begin_read("entry-1", 1000).await.unwrap();
         assert_eq!(
