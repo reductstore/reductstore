@@ -626,6 +626,20 @@ mod tests {
         assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
     }
 
+    #[test]
+    fn rejects_non_utf_query_id_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_bytes(&[0xff, 0xfe]).unwrap(),
+        );
+
+        let err = parse_query_id(&headers).err().unwrap();
+
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+        assert_eq!(err.message(), "Query id header must be valid UTF-8");
+    }
+
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn continuous_query_returns_after_timeout(
