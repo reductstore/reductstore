@@ -54,6 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Preserve provisioned replication mode changes across restarts, [PR-1108](https://github.com/reductstore/reductstore/pull/1108)
 - Fix folder map recovery after crash, [PR-1112](https://github.com/reductstore/reductstore/pull/1121)
 - Fix server shutdown and race condition in file cache, [PR-1122](https://github.com/reductstore/reductstore/pull/1122)
+- Fix minor issues in  multi-entry API [PR-1124](https://github.com/reductstore/reductstore/pull/1124)
 
 ## 1.17.9 - 2025-01-16
 
