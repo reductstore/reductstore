@@ -68,8 +68,15 @@ impl Entry {
                                     .collect()),
                             );
                         } else {
-                            result
-                                .insert(time, Err(not_found!("No record with timestamp {}", time)));
+                            result.insert(
+                                time,
+                                Err(not_found!(
+                                    "Record {} not found in entry {}/{}",
+                                    time,
+                                    self.bucket_name,
+                                    self.name
+                                )),
+                            );
                         }
                     }
                     Err(err) => {
@@ -178,11 +185,11 @@ mod tests {
         assert_eq!(result.len(), 5, "result contains entry for each update");
         assert_eq!(
             result[&0].as_ref().err().unwrap(),
-            &not_found!("No record with timestamp 0")
+            &not_found!("Record 0 not found in entry bucket/entry")
         );
         assert_eq!(
             result[&5].as_ref().err().unwrap(),
-            &not_found!("No record with timestamp 5")
+            &not_found!("Record 5 not found in entry bucket/entry")
         );
 
         let updated_labels = result.get(&1).unwrap().as_ref().unwrap();

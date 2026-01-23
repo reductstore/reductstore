@@ -31,7 +31,7 @@ impl Entry {
         timestamps: Vec<u64>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let block_manager = self.block_manager.clone();
-        Self::inner_remove_records(timestamps, block_manager).await
+        Self::inner_remove_records(timestamps, block_manager, &self.bucket_name, &self.name).await
     }
 
     /// Query and remove multiple records over a range of timestamps.
@@ -98,7 +98,14 @@ impl Entry {
             total_records += records_to_remove.len() as u64;
             let copy_block_manager = block_manager.clone();
 
-            match Self::inner_remove_records(records_to_remove, copy_block_manager).await {
+            match Self::inner_remove_records(
+                records_to_remove,
+                copy_block_manager,
+                &self.bucket_name,
+                &self.name,
+            )
+            .await
+            {
                 Ok(error_map) => {
                     for (timestamp, error) in error_map {
                         // TODO: send the error to the client
@@ -120,6 +127,8 @@ impl Entry {
     async fn inner_remove_records(
         timestamps: Vec<u64>,
         block_manager: Arc<AsyncRwLock<BlockManager>>,
+        bucket_name: &str,
+        entry_name: &str,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         let mut error_map = BTreeMap::new();
         let mut records_per_block = BTreeMap::new();
@@ -138,7 +147,15 @@ impl Entry {
                                 .or_insert_with(Vec::new)
                                 .push(time);
                         } else {
-                            error_map.insert(time, not_found!("No record with timestamp {}", time));
+                            error_map.insert(
+                                time,
+                                not_found!(
+                                    "Record {} not found in entry {}/{}",
+                                    time,
+                                    bucket_name,
+                                    entry_name
+                                ),
+                            );
                         }
                     }
                     Err(e) => {
@@ -196,8 +213,14 @@ mod tests {
             .unwrap();
 
         assert_eq!(error_map.len(), 2, "Only two records are not found");
-        assert_eq!(error_map[&0], not_found!("No record with timestamp 0"));
-        assert_eq!(error_map[&5], not_found!("No record with timestamp 5"));
+        assert_eq!(
+            error_map[&0],
+            not_found!("Record 0 not found in entry bucket/entry")
+        );
+        assert_eq!(
+            error_map[&5],
+            not_found!("Record 5 not found in entry bucket/entry")
+        );
 
         // check existing records
         assert!(entry_with_data.begin_read(1).await.is_ok());

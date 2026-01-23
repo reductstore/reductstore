@@ -264,7 +264,7 @@ mod tests {
         assert_eq!(headers.len(), 1);
         assert_eq!(
             headers.get("x-reduct-error-1").unwrap(),
-            &HeaderValue::from_static("404,No record with timestamp 1")
+            &HeaderValue::from_static("404,Record 1 not found in entry bucket-1/entry-1")
         );
     }
 }

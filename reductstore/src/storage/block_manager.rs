@@ -106,8 +106,8 @@ impl BlockManager {
                 block_id.clone()
             } else {
                 return Err(ReductError::not_found(&format!(
-                    "No record with timestamp {}",
-                    start
+                    "Record {} not found in entry {}/{}",
+                    start, self.bucket, self.entry
                 )));
             }
         };

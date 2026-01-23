@@ -278,7 +278,7 @@ mod tests {
         assert_eq!(resp_headers.get(START_TS_HEADER).unwrap(), "1000");
         assert_eq!(
             resp_headers.get("x-reduct-error-0-1").unwrap(),
-            "404,No record with timestamp 1001"
+            "404,Record 1001 not found in entry bucket-1/entry-1"
         );
         assert!(bucket.begin_read("entry-1", 1000).await.is_err());
     }
