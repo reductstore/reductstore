@@ -196,9 +196,7 @@ async fn fetch_and_response_batched_records(
             Err(err) if err.status() == ErrorCode::NotFound => {
                 return Err(no_content!("No more records").into());
             }
-            _ => {
-                return Err(no_content!("No content").into());
-            }
+            _ => { /* query is still alive */ }
         }
     }
 

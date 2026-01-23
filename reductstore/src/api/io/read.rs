@@ -108,8 +108,10 @@ async fn fetch_and_response_batched_records(
     empty_body: bool,
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
+    // Acquire the query receiver + IO limits for this bucket.
     let (rx, io_settings) = bucket.get_query_receiver(query_id).await?;
 
+    // Batch accumulation state: metadata, per-entry ordering, and size accounting.
     let mut entries: Vec<String> = Vec::new();
     let mut entry_indices: HashMap<String, usize> = HashMap::new();
     let mut records = Vec::new();
@@ -124,6 +126,7 @@ async fn fetch_and_response_batched_records(
     let bucket_name = bucket.name().to_string();
     let start_time = Instant::now();
     loop {
+        // Fetch the next chunk of readers (with timeout) from the query stream.
         let batch_of_readers = match next_record_readers(
             query_id,
             rx.upgrade()?,
@@ -146,6 +149,7 @@ async fn fetch_and_response_batched_records(
         for reader in batch_of_readers {
             match reader {
                 Ok(reader) => {
+                    // Update header metadata, entry index mapping, and size counters.
                     let meta = reader.meta().clone();
                     start_ts =
                         Some(start_ts.map_or(meta.timestamp(), |curr| curr.min(meta.timestamp())));
@@ -182,6 +186,7 @@ async fn fetch_and_response_batched_records(
                     );
                 }
                 Err(err) => {
+                    // Propagate errors unless this is a terminal NoContent after at least one record.
                     if records.is_empty() {
                         return Err(HttpError::from(err));
                     } else if err.status() == ErrorCode::NoContent {
@@ -198,6 +203,7 @@ async fn fetch_and_response_batched_records(
             break;
         }
 
+        // Stop if we hit any batching limits (metadata size, payload size, record count, or timeout).
         if header_size > io_settings.batch_max_metadata_size
             || (!empty_body && body_size > io_settings.batch_max_size)
             || records.len() >= io_settings.batch_max_records
@@ -211,11 +217,9 @@ async fn fetch_and_response_batched_records(
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         match bucket.get_query_receiver(query_id).await {
             Err(err) if err.status() == ErrorCode::NotFound => {
-                return Err(no_content!("No more records").into());
+                return Err(no_content!("No more records").into())
             }
-            _ => {
-                return Err(no_content!("No content").into());
-            }
+            _ => { /* query is still alive */ }
         }
     }
 
@@ -250,6 +254,7 @@ async fn fetch_and_response_batched_records(
 
     records.sort_by_key(|record| (record.entry_index, record.timestamp));
 
+    // Build response headers (entries list, start timestamp, and label index).
     let mut resp_headers = http::HeaderMap::new();
     let start_ts = start_ts.unwrap_or_default();
     resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
@@ -258,6 +263,7 @@ async fn fetch_and_response_batched_records(
         resp_headers.insert(LABELS_HEADER, label_header);
     }
 
+    // Add per-record metadata headers and collect readers for the response body.
     let mut readers_only = Vec::with_capacity(records.len());
     for record in records.into_iter() {
         let header_name = make_batched_header_name(record.entry_index, record.timestamp - start_ts);
@@ -283,6 +289,7 @@ async fn next_record_readers(
     recv_timeout: std::time::Duration,
     ext_repository: &BoxedManageExtensions,
 ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
+    // Wait for the next batch of records (or timeout), then let extensions process them.
     if let Ok(result) = timeout(
         recv_timeout,
         ext_repository.fetch_and_process_record(query_id, rx),
