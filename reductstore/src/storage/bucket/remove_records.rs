@@ -50,13 +50,29 @@ impl Bucket {
         options: QueryEntry,
     ) -> Result<u64, ReductError> {
         let entries = self.entries.read().await?.clone();
+        let requested_entries = match &options.entries {
+            Some(entries) if entries.iter().any(|entry| entry == "*") => None,
+            Some(entries) => Some(entries.clone()),
+            None => None,
+        };
+        let matches_pattern = |entry: &str, patterns: &[String]| {
+            patterns.iter().any(|pattern| {
+                if let Some(prefix) = pattern.strip_suffix('*') {
+                    entry.starts_with(prefix)
+                } else {
+                    entry == pattern
+                }
+            })
+        };
         let mut total_removed = 0;
 
         for (entry_name, entry) in entries {
-            if let Some(requested) = &options.entries {
-                if !requested.contains(&entry_name) {
-                    continue;
-                }
+            if requested_entries
+                .as_ref()
+                .map(|patterns| matches_pattern(&entry_name, patterns))
+                .is_some_and(|matched| !matched)
+            {
+                continue;
             }
 
             let removed_records = entry.query_remove_records(options.clone()).await?;
@@ -142,5 +158,65 @@ mod tests {
         );
         assert!(bucket.begin_read("entry-a", 4).await.is_ok());
         assert!(bucket.begin_read("entry-c", 2).await.is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_remove_records_supports_wildcards(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "entry-one", 1, b"one-1").await.unwrap();
+        write(&bucket, "entry-one", 2, b"one-2").await.unwrap();
+        write(&bucket, "entry-two", 1, b"two-1").await.unwrap();
+        write(&bucket, "other", 1, b"other-1").await.unwrap();
+
+        let request = QueryEntry {
+            query_type: QueryType::Remove,
+            entries: Some(vec!["entry-*".into()]),
+            start: Some(1),
+            stop: Some(1),
+            ..Default::default()
+        };
+
+        let removed = bucket.clone().query_remove_records(request).await.unwrap();
+        assert_eq!(removed, 2);
+
+        assert_eq!(
+            bucket.begin_read("entry-one", 1).await.err().unwrap(),
+            not_found!("Record 1 not found in block test/entry-one/1")
+        );
+        assert_eq!(
+            bucket.begin_read("entry-two", 1).await.err().unwrap(),
+            not_found!("Record 1 not found in block test/entry-two/1")
+        );
+        assert!(bucket.begin_read("entry-one", 2).await.is_ok());
+        assert!(bucket.begin_read("other", 1).await.is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_remove_records_supports_all_entries_wildcard(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "entry-a", 1, b"a1").await.unwrap();
+        write(&bucket, "entry-b", 1, b"b1").await.unwrap();
+
+        let request = QueryEntry {
+            query_type: QueryType::Remove,
+            entries: Some(vec!["*".into()]),
+            start: Some(1),
+            stop: Some(1),
+            ..Default::default()
+        };
+
+        let removed = bucket.clone().query_remove_records(request).await.unwrap();
+        assert_eq!(removed, 2);
+
+        assert_eq!(
+            bucket.begin_read("entry-a", 1).await.err().unwrap(),
+            not_found!("Record 1 not found in block test/entry-a/1")
+        );
+        assert_eq!(
+            bucket.begin_read("entry-b", 1).await.err().unwrap(),
+            not_found!("Record 1 not found in block test/entry-b/1")
+        );
     }
 }

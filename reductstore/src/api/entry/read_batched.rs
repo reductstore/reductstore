@@ -238,17 +238,14 @@ async fn next_record_readers(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cfg::io::IoConfig;
-
     use crate::api::entry::tests::query;
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
+    use crate::cfg::io::IoConfig;
+    use crate::ext::ext_repository::create_ext_repository;
+    use crate::storage::entry::io::record_reader::tests::MockRecord;
     use axum::body::to_bytes;
     use axum::http::StatusCode;
     use bytes::Bytes;
-
-    use crate::api::tests::{headers, keeper, path_to_entry_1};
-
-    use crate::ext::ext_repository::create_ext_repository;
-    use crate::storage::entry::io::record_reader::tests::MockRecord;
     use reduct_base::ext::ExtSettings;
     use reduct_base::io::RecordMeta;
     use reduct_base::msg::entry_api::QueryEntry;
