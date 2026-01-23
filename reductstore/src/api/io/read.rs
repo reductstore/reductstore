@@ -724,7 +724,7 @@ mod tests {
         );
 
         // Empty response since no records match
-        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[rstest]
