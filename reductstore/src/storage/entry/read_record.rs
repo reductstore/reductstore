@@ -90,7 +90,7 @@ mod tests {
         let writer = entry.begin_read(1000).await;
         assert_eq!(
             writer.err(),
-            Some(not_found!("No record with timestamp 1000"))
+            Some(not_found!("Record 1000 not found in entry bucket/entry"))
         );
     }
 
@@ -102,7 +102,7 @@ mod tests {
         let writer = entry.begin_read(1000).await;
         assert_eq!(
             writer.err(),
-            Some(not_found!("No record with timestamp 1000"))
+            Some(not_found!("Record 1000 not found in entry bucket/entry"))
         );
     }
 
@@ -255,7 +255,7 @@ mod tests {
         let writer = entry.begin_read(1000).await;
         assert_eq!(
             writer.err(),
-            Some(not_found!("No record with timestamp 1000"))
+            Some(not_found!("Record 1000 not found in entry bucket/entry"))
         );
     }
 

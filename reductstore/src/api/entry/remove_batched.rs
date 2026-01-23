@@ -136,12 +136,15 @@ mod tests {
             .await
             .err()
             .unwrap();
-        assert_eq!(err, not_found!("No record with timestamp 0"));
+        assert_eq!(
+            err,
+            not_found!("Record 0 not found in entry bucket-1/entry-1")
+        );
 
         assert_eq!(err_map.len(), 1);
         assert_eq!(
             err_map.get("x-reduct-error-1").unwrap(),
-            "404,No record with timestamp 1"
+            "404,Record 1 not found in entry bucket-1/entry-1"
         );
     }
 }

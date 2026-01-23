@@ -111,7 +111,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(errors.len(), 2);
-        assert_eq!(errors[&4], not_found!("No record with timestamp 4"));
+        assert_eq!(
+            errors[&4],
+            not_found!("Record 4 not found in entry test/entry-b")
+        );
         assert_eq!(
             errors[&5],
             not_found!("Entry 'missing' not found in bucket 'test'")
@@ -119,7 +122,7 @@ mod tests {
 
         assert_eq!(
             bucket.begin_read("entry-a", 1).await.err().unwrap(),
-            not_found!("No record with timestamp 1")
+            not_found!("Record 1 not found in entry test/entry-a")
         );
         assert_eq!(
             bucket.begin_read("entry-b", 2).await.err().unwrap(),
@@ -154,7 +157,7 @@ mod tests {
         );
         assert_eq!(
             bucket.begin_read("entry-b", 2).await.err().unwrap(),
-            not_found!("No record with timestamp 2")
+            not_found!("Record 2 not found in entry test/entry-b")
         );
         assert!(bucket.begin_read("entry-a", 4).await.is_ok());
         assert!(bucket.begin_read("entry-c", 2).await.is_ok());
@@ -173,7 +176,7 @@ mod tests {
             query_type: QueryType::Remove,
             entries: Some(vec!["entry-*".into()]),
             start: Some(1),
-            stop: Some(1),
+            stop: Some(2),
             ..Default::default()
         };
 
@@ -186,7 +189,7 @@ mod tests {
         );
         assert_eq!(
             bucket.begin_read("entry-two", 1).await.err().unwrap(),
-            not_found!("Record 1 not found in block test/entry-two/1")
+            not_found!("Record 1 not found in entry test/entry-two")
         );
         assert!(bucket.begin_read("entry-one", 2).await.is_ok());
         assert!(bucket.begin_read("other", 1).await.is_ok());
@@ -203,7 +206,7 @@ mod tests {
             query_type: QueryType::Remove,
             entries: Some(vec!["*".into()]),
             start: Some(1),
-            stop: Some(1),
+            stop: Some(2),
             ..Default::default()
         };
 
@@ -212,11 +215,11 @@ mod tests {
 
         assert_eq!(
             bucket.begin_read("entry-a", 1).await.err().unwrap(),
-            not_found!("Record 1 not found in block test/entry-a/1")
+            not_found!("Record 1 not found in entry test/entry-a")
         );
         assert_eq!(
             bucket.begin_read("entry-b", 1).await.err().unwrap(),
-            not_found!("Record 1 not found in block test/entry-b/1")
+            not_found!("Record 1 not found in entry test/entry-b")
         );
     }
 }

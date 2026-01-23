@@ -92,7 +92,10 @@ mod tests {
             .await
             .err()
             .unwrap();
-        assert_eq!(err, not_found!("No record with timestamp 0"));
+        assert_eq!(
+            err,
+            not_found!("Record 0 not found in entry bucket-1/entry-1")
+        );
     }
 
     #[rstest]
