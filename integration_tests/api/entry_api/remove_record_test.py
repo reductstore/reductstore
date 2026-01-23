@@ -49,7 +49,7 @@ def test_remove_records_in_batch(base_url, session, bucket, write_data):
     assert resp.status_code == 200
     assert (
         resp.headers[f"x-reduct-error-{ts2 + 1}"]
-        == f"404,No record with timestamp {ts2 + 1}"
+        == f"404,Record {ts2 + 1} not found in entry {bucket}/entry"
     )
 
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts={ts1}")
