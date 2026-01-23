@@ -211,9 +211,11 @@ async fn fetch_and_response_batched_records(
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
         match bucket.get_query_receiver(query_id).await {
             Err(err) if err.status() == ErrorCode::NotFound => {
-                return Err(no_content!("No more records").into())
+                return Err(no_content!("No more records").into());
             }
-            _ => { /* query is still alive */ }
+            _ => {
+                return Err(no_content!("No content").into());
+            }
         }
     }
 
@@ -302,6 +304,7 @@ mod tests {
     use crate::api::tests::{headers, keeper, path_to_bucket_1};
     use axum::body::to_bytes;
     use axum::extract::Path;
+    use axum::http::StatusCode;
     use axum::response::IntoResponse;
     use bytes::Bytes;
     use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType};
@@ -705,7 +708,6 @@ mod tests {
             MethodExtractor::new("GET"),
         )
         .await
-        .unwrap()
         .into_response();
 
         // Verify it returned in reasonable time (batch_timeout is typically a few seconds)
@@ -715,8 +717,52 @@ mod tests {
         );
 
         // Empty response since no records match
-        let resp_headers = response.headers();
-        assert_eq!(resp_headers["content-length"], "0");
-        assert_eq!(resp_headers["x-reduct-last"], "false");
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_no_content_when_no_records(
+        #[future] keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["entry-1".into()]),
+            start: Some(1),
+            stop: Some(2),
+            ..Default::default()
+        };
+        let path = Path(path_to_bucket_1.0.clone());
+        let response = query(
+            State(keeper.clone()),
+            headers.clone(),
+            path,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
+        );
+
+        let response = read_batched_records(
+            State(keeper.clone()),
+            headers,
+            path_to_bucket_1,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 }

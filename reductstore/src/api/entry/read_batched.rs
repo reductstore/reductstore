@@ -196,7 +196,9 @@ async fn fetch_and_response_batched_records(
             Err(err) if err.status() == ErrorCode::NotFound => {
                 return Err(no_content!("No more records").into());
             }
-            _ => { /* query is still alive */ }
+            _ => {
+                return Err(no_content!("No content").into());
+            }
         }
     }
 
@@ -240,6 +242,7 @@ mod tests {
 
     use crate::api::entry::tests::query;
     use axum::body::to_bytes;
+    use axum::http::StatusCode;
     use bytes::Bytes;
 
     use crate::api::tests::{headers, keeper, path_to_entry_1};
@@ -248,6 +251,7 @@ mod tests {
     use crate::storage::entry::io::record_reader::tests::MockRecord;
     use reduct_base::ext::ExtSettings;
     use reduct_base::io::RecordMeta;
+    use reduct_base::msg::entry_api::QueryEntry;
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::Labels;
     use rstest::*;
@@ -412,6 +416,56 @@ mod tests {
             err.status() == ErrorCode::NotFound || err.status() == ErrorCode::Conflict,
             "should return NotFound if the entry is deleted"
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_no_content_when_no_records(
+        #[future] keeper: Arc<StateKeeper>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap()
+            .get_entry("entry-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+
+        let query_id = entry
+            .query(
+                QueryEntry {
+                    start: Some(1),
+                    stop: Some(2),
+                    ..Default::default()
+                }
+                .into(),
+            )
+            .await
+            .unwrap();
+
+        let response = read_batched_records(
+            State(keeper.clone()),
+            Path(path_to_entry_1.0.clone()),
+            Query(HashMap::from_iter(vec![(
+                "q".to_string(),
+                query_id.to_string(),
+            )])),
+            headers,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 
     mod next_record_reader {
