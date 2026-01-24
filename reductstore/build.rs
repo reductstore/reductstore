@@ -25,13 +25,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to compile protos");
 
     #[cfg(feature = "web-console")]
-    download_web_console("v1.12.1");
+    download_web_console("v1.13.0");
 
     #[cfg(feature = "select-ext")]
-    download_ext("select-ext", "v0.7.0-beta.1");
+    download_ext("select-ext", "v0.7.0");
 
     #[cfg(feature = "ros-ext")]
-    download_ext("ros-ext", "v0.5.0-beta.1");
+    download_ext("ros-ext", "v0.5.0-beta.2");
 
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
