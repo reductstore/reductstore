@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod create;
@@ -12,6 +12,7 @@ use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
+use log::warn;
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::ext::{
@@ -277,6 +278,13 @@ impl ManageExtensions for ExtRepository {
                         let mut commited_records = vec![];
                         for record in records {
                             if let Some(rec) = query.commiter.commit_record(record).await {
+                                if rec
+                                    .as_ref()
+                                    .is_ok_and(|rec| rec.meta().entry_name().is_empty())
+                                {
+                                    warn!("Extension commiter returned an invalid record with empty entry name, skipping it");
+                                    continue;
+                                }
                                 commited_records.push(rec);
                             }
                         }
@@ -738,6 +746,78 @@ pub(super) mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "current_thread")]
+        async fn test_process_a_record_empty_entry_name(
+            record_reader: RecordReader,
+            mut mock_ext: MockIoExtension,
+            mut processor: Box<MockProcessor>,
+            mut commiter: Box<MockCommiter>,
+        ) {
+            processor.expect_process_record().return_once(|_| {
+                Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                    record_with_labels_empty_entry("key", "val"),
+                )))))
+            });
+
+            commiter
+                .expect_commit_record()
+                .return_once(|_| Some(Ok(record_with_labels_empty_entry("key", "val"))));
+            commiter.expect_flush().return_once(|| None).times(1);
+
+            mock_ext
+                .expect_query()
+                .with(eq("bucket"), eq("entry"), predicate::always())
+                .return_once(|_, _, _| Ok((processor, commiter)));
+
+            let query = QueryEntry {
+                ext: Some(json!({
+                    "test1": {},
+                })),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .unwrap();
+
+            let (tx, rx) = tokio::sync::mpsc::channel(2);
+            tx.send(Ok(record_reader)).await.unwrap();
+            tx.send(Err(no_content!(""))).await.unwrap();
+
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+
+            assert!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx.clone())
+                    .await
+                    .is_none(),
+                "Empty entry name should be skipped"
+            );
+
+            assert!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx.clone())
+                    .await
+                    .is_none(),
+                "Stream should be drained before no content"
+            );
+
+            assert_eq!(
+                *mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx)
+                    .await
+                    .unwrap()[0]
+                    .as_ref()
+                    .err()
+                    .unwrap(),
+                no_content!("")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
         async fn test_process_flushed_record(
             record_reader: RecordReader,
             mut mock_ext: MockIoExtension,
@@ -1012,6 +1092,17 @@ pub(super) mod tests {
     }
 
     pub fn record_with_labels(key: &str, val: &str) -> BoxedReadRecord {
+        let meta = RecordMeta::builder()
+            .entry_name("entry")
+            .timestamp(0)
+            .computed_labels(Labels::from_iter(
+                vec![(key.to_string(), val.to_string())].into_iter(),
+            ))
+            .build();
+        OneShotRecord::boxed(Bytes::new(), meta)
+    }
+
+    pub fn record_with_labels_empty_entry(key: &str, val: &str) -> BoxedReadRecord {
         let meta = RecordMeta::builder()
             .timestamp(0)
             .computed_labels(Labels::from_iter(
