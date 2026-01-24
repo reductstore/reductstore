@@ -148,7 +148,7 @@ impl FileCache {
                 }
             }
 
-            fs::remove_file(&path).ok();
+            tokio::fs::remove_file(&path).await.ok();
             debug!("Removed invalidated file {:?} from cache and storage", path);
         }
 
@@ -231,13 +231,14 @@ impl FileCache {
         for (path, file) in discarded {
             if let Some(mut lock) = file.try_write_owned() {
                 discarded_count += 1;
-                if tokio::fs::try_exists(&path).await?
-                    && lock.mode() == &AccessMode::ReadWrite
-                    && !lock.is_synced()
-                {
+                if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
                     // spawn a task to sync file in the background sync it can be long operation
                     synced_count += 1;
                     spawn(async move {
+                        if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
+                            return;
+                        }
+
                         lock.sync_all().await.unwrap_or_else(|err| {
                             warn!("Failed to sync discarded file {:?}: {}", path, err);
                         });
@@ -377,17 +378,23 @@ impl FileCache {
             return Ok(());
         }
 
-        let mut cache = self.cache.write().await?;
-        if let Some(file) = cache.remove(path) {
-            if file.try_write().is_none() {
-                cache.insert(path.clone(), file);
-                return Err(internal_server_error!(
-                    "Cannot remove file {} because it is in use",
-                    path.display()
-                ));
+        // We hold the lock to ensure that no other operations are being performed on the file
+        let _lock = {
+            let mut cache = self.cache.write().await?;
+            if let Some(file) = cache.remove(path) {
+                if let Some(lock) = file.try_write_owned() {
+                    Some(lock)
+                } else {
+                    cache.insert(path.clone(), file);
+                    return Err(internal_server_error!(
+                        "Cannot remove file {} because it is in use",
+                        path.display()
+                    ));
+                }
+            } else {
+                None
             }
-        }
-        drop(cache);
+        };
 
         let backend = self.backend.read().await?.clone();
         backend.remove(path).await?;
