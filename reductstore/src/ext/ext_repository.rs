@@ -12,6 +12,7 @@ use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
+use log::{error, warn};
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::ext::{
@@ -277,6 +278,13 @@ impl ManageExtensions for ExtRepository {
                         let mut commited_records = vec![];
                         for record in records {
                             if let Some(rec) = query.commiter.commit_record(record).await {
+                                if rec
+                                    .as_ref()
+                                    .is_ok_and(|rec| rec.meta().entry_name().is_empty())
+                                {
+                                    warn!("Extension commiter returned an invalid record with empty entry name, skipping it");
+                                    continue;
+                                }
                                 commited_records.push(rec);
                             }
                         }
