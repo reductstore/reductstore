@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Replication `is_active` flag now reflects remote bucket availability when paused, [PR-1106](https://github.com/reductstore/reductstore/pull/1106)
 - Refactor storage/replication engines to tokio, [PR-1110](https://github.com/reductstore/reductstore/pull/1110)
 - Migrate replication engine and remote storage backend on Tokio, [PR-1114](https://github.com/reductstore/reductstore/pull/1114)
+- Update components: web-console v1.130, ros-ext v0.5.0-beta.2, select-ext v0.7.0, [PR-1126](https://github.com/reductstore/reductstore/pull/1126)
 
 ### Fixed
 
