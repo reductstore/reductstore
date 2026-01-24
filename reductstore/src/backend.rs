@@ -238,6 +238,13 @@ impl Backend {
         BackpackBuilder::new()
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_backend(backend: BoxedBackend) -> Self {
+        Self {
+            backend: Arc::new(backend),
+        }
+    }
+
     /// Create a new instance of `fs::OpenOptions`.
     pub fn open_options(&self) -> OpenOptions {
         OpenOptions::new(Arc::clone(&self.backend))

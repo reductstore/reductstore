@@ -148,7 +148,7 @@ impl FileCache {
                 }
             }
 
-            fs::remove_file(&path).ok();
+            tokio::fs::remove_file(&path).await.ok();
             debug!("Removed invalidated file {:?} from cache and storage", path);
         }
 
@@ -231,13 +231,14 @@ impl FileCache {
         for (path, file) in discarded {
             if let Some(mut lock) = file.try_write_owned() {
                 discarded_count += 1;
-                if tokio::fs::try_exists(&path).await?
-                    && lock.mode() == &AccessMode::ReadWrite
-                    && !lock.is_synced()
-                {
+                if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
                     // spawn a task to sync file in the background sync it can be long operation
                     synced_count += 1;
                     spawn(async move {
+                        if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
+                            return;
+                        }
+
                         lock.sync_all().await.unwrap_or_else(|err| {
                             warn!("Failed to sync discarded file {:?}: {}", path, err);
                         });
@@ -377,17 +378,23 @@ impl FileCache {
             return Ok(());
         }
 
-        let mut cache = self.cache.write().await?;
-        if let Some(file) = cache.remove(path) {
-            if file.try_write().is_none() {
-                cache.insert(path.clone(), file);
-                return Err(internal_server_error!(
-                    "Cannot remove file {} because it is in use",
-                    path.display()
-                ));
+        // We hold the lock to ensure that no other operations are being performed on the file
+        let _lock = {
+            let mut cache = self.cache.write().await?;
+            if let Some(file) = cache.remove(path) {
+                if let Some(lock) = file.try_write_owned() {
+                    Some(lock)
+                } else {
+                    cache.insert(path.clone(), file);
+                    return Err(internal_server_error!(
+                        "Cannot remove file {} because it is in use",
+                        path.display()
+                    ));
+                }
+            } else {
+                None
             }
-        }
-        drop(cache);
+        };
 
         let backend = self.backend.read().await?.clone();
         backend.remove(path).await?;
@@ -530,16 +537,120 @@ mod tests {
     use super::*;
 
     use futures::executor;
+    use mockall::mock;
     use std::fs;
     use std::io::Write;
 
     use rstest::*;
     use std::io::Read;
 
+    mock! {
+        pub StorageBackend {}
+
+        #[async_trait::async_trait]
+        impl crate::backend::StorageBackend for StorageBackend {
+            fn path(&self) -> &PathBuf;
+            async fn rename(&self, from: &std::path::Path, to: &std::path::Path) -> std::io::Result<()>;
+            async fn remove(&self, path: &std::path::Path) -> std::io::Result<()>;
+            async fn remove_dir_all(&self, path: &std::path::Path) -> std::io::Result<()>;
+            async fn create_dir_all(&self, path: &std::path::Path) -> std::io::Result<()>;
+            async fn read_dir(&self, path: &std::path::Path) -> std::io::Result<Vec<PathBuf>>;
+            async fn try_exists(&self, path: &std::path::Path) -> std::io::Result<bool>;
+            async fn upload(&self, path: &std::path::Path) -> std::io::Result<()>;
+            async fn download(&self, path: &std::path::Path) -> std::io::Result<()>;
+            async fn update_local_cache(&self, path: &std::path::Path, mode: &AccessMode) -> std::io::Result<()>;
+            async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+            async fn get_stats(&self, path: &std::path::Path) -> std::io::Result<Option<crate::backend::ObjectMetadata>>;
+            async fn remove_from_local_cache(&self, path: &std::path::Path) -> std::io::Result<()>;
+        }
+    }
+
+    fn build_backend(configure: impl FnOnce(&mut MockStorageBackend)) -> Backend {
+        let mut backend = MockStorageBackend::new();
+        configure(&mut backend);
+        Backend::from_backend(Box::new(backend))
+    }
+
+    fn expect_path(mock: &mut MockStorageBackend, root: &PathBuf, times: usize) {
+        mock.expect_path().return_const(root.clone()).times(times);
+    }
+
+    fn expect_try_exists(
+        mock: &mut MockStorageBackend,
+        path: &PathBuf,
+        exists: bool,
+        times: usize,
+    ) {
+        let expected = path.clone();
+        mock.expect_try_exists()
+            .withf(move |path| path == expected.as_path())
+            .returning(move |_| Ok(exists))
+            .times(times);
+    }
+
+    fn expect_upload(mock: &mut MockStorageBackend, path: &PathBuf, times: usize) {
+        let expected = path.clone();
+        mock.expect_upload()
+            .withf(move |path| path == expected.as_path())
+            .returning(|_| Ok(()))
+            .times(times);
+    }
+
+    fn expect_update_local_cache(
+        mock: &mut MockStorageBackend,
+        path: &PathBuf,
+        mode: AccessMode,
+        times: usize,
+    ) {
+        let expected = path.clone();
+        mock.expect_update_local_cache()
+            .withf(move |path, mode_arg| path == expected.as_path() && mode_arg == &mode)
+            .returning(|_, _| Ok(()))
+            .times(times);
+    }
+
+    fn expect_remove(mock: &mut MockStorageBackend, path: &PathBuf, times: usize) {
+        let expected = path.clone();
+        mock.expect_remove()
+            .withf(move |path| path == expected.as_path())
+            .returning(|path| std::fs::remove_file(path))
+            .times(times);
+    }
+
+    fn expect_remove_dir_all(mock: &mut MockStorageBackend, path: &PathBuf, times: usize) {
+        let expected = path.clone();
+        mock.expect_remove_dir_all()
+            .withf(move |path| path == expected.as_path())
+            .returning(|path| std::fs::remove_dir_all(path))
+            .times(times);
+    }
+
+    fn expect_remove_from_local_cache(mock: &mut MockStorageBackend, path: &PathBuf, times: usize) {
+        let expected = path.clone();
+        mock.expect_remove_from_local_cache()
+            .withf(move |path| path == expected.as_path())
+            .returning(|_| Ok(()))
+            .times(times);
+    }
+
+    fn build_cache(backend: Backend) -> FileCache {
+        let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));
+        executor::block_on(async {
+            cache.set_storage_backend(backend).await;
+        });
+        cache.stop_sync_worker.store(true, Ordering::Relaxed);
+        cache
+    }
+
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_read(cache: FileCache, tmp_dir: PathBuf) {
+    async fn test_read(tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_read.txt");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::Read, 2);
+        });
+        let cache = build_cache(backend);
         let mut file = fs::File::create(&file_path).unwrap();
         file.write_all(b"test").unwrap();
         file.sync_all().unwrap();
@@ -560,8 +671,15 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_write_or_create(cache: FileCache, tmp_dir: PathBuf) {
+    async fn test_write_or_create(tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_write_or_create.txt");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 2);
+            expect_upload(mock, &file_path, 2);
+        });
+        let cache = build_cache(backend);
 
         {
             let mut file_ref = cache
@@ -594,8 +712,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove(cache: FileCache, tmp_dir: PathBuf) {
+    async fn test_remove(tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_remove.txt");
+        let backend = build_backend(|mock| {
+            expect_remove(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
         let mut file = fs::File::create(&file_path).unwrap();
         file.write_all(b"test").unwrap();
         file.sync_all().unwrap();
@@ -607,7 +729,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_used(cache: FileCache, tmp_dir: PathBuf) {
+    async fn test_remove_used(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("test_remove_used.txt");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+        });
+        let cache = build_cache(backend);
         let file_path = tmp_dir.join("test_remove_used.txt");
         let _file_guard = cache
             .write_or_create(&file_path, SeekFrom::Start(0))
@@ -628,10 +757,20 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_cache_max_size(cache: FileCache, tmp_dir: PathBuf) {
+    async fn test_cache_max_size(tmp_dir: PathBuf) {
         let file_path1 = tmp_dir.join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.join("test_cache_max_size2.txt");
         let file_path3 = tmp_dir.join("test_cache_max_size3.txt");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 3);
+            expect_try_exists(mock, &file_path1, false, 1);
+            expect_try_exists(mock, &file_path2, false, 1);
+            expect_try_exists(mock, &file_path3, false, 1);
+            expect_update_local_cache(mock, &file_path1, AccessMode::ReadWrite, 1);
+            expect_update_local_cache(mock, &file_path2, AccessMode::ReadWrite, 1);
+            expect_update_local_cache(mock, &file_path3, AccessMode::ReadWrite, 1);
+        });
+        let cache = build_cache(backend);
 
         cache
             .write_or_create(&file_path1, SeekFrom::Start(0))
@@ -657,15 +796,25 @@ mod tests {
     async fn test_cache_keeps_entries_with_weak_refs(tmp_dir: PathBuf) {
         let cache = {
             let cache = FileCache::new(1, Duration::from_secs(60), Duration::from_millis(100));
-            cache
-                .set_storage_backend(
-                    Backend::builder()
-                        .local_data_path(tempfile::tempdir().unwrap().keep())
-                        .try_build()
-                        .await
-                        .unwrap(),
-                )
-                .await;
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 2);
+                expect_try_exists(mock, &tmp_dir.join("test_cache_keep_weak1.txt"), false, 1);
+                expect_try_exists(mock, &tmp_dir.join("test_cache_keep_weak2.txt"), false, 1);
+                expect_update_local_cache(
+                    mock,
+                    &tmp_dir.join("test_cache_keep_weak1.txt"),
+                    AccessMode::ReadWrite,
+                    1,
+                );
+                expect_update_local_cache(
+                    mock,
+                    &tmp_dir.join("test_cache_keep_weak2.txt"),
+                    AccessMode::ReadWrite,
+                    1,
+                );
+            });
+            cache.set_storage_backend(backend).await;
+            cache.stop_sync_worker.store(true, Ordering::Relaxed);
             cache
         };
 
@@ -687,10 +836,20 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_cache_ttl(cache: FileCache, tmp_dir: PathBuf) {
+    async fn test_cache_ttl(tmp_dir: PathBuf) {
         let file_path1 = tmp_dir.join("test_cache_max_size1.txt");
         let file_path2 = tmp_dir.join("test_cache_max_size2.txt");
         let file_path3 = tmp_dir.join("test_cache_max_size3.txt");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 3);
+            expect_try_exists(mock, &file_path1, false, 1);
+            expect_try_exists(mock, &file_path2, false, 1);
+            expect_try_exists(mock, &file_path3, false, 1);
+            expect_update_local_cache(mock, &file_path1, AccessMode::ReadWrite, 1);
+            expect_update_local_cache(mock, &file_path2, AccessMode::ReadWrite, 1);
+            expect_update_local_cache(mock, &file_path3, AccessMode::ReadWrite, 1);
+        });
+        let cache = build_cache(backend);
 
         cache
             .write_or_create(&file_path1, SeekFrom::Start(0))
@@ -715,13 +874,26 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_dir(cache: FileCache, tmp_dir: PathBuf) {
+    async fn test_remove_dir(tmp_dir: PathBuf) {
+        let file_path1 = tmp_dir.join("test_remove_dir1.txt");
+        let file_path2 = tmp_dir.join("test_remove_dir2.txt");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 2);
+            expect_try_exists(mock, &file_path1, false, 1);
+            expect_try_exists(mock, &file_path2, false, 1);
+            expect_update_local_cache(mock, &file_path1, AccessMode::ReadWrite, 1);
+            expect_update_local_cache(mock, &file_path2, AccessMode::ReadWrite, 1);
+            expect_remove_from_local_cache(mock, &file_path1, 1);
+            expect_remove_from_local_cache(mock, &file_path2, 1);
+            expect_remove_dir_all(mock, &tmp_dir, 1);
+        });
+        let cache = build_cache(backend);
         cache
-            .write_or_create(&tmp_dir.join("test_remove_dir1.txt"), SeekFrom::Start(0))
+            .write_or_create(&file_path1, SeekFrom::Start(0))
             .await
             .unwrap();
         cache
-            .write_or_create(&tmp_dir.join("test_remove_dir2.txt"), SeekFrom::Start(0))
+            .write_or_create(&file_path2, SeekFrom::Start(0))
             .await
             .unwrap();
 
@@ -736,10 +908,14 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_insert_file_cached_file_in_use(
-            small_cache: FileCache,
+            tmp_dir: PathBuf,
             file_path_1: PathBuf,
             file_path_2: PathBuf,
         ) {
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 2);
+            });
+            let small_cache = build_small_cache(backend);
             let file = small_cache
                 .open_write_file(&file_path_1, false)
                 .await
@@ -765,10 +941,14 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_insert_file_cached_missing_on_disk(
-            small_cache: FileCache,
+            tmp_dir: PathBuf,
             file_path_1: PathBuf,
             file_path_2: PathBuf,
         ) {
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 2);
+            });
+            let small_cache = build_small_cache(backend);
             let file = small_cache
                 .open_write_file(&file_path_1, false)
                 .await
@@ -795,10 +975,14 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_insert_file_cached_no_sync_needed(
-            small_cache: FileCache,
+            tmp_dir: PathBuf,
             file_path_1: PathBuf,
             file_path_2: PathBuf,
         ) {
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 2);
+            });
+            let small_cache = build_small_cache(backend);
             let file = small_cache
                 .open_write_file(&file_path_1, false)
                 .await
@@ -823,10 +1007,14 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_insert_file_cached_read_mode(
-            small_cache: FileCache,
+            tmp_dir: PathBuf,
             file_path_1: PathBuf,
             file_path_2: PathBuf,
         ) {
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 2);
+            });
+            let small_cache = build_small_cache(backend);
             let file = small_cache.open_read_file(&file_path_1).await.unwrap();
             small_cache
                 .insert_file_cached(&file_path_1, file)
@@ -848,10 +1036,15 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_insert_file_cached_sync_unsynced_file(
-            small_cache: FileCache,
+            tmp_dir: PathBuf,
             file_path_1: PathBuf,
             file_path_2: PathBuf,
         ) {
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 2);
+                expect_upload(mock, &file_path_1, 1);
+            });
+            let small_cache = build_small_cache(backend);
             let file = small_cache
                 .open_write_file(&file_path_1, false)
                 .await
@@ -871,24 +1064,17 @@ mod tests {
                 .insert_file_cached(&file_path_2, file2)
                 .await
                 .unwrap();
+            tokio::time::sleep(Duration::from_millis(50)).await;
 
             assert_eq!((discarded, synced), (1, 1));
         }
 
-        #[fixture]
-        fn small_cache(tmp_dir: PathBuf) -> FileCache {
+        fn build_small_cache(backend: Backend) -> FileCache {
             let cache = FileCache::new(1, Duration::from_secs(60), Duration::from_secs(60));
             executor::block_on(async {
-                cache
-                    .set_storage_backend(
-                        Backend::builder()
-                            .local_data_path(tmp_dir)
-                            .try_build()
-                            .await
-                            .unwrap(),
-                    )
-                    .await;
+                cache.set_storage_backend(backend).await;
             });
+            cache.stop_sync_worker.store(true, Ordering::Relaxed);
             cache
         }
 
@@ -912,9 +1098,18 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_sync_unused_files(cache: FileCache, tmp_dir: PathBuf) {
-            cache.stop_sync_worker.store(true, Ordering::Relaxed);
+        async fn test_sync_unused_files(tmp_dir: PathBuf) {
             let file_path = tmp_dir.join("test_sync_rw_and_unused_files.txt");
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 1);
+                expect_try_exists(mock, &file_path, false, 1);
+                expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(Vec::new)
+                    .times(1);
+                expect_upload(mock, &file_path, 1);
+            });
+            let cache = build_cache(backend);
             {
                 let mut file_ref = cache
                     .write_or_create(&file_path, SeekFrom::Start(0))
@@ -929,9 +1124,14 @@ mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "multi_thread")]
-        async fn test_not_sync_used_files(cache: FileCache, tmp_dir: PathBuf) {
-            cache.stop_sync_worker.store(true, Ordering::Relaxed);
+        async fn test_not_sync_used_files(tmp_dir: PathBuf) {
             let file_path = tmp_dir.join("test_not_sync_unused_files.txt");
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 1);
+                expect_try_exists(mock, &file_path, false, 1);
+                expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            });
+            let cache = build_cache(backend);
             {
                 let mut file_ref = cache
                     .write_or_create(&file_path, SeekFrom::Start(0))
@@ -952,6 +1152,23 @@ mod tests {
                 .unwrap()
                 .is_synced());
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_invalidated_files(tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("test_invalidated_file.txt");
+            let backend = build_backend(|mock| {
+                let invalidated_path = file_path.clone();
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(move || vec![invalidated_path.clone()])
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            fs::write(&file_path, b"test").unwrap();
+
+            cache.force_sync_all().await.unwrap();
+            assert!(!file_path.exists(), "invalidated file should be removed");
+        }
     }
 
     mod test_read_only {
@@ -959,8 +1176,14 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_write(read_only_cache: FileCache, tmp_dir: PathBuf) {
+        async fn test_write(tmp_dir: PathBuf) {
             let file_path = tmp_dir.join("test_read_only_mode.txt");
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 1);
+                expect_update_local_cache(mock, &file_path, AccessMode::Read, 1);
+            });
+            let read_only_cache = build_cache(backend);
+            read_only_cache.set_read_only(true);
             fs::write(&file_path, b"test").unwrap();
 
             let mut file = read_only_cache
@@ -976,7 +1199,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove(read_only_cache: FileCache, tmp_dir: PathBuf) {
+        async fn test_remove(tmp_dir: PathBuf) {
+            let backend = build_backend(|_mock| {});
+            let read_only_cache = build_cache(backend);
+            read_only_cache.set_read_only(true);
             let file_path = tmp_dir.join("test_remove_in_read_only_mode.txt");
             fs::write(&file_path, b"test").unwrap();
 
@@ -991,7 +1217,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename(read_only_cache: FileCache, tmp_dir: PathBuf) {
+        async fn test_rename(tmp_dir: PathBuf) {
+            let backend = build_backend(|_mock| {});
+            let read_only_cache = build_cache(backend);
+            read_only_cache.set_read_only(true);
             let old_file_path = tmp_dir.join("test_rename_in_read_only_mode_old.txt");
             let new_file_path = tmp_dir.join("test_rename_in_read_only_mode_new.txt");
 
@@ -1016,7 +1245,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_create_dir(read_only_cache: FileCache, tmp_dir: PathBuf) {
+        async fn test_create_dir(tmp_dir: PathBuf) {
+            let backend = build_backend(|_mock| {});
+            let read_only_cache = build_cache(backend);
+            read_only_cache.set_read_only(true);
             let dir_path = tmp_dir.join("test_create_dir_in_read_only_mode");
 
             read_only_cache.create_dir_all(&dir_path).await.unwrap();
@@ -1030,7 +1262,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_dir(read_only_cache: FileCache, tmp_dir: PathBuf) {
+        async fn test_remove_dir(tmp_dir: PathBuf) {
+            let backend = build_backend(|_mock| {});
+            let read_only_cache = build_cache(backend);
+            read_only_cache.set_read_only(true);
             let dir_path = tmp_dir.join("test_remove_dir_in_read_only_mode");
             fs::create_dir_all(&dir_path).unwrap();
 
@@ -1042,28 +1277,6 @@ mod tests {
                 "directory should not be removed in read-only mode"
             );
         }
-
-        #[fixture]
-        fn read_only_cache(cache: FileCache) -> FileCache {
-            cache.set_read_only(true);
-            cache
-        }
-    }
-    #[fixture]
-    fn cache(tmp_dir: PathBuf) -> FileCache {
-        let cache = FileCache::new(2, Duration::from_millis(100), Duration::from_millis(100));
-        executor::block_on(async {
-            cache
-                .set_storage_backend(
-                    Backend::builder()
-                        .local_data_path(tmp_dir)
-                        .try_build()
-                        .await
-                        .unwrap(),
-                )
-                .await;
-        });
-        cache
     }
 
     #[fixture]
