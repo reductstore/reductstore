@@ -57,7 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix server shutdown and race condition in file cache, [PR-1122](https://github.com/reductstore/reductstore/pull/1122)
 - Fix minor issues in  multi-entry API [PR-1124](https://github.com/reductstore/reductstore/pull/1124)
 - Send 204 Status instead of empty response when querying data, [PR-1125](https://github.com/reductstore/reductstore/pull/1125)
-
+  - Prevent race condition between sync and remove operations, [PR-1127](https://github.com/reductstore/reductstore/pull/1127)
 ## 1.17.9 - 2025-01-16
 
 ### Fixed
