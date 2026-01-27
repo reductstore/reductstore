@@ -25,6 +25,7 @@ use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::{debug, error};
 use prost::bytes::Bytes;
 use prost::Message;
+use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
@@ -389,25 +390,89 @@ impl Bucket {
         let entry_name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
 
-        let folder_remove_result = folder_keeper.remove_folder(&entry_name).await;
-
-        match folder_remove_result {
-            Ok(()) => {
-                debug!(
-                    "Remove entry '{}' from bucket '{}' and folder '{}'",
-                    entry_name,
-                    bucket_name,
-                    path.display()
-                );
-                entries.write().await?.remove(&entry_name);
-            }
-            Err(err) => {
+        tokio::spawn(async move {
+            if let Err(err) = entry.remove_all_blocks().await {
                 error!(
-                    "Failed to remove entry '{}' from bucket '{}': {}",
+                    "Failed to remove blocks for entry '{}' in bucket '{}': {}",
                     entry_name, bucket_name, err
                 );
-                return Err(err);
             }
+
+            match folder_keeper.remove_folder(&entry_name).await {
+                Ok(()) => {
+                    debug!(
+                        "Remove entry '{}' from bucket '{}' and folder '{}'",
+                        entry_name,
+                        bucket_name,
+                        path.display()
+                    );
+                    match entries.write().await {
+                        Ok(mut entries) => {
+                            entries.remove(&entry_name);
+                        }
+                        Err(err) => {
+                            error!(
+                                "Failed to drop entry '{}' from bucket '{}' cache: {}",
+                                entry_name, bucket_name, err
+                            );
+                        }
+                    }
+                }
+                Err(err) => {
+                    error!(
+                        "Failed to remove entry '{}' from bucket '{}': {}",
+                        entry_name, bucket_name, err
+                    );
+                }
+            }
+        });
+
+        Ok(())
+    }
+
+    pub(crate) async fn remove_entries_for_bucket_removal(&self) -> Result<(), ReductError> {
+        self.reload().await?;
+
+        let entries_snapshot: Vec<(String, Arc<Entry>)> = {
+            let entries = self.entries.read().await?;
+            entries
+                .iter()
+                .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
+                .collect()
+        };
+
+        for (name, entry) in &entries_snapshot {
+            if let Err(err) = entry.mark_deleting().await {
+                if err.status() != ErrorCode::Conflict {
+                    return Err(err);
+                }
+                if let Ok(status) = entry.status().await {
+                    if status != ResourceStatus::Deleting {
+                        error!(
+                            "Entry '{}' in bucket '{}' is in {:?} state after conflict on delete",
+                            name, self.name, status
+                        );
+                    }
+                }
+            }
+
+            if let Err(err) = entry.remove_all_blocks().await {
+                error!(
+                    "Failed to remove blocks for entry '{}' in bucket '{}': {}",
+                    name, self.name, err
+                );
+            }
+            if let Err(err) = self.folder_keeper.remove_folder(name).await {
+                error!(
+                    "Failed to remove entry '{}' from bucket '{}': {}",
+                    name, self.name, err
+                );
+            }
+        }
+
+        let mut entries = self.entries.write().await?;
+        for (name, _) in entries_snapshot {
+            entries.remove(&name);
         }
 
         Ok(())

@@ -246,9 +246,11 @@ impl StorageEngine {
         let path = self.data_path.join(name);
         let name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
+        let bucket = Arc::clone(&bucket);
 
         let _ = tokio::spawn(async move {
             let remove_bucket_from_backend = async || {
+                bucket.remove_entries_for_bucket_removal().await?;
                 folder_keeper.remove_folder(&name).await?;
                 debug!("Bucket '{}' and folder {:?} are removed", name, path);
                 let mut buckets = buckets.write().await?;
