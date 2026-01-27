@@ -4,6 +4,7 @@
 mod query;
 mod quotas;
 mod read_only;
+mod remove_entry;
 mod remove_records;
 pub(super) mod settings;
 pub(crate) mod update_records;
@@ -367,52 +368,6 @@ impl Bucket {
         Ok(())
     }
 
-    /// Remove entry from the bucket
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - Entry name.
-    ///
-    /// # Returns
-    ///
-    /// * `HTTPError` - The error if any.
-    pub async fn remove_entry(&self, name: &str) -> Result<(), ReductError> {
-        self.ensure_not_deleting().await?;
-        self.check_mode()?;
-
-        let entry = self.get_entry(name).await?.upgrade()?;
-        entry.mark_deleting().await?;
-
-        let entries = self.entries.clone();
-        let path = self.path.join(name);
-        let bucket_name = self.name.clone();
-        let entry_name = name.to_string();
-        let folder_keeper = self.folder_keeper.clone();
-
-        let folder_remove_result = folder_keeper.remove_folder(&entry_name).await;
-
-        match folder_remove_result {
-            Ok(()) => {
-                debug!(
-                    "Remove entry '{}' from bucket '{}' and folder '{}'",
-                    entry_name,
-                    bucket_name,
-                    path.display()
-                );
-                entries.write().await?.remove(&entry_name);
-            }
-            Err(err) => {
-                error!(
-                    "Failed to remove entry '{}' from bucket '{}': {}",
-                    entry_name, bucket_name, err
-                );
-                return Err(err);
-            }
-        }
-
-        Ok(())
-    }
-
     /// Sync all entries to the file system
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
         if self.cfg.role == InstanceRole::Replica {
@@ -521,37 +476,6 @@ mod tests {
                 bucket.get_or_create_entry("test-1/").await.err(),
                 Some(unprocessable_entity!(
                     "Bucket or entry name can contain only letters, digests and [-,_] symbols"
-                ))
-            );
-        }
-    }
-
-    mod remove_entry {
-        use super::*;
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_remove_entry(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            write(&bucket, "test-1", 1, b"test").await.unwrap();
-
-            bucket.remove_entry("test-1").await.unwrap();
-            let err = bucket.get_entry("test-1").await.err().unwrap();
-            assert!(
-                err == ReductError::conflict("Entry 'test-1' in bucket 'test' is being deleted")
-                    || err == ReductError::not_found("Entry 'test-1' not found in bucket 'test'"),
-                "Should report deleting or already removed"
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_remove_entry_not_found(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            assert_eq!(
-                bucket.remove_entry("test-1").await.err(),
-                Some(ReductError::not_found(
-                    "Entry 'test-1' not found in bucket 'test'"
                 ))
             );
         }
@@ -707,24 +631,6 @@ mod tests {
             entry.mark_deleting().await.unwrap();
             assert_eq!(
                 entry.mark_deleting().await,
-                Err(conflict!(
-                    "Entry 'test-1' in bucket 'test' is being deleted"
-                ))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn remove_entry_returns_conflict_when_entry_is_being_deleted(
-            #[future] bucket: Arc<Bucket>,
-        ) {
-            let bucket = bucket.await;
-            write(&bucket, "test-1", 1, b"test").await.unwrap();
-            let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
-            entry.mark_deleting().await.unwrap();
-
-            assert_eq!(
-                bucket.remove_entry("test-1").await,
                 Err(conflict!(
                     "Entry 'test-1' in bucket 'test' is being deleted"
                 ))

@@ -237,6 +237,16 @@ impl Entry {
         }
     }
 
+    pub(super) async fn remove_all_blocks(&self) -> Result<(), ReductError> {
+        let mut block_manager = self.block_manager.write().await?;
+        block_manager.update_and_get_index().await?;
+        let block_ids: Vec<u64> = block_manager.index().tree().iter().copied().collect();
+        for block_id in block_ids {
+            block_manager.remove_block(block_id).await?;
+        }
+        Ok(())
+    }
+
     pub async fn size(&self) -> Result<u64, ReductError> {
         let bm = self.block_manager.read().await?;
         Ok(bm.index().size())
