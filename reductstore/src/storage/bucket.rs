@@ -391,39 +391,25 @@ impl Bucket {
         let folder_keeper = self.folder_keeper.clone();
 
         tokio::spawn(async move {
-            if let Err(err) = entry.remove_all_blocks().await {
+            let remove_entry_from_backend = async || {
+                entry.remove_all_blocks().await?;
+                folder_keeper.remove_folder(&entry_name).await?;
+
+                debug!(
+                    "Remove entry '{}' from bucket '{}' and folder '{}'",
+                    entry_name,
+                    bucket_name,
+                    path.display()
+                );
+                entries.write().await?.remove(&entry_name);
+                Ok::<(), ReductError>(())
+            };
+
+            if let Err(err) = remove_entry_from_backend().await {
                 error!(
-                    "Failed to remove blocks for entry '{}' in bucket '{}': {}",
+                    "Failed to remove entry '{}' from bucket '{}': {}",
                     entry_name, bucket_name, err
                 );
-            }
-
-            match folder_keeper.remove_folder(&entry_name).await {
-                Ok(()) => {
-                    debug!(
-                        "Remove entry '{}' from bucket '{}' and folder '{}'",
-                        entry_name,
-                        bucket_name,
-                        path.display()
-                    );
-                    match entries.write().await {
-                        Ok(mut entries) => {
-                            entries.remove(&entry_name);
-                        }
-                        Err(err) => {
-                            error!(
-                                "Failed to drop entry '{}' from bucket '{}' cache: {}",
-                                entry_name, bucket_name, err
-                            );
-                        }
-                    }
-                }
-                Err(err) => {
-                    error!(
-                        "Failed to remove entry '{}' from bucket '{}': {}",
-                        entry_name, bucket_name, err
-                    );
-                }
             }
         });
 
