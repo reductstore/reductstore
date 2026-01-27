@@ -237,7 +237,7 @@ impl Entry {
         }
     }
 
-    pub(crate) async fn remove_all_blocks(&self) -> Result<(), ReductError> {
+    pub(super) async fn remove_all_blocks(&self) -> Result<(), ReductError> {
         let mut block_manager = self.block_manager.write().await?;
         block_manager.update_and_get_index().await?;
         let block_ids: Vec<u64> = block_manager.index().tree().iter().copied().collect();
