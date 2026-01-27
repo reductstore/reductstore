@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
-use tokio::spawn;
 use tokio::sync::{OwnedRwLockWriteGuard, RwLockWriteGuard};
 use tokio::time::sleep;
 
@@ -232,17 +231,10 @@ impl FileCache {
             if let Some(mut lock) = file.try_write_owned() {
                 discarded_count += 1;
                 if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
-                    // spawn a task to sync file in the background sync it can be long operation
-                    synced_count += 1;
-                    spawn(async move {
-                        if !tokio::fs::try_exists(&path).await.unwrap_or(false) {
-                            return;
-                        }
-
-                        lock.sync_all().await.unwrap_or_else(|err| {
-                            warn!("Failed to sync discarded file {:?}: {}", path, err);
-                        });
+                    lock.sync_all().await.unwrap_or_else(|err| {
+                        warn!("Failed to sync discarded file {:?}: {}", path, err);
                     });
+                    synced_count += 1;
                 }
             } else {
                 // return the file to the cache if it is still in use
