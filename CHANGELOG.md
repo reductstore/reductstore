@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refactor CI workflow and use S3 cache for Rust dependencies, [PR-1003](https://github.com/reductstore/reductstore/pull/1003)
 - Revert Docker image build caching in Dockerfile and CI action to use the non-cache flow.
 - Migrate CI S3 cache configuration for Rust dependencies (region + endpoint scheme), [PR-1094](https://github.com/reductstore/reductstore/pull/1094)
+- Add create-pr skill and helper script, [PR-1138](https://github.com/reductstore/reductstore/pull/1138)
 
 ### Changed
 
@@ -62,6 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Remove entries and buckets in the background and per block, [PR-1135](https://github.com/reductstore/reductstore/pull/1135)
 - Sync invalidated file descriptor synchronously, [PR-1136](https://github.com/reductstore/reductstore/pull/1136)
 - Long lock of block manager during entry removal, [PR-1137](https://github.com/reductstore/reductstore/pull/1137)
+- Invalidate local cache files during reload to avoid stale reads in read-only replicas, [PR-1138](https://github.com/reductstore/reductstore/pull/1138)
 
 ## 1.17.9 - 2025-01-16
 
