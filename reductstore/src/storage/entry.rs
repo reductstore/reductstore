@@ -25,7 +25,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, internal_server_error, not_found};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -238,10 +238,14 @@ impl Entry {
     }
 
     pub(super) async fn remove_all_blocks(&self) -> Result<(), ReductError> {
-        let mut block_manager = self.block_manager.write().await?;
-        block_manager.update_and_get_index().await?;
-        let block_ids: Vec<u64> = block_manager.index().tree().iter().copied().collect();
-        for block_id in block_ids {
+        let block_ids = {
+            let mut block_manager = self.block_manager.write().await?;
+            block_manager.update_and_get_index().await?;
+            Ok::<BTreeSet<u64>, ReductError>(block_manager.index().tree().clone())
+        };
+
+        for block_id in block_ids? {
+            let mut block_manager = self.block_manager.write().await?;
             block_manager.remove_block(block_id).await?;
         }
         Ok(())
