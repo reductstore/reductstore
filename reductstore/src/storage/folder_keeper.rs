@@ -144,6 +144,7 @@ impl FolderKeeper {
     pub async fn reload(&self) -> Result<(), ReductError> {
         let file_path = self.path.join(".folder"); // remove cached file
         FILE_CACHE.discard_recursive(&file_path).await?;
+        FILE_CACHE.invalidate_local_cache_file(&file_path).await?;
         let proto = Self::read_or_build_map(&self.path, &self.path.join(".folder"), false).await;
         let mut map = self.map.write().await?;
         *map = proto;

@@ -164,9 +164,8 @@ impl FileCache {
             // Sync only writeable files that are not synced yet
             // and are not used by other threads
             if file_lock.mode() != &AccessMode::ReadWrite
-                || file.try_write().is_none()
                 || file_lock.is_synced()
-                || file_lock.last_synced().elapsed() < sync_interval
+                || (!force && file_lock.last_synced().elapsed() < sync_interval)
             {
                 continue;
             }
@@ -515,6 +514,16 @@ impl FileCache {
 
     pub async fn read_dir(&self, path: &PathBuf) -> Result<Vec<PathBuf>, ReductError> {
         Ok(self.backend.read().await?.read_dir(path).await?)
+    }
+
+    /// Remove a file from the backend's local cache, if any.
+    pub async fn invalidate_local_cache_file(&self, path: &PathBuf) -> Result<(), ReductError> {
+        self.backend
+            .read()
+            .await?
+            .remove_from_local_cache(path)
+            .await?;
+        Ok(())
     }
 }
 

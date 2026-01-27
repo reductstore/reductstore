@@ -25,7 +25,13 @@ impl BlockManager {
                             .discard_recursive(&self.path_to_desc(*block_id))
                             .await?;
                         FILE_CACHE
+                            .invalidate_local_cache_file(&self.path_to_desc(*block_id))
+                            .await?;
+                        FILE_CACHE
                             .discard_recursive(&self.path_to_data(*block_id))
+                            .await?;
+                        FILE_CACHE
+                            .invalidate_local_cache_file(&self.path_to_data(*block_id))
                             .await?;
                     }
                 }
