@@ -60,6 +60,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prevent race condition between sync and remove operations, [PR-1127](https://github.com/reductstore/reductstore/pull/1127)
 - Allow empty batch v2 in parsing, [PR-1134](https://github.com/reductstore/reductstore/pull/1134)
 - Remove entries and buckets in the background and per block, [PR-1135](https://github.com/reductstore/reductstore/pull/1135)
+- Sync invalidated file descriptor synchronously, [PR-1136](https://github.com/reductstore/reductstore/pull/1136)
 
 ## 1.17.9 - 2025-01-16
 
