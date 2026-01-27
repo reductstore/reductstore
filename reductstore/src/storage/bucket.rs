@@ -442,18 +442,8 @@ impl Bucket {
                 }
             }
 
-            if let Err(err) = entry.remove_all_blocks().await {
-                error!(
-                    "Failed to remove blocks for entry '{}' in bucket '{}': {}",
-                    name, self.name, err
-                );
-            }
-            if let Err(err) = self.folder_keeper.remove_folder(name).await {
-                error!(
-                    "Failed to remove entry '{}' from bucket '{}': {}",
-                    name, self.name, err
-                );
-            }
+            entry.remove_all_blocks().await?;
+            self.folder_keeper.remove_folder(name).await?;
         }
 
         let mut entries = self.entries.write().await?;
