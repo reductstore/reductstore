@@ -378,10 +378,11 @@ pub fn parse_start_timestamp(headers: &HeaderMap) -> Result<u64, ReductError> {
 }
 
 pub fn parse_entries(headers: &HeaderMap) -> Result<Vec<String>, ReductError> {
-    headers
-        .get(ENTRIES_HEADER)
-        .ok_or(unprocessable_entity!("x-reduct-entries header is required"))
-        .and_then(parse_entries_header)
+    if let Some(entries) = headers.get(ENTRIES_HEADER) {
+        parse_entries_header(entries)
+    } else {
+        Ok(Vec::new())
+    }
 }
 
 pub fn parse_labels(headers: &HeaderMap) -> Result<Option<Vec<String>>, ReductError> {
@@ -883,7 +884,7 @@ mod tests {
         let err = parse_batched_headers(&headers).err().unwrap();
         assert_eq!(
             err,
-            unprocessable_entity!("x-reduct-entries header is required")
+            unprocessable_entity!("x-reduct-start-ts header is required")
         );
     }
 
