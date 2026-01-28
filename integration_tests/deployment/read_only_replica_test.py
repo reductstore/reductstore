@@ -118,6 +118,7 @@ async def test_read_only_replica_syncs_data():
             label="entry removal to appear on replica",
         )
 
+        await asyncio.sleep(1)  # ensure replica notices bucket removal
         await primary_bucket.remove()
 
         async def _bucket_removed():
