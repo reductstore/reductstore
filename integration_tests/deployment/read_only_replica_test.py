@@ -41,10 +41,9 @@ async def _bucket_exists(client: Client, name: str) -> bool:
 
 async def _read_record(bucket, entry_name, timestamp):
     try:
-        async with bucket.read(entry_name, timestamp=timestamp) as records:
-            async for record in records:
-                data = await record.read_all()
-                return record, data
+        async with bucket.read(entry_name, timestamp=timestamp) as record:
+            data = await record.read_all()
+            return record, data
         return None
     except ReductError as exc:
         if exc.status_code == 404:
