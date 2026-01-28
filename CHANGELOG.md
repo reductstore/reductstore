@@ -66,6 +66,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Long lock of block manager during entry removal, [PR-1137](https://github.com/reductstore/reductstore/pull/1137)
 - Invalidate local cache files during reload to avoid stale reads in read-only replicas, [PR-1138](https://github.com/reductstore/reductstore/pull/1138)
 
+## 1.17.10 - 2026-01-28
+
+### Fixed
+
+- Reduce the number of cached open descriptors to 512, [PR-1141](https://github.com/reductstore/reductstore/pull/1141)
+
 ## 1.17.9 - 2025-01-16
 
 ### Fixed
