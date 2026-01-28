@@ -46,7 +46,7 @@ async def _read_record(bucket, entry_name, timestamp):
             return record, data
         return None
     except ReductError as exc:
-        if exc.status_code == 404:
+        if exc.status_code in (404, 409):
             return None
         raise
 
