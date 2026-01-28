@@ -353,6 +353,23 @@ jobs:
           minio_bucket: ${{ env.MINIO_BUCKET }}
           minio_endpoint: ${{ env.MINIO_ENDPOINT }}
 
+  primary_secondary_test:
+    name: Primary-Secondary Tests
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - binary_test
+      - unit_tests
+    timeout-minutes: 10
+    env:
+      RS_API_TOKEN: XXXX
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/primary-secondary-test
+        with:
+          rs_api_token: ${{ env.RS_API_TOKEN }}
+          repository: ${{ github.repository }}
+
   check_tag:
     runs-on: ubuntu-latest
     name: Check tag
@@ -380,6 +397,7 @@ jobs:
       - migration_test
       - replication_test
       - read_only_replica_test
+      - primary_secondary_test
       - check_tag # Only publish on tags
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}

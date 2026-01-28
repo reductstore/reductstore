@@ -1,0 +1,107 @@
+name: 'Primary-Secondary Test'
+description: 'Runs primary-secondary deployment tests for ReductStore.'
+inputs:
+  rs_api_token:
+    description: 'API token for ReductStore.'
+    required: true
+  repository:
+    description: 'GitHub repository.'
+    required: true
+  lock_file_ttl_s:
+    description: 'Lock file TTL in seconds.'
+    required: false
+    default: "5"
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+
+    - name: Download Docker image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: image
+        path: /tmp/
+
+    - name: Load Docker image
+      shell: bash
+      run: |
+        docker load --input /tmp/image.tar
+        docker image ls -a
+
+    - name: Start primary and secondary instances
+      shell: bash
+      run: |
+        set -euo pipefail
+        lock_file_ttl_s="${{ inputs.lock_file_ttl_s }}"
+        mkdir -p /tmp/reductstore-primary-secondary-data
+
+        primary_env=(
+          --env RS_INSTANCE_ROLE=PRIMARY
+          --env RS_PORT=8385
+          --env RS_API_TOKEN=${{ inputs.rs_api_token }}
+          --env RS_LOCK_FILE_TTL="${lock_file_ttl_s}"
+          --env RS_LOCK_FILE_POLLING_INTERVAL=1
+          --env RS_DATA_PATH=/data
+        )
+
+        secondary_env=(
+          --env RS_INSTANCE_ROLE=SECONDARY
+          --env RS_PORT=8386
+          --env RS_API_TOKEN=${{ inputs.rs_api_token }}
+          --env RS_LOCK_FILE_TTL="${lock_file_ttl_s}"
+          --env RS_LOCK_FILE_POLLING_INTERVAL=1
+          --env RS_DATA_PATH=/data
+        )
+
+        docker run --network=host -v /tmp/reductstore-primary-secondary-data:/data \
+          "${primary_env[@]}" \
+          --name reduct-primary-secondary-primary -d ${{ inputs.repository }}
+
+        docker run --network=host -v /tmp/reductstore-primary-secondary-data:/data \
+          "${secondary_env[@]}" \
+          --name reduct-primary-secondary-secondary -d ${{ inputs.repository }}
+
+        for _ in {1..60}; do
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8385/api/v1/ready || true)
+          if [ "$status" != "000" ]; then
+            break
+          fi
+          sleep 1
+        done
+
+        for _ in {1..60}; do
+          status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8386/api/v1/ready || true)
+          if [ "$status" != "000" ]; then
+            break
+          fi
+          sleep 1
+        done
+
+    - name: Run primary-secondary tests
+      shell: bash
+      env:
+        PRIMARY_STORAGE_URL: http://127.0.0.1:8385
+        SECONDARY_STORAGE_URL: http://127.0.0.1:8386
+        PRIMARY_CONTAINER: reduct-primary-secondary-primary
+        SECONDARY_CONTAINER: reduct-primary-secondary-secondary
+        DATA_PATH: /tmp/reductstore-primary-secondary-data
+        LOCK_FILE_TTL_S: ${{ inputs.lock_file_ttl_s }}
+      run: |
+        pip install -r ./integration_tests/deployment/requirements.txt
+        pytest integration_tests/deployment/primary_secondary_test.py
+
+    - name: Print docker logs
+      if: always()
+      shell: bash
+      run: |
+        docker logs reduct-primary-secondary-primary || true
+        docker logs reduct-primary-secondary-secondary || true
+
+    - name: Cleanup docker containers
+      if: always()
+      shell: bash
+      run: |
+        docker rm -f reduct-primary-secondary-primary || true
+        docker rm -f reduct-primary-secondary-secondary || true
