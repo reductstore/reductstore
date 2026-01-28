@@ -362,15 +362,28 @@ jobs:
       - build
       - binary_test
       - unit_tests
+    strategy:
+      matrix:
+        backend: [ "fs", "s3" ]
     timeout-minutes: 10
     env:
       RS_API_TOKEN: XXXX
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: test
     steps:
       - uses: actions/checkout@v4
+      - name: Create license
+        run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
       - uses: ./.github/actions/primary-secondary-test
         with:
+          backend: ${{ matrix.backend }}
           rs_api_token: ${{ env.RS_API_TOKEN }}
           repository: ${{ github.repository }}
+          minio_access_key: ${{ env.MINIO_ACCESS_KEY }}
+          minio_secret_key: ${{ env.MINIO_SECRET_KEY }}
+          minio_bucket: ${{ env.MINIO_BUCKET }}
+          minio_endpoint: ${{ env.MINIO_ENDPOINT }}
 
   check_tag:
     runs-on: ubuntu-latest

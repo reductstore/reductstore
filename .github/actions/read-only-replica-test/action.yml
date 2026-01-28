@@ -60,6 +60,7 @@ runs:
         fi
 
         mkdir -p /tmp/reductstore-primary-data /tmp/reductstore-replica-data
+        mkdir -p /tmp/reductstore-primary-cache /tmp/reductstore-replica-cache
 
         primary_env=(
           --env RS_INSTANCE_ROLE=PRIMARY
@@ -92,7 +93,7 @@ runs:
             --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }}
             --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }}
             --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }}
-            --env RS_REMOTE_CACHE_PATH=/data
+            --env RS_REMOTE_CACHE_PATH=/cache
             --env RS_LICENSE_PATH=/misc/license.lic
           )
           replica_env+=(
@@ -101,17 +102,23 @@ runs:
             --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }}
             --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }}
             --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }}
-            --env RS_REMOTE_CACHE_PATH=/data
+            --env RS_REMOTE_CACHE_PATH=/cache
             --env RS_LICENSE_PATH=/misc/license.lic
           )
         fi
 
         if [ "$backend" = "s3" ]; then
-          docker run --network=host -v /tmp/reductstore-primary-data:/data -v ${PWD}/misc:/misc \
+          docker run --network=host \
+            -v /tmp/reductstore-primary-data:/data \
+            -v /tmp/reductstore-primary-cache:/cache \
+            -v ${PWD}/misc:/misc \
             "${primary_env[@]}" \
             --name reduct-primary -d ${{ inputs.repository }}
 
-          docker run --network=host -v /tmp/reductstore-replica-data:/data -v ${PWD}/misc:/misc \
+          docker run --network=host \
+            -v /tmp/reductstore-replica-data:/data \
+            -v /tmp/reductstore-replica-cache:/cache \
+            -v ${PWD}/misc:/misc \
             "${replica_env[@]}" \
             --name reduct-replica -d ${{ inputs.repository }}
         else

@@ -1,12 +1,27 @@
 name: 'Primary-Secondary Test'
 description: 'Runs primary-secondary deployment tests for ReductStore.'
 inputs:
+  backend:
+    description: 'Backend type (fs or s3).'
+    required: true
   rs_api_token:
     description: 'API token for ReductStore.'
     required: true
   repository:
     description: 'GitHub repository.'
     required: true
+  minio_access_key:
+    description: 'MinIO access key.'
+    required: false
+  minio_secret_key:
+    description: 'MinIO secret key.'
+    required: false
+  minio_bucket:
+    description: 'MinIO bucket.'
+    required: false
+  minio_endpoint:
+    description: 'MinIO endpoint.'
+    required: false
   lock_file_ttl_s:
     description: 'Lock file TTL in seconds.'
     required: false
@@ -30,12 +45,27 @@ runs:
         docker load --input /tmp/image.tar
         docker image ls -a
 
+    - name: Run MinIO server and create bucket (if backend is s3)
+      if: ${{ inputs.backend == 's3' }}
+      uses: ./.github/actions/run-minio
+      with:
+        access_key: ${{ inputs.minio_access_key }}
+        secret_key: ${{ inputs.minio_secret_key }}
+        bucket_name: ${{ inputs.minio_bucket }}
+
     - name: Start primary and secondary instances
       shell: bash
       run: |
         set -euo pipefail
+        backend="${{ inputs.backend }}"
+        minio_endpoint="${{ inputs.minio_endpoint }}"
+        if [ -z "$minio_endpoint" ]; then
+          minio_endpoint="http://localhost:9000"
+        fi
         lock_file_ttl_s="${{ inputs.lock_file_ttl_s }}"
         mkdir -p /tmp/reductstore-primary-secondary-data
+        mkdir -p /tmp/reductstore-primary-secondary-cache-primary
+        mkdir -p /tmp/reductstore-primary-secondary-cache-secondary
 
         primary_env=(
           --env RS_INSTANCE_ROLE=PRIMARY
@@ -55,13 +85,54 @@ runs:
           --env RS_DATA_PATH=/data
         )
 
-        docker run --network=host -v /tmp/reductstore-primary-secondary-data:/data \
-          "${primary_env[@]}" \
-          --name reduct-primary-secondary-primary -d ${{ inputs.repository }}
+        if [ "$backend" = "s3" ]; then
+          if [ ! -f "${PWD}/misc/license.lic" ]; then
+            echo "Missing misc/license.lic for S3 backend"
+            exit 1
+          fi
+          primary_env+=(
+            --env RS_REMOTE_BACKEND_TYPE=s3
+            --env RS_REMOTE_ENDPOINT=$minio_endpoint
+            --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }}
+            --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }}
+            --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }}
+            --env RS_REMOTE_CACHE_PATH=/cache
+            --env RS_LICENSE_PATH=/misc/license.lic
+          )
+          secondary_env+=(
+            --env RS_REMOTE_BACKEND_TYPE=s3
+            --env RS_REMOTE_ENDPOINT=$minio_endpoint
+            --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }}
+            --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }}
+            --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }}
+            --env RS_REMOTE_CACHE_PATH=/cache
+            --env RS_LICENSE_PATH=/misc/license.lic
+          )
+        fi
 
-        docker run --network=host -v /tmp/reductstore-primary-secondary-data:/data \
-          "${secondary_env[@]}" \
-          --name reduct-primary-secondary-secondary -d ${{ inputs.repository }}
+        if [ "$backend" = "s3" ]; then
+          docker run --network=host \
+            -v /tmp/reductstore-primary-secondary-data:/data \
+            -v /tmp/reductstore-primary-secondary-cache-primary:/cache \
+            -v ${PWD}/misc:/misc \
+            "${primary_env[@]}" \
+            --name reduct-primary-secondary-primary -d ${{ inputs.repository }}
+
+          docker run --network=host \
+            -v /tmp/reductstore-primary-secondary-data:/data \
+            -v /tmp/reductstore-primary-secondary-cache-secondary:/cache \
+            -v ${PWD}/misc:/misc \
+            "${secondary_env[@]}" \
+            --name reduct-primary-secondary-secondary -d ${{ inputs.repository }}
+        else
+          docker run --network=host -v /tmp/reductstore-primary-secondary-data:/data \
+            "${primary_env[@]}" \
+            --name reduct-primary-secondary-primary -d ${{ inputs.repository }}
+
+          docker run --network=host -v /tmp/reductstore-primary-secondary-data:/data \
+            "${secondary_env[@]}" \
+            --name reduct-primary-secondary-secondary -d ${{ inputs.repository }}
+        fi
 
         for _ in {1..60}; do
           status=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:8385/api/v1/ready || true)
