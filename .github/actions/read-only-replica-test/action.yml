@@ -52,13 +52,14 @@ runs:
     - name: Start primary and replica instances
       shell: bash
       run: |
+        set -euo pipefail
         backend="${{ inputs.backend }}"
         minio_endpoint="${{ inputs.minio_endpoint }}"
         if [ -z "$minio_endpoint" ]; then
           minio_endpoint="http://localhost:9000"
         fi
 
-        mkdir -p /tmp/reductstore-replica-data
+        mkdir -p /tmp/reductstore-primary-data /tmp/reductstore-replica-data
 
         primary_env=(
           --env RS_INSTANCE_ROLE=PRIMARY
@@ -99,13 +100,26 @@ runs:
           )
         fi
 
-        docker run --network=host -v /tmp/reductstore-replica-data:/data \
-          "${primary_env[@]}" \
-          --name reduct-primary -d ${{ inputs.repository }}
+        if [ "$backend" = "s3" ]; then
+          docker run --network=host -v /tmp/reductstore-primary-data:/data \
+            "${primary_env[@]}" \
+            --name reduct-primary -d ${{ inputs.repository }}
 
-        docker run --network=host -v /tmp/reductstore-replica-data:/data \
-          "${replica_env[@]}" \
-          --name reduct-replica -d ${{ inputs.repository }}
+          docker run --network=host -v /tmp/reductstore-replica-data:/data \
+            "${replica_env[@]}" \
+            --name reduct-replica -d ${{ inputs.repository }}
+        else
+          docker run --network=host -v /tmp/reductstore-primary-data:/data \
+            "${primary_env[@]}" \
+            --name reduct-primary -d ${{ inputs.repository }}
+
+          docker run --network=host -v /tmp/reductstore-primary-data:/data \
+            "${replica_env[@]}" \
+            --name reduct-replica -d ${{ inputs.repository }}
+        fi
+
+        docker ps --filter "name=reduct-primary"
+        docker ps --filter "name=reduct-replica"
 
         for _ in {1..60}; do
           if curl -fsS "http://127.0.0.1:8383/api/v1/ready" >/dev/null 2>&1; then
@@ -113,6 +127,7 @@ runs:
           fi
           sleep 1
         done
+        curl -fsS "http://127.0.0.1:8383/api/v1/ready" >/dev/null 2>&1
 
         for _ in {1..60}; do
           if curl -fsS "http://127.0.0.1:8384/api/v1/ready" >/dev/null 2>&1; then
@@ -120,6 +135,7 @@ runs:
           fi
           sleep 1
         done
+        curl -fsS "http://127.0.0.1:8384/api/v1/ready" >/dev/null 2>&1
 
     - name: Run read-only replica tests
       shell: bash
