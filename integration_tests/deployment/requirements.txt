@@ -1,0 +1,3 @@
+pytest~=9.0
+pytest-asyncio~=0.23
+reduct-py~=1.16
