@@ -9,8 +9,8 @@ use crate::storage::proto::Record;
 use async_trait::async_trait;
 use bytes::Bytes;
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
+use reduct_base::{internal_server_error, not_found};
 use std::cmp::min;
 use std::io;
 use std::io::Read;
@@ -69,6 +69,9 @@ impl RecordReader {
         };
 
         let file_path = if content_size > 0 {
+            if !FILE_CACHE.try_exists(&file_path).await? {
+                return Err(not_found!("Data block {} not found", file_path.display()));
+            }
             Some(file_path)
         } else {
             None
