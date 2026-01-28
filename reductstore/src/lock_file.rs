@@ -304,13 +304,11 @@ mod tests {
     async fn test_lock_file_acquire_and_release(lock_file_path: PathBuf) {
         let lock_file = LockFileBuilder::new(lock_file_path.clone()).build();
 
-        // Initially, the lock file should be in waiting state
-        assert!(lock_file.is_waiting().await.unwrap());
-
-        // Wait for the lock to be acquired
-        let acquired = wait_new_state(&lock_file).await;
-
-        assert!(acquired.is_ok(), "Lock file was not acquired in time");
+        // The lock may be acquired quickly; only wait if we observe it waiting.
+        if lock_file.is_waiting().await.unwrap() {
+            let acquired = wait_new_state(&lock_file).await;
+            assert!(acquired.is_ok(), "Lock file was not acquired in time");
+        }
         assert!(lock_file.is_locked().await.unwrap());
         assert!(!lock_file.is_failed().await.unwrap());
         assert!(!lock_file.is_waiting().await.unwrap());

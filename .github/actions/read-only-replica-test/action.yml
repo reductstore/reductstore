@@ -1,0 +1,194 @@
+name: 'Read-Only Replica Test'
+description: 'Runs read-only replica integration tests for ReductStore.'
+inputs:
+  backend:
+    description: 'Backend type (fs or s3).'
+    required: true
+  rs_api_token:
+    description: 'API token for ReductStore.'
+    required: true
+  repository:
+    description: 'GitHub repository.'
+    required: true
+  minio_access_key:
+    description: 'MinIO access key.'
+    required: true
+  minio_secret_key:
+    description: 'MinIO secret key.'
+    required: true
+  minio_bucket:
+    description: 'MinIO bucket.'
+    required: true
+  minio_endpoint:
+    description: 'MinIO endpoint.'
+    required: false
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+
+    - name: Download Docker image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: image
+        path: /tmp/
+
+    - name: Load Docker image
+      shell: bash
+      run: |
+        docker load --input /tmp/image.tar
+        docker image ls -a
+
+    - name: Run MinIO server and create bucket (if backend is s3)
+      if: ${{ inputs.backend == 's3' }}
+      uses: ./.github/actions/run-minio
+      with:
+        access_key: ${{ inputs.minio_access_key }}
+        secret_key: ${{ inputs.minio_secret_key }}
+        bucket_name: ${{ inputs.minio_bucket }}
+
+    - name: Start primary and replica instances
+      shell: bash
+      run: |
+        set -euo pipefail
+        backend="${{ inputs.backend }}"
+        minio_endpoint="${{ inputs.minio_endpoint }}"
+        if [ -z "$minio_endpoint" ]; then
+          minio_endpoint="http://localhost:9000"
+        fi
+
+        mkdir -p /tmp/reductstore-primary-data /tmp/reductstore-replica-data
+        mkdir -p /tmp/reductstore-primary-cache /tmp/reductstore-replica-cache
+
+        primary_env=(
+          --env RS_INSTANCE_ROLE=PRIMARY
+          --env RS_PORT=8383
+          --env RS_API_TOKEN=${{ inputs.rs_api_token }}
+          --env RS_LOG_LEVEL=DEBUG
+          --env RS_ENGINE_COMPACTION_INTERVAL=3
+          --env RS_ENGINE_REPLICA_UPDATE_INTERVAL=3
+          --env RS_REMOTE_SYNC_INTERVAL=3
+          --env RS_DATA_PATH=/data
+        )
+
+        replica_env=(
+          --env RS_INSTANCE_ROLE=REPLICA
+          --env RS_PORT=8384
+          --env RS_API_TOKEN=${{ inputs.rs_api_token }}
+          --env RS_LOG_LEVEL=DEBUG
+          --env RS_ENGINE_COMPACTION_INTERVAL=3
+          --env RS_ENGINE_REPLICA_UPDATE_INTERVAL=3
+          --env RS_REMOTE_SYNC_INTERVAL=3
+          --env RS_DATA_PATH=/data
+        )
+
+        if [ "$backend" = "s3" ]; then
+          if [ ! -f "${PWD}/misc/license.lic" ]; then
+            echo "Missing misc/license.lic for S3 backend"
+            exit 1
+          fi
+          primary_env+=(
+            --env RS_REMOTE_BACKEND_TYPE=s3
+            --env RS_REMOTE_ENDPOINT=$minio_endpoint
+            --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }}
+            --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }}
+            --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }}
+            --env RS_REMOTE_CACHE_PATH=/cache
+            --env RS_LICENSE_PATH=/misc/license.lic
+          )
+          replica_env+=(
+            --env RS_REMOTE_BACKEND_TYPE=s3
+            --env RS_REMOTE_ENDPOINT=$minio_endpoint
+            --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }}
+            --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }}
+            --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }}
+            --env RS_REMOTE_CACHE_PATH=/cache
+            --env RS_LICENSE_PATH=/misc/license.lic
+          )
+        fi
+
+        if [ "$backend" = "s3" ]; then
+          docker run --network=host \
+            -v /tmp/reductstore-primary-data:/data \
+            -v /tmp/reductstore-primary-cache:/cache \
+            -v ${PWD}/misc:/misc \
+            "${primary_env[@]}" \
+            --name reduct-primary -d ${{ inputs.repository }}
+
+          docker run --network=host \
+            -v /tmp/reductstore-replica-data:/data \
+            -v /tmp/reductstore-replica-cache:/cache \
+            -v ${PWD}/misc:/misc \
+            "${replica_env[@]}" \
+            --name reduct-replica -d ${{ inputs.repository }}
+        else
+          docker run --network=host -v /tmp/reductstore-primary-data:/data \
+            "${primary_env[@]}" \
+            --name reduct-primary -d ${{ inputs.repository }}
+
+          docker run --network=host -v /tmp/reductstore-primary-data:/data \
+            "${replica_env[@]}" \
+            --name reduct-replica -d ${{ inputs.repository }}
+        fi
+
+        docker ps --filter "name=reduct-primary"
+        docker ps --filter "name=reduct-replica"
+
+        for _ in {1..60}; do
+          if curl -fsS "http://127.0.0.1:8383/api/v1/ready" >/dev/null 2>&1; then
+            break
+          fi
+          sleep 1
+        done
+        curl -fsS "http://127.0.0.1:8383/api/v1/ready" >/dev/null 2>&1
+
+        for _ in {1..60}; do
+          if curl -fsS "http://127.0.0.1:8384/api/v1/ready" >/dev/null 2>&1; then
+            break
+          fi
+          sleep 1
+        done
+        curl -fsS "http://127.0.0.1:8384/api/v1/ready" >/dev/null 2>&1
+
+    - name: Debug container mounts and env
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Primary mounts:"
+        docker inspect reduct-primary --format 'Mounts: {{json .Mounts}}'
+        docker inspect reduct-primary --format 'Env: {{json .Config.Env}}'
+        echo "Replica mounts:"
+        docker inspect reduct-replica --format 'Mounts: {{json .Mounts}}'
+        docker inspect reduct-replica --format 'Env: {{json .Config.Env}}'
+        if docker ps --format '{{.Names}}' | grep -q '^minio-server$'; then
+          echo "MinIO mounts:"
+          docker inspect minio-server --format 'Mounts: {{json .Mounts}}'
+          docker inspect minio-server --format 'Env: {{json .Config.Env}}'
+        fi
+
+    - name: Run read-only replica tests
+      shell: bash
+      env:
+        PRIMARY_STORAGE_URL: http://127.0.0.1:8383
+        REPLICA_STORAGE_URL: http://127.0.0.1:8384
+        API_TOKEN: ${{ inputs.rs_api_token }}
+      run: |
+        pip install -r ./integration_tests/deployment/requirements.txt
+        pytest integration_tests/deployment/read_only_replica_test.py
+
+    - name: Print docker logs
+      if: always()
+      shell: bash
+      run: |
+        docker logs reduct-primary || true
+        docker logs reduct-replica || true
+
+    - name: Cleanup docker containers
+      if: always()
+      shell: bash
+      run: |
+        docker rm -f reduct-primary || true
+        docker rm -f reduct-replica || true

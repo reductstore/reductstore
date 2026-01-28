@@ -114,6 +114,7 @@ mod tests {
             .unwrap();
 
         primary_bucket.sync_fs().await.unwrap();
+        read_only_bucket.reset_last_replica_sync().await;
         read_only_bucket.reload().await.unwrap();
 
         assert_eq!(
@@ -160,6 +161,7 @@ mod tests {
         // Remove entry in primary bucket
         primary_bucket.remove_entry("test-1").await.unwrap();
         primary_bucket.sync_fs().await.unwrap();
+        read_only_bucket.reset_last_replica_sync().await;
         read_only_bucket.reload().await.unwrap();
 
         assert_eq!(

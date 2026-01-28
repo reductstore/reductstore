@@ -446,6 +446,14 @@ impl Bucket {
 }
 
 #[cfg(test)]
+impl Bucket {
+    pub async fn reset_last_replica_sync(&self) {
+        let mut sync = self.last_replica_sync.write().await.unwrap();
+        *sync = Instant::now();
+    }
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use reduct_base::conflict;

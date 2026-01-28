@@ -22,10 +22,10 @@ impl BlockManager {
                     if previous_block_info.crc64 != new_block_info.crc64 {
                         // block changed, we need to reload it
                         FILE_CACHE
-                            .discard_recursive(&self.path_to_desc(*block_id))
+                            .invalidate_local_cache_file(&self.path_to_desc(*block_id))
                             .await?;
                         FILE_CACHE
-                            .discard_recursive(&self.path_to_data(*block_id))
+                            .invalidate_local_cache_file(&self.path_to_data(*block_id))
                             .await?;
                     }
                 }
@@ -88,6 +88,38 @@ mod tests {
         block_manager.reload_if_readonly().await.unwrap();
 
         assert!(block_manager.block_index.info().get(&1).is_some());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_reload_if_readonly_discards_cache_on_crc_change(#[future] path: PathBuf) {
+        let path = path.await;
+        let entry_path = path.join("bucket").join("entry");
+
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            data_path: path.clone(),
+            engine_config: StorageEngineConfig {
+                replica_update_interval: Duration::from_millis(50),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let index_path = entry_path.join(BLOCK_INDEX_FILE);
+        let mut index = BlockIndex::new(index_path.clone());
+        index.insert_or_update_with_crc(Block::new(1), 1);
+        index.save().await.unwrap();
+
+        let mut block_manager =
+            BlockManager::build(entry_path.clone(), index, Arc::new(cfg.clone())).await;
+
+        let mut updated_index = BlockIndex::new(index_path.clone());
+        updated_index.insert_or_update_with_crc(Block::new(1), 2);
+        updated_index.save().await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(75)).await;
+        block_manager.reload_if_readonly().await.unwrap();
     }
 
     #[fixture]

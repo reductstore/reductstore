@@ -104,6 +104,7 @@ mod tests {
             .create_bucket("bucket-2", BucketSettings::default())
             .await
             .unwrap();
+        read_only_engine.reset_last_replica_sync().await;
         read_only_engine.reload().await.unwrap();
         assert_eq!(
             read_only_engine.buckets.read().await.unwrap().len(),
@@ -146,6 +147,7 @@ mod tests {
         primary_engine.remove_bucket("bucket-1").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         primary_engine.sync_fs().await.unwrap();
+        read_only_engine.reset_last_replica_sync().await;
         read_only_engine.reload().await.unwrap();
         assert_eq!(
             read_only_engine.buckets.read().await.unwrap().len(),

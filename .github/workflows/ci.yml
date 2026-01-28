@@ -325,6 +325,66 @@ jobs:
           rs_api_token: ${{ env.RS_API_TOKEN }}
           repository: ${{ github.repository }}
 
+  read_only_replica_test:
+    name: Read-Only Replica Tests
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - binary_test
+      - unit_tests
+    strategy:
+      matrix:
+        backend: [ "fs", "s3" ]
+    timeout-minutes: 10
+    env:
+      RS_API_TOKEN: XXXX
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create license
+        run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
+      - uses: ./.github/actions/read-only-replica-test
+        with:
+          backend: ${{ matrix.backend }}
+          rs_api_token: ${{ env.RS_API_TOKEN }}
+          repository: ${{ github.repository }}
+          minio_access_key: ${{ env.MINIO_ACCESS_KEY }}
+          minio_secret_key: ${{ env.MINIO_SECRET_KEY }}
+          minio_bucket: ${{ env.MINIO_BUCKET }}
+          minio_endpoint: ${{ env.MINIO_ENDPOINT }}
+
+  primary_secondary_test:
+    name: Primary-Secondary Tests
+    runs-on: ubuntu-latest
+    needs:
+      - build
+      - binary_test
+      - unit_tests
+    strategy:
+      matrix:
+        backend: [ "fs", "s3" ]
+    timeout-minutes: 10
+    env:
+      RS_API_TOKEN: XXXX
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: test
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create license
+        run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
+      - uses: ./.github/actions/primary-secondary-test
+        with:
+          backend: ${{ matrix.backend }}
+          rs_api_token: ${{ env.RS_API_TOKEN }}
+          repository: ${{ github.repository }}
+          minio_access_key: ${{ env.MINIO_ACCESS_KEY }}
+          minio_secret_key: ${{ env.MINIO_SECRET_KEY }}
+          minio_bucket: ${{ env.MINIO_BUCKET }}
+          minio_endpoint: ${{ env.MINIO_ENDPOINT }}
+
   check_tag:
     runs-on: ubuntu-latest
     name: Check tag
@@ -351,6 +411,8 @@ jobs:
       - api_tests
       - migration_test
       - replication_test
+      - read_only_replica_test
+      - primary_secondary_test
       - check_tag # Only publish on tags
     outputs:
       upload_url: ${{ steps.create_release.outputs.upload_url }}
@@ -448,7 +510,7 @@ jobs:
   push_image_dockerhub:
     runs-on: ubuntu-latest
     name: Build image and push it to DockerHub Registry
-    needs: [ check_tag, api_tests, migration_test, replication_test ]
+    needs: [ check_tag, api_tests, migration_test, replication_test, read_only_replica_test ]
     if: github.event_name != 'pull_request'
     strategy:
       matrix:

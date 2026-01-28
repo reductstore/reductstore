@@ -70,6 +70,8 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::file_cache::FILE_CACHE;
+    use crate::storage::block_manager::DATA_FILE_EXT;
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::tests::{
         entry, entry_settings, path, write_record, write_stub_record,
@@ -180,6 +182,26 @@ mod tests {
             Some(not_found!(
                 "Record 2000000 not found in block bucket/entry/1000000"
             ))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_missing_data_file(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
+        write_stub_record(&entry, 1000000).await;
+
+        let data_path = {
+            let bm = entry.block_manager.read().await.unwrap();
+            let block_id = *bm.index().tree().first().unwrap();
+            bm.path().join(format!("{}{}", block_id, DATA_FILE_EXT))
+        };
+        FILE_CACHE.remove(&data_path).await.unwrap();
+
+        let reader = entry.begin_read(1000000).await;
+        assert_eq!(
+            reader.err(),
+            Some(not_found!("Data block {} not found", data_path.display()))
         );
     }
 
