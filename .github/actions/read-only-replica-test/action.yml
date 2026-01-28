@@ -66,6 +66,7 @@ runs:
           --env RS_INSTANCE_ROLE=PRIMARY
           --env RS_PORT=8383
           --env RS_API_TOKEN=${{ inputs.rs_api_token }}
+          --env RS_LOG_LEVEL=DEBUG
           --env RS_ENGINE_COMPACTION_INTERVAL=3
           --env RS_ENGINE_REPLICA_UPDATE_INTERVAL=3
           --env RS_REMOTE_SYNC_INTERVAL=3
@@ -76,6 +77,7 @@ runs:
           --env RS_INSTANCE_ROLE=REPLICA
           --env RS_PORT=8384
           --env RS_API_TOKEN=${{ inputs.rs_api_token }}
+          --env RS_LOG_LEVEL=DEBUG
           --env RS_ENGINE_COMPACTION_INTERVAL=3
           --env RS_ENGINE_REPLICA_UPDATE_INTERVAL=3
           --env RS_REMOTE_SYNC_INTERVAL=3
@@ -149,6 +151,23 @@ runs:
           sleep 1
         done
         curl -fsS "http://127.0.0.1:8384/api/v1/ready" >/dev/null 2>&1
+
+    - name: Debug container mounts and env
+      if: ${{ always() }}
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "Primary mounts:"
+        docker inspect reduct-primary --format 'Mounts: {{json .Mounts}}'
+        docker inspect reduct-primary --format 'Env: {{json .Config.Env}}'
+        echo "Replica mounts:"
+        docker inspect reduct-replica --format 'Mounts: {{json .Mounts}}'
+        docker inspect reduct-replica --format 'Env: {{json .Config.Env}}'
+        if docker ps --format '{{.Names}}' | grep -q '^minio-server$'; then
+          echo "MinIO mounts:"
+          docker inspect minio-server --format 'Mounts: {{json .Mounts}}'
+          docker inspect minio-server --format 'Env: {{json .Config.Env}}'
+        fi
 
     - name: Run read-only replica tests
       shell: bash
