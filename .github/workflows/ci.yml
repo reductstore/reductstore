@@ -343,6 +343,8 @@ jobs:
       MINIO_BUCKET: test
     steps:
       - uses: actions/checkout@v4
+      - name: Create license
+        run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
       - uses: ./.github/actions/read-only-replica-test
         with:
           backend: ${{ matrix.backend }}

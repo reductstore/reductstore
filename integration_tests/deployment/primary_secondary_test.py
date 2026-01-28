@@ -42,25 +42,30 @@ def _docker(*args):
     subprocess.run(["docker", *args], check=True, capture_output=True, text=True)
 
 
-def _container_running(name: str) -> bool:
-    result = subprocess.run(
-        ["docker", "inspect", "-f", "{{.State.Running}}", name],
-        capture_output=True,
-        text=True,
-    )
-    return result.returncode == 0 and result.stdout.strip().lower() == "true"
+def _docker_try(*args):
+    subprocess.run(["docker", *args], check=False, capture_output=True, text=True)
 
 
-def _ensure_running(name: str):
-    if not _container_running(name):
-        data_path = os.getenv("DATA_PATH")
-        if data_path:
-            lock_path = os.path.join(data_path, ".lock")
-            try:
-                os.remove(lock_path)
-            except FileNotFoundError:
-                pass
-        _docker("start", name)
+def _remove_lock_file():
+    data_path = os.getenv("DATA_PATH")
+    if data_path:
+        lock_path = os.path.join(data_path, ".lock")
+        try:
+            os.remove(lock_path)
+        except FileNotFoundError:
+            pass
+
+
+async def _reset_cluster(
+    primary_container, secondary_container, primary_url, secondary_url
+):
+    _docker_try("stop", secondary_container)
+    _docker_try("stop", primary_container)
+    _remove_lock_file()
+    _docker("start", primary_container)
+    await _wait_for_status(primary_url, 200, label="primary ready")
+    _docker("start", secondary_container)
+    await _wait_for_status(secondary_url, 503, label="secondary waiting")
 
 
 @requires_env("PRIMARY_STORAGE_URL")
@@ -72,10 +77,11 @@ async def test_secondary_promotes_after_primary_stop():
     primary_url = _ready_url(os.environ["PRIMARY_STORAGE_URL"])
     secondary_url = _ready_url(os.environ["SECONDARY_STORAGE_URL"])
     primary_container = os.environ["PRIMARY_CONTAINER"]
-    _ensure_running(primary_container)
+    secondary_container = os.environ["SECONDARY_CONTAINER"]
 
-    await _wait_for_status(primary_url, 200, label="primary ready")
-    await _wait_for_status(secondary_url, 503, label="secondary waiting")
+    await _reset_cluster(
+        primary_container, secondary_container, primary_url, secondary_url
+    )
 
     _docker("stop", primary_container)
 
@@ -96,10 +102,11 @@ async def test_secondary_promotes_after_primary_kill_and_ttl():
     primary_url = _ready_url(os.environ["PRIMARY_STORAGE_URL"])
     secondary_url = _ready_url(os.environ["SECONDARY_STORAGE_URL"])
     primary_container = os.environ["PRIMARY_CONTAINER"]
-    _ensure_running(primary_container)
+    secondary_container = os.environ["SECONDARY_CONTAINER"]
 
-    await _wait_for_status(primary_url, 200, label="primary ready")
-    await _wait_for_status(secondary_url, 503, label="secondary waiting")
+    await _reset_cluster(
+        primary_container, secondary_container, primary_url, secondary_url
+    )
 
     _docker("kill", "-s", "KILL", primary_container)
 
