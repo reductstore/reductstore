@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Fixed
+
+- Reduce the number of cached open descriptors to 512, [PR-1141](https://github.com/reductstore/reductstore/pull/1141)
+
 ## 1.17.9 - 2025-01-16
 
 ### Fixed
