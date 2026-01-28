@@ -88,8 +88,14 @@ impl BlockManager {
     }
 
     pub async fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
-        for block in self.block_cache.write_values() {
-            self.save_block_on_disk(block).await?;
+        let blocks = self.block_cache.write_values();
+        for block in blocks.iter() {
+            let block_id = block.read().await?.block_id();
+            self.sync_data_block(block_id).await?;
+        }
+
+        for block in blocks {
+            self.save_meta_on_disk(block).await?;
         }
 
         Ok(())
@@ -191,7 +197,7 @@ impl BlockManager {
     pub async fn save_block(&mut self, block: BlockRef) -> Result<(), ReductError> {
         let id = block.read().await?.block_id();
         for (_, block) in self.block_cache.insert_write(id, block.clone()) {
-            self.save_block_on_disk(block).await?;
+            self.save_meta_on_disk(block).await?;
         }
 
         Ok(())
@@ -471,7 +477,7 @@ impl BlockManager {
             .await?;
         block_file.sync_all().await?;
 
-        self.save_block_on_disk(block_ref).await
+        self.save_meta_on_disk(block_ref).await
     }
 
     /// Begin writing a record to a block.
@@ -546,6 +552,23 @@ impl BlockManager {
         Ok(())
     }
 
+    async fn sync_data_block(&self, block_id: u64) -> Result<(), ReductError> {
+        if self.cfg.role == InstanceRole::Replica {
+            return Ok(());
+        }
+
+        let path = self.path_to_data(block_id);
+        if !FILE_CACHE.try_exists(&path).await? {
+            return Ok(());
+        }
+
+        let mut data_block = FILE_CACHE
+            .write_or_create(&path, SeekFrom::Current(0))
+            .await?;
+        data_block.sync_all().await?;
+        Ok(())
+    }
+
     /// Begin reading a record from a block.
     ///
     /// # Arguments
@@ -604,7 +627,7 @@ impl BlockManager {
         self.path.join(format!("{}{}", block_id, DATA_FILE_EXT))
     }
 
-    async fn save_block_on_disk(&mut self, block_ref: BlockRef) -> Result<(), ReductError> {
+    async fn save_meta_on_disk(&mut self, block_ref: BlockRef) -> Result<(), ReductError> {
         // Take a snapshot under a short-lived write lock to avoid blocking readers
         let (block_id, block_snapshot) = {
             let block = block_ref.read().await?;
@@ -1214,7 +1237,7 @@ mod tests {
             .write()
             .await
             .unwrap()
-            .save_block_on_disk(block_ref.clone())
+            .save_meta_on_disk(block_ref.clone())
             .await
             .unwrap();
         (record, record_body)
@@ -1268,7 +1291,7 @@ mod tests {
         bm.finish_write_record(block_id, record::State::Finished, 0)
             .await
             .unwrap();
-        bm.save_block_on_disk(block_ref).await.unwrap();
+        bm.save_meta_on_disk(block_ref).await.unwrap();
         bm
     }
 }
