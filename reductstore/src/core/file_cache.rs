@@ -15,7 +15,7 @@ use std::sync::{Arc, LazyLock, RwLock, RwLockWriteGuard, Weak};
 use std::thread::spawn;
 use std::time::Duration;
 
-const FILE_CACHE_MAX_SIZE: usize = 1024;
+const FILE_CACHE_MAX_SIZE: usize = 512;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
 const FILE_CACHE_SYNC_INTERVAL: Duration = Duration::from_millis(10);
