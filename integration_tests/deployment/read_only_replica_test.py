@@ -41,9 +41,10 @@ async def _bucket_exists(client: Client, name: str) -> bool:
 
 async def _read_record(bucket, entry_name, timestamp):
     try:
-        async for record in bucket.read(entry_name, timestamp=timestamp):
-            data = await record.read_all()
-            return record, data
+        async with bucket.read(entry_name, timestamp=timestamp) as records:
+            async for record in records:
+                data = await record.read_all()
+                return record, data
         return None
     except ReductError as exc:
         if exc.status_code == 404:
@@ -96,8 +97,8 @@ async def test_read_only_replica_syncs_data():
         await primary_bucket.update(entry_name, timestamp=ts, labels={"version": "2"})
 
         async def _record_updated():
-            record = await _read_record(replica_bucket, entry_name, ts)
-            return record is not None and record.labels.get("version") == "2"
+            result = await _read_record(replica_bucket, entry_name, ts)
+            return result is not None and result[0].labels.get("version") == "2"
 
         await _wait_until(
             _record_updated,
