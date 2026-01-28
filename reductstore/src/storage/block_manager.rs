@@ -706,6 +706,29 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_sync_data_block_ok_for_replica() {
+            let path = tempdir().unwrap().keep().join("bucket").join("entry");
+            let mut cfg = Cfg::default();
+            cfg.role = InstanceRole::Replica;
+            let block_manager =
+                BlockManager::build(path.clone(), BlockIndex::new(path.clone()), Arc::new(cfg))
+                    .await;
+            block_manager.sync_data_block(1).await.unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_sync_data_block_ok_for_missing_path() {
+            let path = tempdir().unwrap().keep().join("bucket").join("entry");
+            let cfg = Cfg::default();
+            let block_manager =
+                BlockManager::build(path.clone(), BlockIndex::new(path.clone()), Arc::new(cfg))
+                    .await;
+            block_manager.sync_data_block(999).await.unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_starting_block(#[future] block_manager: BlockManager) {
             let mut block_manager = block_manager.await;
             let block_id = 1_000_005;
