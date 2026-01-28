@@ -23,8 +23,12 @@ def _bucket_name():
 async def _wait_until(predicate, timeout_s=30, step_s=0.5, label="condition"):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        if await predicate():
-            return
+        try:
+            if await predicate():
+                return
+        except ReductError as exc:
+            if exc.status_code not in (404, 409):
+                raise
         await asyncio.sleep(step_s)
     raise AssertionError(f"Timed out waiting for {label}")
 
