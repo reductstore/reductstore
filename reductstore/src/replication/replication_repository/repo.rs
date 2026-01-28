@@ -15,7 +15,7 @@ use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::WhenFilter;
 use async_trait::async_trait;
 use bytes::Bytes;
-use log::{debug, error};
+use log::{debug, error, warn};
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::msg::replication_api::{
@@ -266,8 +266,7 @@ impl ReplicationRepository {
         let read_conf_file = async || {
             let mut lock = FILE_CACHE
                 .write_or_create(&repo.repo_path, Start(0))
-                .await
-                .expect("Failed to create or open replication repository file");
+                .await?;
 
             let mut buf = Vec::new();
             lock.read_to_end(&mut buf)?;
@@ -291,7 +290,13 @@ impl ReplicationRepository {
                     }
                 }
             }
-            Err(_) => {}
+            Err(err) => {
+                warn!(
+                    "Failed to read replication repository from {}: {}",
+                    repo.repo_path.as_os_str().to_str().unwrap_or("..."),
+                    err
+                );
+            }
         }
         repo
     }
