@@ -518,6 +518,7 @@ impl FileCache {
 
     /// Remove a file from the backend's local cache, if any.
     pub async fn invalidate_local_cache_file(&self, path: &PathBuf) -> Result<(), ReductError> {
+        self.discard_recursive(path).await?;
         self.backend
             .read()
             .await?

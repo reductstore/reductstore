@@ -155,7 +155,6 @@ impl BlockIndex {
     }
 
     pub async fn update_from_disc(&mut self) -> Result<(), ReductError> {
-        FILE_CACHE.discard_recursive(&self.path_buf).await?;
         FILE_CACHE
             .invalidate_local_cache_file(&self.path_buf)
             .await?;
