@@ -1,0 +1,9 @@
+# See https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+#
+# NOTE: Replace the team handles below with your actual GitHub org/team names.
+#
+# Everything is owned by maintainers...
+* @reductstore/maintainers
+
+# ...except `.github/`, which is owned by DevOps.
+/.github/ @reductstore/devops
