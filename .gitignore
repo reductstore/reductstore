@@ -4,3 +4,4 @@ src/asset/console.zip
 /venv/
 .cache
 lcov.info
+.vscode/settings.json
