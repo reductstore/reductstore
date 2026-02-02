@@ -1,8 +1,9 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::storage::query::condition::value::Value;
 use crate::storage::query::condition::{Boxed, BoxedNode, Context, Node};
+use log::warn;
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 
@@ -45,6 +46,15 @@ impl Node for EachT {
         } else {
             value.as_float()?
         };
+
+        if context.timestamp < last_time {
+            warn!(
+                "Time went backwards (from {} to {}), resetting $each_t",
+                last_time, context.timestamp
+            );
+            self.last_timestamp = Some(context.timestamp);
+            return Ok(Value::Bool(false));
+        }
 
         let ret = context.timestamp - last_time >= (s * 1_000_000.0) as u64;
         if ret {
