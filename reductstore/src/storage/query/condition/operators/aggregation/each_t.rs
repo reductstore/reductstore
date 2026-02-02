@@ -122,4 +122,19 @@ mod tests {
         let and = EachT::new(vec![Constant::boxed(Value::Int(5))]);
         assert_eq!(and.print(), "EachT(Int(5))");
     }
+
+    #[rstest]
+    fn apply_time_goes_backwards_resets() {
+        let mut op = EachT::new(vec![Constant::boxed(Value::Float(0.1))]);
+
+        let mut context = Context::default();
+        context.timestamp = 200_000;
+        assert_eq!(op.apply(&context).unwrap(), Value::Bool(false));
+
+        context.timestamp = 100_000;
+        assert_eq!(op.apply(&context).unwrap(), Value::Bool(false));
+
+        context.timestamp = 200_000;
+        assert_eq!(op.apply(&context).unwrap(), Value::Bool(true));
+    }
 }
