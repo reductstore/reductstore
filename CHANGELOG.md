@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Prevent panic in `$each_t` when time goes backwards, [PR-1150](https://github.com/reductstore/reductstore/pull/1150)
 - Fix thread pool deadlock in tests when tasks wait for other tasks, [PR-1081](https://github.com/reductstore/reductstore/pull/1081)
 - Sync block data before metadata/index during compaction to avoid stale replica reads, [PR-1139](https://github.com/reductstore/reductstore/pull/1139)
 - Fix replica crash at the start without write permissions, [PR-1054](https://github.com/reductstore/reductstore/pull/1054)
