@@ -57,9 +57,9 @@ async def load():
 
         await asyncio.gather(*tasks)
 
-        report["server"] = (await client.info()).dict()
+        report["server"] = (await client.info()).model_dump()
         del report["server"]["defaults"]
-        report["bucket"] = (await bucket.get_full_info()).dict()
+        report["bucket"] = (await bucket.get_full_info()).model_dump()
         del report["bucket"]["settings"]
         report["elapsed"] = time.time() - start_at
         return report
