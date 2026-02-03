@@ -1,4 +1,4 @@
-// Copyright 2023-2024 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::replication::remote_bucket::client_wrapper::{create_client, BoxedClientApi};
@@ -32,18 +32,18 @@ impl InitialState {
 
 #[async_trait]
 impl RemoteBucketState for InitialState {
-    fn write_batch(
+    async fn write_batch(
         self: Box<Self>,
         entry: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         // Try to get the bucket.
-        let bucket = self.client.get_bucket(&self.bucket_name);
+        let bucket = self.client.get_bucket(&self.bucket_name).await;
         match bucket {
             Ok(bucket) => {
                 // Bucket is available, transition to the available state and write the record.
                 let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
-                new_state.write_batch(entry, records)
+                new_state.write_batch(entry, records).await
             }
             Err(err) => {
                 // Bucket is unavailable, transition to the unavailable state.
@@ -59,6 +59,17 @@ impl RemoteBucketState for InitialState {
                     err,
                 ))
             }
+        }
+    }
+
+    async fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send> {
+        match self.client.get_bucket(&self.bucket_name).await {
+            Ok(bucket) => Box::new(BucketAvailableState::new(self.client, bucket)),
+            Err(err) => Box::new(BucketUnavailableState::new(
+                self.client,
+                self.bucket_name,
+                err,
+            )),
         }
     }
 
@@ -112,7 +123,7 @@ mod tests {
             last_result: Ok(ErrorRecordMap::new()),
         });
 
-        let state = state.write_batch("test_entry", vec![]);
+        let state = state.write_batch("test_entry", vec![]).await;
 
         assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
         assert_eq!(state.is_available(), true);
@@ -131,12 +142,46 @@ mod tests {
             last_result: Ok(ErrorRecordMap::new()),
         });
 
-        let state = state.write_batch("test_entry", vec![]);
+        let state = state.write_batch("test_entry", vec![]).await;
 
         assert_eq!(
             state.last_result(),
             &Err(ReductError::bad_request("test error"))
         );
         assert_eq!(state.is_available(), false);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_available(mut client: MockReductClientApi, bucket: MockReductBucketApi) {
+        client
+            .expect_get_bucket()
+            .return_once(move |_| Ok(Box::new(bucket)));
+
+        let state = Box::new(InitialState {
+            client: Box::new(client),
+            bucket_name: "test_bucket".to_string(),
+            last_result: Ok(ErrorRecordMap::new()),
+        });
+
+        let state = state.probe().await;
+        assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_unavailable(mut client: MockReductClientApi) {
+        client
+            .expect_get_bucket()
+            .return_once(move |_| Err(ReductError::bad_request("test error")));
+
+        let state = Box::new(InitialState {
+            client: Box::new(client),
+            bucket_name: "test_bucket".to_string(),
+            last_result: Ok(ErrorRecordMap::new()),
+        });
+
+        let state = state.probe().await;
+        assert!(!state.is_available());
     }
 }

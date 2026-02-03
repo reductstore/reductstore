@@ -6,11 +6,10 @@ use crate::api::HttpError;
 use crate::api::StateKeeper;
 use crate::auth::policy::ReadAccessPolicy;
 use axum::extract::{Path, State};
-use axum_extra::headers::HeaderMap;
+use axum::http::HeaderMap;
 use std::sync::Arc;
 
 // GET /b/:bucket_name
-
 pub(super) async fn get_bucket(
     State(keeper): State<Arc<StateKeeper>>,
     Path(bucket_name): Path<String>,
@@ -24,8 +23,12 @@ pub(super) async fn get_bucket(
             },
         )
         .await?;
-    let bucket_info = components.storage.get_bucket(&bucket_name)?.upgrade()?;
-    Ok(bucket_info.info()?.into())
+    let bucket_info = components
+        .storage
+        .get_bucket(&bucket_name)
+        .await?
+        .upgrade()?;
+    Ok(bucket_info.info().await?.into())
 }
 
 #[cfg(test)]
@@ -73,6 +76,7 @@ mod tests {
             .token_repo
             .write()
             .await
+            .unwrap()
             .generate_token(
                 "test-token",
                 Permissions {
@@ -81,6 +85,7 @@ mod tests {
                     write: vec![],
                 },
             )
+            .await
             .unwrap();
 
         headers.insert(
@@ -91,6 +96,6 @@ mod tests {
             .await
             .err()
             .unwrap();
-        assert_eq!(err.0.status(), ErrorCode::Forbidden);
+        assert_eq!(err.status(), ErrorCode::Forbidden);
     }
 }

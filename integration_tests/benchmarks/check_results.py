@@ -70,6 +70,7 @@ def compare_results(
     assert len(result) == len(result_gt)
     assert all(len(result[key]) == len(result_gt[key]) == len(fields) for key in result)
 
+    report = []
     for key in result:
         for field, v, v_gt in zip(fields, result[key], result_gt[key]):
             if v_gt == 0 and v != 0:
@@ -78,12 +79,22 @@ def compare_results(
                 )
                 return False
             else:
-                d = (v - v_gt) / v_gt
-                if d > threshold:
-                    print(
-                        f"Error: Relative difference {d:.2f} exceeds threshold {threshold} for record_size: {key} and field: {field}"
-                    )
-                    return False
+                # We only fail when performance regresses beyond the threshold.
+                if v < v_gt:
+                    d = (v_gt - v) / v_gt
+                    if d > threshold:
+                        print(
+                            f"Error: Relative difference {d:.2f} exceeds threshold {threshold} for record_size: {key} and field: {field}"
+                        )
+                        return False
+                pct = ((v - v_gt) / v_gt) * 100
+                report.append(
+                    f"record_size={key} {field}: {pct:+.2f}% (ref={v_gt}, current={v})"
+                )
+
+    print("Benchmark comparison report:")
+    for line in report:
+        print(f" - {line}")
     return True
 
 

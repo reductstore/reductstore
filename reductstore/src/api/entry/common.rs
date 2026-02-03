@@ -9,7 +9,7 @@ use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::str::FromStr;
 
-pub(super) fn parse_content_length_from_header(headers: &HeaderMap) -> Result<u64, HttpError> {
+pub(crate) fn parse_content_length_from_header(headers: &HeaderMap) -> Result<u64, HttpError> {
     let content_size = headers
         .get("content-length")
         .ok_or(unprocessable_entity!("content-length header is required"))?
@@ -60,6 +60,7 @@ pub(super) fn parse_query_params(
 
     Ok(QueryEntry {
         query_type: QueryType::Query,
+        entries: None,
         start,
         stop,
         include: Some(include),
@@ -247,7 +248,7 @@ mod tests {
             let params = HashMap::from_iter(vec![("ttl".to_string(), "a".to_string())]);
             let result = parse_ttl(&params);
             assert_eq!(
-                result.err().unwrap().0.to_string(),
+                result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'ttl' must be in seconds as an unsigned integer"
             );
         }
@@ -275,7 +276,7 @@ mod tests {
             let params = HashMap::from_iter(vec![("continuous".to_string(), "a".to_string())]);
             let result = parse_continuous_flag(&params);
             assert_eq!(
-                result.err().unwrap().0.to_string(),
+                result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'continue' must be a bool value"
             );
         }
@@ -308,7 +309,7 @@ mod tests {
             let params = HashMap::from_iter(vec![("start".to_string(), "a".to_string())]);
             let result = parse_time_range(&params);
             assert_eq!(
-                result.err().unwrap().0.to_string(),
+                result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'start' must be an unix timestamp in microseconds"
             );
         }
@@ -318,7 +319,7 @@ mod tests {
             let params = HashMap::from_iter(vec![("stop".to_string(), "a".to_string())]);
             let result = parse_time_range(&params);
             assert_eq!(
-                result.err().unwrap().0.to_string(),
+                result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'stop' must be an unix timestamp in microseconds"
             );
         }
@@ -375,7 +376,7 @@ mod tests {
             let params = HashMap::from_iter(vec![("each_s".to_string(), "a".to_string())]);
             let result = parse_each_s(&params);
             assert_eq!(
-                result.err().unwrap().0.to_string(),
+                result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'each_s' must be a float value"
             );
         }
@@ -385,7 +386,7 @@ mod tests {
             let params = HashMap::from_iter(vec![("each_s".to_string(), "0".to_string())]);
             let result = parse_each_s(&params);
             assert_eq!(
-                result.err().unwrap().0.to_string(),
+                result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] Time must be greater than 0 seconds"
             );
         }
@@ -413,7 +414,7 @@ mod tests {
             let params = HashMap::from_iter(vec![("each_n".to_string(), "a".to_string())]);
             let result = parse_each_n(&params);
             assert_eq!(
-                result.err().unwrap().0.to_string(),
+                result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'each_n' must unsigned integer"
             );
         }
@@ -423,7 +424,7 @@ mod tests {
             let params = HashMap::from_iter(vec![("each_n".to_string(), "0".to_string())]);
             let result = parse_each_n(&params);
             assert_eq!(
-                result.err().unwrap().0.to_string(),
+                result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'each_n' must be greater than 0"
             );
         }
@@ -451,7 +452,7 @@ mod tests {
             let params = HashMap::from_iter(vec![("limit".to_string(), "a".to_string())]);
             let result = parse_limit(params);
             assert_eq!(
-                result.err().unwrap().0.to_string(),
+                result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'limit' must unsigned integer"
             );
         }

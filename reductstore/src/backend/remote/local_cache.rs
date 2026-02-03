@@ -148,6 +148,14 @@ impl LocalCache {
 
         removed_files
     }
+
+    pub fn invalidate_file(&mut self, path: &Path) -> io::Result<()> {
+        if let Some(entry) = self.entries.remove(path) {
+            self.current_size -= entry.size;
+            fs::remove_file(path)?;
+        }
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -414,6 +422,42 @@ mod tests {
             assert!(removed_files.contains(&file_path2), "file2 remains");
             assert!(!removed_files.contains(&file_path1));
             assert_eq!(local_cache.current_size, 5);
+        }
+    }
+
+    mod invalidate_file {
+        use super::*;
+
+        #[rstest]
+        fn test_invalidate_registered_file(local_cache_with_file: (LocalCache, PathBuf)) {
+            let (mut local_cache, file_path) = local_cache_with_file;
+
+            assert!(file_path.exists());
+            assert!(local_cache.entries.contains_key(&file_path));
+            assert_eq!(local_cache.current_size, 4);
+
+            local_cache.invalidate_file(&file_path).unwrap();
+
+            assert!(!file_path.exists());
+            assert!(!local_cache.entries.contains_key(&file_path));
+            assert_eq!(local_cache.current_size, 0);
+        }
+
+        #[rstest]
+        fn test_invalidate_non_registered_file(mut local_cache: LocalCache) {
+            let file_path = local_cache.path.join("non_registered_file.txt");
+            fs::create_dir_all(local_cache.path.clone()).unwrap();
+            fs::write(&file_path, b"test").unwrap();
+
+            assert!(file_path.exists());
+            assert!(!local_cache.entries.contains_key(&file_path));
+            assert_eq!(local_cache.current_size, 0);
+
+            local_cache.invalidate_file(&file_path).unwrap();
+
+            assert!(file_path.exists());
+            assert!(!local_cache.entries.contains_key(&file_path));
+            assert_eq!(local_cache.current_size, 0);
         }
     }
 

@@ -38,9 +38,11 @@ pub(super) async fn remove_batched_records(
     let err_map = {
         let entry = components
             .storage
-            .get_bucket(bucket_name)?
+            .get_bucket(bucket_name)
+            .await?
             .upgrade()?
-            .get_entry(entry_name)?
+            .get_entry(entry_name)
+            .await?
             .upgrade()?;
         entry
             .remove_records(record_headers.iter().map(|(time, _)| *time).collect())
@@ -119,12 +121,14 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade()
             .unwrap();
 
         let err = bucket
             .get_entry("entry-1")
+            .await
             .unwrap()
             .upgrade()
             .unwrap()
@@ -132,12 +136,15 @@ mod tests {
             .await
             .err()
             .unwrap();
-        assert_eq!(err, not_found!("No record with timestamp 0"));
+        assert_eq!(
+            err,
+            not_found!("Record 0 not found in entry bucket-1/entry-1")
+        );
 
         assert_eq!(err_map.len(), 1);
         assert_eq!(
             err_map.get("x-reduct-error-1").unwrap(),
-            "404,No record with timestamp 1"
+            "404,Record 1 not found in entry bucket-1/entry-1"
         );
     }
 }

@@ -2,12 +2,18 @@
 // Licensed under the Business Source License 1.1
 
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::AsyncRwLock;
 use crate::replication::Transaction;
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::collections::HashMap;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
+
+pub(super) type TransactionLogRef = Arc<AsyncRwLock<TransactionLog>>;
+pub(super) type TransactionLogMap = Arc<AsyncRwLock<HashMap<String, TransactionLogRef>>>;
 
 /// Transaction log for replication.
 ///
@@ -39,20 +45,18 @@ impl TransactionLog {
     /// # Returns
     ///
     /// A new transaction log instance or an error.
-    pub fn try_load_or_create(path: &PathBuf, capacity: usize) -> Result<Self, ReductError> {
+    pub async fn try_load_or_create(path: &PathBuf, capacity: usize) -> Result<Self, ReductError> {
         let init_capacity_in_bytes = capacity * ENTRY_SIZE + HEADER_SIZE;
 
         let instance = if !path.try_exists()? {
-            let file = FILE_CACHE
-                .write_or_create(&path, SeekFrom::Current(0))?
-                .upgrade()?;
-            let mut file = file.write()?;
+            let mut file = FILE_CACHE
+                .write_or_create(&path, SeekFrom::Current(0))
+                .await?;
 
             file.set_len(init_capacity_in_bytes as u64)?;
-            file.seek(SeekFrom::Start(0))?;
             file.write_all(HEADER_SIZE.to_be_bytes().as_ref())?;
             file.write_all(HEADER_SIZE.to_be_bytes().as_ref())?;
-            file.sync_all()?;
+            file.sync_all().await?;
 
             Self {
                 file_path: path.clone(),
@@ -62,9 +66,7 @@ impl TransactionLog {
             }
         } else {
             let (buf, capacity_in_bytes) = {
-                let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
-                let mut file = file.write()?;
-
+                let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
                 let mut buf = [0u8; 16];
                 file.read_exact(&mut buf)?;
                 let capacity_in_bytes = file.metadata()?.len() as usize;
@@ -89,10 +91,9 @@ impl TransactionLog {
                         "Transaction log {:?}' size changed from {} to {} bytes",
                         path, capacity_in_bytes, init_capacity_in_bytes
                     );
-                    let file = FILE_CACHE
-                        .write_or_create(&path, SeekFrom::Start(0))?
-                        .upgrade()?;
-                    let mut file = file.write()?;
+                    let mut file = FILE_CACHE
+                        .write_or_create(&path, SeekFrom::Start(0))
+                        .await?;
 
                     file.set_len(init_capacity_in_bytes as u64)?;
                     init_capacity_in_bytes
@@ -162,16 +163,14 @@ impl TransactionLog {
     /// # Returns
     ///
     /// The oldest transaction if the log is full, otherwise `None`.
-    pub fn push_back(
+    pub async fn push_back(
         &mut self,
         transaction: Transaction,
     ) -> Result<Option<Transaction>, ReductError> {
         {
-            let file = FILE_CACHE
-                .write_or_create(&self.file_path, SeekFrom::Start(self.write_pos as u64))?
-                .upgrade()?;
-            let mut file = file.write()?;
-
+            let mut file = FILE_CACHE
+                .write_or_create(&self.file_path, SeekFrom::Start(self.write_pos as u64))
+                .await?;
             let mut buf = [0u8; ENTRY_SIZE];
             buf[0] = transaction.clone().into();
             buf[1..9].copy_from_slice(&transaction.timestamp().to_be_bytes());
@@ -188,9 +187,9 @@ impl TransactionLog {
         }
 
         if self.write_pos == self.read_pos {
-            let transaction = self.unsafe_head(1)?.get(0).cloned();
+            let transaction = self.unsafe_head(1).await?.get(0).cloned();
 
-            self.unsafe_pop()?;
+            self.unsafe_pop().await?;
             Ok(transaction)
         } else {
             Ok(None)
@@ -213,35 +212,34 @@ impl TransactionLog {
         (len_in_bytes / ENTRY_SIZE) as usize
     }
 
-    pub fn front(&self, n: usize) -> Result<Vec<Transaction>, ReductError> {
+    pub async fn front(&self, n: usize) -> Result<Vec<Transaction>, ReductError> {
         if self.is_empty() {
             return Ok(Vec::new());
         }
-        let transaction = self.unsafe_head(n)?;
+        let transaction = self.unsafe_head(n).await?;
         Ok(transaction)
     }
 
-    pub fn pop_front(&mut self, n: usize) -> Result<usize, ReductError> {
+    pub async fn pop_front(&mut self, n: usize) -> Result<usize, ReductError> {
         let mut popped = 0usize;
         for _ in 0..n {
             if self.read_pos == self.write_pos {
                 break;
             }
-            self.unsafe_pop()?;
+            self.unsafe_pop().await?;
             popped += 1;
         }
 
         Ok(popped)
     }
 
-    fn unsafe_head(&self, n: usize) -> Result<Vec<Transaction>, ReductError> {
+    async fn unsafe_head(&self, n: usize) -> Result<Vec<Transaction>, ReductError> {
         let mut buf = [0u8; ENTRY_SIZE];
         let mut read_pos = self.read_pos;
         let mut transactions = Vec::with_capacity(n);
-        let file = FILE_CACHE
-            .read(&self.file_path, SeekFrom::Start(read_pos as u64))?
-            .upgrade()?;
-        let mut file = file.write()?;
+        let mut file = FILE_CACHE
+            .read(&self.file_path, SeekFrom::Start(read_pos as u64))
+            .await?;
 
         for _ in 0..n {
             file.seek(SeekFrom::Start(read_pos as u64))?;
@@ -268,7 +266,7 @@ impl TransactionLog {
         Ok(transactions)
     }
 
-    fn unsafe_pop(&mut self) -> Result<(), ReductError> {
+    async fn unsafe_pop(&mut self) -> Result<(), ReductError> {
         self.read_pos += ENTRY_SIZE;
 
         if self.read_pos >= self.capacity_in_bytes {
@@ -276,10 +274,9 @@ impl TransactionLog {
         }
 
         {
-            let file = FILE_CACHE
-                .write_or_create(&self.file_path, SeekFrom::Start(8))?
-                .upgrade()?;
-            let mut file = file.write()?;
+            let mut file = FILE_CACHE
+                .write_or_create(&self.file_path, SeekFrom::Start(8))
+                .await?;
             file.write_all(&self.read_pos.to_be_bytes())?;
         }
 
@@ -295,17 +292,24 @@ mod tests {
     use tempfile::tempdir;
 
     #[rstest]
-    fn test_new_transaction_log(path: PathBuf) {
-        let transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
-        assert_eq!(transaction_log.is_empty(), true);
+    #[tokio::test]
+    async fn test_new_transaction_log(path: PathBuf) {
+        let transaction_log = TransactionLog::try_load_or_create(&path, 100)
+            .await
+            .unwrap();
+        assert!(transaction_log.is_empty());
     }
 
     #[rstest]
-    fn test_write_read_transaction_log(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
+    #[tokio::test]
+    async fn test_write_read_transaction_log(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100)
+            .await
+            .unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
+                .await
                 .unwrap(),
             None
         );
@@ -315,161 +319,178 @@ mod tests {
         assert_eq!(
             transaction_log
                 .push_back(Transaction::UpdateRecord(2))
+                .await
                 .unwrap(),
             None
         );
         assert_eq!(transaction_log.len(), 2);
-        assert_eq!(transaction_log.is_empty(), false);
+        assert!(!transaction_log.is_empty());
         assert_eq!(
-            transaction_log.front(2).unwrap(),
+            transaction_log.front(2).await.unwrap(),
             vec![Transaction::WriteRecord(1), Transaction::UpdateRecord(2),]
         );
 
-        assert_eq!(transaction_log.pop_front(2).unwrap(), 2);
-        assert_eq!(transaction_log.is_empty(), true);
+        assert_eq!(transaction_log.pop_front(2).await.unwrap(), 2);
+        assert!(transaction_log.is_empty());
 
-        assert_eq!(transaction_log.pop_front(1).unwrap(), 0);
+        assert_eq!(transaction_log.pop_front(1).await.unwrap(), 0);
     }
 
     #[rstest]
-    fn test_write_broken_type(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
+    #[tokio::test]
+    async fn test_write_broken_type(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100)
+            .await
+            .unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
+                .await
                 .unwrap(),
             None
         );
         {
-            let file = FILE_CACHE
+            let mut file = FILE_CACHE
                 .write_or_create(
                     &path,
                     SeekFrom::Start((transaction_log.write_pos - ENTRY_SIZE) as u64),
                 )
-                .unwrap()
-                .upgrade()
+                .await
                 .unwrap();
-            let mut file = file.write().unwrap();
             file.write_all(&[99]).unwrap();
-            file.sync_all().unwrap();
+            file.sync_all().await.unwrap();
         }
 
         assert_eq!(
-            transaction_log.front(1).unwrap_err(),
+            transaction_log.front(1).await.unwrap_err(),
             internal_server_error!("Invalid transaction type",)
         );
     }
 
     #[rstest]
-    fn test_out_of_range(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100).unwrap();
+    #[tokio::test]
+    async fn test_out_of_range(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100)
+            .await
+            .unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
+                .await
                 .unwrap(),
             None
         );
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(2))
+                .await
                 .unwrap(),
             None
         );
         assert_eq!(transaction_log.len(), 2);
-        assert_eq!(transaction_log.is_empty(), false);
+        assert!(!transaction_log.is_empty());
 
         assert_eq!(
-            transaction_log.front(3).unwrap(),
+            transaction_log.front(3).await.unwrap(),
             vec![Transaction::WriteRecord(1), Transaction::WriteRecord(2),],
             "We return only the available transactions."
         );
 
         assert_eq!(
-            transaction_log.pop_front(3).unwrap(),
+            transaction_log.pop_front(3).await.unwrap(),
             2,
             "We pop only the available transactions."
         );
-        assert_eq!(transaction_log.is_empty(), true);
+        assert!(transaction_log.is_empty());
     }
 
     #[rstest]
-    fn test_overflow(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_overflow(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         for i in 1..5 {
             transaction_log
                 .push_back(Transaction::WriteRecord(i))
+                .await
                 .unwrap();
         }
 
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(
-            transaction_log.front(2).unwrap(),
+            transaction_log.front(2).await.unwrap(),
             vec![Transaction::WriteRecord(3), Transaction::WriteRecord(4),]
         );
     }
 
     #[rstest]
-    fn test_recovery(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_recovery(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         for i in 1..5 {
             transaction_log
                 .push_back(Transaction::WriteRecord(i))
+                .await
                 .unwrap();
         }
 
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(
-            transaction_log.front(2).unwrap(),
+            transaction_log.front(2).await.unwrap(),
             vec![Transaction::WriteRecord(3), Transaction::WriteRecord(4),]
         );
 
-        assert_eq!(transaction_log.pop_front(2).unwrap(), 2);
-        assert_eq!(transaction_log.is_empty(), true);
+        assert_eq!(transaction_log.pop_front(2).await.unwrap(), 2);
+        assert!(transaction_log.is_empty());
     }
 
     #[rstest]
-    fn test_recovery_init(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_recovery_init(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
+            .await
             .unwrap();
         drop(transaction_log);
 
-        let transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+        let transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         assert_eq!(transaction_log.write_pos, HEADER_SIZE + ENTRY_SIZE);
         assert_eq!(transaction_log.read_pos, HEADER_SIZE);
     }
 
     #[rstest]
-    fn test_recovery_empty_cache(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_recovery_empty_cache(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
+            .await
             .unwrap();
 
-        FILE_CACHE.discard_recursive(&path).unwrap(); // discard the cache to simulate restart
+        FILE_CACHE.discard_recursive(&path).await.unwrap(); // discard the cache to simulate restart
 
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
 
         // check if the transaction log is still working after cache discard
         assert_eq!(
-            transaction_log.front(1).unwrap(),
+            transaction_log.front(1).await.unwrap(),
             vec![Transaction::WriteRecord(1)]
         );
-        assert_eq!(transaction_log.pop_front(1).unwrap(), 1);
+        assert_eq!(transaction_log.pop_front(1).await.unwrap(), 1);
         assert!(transaction_log.is_empty());
     }
 
     #[rstest]
-    fn test_resize_empty_log(path: PathBuf) {
-        TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_resize_empty_log(path: PathBuf) {
+        TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 3 + HEADER_SIZE
         );
 
-        TransactionLog::try_load_or_create(&path, 5).unwrap();
+        TransactionLog::try_load_or_create(&path, 5).await.unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 5 + HEADER_SIZE
@@ -477,17 +498,19 @@ mod tests {
     }
 
     #[rstest]
-    fn test_resize_non_empty_log(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).unwrap();
+    #[tokio::test]
+    async fn test_resize_non_empty_log(path: PathBuf) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
+            .await
             .unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 3 + HEADER_SIZE
         );
 
-        TransactionLog::try_load_or_create(&path, 5).unwrap();
+        TransactionLog::try_load_or_create(&path, 5).await.unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 3 + HEADER_SIZE,
@@ -511,45 +534,43 @@ mod tests {
         )]
         #[case([0, 0, 0, 0, 0, 0, 0, 16, 0, 0, 0, 0, 0, 0, 0, 34], "Invalid read position 34 in transaction log"
         )]
-        fn test_invalid_position(
+        #[tokio::test]
+        async fn test_invalid_position(
             #[case] buf: [u8; 16],
             #[case] expected_error: &str,
             path: PathBuf,
         ) {
             {
-                let file = FILE_CACHE
+                let mut file = FILE_CACHE
                     .write_or_create(&path, SeekFrom::Start(0))
-                    .unwrap()
-                    .upgrade()
+                    .await
                     .unwrap();
-                let mut file = file.write().unwrap();
                 file.write_all(&buf).unwrap();
                 file.set_len((HEADER_SIZE + ENTRY_SIZE * 2) as u64).unwrap();
             }
 
             let result = TransactionLog::try_load_or_create(&path, 3);
             assert_eq!(
-                result.err().unwrap(),
+                result.await.err().unwrap(),
                 internal_server_error!("{} {}", expected_error, path.to_str().unwrap())
             );
         }
 
         #[rstest]
-        fn test_invalid_size(path: PathBuf) {
+        #[tokio::test]
+        async fn test_invalid_size(path: PathBuf) {
             {
-                let file = FILE_CACHE
+                let mut file = FILE_CACHE
                     .write_or_create(&path, SeekFrom::Start(0))
-                    .unwrap()
-                    .upgrade()
+                    .await
                     .unwrap();
-                let mut file = file.write().unwrap();
                 file.write_all(&[0u8; 16]).unwrap();
                 file.set_len((HEADER_SIZE + 1) as u64).unwrap();
             }
 
             let result = TransactionLog::try_load_or_create(&path, 3);
             assert_eq!(
-                result.err().unwrap(),
+                result.await.err().unwrap(),
                 internal_server_error!(
                     "Invalid size 17 of transaction log {}",
                     path.to_str().unwrap()

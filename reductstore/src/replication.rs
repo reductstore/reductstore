@@ -1,15 +1,13 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::Cfg;
 use crate::replication::replication_task::ReplicationTask;
-use crate::storage::engine::StorageEngine;
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::{
-    FullReplicationInfo, ReplicationInfo, ReplicationSettings,
+    FullReplicationInfo, ReplicationInfo, ReplicationMode, ReplicationSettings,
 };
-use std::sync::Arc;
 
 mod diagnostics;
 pub mod proto;
@@ -76,6 +74,8 @@ pub struct TransactionNotification {
     pub meta: RecordMeta,
     pub event: Transaction,
 }
+
+#[async_trait]
 pub trait ManageReplications {
     /// Create a new replication.
     ///
@@ -88,7 +88,7 @@ pub trait ManageReplications {
     /// * `ReductError::Conflict` - Replication already exists.
     /// * `ReductError::BadRequest` - Invalid destination host.
     /// * `ReductError::NotFound` - Source bucket does not exist.
-    fn create_replication(
+    async fn create_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
@@ -104,17 +104,17 @@ pub trait ManageReplications {
     /// # Errors
     ///
     /// A `ReductError` is returned if the update fails.
-    fn update_replication(
+    async fn update_replication(
         &mut self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError>;
 
     /// List all replications.
-    fn replications(&self) -> Vec<ReplicationInfo>;
+    async fn replications(&self) -> Result<Vec<ReplicationInfo>, ReductError>;
 
     /// Get replication information.
-    fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
+    async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
 
     /// Get replication task.
     fn get_replication(&self, name: &str) -> Result<&ReplicationTask, ReductError>;
@@ -123,7 +123,10 @@ pub trait ManageReplications {
     fn get_mut_replication(&mut self, name: &str) -> Result<&mut ReplicationTask, ReductError>;
 
     /// Remove a replication task
-    fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
+    async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
+
+    /// Update replication mode
+    async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError>;
 
     /// Notify replication task about a new transaction.
     ///
@@ -134,17 +137,10 @@ pub trait ManageReplications {
     /// # Errors
     ///
     /// A `ReductError` is returned if the notification fails.
-    fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
+    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
 
     /// Start background workers if they are not running yet.
     fn start(&mut self);
 }
 
-/// Create a new replication repository
-/// A factory method to create a new replication repository and return it as a trait object.
-pub(crate) fn create_replication_repo(
-    storage: Arc<StorageEngine>,
-    config: Cfg,
-) -> Box<dyn ManageReplications + Send + Sync> {
-    Box::new(replication_repository::ReplicationRepository::load_or_create(storage, config))
-}
+pub(crate) use replication_repository::ReplicationRepoBuilder;

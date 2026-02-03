@@ -30,7 +30,8 @@ pub(super) async fn remove_entry(
 
     components
         .storage
-        .get_bucket(bucket_name)?
+        .get_bucket(bucket_name)
+        .await?
         .upgrade()?
         .remove_entry(entry_name)
         .await?;
@@ -60,17 +61,20 @@ mod tests {
             .await
             .unwrap();
         let components = keeper.get_anonymous().await.unwrap();
-        assert_eq!(
-            components
-                .storage
-                .get_bucket("bucket-1")
-                .unwrap()
-                .upgrade_and_unwrap()
-                .get_entry("entry-1")
-                .err()
-                .unwrap()
-                .status(),
-            ErrorCode::NotFound
+        let status = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap()
+            .get_entry("entry-1")
+            .await
+            .err()
+            .unwrap()
+            .status();
+        assert!(
+            matches!(status, ErrorCode::NotFound | ErrorCode::Conflict),
+            "Entry removal should finish quickly"
         );
     }
 
@@ -86,6 +90,6 @@ mod tests {
             ("entry_name".to_string(), "entry-1".to_string()),
         ]);
         let result = remove_entry(State(keeper.clone()), Path(path), headers.clone()).await;
-        assert_eq!(result.unwrap_err().0.status(), ErrorCode::NotFound);
+        assert_eq!(result.unwrap_err().status(), ErrorCode::NotFound);
     }
 }

@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 pub struct QueryLinkCreateRequest {
     /// Bucket name
     pub bucket: String,
-    /// Entry name
+    /// Entry name (since v1.18 used for backward compatibility)
     pub entry: String,
     /// Record index
     pub index: Option<u64>,

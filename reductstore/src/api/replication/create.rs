@@ -21,8 +21,9 @@ pub(super) async fn create_replication(
     components
         .replication_repo
         .write()
-        .await
-        .create_replication(&replication_name, settings.into())?;
+        .await?
+        .create_replication(&replication_name, settings.into())
+        .await?;
     Ok(())
 }
 
@@ -57,6 +58,7 @@ mod tests {
             .replication_repo
             .read()
             .await
+            .unwrap()
             .get_replication("test")
             .is_ok());
     }

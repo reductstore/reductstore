@@ -14,6 +14,7 @@ use axum_extra::headers::HeaderMap;
 use crate::api::entry::common::check_and_extract_ts_or_query_id;
 use crate::api::utils::{make_headers_from_reader, RecordStream};
 use crate::api::StateKeeper;
+use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::query::QueryRx;
@@ -21,7 +22,7 @@ use reduct_base::bad_request;
 use reduct_base::io::ReadRecord;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::{Mutex, RwLock as AsyncRwLock};
+use tokio::sync::Mutex;
 
 // GET /:bucket/:entry?ts=<number>|q=<number>|
 pub(super) async fn read_record(
@@ -44,10 +45,12 @@ pub(super) async fn read_record(
 
     let entry = components
         .storage
-        .get_bucket(bucket_name)?
+        .get_bucket(bucket_name)
+        .await?
         .upgrade()?
-        .get_entry(entry_name)?;
-    let last_record = entry.upgrade()?.info()?.latest_record;
+        .get_entry(entry_name)
+        .await?;
+    let last_record = entry.upgrade()?.info().await?.latest_record;
 
     let (query_id, ts) = check_and_extract_ts_or_query_id(params, last_record)?;
 
@@ -71,7 +74,7 @@ async fn fetch_and_response_single_record(
         entry.begin_read(ts).await?
     } else {
         let query_id = query_id.unwrap();
-        let (rx, _) = entry.get_query_receiver(query_id)?;
+        let (rx, _) = entry.get_query_receiver(query_id).await?;
         let query_path = format!("{}/{}/{}", entry.bucket_name(), entry.name(), query_id);
         next_record_reader(rx, &query_path).await?
     };
@@ -94,7 +97,7 @@ async fn next_record_reader(
     let rc = rx
         .upgrade()
         .map_err(|_| bad_request!("Query '{}' was closed", query_path))?;
-    let mut rx = rc.write().await;
+    let mut rx = rc.write().await?;
     if let Some(reader) = rx.recv().await {
         reader.map_err(|e| HttpError::from(e))
     } else {
@@ -118,7 +121,7 @@ mod tests {
     #[rstest]
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_single_read_ts(
         #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
@@ -155,7 +158,7 @@ mod tests {
     #[rstest]
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_single_read_query(
         #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
@@ -164,7 +167,7 @@ mod tests {
         #[case] body: String,
     ) {
         let keeper = keeper.await;
-        let query_id = query(&path_to_entry_1, keeper.clone()).await;
+        let query_id = query(&path_to_entry_1, keeper.clone(), None).await;
         let response = read_record(
             State(keeper.clone()),
             path_to_entry_1,
@@ -241,7 +244,10 @@ mod tests {
         .err()
         .unwrap();
 
-        assert_eq!(err, HttpError::new(NotFound, "No record with timestamp 1"));
+        assert_eq!(
+            err,
+            HttpError::new(NotFound, "Record 1 not found in block bucket-1/entry-1/0")
+        );
     }
 
     #[rstest]

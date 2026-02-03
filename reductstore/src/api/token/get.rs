@@ -20,9 +20,10 @@ pub(super) async fn get_token(
 
     let mut token = components
         .token_repo
-        .read()
-        .await
-        .get_token(&token_name)?
+        .write()
+        .await?
+        .get_token(&token_name)
+        .await?
         .clone();
     token.value.clear();
     Ok(TokenAxum::from(token))

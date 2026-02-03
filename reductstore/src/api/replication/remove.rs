@@ -19,8 +19,9 @@ pub(super) async fn remove_replication(
     components
         .replication_repo
         .write()
-        .await
-        .remove_replication(&replication_name)?;
+        .await?
+        .remove_replication(&replication_name)
+        .await?;
     Ok(())
 }
 
@@ -47,7 +48,9 @@ mod tests {
             .replication_repo
             .write()
             .await
+            .unwrap()
             .create_replication("test", settings)
+            .await
             .unwrap();
 
         remove_replication(
@@ -63,6 +66,7 @@ mod tests {
                 .replication_repo
                 .read()
                 .await
+                .unwrap()
                 .get_replication("test")
                 .err()
                 .unwrap()
@@ -79,6 +83,6 @@ mod tests {
             .err()
             .unwrap();
 
-        assert_eq!(err.0.status, NotFound, "Should handle errors");
+        assert_eq!(err.status(), NotFound, "Should handle errors");
     }
 }

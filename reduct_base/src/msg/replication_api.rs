@@ -7,6 +7,24 @@ use crate::Labels;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+/// Replication mode
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ReplicationMode {
+    /// Replication is active and sends records
+    Enabled,
+    /// Replication stores transactions but doesn't send them
+    Paused,
+    /// Replication ignores new transactions
+    Disabled,
+}
+
+impl Default for ReplicationMode {
+    fn default() -> Self {
+        Self::Enabled
+    }
+}
+
 /// Replication settings
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct ReplicationSettings {
@@ -36,6 +54,9 @@ pub struct ReplicationSettings {
     /// When condition
     #[serde(default)]
     pub when: Option<Value>,
+    /// Mode
+    #[serde(default)]
+    pub mode: ReplicationMode,
 }
 
 /// Replication info
@@ -43,12 +64,21 @@ pub struct ReplicationSettings {
 pub struct ReplicationInfo {
     /// Replication name
     pub name: String,
+    /// Replication mode
+    #[serde(default)] // for backward compatibility with older versions of reduct-rs
+    pub mode: ReplicationMode,
     /// Remote instance is available and replication is active
     pub is_active: bool,
     /// Replication is provisioned
     pub is_provisioned: bool,
     /// Number of records pending replication
     pub pending_records: u64,
+}
+
+/// Payload for updating replication mode
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ReplicationModePayload {
+    pub mode: ReplicationMode,
 }
 
 /// Replication list

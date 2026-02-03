@@ -18,7 +18,7 @@ pub(super) async fn head_bucket(
     let components = keeper
         .get_with_permissions(&headers, AuthenticatedPolicy {})
         .await?;
-    components.storage.get_bucket(&bucket_name)?;
+    components.storage.get_bucket(&bucket_name).await?;
     Ok(())
 }
 

@@ -1,0 +1,111 @@
+name: 'Recovery Test'
+description: 'Runs recovery tests for ReductStore.'
+inputs:
+  backend:
+    description: 'Storage backend type (fs or s3).'
+    required: true
+  cmd:
+    description: 'Docker command to stop or kill.'
+    required: true
+  rs_api_token:
+    description: 'API token for ReductStore.'
+    required: true
+  minio_access_key:
+    description: 'MinIO access key.'
+    required: true
+  minio_secret_key:
+    description: 'MinIO secret key.'
+    required: true
+  minio_bucket:
+    description: 'MinIO bucket.'
+    required: true
+  repository:
+    description: 'GitHub repository.'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - uses: actions/setup-python@v5
+      with:
+        python-version: 3.12
+
+    - name: Download artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: image
+        path: /tmp/
+
+    - name: Load image
+      shell: bash
+      run: |
+        docker load --input /tmp/image.tar
+        docker image ls -a
+
+    - name: Run ReductStore with FileSystem backend
+      if: ${{ inputs.backend == 'fs' }}
+      shell: bash
+      run: |
+        docker run --network=host -v ./data:/data --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name reductstore -d ${{ inputs.repository }}
+        sleep 5
+        docker logs reductstore
+
+    - name: Run MiniO server and create bucket
+      if: ${{ inputs.backend == 's3' }}
+      uses: ./.github/actions/run-minio
+      with:
+        access_key: ${{ inputs.minio_access_key }}
+        secret_key: ${{ inputs.minio_secret_key }}
+        bucket_name: ${{ inputs.minio_bucket }}
+
+    - name: Run ReductStore with S3 backend
+      if: ${{ inputs.backend == 's3' }}
+      shell: bash
+      run: |
+        docker run --network=host -v ./data:/data \
+          --env RS_API_TOKEN=${{ inputs.rs_api_token }} \
+          --env RS_STORAGE_TYPE=s3 \
+          --env RS_REMOTE_BACKEND_ENDPOINT=http://127.0.0.1:9000 \
+          --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }} \
+          --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }} \
+          --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }} \
+          --name reductstore -d ${{ inputs.repository }}
+        sleep 5
+        docker logs reductstore
+
+    - name: Upload data
+      shell: bash
+      env:
+        RS_API_TOKEN: ${{ inputs.rs_api_token }}
+      run: |
+        pip install -r ./integration_tests/data_check/requirements.txt
+        python3 ./integration_tests/data_check/uploader.py
+
+    - name: Restart ReductStore
+      shell: bash
+      run: |
+        docker ${{ inputs.cmd }} reductstore
+        docker run --network=host -v ./data:/data --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name reductstore-1 -d ${{ inputs.repository }}
+        sleep 5
+        docker logs reductstore-1
+
+    - name: Check data after migration
+      shell: bash
+      env:
+          RS_API_TOKEN: ${{ inputs.rs_api_token }}
+      run: python3 ./integration_tests/data_check/checker.py
+
+    - name: Save docker logs
+      if: always()
+      shell: bash
+      run: docker logs reductstore | zip > /tmp/docker-log.zip
+
+    - uses: actions/upload-artifact@v4
+      if: always()
+      with:
+        name: docker-log-recovery-${{ inputs.cmd }}-${{ inputs.backend }}
+        path: /tmp/docker-log.zip
+
+    - name: Show replication report
+      if: always()
+      shell: bash
+      run: cat ./report.json

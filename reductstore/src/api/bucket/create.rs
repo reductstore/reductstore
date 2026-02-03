@@ -22,7 +22,8 @@ pub(super) async fn create_bucket(
         .await?;
     components
         .storage
-        .create_bucket(&bucket_name, settings.into())?;
+        .create_bucket(&bucket_name, settings.into())
+        .await?;
     Ok(())
 }
 

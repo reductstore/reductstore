@@ -1,13 +1,13 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::core::fallback_runtime::FallbackRuntime;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use async_stream::stream;
+use async_trait::async_trait;
 use axum::http::HeaderName;
 use bytes::Bytes;
 use futures_util::Stream;
-use reduct_base::error::{ErrorCode, IntEnum, ReductError};
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
@@ -16,8 +16,9 @@ use std::collections::BTreeMap;
 use std::str::FromStr;
 
 // A wrapper around the Reduct client API to make it easier to mock.
+#[async_trait]
 pub(super) trait ReductClientApi {
-    fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
+    async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
 
     fn url(&self) -> &str;
 }
@@ -25,14 +26,15 @@ pub(super) trait ReductClientApi {
 pub(super) type BoxedClientApi = Box<dyn ReductClientApi + Sync + Send>;
 
 // A wrapper around the Reduct bucket API to make it easier to mock.
+#[async_trait]
 pub(super) trait ReductBucketApi {
-    fn write_batch(
+    async fn write_batch(
         &self,
         entry: &str,
         records: Vec<BoxedReadRecord>,
     ) -> Result<ErrorRecordMap, ReductError>;
 
-    fn update_batch(
+    async fn update_batch(
         &self,
         entry: &str,
         records: &Vec<BoxedReadRecord>,
@@ -48,7 +50,6 @@ pub(super) type BoxedBucketApi = Box<dyn ReductBucketApi + Sync + Send>;
 struct ReductClient {
     client: Client,
     server_url: String,
-    rt: FallbackRuntime,
 }
 
 static API_PATH: &str = "api/v1";
@@ -76,11 +77,7 @@ impl ReductClient {
             url.to_string()
         };
 
-        Self {
-            client,
-            server_url,
-            rt: FallbackRuntime::new(),
-        }
+        Self { client, server_url }
     }
 }
 
@@ -88,7 +85,6 @@ struct BucketWrapper {
     server_url: String,
     bucket_name: String,
     client: Client,
-    rt: FallbackRuntime,
 }
 
 impl BucketWrapper {
@@ -187,7 +183,11 @@ impl BucketWrapper {
             failed_records.insert(
                 record_ts,
                 ReductError::new(
-                    ErrorCode::from_int(status.parse().unwrap()).unwrap(),
+                    status
+                        .parse::<i16>()
+                        .unwrap_or(-1)
+                        .try_into()
+                        .unwrap_or(ErrorCode::Unknown),
                     message,
                 ),
             );
@@ -222,7 +222,7 @@ fn check_response(response: Result<Response, Error>) -> Result<Response, ReductE
     }
 
     let status =
-        ErrorCode::from_int(response.status().as_u16() as i16).unwrap_or(ErrorCode::Unknown);
+        ErrorCode::try_from(response.status().as_u16() as i16).unwrap_or(ErrorCode::Unknown);
 
     let error_msg = response
         .headers()
@@ -235,26 +235,21 @@ fn check_response(response: Result<Response, Error>) -> Result<Response, ReductE
     Err(ReductError::new(status, &error_msg))
 }
 
+#[async_trait]
 impl ReductClientApi for ReductClient {
-    fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
+    async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
         let request = self.client.request(
             Method::GET,
             &format!("{}{}/b/{}", self.server_url, API_PATH, bucket_name),
         );
 
-        self.rt.block_on(async move {
-            let resp = request.send().await;
-            tx.send(resp).await.unwrap();
-        });
-
-        check_response(rx.blocking_recv().unwrap())?;
+        let resp = request.send().await;
+        check_response(resp)?;
 
         Ok(Box::new(BucketWrapper {
             server_url: self.server_url.clone(),
             bucket_name: bucket_name.to_string(),
             client: self.client.clone(),
-            rt: self.rt.clone(),
         }))
     }
 
@@ -263,8 +258,9 @@ impl ReductClientApi for ReductClient {
     }
 }
 
+#[async_trait]
 impl ReductBucketApi for BucketWrapper {
-    fn write_batch(
+    async fn write_batch(
         &self,
         entry: &str,
         records: Vec<BoxedReadRecord>,
@@ -278,20 +274,16 @@ impl ReductBucketApi for BucketWrapper {
             ),
         );
 
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        self.rt.block_on(async move {
-            let response = request
-                .headers(headers)
-                .body(Body::wrap_stream(stream))
-                .send()
-                .await;
-            tx.send(response).await.unwrap();
-        });
+        let response = request
+            .headers(headers)
+            .body(Body::wrap_stream(stream))
+            .send()
+            .await;
 
-        Self::parse_record_errors(rx.blocking_recv().unwrap())
+        Self::parse_record_errors(response)
     }
 
-    fn update_batch(
+    async fn update_batch(
         &self,
         entry: &str,
         records: &Vec<BoxedReadRecord>,
@@ -304,13 +296,9 @@ impl ReductBucketApi for BucketWrapper {
                 self.server_url, API_PATH, self.bucket_name, entry
             ),
         );
-        let (tx, mut rx) = tokio::sync::mpsc::channel(1);
-        self.rt.block_on(async move {
-            let response = request.headers(headers).send().await;
-            tx.send(response).await.unwrap();
-        });
 
-        Self::parse_record_errors(rx.blocking_recv().unwrap())
+        let response = request.headers(headers).send().await;
+        Self::parse_record_errors(response)
     }
 
     fn server_url(&self) -> &str {
@@ -330,16 +318,16 @@ pub(super) fn create_client(url: &str, api_token: &str) -> BoxedClientApi {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use crate::core::sync::RwLock;
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{us_to_ts, Record};
+    use crossbeam_channel::{Receiver, Sender};
     use futures_util::StreamExt;
     use hyper::http;
     use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use rstest::*;
     use std::io::{Read, Seek, SeekFrom};
     use std::pin::pin;
-    use std::sync::mpsc::{Receiver, Sender};
-    use std::sync::Mutex;
 
     #[rstest]
     #[tokio::test]
@@ -498,7 +486,7 @@ pub(super) mod tests {
 
     pub struct MockRecordReader {
         meta: RecordMeta,
-        rx: Mutex<Receiver<Result<Bytes, ReductError>>>,
+        rx: RwLock<Receiver<Result<Bytes, ReductError>>>,
     }
 
     impl MockRecordReader {
@@ -508,7 +496,7 @@ pub(super) mod tests {
         ) -> BoxedReadRecord {
             Box::new(Self {
                 meta: record.into(),
-                rx: Mutex::new(rx),
+                rx: RwLock::new(rx),
             })
         }
     }
@@ -527,7 +515,7 @@ pub(super) mod tests {
 
     impl ReadRecord for MockRecordReader {
         fn read_chunk(&mut self) -> ReadChunk {
-            match self.rx.lock().unwrap().recv() {
+            match self.rx.write().unwrap().recv() {
                 Ok(chunk) => Some(chunk),
                 Err(_) => None,
             }
@@ -574,8 +562,8 @@ pub(super) mod tests {
             state: 0,
         };
 
-        let (tx1, rx1) = std::sync::mpsc::channel();
-        let (tx2, rx2) = std::sync::mpsc::channel();
+        let (tx1, rx1) = crossbeam_channel::unbounded();
+        let (tx2, rx2) = crossbeam_channel::unbounded();
 
         (
             vec![

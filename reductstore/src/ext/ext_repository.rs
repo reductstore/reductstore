@@ -1,16 +1,18 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 mod create;
 mod load;
 
 use crate::asset::asset_manager::ManageStaticAsset;
+use crate::core::sync::AsyncRwLock;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{Parser, Value};
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
+use log::warn;
 use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::ext::{
@@ -22,7 +24,6 @@ use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::RwLock as AsyncRwLock;
 
 type IoExtRef = Arc<AsyncRwLock<Box<dyn IoExtension + Send + Sync>>>;
 type IoExtMap = HashMap<String, IoExtRef>;
@@ -106,7 +107,7 @@ impl ManageExtensions for ExtRepository {
         entry_name: &str,
         mut query_request: QueryEntry,
     ) -> Result<(), ReductError> {
-        let mut query_map = self.query_map.write().await;
+        let mut query_map = self.query_map.write().await?;
 
         let ext_directive = {
             if let Some(when) = &query_request.when {
@@ -166,7 +167,7 @@ impl ManageExtensions for ExtRepository {
                     query_request.ext = Some(serde_json::Value::Object(ext_query.clone()));
                     let (processor, commiter) =
                         ext.write()
-                            .await
+                            .await?
                             .query(bucket_name, entry_name, &query_request)?;
                     Some((processor, commiter, condition))
                 } else {
@@ -230,16 +231,20 @@ impl ManageExtensions for ExtRepository {
     ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
         // TODO: The code is awkward, we need to refactor it
         // unfortunately stream! macro does not work here and crashes compiler
-        let mut lock = self.query_map.write().await;
+        let mut lock = match self.query_map.write().await {
+            Ok(lock) => lock,
+            Err(err) => return Some(vec![Err(err)]),
+        };
         let query = match lock.get_mut(&query_id) {
             Some(query) => query,
             None => {
-                let result = query_rx
-                    .write()
-                    .await
-                    .recv()
-                    .await
-                    .map(|record| record.map(|r| vec![Box::new(r) as BoxedReadRecord]));
+                let result = match query_rx.write().await {
+                    Ok(mut rx) => rx
+                        .recv()
+                        .await
+                        .map(|record| record.map(|r| vec![Box::new(r) as BoxedReadRecord])),
+                    Err(err) => return Some(vec![Err(err)]),
+                };
 
                 if result.is_none() {
                     // If no record is available, return a no content error to finish the query.
@@ -273,6 +278,13 @@ impl ManageExtensions for ExtRepository {
                         let mut commited_records = vec![];
                         for record in records {
                             if let Some(rec) = query.commiter.commit_record(record).await {
+                                if rec
+                                    .as_ref()
+                                    .is_ok_and(|rec| rec.meta().entry_name().is_empty())
+                                {
+                                    warn!("Extension commiter returned an invalid record with empty entry name, skipping it");
+                                    continue;
+                                }
                                 commited_records.push(rec);
                             }
                         }
@@ -295,7 +307,10 @@ impl ManageExtensions for ExtRepository {
             }
         }
 
-        let Some(record) = query_rx.write().await.recv().await else {
+        let Some(record) = (match query_rx.write().await {
+            Ok(mut rx) => rx.recv().await,
+            Err(err) => return Some(vec![Err(err)]),
+        }) else {
             return Some(vec![Err(no_content!("No content"))]);
         };
 
@@ -374,7 +389,7 @@ pub(super) mod tests {
                 .await
                 .is_ok());
 
-            let query_map = mocked_ext_repo.query_map.read().await;
+            let query_map = mocked_ext_repo.query_map.read().await.unwrap();
             assert_eq!(
                 query_map.len(),
                 0,
@@ -408,7 +423,7 @@ pub(super) mod tests {
                 .await
                 .is_ok());
 
-            let query_map = mocked_ext_repo.query_map.read().await;
+            let query_map = mocked_ext_repo.query_map.read().await.unwrap();
             assert_eq!(
                 query_map.len(),
                 1,
@@ -443,7 +458,7 @@ pub(super) mod tests {
                 .is_ok(),);
 
             // make sure we parsed condition correctly
-            let mut query_map = mocked_ext_repo.query_map.write().await;
+            let mut query_map = mocked_ext_repo.query_map.write().await.unwrap();
             assert_eq!(query_map.len(), 1, "Query should be registered");
             let query_context = query_map.get_mut(&1).unwrap();
             assert_eq!(
@@ -491,7 +506,7 @@ pub(super) mod tests {
                 .is_ok());
 
             {
-                let query_map = mocked_ext_repo.query_map.read().await;
+                let query_map = mocked_ext_repo.query_map.read().await.unwrap();
                 assert_eq!(query_map.len(), 2);
             }
 
@@ -501,7 +516,7 @@ pub(super) mod tests {
                 .await
                 .is_ok());
             {
-                let query_map = mocked_ext_repo.query_map.read().await;
+                let query_map = mocked_ext_repo.query_map.read().await.unwrap();
                 assert_eq!(query_map.len(), 1,);
 
                 assert!(query_map.get(&1).is_none(), "Query 1 should be expired");
@@ -731,6 +746,78 @@ pub(super) mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "current_thread")]
+        async fn test_process_a_record_empty_entry_name(
+            record_reader: RecordReader,
+            mut mock_ext: MockIoExtension,
+            mut processor: Box<MockProcessor>,
+            mut commiter: Box<MockCommiter>,
+        ) {
+            processor.expect_process_record().return_once(|_| {
+                Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                    record_with_labels_empty_entry("key", "val"),
+                )))))
+            });
+
+            commiter
+                .expect_commit_record()
+                .return_once(|_| Some(Ok(record_with_labels_empty_entry("key", "val"))));
+            commiter.expect_flush().return_once(|| None).times(1);
+
+            mock_ext
+                .expect_query()
+                .with(eq("bucket"), eq("entry"), predicate::always())
+                .return_once(|_, _, _| Ok((processor, commiter)));
+
+            let query = QueryEntry {
+                ext: Some(json!({
+                    "test1": {},
+                })),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .unwrap();
+
+            let (tx, rx) = tokio::sync::mpsc::channel(2);
+            tx.send(Ok(record_reader)).await.unwrap();
+            tx.send(Err(no_content!(""))).await.unwrap();
+
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+
+            assert!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx.clone())
+                    .await
+                    .is_none(),
+                "Empty entry name should be skipped"
+            );
+
+            assert!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx.clone())
+                    .await
+                    .is_none(),
+                "Stream should be drained before no content"
+            );
+
+            assert_eq!(
+                *mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx)
+                    .await
+                    .unwrap()[0]
+                    .as_ref()
+                    .err()
+                    .unwrap(),
+                no_content!("")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
         async fn test_process_flushed_record(
             record_reader: RecordReader,
             mut mock_ext: MockIoExtension,
@@ -915,7 +1002,7 @@ pub(super) mod tests {
             }),
             ..Default::default()
         };
-        RecordReader::form_record(record)
+        RecordReader::form_record("entry", record)
     }
 
     #[fixture]
@@ -1005,6 +1092,17 @@ pub(super) mod tests {
     }
 
     pub fn record_with_labels(key: &str, val: &str) -> BoxedReadRecord {
+        let meta = RecordMeta::builder()
+            .entry_name("entry")
+            .timestamp(0)
+            .computed_labels(Labels::from_iter(
+                vec![(key.to_string(), val.to_string())].into_iter(),
+            ))
+            .build();
+        OneShotRecord::boxed(Bytes::new(), meta)
+    }
+
+    pub fn record_with_labels_empty_entry(key: &str, val: &str) -> BoxedReadRecord {
         let meta = RecordMeta::builder()
             .timestamp(0)
             .computed_labels(Labels::from_iter(

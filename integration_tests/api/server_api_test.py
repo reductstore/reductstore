@@ -113,6 +113,25 @@ def test__anonymous_alive(base_url, session):
     assert resp.status_code == 200
 
 
+def test__head_ready(base_url, session):
+    """Should provide HEAD /ready method"""
+    resp = session.head(f"{base_url}/ready")
+    assert resp.status_code == 200
+
+
+def test__get_ready(base_url, session):
+    """Should provide GET /ready method"""
+    resp = session.get(f"{base_url}/ready")
+    assert resp.status_code == 200
+
+
+@requires_env("API_TOKEN")
+def test__anonymous_ready(base_url, session):
+    """should access /ready without token"""
+    resp = session.head(f"{base_url}/ready", headers={})
+    assert resp.status_code == 200
+
+
 @requires_env("API_TOKEN")
 def test__me(
     base_url,

@@ -20,7 +20,7 @@ pub(super) async fn list(
 
     let mut filtered_by_read_permission = vec![];
 
-    for bucket in components.storage.get_bucket_list()?.buckets {
+    for bucket in components.storage.clone().get_bucket_list().await?.buckets {
         // Filter out buckets that are not visible to the user
         if keeper
             .get_with_permissions(
@@ -58,7 +58,7 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_filtered_list(#[future] keeper: Arc<StateKeeper>, mut headers: HeaderMap) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
@@ -66,6 +66,7 @@ mod tests {
             .token_repo
             .write()
             .await
+            .unwrap()
             .generate_token(
                 "with-one-bucket",
                 Permissions {
@@ -73,6 +74,7 @@ mod tests {
                     ..Default::default()
                 },
             )
+            .await
             .unwrap();
 
         headers.insert(

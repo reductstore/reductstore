@@ -1,10 +1,8 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use reqwest::{
-    blocking::{get, Client},
-    StatusCode, Url,
-};
+use reqwest::blocking::get;
+use reqwest::{blocking::Client, StatusCode, Url};
 use std::path::Path;
 use std::time::SystemTime;
 use std::{env, fs};
@@ -27,13 +25,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to compile protos");
 
     #[cfg(feature = "web-console")]
-    download_web_console("v1.12.1");
+    download_web_console("v1.13.0");
 
     #[cfg(feature = "select-ext")]
-    download_ext("select-ext", "v0.6.0");
+    download_ext("select-ext", "v0.7.0");
 
     #[cfg(feature = "ros-ext")]
-    download_ext("ros-ext", "v0.4.0");
+    download_ext("ros-ext", "v0.5.0");
 
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())

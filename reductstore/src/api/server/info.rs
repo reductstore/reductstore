@@ -17,7 +17,7 @@ pub(super) async fn info(
     let components = keeper
         .get_with_permissions(&headers, AuthenticatedPolicy {})
         .await?;
-    Ok(components.storage.info()?.into())
+    Ok(components.storage.info().await?.into())
 }
 
 #[cfg(test)]

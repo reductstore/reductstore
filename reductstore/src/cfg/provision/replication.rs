@@ -1,34 +1,40 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
-use crate::replication::{create_replication_repo, ManageReplications};
+use crate::replication::{ManageReplications, ReplicationRepoBuilder};
 use crate::storage::engine::StorageEngine;
 use log::{error, info, warn};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::replication_api::ReplicationSettings;
+use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
 use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub(in crate::cfg) fn provision_replication_repo(
+    pub(in crate::cfg) async fn provision_replication_repo(
         &self,
         storage: Arc<StorageEngine>,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = create_replication_repo(Arc::clone(&storage), self.cfg.clone());
+        let mut repo = ReplicationRepoBuilder::new(self.cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
         for (name, settings) in &self.cfg.replications {
-            if let Err(e) = repo.create_replication(&name, settings.clone()) {
+            if let Err(e) = repo.create_replication(&name, settings.clone()).await {
                 if e.status() == ErrorCode::Conflict {
-                    repo.update_replication(&name, settings.clone())?;
+                    let mut settings = settings.clone();
+                    if let Ok(replication) = repo.get_replication(&name) {
+                        settings.mode = replication.mode();
+                    }
+                    repo.update_replication(&name, settings).await?;
                 } else {
                     error!("Failed to provision replication '{}': {}", name, e);
                     continue;
                 }
             }
 
-            let replication = repo.get_mut_replication(&name).unwrap();
+            let replication = repo.get_mut_replication(&name)?;
             replication.set_provisioned(true);
 
             info!(
@@ -39,6 +45,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         }
         Ok(repo)
     }
+
     pub(in crate::cfg) fn parse_replications(
         env: &mut Env<EnvGetter>,
     ) -> HashMap<String, ReplicationSettings> {
@@ -55,6 +62,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 each_n: None,
                 each_s: None,
                 when: None,
+                mode: ReplicationMode::Enabled,
             };
             replications.insert(id, (name, replication));
         }
@@ -158,12 +166,23 @@ mod tests {
     use crate::cfg::replication::ReplicationConfig;
     use crate::cfg::tests::MockEnvGetter;
     use crate::cfg::Cfg;
+    use crate::replication::{ManageReplications, ReplicationRepoBuilder};
+    use crate::storage::engine::StorageEngine;
     use mockall::predicate::eq;
     use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
     use std::env::VarError;
     use std::path::PathBuf;
+    use std::sync::Arc;
     use test_log::test as log_test;
+
+    // Local helper to create a replication repo for tests
+    async fn create_replication_repo(
+        storage: Arc<StorageEngine>,
+        cfg: Cfg,
+    ) -> Box<dyn ManageReplications + Send + Sync> {
+        ReplicationRepoBuilder::new(cfg).build(storage).await
+    }
 
     #[log_test(rstest)]
     #[tokio::test]
@@ -188,9 +207,11 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
+            .await
             .unwrap();
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication("replication1").unwrap();
 
         assert_eq!(replication.settings().src_bucket, "bucket1");
@@ -230,10 +251,12 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
+            .await
             .unwrap();
-        let repo = components.replication_repo.read().await;
-        assert_eq!(repo.replications().len(), 0);
+        let repo = components.replication_repo.read().await.unwrap();
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -259,10 +282,12 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
+            .await
             .unwrap();
-        let repo = components.replication_repo.read().await;
-        assert_eq!(repo.replications().len(), 0);
+        let repo = components.replication_repo.read().await.unwrap();
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -287,10 +312,12 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
+            .await
             .unwrap();
-        let repo = components.replication_repo.read().await;
-        assert_eq!(repo.replications().len(), 0);
+        let repo = components.replication_repo.read().await.unwrap();
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -315,10 +342,12 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
+            .await
             .unwrap();
-        let repo = components.replication_repo.read().await;
-        assert_eq!(repo.replications().len(), 0);
+        let repo = components.replication_repo.read().await.unwrap();
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]
@@ -343,10 +372,12 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
+            .await
             .unwrap();
-        let repo = components.replication_repo.read().await;
-        assert_eq!(repo.replications().len(), 0);
+        let repo = components.replication_repo.read().await.unwrap();
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[rstest]
@@ -354,17 +385,16 @@ mod tests {
     async fn test_replications_update_existing(mut env_with_replications: MockEnvGetter) {
         let cfg = Cfg {
             data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
-
             ..Default::default()
         };
-
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
-            .with_cfg(cfg)
-            .build();
-
+            .with_cfg(cfg.clone())
+            .build()
+            .await;
         storage
             .create_bucket("bucket1", Default::default())
+            .await
             .unwrap();
         let mut repo = create_replication_repo(
             Arc::new(storage),
@@ -376,7 +406,8 @@ mod tests {
                 },
                 ..Default::default()
             },
-        );
+        )
+        .await;
         repo.create_replication(
             "replication1",
             ReplicationSettings {
@@ -390,9 +421,14 @@ mod tests {
                 each_n: None,
                 each_s: None,
                 when: None,
+                mode: ReplicationMode::Enabled,
             },
         )
+        .await
         .unwrap();
+        repo.set_mode("replication1", ReplicationMode::Disabled)
+            .await
+            .unwrap();
 
         env_with_replications
             .expect_get()
@@ -413,14 +449,99 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
 
         let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
             .build()
+            .await
             .unwrap();
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication("replication1").unwrap();
         assert_eq!(
             replication.settings().when,
             Some(serde_json::json!({"$and": [true, false]}))
         );
+        assert_eq!(replication.mode(), ReplicationMode::Disabled);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replications_update_existing_preserves_mode(
+        mut env_with_replications: MockEnvGetter,
+    ) {
+        let cfg = Cfg {
+            data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
+            ..Default::default()
+        };
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
+        storage
+            .create_bucket("bucket1", Default::default())
+            .await
+            .unwrap();
+        let mut repo = create_replication_repo(
+            storage.clone(),
+            Cfg {
+                replication_conf: ReplicationConfig {
+                    connection_timeout: std::time::Duration::from_secs(10),
+                    replication_log_size: 500,
+                    listening_port: 8080,
+                },
+                ..Default::default()
+            },
+        )
+        .await;
+        repo.create_replication(
+            "replication1",
+            ReplicationSettings {
+                src_bucket: "bucket1".to_string(),
+                dst_bucket: "bucket2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: None,
+                entries: vec![],
+                include: Labels::default(),
+                exclude: Labels::default(),
+                each_n: None,
+                each_s: None,
+                when: None,
+                mode: ReplicationMode::Enabled,
+            },
+        )
+        .await
+        .unwrap();
+        repo.set_mode("replication1", ReplicationMode::Disabled)
+            .await
+            .unwrap();
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("bucket1".to_string()));
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("http://localhost".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
+            .build()
+            .await
+            .unwrap();
+        let repo = components.replication_repo.read().await.unwrap();
+        let replication = repo.get_replication("replication1").unwrap();
+        assert_eq!(replication.mode(), ReplicationMode::Disabled);
     }
 
     #[fixture]

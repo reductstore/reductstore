@@ -1,8 +1,9 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::cfg::io::IoConfig;
+use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::{ExtRepository, ExtensionApi, IoExtMap};
 use dlopen2::wrapper::Container;
 use log::{error, info};
@@ -12,7 +13,6 @@ use reduct_base::internal_server_error;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
-use tokio::sync::RwLock as AsyncRwLock;
 
 impl ExtRepository {
     pub(super) fn try_load(
@@ -87,13 +87,17 @@ mod tests {
     const EXTENSION_VERSION: &str = "0.2.3";
 
     #[log_test(rstest)]
-    fn test_load_extension(ext_repo: ExtRepository) {
+    #[tokio::test]
+    #[ignore] // requires network and external binary
+    async fn test_load_extension(ext_repo: ExtRepository) {
         assert_eq!(ext_repo.extension_map.len(), 1);
         let ext = ext_repo
             .extension_map
             .get("test-ext")
             .unwrap()
-            .blocking_read();
+            .read()
+            .await
+            .unwrap();
         let info = ext.info().clone();
         assert_eq!(
             info,

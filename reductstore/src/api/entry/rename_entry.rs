@@ -31,7 +31,8 @@ pub(super) async fn rename_entry(
 
     components
         .storage
-        .get_bucket(bucket_name)?
+        .get_bucket(bucket_name)
+        .await?
         .upgrade()?
         .rename_entry(entry_name, &request.new_name.clone())
         .await?;
@@ -75,9 +76,11 @@ mod tests {
             components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .get_entry("entry-1")
+                .await
                 .err()
                 .unwrap()
                 .status(),
@@ -87,9 +90,11 @@ mod tests {
             components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .get_entry("entry-2")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .name(),
@@ -116,6 +121,6 @@ mod tests {
         )
         .await;
         let err = result.unwrap_err();
-        assert_eq!(err.0.status, ErrorCode::NotFound);
+        assert_eq!(err.status(), ErrorCode::NotFound);
     }
 }

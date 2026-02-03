@@ -75,7 +75,7 @@ pub struct ReductError {
     /// The HTTP status code.
     pub status: ErrorCode,
 
-    /// The human readable message.
+    /// The human-readable message.
     pub message: String,
 }
 
@@ -87,15 +87,19 @@ impl Display for ReductError {
 
 impl Display for ErrorCode {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
-        write!(f, "{}", self.int_value())
+        write!(f, "{}", i16::from(*self))
     }
 }
 
 impl From<std::io::Error> for ReductError {
     fn from(err: std::io::Error) -> Self {
-        // An IO error is an internal reductstore error
+        let status = match err.kind() {
+            std::io::ErrorKind::Unsupported => ErrorCode::MethodNotAllowed,
+            _ => ErrorCode::InternalServerError,
+        };
+
         ReductError {
-            status: ErrorCode::InternalServerError,
+            status,
             message: err.to_string(),
         }
     }

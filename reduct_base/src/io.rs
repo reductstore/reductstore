@@ -18,6 +18,7 @@ pub type ReadChunk = Option<Result<Bytes, ReductError>>;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct RecordMeta {
+    entry_name: String,
     timestamp: u64,
     state: i32,
     labels: Labels,
@@ -27,6 +28,7 @@ pub struct RecordMeta {
 }
 
 pub struct BuilderRecordMeta {
+    entry_name: String,
     timestamp: u64,
     state: i32,
     labels: Labels,
@@ -36,6 +38,11 @@ pub struct BuilderRecordMeta {
 }
 
 impl BuilderRecordMeta {
+    pub fn entry_name<T: ToString>(mut self, entry_name: T) -> Self {
+        self.entry_name = entry_name.to_string();
+        self
+    }
+
     pub fn timestamp(mut self, timestamp: u64) -> Self {
         self.timestamp = timestamp;
         self
@@ -75,6 +82,7 @@ impl BuilderRecordMeta {
     /// Builds a `RecordMeta` instance from the builder.
     pub fn build(self) -> RecordMeta {
         RecordMeta {
+            entry_name: self.entry_name,
             timestamp: self.timestamp,
             state: self.state,
             labels: self.labels,
@@ -89,6 +97,7 @@ impl RecordMeta {
     /// Creates a builder for a new `RecordMeta` instance.
     pub fn builder() -> BuilderRecordMeta {
         BuilderRecordMeta {
+            entry_name: String::new(),
             timestamp: 0,
             state: 0,
             labels: Labels::new(),
@@ -101,6 +110,7 @@ impl RecordMeta {
     /// Creates a builder from an existing `RecordMeta` instance.
     pub fn builder_from(meta: RecordMeta) -> BuilderRecordMeta {
         BuilderRecordMeta {
+            entry_name: meta.entry_name,
             timestamp: meta.timestamp,
             state: meta.state,
             labels: meta.labels,
@@ -113,6 +123,11 @@ impl RecordMeta {
     /// Returns the timestamp of the record as Unix time in microseconds.
     pub fn timestamp(&self) -> u64 {
         self.timestamp
+    }
+
+    /// Returns the entry name associated with the record, if any.
+    pub fn entry_name(&self) -> &str {
+        &self.entry_name
     }
 
     /// Returns the labels associated with the record.
@@ -175,8 +190,6 @@ pub trait WriteRecord {
     ///
     /// Stops the writer if the chunk is an error or None.
     async fn send(&mut self, chunk: WriteChunk) -> Result<(), ReductError>;
-
-    fn blocking_send(&mut self, chunk: WriteChunk) -> Result<(), ReductError>;
 
     async fn send_timeout(
         &mut self,

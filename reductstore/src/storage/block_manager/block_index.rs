@@ -117,45 +117,51 @@ impl BlockIndex {
         block
     }
 
-    pub fn try_load(path: PathBuf) -> Result<Self, ReductError> {
-        if !FILE_CACHE.try_exists(&path)? {
+    pub async fn try_load(path: PathBuf) -> Result<Self, ReductError> {
+        if !FILE_CACHE.try_exists(&path).await? {
             return Err(internal_server_error!("Block index {:?} not found", path));
         }
 
-        let block_index_proto = {
-            let file = FILE_CACHE.read(&path, SeekFrom::Start(0))?.upgrade()?;
-            let mut lock = file.write()?;
-            let mut buf = Vec::new();
-            if let Err(err) = lock.read_to_end(&mut buf) {
-                return Err(internal_server_error!(
-                    "Failed to read block index {:?}: {}",
-                    path,
-                    err
-                ));
-            };
-
-            let has_block_descriptors = FILE_CACHE
-                .read_dir(&path.parent().unwrap().into())?
-                .iter()
-                .any(|path| path.ends_with(DESCRIPTOR_FILE_EXT));
-
-            if lock.metadata()?.len() == 0 && has_block_descriptors {
-                return Err(internal_server_error!("Block index {:?} is empty", path));
-            }
-
-            BlockIndexProto::decode(Bytes::from(buf))
-        };
-
-        if let Err(err) = block_index_proto {
+        let mut lock = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+        let mut buf = Vec::new();
+        if let Err(err) = lock.read_to_end(&mut buf) {
             return Err(internal_server_error!(
-                "Failed to decode block index {:?}: {}",
+                "Failed to read block index {:?}: {}",
                 path,
                 err
             ));
+        };
+
+        if lock.metadata()?.len() == 0 {
+            // If the index file is empty, check if there are any block descriptors.
+            // If there are, the index file is corrupted.
+            let has_block_descriptors = FILE_CACHE
+                .read_dir(&path.parent().unwrap().into())
+                .await?
+                .iter()
+                .any(|path| path.ends_with(DESCRIPTOR_FILE_EXT));
+
+            if has_block_descriptors {
+                return Err(internal_server_error!("Block index {:?} is empty", path));
+            }
         }
 
-        let block_index: BlockIndex = BlockIndex::from_proto(path, block_index_proto.unwrap())?;
+        let block_index_proto = BlockIndexProto::decode(Bytes::from(buf)).map_err(|err| {
+            internal_server_error!("Failed to decode block index {:?}: {}", path, err)
+        })?;
+
+        let block_index: BlockIndex = BlockIndex::from_proto(path, block_index_proto)?;
         Ok(block_index)
+    }
+
+    pub async fn update_from_disc(&mut self) -> Result<(), ReductError> {
+        FILE_CACHE
+            .invalidate_local_cache_file(&self.path_buf)
+            .await?;
+
+        let updated_index = BlockIndex::try_load(self.path_buf.clone()).await?;
+        *self = updated_index;
+        Ok(())
     }
 
     pub fn from_proto(path: PathBuf, value: BlockIndexProto) -> Result<Self, ReductError> {
@@ -195,7 +201,7 @@ impl BlockIndex {
         Ok(block_index)
     }
 
-    pub fn save(&self) -> Result<(), ReductError> {
+    pub async fn save(&self) -> Result<(), ReductError> {
         let mut block_index_proto = BlockIndexProto {
             blocks: Vec::new(),
             crc64: 0,
@@ -232,16 +238,15 @@ impl BlockIndex {
         block_index_proto.crc64 = crc.sum64();
         let buf = block_index_proto.encode_to_vec();
 
-        let file = FILE_CACHE
-            .write_or_create(&self.path_buf, SeekFrom::Start(0))?
-            .upgrade()?;
-        let mut lock = file.write()?;
+        let mut lock = FILE_CACHE
+            .write_or_create(&self.path_buf, SeekFrom::Start(0))
+            .await?;
         lock.set_len(0)?;
         lock.write_all(&buf).map_err(|err| {
             internal_server_error!("Failed to write block index {:?}: {}", self.path_buf, err)
         })?;
 
-        lock.sync_all()?;
+        lock.sync_all().await?;
 
         Ok(())
     }
@@ -262,6 +267,10 @@ impl BlockIndex {
         &self.index
     }
 
+    pub fn info(&self) -> &HashMap<u64, BlockEntry> {
+        &self.index_info
+    }
+
     fn insert(&mut self, block: BlockEntry) {
         self.index_info.insert(block.block_id, block);
         self.index.insert(block.block_id);
@@ -272,12 +281,11 @@ impl BlockIndex {
 mod tests {
     use std::fs;
 
+    use crate::storage::block_manager::BLOCK_INDEX_FILE;
+    use crate::storage::proto::block_index::Block as BlockEntry;
     use prost_wkt_types::Timestamp;
     use rstest::rstest;
     use tempfile::tempdir;
-
-    use crate::storage::block_manager::BLOCK_INDEX_FILE;
-    use crate::storage::proto::block_index::Block as BlockEntry;
 
     use super::*;
 
@@ -285,7 +293,8 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_ok() {
+        #[tokio::test]
+        async fn test_ok() {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let block_index_proto = BlockIndexProto {
@@ -301,7 +310,7 @@ mod tests {
             };
             fs::write(&path, block_index_proto.encode_to_vec()).unwrap();
 
-            let block_index = BlockIndex::try_load(path.clone()).unwrap();
+            let block_index = BlockIndex::try_load(path.clone()).await.unwrap();
             assert_eq!(block_index.size(), 2);
             assert_eq!(block_index.record_count(), 1);
             assert_eq!(block_index.tree().len(), 1);
@@ -309,9 +318,10 @@ mod tests {
         }
 
         #[rstest]
-        fn test_index_file_not_found() {
+        #[tokio::test]
+        async fn test_index_file_not_found() {
             let path = PathBuf::from("not_found");
-            let block_index = BlockIndex::try_load(path.clone()).err().unwrap();
+            let block_index = BlockIndex::try_load(path.clone()).await.err().unwrap();
             assert_eq!(
                 block_index,
                 internal_server_error!("Block index {:?} not found", path)
@@ -319,7 +329,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_index_file_corrupted() {
+        #[tokio::test]
+        async fn test_index_file_corrupted() {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let block_index_proto = BlockIndexProto {
@@ -335,7 +346,7 @@ mod tests {
             };
             fs::write(&path, block_index_proto.encode_to_vec()).unwrap();
 
-            let block_index = BlockIndex::try_load(path.clone()).err().unwrap();
+            let block_index = BlockIndex::try_load(path.clone()).await.err().unwrap();
             assert_eq!(
                 block_index,
                 internal_server_error!("Block index {:?} is corrupted", path)
@@ -343,11 +354,12 @@ mod tests {
         }
 
         #[rstest]
-        fn test_decode_err() {
+        #[tokio::test]
+        async fn test_decode_err() {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
             fs::write(&path, vec![0, 1, 2, 3]).unwrap();
 
-            let block_index = BlockIndex::try_load(path.clone()).err().unwrap();
+            let block_index = BlockIndex::try_load(path.clone()).await.err().unwrap();
             assert_eq!(block_index, internal_server_error!("Failed to decode block index {:?}: failed to decode Protobuf message: invalid tag value: 0", path));
         }
     }
@@ -356,7 +368,8 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_ok() {
+        #[tokio::test]
+        async fn test_ok() {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let mut block_index = BlockIndex::new(path.clone());
@@ -369,9 +382,9 @@ mod tests {
                 crc64: None,
             });
 
-            block_index.save().unwrap();
+            block_index.save().await.unwrap();
 
-            let block_index_proto = BlockIndex::try_load(path.clone()).unwrap();
+            let block_index_proto = BlockIndex::try_load(path.clone()).await.unwrap();
             assert_eq!(block_index_proto.size(), 2);
             assert_eq!(block_index_proto.record_count(), 1);
             assert_eq!(block_index_proto.tree().len(), 1);

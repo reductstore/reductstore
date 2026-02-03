@@ -21,8 +21,9 @@ pub(super) async fn create_token(
     let token = components
         .token_repo
         .write()
-        .await
-        .generate_token(&token_name, permissions.into())?;
+        .await?
+        .generate_token(&token_name, permissions.into())
+        .await?;
     Ok(TokenCreateResponseAxum(token))
 }
 

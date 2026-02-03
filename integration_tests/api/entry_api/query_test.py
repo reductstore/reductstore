@@ -1,4 +1,5 @@
 import json
+from time import sleep
 
 from ..conftest import requires_env, auth_headers
 
@@ -241,7 +242,7 @@ def test_query_entry_no_next(base_url, session, bucket):
 
     resp = session.post(
         f"{base_url}/b/{bucket}/entry/q",
-        json={"query_type": "QUERY", "start": ts + 1, "stop": ts + 200},
+        json={"query_type": "QUERY", "start": ts + 1, "stop": ts + 200, "ttl": 1},
     )
     assert resp.status_code == 200
 
@@ -249,6 +250,7 @@ def test_query_entry_no_next(base_url, session, bucket):
     resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
     assert resp.status_code == 204
 
+    sleep(1.1)
     resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
     assert resp.status_code == 404
 

@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedClientApi};
@@ -6,6 +6,7 @@ use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavail
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
+use async_trait::async_trait;
 use log::{debug, warn};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
@@ -56,8 +57,9 @@ impl BucketAvailableState {
     }
 }
 
+#[async_trait]
 impl RemoteBucketState for BucketAvailableState {
-    fn write_batch(
+    async fn write_batch(
         mut self: Box<Self>,
         entry_name: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
@@ -76,7 +78,11 @@ impl RemoteBucketState for BucketAvailableState {
         }
 
         let error_map = if !records_to_update.is_empty() {
-            match self.bucket.update_batch(entry_name, &records_to_update) {
+            match self
+                .bucket
+                .update_batch(entry_name, &records_to_update)
+                .await
+            {
                 Ok(error_map) => {
                     // all good keep the state
                     error_map
@@ -121,7 +127,7 @@ impl RemoteBucketState for BucketAvailableState {
         }
 
         if !records_to_write.is_empty() {
-            match self.bucket.write_batch(entry_name, records_to_write) {
+            match self.bucket.write_batch(entry_name, records_to_write).await {
                 Ok(error_map) => {
                     self.last_result = Ok(error_map);
                     self
@@ -147,6 +153,11 @@ impl RemoteBucketState for BucketAvailableState {
         true
     }
 
+    async fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send> {
+        // Already available, stay in this state
+        self
+    }
+
     fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
         &self.last_result
     }
@@ -160,6 +171,7 @@ mod tests {
         bucket, client, MockReductBucketApi, MockReductClientApi,
     };
     use crate::storage::proto::{us_to_ts, Record};
+    use crossbeam_channel::unbounded;
     use mockall::predicate;
     use reduct_base::error::{ErrorCode, ReductError};
     use rstest::{fixture, rstest};
@@ -187,7 +199,7 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let state = state.write_batch("test_entry", vec![record_to_write]);
+        let state = state.write_batch("test_entry", vec![record_to_write]).await;
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -214,7 +226,9 @@ mod tests {
             last_result: Err(ReductError::new(ErrorCode::Timeout, "")), // to check that it is reset
         });
 
-        let state = state.write_batch("test_entry", vec![record_to_update]);
+        let state = state
+            .write_batch("test_entry", vec![record_to_update])
+            .await;
         assert!(state.last_result().is_ok());
         assert!(state.is_available());
     }
@@ -229,9 +243,10 @@ mod tests {
         mut bucket: MockReductBucketApi,
         record_to_write: (BoxedReadRecord, Transaction),
     ) {
-        bucket
-            .expect_write_batch()
-            .returning(move |_, _| Err(ReductError::new(err.clone(), "")));
+        bucket.expect_write_batch().returning(move |_, _| {
+            let err = err.clone();
+            Err(ReductError::new(err, ""))
+        });
         bucket.expect_update_batch().times(0);
 
         let state = Box::new(BucketAvailableState::new(
@@ -239,7 +254,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]);
+        let state = state.write_batch("test", vec![record_to_write]).await;
         assert_eq!(state.last_result(), &Err(ReductError::new(err, "")));
         assert!(!state.is_available());
     }
@@ -255,16 +270,17 @@ mod tests {
         record_to_update: (BoxedReadRecord, Transaction),
     ) {
         bucket.expect_write_batch().times(0);
-        bucket
-            .expect_update_batch()
-            .returning(move |_, _| Err(ReductError::new(err.clone(), "")));
+        bucket.expect_update_batch().returning(move |_, _| {
+            let err = err.clone();
+            Err(ReductError::new(err, ""))
+        });
 
         let state = Box::new(BucketAvailableState::new(
             Box::new(client),
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_update]);
+        let state = state.write_batch("test", vec![record_to_update]).await;
         assert_eq!(state.last_result(), &Err(ReductError::new(err, "")));
         assert!(!state.is_available());
     }
@@ -279,16 +295,17 @@ mod tests {
         mut bucket: MockReductBucketApi,
         record_to_write: (BoxedReadRecord, Transaction),
     ) {
-        bucket
-            .expect_write_batch()
-            .returning(move |_, _| Err(ReductError::new(err.clone(), "")));
+        bucket.expect_write_batch().returning(move |_, _| {
+            let err = err.clone();
+            Err(ReductError::new(err, ""))
+        });
 
         let state = Box::new(BucketAvailableState::new(
             Box::new(client),
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]);
+        let state = state.write_batch("test", vec![record_to_write]).await;
         assert_eq!(state.last_result(), &Err(ReductError::new(err, "")));
         assert!(state.is_available());
     }
@@ -312,7 +329,7 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_write]);
+        let state = state.write_batch("test", vec![record_to_write]).await;
         let error_map = state.last_result().as_ref().unwrap();
 
         assert_eq!(error_map.len(), 1);
@@ -344,7 +361,9 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_update, record_to_write()]);
+        let state = state
+            .write_batch("test", vec![record_to_update, record_to_write()])
+            .await;
         assert!(
             state.last_result().is_ok(),
             "we should not have any errors because wrote errored records"
@@ -373,14 +392,26 @@ mod tests {
             Box::new(bucket),
         ));
 
-        let state = state.write_batch("test", vec![record_to_update]);
+        let state = state.write_batch("test", vec![record_to_update]).await;
         assert!(state.last_result().is_ok());
+        assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_probe_stays_available(client: MockReductClientApi, bucket: MockReductBucketApi) {
+        let state = Box::new(BucketAvailableState::new(
+            Box::new(client),
+            Box::new(bucket),
+        ));
+
+        let state = state.probe().await;
         assert!(state.is_available());
     }
 
     #[fixture]
     fn record_to_write() -> (BoxedReadRecord, Transaction) {
-        let (_, rx) = std::sync::mpsc::channel();
+        let (_, rx) = unbounded();
         (
             MockRecordReader::form_record_with_rx(
                 rx,
@@ -399,7 +430,7 @@ mod tests {
 
     #[fixture]
     fn record_to_update() -> (BoxedReadRecord, Transaction) {
-        let (_, rx) = std::sync::mpsc::channel();
+        let (_, rx) = unbounded();
         (
             MockRecordReader::form_record_with_rx(
                 rx,

@@ -21,8 +21,9 @@ pub(super) async fn get_replication(
     let info = components
         .replication_repo
         .read()
-        .await
-        .get_info(&replication_name)?;
+        .await?
+        .get_info(&replication_name)
+        .await?;
     Ok(info.into())
 }
 
@@ -50,7 +51,9 @@ mod tests {
             .replication_repo
             .write()
             .await
+            .unwrap()
             .create_replication("test", settings)
+            .await
             .unwrap();
 
         let info = get_replication(
@@ -61,15 +64,15 @@ mod tests {
         .await
         .unwrap();
 
-        let repo = components.replication_repo.read().await;
+        let repo = components.replication_repo.read().await.unwrap();
         let repl = repo.get_replication("test").unwrap();
 
         assert_eq!(
             info.0,
             FullReplicationInfo {
-                info: repl.info(),
+                info: repl.info().await.unwrap(),
                 settings: repl.masked_settings().clone(),
-                diagnostics: repl.diagnostics(),
+                diagnostics: repl.diagnostics().await.unwrap(),
             }
         );
     }
@@ -82,6 +85,6 @@ mod tests {
             .err()
             .unwrap();
 
-        assert_eq!(err.0.status, NotFound);
+        assert_eq!(err.status(), NotFound);
     }
 }

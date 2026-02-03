@@ -7,6 +7,68 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.18.0 - 2026-02-03
+
+### Added
+
+- Support for Active/Passive deployment, [PR-1028](https://github.com/reductstore/reductstore/pull/1028)
+- Implement concurrent read-only access to data, [PR-1034](https://github.com/reductstore/reductstore/pull/1034)
+- Cache buckets and entries in .folder file for S3 listing, [PR-1052](https://github.com/reductstore/reductstore/pull/1052)
+- `RS_ENGINE_ENABLE_INTEGRITY_CHECKS` option to enable/disable integrity checks, [PR-1060](https://github.com/reductstore/reductstore/pull/1060)
+- Implement `DISABLE`,`PAUSE` and `DISABLED` modes for replication tasks, [PR-1065](https://github.com/reductstore/reductstore/pull/1065)
+- Implement non-blocking bucket and entry deletion, [PR-1066](https://github.com/reductstore/reductstore/pull/1066)
+- `RS_RWLOCK_TIMEOUT` and `RS_RWLOCK_FAILURE_ACTION` to configure lock timeout handling, [PR-1077](https://github.com/reductstore/reductstore/pull/1077)
+- Refactor thread pool, [PR-1080](https://github.com/reductstore/reductstore/pull/1080)
+- Add multi-entry IO batching, wildcard queries, and record update/remove endpoints, [PR-1095](https://github.com/reductstore/reductstore/pull/1095)
+- Option to disable compaction with `RS_ENGINE_COMPACTION_INTERVAL=0`, [PR-1106](https://github.com/reductstore/reductstore/pull/1107)
+
+### Internal
+
+- Refactor CI workflow and use S3 cache for Rust dependencies, [PR-1003](https://github.com/reductstore/reductstore/pull/1003)
+- Revert Docker image build caching in Dockerfile and CI action to use the non-cache flow.
+- Migrate CI S3 cache configuration for Rust dependencies (region + endpoint scheme), [PR-1094](https://github.com/reductstore/reductstore/pull/1094)
+- Add create-pr skill and helper script, [PR-1138](https://github.com/reductstore/reductstore/pull/1138)
+
+### Changed
+
+- Update dependencies (int-enum 1.2, axum-server 0.8, zip 7.0, jsonwebtoken 10.2) and align status conversions, [PR-1079](https://github.com/reductstore/reductstore/pull/1079)
+- Replication `is_active` flag now reflects remote bucket availability when paused, [PR-1106](https://github.com/reductstore/reductstore/pull/1106)
+- Refactor storage/replication engines to tokio, [PR-1110](https://github.com/reductstore/reductstore/pull/1110)
+- Migrate replication engine and remote storage backend on Tokio, [PR-1114](https://github.com/reductstore/reductstore/pull/1114)
+- Update components: web-console v1.130, ros-ext v0.5.0-beta.2, select-ext v0.7.0, [PR-1126](https://github.com/reductstore/reductstore/pull/1126)
+
+### Fixed
+
+- Prevent panic in `$each_t` when time goes backwards, [PR-1150](https://github.com/reductstore/reductstore/pull/1150)
+- Fix thread pool deadlock in tests when tasks wait for other tasks, [PR-1081](https://github.com/reductstore/reductstore/pull/1081)
+- Sync block data before metadata/index during compaction to avoid stale replica reads, [PR-1139](https://github.com/reductstore/reductstore/pull/1139)
+- Fix replica crash at the start without write permissions, [PR-1054](https://github.com/reductstore/reductstore/pull/1054)
+- Handle encode error in folder keeper, [PR-1055](https://github.com/reductstore/reductstore/pull/1055)
+- Fix writing folder cache and read only mode, [PR-1056](https://github.com/reductstore/reductstore/pull/1056)
+- Enforce timeouts on async read/write locks to avoid deadlocks, [PR-1070](https://github.com/reductstore/reductstore/pull/1070)
+- Avoid error-level log spam when a passive node serves 503 during lock wait, [PR-1071](https://github.com/reductstore/reductstore/pull/1071)
+- Keep finished queries alive until TTL to avoid spurious `NotFound` during reads, [PR-1078](https://github.com/reductstore/reductstore/pull/1078)
+- Run query tasks on Tokio to avoid exhausting the thread pool and shrink read cache size, [PR-1098](https://github.com/reductstore/reductstore/pull/1098)
+- Abort on thread pool worker panic to fail fast on background task crashes, [PR-1098](https://github.com/reductstore/reductstore/pull/1098)
+- Prevent query tasks from blocking Tokio workers and surface join failures, [PR-1099](https://github.com/reductstore/reductstore/pull/1099)
+- Fix multi-entry read aggregation returning only one entry and hanging shutdown, [PR-1099](https://github.com/reductstore/reductstore/pull/1099)
+- Fix entry write task panic and update tests, [PR-1100](https://github.com/reductstore/reductstore/pull/1100)
+- Fix deleting non-synced objects in S3 connector, [PR-1113](https://github.com/reductstore/reductstore/pull/1113)
+- Fix block cache read access, [PR-1101](https://github.com/reductstore/reductstore/pull/1101)
+- Avoid long block write lock during save, [PR-1104](https://github.com/reductstore/reductstore/pull/1104)
+- Skip compact when block manager busy, [PR-1105](https://github.com/reductstore/reductstore/pull/1105)
+- Preserve provisioned replication mode changes across restarts, [PR-1108](https://github.com/reductstore/reductstore/pull/1108)
+- Fix folder map recovery after crash, [PR-1112](https://github.com/reductstore/reductstore/pull/1121)
+- Fix server shutdown and race condition in file cache, [PR-1122](https://github.com/reductstore/reductstore/pull/1122)
+- Fix minor issues in  multi-entry API [PR-1124](https://github.com/reductstore/reductstore/pull/1124)
+- Send 204 Status instead of empty response when querying data, [PR-1125](https://github.com/reductstore/reductstore/pull/1125)
+- Prevent race condition between sync and remove operations, [PR-1127](https://github.com/reductstore/reductstore/pull/1127)
+- Allow empty batch v2 in parsing, [PR-1134](https://github.com/reductstore/reductstore/pull/1134)
+- Remove entries and buckets in the background and per block, [PR-1135](https://github.com/reductstore/reductstore/pull/1135)
+- Sync invalidated file descriptor synchronously, [PR-1136](https://github.com/reductstore/reductstore/pull/1136)
+- Long lock of block manager during entry removal, [PR-1137](https://github.com/reductstore/reductstore/pull/1137)
+- Invalidate local cache files during reload to avoid stale reads in read-only replicas, [PR-1138](https://github.com/reductstore/reductstore/pull/1138)
+
 ## 1.17.10 - 2026-01-28
 
 ### Fixed
@@ -18,6 +80,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Crash on Ubuntu-22.04, [PR-1120](https://github.com/reductstore/reductstore/pull/1120)
+
 
 ## 1.17.8 - 2025-12-15
 

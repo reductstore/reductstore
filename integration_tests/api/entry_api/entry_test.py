@@ -1,4 +1,4 @@
-from ..conftest import requires_env, auth_headers
+from ..conftest import requires_env, requires_backend, auth_headers
 
 
 def test_remove_entry(base_url, session, bucket):
@@ -10,6 +10,10 @@ def test_remove_entry(base_url, session, bucket):
     resp = session.delete(f"{base_url}/b/{bucket}/entry")
     assert resp.status_code == 200
 
+    # Deletion is async; allow cleanup to finish before asserting absence
+    from time import sleep
+
+    sleep(0.1)
     resp = session.get(f"{base_url}/b/{bucket}/entry?ts={ts}")
     assert resp.status_code == 404
 
@@ -46,6 +50,7 @@ def test_remove_with_bucket_write_permissions(
     assert resp.status_code == 200
 
 
+@requires_backend("fs")
 def test_rename_entry(base_url, session, bucket):
     """Should rename entry"""
     ts = 1000
@@ -65,7 +70,21 @@ def test_rename_entry(base_url, session, bucket):
     assert resp.content == b"some_data1"
 
 
+@requires_backend("s3")
+def test_rename_entry_s3_not_allowed(base_url, session, bucket):
+    """Should not rename entry with S3 backend"""
+    ts = 1000
+    resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data="some_data1")
+    assert resp.status_code == 200
+
+    resp = session.put(
+        f"{base_url}/b/{bucket}/entry/rename", json={"new_name": "new_name"}
+    )
+    assert resp.status_code == 405
+
+
 @requires_env("API_TOKEN")
+@requires_backend("fs")
 def test_rename_with_bucket_write_permissions(
     base_url,
     session,

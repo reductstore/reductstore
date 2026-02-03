@@ -1,10 +1,9 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::RwLock;
 use crate::replication::remote_bucket::RemoteBucket;
-use crate::replication::transaction_log::TransactionLog;
+use crate::replication::transaction_log::TransactionLogMap;
 use crate::replication::Transaction;
 use crate::storage::engine::StorageEngine;
 use log::{debug, error};
@@ -12,14 +11,12 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::cmp::PartialEq;
-use std::collections::HashMap;
 use std::sync::Arc;
-use std::thread::sleep;
-use std::time::Duration;
+use tokio::time::{sleep, Duration};
 
 /// Internal worker for replication to process a sole iteration of the replication loop.
 pub(super) struct ReplicationSender {
-    log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
+    log_map: TransactionLogMap,
     storage: Arc<StorageEngine>,
     settings: ReplicationSettings,
     io_config: IoConfig,
@@ -38,7 +35,7 @@ pub(super) enum SyncState {
 
 impl ReplicationSender {
     pub fn new(
-        log_map: Arc<RwLock<HashMap<String, RwLock<TransactionLog>>>>,
+        log_map: TransactionLogMap,
         storage: Arc<StorageEngine>,
         config: ReplicationSettings,
         io_config: IoConfig,
@@ -53,20 +50,35 @@ impl ReplicationSender {
         }
     }
 
-    pub fn run(&mut self) -> Result<SyncState, ReductError> {
-        let entries = self.log_map.read()?.keys().cloned().collect::<Vec<_>>();
+    pub async fn probe_availability(&mut self) -> bool {
+        self.bucket.probe_availability().await;
+        self.bucket.is_active()
+    }
+
+    pub async fn run(&mut self) -> Result<SyncState, ReductError> {
+        let entries = self
+            .log_map
+            .read()
+            .await?
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
 
         let mut counter = Vec::new();
 
         for entry_name in entries.iter() {
-            let transactions = {
-                // we can't hold the lock while we read the log
-                if let Some(log) = self.log_map.read()?.get(entry_name) {
-                    log.write()?.front(self.io_config.batch_max_records)
-                } else {
-                    // log might be removed
-                    continue;
+            let log = {
+                // Take only the handle, drop the map lock before touching the log itself.
+                let map = self.log_map.read().await?;
+                match map.get(entry_name) {
+                    Some(log) => Arc::clone(log),
+                    None => continue, // log might be removed
                 }
+            };
+
+            let transactions = {
+                let log = log.write().await?;
+                log.front(self.io_config.batch_max_records).await
             };
             match transactions {
                 Ok(vec) => {
@@ -82,7 +94,7 @@ impl ReplicationSender {
                             self.settings.src_bucket, entry_name, transaction
                         );
 
-                        let record_to_sync = self.read_record(entry_name, &transaction);
+                        let record_to_sync = self.read_record(entry_name, &transaction).await;
                         processed_transactions += 1;
 
                         match record_to_sync {
@@ -109,7 +121,7 @@ impl ReplicationSender {
                     }
 
                     let batch_size = batch.len() as u64;
-                    match self.bucket.write_batch(entry_name, batch) {
+                    match self.bucket.write_batch(entry_name, batch).await {
                         Ok(map) => {
                             counter.push((Ok(()), batch_size - map.len() as u64));
                             for (timestamp, err) in map.into_iter() {
@@ -135,14 +147,7 @@ impl ReplicationSender {
                     }
 
                     // remove processed transactions from the log
-                    if let Err(err) = self
-                        .log_map
-                        .read()?
-                        .get(entry_name)
-                        .unwrap()
-                        .write()?
-                        .pop_front(processed_transactions)
-                    {
+                    if let Err(err) = log.write().await?.pop_front(processed_transactions).await {
                         error!("Failed to remove transaction: {:?}", err);
                     }
                 }
@@ -165,31 +170,33 @@ impl ReplicationSender {
         })
     }
 
-    fn read_record(
+    async fn read_record(
         &self,
         entry_name: &str,
         transaction: &Transaction,
     ) -> Result<BoxedReadRecord, ReductError> {
-        let read_record_from_storage = || {
+        let read_record_from_storage = async || {
             let mut attempts = 3;
             loop {
-                let read_record = || {
+                let read_record = async || {
                     self.storage
-                        .get_bucket(&self.settings.src_bucket)?
+                        .get_bucket(&self.settings.src_bucket)
+                        .await?
                         .upgrade()?
-                        .get_entry(&entry_name)?
+                        .get_entry(&entry_name)
+                        .await?
                         .upgrade()?
                         .begin_read(*transaction.timestamp())
-                        .wait()
+                        .await
                 };
-                let record = read_record();
+                let record = read_record().await;
                 match record {
                     Err(ReductError {
                         status: ErrorCode::TooEarly,
                         ..
                     }) => {
                         debug!("Transaction is too early, retrying later");
-                        sleep(Duration::from_millis(10));
+                        sleep(Duration::from_millis(10)).await;
                         attempts -= 1;
                     }
 
@@ -204,7 +211,7 @@ impl ReplicationSender {
             }
         };
 
-        match read_record_from_storage() {
+        match read_record_from_storage().await {
             Ok(record) => Ok(Box::new(record)),
             Err(err) => Err(err),
         }
@@ -215,30 +222,40 @@ impl ReplicationSender {
 #[cfg(target_os = "linux")] // we need precise timing
 mod tests {
     use super::*;
-    use crate::backend::Backend;
+
     use crate::cfg::Cfg;
-    use crate::core::file_cache::FILE_CACHE;
+
+    use crate::core::sync::AsyncRwLock;
     use crate::replication::remote_bucket::ErrorRecordMap;
+    use crate::replication::transaction_log::TransactionLog;
+    use crate::replication::transaction_log::TransactionLogRef;
     use crate::replication::Transaction;
     use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
+    use async_trait::async_trait;
     use bytes::Bytes;
     use mockall::mock;
     use reduct_base::error::ErrorCode;
     use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::msg::replication_api::ReplicationMode;
     use reduct_base::{conflict, not_found, timeout, too_early, Labels};
     use rstest::*;
-    use std::thread::spawn;
+    use std::collections::HashMap;
+    use tokio::task::JoinHandle;
+    use tokio::time::{sleep, Duration};
 
     mock! {
         RmBucket {}
 
+        #[async_trait]
         impl RemoteBucket for RmBucket {
-            fn write_batch(
+            async fn write_batch(
                 &mut self,
                 entry_name: &str,
                 record: Vec<(BoxedReadRecord, Transaction)>,
             ) -> Result<ErrorRecordMap, ReductError>;
+
+            async fn probe_availability(&mut self);
 
             fn is_active(&self) -> bool;
         }
@@ -246,47 +263,52 @@ mod tests {
     }
 
     #[rstest]
-    fn test_replication_ok(mut remote_bucket: MockRmBucket, settings: ReplicationSettings) {
+    #[tokio::test]
+    async fn test_replication_ok(mut remote_bucket: MockRmBucket, settings: ReplicationSettings) {
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings).await;
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, 5);
+        imitate_write_record(&sender, &transaction, 5).await;
 
         assert_eq!(
-            sender.run().unwrap(),
+            sender.run().await.unwrap(),
             SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
         );
         assert_eq!(
             sender
                 .log_map
                 .read()
+                .await
                 .unwrap()
                 .get("test")
                 .unwrap()
                 .read()
+                .await
                 .unwrap()
-                .front(1),
+                .front(1)
+                .await,
             Ok(vec![]),
         );
     }
 
     #[rstest]
-    fn test_replication_comm_err(mut remote_bucket: MockRmBucket) {
+    #[tokio::test]
+    async fn test_replication_comm_err(mut remote_bucket: MockRmBucket) {
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Err(ReductError::new(ErrorCode::Timeout, "Timeout")));
         remote_bucket.expect_is_active().return_const(false);
-        let mut sender = build_sender(remote_bucket, settings());
+        let mut sender = build_sender(remote_bucket, settings()).await;
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, 5);
+        imitate_write_record(&sender, &transaction, 5).await;
 
         assert_eq!(
-            sender.run().unwrap(),
+            sender.run().await.unwrap(),
             SyncState::NotAvailable(vec![(Err(timeout!("Timeout")), 1)])
         );
 
@@ -294,37 +316,47 @@ mod tests {
             sender
                 .log_map
                 .read()
+                .await
                 .unwrap()
                 .get("test")
                 .unwrap()
                 .read()
+                .await
                 .unwrap()
-                .front(1),
+                .front(1)
+                .await,
             Ok(vec![transaction]),
         );
     }
 
     #[rstest]
-    fn test_replication_not_found(mut remote_bucket: MockRmBucket, settings: ReplicationSettings) {
+    #[tokio::test]
+    async fn test_replication_not_found(
+        mut remote_bucket: MockRmBucket,
+        settings: ReplicationSettings,
+    ) {
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings).await;
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, 5);
+        imitate_write_record(&sender, &transaction, 5).await;
         sender
             .storage
             .get_bucket("src")
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .remove_entry("test")
-            .wait()
+            .await
             .unwrap();
 
+        sleep(Duration::from_millis(50)).await; // ensure the deletion is fully processed
+
         assert_eq!(
-            sender.run().unwrap(),
+            sender.run().await.unwrap(),
             SyncState::SyncedOrRemoved(vec![
                 (Err(not_found!("Entry 'test' not found in bucket 'src'")), 1),
                 (Ok(()), 0)
@@ -334,10 +366,12 @@ mod tests {
             sender
                 .log_map
                 .read()
+                .await
                 .unwrap()
                 .get("test")
                 .unwrap()
                 .read()
+                .await
                 .unwrap()
                 .is_empty(),
             "We don't keep the transaction for a non existing record"
@@ -345,7 +379,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_replication_too_early_ok(
+    #[tokio::test]
+    async fn test_replication_too_early_ok(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
@@ -353,43 +388,44 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings).await;
 
-        sender
-            .log_map
-            .read()
-            .unwrap()
-            .get("test")
-            .unwrap()
-            .write()
-            .unwrap()
-            .push_back(Transaction::WriteRecord(20))
-            .unwrap();
+        {
+            let map = sender.log_map.write().await.unwrap();
+            let log = map.get("test").unwrap().clone();
+            log.write()
+                .await
+                .unwrap()
+                .push_back(Transaction::WriteRecord(20))
+                .await
+                .unwrap();
+        }
 
-        let mut writer = sender
+        let bucket = sender
             .storage
             .create_bucket("src", BucketSettings::default())
+            .await
             .unwrap()
-            .upgrade_and_unwrap()
+            .upgrade_and_unwrap();
+        let mut writer = bucket
             .begin_write("test", 20, 4, "".to_string(), Labels::new())
-            .wait()
+            .await
             .unwrap();
 
-        let handle = spawn(move || {
-            // we need to spawn a task to check the state in the attempt loop
-            sender.run()
-        });
+        let handle: JoinHandle<Result<SyncState, ReductError>> =
+            tokio::spawn(async move { sender.run().await });
 
-        writer.blocking_send(Ok(Some(Bytes::from("xxxx")))).unwrap();
-        writer.blocking_send(Ok(None)).unwrap_or(());
+        writer.send(Ok(Some(Bytes::from("xxxx")))).await.unwrap();
+        writer.send(Ok(None)).await.unwrap();
         assert_eq!(
-            handle.join().unwrap().unwrap(),
+            handle.await.unwrap().unwrap(),
             SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
         );
     }
 
     #[rstest]
-    fn test_replication_too_early_err(
+    #[tokio::test]
+    async fn test_replication_too_early_err(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
@@ -397,22 +433,23 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings).await;
 
-        sender
-            .log_map
-            .read()
-            .unwrap()
-            .get("test")
-            .unwrap()
-            .write()
-            .unwrap()
-            .push_back(Transaction::WriteRecord(20))
-            .unwrap();
+        {
+            let map = sender.log_map.write().await.unwrap();
+            let log = map.get("test").unwrap().clone();
+            log.write()
+                .await
+                .unwrap()
+                .push_back(Transaction::WriteRecord(20))
+                .await
+                .unwrap();
+        }
 
         let _tx = sender
             .storage
             .create_bucket("src", BucketSettings::default())
+            .await
             .unwrap()
             .upgrade_and_unwrap()
             .begin_write(
@@ -422,15 +459,15 @@ mod tests {
                 "".to_string(),
                 Labels::new(),
             )
-            .wait()
+            .await
             .unwrap();
 
         assert_eq!(
-            sender.run().unwrap(),
+            sender.run().await.unwrap(),
             SyncState::SyncedOrRemoved(vec![
                 (
                     Err(too_early!(
-                        "Record with timestamp 20 is still being written"
+                        "Record with timestamp 20 in src/test is still being written"
                     )),
                     1
                 ),
@@ -440,7 +477,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_replication_not_all_records_ok(
+    #[tokio::test]
+    async fn test_replication_not_all_records_ok(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
@@ -451,26 +489,28 @@ mod tests {
             )]))
         });
         remote_bucket.expect_is_active().return_const(true);
-        let mut sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings).await;
 
         let transaction = Transaction::WriteRecord(10);
-        imitate_write_record(&sender, &transaction, 5);
+        imitate_write_record(&sender, &transaction, 5).await;
 
         let transaction = Transaction::WriteRecord(20);
-        imitate_write_record(&sender, &transaction, 5);
+        imitate_write_record(&sender, &transaction, 5).await;
 
         assert_eq!(
-            sender.run().unwrap(),
+            sender.run().await.unwrap(),
             SyncState::SyncedOrRemoved(vec![(Ok(()), 1), (Err(conflict!("AlreadyExists")), 1)])
         );
         assert!(
             sender
                 .log_map
                 .read()
+                .await
                 .unwrap()
                 .get("test")
                 .unwrap()
                 .read()
+                .await
                 .unwrap()
                 .is_empty(),
             "We remove all errored transactions"
@@ -478,7 +518,8 @@ mod tests {
     }
 
     #[rstest]
-    fn test_replication_record_large_payload(
+    #[tokio::test]
+    async fn test_replication_record_large_payload(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) {
@@ -486,73 +527,124 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut sender = build_sender(remote_bucket, settings);
+        let mut sender = build_sender(remote_bucket, settings).await;
 
         let transaction = Transaction::WriteRecord(10);
         imitate_write_record(
             &sender,
             &transaction,
             IoConfig::default().batch_max_size + 1,
-        );
+        )
+        .await;
 
         assert_eq!(
-            sender.run().unwrap(),
+            sender.run().await.unwrap(),
             SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
         );
         assert!(
             sender
                 .log_map
                 .read()
+                .await
                 .unwrap()
                 .get("test")
                 .unwrap()
                 .read()
+                .await
                 .unwrap()
                 .is_empty(),
             "We remove all errored transactions"
         );
     }
 
-    fn imitate_write_record(sender: &ReplicationSender, transaction: &Transaction, size: u64) {
-        sender
-            .log_map
-            .read()
-            .unwrap()
-            .get("test")
-            .unwrap()
-            .write()
+    #[rstest]
+    #[tokio::test]
+    async fn test_skips_removed_log_entry(
+        remote_bucket: MockRmBucket,
+        settings: ReplicationSettings,
+    ) {
+        let cfg = Cfg {
+            data_path: tempfile::tempdir().unwrap().keep(),
+            ..Default::default()
+        };
+
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg)
+                .build()
+                .await,
+        );
+
+        let log_map: TransactionLogMap = Arc::new(AsyncRwLock::new(HashMap::new()));
+        log_map.write().await.unwrap().insert(
+            "gone".to_string(),
+            Arc::new(AsyncRwLock::new(
+                TransactionLog::try_load_or_create(&storage.data_path().join("gone.log"), 10)
+                    .await
+                    .unwrap(),
+            )),
+        );
+        log_map.write().await.unwrap().remove("gone");
+
+        let mut sender = ReplicationSender::new(
+            log_map,
+            storage,
+            settings,
+            IoConfig::default(),
+            Box::new(remote_bucket),
+        );
+
+        assert_eq!(sender.run().await.unwrap(), SyncState::NoTransactions);
+    }
+
+    async fn imitate_write_record(
+        sender: &ReplicationSender,
+        transaction: &Transaction,
+        size: u64,
+    ) {
+        let log = {
+            let map = sender.log_map.write().await.unwrap();
+            map.get("test").unwrap().clone()
+        };
+
+        log.write()
+            .await
             .unwrap()
             .push_back(transaction.clone())
+            .await
             .unwrap();
 
         let bucket = match sender
             .storage
             .create_bucket("src", BucketSettings::default())
+            .await
         {
             Ok(bucket) => bucket,
-            Err(_err) => sender.storage.get_bucket("src").unwrap(),
+            Err(_err) => sender.storage.get_bucket("src").await.unwrap(),
         };
 
         let mut writer = bucket
             .upgrade_and_unwrap()
             .begin_write(
                 "test",
-                transaction.timestamp().clone(),
+                *transaction.timestamp(),
                 size,
                 "text/plain".to_string(),
                 Labels::new(),
             )
-            .wait()
+            .await
             .unwrap();
         writer
-            .blocking_send(Ok(Some(Bytes::from(
+            .send(Ok(Some(Bytes::from(
                 (0..size).map(|_| 'x').collect::<String>(),
             ))))
+            .await
             .unwrap();
-        writer.blocking_send(Ok(None)).unwrap_or(());
+        writer.send(Ok(None)).await.unwrap();
     }
 
-    fn build_sender(
+    async fn build_sender(
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) -> ReplicationSender {
@@ -561,26 +653,26 @@ mod tests {
             ..Default::default()
         };
 
-        FILE_CACHE.set_storage_backend(
-            Backend::builder()
-                .local_data_path(cfg.data_path.clone())
-                .try_build()
-                .unwrap(),
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg)
+                .build()
+                .await,
         );
 
-        let storage = StorageEngine::builder()
-            .with_data_path(cfg.data_path.clone())
-            .with_cfg(cfg)
-            .build();
-        let storage = Arc::new(storage);
-
-        let log_map = Arc::new(RwLock::new(HashMap::new()));
-        let log = RwLock::new(
+        let log_map: TransactionLogMap = Arc::new(AsyncRwLock::new(HashMap::new()));
+        let log: TransactionLogRef = Arc::new(AsyncRwLock::new(
             TransactionLog::try_load_or_create(&storage.data_path().join("test.log"), 1000)
+                .await
                 .unwrap(),
-        );
+        ));
 
-        log_map.write().unwrap().insert("test".to_string(), log);
+        log_map
+            .write()
+            .await
+            .unwrap()
+            .insert("test".to_string(), log);
 
         ReplicationSender {
             log_map,
@@ -610,6 +702,7 @@ mod tests {
             each_n: None,
             each_s: None,
             when: None,
+            mode: ReplicationMode::Enabled,
         }
     }
 }

@@ -13,33 +13,47 @@ mod noop;
 
 use crate::backend::file::{AccessMode, OpenOptions};
 use crate::backend::noop::NoopBackend;
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use reduct_base::msg::server_api::License;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::SystemTime;
 
+#[derive(Default)]
+pub(super) struct ObjectMetadata {
+    #[allow(dead_code)]
+    pub size: Option<i64>,
+    pub modified_time: Option<SystemTime>,
+}
+
+#[async_trait]
 pub(crate) trait StorageBackend {
     fn path(&self) -> &PathBuf;
-    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+    async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
 
-    fn remove(&self, path: &Path) -> std::io::Result<()>;
+    async fn remove(&self, path: &Path) -> std::io::Result<()>;
 
-    fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
+    async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
 
-    fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
+    async fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
 
-    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
+    async fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
 
-    fn try_exists(&self, _path: &Path) -> std::io::Result<bool>;
+    async fn try_exists(&self, _path: &Path) -> std::io::Result<bool>;
 
-    fn upload(&self, path: &Path) -> std::io::Result<()>;
+    async fn upload(&self, path: &Path) -> std::io::Result<()>;
 
-    fn download(&self, path: &Path) -> std::io::Result<()>;
+    async fn download(&self, path: &Path) -> std::io::Result<()>;
 
-    fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
+    async fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
 
-    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+    async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+
+    async fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
+
+    async fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
 }
 
 pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;
@@ -127,7 +141,7 @@ impl BackpackBuilder {
         self
     }
 
-    pub fn try_build(self) -> Result<Backend, ReductError> {
+    pub async fn try_build(self) -> Result<Backend, ReductError> {
         let backend: BoxedBackend = match self.backend_type {
             #[cfg(feature = "fs-backend")]
             BackendType::Filesystem => {
@@ -194,7 +208,7 @@ impl BackpackBuilder {
                     default_storage_class: self.remote_default_storage_class,
                 };
 
-                Box::new(remote::RemoteBackend::new(settings))
+                Box::new(remote::RemoteBackend::new(settings).await)
             }
             #[allow(unreachable_patterns)]
             _ => Err(internal_server_error!("Unsupported backend type"))?,
@@ -206,6 +220,7 @@ impl BackpackBuilder {
     }
 }
 
+#[derive(Clone)]
 pub struct Backend {
     backend: Arc<BoxedBackend>,
 }
@@ -223,41 +238,61 @@ impl Backend {
         BackpackBuilder::new()
     }
 
+    #[cfg(test)]
+    pub(crate) fn from_backend(backend: BoxedBackend) -> Self {
+        Self {
+            backend: Arc::new(backend),
+        }
+    }
+
     /// Create a new instance of `fs::OpenOptions`.
     pub fn open_options(&self) -> OpenOptions {
         OpenOptions::new(Arc::clone(&self.backend))
     }
 
-    pub fn rename<P: AsRef<std::path::Path>, Q: AsRef<std::path::Path>>(
+    pub async fn rename<P: AsRef<Path>, Q: AsRef<Path>>(
         &self,
         from: P,
         to: Q,
     ) -> std::io::Result<()> {
-        self.backend.rename(from.as_ref(), to.as_ref())
+        self.backend.rename(from.as_ref(), to.as_ref()).await
     }
 
-    pub fn remove<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
-        self.backend.remove(path.as_ref())
+    pub async fn remove<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        self.backend.remove(path.as_ref()).await
     }
 
-    pub fn remove_dir_all<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
-        self.backend.remove_dir_all(path.as_ref())
+    pub async fn remove_dir_all<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        self.backend.remove_dir_all(path.as_ref()).await
     }
 
-    pub fn create_dir_all<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<()> {
-        self.backend.create_dir_all(path.as_ref())
+    pub async fn create_dir_all<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        self.backend.create_dir_all(path.as_ref()).await
     }
 
-    pub fn read_dir(&self, path: &PathBuf) -> std::io::Result<Vec<PathBuf>> {
-        self.backend.read_dir(path)
+    pub async fn read_dir(&self, path: &PathBuf) -> std::io::Result<Vec<PathBuf>> {
+        self.backend.read_dir(path).await
     }
 
-    pub fn try_exists<P: AsRef<std::path::Path>>(&self, path: P) -> std::io::Result<bool> {
-        self.backend.try_exists(path.as_ref())
+    pub async fn try_exists<P: AsRef<Path>>(&self, path: P) -> std::io::Result<bool> {
+        self.backend.try_exists(path.as_ref()).await
     }
 
-    pub fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
-        self.backend.invalidate_locally_cached_files()
+    pub async fn get_stats<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> std::io::Result<Option<ObjectMetadata>> {
+        self.backend.get_stats(path.as_ref()).await
+    }
+
+    pub async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
+        self.backend.invalidate_locally_cached_files().await
+    }
+
+    /// Remove the file only from local cache, without affecting remote storage.
+    /// This is useful for initiating re-download of the file on next access.
+    pub async fn remove_from_local_cache<P: AsRef<Path>>(&self, path: P) -> std::io::Result<()> {
+        self.backend.remove_from_local_cache(path.as_ref()).await
     }
 }
 
@@ -272,15 +307,15 @@ mod tests {
     mod fs {
         use super::*;
         #[rstest]
-        fn test_backend_builder_fs() {
-            {
-                let backend = Backend::builder()
-                    .backend_type(BackendType::Filesystem)
-                    .local_data_path(PathBuf::from("/tmp/data"))
-                    .try_build()
-                    .expect("Failed to build Filesystem backend");
-                assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/data"));
-            }
+        #[tokio::test]
+        async fn test_backend_builder_fs() {
+            let backend = Backend::builder()
+                .backend_type(BackendType::Filesystem)
+                .local_data_path(PathBuf::from("/tmp/data"))
+                .try_build()
+                .await
+                .expect("Failed to build Filesystem backend");
+            assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/data"));
         }
     }
 
@@ -288,26 +323,27 @@ mod tests {
     mod s3 {
         use super::*;
         #[rstest]
-        fn test_backend_builder_s3(license: License) {
-            {
-                let backend = Backend::builder()
-                    .backend_type(BackendType::S3)
-                    .remote_bucket("my-bucket")
-                    .remote_cache_path(PathBuf::from("/tmp/cache"))
-                    .remote_region("us-east-1")
-                    .remote_endpoint("http://localhost:9000")
-                    .remote_access_key("access_key")
-                    .remote_secret_key("secret_key")
-                    .cache_size(1024 * 1024 * 1024) // 1 GB
-                    .license(license)
-                    .try_build()
-                    .expect("Failed to build S3 backend");
-                assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/cache"));
-            }
+        #[tokio::test]
+        async fn test_backend_builder_s3(license: License) {
+            let backend = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
+                .remote_region("us-east-1")
+                .remote_endpoint("http://localhost:9000")
+                .remote_access_key("access_key")
+                .remote_secret_key("secret_key")
+                .cache_size(1024 * 1024 * 1024) // 1 GB
+                .license(license)
+                .try_build()
+                .await
+                .expect("Failed to build S3 backend");
+            assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/cache"));
         }
 
         #[rstest]
-        fn test_backend_builder_s3_bucket_missing(license: License) {
+        #[tokio::test]
+        async fn test_backend_builder_s3_bucket_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_cache_path(PathBuf::from("/tmp/cache"))
@@ -318,6 +354,7 @@ mod tests {
                 .cache_size(1024 * 1024 * 1024) // 1 GB
                 .license(license)
                 .try_build()
+                .await
                 .err()
                 .unwrap();
 
@@ -328,7 +365,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_cache_path_missing(license: License) {
+        #[tokio::test]
+        async fn test_backend_builder_s3_cache_path_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -339,6 +377,7 @@ mod tests {
                 .cache_size(1024 * 1024 * 1024) // 1 GB
                 .license(license)
                 .try_build()
+                .await
                 .err()
                 .unwrap();
 
@@ -349,7 +388,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_region_missing(license: License) {
+        #[tokio::test]
+        async fn test_backend_builder_s3_region_missing(license: License) {
             let result = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -360,7 +400,8 @@ mod tests {
                 .remote_secret_key("secret_key")
                 .cache_size(1024 * 1024 * 1024) // 1 GB
                 .license(license)
-                .try_build();
+                .try_build()
+                .await;
 
             assert!(
                 result.is_ok(),
@@ -369,7 +410,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_endpoint_missing(license: License) {
+        #[tokio::test]
+        async fn test_backend_builder_s3_endpoint_missing(license: License) {
             let result = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -379,7 +421,8 @@ mod tests {
                 .remote_secret_key("secret_key")
                 .cache_size(1024 * 1024 * 1024)
                 .license(license)
-                .try_build();
+                .try_build()
+                .await;
 
             assert!(
                 result.is_ok(),
@@ -388,7 +431,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_access_key_missing(license: License) {
+        #[tokio::test]
+        async fn test_backend_builder_s3_access_key_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -399,6 +443,7 @@ mod tests {
                 .cache_size(1024 * 1024 * 1024)
                 .license(license)
                 .try_build()
+                .await
                 .err()
                 .unwrap();
 
@@ -409,7 +454,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_secret_key_missing(license: License) {
+        #[tokio::test]
+        async fn test_backend_builder_s3_secret_key_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -420,6 +466,7 @@ mod tests {
                 .cache_size(1024 * 1024 * 1024)
                 .license(license)
                 .try_build()
+                .await
                 .err()
                 .unwrap();
 
@@ -430,7 +477,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_cache_size_missing(license: License) {
+        #[tokio::test]
+        async fn test_backend_builder_s3_cache_size_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .backend_type(BackendType::S3)
@@ -442,6 +490,7 @@ mod tests {
                 .remote_secret_key("secret_key")
                 .license(license)
                 .try_build()
+                .await
                 .err()
                 .unwrap();
 
@@ -452,7 +501,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_license_missing() {
+        #[tokio::test]
+        async fn test_backend_builder_s3_license_missing() {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
                 .remote_bucket("my-bucket")
@@ -463,6 +513,7 @@ mod tests {
                 .remote_secret_key("secret_key")
                 .cache_size(1024 * 1024 * 1024)
                 .try_build()
+                .await
                 .err()
                 .unwrap();
 
@@ -473,7 +524,8 @@ mod tests {
         }
 
         #[rstest]
-        fn test_backend_builder_s3_license_expired() {
+        #[tokio::test]
+        async fn test_backend_builder_s3_license_expired() {
             let license = License {
                 licensee: "".to_string(),
                 invoice: "".to_string(),
@@ -495,6 +547,7 @@ mod tests {
                 .cache_size(1024 * 1024 * 1024)
                 .license(license)
                 .try_build()
+                .await
                 .err()
                 .unwrap();
 
@@ -508,7 +561,8 @@ mod tests {
     mod open {
         use super::*;
         #[rstest]
-        fn test_backend_open_options(mut mock_backend: MockBackend) {
+        #[tokio::test]
+        async fn test_backend_open_options(mut mock_backend: MockBackend) {
             let path = mock_backend.path().join("test.txt").clone();
 
             // download because it is not cached yet
@@ -526,6 +580,7 @@ mod tests {
                 .create(true)
                 .write(true)
                 .open("test.txt")
+                .await
                 .unwrap();
 
             assert!(file.is_synced());
@@ -538,7 +593,8 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_backend_rename(mut mock_backend: MockBackend) {
+        #[tokio::test]
+        async fn test_backend_rename(mut mock_backend: MockBackend) {
             mock_backend
                 .expect_rename()
                 .returning(move |old_path, new_path| {
@@ -548,7 +604,10 @@ mod tests {
                 });
 
             let backend = build_backend(mock_backend);
-            backend.rename("old_name.txt", "new_name.txt").unwrap();
+            backend
+                .rename("old_name.txt", "new_name.txt")
+                .await
+                .unwrap();
         }
     }
 
@@ -556,14 +615,15 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_backend_remove(mut mock_backend: MockBackend) {
+        #[tokio::test]
+        async fn test_backend_remove(mut mock_backend: MockBackend) {
             mock_backend.expect_remove().returning(move |path| {
                 assert_eq!(path, Path::new("temp_file.txt"));
                 Ok(())
             });
 
             let backend = build_backend(mock_backend);
-            backend.remove("temp_file.txt").unwrap();
+            backend.remove("temp_file.txt").await.unwrap();
         }
     }
 
@@ -571,14 +631,15 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_backend_remove_dir_all(mut mock_backend: MockBackend) {
+        #[tokio::test]
+        async fn test_backend_remove_dir_all(mut mock_backend: MockBackend) {
             mock_backend.expect_remove_dir_all().returning(move |path| {
                 assert_eq!(path, Path::new("temp_dir"));
                 Ok(())
             });
 
             let backend = build_backend(mock_backend);
-            backend.remove_dir_all("temp_dir").unwrap();
+            backend.remove_dir_all("temp_dir").await.unwrap();
         }
     }
 
@@ -586,14 +647,15 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_backend_create_dir_all(mut mock_backend: MockBackend) {
+        #[tokio::test]
+        async fn test_backend_create_dir_all(mut mock_backend: MockBackend) {
             mock_backend.expect_create_dir_all().returning(move |path| {
                 assert_eq!(path, Path::new("new_dir"));
                 Ok(())
             });
 
             let backend = build_backend(mock_backend);
-            backend.create_dir_all("new_dir").unwrap();
+            backend.create_dir_all("new_dir").await.unwrap();
         }
     }
 
@@ -601,7 +663,8 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_backend_read_dir(mut mock_backend: MockBackend) {
+        #[tokio::test]
+        async fn test_backend_read_dir(mut mock_backend: MockBackend) {
             let expected_files = vec![PathBuf::from("file1.txt"), PathBuf::from("file2.txt")];
             let copy_of_expected = expected_files.clone();
             mock_backend.expect_read_dir().returning(move |path| {
@@ -610,7 +673,7 @@ mod tests {
             });
 
             let backend = build_backend(mock_backend);
-            let files = backend.read_dir(&PathBuf::from("some_dir")).unwrap();
+            let files = backend.read_dir(&PathBuf::from("some_dir")).await.unwrap();
             assert_eq!(files, expected_files);
         }
     }
@@ -619,14 +682,15 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_backend_try_exists(mut mock_backend: MockBackend) {
+        #[tokio::test]
+        async fn test_backend_try_exists(mut mock_backend: MockBackend) {
             mock_backend.expect_try_exists().returning(move |path| {
                 assert_eq!(path, Path::new("existing_file.txt"));
                 Ok(true)
             });
 
             let backend = build_backend(mock_backend);
-            let exists = backend.try_exists("existing_file.txt").unwrap();
+            let exists = backend.try_exists("existing_file.txt").await.unwrap();
             assert!(exists);
         }
     }
@@ -635,7 +699,8 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_backend_invalidate_locally_cached_files(mut mock_backend: MockBackend) {
+        #[tokio::test]
+        async fn test_backend_invalidate_locally_cached_files(mut mock_backend: MockBackend) {
             let expected_invalidated = vec![
                 PathBuf::from("cached_file1.txt"),
                 PathBuf::from("cached_file2.txt"),
@@ -646,7 +711,7 @@ mod tests {
                 .returning(move || copy_of_expected.clone());
 
             let backend = build_backend(mock_backend);
-            let invalidated = backend.invalidate_locally_cached_files();
+            let invalidated = backend.invalidate_locally_cached_files().await;
             assert_eq!(invalidated, expected_invalidated);
         }
     }
@@ -654,18 +719,21 @@ mod tests {
     mock! {
         pub Backend {}
 
+        #[async_trait]
         impl StorageBackend for Backend {
             fn path(&self) -> &PathBuf;
-            fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
-            fn remove(&self, path: &Path) -> std::io::Result<()>;
-            fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
-            fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
-            fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
-            fn try_exists(&self, path: &Path) -> std::io::Result<bool>;
-            fn upload(&self, path: &Path) -> std::io::Result<()>;
-            fn download(&self, path: &Path) -> std::io::Result<()>;
-            fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
-            fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+            async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()>;
+            async fn remove(&self, path: &Path) -> std::io::Result<()>;
+            async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()>;
+            async fn create_dir_all(&self, path: &Path) -> std::io::Result<()>;
+            async fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>>;
+            async fn try_exists(&self, path: &Path) -> std::io::Result<bool>;
+            async fn upload(&self, path: &Path) -> std::io::Result<()>;
+            async fn download(&self, path: &Path) -> std::io::Result<()>;
+            async fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
+            async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+            async fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
+            async fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
         }
 
     }

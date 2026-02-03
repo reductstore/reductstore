@@ -2,31 +2,27 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::entry::MethodExtractor;
+use crate::api::utils::ReadersWrapper;
 use crate::api::{ErrorCode, HttpError};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::Bucket;
 
+use crate::api::StateKeeper;
+use crate::core::sync::AsyncRwLock;
+use crate::ext::ext_repository::BoxedManageExtensions;
+use crate::storage::query::QueryRx;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum::response::IntoResponse;
 use axum_extra::headers::{HeaderMap, HeaderName, HeaderValue};
-use bytes::Bytes;
-use futures_util::Stream;
-
-use crate::api::StateKeeper;
-use crate::ext::ext_repository::BoxedManageExtensions;
-use crate::storage::query::QueryRx;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::{no_content, unprocessable_entity};
-use std::collections::{HashMap, VecDeque};
-use std::pin::Pin;
+use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::Arc;
-use std::task::{Context, Poll};
 use std::time::Duration;
-use tokio::sync::RwLock as AsyncRwLock;
 use tokio::time::timeout;
 
 // GET /:bucket/:entry/batch?q=<number>
@@ -61,7 +57,11 @@ pub(super) async fn read_batched_records(
     };
 
     fetch_and_response_batched_records(
-        components.storage.get_bucket(bucket_name)?.upgrade()?,
+        components
+            .storage
+            .get_bucket(bucket_name)
+            .await?
+            .upgrade()?,
         entry_name,
         query_id,
         method.name == "HEAD",
@@ -110,9 +110,11 @@ async fn fetch_and_response_batched_records(
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
     let (rx, io_settings) = bucket
-        .get_entry(entry_name)?
+        .get_entry(entry_name)
+        .await?
         .upgrade()?
-        .get_query_receiver(query_id)?;
+        .get_query_receiver(query_id)
+        .await?;
 
     let mut header_size = 0usize;
     let mut body_size = 0u64;
@@ -185,9 +187,11 @@ async fn fetch_and_response_batched_records(
     if readers.is_empty() {
         tokio::time::sleep(Duration::from_millis(5)).await;
         match bucket
-            .get_entry(entry_name)?
+            .get_entry(entry_name)
+            .await?
             .upgrade()?
             .get_query_receiver(query_id)
+            .await
         {
             Err(err) if err.status() == ErrorCode::NotFound => {
                 return Err(no_content!("No more records").into());
@@ -229,66 +233,20 @@ async fn next_record_readers(
     }
 }
 
-struct ReadersWrapper {
-    readers: VecDeque<BoxedReadRecord>,
-    empty_body: bool,
-}
-
-impl ReadersWrapper {
-    fn new(readers: Vec<BoxedReadRecord>, empty_body: bool) -> Self {
-        Self {
-            readers: VecDeque::from(readers),
-            empty_body,
-        }
-    }
-}
-
-impl Stream for ReadersWrapper {
-    type Item = Result<Bytes, HttpError>;
-
-    fn poll_next(
-        mut self: Pin<&mut ReadersWrapper>,
-        _ctx: &mut Context<'_>,
-    ) -> Poll<Option<Self::Item>> {
-        if self.empty_body {
-            return Poll::Ready(None);
-        }
-
-        if self.readers.is_empty() {
-            return Poll::Ready(None);
-        }
-
-        while let Some(mut reader) = self.readers.pop_front() {
-            match reader.read_chunk() {
-                Some(Ok(bytes)) => {
-                    self.readers.push_front(reader);
-                    return Poll::Ready(Some(Ok(bytes)));
-                }
-                Some(Err(err)) => return Poll::Ready(Some(Err(HttpError::from(err)))),
-                None => continue,
-            }
-        }
-        Poll::Ready(None)
-    }
-    fn size_hint(&self) -> (usize, Option<usize>) {
-        (0, None)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cfg::io::IoConfig;
-
     use crate::api::entry::tests::query;
-    use axum::body::to_bytes;
-
     use crate::api::tests::{headers, keeper, path_to_entry_1};
-
+    use crate::cfg::io::IoConfig;
     use crate::ext::ext_repository::create_ext_repository;
     use crate::storage::entry::io::record_reader::tests::MockRecord;
+    use axum::body::to_bytes;
+    use axum::http::StatusCode;
+    use bytes::Bytes;
     use reduct_base::ext::ExtSettings;
     use reduct_base::io::RecordMeta;
+    use reduct_base::msg::entry_api::QueryEntry;
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::Labels;
     use rstest::*;
@@ -299,7 +257,7 @@ mod tests {
     #[test_log(rstest)]
     #[case("GET", "Hey!!!")]
     #[case("HEAD", "")]
-    #[tokio::test]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_batched_read(
         #[future] keeper: Arc<StateKeeper>,
         path_to_entry_1: Path<HashMap<String, String>>,
@@ -313,13 +271,16 @@ mod tests {
             let entry = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
             for time in 10..100 {
                 let mut writer = entry
+                    .clone()
                     .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
                     .await
                     .unwrap();
@@ -328,7 +289,8 @@ mod tests {
             }
         }
 
-        let query_id = query(&path_to_entry_1, keeper.clone()).await;
+        let ttl = 1;
+        let query_id = query(&path_to_entry_1, keeper.clone(), Some(ttl)).await;
         let query = Query(HashMap::from_iter(vec![(
             "q".to_string(),
             query_id.to_string(),
@@ -395,7 +357,7 @@ mod tests {
             );
         }
 
-        sleep(Duration::from_millis(200)).await;
+        sleep(Duration::from_secs(ttl)).await;
         let response = read_batched_records!();
         let resp_headers = response.headers();
         assert_eq!(
@@ -416,17 +378,20 @@ mod tests {
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
-        let query_id = query(&path_to_entry_1, keeper.clone()).await;
+        let query_id = query(&path_to_entry_1, keeper.clone(), None).await;
 
         components
             .storage
             .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+            .await
             .unwrap()
             .upgrade()
             .unwrap()
             .remove_entry(path_to_entry_1.get("entry_name").unwrap())
             .await
             .unwrap();
+
+        sleep(Duration::from_millis(100)).await;
 
         let err = read_batched_records(
             State(keeper.clone()),
@@ -442,13 +407,60 @@ mod tests {
         .err()
         .unwrap();
 
-        assert_eq!(
-            err,
-            HttpError::new(
-                ErrorCode::NotFound,
-                "Entry 'entry-1' not found in bucket 'bucket-1'"
-            )
+        assert!(
+            err.status() == ErrorCode::NotFound || err.status() == ErrorCode::Conflict,
+            "should return NotFound if the entry is deleted"
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_no_content_when_no_records(
+        #[future] keeper: Arc<StateKeeper>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap()
+            .get_entry("entry-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+
+        let query_id = entry
+            .query(
+                QueryEntry {
+                    start: Some(1),
+                    stop: Some(2),
+                    ..Default::default()
+                }
+                .into(),
+            )
+            .await
+            .unwrap();
+
+        let response = read_batched_records(
+            State(keeper.clone()),
+            Path(path_to_entry_1.0.clone()),
+            Query(HashMap::from_iter(vec![(
+                "q".to_string(),
+                query_id.to_string(),
+            )])),
+            headers,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
     }
 
     mod next_record_reader {
@@ -565,7 +577,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn max_metadata_size_from_query(#[future] keeper: Arc<StateKeeper>) {
             let components = keeper.await.get_anonymous().await.unwrap();
             let resp =
@@ -578,7 +590,7 @@ mod tests {
         }
 
         #[rstest]
-        #[tokio::test]
+        #[tokio::test(flavor = "multi_thread")]
         async fn max_size_from_settings(#[future] keeper: Arc<StateKeeper>) {
             let components = keeper.await.get_anonymous().await.unwrap();
             let resp = build_bucket_and_query(components.clone(), json!({}), false).await;
@@ -614,13 +626,20 @@ mod tests {
             let bucket = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap();
-            let entry = bucket.get_entry("entry-1").unwrap().upgrade().unwrap();
+            let entry = bucket
+                .get_entry("entry-1")
+                .await
+                .unwrap()
+                .upgrade()
+                .unwrap();
 
             for time in 10..100 {
                 let mut writer = entry
+                    .clone()
                     .begin_write(time, 6, "text/plain".to_string(), HashMap::new())
                     .await
                     .unwrap();
@@ -667,13 +686,11 @@ mod tests {
 
     mod stream_wrapper {
         use super::*;
+        use futures_util::Stream;
 
         #[rstest]
         fn test_size_hint() {
-            let wrapper = ReadersWrapper {
-                readers: VecDeque::new(),
-                empty_body: false,
-            };
+            let wrapper = ReadersWrapper::new(vec![], false);
             assert_eq!(wrapper.size_hint(), (0, None));
         }
     }

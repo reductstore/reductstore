@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-mod common;
+pub(crate) mod common;
 mod read_batched;
 mod read_query;
 mod read_query_post;
@@ -85,7 +85,7 @@ pub(super) struct QueryInfoAxum(QueryInfo);
 pub(super) struct RemoveQueryInfoAxum(RemoveQueryInfo);
 
 #[derive(IntoResponse, Twin)]
-pub(super) struct QueryEntryAxum(QueryEntry);
+pub(super) struct QueryEntryAxum(pub QueryEntry);
 
 impl<S> FromRequest<S> for QueryEntryAxum
 where
@@ -259,14 +259,19 @@ mod tests {
             let err = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap()
                 .get_entry("entry-1")
+                .await
                 .err()
                 .unwrap();
 
-            assert_eq!(err.status(), ErrorCode::NotFound);
+            assert!(
+                matches!(err.status(), ErrorCode::NotFound | ErrorCode::Conflict),
+                "Entry should be gone or marked deleting"
+            );
         }
 
         #[rstest]
@@ -291,10 +296,12 @@ mod tests {
             let entry = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap()
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap();
 
@@ -354,10 +361,12 @@ mod tests {
     pub async fn query(
         path_to_entry_1: &Path<HashMap<String, String>>,
         keeper: Arc<StateKeeper>,
+        ttl: Option<u64>,
     ) -> u64 {
         let options = QueryEntry {
             start: Some(0),
             stop: Some(u64::MAX),
+            ttl,
             ..Default::default()
         };
 
@@ -366,10 +375,12 @@ mod tests {
             components
                 .storage
                 .get_bucket(path_to_entry_1.get("bucket_name").unwrap())
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap()
                 .get_entry(path_to_entry_1.get("entry_name").unwrap())
+                .await
                 .unwrap()
                 .upgrade()
                 .unwrap()

@@ -5,7 +5,7 @@ use crate::api::token::TokenListAxum;
 use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::State;
-use axum_extra::headers::HeaderMap;
+use axum::http::HeaderMap;
 
 use std::sync::Arc;
 
@@ -17,10 +17,10 @@ pub(super) async fn list_tokens(
     let components = keeper
         .get_with_permissions(&headers, FullAccessPolicy {})
         .await?;
-    let token_repo = components.token_repo.read().await;
+    let mut token_repo = components.token_repo.write().await?;
 
     let mut list = TokenListAxum::default();
-    for token in token_repo.get_token_list()?.iter() {
+    for token in token_repo.get_token_list().await?.iter() {
         let mut x = token.clone();
         x.value.clear();
         list.0.tokens.push(x);

@@ -24,7 +24,9 @@ pub(super) async fn remove_bucket(
         .token_repo
         .write()
         .await
-        .remove_bucket_from_tokens(&bucket_name)?;
+        .unwrap()
+        .remove_bucket_from_tokens(&bucket_name)
+        .await?;
     Ok(())
 }
 
@@ -68,9 +70,11 @@ mod tests {
         let components = keeper.get_anonymous().await.unwrap();
         let token = components
             .token_repo
-            .read()
+            .write()
             .await
+            .unwrap()
             .get_token("test")
+            .await
             .unwrap()
             .clone();
         assert_eq!(
@@ -89,9 +93,11 @@ mod tests {
         let components = keeper.get_anonymous().await.unwrap();
         let token = components
             .token_repo
-            .read()
+            .write()
             .await
+            .unwrap()
             .get_token("test")
+            .await
             .unwrap()
             .clone();
         assert_eq!(

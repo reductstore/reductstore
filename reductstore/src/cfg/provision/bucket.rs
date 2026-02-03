@@ -13,7 +13,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
-    pub(in crate::cfg) fn provision_buckets(&self, data_path: &PathBuf) -> StorageEngine {
+    pub(in crate::cfg) async fn provision_buckets(&self, data_path: &PathBuf) -> StorageEngine {
         let license = parse_license(self.cfg.license_path.clone());
 
         let builder = StorageEngine::builder()
@@ -21,26 +21,26 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             .with_data_path(data_path.clone());
 
         let storage = if let Some(license) = license {
-            builder.with_license(license).build()
+            builder.with_license(license).build().await
         } else {
-            builder.build()
+            builder.build().await
         };
 
         for (name, settings) in &self.cfg.buckets {
-            let settings = match storage.create_bucket(&name, settings.clone()) {
+            let settings = match storage.create_bucket(&name, settings.clone()).await {
                 Ok(bucket) => {
                     let bucket = bucket.upgrade().unwrap();
                     bucket.set_provisioned(true);
-                    Ok(bucket.settings().clone())
+                    Ok(bucket.settings().await)
                 }
                 Err(e) => {
                     if e.status() == ErrorCode::Conflict {
-                        let bucket = storage.get_bucket(&name).unwrap().upgrade().unwrap();
+                        let bucket = storage.get_bucket(&name).await.unwrap().upgrade().unwrap();
                         bucket.set_provisioned(false);
-                        bucket.set_settings(settings.clone()).wait().unwrap();
+                        bucket.set_settings(settings.clone()).await.unwrap();
                         bucket.set_provisioned(true);
 
-                        Ok(bucket.settings().clone())
+                        Ok(bucket.settings().await)
                     } else {
                         Err(e)
                     }
@@ -131,20 +131,22 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0");
-        let components = cfg.build().unwrap();
+        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0").await;
+        let components = cfg.build().await.unwrap();
 
         let bucket1 = components
             .storage
             .get_bucket("bucket1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
         assert!(bucket1.is_provisioned());
-        assert_eq!(bucket1.settings().quota_type, Some(FIFO));
-        assert_eq!(bucket1.settings().quota_size, Some(1_000_000_000));
-        assert_eq!(bucket1.settings().max_block_size, Some(1_000_000));
-        assert_eq!(bucket1.settings().max_block_records, Some(1000));
+        let settings = bucket1.settings().await.unwrap();
+        assert_eq!(settings.quota_type, Some(FIFO));
+        assert_eq!(settings.quota_size, Some(1_000_000_000));
+        assert_eq!(settings.max_block_size, Some(1_000_000));
+        assert_eq!(settings.max_block_records, Some(1000));
     }
 
     #[log_test(rstest)]
@@ -159,16 +161,17 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0");
-        let components = cfg.build().unwrap();
+        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0").await;
+        let components = cfg.build().await.unwrap();
         let bucket1 = components
             .storage
             .get_bucket("bucket1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
         assert_eq!(
-            bucket1.settings(),
+            bucket1.settings().await.unwrap(),
             Bucket::defaults(),
             "use defaults if env vars are not set"
         );
@@ -186,11 +189,11 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0");
-        let components = cfg.build().unwrap();
+        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0").await;
+        let components = cfg.build().await.unwrap();
 
         assert_eq!(
-            components.storage.get_bucket("$$$$$").err().unwrap(),
+            components.storage.get_bucket("$$$$$").await.err().unwrap(),
             not_found!("Bucket '$$$$$' is not found")
         );
     }

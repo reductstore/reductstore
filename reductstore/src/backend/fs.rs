@@ -4,7 +4,8 @@
 //    file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 use crate::backend::file::AccessMode;
-use crate::backend::StorageBackend;
+use crate::backend::{ObjectMetadata, StorageBackend};
+use async_trait::async_trait;
 use std::path::{Path, PathBuf};
 
 pub(crate) struct FileSystemBackend {
@@ -17,57 +18,80 @@ impl FileSystemBackend {
     }
 }
 
+#[async_trait]
 impl StorageBackend for FileSystemBackend {
     fn path(&self) -> &PathBuf {
         &self.path
     }
 
-    fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
-        std::fs::rename(from, to)
+    async fn rename(&self, from: &Path, to: &Path) -> std::io::Result<()> {
+        tokio::fs::rename(from, to).await
     }
 
-    fn remove(&self, path: &Path) -> std::io::Result<()> {
-        std::fs::remove_file(path)
+    async fn remove(&self, path: &Path) -> std::io::Result<()> {
+        tokio::fs::remove_file(path).await
     }
 
-    fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
-        std::fs::remove_dir_all(path)
+    async fn remove_dir_all(&self, path: &Path) -> std::io::Result<()> {
+        tokio::fs::remove_dir_all(path).await
     }
 
-    fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
-        std::fs::create_dir_all(path)
+    async fn create_dir_all(&self, path: &Path) -> std::io::Result<()> {
+        tokio::fs::create_dir_all(path).await
     }
 
-    fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>> {
-        std::fs::read_dir(path).map(|read_dir| {
-            read_dir
-                .filter_map(|entry| entry.ok().map(|e| e.path()))
-                .collect()
-        })
+    async fn read_dir(&self, path: &Path) -> std::io::Result<Vec<PathBuf>> {
+        let mut dir = tokio::fs::read_dir(path).await?;
+        let mut entries = Vec::new();
+        while let Some(entry) = dir.next_entry().await? {
+            entries.push(entry.path());
+        }
+
+        Ok(entries)
     }
 
-    fn try_exists(&self, path: &Path) -> std::io::Result<bool> {
+    async fn try_exists(&self, path: &Path) -> std::io::Result<bool> {
         path.try_exists()
     }
 
-    fn upload(&self, _path: &Path) -> std::io::Result<()> {
+    async fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
+        match tokio::fs::metadata(path).await {
+            Ok(metadata) => {
+                let modified = metadata.modified().ok();
+                let size = metadata.len();
+                Ok(Some(ObjectMetadata {
+                    size: Some(size as i64),
+                    modified_time: modified,
+                }))
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(e) => Err(e),
+        }
+    }
+
+    async fn upload(&self, _path: &Path) -> std::io::Result<()> {
         // do nothing because the file owner is responsible for syncing with fs
         Ok(())
     }
 
-    fn download(&self, _path: &Path) -> std::io::Result<()> {
+    async fn download(&self, _path: &Path) -> std::io::Result<()> {
         // do nothing because filesystem backend does not need downloading
         Ok(())
     }
 
-    fn update_local_cache(&self, _path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
+    async fn update_local_cache(&self, _path: &Path, _mode: &AccessMode) -> std::io::Result<()> {
         // do nothing because filesystem backend does not need access tracking
         Ok(())
     }
 
-    fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
+    async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
         // do nothing because filesystem backend does not have a cache
         vec![]
+    }
+
+    async fn remove_from_local_cache(&self, _path: &Path) -> std::io::Result<()> {
+        // do nothing because filesystem backend does not have a cache
+        Ok(())
     }
 }
 
@@ -84,7 +108,8 @@ mod tests {
         use std::io::Read;
 
         #[rstest]
-        fn test_rename_file(fs_backend: FileSystemBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_rename_file(fs_backend: FileSystemBackend) {
             let path = fs_backend.path().join("old_name.txt");
             let mut file = OpenOptions::new()
                 .write(true)
@@ -94,9 +119,9 @@ mod tests {
             writeln!(file, "This is a test file.").unwrap();
 
             let new_path = path.with_file_name("new_name.txt");
-            fs_backend.rename(&path, &new_path).unwrap();
-            assert!(!fs_backend.try_exists(&path).unwrap());
-            assert!(fs_backend.try_exists(&new_path).unwrap());
+            fs_backend.rename(&path, &new_path).await.unwrap();
+            assert!(!fs_backend.try_exists(&path).await.unwrap());
+            assert!(fs_backend.try_exists(&new_path).await.unwrap());
 
             let mut read_file = OpenOptions::new().read(true).open(&new_path).unwrap();
             let mut content = String::new();
@@ -110,7 +135,8 @@ mod tests {
         use std::fs::OpenOptions;
 
         #[rstest]
-        fn test_remove_file(fs_backend: FileSystemBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_remove_file(fs_backend: FileSystemBackend) {
             let path = fs_backend.path().join("temp_file.txt");
             let mut file = OpenOptions::new()
                 .write(true)
@@ -119,9 +145,9 @@ mod tests {
                 .unwrap();
             writeln!(file, "Temporary file content.").unwrap();
 
-            assert!(fs_backend.try_exists(&path).unwrap());
-            fs_backend.remove(&path).unwrap();
-            assert!(!fs_backend.try_exists(&path).unwrap());
+            assert!(fs_backend.try_exists(&path).await.unwrap());
+            fs_backend.remove(&path).await.unwrap();
+            assert!(!fs_backend.try_exists(&path).await.unwrap());
         }
     }
 
@@ -130,9 +156,10 @@ mod tests {
         use std::fs::OpenOptions;
 
         #[rstest]
-        fn test_remove_dir_all(fs_backend: FileSystemBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_remove_dir_all(fs_backend: FileSystemBackend) {
             let dir_path = fs_backend.path().join("temp_dir");
-            fs_backend.create_dir_all(&dir_path).unwrap();
+            fs_backend.create_dir_all(&dir_path).await.unwrap();
             let file_path = dir_path.join("file.txt");
             let mut file = OpenOptions::new()
                 .write(true)
@@ -142,8 +169,8 @@ mod tests {
             writeln!(file, "File in temporary directory.").unwrap();
             file.sync_all().unwrap();
 
-            fs_backend.remove_dir_all(&dir_path).unwrap();
-            assert!(!fs_backend.try_exists(&dir_path).unwrap());
+            fs_backend.remove_dir_all(&dir_path).await.unwrap();
+            assert!(!fs_backend.try_exists(&dir_path).await.unwrap());
         }
     }
 
@@ -151,10 +178,11 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn test_create_dir_all(fs_backend: FileSystemBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_create_dir_all(fs_backend: FileSystemBackend) {
             let dir_path = fs_backend.path().join("new_dir/sub_dir");
-            fs_backend.create_dir_all(&dir_path).unwrap();
-            assert!(fs_backend.try_exists(&dir_path).unwrap());
+            fs_backend.create_dir_all(&dir_path).await.unwrap();
+            assert!(fs_backend.try_exists(&dir_path).await.unwrap());
         }
     }
 
@@ -163,9 +191,10 @@ mod tests {
         use std::fs::OpenOptions;
 
         #[rstest]
-        fn test_read_dir(fs_backend: FileSystemBackend) {
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_read_dir(fs_backend: FileSystemBackend) {
             let dir_path = fs_backend.path().join("read_dir_test");
-            fs_backend.create_dir_all(&dir_path).unwrap();
+            fs_backend.create_dir_all(&dir_path).await.unwrap();
 
             let file1_path = dir_path.join("file1.txt");
             let _ = OpenOptions::new()
@@ -181,9 +210,12 @@ mod tests {
                 .open(&file2_path)
                 .unwrap();
 
-            fs_backend.create_dir_all(&dir_path.join("child/")).unwrap();
+            fs_backend
+                .create_dir_all(&dir_path.join("child/"))
+                .await
+                .unwrap();
 
-            let entries = fs_backend.read_dir(&dir_path).unwrap();
+            let entries = fs_backend.read_dir(&dir_path).await.unwrap();
             let entry_names: Vec<String> = entries
                 .iter()
                 .map(|p| p.file_name().unwrap().to_string_lossy().to_string())

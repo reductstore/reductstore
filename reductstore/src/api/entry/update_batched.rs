@@ -64,9 +64,11 @@ pub(super) async fn update_batched_records(
     let result = {
         let entry = components
             .storage
-            .get_bucket(bucket_name)?
+            .get_bucket(bucket_name)
+            .await?
             .upgrade()?
-            .get_entry(entry_name)?
+            .get_entry(entry_name)
+            .await?
             .upgrade()?;
         entry.update_labels(records_to_update).await?
     };
@@ -78,16 +80,18 @@ pub(super) async fn update_batched_records(
                 err_to_batched_header(&mut headers, time, &err);
             }
             Ok(new_labels) => {
-                let mut replication_repo = components.replication_repo.write().await;
-                replication_repo.notify(TransactionNotification {
-                    bucket: bucket_name.clone(),
-                    entry: entry_name.clone(),
-                    meta: RecordMeta::builder()
-                        .timestamp(time)
-                        .labels(new_labels)
-                        .build(),
-                    event: Transaction::UpdateRecord(time),
-                })?;
+                let mut replication_repo = components.replication_repo.write().await?;
+                replication_repo
+                    .notify(TransactionNotification {
+                        bucket: bucket_name.clone(),
+                        entry: entry_name.clone(),
+                        meta: RecordMeta::builder()
+                            .timestamp(time)
+                            .labels(new_labels)
+                            .build(),
+                        event: Transaction::UpdateRecord(time),
+                    })
+                    .await?;
             }
         };
     }
@@ -186,12 +190,14 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("bucket-1")
+            .await
             .unwrap()
             .upgrade_and_unwrap();
 
         {
             let reader = bucket
                 .get_entry("entry-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_read(0)
@@ -207,7 +213,9 @@ mod tests {
             .replication_repo
             .read()
             .await
+            .unwrap()
             .get_info("api-test")
+            .await
             .unwrap();
         assert_eq!(info.info.pending_records, 1);
     }
@@ -226,6 +234,7 @@ mod tests {
             let mut writer = components
                 .storage
                 .get_bucket("bucket-1")
+                .await
                 .unwrap()
                 .upgrade_and_unwrap()
                 .begin_write("entry-1", 2, 20, "text/plain".to_string(), HashMap::new())
@@ -255,7 +264,7 @@ mod tests {
         assert_eq!(headers.len(), 1);
         assert_eq!(
             headers.get("x-reduct-error-1").unwrap(),
-            &HeaderValue::from_static("404,No record with timestamp 1")
+            &HeaderValue::from_static("404,Record 1 not found in entry bucket-1/entry-1")
         );
     }
 }

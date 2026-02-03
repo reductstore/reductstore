@@ -1,7 +1,7 @@
 import json
 from time import sleep
 
-from .conftest import requires_env, auth_headers
+from .conftest import requires_env, requires_backend, auth_headers
 
 
 def test__create_bucket_ok(base_url, session, bucket_name):
@@ -20,6 +20,7 @@ def test__create_bucket_ok(base_url, session, bucket_name):
         "quota_size": 0,
     }
     assert data["info"]["name"] == bucket_name
+    assert data["info"]["status"] == "READY"
     assert len(data["entries"]) == 0
 
     assert resp.headers["Content-Type"] == "application/json"
@@ -138,6 +139,7 @@ def test__get_bucket_stats(base_url, session, bucket_name):
             "oldest_record": 1000000,
             "record_count": 1,
             "size": 40,
+            "status": "READY",
         },
         {
             "block_count": 1,
@@ -146,6 +148,7 @@ def test__get_bucket_stats(base_url, session, bucket_name):
             "oldest_record": 2000000,
             "record_count": 1,
             "size": 43,
+            "status": "READY",
         },
     ]
     assert data["info"] == dict(
@@ -155,6 +158,7 @@ def test__get_bucket_stats(base_url, session, bucket_name):
         latest_record=2000000,
         oldest_record=1000000,
         is_provisioned=False,
+        status="READY",
     )
 
 
@@ -227,6 +231,8 @@ def test__remove_bucket_ok(base_url, session, bucket_name):
     resp = session.delete(f"{base_url}/b/{bucket_name}")
     assert resp.status_code == 200
 
+    # Deletion is async; allow cleanup to finish before asserting absence
+    sleep(0.1)
     resp = session.get(f"{base_url}/b/{bucket_name}")
     assert resp.status_code == 404
 
@@ -293,6 +299,7 @@ def test__head_bucket_with_full_access_token(
     assert resp.status_code == 200
 
 
+@requires_backend("fs")
 def test__rename_bucket_ok(base_url, session, bucket_name):
     """Should rename a bucket"""
     resp = session.post(f"{base_url}/b/{bucket_name}")
@@ -311,7 +318,20 @@ def test__rename_bucket_ok(base_url, session, bucket_name):
     assert resp.status_code == 200
 
 
+@requires_backend("s3")
+def test__rename_bucket_s3_not_allowed(base_url, session, bucket_name):
+    """Should not rename a bucket with S3 backend"""
+    resp = session.post(f"{base_url}/b/{bucket_name}")
+    assert resp.status_code == 200
+
+    resp = session.put(
+        f"{base_url}/b/{bucket_name}/rename", json={"new_name": "new_bucket_name"}
+    )
+    assert resp.status_code == 405
+
+
 @requires_env("API_TOKEN")
+@requires_backend("fs")
 def test__rename_bucket_with_full_access_token(
     base_url,
     session,

@@ -22,13 +22,14 @@ pub(super) async fn rename_bucket(
         .await?;
     components
         .storage
-        .rename_bucket(&bucket_name, &request.new_name)
+        .rename_bucket(bucket_name.clone(), request.new_name.clone())
         .await?;
     components
         .token_repo
         .write()
-        .await
-        .rename_bucket(&bucket_name, &request.new_name)?;
+        .await?
+        .rename_bucket(&bucket_name, &request.new_name)
+        .await?;
     Ok(())
 }
 
@@ -56,6 +57,7 @@ mod tests {
             .token_repo
             .write()
             .await
+            .unwrap()
             .generate_token(
                 "test-1",
                 Permissions {
@@ -64,6 +66,7 @@ mod tests {
                     write: vec!["bucket-1".to_string()],
                 },
             )
+            .await
             .unwrap();
 
         rename_bucket(
@@ -79,6 +82,7 @@ mod tests {
         let bucket = components
             .storage
             .get_bucket("new-bucket")
+            .await
             .unwrap()
             .upgrade()
             .unwrap();
@@ -87,9 +91,11 @@ mod tests {
 
         let token = components
             .token_repo
-            .read()
+            .write()
             .await
+            .unwrap()
             .get_token("test-1")
+            .await
             .unwrap()
             .clone();
         assert_eq!(

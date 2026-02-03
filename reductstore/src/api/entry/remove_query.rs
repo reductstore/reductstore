@@ -33,8 +33,12 @@ pub(super) async fn remove_query(
         )
         .await?;
 
-    let bucket = components.storage.get_bucket(bucket_name)?.upgrade()?;
-    let entry = bucket.get_or_create_entry(entry_name)?.upgrade()?;
+    let bucket = components
+        .storage
+        .get_bucket(bucket_name)
+        .await?
+        .upgrade()?;
+    let entry = bucket.get_or_create_entry(entry_name).await?.upgrade()?;
     if params.is_empty() {
         return Err(
             unprocessable_entity!("Define at least one query parameter to delete records").into(),

@@ -1,0 +1,56 @@
+{
+    "server": {
+        "version": "1.18.0",
+        "bucket_count": 2,
+        "usage": 63250850104,
+        "uptime": 73,
+        "oldest_record": 1768592797895147,
+        "latest_record": 1768602007362290,
+        "license": null
+    },
+    "bucket": {
+        "info": {
+            "name": "data_check",
+            "entry_count": 4,
+            "size": 40641030087,
+            "oldest_record": 1768592797895147,
+            "latest_record": 1768602007362290,
+            "is_provisioned": false
+        },
+        "entries": [
+            {
+                "name": "entry_0",
+                "size": 12030218735,
+                "block_count": 197,
+                "record_count": 14119,
+                "oldest_record": 1768592797895147,
+                "latest_record": 1768602007362290
+            },
+            {
+                "name": "entry_1",
+                "size": 11891302494,
+                "block_count": 194,
+                "record_count": 13989,
+                "oldest_record": 1768592797896436,
+                "latest_record": 1768602006443027
+            },
+            {
+                "name": "entry_2",
+                "size": 8393130955,
+                "block_count": 133,
+                "record_count": 13942,
+                "oldest_record": 1768592797898979,
+                "latest_record": 1768602002708634
+            },
+            {
+                "name": "entry_3",
+                "size": 8326377903,
+                "block_count": 132,
+                "record_count": 13668,
+                "oldest_record": 1768592797899832,
+                "latest_record": 1768602002839566
+            }
+        ]
+    },
+    "elapsed": 72.10125637054443
+}

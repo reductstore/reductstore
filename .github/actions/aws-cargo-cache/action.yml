@@ -1,0 +1,54 @@
+name: 'AWS Credentials and Cargo Cache'
+description: 'Configures AWS credentials via OIDC and sets up Cargo cache.'
+inputs:
+  target:
+    description: 'Target triple.'
+    required: true
+  profile:
+    description: 'Cargo profile used for the build.'
+    required: false
+    default: 'ci'
+  access-key-id:
+    description: 'AWS Access Key ID'
+    required: true
+  secret-access-key:
+    description: 'AWS Secret Access Key'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Detect rust minor version
+      shell: bash
+      run: |
+        if [[ -z "${RUST_MINOR:-}" ]]; then
+          minor=$(rustc --version --verbose | sed -ne 's/^release: \([0-9]*\.[0-9]*\).*/\1/p')
+          echo "RUST_MINOR=${minor:-unknown}" >> "$GITHUB_ENV"
+        else
+          echo "Using preset RUST_MINOR=${RUST_MINOR}"
+        fi
+    #
+    #    - name: Configure AWS credentials via OIDC (org-wide role)
+    #      uses: aws-actions/configure-aws-credentials@v4
+    #      with:
+    #        aws-access-key-id: ${{ inputs.access-key-id }}
+    #        aws-secret-access-key: ${{ inputs.secret-access-key }}
+    #        aws-region: eu-central
+
+    - name: Use cache for Cargo
+      uses: runs-on/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+      env:
+        RUNS_ON_S3_BUCKET_CACHE: reduct-cache
+        RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        AWS_REGION: fsn1
+        AWS_DEFAULT_REGION: fsn1
