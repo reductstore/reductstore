@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
-- v1.18.0 crates were published earlier by mistake, must be corrected to v1.18.1
+- v1.18.0 crates were published earlier by mistake, must be corrected to v1.18.1 (#1156)
 
 ## 1.18.0 - 2026-02-03
 
