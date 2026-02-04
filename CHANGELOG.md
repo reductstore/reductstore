@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## Fixed
+
+- Fix ros-ext release artifact and macro deps for the corrected publish, [PR-1156](https://github.com/reductstore/reductstore/pull/1156)
+
 ## 1.18.1 - 2026-02-04
 
 ### Internal
