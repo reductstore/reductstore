@@ -5,5 +5,6 @@ src/asset/console.zip
 .venv/
 .cache
 lcov.info
+__pycache__
 .vscode/settings.json
 __pycache__
