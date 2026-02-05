@@ -6,7 +6,7 @@ Quick run (local):
 2) Start ReductStore with Zenoh enabled:
    `RS_DATA_PATH=~/data-test RS_ZENOH_ENABLED=1 RS_ZENOH_CONNECT=tcp/127.0.0.1:7447 RS_ZENOH_DISABLE_MULTICAST=1 cargo run -p reductstore --features "fs-backend web-console zenoh-api"`
 3) Run tests:
-   `STORAGE_URL=http://127.0.0.1:8383 pytest -p pytest_asyncio.plugin integration_tests/zenoh`
+   `pytest integration_tests/zenoh`
 
 Cleanup:
 `docker rm -f zenoh-router`
