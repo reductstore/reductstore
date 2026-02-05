@@ -20,17 +20,29 @@ pub struct ZenohApiConfig {
     pub mode: Option<String>,
     /// True to disable multicast scouting for discovery.
     pub disable_multicast_scouting: bool,
+    /// Key expression patterns to subscribe to for data ingestion.
+    /// Each pattern maps to bucket/entry based on the key structure: `{prefix}/{bucket}/{entry}/**`
+    pub subscribe_patterns: Vec<String>,
+    /// Enable advanced subscriber features: history recovery and sample miss detection.
+    pub enable_recovery: bool,
+    /// Enable queryable endpoints to allow Zenoh queries to read data from ReductStore.
+    pub enable_queryable: bool,
 }
+
+const DEFAULT_KEY_PREFIX: &str = "reduct";
 
 impl Default for ZenohApiConfig {
     fn default() -> Self {
         ZenohApiConfig {
             enabled: false,
-            key_prefix: "reduct".to_string(),
+            key_prefix: DEFAULT_KEY_PREFIX.to_string(),
             listen_endpoints: Vec::new(),
             connect_endpoints: Vec::new(),
             mode: None,
             disable_multicast_scouting: false,
+            subscribe_patterns: Vec::new(),
+            enable_recovery: false,
+            enable_queryable: true,
         }
     }
 }
@@ -39,13 +51,16 @@ impl Display for ZenohApiConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "enabled={}, prefix={}, listen={:?}, connect={:?}, mode={:?}, disable_multicast={}",
+            "enabled={}, prefix={}, listen={:?}, connect={:?}, mode={:?}, disable_multicast={}, subscribe={:?}, recovery={}, queryable={}",
             self.enabled,
             self.key_prefix,
             self.listen_endpoints,
             self.connect_endpoints,
             self.mode,
-            self.disable_multicast_scouting
+            self.disable_multicast_scouting,
+            self.subscribe_patterns,
+            self.enable_recovery,
+            self.enable_queryable
         )
     }
 }
@@ -57,7 +72,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             key_prefix: env
                 .get_optional("RS_ZENOH_KEY_PREFIX")
                 .filter(|value: &String| !value.trim().is_empty())
-                .unwrap_or_else(|| "reduct".to_string()),
+                .unwrap_or_else(|| DEFAULT_KEY_PREFIX.to_string()),
             listen_endpoints: parse_endpoints(env.get_optional::<String>("RS_ZENOH_LISTEN")),
             connect_endpoints: parse_endpoints(env.get_optional::<String>("RS_ZENOH_CONNECT")),
             mode: env
@@ -73,6 +88,15 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             disable_multicast_scouting: parse_bool(
                 env.get_optional::<String>("RS_ZENOH_DISABLE_MULTICAST"),
                 false,
+            ),
+            subscribe_patterns: parse_endpoints(env.get_optional::<String>("RS_ZENOH_SUBSCRIBE")),
+            enable_recovery: parse_bool(
+                env.get_optional::<String>("RS_ZENOH_ENABLE_RECOVERY"),
+                false,
+            ),
+            enable_queryable: parse_bool(
+                env.get_optional::<String>("RS_ZENOH_ENABLE_QUERYABLE"),
+                true,
             ),
         }
     }
@@ -139,6 +163,21 @@ mod tests {
             .with(eq("RS_ZENOH_DISABLE_MULTICAST"))
             .times(1)
             .return_const(Ok("true".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_SUBSCRIBE"))
+            .times(1)
+            .return_const(Ok("sensors/**,telemetry/imu/**".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_ENABLE_RECOVERY"))
+            .times(1)
+            .return_const(Ok("true".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_ENABLE_QUERYABLE"))
+            .times(1)
+            .return_const(Ok("false".to_string()));
 
         let cfg = CfgParser::<MockEnvGetter>::parse_zenoh_api_config(&mut Env::new(env_getter));
         assert!(cfg.enabled);
@@ -147,6 +186,12 @@ mod tests {
         assert_eq!(cfg.connect_endpoints, vec!["tcp/10.0.0.1:7447".to_string()]);
         assert_eq!(cfg.mode, Some("peer".to_string()));
         assert!(cfg.disable_multicast_scouting);
+        assert_eq!(
+            cfg.subscribe_patterns,
+            vec!["sensors/**".to_string(), "telemetry/imu/**".to_string()]
+        );
+        assert!(cfg.enable_recovery);
+        assert!(!cfg.enable_queryable);
     }
 
     #[rstest]
@@ -158,10 +203,13 @@ mod tests {
 
         let cfg = CfgParser::<MockEnvGetter>::parse_zenoh_api_config(&mut Env::new(env_getter));
         assert!(!cfg.enabled);
-        assert_eq!(cfg.key_prefix, "reduct");
+        assert_eq!(cfg.key_prefix, DEFAULT_KEY_PREFIX.to_string());
         assert!(cfg.listen_endpoints.is_empty());
         assert!(cfg.connect_endpoints.is_empty());
         assert_eq!(cfg.mode, None);
         assert!(!cfg.disable_multicast_scouting);
+        assert!(cfg.subscribe_patterns.is_empty());
+        assert!(!cfg.enable_recovery);
+        assert!(cfg.enable_queryable);
     }
 }

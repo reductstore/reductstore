@@ -1,9 +1,14 @@
+// Copyright 2026 ReductSoftware UG
+// Licensed under the Business Source License 1.1
+
 use crate::api::zenoh::attachments;
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::components::Components;
+use crate::replication::{Transaction, TransactionNotification};
 use bytes::Bytes;
 use log::{debug, info, warn};
 use reduct_base::error::ReductError;
+use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -29,7 +34,7 @@ impl SubscriberPipeline {
         format!("{}/**", self.key_pattern.prefix())
     }
 
-    /// Handles a single Zenoh sample by writing it into storage.
+    /// Handles a single Zenoh sample by writing it into storage and notifying replications.
     pub(crate) async fn handle_sample(
         &self,
         key_expr: &str,
@@ -74,13 +79,42 @@ impl SubscriberPipeline {
                 ts,
                 content_size,
                 "application/octet-stream".to_string(),
-                labels,
+                labels.clone(),
             )
             .await?;
 
         writer.send(Ok(Some(payload))).await?;
         writer.send(Ok(None)).await?;
 
+        // Notify replication system about the write
+        self.notify_replication(&route.bucket, &route.entry, ts, labels)
+            .await?;
+
+        Ok(())
+    }
+
+    /// Notifies the replication system about a write event.
+    async fn notify_replication(
+        &self,
+        bucket: &str,
+        entry: &str,
+        timestamp: u64,
+        labels: Labels,
+    ) -> Result<(), ReductError> {
+        self.components
+            .replication_repo
+            .write()
+            .await?
+            .notify(TransactionNotification {
+                bucket: bucket.to_string(),
+                entry: entry.to_string(),
+                meta: RecordMeta::builder()
+                    .timestamp(timestamp)
+                    .labels(labels)
+                    .build(),
+                event: Transaction::WriteRecord(timestamp),
+            })
+            .await?;
         Ok(())
     }
 
@@ -128,7 +162,12 @@ impl KeyPattern {
     }
 
     pub(crate) fn format(&self, bucket: &str, entry: &str) -> String {
-        format!("{}/{}/{}", self.prefix, bucket, entry)
+        format!(
+            "{}/{}/{}",
+            self.prefix,
+            bucket.trim_matches('/'),
+            entry.trim_matches('/')
+        )
     }
 
     pub(crate) fn parse(&self, expr: &str) -> Result<KeyRoute, KeyParseError> {
