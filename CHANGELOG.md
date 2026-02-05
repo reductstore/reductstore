@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Bump ros-ext release artifact to v0.5.2, [PR-1158](https://github.com/reductstore/reductstore/pull/1158)
+
 ## 1.18.2 - 2026-02-04
 
 ## Fixed
