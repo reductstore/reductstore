@@ -5,7 +5,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use log::{error, info};
 use reduct_base::logger::Logger;
-use reductstore::api::AxumAppBuilder;
+use reductstore::api::http::AxumAppBuilder;
 use reductstore::cfg::CfgParser;
 use reductstore::core::env::StdEnvGetter;
 use reductstore::storage::engine::StorageEngine;
@@ -77,6 +77,9 @@ async fn launch_server() {
         .with_component_receiver(rx)
         .with_lock_file(lock_file.clone())
         .build();
+
+    let _zenoh_runtime =
+        reductstore::api::zenoh::spawn_runtime(cfg.zenoh_api.clone(), state_keeper.clone());
 
     // Ensure that the process exits with a non-zero exit code on panic.
     let default_panic = std::panic::take_hook();
