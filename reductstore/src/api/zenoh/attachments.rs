@@ -1,3 +1,6 @@
+// Copyright 2026 ReductSoftware UG
+// Licensed under the Business Source License 1.1
+
 use reduct_base::Labels;
 
 /// Encodes ReductStore labels as a JSON attachment payload compatible with Zenoh samples.

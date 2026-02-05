@@ -10,14 +10,34 @@ pub(crate) mod queryable;
 mod session;
 #[cfg(feature = "zenoh-api")]
 pub(crate) mod subscriber;
-
+#[cfg(feature = "zenoh-api")]
+use tokio::sync::watch;
 #[cfg(feature = "zenoh-api")]
 use tokio::task::JoinHandle;
 
+/// Handle to the Zenoh runtime, allows graceful shutdown.
 #[cfg(feature = "zenoh-api")]
-pub type ZenohRuntimeHandle = JoinHandle<()>;
+pub struct ZenohRuntimeHandle {
+    task: JoinHandle<()>,
+    shutdown_tx: watch::Sender<bool>,
+}
+
+#[cfg(feature = "zenoh-api")]
+impl ZenohRuntimeHandle {
+    /// Signal the Zenoh runtime to shut down and wait for it to complete.
+    pub async fn shutdown(self) {
+        let _ = self.shutdown_tx.send(true);
+        let _ = self.task.await;
+    }
+}
+
 #[cfg(not(feature = "zenoh-api"))]
-pub type ZenohRuntimeHandle = ();
+pub struct ZenohRuntimeHandle;
+
+#[cfg(not(feature = "zenoh-api"))]
+impl ZenohRuntimeHandle {
+    pub async fn shutdown(self) {}
+}
 
 pub fn spawn_runtime(
     config: ZenohApiConfig,
@@ -29,13 +49,15 @@ pub fn spawn_runtime(
             return None;
         }
 
-        let handle = tokio::spawn(async move {
-            if let Err(err) = session::run_session(config, state_keeper).await {
+        let (shutdown_tx, shutdown_rx) = watch::channel(false);
+
+        let task = tokio::spawn(async move {
+            if let Err(err) = session::run_session(config, state_keeper, shutdown_rx).await {
                 log::error!("Zenoh API runtime terminated: {}", err);
             }
         });
 
-        return Some(handle);
+        return Some(ZenohRuntimeHandle { task, shutdown_tx });
     }
 
     #[cfg(not(feature = "zenoh-api"))]

@@ -1,3 +1,6 @@
+// Copyright 2026 ReductSoftware UG
+// Licensed under the Business Source License 1.1
+
 use crate::api::zenoh::subscriber::{KeyParseError, KeyPattern};
 use crate::cfg::io::IoConfig;
 use crate::cfg::zenoh::ZenohApiConfig;
