@@ -18,6 +18,7 @@ use axum::http::HeaderMap;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::service_unavailable;
+use serde::de::StdError;
 use std::fmt::{Debug, Display, Formatter};
 use std::sync::Arc;
 use tokio::sync::mpsc::Receiver;
@@ -32,12 +33,13 @@ pub struct Components {
     pub(crate) replication_repo: AsyncRwLock<Box<dyn ManageReplications + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
+
     pub(crate) cfg: Cfg,
 }
 
-/// Initialization and shared access to [`Components`].
+/// Initialization and shared access to core server components.
 ///
-/// Both the HTTP API and Zenoh API use this to wait for server readiness
+/// Both the HTTP API and Zenoh API use this to wait for the server to be ready
 /// and obtain references to the storage engine and other services.
 pub struct StateKeeper {
     rx: AsyncRwLock<Receiver<Components>>,
@@ -191,8 +193,8 @@ impl Display for ComponentError {
     }
 }
 
-impl std::error::Error for ComponentError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+impl StdError for ComponentError {
+    fn source(&self) -> Option<&(dyn StdError + 'static)> {
         None
     }
 }
