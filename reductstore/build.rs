@@ -1,4 +1,4 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use reqwest::blocking::get;
@@ -31,7 +31,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     download_ext("select-ext", "v0.7.0");
 
     #[cfg(feature = "ros-ext")]
-    download_ext("ros-ext", "v0.5.0-beta.2");
+    download_ext("ros-ext", "v0.5.2");
 
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())

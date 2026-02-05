@@ -6,3 +6,4 @@ src/asset/console.zip
 .cache
 lcov.info
 __pycache__
+.vscode/settings.json
