@@ -16,6 +16,7 @@ use crate::api::http::io::create_io_api_routes;
 use crate::api::http::ui::{redirect_to_index, show_ui};
 use crate::cfg::Cfg;
 use crate::core::components::ComponentError;
+use crate::core::components::{Components, LogHint, StateKeeper};
 use crate::lock_file::BoxedLockFile;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -36,9 +37,6 @@ use std::sync::Arc;
 use token::create_token_api_routes;
 use tokio::sync::mpsc::Receiver;
 use tower_http::cors::{Any, CorsLayer};
-
-// Re-export from core for backward compatibility and convenience
-pub use crate::core::components::{Components, LogHint, StateKeeper};
 
 #[derive(PartialEq, Clone)]
 pub struct HttpError {

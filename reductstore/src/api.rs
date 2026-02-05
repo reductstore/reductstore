@@ -4,5 +4,6 @@
 pub mod http;
 pub mod zenoh;
 
-pub use http::{Components, HttpError, LogHint, StateKeeper};
+pub use crate::core::components::{Components, LogHint, StateKeeper};
+pub use http::HttpError;
 pub use zenoh::{spawn_runtime as spawn_zenoh_runtime, ZenohRuntimeHandle};
