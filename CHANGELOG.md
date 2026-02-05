@@ -7,6 +7,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.18.3 - 2026-02-05
+
+### Fixed
+
+- Bump ros-ext release artifact to v0.5.2, [PR-1158](https://github.com/reductstore/reductstore/pull/1158)
+
+## 1.18.2 - 2026-02-04
+
+## Fixed
+
+- Fix ros-ext release artifact and macro deps for the corrected publish, [PR-1156](https://github.com/reductstore/reductstore/pull/1156)
+
+## 1.18.1 - 2026-02-04
+
+### Internal
+
+- v1.18.0 crates were published earlier by mistake, must be corrected to v1.18.1
+
+## 1.18.0 - 2026-02-03
+
 ### Added
 
 - Support for Active/Passive deployment, [PR-1028](https://github.com/reductstore/reductstore/pull/1028)
@@ -37,6 +57,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Prevent panic in `$each_t` when time goes backwards, [PR-1150](https://github.com/reductstore/reductstore/pull/1150)
 - Fix thread pool deadlock in tests when tasks wait for other tasks, [PR-1081](https://github.com/reductstore/reductstore/pull/1081)
 - Sync block data before metadata/index during compaction to avoid stale replica reads, [PR-1139](https://github.com/reductstore/reductstore/pull/1139)
 - Fix replica crash at the start without write permissions, [PR-1054](https://github.com/reductstore/reductstore/pull/1054)
