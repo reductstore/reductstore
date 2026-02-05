@@ -2,5 +2,7 @@
 target
 src/asset/console.zip
 /venv/
+.venv/
 .cache
 lcov.info
+__pycache__

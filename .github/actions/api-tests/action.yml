@@ -28,6 +28,14 @@ inputs:
   minio_endpoint:
     description: 'MinIO endpoint.'
     required: false
+  zenoh_enabled:
+    description: 'Enable Zenoh API tests.'
+    required: false
+    default: 'false'
+  zenoh_connect:
+    description: 'Zenoh router connection string.'
+    required: false
+    default: 'tcp/127.0.0.1:7447'
 runs:
   using: 'composite'
   steps:
@@ -50,6 +58,12 @@ runs:
         secret_key: ${{ inputs.minio_secret_key }}
         bucket_name: ${{ inputs.minio_bucket }}
 
+    - name: Start Zenoh router (if zenoh enabled)
+      if: ${{ inputs.zenoh_enabled == 'true' }}
+      shell: bash
+      run: |
+        docker run --init -d --name zenoh-router -p 7447:7447/tcp -p 8000:8000/tcp eclipse/zenoh
+
     - name: Check dir
       run: ls -la ./misc
       shell: bash
@@ -59,8 +73,16 @@ runs:
       run: |
         backend="${{ inputs.backend }}"
         minio_endpoint="${{ inputs.minio_endpoint }}"
+        zenoh_enabled="${{ inputs.zenoh_enabled }}"
+        zenoh_connect="${{ inputs.zenoh_connect }}"
         if [ -z "$minio_endpoint" ]; then
           minio_endpoint="http://localhost:9000"
+        fi
+
+        # Build Zenoh env vars if enabled
+        zenoh_envs=""
+        if [ "$zenoh_enabled" = "true" ]; then
+          zenoh_envs="--env RS_ZENOH_ENABLED=1 --env RS_ZENOH_CONNECT=$zenoh_connect --env RS_ZENOH_DISABLE_MULTICAST=1"
         fi
 
         if [ "$backend" = "s3" ] && [ -n "${{ inputs.license_path }}" ]; then
@@ -76,6 +98,7 @@ runs:
             --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }} \
             --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }} \
             --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
+            $zenoh_envs \
             --name reduct -d ${{ github.repository }}
         else
           docker run --network=host -v ${PWD}/misc:/misc \
@@ -84,6 +107,7 @@ runs:
             --env RS_LICENSE_PATH=${{ inputs.license_path }} \
             --env RS_CERT_KEY_PATH=/misc/privateKey.key \
             --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
+            $zenoh_envs \
             --name reduct -d ${{ github.repository }}
         fi
 
@@ -114,6 +138,22 @@ runs:
           --env LICENSE_PATH=${{ inputs.license_path }} \
           --env STORAGE_BACKEND=$storage_backend \
           --env STORAGE_URL=${{ inputs.url }} api
+
+    - name: Build Zenoh tests
+      if: ${{ inputs.zenoh_enabled == 'true' }}
+      shell: bash
+      run: |
+        docker build -t zenoh-tests ./integration_tests/zenoh
+
+    - name: Run Zenoh tests
+      if: ${{ inputs.zenoh_enabled == 'true' }}
+      shell: bash
+      run: |
+        docker run --network=host \
+          --env API_TOKEN=${{ inputs.token }} \
+          --env STORAGE_URL=${{ inputs.url }} \
+          --env ZENOH_CONNECT=${{ inputs.zenoh_connect }} \
+          zenoh-tests
 
     - name: Print docker logs
       if: always()

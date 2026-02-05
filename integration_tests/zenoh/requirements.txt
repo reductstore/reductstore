@@ -1,0 +1,4 @@
+pytest>=8,<9
+pytest-asyncio~=0.23
+eclipse-zenoh~=1.7
+reduct-py~=1.18
