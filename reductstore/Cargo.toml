@@ -26,6 +26,7 @@ ci = [] # features enables CI-specific tests
 
 fs-backend = []
 s3-backend = ["dep:aws-sdk-s3", "dep:aws-config", "dep:aws-credential-types"]
+zenoh-api = ["dep:zenoh"]
 
 [lib]
 crate-type = ["lib"]
@@ -75,6 +76,7 @@ argon2 = "0.6.0-rc.1"
 aes-siv = "0.8.0-rc.1"
 uuid = { version = "1.20.0", features = ["v4"] }
 parking_lot="0.12.5"
+zenoh = { version = "1.7.2", optional = true }
 
 # optional dependencies for remote backend
 aws-sdk-s3 = { version = "1.121.0", optional = true, features = ["rustls"] }
