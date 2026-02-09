@@ -69,6 +69,10 @@ impl ManageReplications for ReadOnlyReplicationRepository {
     fn start(&mut self) {
         // No-op
     }
+
+    async fn stop(&mut self) {
+        // No-op
+    }
 }
 
 #[cfg(test)]
