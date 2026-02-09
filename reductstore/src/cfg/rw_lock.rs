@@ -23,7 +23,7 @@ impl Default for RwLockConfig {
     }
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_rw_lock_config(env: &mut Env<EnvGetter>) -> RwLockConfig {
         let timeout = env
             .get_optional::<u64>("RS_RWLOCK_TIMEOUT")

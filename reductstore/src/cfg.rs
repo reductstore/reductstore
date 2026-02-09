@@ -20,12 +20,13 @@ use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
 use crate::core::cache::Cache;
-use crate::core::env::{Env, GetEnv};
+use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
 use crate::license::parse_license;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
+use async_trait::async_trait;
 use log::info;
 use reduct_base::error::ReductError;
 use reduct_base::ext::ExtSettings;
@@ -114,14 +115,38 @@ impl Default for Cfg {
 }
 
 /// Database configuration
-pub struct CfgParser<EnvGetter: GetEnv> {
+pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: Clone + Send + Sync = ()> {
     pub cfg: Cfg,
     pub license: Option<License>,
     pub env: Env<EnvGetter>,
+    pub ext_cfg: ExtCfg,
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+#[async_trait]
+pub trait ExtCfgParser<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync>: Send + Sync {
+    async fn from_env(&self, env: &mut Env<EnvGetter>, version: &str) -> ExtCfg;
+}
+
+#[derive(Default)]
+pub struct NoExtCfgParser;
+
+#[async_trait]
+impl<EnvGetter: GetEnv> ExtCfgParser<EnvGetter, ()> for NoExtCfgParser {
+    async fn from_env(&self, _env: &mut Env<EnvGetter>, _version: &str) {}
+}
+
+impl<EnvGetter: GetEnv> CfgParser<EnvGetter, ()> {
     pub async fn from_env(env_getter: EnvGetter, version: &str) -> Self {
+        Self::from_env_with_ext(env_getter, &NoExtCfgParser, version).await
+    }
+}
+
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
+    pub async fn from_env_with_ext<ExtParser: ExtCfgParser<EnvGetter, ExtCfg>>(
+        env_getter: EnvGetter,
+        ext_parser: &ExtParser,
+        version: &str,
+    ) -> Self {
         let mut env = Env::new(env_getter);
 
         let mut api_base_path = env.get("RS_API_BASE_PATH", "/".to_string());
@@ -165,6 +190,8 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             }
         };
 
+        let ext_cfg = ext_parser.from_env(&mut env, version).await;
+
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
             host,
@@ -194,7 +221,12 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         set_rwlock_failure_action(cfg.rw_lock_config.failure_action);
 
         let license = parse_license(cfg.license_path.clone());
-        let me = Self { cfg, env, license };
+        let me = Self {
+            cfg,
+            env,
+            license,
+            ext_cfg,
+        };
 
         Logger::init(&me.cfg.log_level);
         info!("Configuration: \n {}", me);
@@ -399,7 +431,7 @@ fn load_ros_ext() -> &'static [u8] {
     b""
 }
 
-impl<EnvGetter: GetEnv> Display for CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> Display for CfgParser<EnvGetter, ExtCfg> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.env.message())
     }

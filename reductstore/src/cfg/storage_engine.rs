@@ -25,7 +25,7 @@ impl Default for StorageEngineConfig {
     }
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
     pub fn parse_storage_engine_config(env: &mut Env<EnvGetter>) -> StorageEngineConfig {
         StorageEngineConfig {
             compaction_interval: Duration::from_secs(

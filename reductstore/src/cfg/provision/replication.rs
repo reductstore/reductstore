@@ -12,7 +12,7 @@ use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_replication_repo(
         &self,
         storage: Arc<StorageEngine>,

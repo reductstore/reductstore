@@ -28,7 +28,7 @@ impl Default for ReplicationConfig {
     }
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_replication_config(
         env: &mut Env<EnvGetter>,
         listening_port: u16,

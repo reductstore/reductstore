@@ -43,7 +43,7 @@ impl Default for IoConfig {
     }
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_io_config(env: &mut Env<EnvGetter>) -> IoConfig {
         IoConfig {
             batch_max_size: env

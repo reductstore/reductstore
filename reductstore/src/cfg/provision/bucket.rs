@@ -12,7 +12,7 @@ use reduct_base::msg::bucket_api::BucketSettings;
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_buckets(&self, data_path: &PathBuf) -> StorageEngine {
         let license = parse_license(self.cfg.license_path.clone());
 

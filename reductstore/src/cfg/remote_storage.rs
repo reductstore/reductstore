@@ -1,4 +1,4 @@
-// Copyright 2025 ReductSoftware UG
+// Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
 use crate::backend::BackendType;
@@ -23,7 +23,7 @@ pub struct RemoteStorageConfig {
     pub default_storage_class: Option<String>,
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_remote_storage_cfg(env: &mut Env<EnvGetter>) -> RemoteStorageConfig {
         let secret_key = env.get_masked("RS_REMOTE_SECRET_KEY", "".to_string());
         let (backend_type, default_sync_interval) = match env

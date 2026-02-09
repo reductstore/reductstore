@@ -10,7 +10,7 @@ use reduct_base::msg::token_api::{Permissions, Token};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_tokens(
         &self,
         data_path: &PathBuf,

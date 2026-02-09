@@ -35,7 +35,7 @@ impl Default for LockFileConfig {
     }
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_lock_file_config(env: &mut Env<EnvGetter>) -> LockFileConfig {
         LockFileConfig {
             polling_interval: Duration::from_secs(
