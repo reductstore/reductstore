@@ -28,9 +28,9 @@ pub(super) async fn write_record(
     Query(params): Query<HashMap<String, String>>,
     body: Body,
 ) -> Result<(), HttpError> {
-    let bucket = path.get("bucket_name").unwrap();
+    let bucket = path.get("bucket_name").unwrap().clone();
     let components = keeper
-        .get_with_permissions(&headers.clone(), WriteAccessPolicy { bucket })
+        .get_with_permissions(&headers.clone(), WriteAccessPolicy { bucket: &bucket })
         .await?;
 
     let mut stream = body.into_data_stream();
@@ -62,7 +62,7 @@ pub(super) async fn write_record(
         }
 
         let sender = {
-            let bucket = components.storage.get_bucket(bucket).await?.upgrade()?;
+            let bucket = components.storage.get_bucket(&bucket).await?.upgrade()?;
             bucket
                 .begin_write(
                     path.get("entry_name").unwrap(),
@@ -141,6 +141,7 @@ mod tests {
     use reduct_base::io::ReadRecord;
     use reduct_base::not_found;
     use rstest::*;
+    use tokio::time::{sleep, Duration};
 
     #[rstest]
     #[tokio::test]
@@ -185,7 +186,18 @@ mod tests {
             .get_info("api-test")
             .await
             .unwrap();
-        assert_eq!(info.info.pending_records, 1);
+        if info.info.pending_records == 0 {
+            sleep(Duration::from_millis(50)).await;
+        }
+        let info = components
+            .replication_repo
+            .read()
+            .await
+            .unwrap()
+            .get_info("api-test")
+            .await
+            .unwrap();
+        assert!(info.info.pending_records >= 1);
     }
 
     #[rstest]

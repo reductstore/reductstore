@@ -48,7 +48,7 @@ impl RecordReader {
         record_timestamp: u64,
         processed_record: Option<Record>,
     ) -> Result<Self, ReductError> {
-        let bm = block_manager.write().await?;
+        let bm = block_manager.read().await?;
         let block = block_ref.read().await?;
 
         let (file_path, offset) = bm.begin_read_record(&block, record_timestamp)?;

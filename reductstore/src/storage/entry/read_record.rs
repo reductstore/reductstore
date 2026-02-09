@@ -24,11 +24,36 @@ impl Entry {
             time, self.bucket_name, self.name
         );
 
-        let (block_ref, record) = {
-            let block_ref = {
+        let (block_ref, record) = if let Some(block_ref) = {
+            let bm = self.block_manager.read().await?;
+            bm.find_cached_block(time)
+        } {
+            let block = block_ref.read().await?;
+            if let Some(record) = block.get_record(time) {
+                let record = record.clone();
+                drop(block);
+                (block_ref, record)
+            } else {
                 let mut bm = self.block_manager.write().await?;
-                bm.find_block(time).await?
-            };
+                let block_ref = bm.find_block(time).await?;
+                let block = block_ref.read().await?;
+                let record = block
+                    .get_record(time)
+                    .ok_or_else(|| {
+                        not_found!(
+                            "Record {} not found in block {}/{}/{}",
+                            time,
+                            self.bucket_name,
+                            self.name,
+                            block.block_id(),
+                        )
+                    })?
+                    .clone();
+                (block_ref.clone(), record)
+            }
+        } else {
+            let mut bm = self.block_manager.write().await?;
+            let block_ref = bm.find_block(time).await?;
             let block = block_ref.read().await?;
             let record = block
                 .get_record(time)

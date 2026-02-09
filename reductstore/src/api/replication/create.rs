@@ -59,7 +59,8 @@ mod tests {
             .read()
             .await
             .unwrap()
-            .get_replication("test")
+            .get_info("test")
+            .await
             .is_ok());
     }
 
