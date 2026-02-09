@@ -120,6 +120,10 @@ async fn launch_server() {
             .unwrap_or_else(|e| error!("Server error: {}", e));
     };
 
+    state_keeper
+        .sync_storage()
+        .await
+        .expect("Failed to sync storage during shutdown");
     lock_file.release().await;
     info!("Server has been shut down.");
 }
@@ -136,9 +140,6 @@ async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>, state_keeper: Arc<St
         warn!("Failed to stop replication tasks: {err}");
     }
     server_handle.shutdown();
-    if let Err(err) = state_keeper.sync_storage().await {
-        warn!("Failed to sync storage: {err}");
-    }
 }
 
 #[cfg(unix)]
@@ -152,9 +153,6 @@ async fn shutdown_signal(server_handle: Handle<SocketAddr>, state_keeper: Arc<St
         warn!("Failed to stop replication tasks: {err}");
     }
     server_handle.shutdown();
-    if let Err(err) = state_keeper.sync_storage().await {
-        warn!("Failed to sync storage: {err}");
-    }
 }
 
 #[cfg(test)]
