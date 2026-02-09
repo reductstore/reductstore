@@ -318,6 +318,15 @@ impl ReplicationTask {
         self.worker_handle = Some(handle);
     }
 
+    pub async fn stop(&mut self) {
+        self.stop_flag.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.worker_handle.take() {
+            if let Err(err) = handle.await {
+                error!("Replication worker task failed to join: {:?}", err);
+            }
+        }
+    }
+
     pub async fn notify(
         &mut self,
         notification: TransactionNotification,
@@ -474,8 +483,7 @@ impl Drop for ReplicationTask {
     fn drop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         if let Some(handle) = self.worker_handle.take() {
-            // Use recv() without unwrap to avoid panic if the channel is disconnected
-            // (e.g., during test cleanup or thread pool shutdown)
+            // We can't block in Drop, so join on a detached task as best effort fallback.
             tokio::spawn(async move {
                 if let Err(err) = handle.await {
                     error!("Replication worker task failed to join: {:?}", err);

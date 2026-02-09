@@ -141,6 +141,9 @@ pub trait ManageReplications {
 
     /// Start background workers if they are not running yet.
     fn start(&mut self);
+
+    /// Stop background workers and wait until they finish.
+    async fn stop(&mut self);
 }
 
 pub(crate) use replication_repository::ReplicationRepoBuilder;

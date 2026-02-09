@@ -152,6 +152,16 @@ impl StateKeeper {
     pub async fn get_anonymous(&self) -> Result<Arc<Components>, HttpError> {
         self.wait_components().await
     }
+
+    pub async fn shutdown(&self) -> Result<(), ReductError> {
+        let components = self.wait_components().await?.clone();
+        let mut repo = components.replication_repo.write().await?;
+        repo.stop().await;
+
+        let storage = &components.storage;
+        storage.sync_fs().await?;
+        Ok(())
+    }
 }
 
 #[derive(PartialEq, Clone, Copy, Debug, Eq)]

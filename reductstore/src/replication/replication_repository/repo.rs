@@ -249,6 +249,12 @@ impl ManageReplications for ReplicationRepository {
     fn start(&mut self) {
         self.start_all();
     }
+
+    async fn stop(&mut self) {
+        for (_, task) in self.replications.iter_mut() {
+            task.stop().await;
+        }
+    }
 }
 
 impl ReplicationRepository {

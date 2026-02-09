@@ -123,13 +123,9 @@ async fn launch_server() {
 
     // shutdown procedure
     state_keeper
-        .get_anonymous()
+        .shutdown()
         .await
-        .expect("Failed to access storage engine")
-        .storage
-        .sync_fs()
-        .await
-        .expect("Failed to shutdown storage");
+        .expect("Failed to shutdown server");
     lock_file.release().await;
     info!("Server has been shut down.");
 }
