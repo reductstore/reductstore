@@ -550,10 +550,12 @@ impl ReplicationRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::sync::{reset_rwlock_config, set_rwlock_timeout};
     use crate::replication::Transaction::WriteRecord;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::{conflict, Labels};
+    use reduct_base::{conflict, internal_server_error, not_found, Labels};
     use rstest::*;
+    use serial_test::serial;
     use tokio::time::{sleep, Duration};
 
     mod create {
@@ -849,6 +851,27 @@ mod tests {
 
             assert!(repo.get_info("test").await.is_ok(), "Was not removed");
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_update_replication_keep_dst_token_if_not_set(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
+
+            let mut updated = settings;
+            updated.dst_bucket = "bucket-3".to_string();
+            updated.dst_token = None;
+            repo.update_replication("test", updated).await.unwrap();
+
+            let replication = repo.get_replication_settings("test").await.unwrap();
+            assert_eq!(replication.dst_bucket, "bucket-3");
+            assert_eq!(replication.dst_token, Some("token".to_string()));
+        }
     }
 
     mod remove {
@@ -953,6 +976,16 @@ mod tests {
                 Some(not_found!("Replication 'test-2' does not exist")),
                 "Should not get non existing replication"
             );
+            assert_eq!(
+                repo.get_replication_settings("test-2").await.err(),
+                Some(not_found!("Replication 'test-2' does not exist")),
+                "Should not get settings for non existing replication"
+            );
+            assert_eq!(
+                repo.is_replication_running("test-2").await.err(),
+                Some(not_found!("Replication 'test-2' does not exist")),
+                "Should not get running state for non existing replication"
+            );
         }
 
         #[rstest]
@@ -1021,6 +1054,105 @@ mod tests {
                 "Should not notify replication for wrong bucket"
             );
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_notify_after_stop_returns_error(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test", settings).await.unwrap();
+            repo.stop().await;
+
+            let notification = TransactionNotification {
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            };
+
+            assert_eq!(
+                repo.notify(notification).await.err(),
+                Some(internal_server_error!(
+                    "Failed to enqueue replication notification"
+                ))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_notify_skips_non_matching_replications(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            let mut settings_1 = settings.clone();
+            settings_1.src_bucket = "bucket-1".to_string();
+            repo.create_replication("test-1", settings_1).await.unwrap();
+
+            repo.storage
+                .create_bucket("bucket-2", BucketSettings::default())
+                .await
+                .unwrap();
+            let mut settings_2 = settings;
+            settings_2.src_bucket = "bucket-2".to_string();
+            settings_2.dst_bucket = "bucket-1".to_string();
+            repo.create_replication("test-2", settings_2).await.unwrap();
+
+            let notification = TransactionNotification {
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            };
+
+            repo.notify(notification).await.unwrap();
+            sleep(Duration::from_millis(50)).await;
+            assert_eq!(
+                repo.get_info("test-1").await.unwrap().info.pending_records,
+                1
+            );
+            assert_eq!(
+                repo.get_info("test-2").await.unwrap().info.pending_records,
+                0
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        #[serial]
+        async fn test_notify_worker_lock_timeout(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            struct ResetGuard;
+            impl Drop for ResetGuard {
+                fn drop(&mut self) {
+                    reset_rwlock_config();
+                }
+            }
+            let _reset = ResetGuard;
+
+            let mut repo = repo.await;
+            repo.create_replication("test", settings).await.unwrap();
+
+            set_rwlock_timeout(Duration::from_millis(20));
+            let replications = Arc::clone(&repo.replications);
+            let guard = replications.read().await.unwrap();
+
+            let notification = TransactionNotification {
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            };
+            repo.notify(notification).await.unwrap();
+            sleep(Duration::from_millis(50)).await;
+            drop(guard);
+
+            assert_eq!(repo.get_info("test").await.unwrap().info.pending_records, 0);
+        }
     }
 
     mod start {
@@ -1070,6 +1202,56 @@ mod tests {
                 "Replication 'test-1' should be running"
             );
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_start_all_when_lock_contended(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test-1", settings.clone())
+                .await
+                .unwrap();
+            repo.create_replication("test-2", settings).await.unwrap();
+
+            let replications = Arc::clone(&repo.replications);
+            let guard = replications.write().await.unwrap();
+            repo.start();
+            drop(guard);
+            sleep(Duration::from_millis(50)).await;
+
+            assert!(repo.is_replication_running("test-1").await.unwrap());
+            assert!(repo.is_replication_running("test-2").await.unwrap());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        #[serial]
+        async fn test_start_all_lock_timeout(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            struct ResetGuard;
+            impl Drop for ResetGuard {
+                fn drop(&mut self) {
+                    reset_rwlock_config();
+                }
+            }
+            let _reset = ResetGuard;
+
+            let mut repo = repo.await;
+            repo.create_replication("test-1", settings).await.unwrap();
+
+            set_rwlock_timeout(Duration::from_millis(20));
+            let replications = Arc::clone(&repo.replications);
+            let guard = replications.read().await.unwrap();
+            repo.start();
+            sleep(Duration::from_millis(50)).await;
+            drop(guard);
+
+            assert!(!repo.is_replication_running("test-1").await.unwrap());
+        }
     }
 
     mod set_mode {
@@ -1092,6 +1274,16 @@ mod tests {
             assert_eq!(
                 repo.get_info("test-1").await.unwrap().info.mode,
                 ReplicationMode::Paused
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_set_mode_non_existing(#[future] mut repo: ReplicationRepository) {
+            let mut repo = repo.await;
+            assert_eq!(
+                repo.set_mode("test-1", ReplicationMode::Paused).await,
+                Err(not_found!("Replication 'test-1' does not exist"))
             );
         }
     }

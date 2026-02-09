@@ -155,6 +155,16 @@ mod tests {
         use super::*;
         #[rstest]
         #[tokio::test]
+        async fn test_get_replication_settings_forbidden(repo: ReadOnlyReplicationRepository) {
+            let err = repo.get_replication_settings("test").await.err().unwrap();
+            assert_eq!(
+                err,
+                forbidden!("Cannot get replication settings in read-only mode")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_get_replication_forbidden(repo: ReadOnlyReplicationRepository) {
             let err = repo.is_replication_running("test").await.err().unwrap();
             assert_eq!(err, forbidden!("Cannot get replication in read-only mode"));

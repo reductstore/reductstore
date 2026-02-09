@@ -212,6 +212,26 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_not_found_in_cached_block(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
+        write_stub_record(&entry, 1000000).await;
+        write_stub_record(&entry, 3000000).await;
+
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            let _ = bm.find_block(1000000).await.unwrap();
+        }
+        let reader = entry.begin_read(2000000).await;
+        assert_eq!(
+            reader.err(),
+            Some(not_found!(
+                "Record 2000000 not found in block bucket/entry/1000000"
+            ))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_begin_read_missing_data_file(#[future] entry: Arc<Entry>) {
         let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
@@ -247,6 +267,21 @@ mod tests {
         write_stub_record(&entry, 1010000).await;
 
         let mut reader = entry.begin_read(1010000).await.unwrap();
+        assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_uses_cached_block(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
+        write_stub_record(&entry, 1000000).await;
+
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            let _ = bm.find_block(1000000).await.unwrap();
+        }
+
+        let mut reader = entry.begin_read(1000000).await.unwrap();
         assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
     }
 
