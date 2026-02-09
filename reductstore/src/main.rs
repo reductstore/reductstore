@@ -3,9 +3,9 @@
 
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
-use log::{error, info};
+use log::{error, info, warn};
 use reduct_base::logger::Logger;
-use reductstore::api::AxumAppBuilder;
+use reductstore::api::{AxumAppBuilder, StateKeeper};
 use reductstore::cfg::CfgParser;
 use reductstore::core::env::StdEnvGetter;
 use reductstore::storage::engine::StorageEngine;
@@ -34,7 +34,6 @@ async fn launch_server() {
     // Run initialization in a separate thread to avoid blocking HTTP server startup
     // if waiting for the lock file.
     let config_lock = Arc::clone(&lock_file);
-    let signal_handle = handle.clone();
     let cfg = parser.cfg.clone();
     let engine_config = cfg.engine_config.clone();
     let (tx, rx) = mpsc::channel(1);
@@ -56,12 +55,6 @@ async fn launch_server() {
             ));
         }
 
-        tokio::spawn(shutdown_ctrl_c(signal_handle.clone()));
-        #[cfg(unix)]
-        tokio::spawn(shutdown_signal(signal_handle.clone()));
-        #[cfg(test)]
-        tokio::spawn(tests::shutdown_server(signal_handle.clone()));
-
         tx.send(components).await.unwrap();
     });
 
@@ -77,6 +70,12 @@ async fn launch_server() {
         .with_component_receiver(rx)
         .with_lock_file(lock_file.clone())
         .build();
+
+    tokio::spawn(shutdown_ctrl_c(handle.clone(), state_keeper.clone()));
+    #[cfg(unix)]
+    tokio::spawn(shutdown_signal(handle.clone(), state_keeper.clone()));
+    #[cfg(test)]
+    tokio::spawn(tests::shutdown_server(handle.clone()));
 
     // Ensure that the process exits with a non-zero exit code on panic.
     let default_panic = std::panic::take_hook();
@@ -121,11 +120,6 @@ async fn launch_server() {
             .unwrap_or_else(|e| error!("Server error: {}", e));
     };
 
-    // shutdown procedure
-    state_keeper
-        .shutdown()
-        .await
-        .expect("Failed to shutdown server");
     lock_file.release().await;
     info!("Server has been shut down.");
 }
@@ -135,20 +129,32 @@ async fn main() {
     launch_server().await;
 }
 
-async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>) {
+async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>, state_keeper: Arc<StateKeeper>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Received Ctrl-C, shutting down server...");
+    if let Err(err) = state_keeper.stop_replication_tasks().await {
+        warn!("Failed to stop replication tasks: {err}");
+    }
     server_handle.shutdown();
+    if let Err(err) = state_keeper.sync_storage().await {
+        warn!("Failed to sync storage: {err}");
+    }
 }
 
 #[cfg(unix)]
-async fn shutdown_signal(server_handle: Handle<SocketAddr>) {
+async fn shutdown_signal(server_handle: Handle<SocketAddr>, state_keeper: Arc<StateKeeper>) {
     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .unwrap()
         .recv()
         .await;
     info!("Received termination signal, shutting down server...");
+    if let Err(err) = state_keeper.stop_replication_tasks().await {
+        warn!("Failed to stop replication tasks: {err}");
+    }
     server_handle.shutdown();
+    if let Err(err) = state_keeper.sync_storage().await {
+        warn!("Failed to sync storage: {err}");
+    }
 }
 
 #[cfg(test)]

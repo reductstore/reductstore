@@ -153,11 +153,15 @@ impl StateKeeper {
         self.wait_components().await
     }
 
-    pub async fn shutdown(&self) -> Result<(), ReductError> {
+    pub async fn stop_replication_tasks(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
         let mut repo = components.replication_repo.write().await?;
         repo.stop().await;
+        Ok(())
+    }
 
+    pub async fn sync_storage(&self) -> Result<(), ReductError> {
+        let components = self.wait_components().await?.clone();
         let storage = &components.storage;
         storage.sync_fs().await?;
         Ok(())
