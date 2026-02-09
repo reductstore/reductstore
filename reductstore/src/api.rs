@@ -625,6 +625,61 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_stop_replication_tasks(#[future] keeper: Arc<StateKeeper>) {
+            let keeper = keeper.await;
+            let components = keeper.get_anonymous().await.unwrap();
+
+            {
+                let mut repo = components.replication_repo.write().await.unwrap();
+                repo.start();
+                assert!(repo.get_replication("api-test").unwrap().is_running());
+            }
+
+            keeper.stop_replication_tasks().await.unwrap();
+
+            let components = keeper.get_anonymous().await.unwrap();
+            let repo = components.replication_repo.read().await.unwrap();
+            assert!(!repo.get_replication("api-test").unwrap().is_running());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_sync_storage(#[future] keeper: Arc<StateKeeper>) {
+            let keeper = keeper.await;
+            let components = keeper.get_anonymous().await.unwrap();
+            let bucket = components
+                .storage
+                .get_bucket("bucket-1")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+
+            let mut writer = bucket
+                .begin_write("entry-sync", 1, 4, "text/plain".to_string(), HashMap::new())
+                .await
+                .unwrap();
+            writer.send(Ok(Some(Bytes::from("test")))).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            keeper.sync_storage().await.unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_stop_replication_tasks_not_ready(
+            #[future] not_ready_keeper: Arc<StateKeeper>,
+        ) {
+            let err = not_ready_keeper
+                .await
+                .stop_replication_tasks()
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err.status, ErrorCode::ServiceUnavailable);
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_get_with_permissions_ok(
             #[future] keeper: Arc<StateKeeper>,
             headers: HeaderMap,
