@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Stop replication tasks before HTTP shutdown and sync storage after server exit, [PR-1164](https://github.com/reductstore/reductstore/pull/1164)
+- Fix write latency spikes when replication is enabled by moving replication notifications out of API write paths, [PR-1165](https://github.com/reductstore/reductstore/pull/1165)
 
 ## 1.18.3 - 2026-02-05
 

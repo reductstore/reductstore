@@ -312,12 +312,14 @@ mod tests {
     use super::*;
     use crate::api::entry::write_batched::write_batched_records;
     use crate::api::tests::{headers, keeper, path_to_entry_1};
-
     use axum_extra::headers::HeaderValue;
     use futures_util::stream;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
+    use reduct_base::msg::replication_api::ReplicationMode;
     use rstest::{fixture, rstest};
+    use std::time::Duration;
+    use tokio::time::sleep;
 
     #[rstest]
     #[tokio::test]
@@ -386,6 +388,14 @@ mod tests {
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
+        components
+            .replication_repo
+            .write()
+            .await
+            .unwrap()
+            .set_mode("api-test", ReplicationMode::Paused)
+            .await
+            .unwrap();
         headers.insert("content-length", "48".parse().unwrap());
         headers.insert("x-reduct-time-1", "10,text/plain,a=b".parse().unwrap());
         headers.insert(
@@ -456,15 +466,24 @@ mod tests {
             );
         }
 
-        let info = components
-            .replication_repo
-            .read()
-            .await
-            .unwrap()
-            .get_info("api-test")
-            .await
-            .unwrap();
-        assert_eq!(info.info.pending_records, 3);
+        let mut pending_records = 0;
+        for _ in 0..20 {
+            pending_records = components
+                .replication_repo
+                .read()
+                .await
+                .unwrap()
+                .get_info("api-test")
+                .await
+                .unwrap()
+                .info
+                .pending_records;
+            if pending_records == 3 {
+                break;
+            }
+            sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(pending_records, 3);
     }
 
     #[rstest]

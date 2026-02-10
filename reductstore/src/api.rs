@@ -632,14 +632,14 @@ mod tests {
             {
                 let mut repo = components.replication_repo.write().await.unwrap();
                 repo.start();
-                assert!(repo.get_replication("api-test").unwrap().is_running());
+                assert!(repo.is_replication_running("api-test").await.unwrap());
             }
 
             keeper.stop_replication_tasks().await.unwrap();
 
             let components = keeper.get_anonymous().await.unwrap();
             let repo = components.replication_repo.read().await.unwrap();
-            assert!(!repo.get_replication("api-test").unwrap().is_running());
+            assert!(!repo.is_replication_running("api-test").await.unwrap());
         }
 
         #[rstest]
