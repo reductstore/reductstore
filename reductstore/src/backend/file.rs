@@ -10,6 +10,7 @@ use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::runtime::{Handle, RuntimeFlavor};
 
 #[derive(PartialEq, Clone, Debug)]
 pub enum AccessMode {
@@ -106,6 +107,15 @@ impl OpenOptions {
 }
 
 impl File {
+    fn run_blocking_io<T>(op: impl FnOnce() -> std::io::Result<T>) -> std::io::Result<T> {
+        match Handle::try_current() {
+            Ok(handle) if handle.runtime_flavor() == RuntimeFlavor::MultiThread => {
+                tokio::task::block_in_place(op)
+            }
+            _ => op(),
+        }
+    }
+
     pub async fn sync_all(&mut self) -> std::io::Result<()> {
         if self.ignore_write {
             return Ok(());
@@ -117,7 +127,7 @@ impl File {
 
         debug!("File {} synced to storage backend", self.path.display());
 
-        self.inner.sync_all()?;
+        Self::run_blocking_io(|| self.inner.sync_all())?;
         self.backend.upload(&self.path).await?;
         self.last_synced = Instant::now();
         self.is_synced = true;
@@ -133,7 +143,7 @@ impl File {
         }
 
         self.is_synced = false;
-        self.inner.set_len(size)
+        Self::run_blocking_io(|| self.inner.set_len(size))
     }
 
     // Specifically for cache management
@@ -163,7 +173,7 @@ impl File {
 
 impl Read for File {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        self.inner.read(buf)
+        Self::run_blocking_io(|| self.inner.read(buf))
     }
 }
 
@@ -173,20 +183,20 @@ impl Write for File {
             return Ok(buf.len());
         }
         self.is_synced = false;
-        self.inner.write(buf)
+        Self::run_blocking_io(|| self.inner.write(buf))
     }
 
     fn flush(&mut self) -> std::io::Result<()> {
         if self.ignore_write {
             return Ok(());
         }
-        self.inner.flush()
+        Self::run_blocking_io(|| self.inner.flush())
     }
 }
 
 impl Seek for File {
     fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
-        self.inner.seek(pos)
+        Self::run_blocking_io(|| self.inner.seek(pos))
     }
 }
 

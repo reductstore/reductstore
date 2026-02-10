@@ -34,7 +34,7 @@ mod tests {
     use crate::api::replication::tests::settings;
     use crate::api::tests::{headers, keeper};
     use reduct_base::error::ErrorCode::NotFound;
-    use reduct_base::msg::replication_api::{FullReplicationInfo, ReplicationSettings};
+    use reduct_base::msg::replication_api::ReplicationSettings;
     use rstest::rstest;
     use std::sync::Arc;
 
@@ -64,17 +64,16 @@ mod tests {
         .await
         .unwrap();
 
-        let repo = components.replication_repo.read().await.unwrap();
-        let repl = repo.get_replication("test").unwrap();
+        let expected = components
+            .replication_repo
+            .read()
+            .await
+            .unwrap()
+            .get_info("test")
+            .await
+            .unwrap();
 
-        assert_eq!(
-            info.0,
-            FullReplicationInfo {
-                info: repl.info().await.unwrap(),
-                settings: repl.masked_settings().clone(),
-                diagnostics: repl.diagnostics().await.unwrap(),
-            }
-        );
+        assert_eq!(info.0, expected);
     }
 
     #[rstest]
