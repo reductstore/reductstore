@@ -127,6 +127,12 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
     fn remote_storage_config(&self) -> RemoteStorageConfig {
         RemoteStorageConfig::default()
     }
+    async fn init_backend(&self) -> Result<Backend, ReductError> {
+        let mut builder = Backend::builder()
+            .backend_type(self.remote_storage_config().backend_type.clone())
+            .local_data_path(self.data_path());
+        builder.try_build().await
+    }
     fn static_extensions(&self, _settings: ExtSettings) -> Vec<Box<dyn IoExtension + Send + Sync>> {
         vec![]
     }
@@ -378,42 +384,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     }
 
     async fn init_storage_backend(&self) -> Result<(), ReductError> {
-        // Initialize storage backend
-        let mut backend_builder = Backend::builder()
-            .backend_type(self.cfg.cs_config.backend_type.clone())
-            .local_data_path(self.cfg.data_path.clone())
-            .cache_size(self.cfg.cs_config.cache_size)
-            .remote_default_storage_class(self.cfg.cs_config.default_storage_class.clone());
-
-        if let Some(bucket) = &self.cfg.cs_config.bucket {
-            backend_builder = backend_builder.remote_bucket(bucket);
-        }
-
-        if let Some(region) = &self.cfg.cs_config.region {
-            backend_builder = backend_builder.remote_region(region);
-        }
-
-        if let Some(endpoint) = &self.cfg.cs_config.endpoint {
-            backend_builder = backend_builder.remote_endpoint(endpoint);
-        }
-
-        if let Some(access_key) = &self.cfg.cs_config.access_key {
-            backend_builder = backend_builder.remote_access_key(access_key);
-        }
-
-        if let Some(secret_key) = &self.cfg.cs_config.secret_key {
-            backend_builder = backend_builder.remote_secret_key(secret_key);
-        }
-
-        if let Some(cache_path) = &self.cfg.cs_config.cache_path {
-            backend_builder = backend_builder.remote_cache_path(cache_path.clone());
-        }
-
-        if let Some(license) = &self.license {
-            backend_builder = backend_builder.license(license.clone());
-        }
-
-        let backend = backend_builder.try_build().await.map_err(|e| {
+        let backend = self.ext_cfg.init_backend().await.map_err(|e| {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?;
 

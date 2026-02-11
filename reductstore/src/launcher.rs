@@ -81,12 +81,15 @@ where
         .with_lock_file(lock_file.clone())
         .build();
 
-    // Ensure that the process exits with a non-zero exit code on panic.
-    let default_panic = std::panic::take_hook();
-    std::panic::set_hook(Box::new(move |info| {
-        default_panic(info);
-        std::process::exit(1);
-    }));
+    #[cfg(not(test))]
+    {
+        // Ensure that the process exits with a non-zero exit code on panic.
+        let default_panic = std::panic::take_hook();
+        std::panic::set_hook(Box::new(move |info| {
+            default_panic(info);
+            std::process::exit(1);
+        }));
+    }
 
     macro_rules! apply_http_settings {
         ($server:expr) => {{
