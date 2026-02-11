@@ -83,7 +83,6 @@ impl FsBackendBuilder {
         self
     }
 
-
     pub async fn try_build(self) -> Result<Backend, ReductError> {
         let backend: BoxedBackend = match self.backend_type {
             BackendType::Filesystem => {
@@ -201,7 +200,6 @@ mod tests {
             assert_eq!(backend.backend.path(), &PathBuf::from("/tmp/data"));
         }
     }
-
 
     mod open {
         use super::*;
