@@ -393,19 +393,6 @@ mod tests {
         tempdir().unwrap().keep()
     }
 
-    #[fixture]
-    fn license() -> License {
-        License {
-            licensee: "".to_string(),
-            invoice: "".to_string(),
-            expiry_date: chrono::Utc::now() + chrono::Duration::days(30),
-            plan: "".to_string(),
-            device_number: 0,
-            disk_quota: 0,
-            fingerprint: "".to_string(),
-        }
-    }
-
     fn build_backend(mock_backend: MockBackend) -> Backend {
         Backend {
             backend: Arc::new(Box::new(mock_backend)),
