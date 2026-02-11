@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::CfgParser;
+use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use bytesize::ByteSize;
 use std::time::Duration;
@@ -43,7 +43,7 @@ impl Default for IoConfig {
     }
 }
 
-impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_io_config(env: &mut Env<EnvGetter>) -> IoConfig {
         IoConfig {
             batch_max_size: env

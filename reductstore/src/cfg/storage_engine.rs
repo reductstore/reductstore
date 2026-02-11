@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::CfgParser;
+use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use std::time::Duration;
 
@@ -25,7 +25,7 @@ impl Default for StorageEngineConfig {
     }
 }
 
-impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub fn parse_storage_engine_config(env: &mut Env<EnvGetter>) -> StorageEngineConfig {
         StorageEngineConfig {
             compaction_interval: Duration::from_secs(

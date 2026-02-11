@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::{CfgParser, DEFAULT_PORT};
+use crate::cfg::{CfgParser, ExtCfgBounds, DEFAULT_PORT};
 use crate::core::env::{Env, GetEnv};
 use std::time::Duration;
 const DEFAULT_CONNECTION_TIMEOUT_S: u64 = 5;
@@ -28,7 +28,7 @@ impl Default for ReplicationConfig {
     }
 }
 
-impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_replication_config(
         env: &mut Env<EnvGetter>,
         listening_port: u16,

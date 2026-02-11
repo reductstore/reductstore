@@ -1,7 +1,7 @@
 // Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::CfgParser;
+use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use crate::replication::{ManageReplications, ReplicationRepoBuilder};
 use crate::storage::engine::StorageEngine;
@@ -12,7 +12,7 @@ use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_replication_repo(
         &self,
         storage: Arc<StorageEngine>,

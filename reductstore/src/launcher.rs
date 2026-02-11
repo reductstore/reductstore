@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::AxumAppBuilder;
-use crate::cfg::{CfgParser, ExtCfgParser};
+use crate::cfg::{CfgParser, ExtCfgBounds, ExtCfgParser};
 use crate::core::env::StdEnvGetter;
 use crate::storage::engine::StorageEngine;
 use axum_server::tls_rustls::RustlsConfig;
@@ -15,18 +15,22 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
-pub async fn launch_server<Parser: ExtCfgParser>(ext_cfg_pareser: Parser) {
+pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pareser: Parser)
+where
+    Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
+{
     let version: &str = env!("CARGO_PKG_VERSION");
 
     Logger::init("INFO");
     info!(
-        "ReductStore {} [{} at {}]",
+        "ReductStore Core {} [{} at {}]",
         version,
         env!("COMMIT"),
         env!("BUILD_TIME")
     );
 
-    let parser = CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_pareser, version).await;
+    let parser =
+        CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_pareser, version).await;
     let handle = Handle::new();
     let lock_file = Arc::new(parser.build_lock_file().unwrap());
 

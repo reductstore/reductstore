@@ -1,10 +1,10 @@
 // Copyright 2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use reductstore::{cfg::ExtCfgParser, launcher::launch_server};
+use reductstore::{cfg::CoreExtCfgParser, launcher::launch_server};
 
-struct EmptyExtCfgParser;
-
-impl ExtCfgParser for EmptyExtCfgParser {
-    async fn from_env(&self, env: &mut Env<EnvGetter>, version: &str) -> ExtCfg;
+#[tokio::main]
+async fn main() {
+    let ext_cfg_pareser = CoreExtCfgParser;
+    launch_server(ext_cfg_pareser).await;
 }

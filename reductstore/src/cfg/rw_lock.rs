@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::CfgParser;
+use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use crate::core::sync::{
     default_rwlock_failure_action, default_rwlock_timeout, RwLockFailureAction,
@@ -23,7 +23,7 @@ impl Default for RwLockConfig {
     }
 }
 
-impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_rw_lock_config(env: &mut Env<EnvGetter>) -> RwLockConfig {
         let timeout = env
             .get_optional::<u64>("RS_RWLOCK_TIMEOUT")
