@@ -36,12 +36,13 @@ impl Entry {
             let mut bm = self.block_manager.write().await?;
             // When we write, the likely case is that we are writing the latest record
             // in the entry. In this case, we can just append to the latest block.
-            if bm.index().tree().is_empty() {
+            let block_ref = if bm.index().tree().is_empty() {
                 bm.start_new_block(time, settings.max_block_size).await?
             } else {
                 let block_id = *bm.index().tree().last().unwrap();
                 bm.load_block(block_id).await?
-            }
+            };
+            block_ref
         };
 
         let _record_type = {
@@ -57,7 +58,7 @@ impl Entry {
                 // The timestamp is belated. We need to find the proper block to write to.
                 let mut bm = self.block_manager.write().await?;
                 let index_tree = bm.index().tree();
-                if *index_tree.first().unwrap() > time {
+                let record_type = if *index_tree.first().unwrap() > time {
                     // The timestamp is the earliest. We need to create a new block.
                     debug!(
                         "Timestamp {} is the earliest for {}/{}. Creating a new block",
@@ -108,7 +109,8 @@ impl Entry {
                         };
                     }
                     RecordType::Belated
-                }
+                };
+                record_type
             } else {
                 // The timestamp is the latest. We can just append to the latest block.
                 RecordType::Latest

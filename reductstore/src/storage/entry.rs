@@ -296,7 +296,7 @@ impl Entry {
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
     pub async fn compact(&self) -> Result<(), ReductError> {
         if let Some(mut bm) = self.block_manager.try_write() {
-            bm.save_cache_on_disk().await
+            bm.save_cache_metadata_on_disk().await
         } else {
             // Avoid blocking writers; we'll try again on the next sync tick
             debug!(

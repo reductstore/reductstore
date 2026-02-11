@@ -8,8 +8,3 @@ struct EmptyExtCfgParser;
 impl ExtCfgParser for EmptyExtCfgParser {
     async fn from_env(&self, env: &mut Env<EnvGetter>, version: &str) -> ExtCfg;
 }
-
-#[tokio::main(flavor = "multi_thread")]
-async fn main() {
-    launch_server().await;
-}

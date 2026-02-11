@@ -24,8 +24,8 @@ impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg
             if let Err(e) = repo.create_replication(&name, settings.clone()).await {
                 if e.status() == ErrorCode::Conflict {
                     let mut settings = settings.clone();
-                    if let Ok(replication) = repo.get_replication(&name) {
-                        settings.mode = replication.mode();
+                    if let Ok(info) = repo.get_info(&name).await {
+                        settings.mode = info.info.mode;
                     }
                     repo.update_replication(&name, settings).await?;
                 } else {
@@ -34,13 +34,12 @@ impl<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync> CfgParser<EnvGetter, ExtCfg
                 }
             }
 
-            let replication = repo.get_mut_replication(&name)?;
-            replication.set_provisioned(true);
+            repo.set_replication_provisioned(&name, true).await?;
 
+            let info_data = repo.get_info(&name).await?;
             info!(
                 "Provisioned replication '{}' with {:?}",
-                name,
-                replication.masked_settings()
+                name, info_data.settings
             );
         }
         Ok(repo)
@@ -212,20 +211,21 @@ mod tests {
             .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        let replication = repo.get_replication("replication1").unwrap();
+        let replication = repo.get_replication_settings("replication1").await.unwrap();
+        let repl_info = repo.get_info("replication1").await.unwrap();
 
-        assert_eq!(replication.settings().src_bucket, "bucket1");
-        assert_eq!(replication.settings().dst_bucket, "bucket2");
-        assert_eq!(replication.settings().dst_host, "http://localhost/");
-        assert_eq!(replication.settings().dst_token, Some("TOKEN".to_string()));
-        assert_eq!(replication.settings().entries, vec!["entry1", "entry2"]);
-        assert_eq!(replication.settings().each_n, Some(10));
-        assert_eq!(replication.settings().each_s, Some(0.5));
+        assert_eq!(replication.src_bucket, "bucket1");
+        assert_eq!(replication.dst_bucket, "bucket2");
+        assert_eq!(replication.dst_host, "http://localhost/");
+        assert_eq!(replication.dst_token, Some("TOKEN".to_string()));
+        assert_eq!(replication.entries, vec!["entry1", "entry2"]);
+        assert_eq!(replication.each_n, Some(10));
+        assert_eq!(replication.each_s, Some(0.5));
         assert_eq!(
-            replication.settings().when,
+            replication.when,
             Some(serde_json::json!({"$and": [true, false]}))
         );
-        assert!(replication.is_provisioned());
+        assert!(repl_info.info.is_provisioned);
     }
 
     #[log_test(rstest)]
@@ -454,12 +454,13 @@ mod tests {
             .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        let replication = repo.get_replication("replication1").unwrap();
+        let replication = repo.get_replication_settings("replication1").await.unwrap();
+        let repl_info = repo.get_info("replication1").await.unwrap();
         assert_eq!(
-            replication.settings().when,
+            replication.when,
             Some(serde_json::json!({"$and": [true, false]}))
         );
-        assert_eq!(replication.mode(), ReplicationMode::Disabled);
+        assert_eq!(repl_info.info.mode, ReplicationMode::Disabled);
     }
 
     #[rstest]
@@ -540,8 +541,8 @@ mod tests {
             .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        let replication = repo.get_replication("replication1").unwrap();
-        assert_eq!(replication.mode(), ReplicationMode::Disabled);
+        let info = repo.get_info("replication1").await.unwrap();
+        assert_eq!(info.info.mode, ReplicationMode::Disabled);
     }
 
     #[fixture]
