@@ -19,8 +19,6 @@ include = ["src/**/*", "Cargo.toml", "Cargo.lock", "build.rs", "README.md", "LIC
 [features]
 default = ["web-console", "fs-backend"]
 web-console = []
-select-ext = []
-ros-ext = []
 ci = [] # features enables CI-specific tests
 
 

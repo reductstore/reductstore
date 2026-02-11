@@ -127,6 +127,9 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
     fn remote_storage_config(&self) -> RemoteStorageConfig {
         RemoteStorageConfig::default()
     }
+    fn bundled_extensions(&self) -> Vec<&'static [u8]> {
+        vec![]
+    }
 }
 
 #[async_trait]
@@ -317,8 +320,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let storage = Arc::new(self.provision_buckets(&data_path).await);
         let token_repo = self.provision_tokens(&data_path);
         let console = create_asset_manager(load_console());
-        let select_ext = create_asset_manager(load_select_ext());
-        let ros_ext = create_asset_manager(load_ros_ext());
+        let bundled_ext = self
+            .ext_cfg
+            .bundled_extensions()
+            .into_iter()
+            .map(create_asset_manager)
+            .collect();
         let replication_engine = self
             .provision_replication_repo(Arc::clone(&storage))
             .await?;
@@ -344,7 +351,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             replication_repo: AsyncRwLock::new(replication_engine),
             ext_repo: create_ext_repository(
                 ext_path,
-                vec![select_ext, ros_ext],
+                bundled_ext,
                 ExtSettings::builder()
                     .log_level(&self.cfg.log_level)
                     .server_info(server_info)
@@ -440,30 +447,6 @@ fn load_console() -> &'static [u8] {
 #[cfg(not(feature = "web-console"))]
 fn load_console() -> &'static [u8] {
     info!("Web Console is disabled");
-    b""
-}
-
-#[cfg(feature = "select-ext")]
-fn load_select_ext() -> &'static [u8] {
-    info!("Load Reduct Select Extension");
-    include_bytes!(concat!(env!("OUT_DIR"), "/select-ext.zip"))
-}
-
-#[cfg(not(feature = "select-ext"))]
-fn load_select_ext() -> &'static [u8] {
-    info!("Reduct Select Extension is disabled");
-    b""
-}
-
-#[cfg(feature = "ros-ext")]
-fn load_ros_ext() -> &'static [u8] {
-    info!("Load Reduct ROS Extension");
-    include_bytes!(concat!(env!("OUT_DIR"), "/ros-ext.zip"))
-}
-
-#[cfg(not(feature = "ros-ext"))]
-fn load_ros_ext() -> &'static [u8] {
-    info!("Reduct ROS Extension is disabled");
     b""
 }
 
@@ -739,20 +722,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "current_thread")]
-    async fn test_license_path(mut env_getter: MockEnvGetter) {
-        env_getter
-            .expect_get()
-            .with(eq("RS_LICENSE_PATH"))
-            .times(1)
-            .return_const(Ok("/tmp/license.lic".to_string())); // must be created from CI
+    async fn test_no_license_by_default(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter, "0.0.0").await;
-        assert_eq!(
-            parser.cfg.license_path,
-            Some("/tmp/license.lic".to_string())
-        );
+        assert!(parser.license.is_none());
     }
 
     #[rstest]
