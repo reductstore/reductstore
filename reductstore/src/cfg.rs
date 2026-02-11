@@ -128,7 +128,7 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
         RemoteStorageConfig::default()
     }
     async fn init_backend(&self) -> Result<Backend, ReductError> {
-        let mut builder = Backend::builder()
+        let builder = Backend::builder()
             .backend_type(self.remote_storage_config().backend_type.clone())
             .local_data_path(self.data_path());
         builder.try_build().await

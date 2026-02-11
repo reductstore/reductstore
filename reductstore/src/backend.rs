@@ -14,7 +14,6 @@ use crate::backend::noop::NoopBackend;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
-use reduct_base::msg::server_api::License;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::SystemTime;
