@@ -26,8 +26,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v4
-
     - uses: arduino/setup-protoc@v3
       with:
         version: '26.x'
