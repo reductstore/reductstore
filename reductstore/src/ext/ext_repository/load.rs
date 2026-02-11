@@ -1,14 +1,13 @@
 // Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::asset::asset_manager::ManageStaticAsset;
 use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::{ExtRepository, ExtensionApi, IoExtMap};
 use dlopen2::wrapper::Container;
 use log::{error, info};
 use reduct_base::error::ReductError;
-use reduct_base::ext::ExtSettings;
+use reduct_base::ext::{ExtSettings, IoExtension};
 use reduct_base::internal_server_error;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -17,7 +16,7 @@ use std::sync::Arc;
 impl ExtRepository {
     pub(super) fn try_load(
         paths: Vec<PathBuf>,
-        embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
+        static_extensions: Vec<Box<dyn IoExtension + Send + Sync>>,
         settings: ExtSettings,
         io_config: IoConfig,
     ) -> Result<ExtRepository, ReductError> {
@@ -25,6 +24,12 @@ impl ExtRepository {
 
         let query_map = AsyncRwLock::new(HashMap::new());
         let mut ext_wrappers = Vec::new();
+
+        for ext in static_extensions {
+            info!("Load static extension: {:?}", ext.info());
+            let name = ext.info().name().to_string();
+            extension_map.insert(name, Arc::new(AsyncRwLock::new(ext)));
+        }
 
         for path in paths {
             if !path.exists() {
@@ -66,7 +71,6 @@ impl ExtRepository {
             extension_map,
             query_map,
             ext_wrappers,
-            embedded_extensions,
             io_config,
         })
     }

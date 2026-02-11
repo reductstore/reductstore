@@ -28,7 +28,7 @@ use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use async_trait::async_trait;
 use log::info;
 use reduct_base::error::ReductError;
-use reduct_base::ext::ExtSettings;
+use reduct_base::ext::{ExtSettings, IoExtension};
 use reduct_base::internal_server_error;
 use reduct_base::logger::Logger;
 use reduct_base::msg::bucket_api::BucketSettings;
@@ -127,7 +127,7 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
     fn remote_storage_config(&self) -> RemoteStorageConfig {
         RemoteStorageConfig::default()
     }
-    fn bundled_extensions(&self) -> Vec<&'static [u8]> {
+    fn static_extensions(&self, _settings: ExtSettings) -> Vec<Box<dyn IoExtension + Send + Sync>> {
         vec![]
     }
 }
@@ -320,12 +320,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let storage = Arc::new(self.provision_buckets(&data_path).await);
         let token_repo = self.provision_tokens(&data_path);
         let console = create_asset_manager(load_console());
-        let bundled_ext = self
-            .ext_cfg
-            .bundled_extensions()
-            .into_iter()
-            .map(create_asset_manager)
-            .collect();
         let replication_engine = self
             .provision_replication_repo(Arc::clone(&storage))
             .await?;
@@ -342,6 +336,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         };
 
         let server_info = storage.info().await?;
+        let ext_settings = ExtSettings::builder()
+            .log_level(&self.cfg.log_level)
+            .server_info(server_info.clone())
+            .build();
+        let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
 
         Ok(Components {
             storage,
@@ -351,11 +350,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             replication_repo: AsyncRwLock::new(replication_engine),
             ext_repo: create_ext_repository(
                 ext_path,
-                bundled_ext,
-                ExtSettings::builder()
-                    .log_level(&self.cfg.log_level)
-                    .server_info(server_info)
-                    .build(),
+                static_extensions,
+                ext_settings,
                 self.cfg.io_conf.clone(),
             )?,
             query_link_cache: AsyncRwLock::new(Cache::new(
