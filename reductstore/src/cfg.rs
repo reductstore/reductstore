@@ -115,7 +115,7 @@ impl Default for Cfg {
 }
 
 /// Database configuration
-pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: Clone + Send + Sync = ()> {
+pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: Clone = ()> {
     pub cfg: Cfg,
     pub license: Option<License>,
     pub env: Env<EnvGetter>,
@@ -123,7 +123,7 @@ pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: Clone + Send + Sy
 }
 
 #[async_trait]
-pub trait ExtCfgParser<EnvGetter: GetEnv, ExtCfg: Clone + Send + Sync>: Send + Sync {
+pub trait ExtCfgParser<EnvGetter: GetEnv, ExtCfg: Clone> {
     async fn from_env(&self, env: &mut Env<EnvGetter>, version: &str) -> ExtCfg;
 }
 
