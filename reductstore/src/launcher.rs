@@ -187,6 +187,7 @@ async fn periodical_compact_storage(storage: Arc<StorageEngine>, sync_interval: 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::CoreExtCfgParser;
     use log::warn;
     use rstest::rstest;
     use serial_test::serial;
@@ -312,7 +313,7 @@ mod tests {
         let task = spawn(|| {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
                 *STOP_SERVER.lock().await = false;
-                launch_server().await;
+                launch_server(CoreExtCfgParser).await;
             });
         });
 

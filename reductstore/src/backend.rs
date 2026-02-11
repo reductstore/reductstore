@@ -6,9 +6,6 @@
 #[cfg(feature = "fs-backend")]
 pub(super) mod fs;
 
-#[cfg(feature = "s3-backend")]
-pub(super) mod remote;
-
 pub(crate) mod file;
 mod noop;
 
