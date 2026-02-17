@@ -1,4 +1,8 @@
-"""Pytest fixtures for Zenoh integration tests."""
+"""Pytest fixtures for Zenoh integration tests.
+
+In single-bucket mode, all Zenoh data is stored in a fixed bucket configured
+via RS_ZENOH_BUCKET (default: "zenoh"). The full Zenoh key becomes the entry name.
+"""
 
 import json
 import os
@@ -30,8 +34,9 @@ def zenoh_connect() -> str:
 
 
 @pytest.fixture(scope="session")
-def key_prefix() -> str:
-    return os.environ.get("ZENOH_KEY_PREFIX", "reduct")
+def zenoh_bucket() -> str:
+    """The fixed bucket name used for all Zenoh data (matches RS_ZENOH_BUCKET)."""
+    return os.environ.get("RS_ZENOH_BUCKET", "zenoh")
 
 
 @pytest.fixture(scope="session")
@@ -45,12 +50,8 @@ def client(storage_url: str, api_token: str) -> Client:
 
 
 @pytest.fixture(scope="function")
-def bucket_name() -> str:
-    return _rand_name("zenoh_bucket")
-
-
-@pytest.fixture(scope="function")
 def entry_name() -> str:
+    """A unique entry name (used as the Zenoh key expression)."""
     return _rand_name("entry")
 
 
@@ -63,7 +64,12 @@ def zenoh_session(zenoh_connect: str):
     if zenoh_mode == "client":
         config.insert_json5("listen/endpoints", json.dumps({"peer": [], "router": []}))
     config.insert_json5("scouting/multicast/enabled", "false")
-    if os.environ.get("ZENOH_SHM_ENABLED", "").lower() not in {"1", "true", "yes", "on"}:
+    if os.environ.get("ZENOH_SHM_ENABLED", "").lower() not in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }:
         config.insert_json5("transport/shared_memory/enabled", "false")
     session = zenoh.open(config)
     yield session
@@ -71,12 +77,11 @@ def zenoh_session(zenoh_connect: str):
 
 
 @pytest_asyncio.fixture(scope="function")
-async def bucket(client: Client, bucket_name: str):
-    bucket = await client.create_bucket(bucket_name, exist_ok=True)
-    try:
-        yield bucket
-    finally:
-        await (await client.get_bucket(bucket_name)).remove()
+async def bucket(client: Client, zenoh_bucket: str):
+    """Get the fixed Zenoh bucket (auto-created by ReductStore on startup)."""
+    bucket = await client.get_bucket(zenoh_bucket)
+    yield bucket
+    # Don't remove - the bucket is managed by the server
 
 
 @pytest.fixture(scope="session")

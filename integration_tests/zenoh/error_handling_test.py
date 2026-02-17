@@ -1,4 +1,8 @@
-"""Integration tests for error handling and edge cases."""
+"""Integration tests for error handling and edge cases.
+
+In single-bucket mode, the Zenoh key expression becomes the entry name.
+All data flows through the bucket configured via RS_ZENOH_BUCKET.
+"""
 
 import asyncio
 import json
@@ -15,11 +19,9 @@ async def read_first_payload(bucket, entry_name):
     return None
 
 
-async def test_publish_unicode_data(
-    bucket, bucket_name, entry_name, key_prefix, zenoh_session
-):
+async def test_publish_unicode_data(bucket, entry_name, zenoh_session):
     """Handle Unicode data in payload."""
-    key_expr = f"{key_prefix}/{bucket_name}/{entry_name}"
+    key_expr = entry_name
     payload = "Hello 世界 🌍 Привет".encode("utf-8")
 
     zenoh_session.put(key_expr, payload)
@@ -30,11 +32,9 @@ async def test_publish_unicode_data(
     assert data == payload
 
 
-async def test_publish_binary_data(
-    bucket, bucket_name, entry_name, key_prefix, zenoh_session
-):
+async def test_publish_binary_data(bucket, entry_name, zenoh_session):
     """Handle arbitrary binary data."""
-    key_expr = f"{key_prefix}/{bucket_name}/{entry_name}"
+    key_expr = entry_name
     payload = bytes(range(256)) + b"\x00" * 100
 
     zenoh_session.put(key_expr, payload)
@@ -45,11 +45,9 @@ async def test_publish_binary_data(
     assert data == payload
 
 
-async def test_rapid_fire_publishing(
-    bucket, bucket_name, entry_name, key_prefix, zenoh_session
-):
+async def test_rapid_fire_publishing(bucket, entry_name, zenoh_session):
     """Handle rapid consecutive publishes."""
-    key_expr = f"{key_prefix}/{bucket_name}/{entry_name}"
+    key_expr = entry_name
 
     for i in range(100):
         zenoh_session.put(key_expr, f"message_{i}".encode())
@@ -60,15 +58,13 @@ async def test_rapid_fire_publishing(
     assert records
 
 
-async def test_concurrent_publish_to_multiple_entries(
-    bucket, bucket_name, key_prefix, zenoh_session
-):
+async def test_concurrent_publish_to_multiple_entries(bucket, zenoh_session):
     """Handle concurrent publishes to different entries."""
     entries = ["entry_a", "entry_b", "entry_c"]
 
     for i in range(30):
         for entry in entries:
-            key_expr = f"{key_prefix}/{bucket_name}/{entry}"
+            key_expr = entry
             zenoh_session.put(key_expr, f"data_{i}".encode())
 
     await asyncio.sleep(2.0)
@@ -78,9 +74,9 @@ async def test_concurrent_publish_to_multiple_entries(
         assert records
 
 
-async def test_json_payload(bucket, bucket_name, entry_name, key_prefix, zenoh_session):
+async def test_json_payload(bucket, entry_name, zenoh_session):
     """Handle JSON payload."""
-    key_expr = f"{key_prefix}/{bucket_name}/{entry_name}"
+    key_expr = entry_name
     data = {"sensor_id": "temp_001", "readings": [23.5, 24.1, 23.8]}
     payload = json.dumps(data).encode("utf-8")
 
@@ -93,11 +89,9 @@ async def test_json_payload(bucket, bucket_name, entry_name, key_prefix, zenoh_s
     assert parsed["sensor_id"] == "temp_001"
 
 
-async def test_large_json_array(
-    bucket, bucket_name, entry_name, key_prefix, zenoh_session
-):
+async def test_large_json_array(bucket, entry_name, zenoh_session):
     """Handle large JSON arrays."""
-    key_expr = f"{key_prefix}/{bucket_name}/{entry_name}"
+    key_expr = entry_name
     data = {"readings": list(range(10_000))}
     payload = json.dumps(data).encode("utf-8")
 
