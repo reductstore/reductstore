@@ -24,7 +24,7 @@ use crate::api::token::list::list_tokens;
 use crate::api::token::remove::remove_token;
 use crate::api::{HttpError, StateKeeper};
 
-use reduct_base::msg::token_api::{Token, TokenCreateResponse, TokenCreateRequest, TokenList};
+use reduct_base::msg::token_api::{Token, TokenCreateRequest, TokenCreateResponse, TokenList};
 use reduct_macros::{IntoResponse, Twin};
 
 #[derive(IntoResponse, Twin)]

@@ -38,7 +38,7 @@ mod tests {
     use crate::api::tests::{headers, keeper};
     use axum::http::HeaderValue;
     use reduct_base::error::ErrorCode;
-    use reduct_base::msg::token_api::Permissions;
+    use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
     use rstest::rstest;
     use std::sync::Arc;
 
@@ -79,10 +79,13 @@ mod tests {
             .unwrap()
             .generate_token(
                 "test-token",
-                Permissions {
-                    full_access: false,
-                    read: vec!["bucket-1".to_string()],
-                    write: vec![],
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access: false,
+                        read: vec!["bucket-1".to_string()],
+                        write: vec![],
+                    },
+                    expires_in: None,
                 },
             )
             .await

@@ -22,7 +22,7 @@ pub(super) async fn create_token(
         .token_repo
         .write()
         .await?
-        .generate_token(&token_name, body.0.permissions.into(), None)
+        .generate_token(&token_name, body.0)
         .await?;
     Ok(TokenCreateResponseAxum(token))
 }
@@ -34,7 +34,7 @@ mod tests {
     use crate::api::tests::{headers, keeper};
 
     use reduct_base::error::ErrorCode;
-    use reduct_base::msg::token_api::Permissions;
+    use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
     use rstest::rstest;
 
     #[rstest]
@@ -45,7 +45,8 @@ mod tests {
             Path("new-token".to_string()),
             headers,
             TokenCreateRequestAxum(TokenCreateRequest {
-                permissions: Permissions::default(), 
+                permissions: Permissions::default(),
+                expires_in: None,
             }),
         )
         .await
@@ -66,6 +67,7 @@ mod tests {
             headers,
             TokenCreateRequestAxum(TokenCreateRequest {
                 permissions: Permissions::default(),
+                expires_in: None,
             }),
         )
         .await
