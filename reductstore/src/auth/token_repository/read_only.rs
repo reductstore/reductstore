@@ -13,7 +13,7 @@ use chrono::{DateTime, Utc};
 use log::{debug, error};
 use prost::Message;
 use reduct_base::error::ReductError;
-use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
+use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
 use reduct_base::{forbidden, internal_server_error};
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom};
@@ -94,6 +94,7 @@ impl ReadOnlyTokenRepository {
                     write: vec![],
                 }),
                 is_provisioned: true,
+                expires_at: None,
             };
 
             repo.insert(init_token.name.clone(), init_token);
@@ -130,7 +131,7 @@ impl ManageTokens for ReadOnlyTokenRepository {
     async fn generate_token(
         &mut self,
         _name: &str,
-        _permissions: Permissions,
+        _request: TokenCreateRequest,
     ) -> Result<TokenCreateResponse, ReductError> {
         Err(forbidden!("Cannot generate token in read-only mode"))
     }
@@ -228,6 +229,7 @@ mod tests {
                     write: vec![],
                 }),
                 is_provisioned: true,
+                expires_at: None,
             };
 
             write_token_to_file(&path, &new_token).await;
@@ -258,7 +260,15 @@ mod tests {
                 read: vec![],
                 write: vec![],
             };
-            let res = repo.generate_token("test", perms).await;
+            let res = repo
+                .generate_token(
+                    "test",
+                    TokenCreateRequest {
+                        permissions: perms,
+                        expires_in: None,
+                    },
+                )
+                .await;
             assert_eq!(
                 res.err().unwrap(),
                 forbidden!("Cannot generate token in read-only mode")
@@ -285,6 +295,7 @@ mod tests {
                         write: vec![],
                     }),
                     is_provisioned: true,
+                    expires_at: None
                 }
             );
         }
@@ -344,6 +355,7 @@ mod tests {
                         write: vec![],
                     }),
                     is_provisioned: true,
+                    expires_at: None
                 }
             );
         }
@@ -424,6 +436,7 @@ mod tests {
                 write: vec![],
             }),
             is_provisioned: true,
+            expires_at: None,
         };
 
         write_token_to_file(&path, &token).await;
