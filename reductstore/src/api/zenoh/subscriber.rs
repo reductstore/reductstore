@@ -1,6 +1,7 @@
 // Copyright 2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use super::sanitize_entry_name;
 use crate::api::zenoh::attachments;
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::components::Components;
@@ -15,26 +16,29 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+/// Subscriber pipeline for ingesting Zenoh samples into ReductStore.
+///
+/// In single-bucket mode, all data is written to a fixed bucket configured via
+/// `RS_ZENOH_BUCKET`. The full Zenoh key expression becomes the entry name.
 pub(crate) struct SubscriberPipeline {
     components: Arc<Components>,
-    key_pattern: KeyPattern,
+    /// The fixed bucket name for all ingested data.
+    bucket: String,
 }
 
 impl SubscriberPipeline {
     pub(crate) fn new(config: ZenohApiConfig, components: Arc<Components>) -> Self {
         SubscriberPipeline {
             components,
-            key_pattern: KeyPattern::new(config.key_prefix),
+            bucket: config.bucket.clone(),
         }
     }
 
-    /// Key expression used for the Zenoh subscription. Includes wildcard
-    /// to cover all entries and nested paths under the configured prefix.
-    pub(crate) fn subscription_key_expr(&self) -> String {
-        format!("{}/**", self.key_pattern.prefix())
-    }
-
     /// Handles a single Zenoh sample by writing it into storage and notifying replications.
+    ///
+    /// The full key expression is used as the entry name within the configured bucket.
+    /// Slashes in the key expression are replaced with underscores since ReductStore
+    /// entry names only allow alphanumeric characters, hyphens, and underscores.
     pub(crate) async fn handle_sample(
         &self,
         key_expr: &str,
@@ -42,7 +46,8 @@ impl SubscriberPipeline {
         attachment: Option<Vec<u8>>,
         timestamp: Option<u64>,
     ) -> Result<(), IngestError> {
-        let route = self.key_pattern.parse(key_expr)?;
+        // In single-bucket mode: entry = full Zenoh key (with slashes replaced)
+        let entry_name = sanitize_entry_name(key_expr.trim_matches('/'));
 
         let labels = match attachment {
             Some(raw_labels) => match attachments::deserialize_labels(&raw_labels) {
@@ -50,7 +55,7 @@ impl SubscriberPipeline {
                 Err(err) => {
                     warn!(
                         "Failed to decode labels for {}:{} ({}): {}",
-                        route.bucket, route.entry, key_expr, err
+                        self.bucket, entry_name, key_expr, err
                     );
                     Labels::new()
                 }
@@ -63,19 +68,19 @@ impl SubscriberPipeline {
 
         debug!(
             "Ingesting Zenoh sample bucket={} entry={} timestamp={} bytes={}",
-            route.bucket, route.entry, ts, content_size
+            self.bucket, entry_name, ts, content_size
         );
 
         let bucket = self
             .components
             .storage
-            .get_bucket(&route.bucket)
+            .get_bucket(&self.bucket)
             .await?
             .upgrade()?;
 
         let mut writer = bucket
             .begin_write(
-                &route.entry,
+                &entry_name,
                 ts,
                 content_size,
                 "application/octet-stream".to_string(),
@@ -87,7 +92,7 @@ impl SubscriberPipeline {
         writer.send(Ok(None)).await?;
 
         // Notify replication system about the write
-        self.notify_replication(&route.bucket, &route.entry, ts, labels)
+        self.notify_replication(&self.bucket, &entry_name, ts, labels)
             .await?;
 
         Ok(())
@@ -126,128 +131,28 @@ impl SubscriberPipeline {
             .await
             .map_err(|err| err.to_string())?;
 
-        let probe_key = self.key_pattern.format("probe-bucket", "probe-entry");
-        let route = self
-            .key_pattern
-            .parse(&probe_key)
-            .map_err(|err| err.to_string())?;
-
-        debug!(
-            "Zenoh subscriber probe for bucket={} entry={} tail={:?}",
-            route.bucket, route.entry, route.tail
-        );
         info!(
-            "Zenoh subscriber wiring ready (storage version {}): {}",
-            server_info.version,
-            self.key_pattern.prefix()
+            "Zenoh subscriber ready (storage version {}): bucket='{}'",
+            server_info.version, self.bucket
         );
         Ok(())
     }
 }
 
-#[derive(Clone)]
-pub(crate) struct KeyPattern {
-    prefix: String,
-}
-
-impl KeyPattern {
-    pub(crate) fn new(prefix: impl Into<String>) -> Self {
-        KeyPattern {
-            prefix: prefix.into().trim_matches('/').to_string(),
-        }
-    }
-
-    pub(crate) fn prefix(&self) -> &str {
-        &self.prefix
-    }
-
-    pub(crate) fn format(&self, bucket: &str, entry: &str) -> String {
-        format!(
-            "{}/{}/{}",
-            self.prefix,
-            bucket.trim_matches('/'),
-            entry.trim_matches('/')
-        )
-    }
-
-    pub(crate) fn parse(&self, expr: &str) -> Result<KeyRoute, KeyParseError> {
-        let segments: Vec<&str> = expr.trim_matches('/').split('/').collect();
-        if segments.is_empty() {
-            return Err(KeyParseError::MissingPrefix);
-        }
-        if segments[0] != self.prefix {
-            return Err(KeyParseError::PrefixMismatch {
-                expected: self.prefix.clone(),
-                found: segments[0].to_string(),
-            });
-        }
-        if segments.len() < 2 {
-            return Err(KeyParseError::MissingBucket);
-        }
-        if segments.len() < 3 {
-            return Err(KeyParseError::MissingEntry);
-        }
-
-        Ok(KeyRoute {
-            bucket: segments[1].to_string(),
-            entry: segments[2].to_string(),
-            tail: segments[3..].iter().map(|s| (*s).to_string()).collect(),
-        })
-    }
-}
-
-#[derive(Debug, PartialEq)]
-pub(crate) enum KeyParseError {
-    MissingPrefix,
-    MissingBucket,
-    MissingEntry,
-    PrefixMismatch { expected: String, found: String },
-}
-
-impl Display for KeyParseError {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            KeyParseError::MissingPrefix => write!(f, "key expression must include a prefix"),
-            KeyParseError::MissingBucket => write!(f, "key expression missing bucket segment"),
-            KeyParseError::MissingEntry => write!(f, "key expression missing entry segment"),
-            KeyParseError::PrefixMismatch { expected, found } => {
-                write!(f, "expected prefix '{}' but found '{}'", expected, found)
-            }
-        }
-    }
-}
-
-impl Error for KeyParseError {}
-
-#[derive(Debug, PartialEq)]
-pub(crate) struct KeyRoute {
-    pub(crate) bucket: String,
-    pub(crate) entry: String,
-    pub(crate) tail: Vec<String>,
-}
-
 #[derive(Debug)]
 pub(crate) enum IngestError {
-    KeyParse(KeyParseError),
     Storage(ReductError),
 }
 
 impl Display for IngestError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            IngestError::KeyParse(err) => write!(f, "Invalid key expression: {}", err),
             IngestError::Storage(err) => write!(f, "Storage error: {}", err),
         }
     }
 }
 
 impl Error for IngestError {}
-
-impl From<KeyParseError> for IngestError {
-    fn from(value: KeyParseError) -> Self {
-        IngestError::KeyParse(value)
-    }
-}
 
 impl From<ReductError> for IngestError {
     fn from(value: ReductError) -> Self {
@@ -260,38 +165,4 @@ fn current_time_us() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_micros() as u64)
         .unwrap_or_default()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parses_valid_key() {
-        let pattern = KeyPattern::new("reduct");
-        let route = pattern.parse("/reduct/demo/temp").unwrap();
-        assert_eq!(route.bucket, "demo");
-        assert_eq!(route.entry, "temp");
-        assert!(route.tail.is_empty());
-    }
-
-    #[test]
-    fn detects_prefix_mismatch() {
-        let pattern = KeyPattern::new("reduct");
-        let result = pattern.parse("/other/demo/temp");
-        assert!(matches!(result, Err(KeyParseError::PrefixMismatch { .. })));
-    }
-
-    #[test]
-    fn detects_short_path() {
-        let pattern = KeyPattern::new("reduct");
-        assert_eq!(
-            pattern.parse("reduct").unwrap_err(),
-            KeyParseError::MissingBucket
-        );
-        assert_eq!(
-            pattern.parse("reduct/demo").unwrap_err(),
-            KeyParseError::MissingEntry
-        );
-    }
 }

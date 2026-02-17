@@ -10,10 +10,12 @@ use bytes::Bytes;
 use log::{debug, error, info, warn};
 use reduct_base::error::ErrorCode;
 use reduct_base::io::ReadRecord;
+use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::Labels;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::path::Path;
 use std::sync::Arc;
 use tokio::sync::watch;
 use tokio::time::{sleep, Duration};
@@ -29,8 +31,10 @@ pub(crate) async fn run_session(
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> Result<(), SessionError> {
     info!(
-        "Starting Zenoh API runtime: prefix='{}', listen={:?}, connect={:?}, mode={:?}",
-        config.key_prefix, config.listen_endpoints, config.connect_endpoints, config.mode
+        "Starting Zenoh API runtime: bucket='{}', sub_keyexprs={}, query_keyexprs={}",
+        config.bucket,
+        config.sub_keyexprs.as_deref().unwrap_or("<disabled>"),
+        config.query_keyexprs.as_deref().unwrap_or("<disabled>")
     );
 
     validate_label_codec()?;
@@ -52,6 +56,9 @@ pub(crate) async fn run_session(
             }
         }
     };
+
+    // Ensure the target bucket exists (auto-create if not)
+    ensure_bucket_exists(&components, &config.bucket).await?;
 
     // Build Zenoh configuration
     let zenoh_config = build_zenoh_config(&config)?;
@@ -84,12 +91,15 @@ pub(crate) async fn run_session(
         .await
         .map_err(SessionError::Queryable)?;
 
-    // Spawn subscriber tasks
-    let subscriber_handles =
-        spawn_subscribers(&session, &config, Arc::clone(&subscriber_pipeline)).await?;
+    // Spawn subscriber tasks (only if sub_keyexprs is set)
+    let subscriber_handles = if config.sub_keyexprs.is_some() {
+        spawn_subscribers(&session, &config, Arc::clone(&subscriber_pipeline)).await?
+    } else {
+        Vec::new()
+    };
 
-    // Spawn queryable tasks
-    let queryable_handles = if config.enable_queryable {
+    // Spawn queryable tasks (only if query_keyexprs is set)
+    let queryable_handles = if config.query_keyexprs.is_some() {
         spawn_queryables(&session, &config, queryable_pipeline).await?
     } else {
         Vec::new()
@@ -124,50 +134,138 @@ pub(crate) async fn run_session(
     Ok(())
 }
 
+/// Ensures the target bucket exists, creating it with default settings if not.
+async fn ensure_bucket_exists(
+    components: &Arc<crate::core::components::Components>,
+    bucket_name: &str,
+) -> Result<(), SessionError> {
+    match components.storage.get_bucket(bucket_name).await {
+        Ok(_) => {
+            info!("Zenoh target bucket '{}' exists", bucket_name);
+            Ok(())
+        }
+        Err(_) => {
+            info!(
+                "Zenoh target bucket '{}' does not exist, creating...",
+                bucket_name
+            );
+            components
+                .storage
+                .create_bucket(bucket_name, BucketSettings::default())
+                .await
+                .map_err(|e| {
+                    SessionError::InvalidConfig(format!(
+                        "Failed to create bucket '{}': {}",
+                        bucket_name, e
+                    ))
+                })?;
+            info!("Zenoh target bucket '{}' created successfully", bucket_name);
+            Ok(())
+        }
+    }
+}
+
 fn build_zenoh_config(config: &ZenohApiConfig) -> Result<Config, SessionError> {
+    // Priority: inline config > config file path > error
+    if let Some(ref inline_config) = config.config_inline {
+        info!("Building Zenoh config from inline string");
+        parse_inline_config(inline_config)
+    } else if let Some(ref config_path) = config.config_path {
+        info!("Loading Zenoh config from file: {}", config_path);
+        load_config_file(config_path)
+    } else {
+        Err(SessionError::InvalidConfig(
+            "Either RS_ZENOH_CONFIG or RS_ZENOH_CONFIG_PATH must be set".to_string(),
+        ))
+    }
+}
+
+/// Parses an inline config string like "mode=client;peer=localhost:7447"
+fn parse_inline_config(inline: &str) -> Result<Config, SessionError> {
     let mut zenoh_config = Config::default();
 
-    // Set mode if specified
-    if let Some(ref mode) = config.mode {
-        zenoh_config
-            .insert_json5("mode", &format!("\"{}\"", mode))
-            .map_err(|e| SessionError::InvalidConfig(format!("Failed to set mode: {}", e)))?;
-    }
+    for part in inline.split(';') {
+        let part = part.trim();
+        if part.is_empty() {
+            continue;
+        }
 
-    // Set listen endpoints
-    if !config.listen_endpoints.is_empty() {
-        let endpoints_json = serde_json::to_string(&config.listen_endpoints).map_err(|e| {
-            SessionError::InvalidConfig(format!("Failed to serialize listen endpoints: {}", e))
-        })?;
-        zenoh_config
-            .insert_json5("listen/endpoints", &endpoints_json)
-            .map_err(|e| {
-                SessionError::InvalidConfig(format!("Failed to set listen endpoints: {}", e))
-            })?;
-    }
+        if let Some((key, value)) = part.split_once('=') {
+            let key = key.trim().to_lowercase();
+            let value = value.trim();
 
-    // Set connect endpoints
-    if !config.connect_endpoints.is_empty() {
-        let endpoints_json = serde_json::to_string(&config.connect_endpoints).map_err(|e| {
-            SessionError::InvalidConfig(format!("Failed to serialize connect endpoints: {}", e))
-        })?;
-        zenoh_config
-            .insert_json5("connect/endpoints", &endpoints_json)
-            .map_err(|e| {
-                SessionError::InvalidConfig(format!("Failed to set connect endpoints: {}", e))
-            })?;
-    }
-
-    // Disable multicast scouting if requested
-    if config.disable_multicast_scouting {
-        zenoh_config
-            .insert_json5("scouting/multicast/enabled", "false")
-            .map_err(|e| {
-                SessionError::InvalidConfig(format!("Failed to disable multicast: {}", e))
-            })?;
+            match key.as_str() {
+                "mode" => {
+                    zenoh_config
+                        .insert_json5("mode", &format!("\"{}\"", value))
+                        .map_err(|e| {
+                            SessionError::InvalidConfig(format!("Failed to set mode: {}", e))
+                        })?;
+                }
+                "peer" | "connect" => {
+                    // Support comma-separated peers
+                    let endpoints: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
+                    let endpoints_json = serde_json::to_string(&endpoints).map_err(|e| {
+                        SessionError::InvalidConfig(format!(
+                            "Failed to serialize connect endpoints: {}",
+                            e
+                        ))
+                    })?;
+                    zenoh_config
+                        .insert_json5("connect/endpoints", &endpoints_json)
+                        .map_err(|e| {
+                            SessionError::InvalidConfig(format!(
+                                "Failed to set connect endpoints: {}",
+                                e
+                            ))
+                        })?;
+                }
+                "listen" => {
+                    let endpoints: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
+                    let endpoints_json = serde_json::to_string(&endpoints).map_err(|e| {
+                        SessionError::InvalidConfig(format!(
+                            "Failed to serialize listen endpoints: {}",
+                            e
+                        ))
+                    })?;
+                    zenoh_config
+                        .insert_json5("listen/endpoints", &endpoints_json)
+                        .map_err(|e| {
+                            SessionError::InvalidConfig(format!(
+                                "Failed to set listen endpoints: {}",
+                                e
+                            ))
+                        })?;
+                }
+                _ => {
+                    warn!("Unknown inline config key '{}', ignoring", key);
+                }
+            }
+        } else {
+            warn!("Invalid inline config part '{}', expected key=value", part);
+        }
     }
 
     Ok(zenoh_config)
+}
+
+/// Loads a Zenoh config from a JSON5 file.
+fn load_config_file(path: &str) -> Result<Config, SessionError> {
+    let path = Path::new(path);
+    if !path.exists() {
+        return Err(SessionError::InvalidConfig(format!(
+            "Config file does not exist: {}",
+            path.display()
+        )));
+    }
+
+    Config::from_file(path).map_err(|e| {
+        SessionError::InvalidConfig(format!(
+            "Failed to load config file '{}': {}",
+            path.display(),
+            e
+        ))
+    })
 }
 
 async fn spawn_subscribers(
@@ -177,47 +275,41 @@ async fn spawn_subscribers(
 ) -> Result<Vec<tokio::task::JoinHandle<()>>, SessionError> {
     let mut handles = Vec::new();
 
-    // Subscribe to patterns from config, or use default prefix pattern
-    let patterns: Vec<String> = if config.subscribe_patterns.is_empty() {
-        vec![format!("{}/**", config.key_prefix)]
-    } else {
-        config.subscribe_patterns.clone()
-    };
+    // Use the configured key expression (guaranteed to be Some by caller)
+    let key_expr = config.sub_keyexprs.as_ref().unwrap();
 
-    for pattern in patterns {
-        info!("Declaring Zenoh subscriber on key expression: {}", pattern);
+    info!("Declaring Zenoh subscriber on key expression: {}", key_expr);
 
-        let subscriber = session.declare_subscriber(&pattern).await.map_err(|e| {
-            SessionError::Subscriber(format!(
-                "Failed to declare subscriber on '{}': {}",
-                pattern, e
-            ))
-        })?;
+    let subscriber = session.declare_subscriber(key_expr).await.map_err(|e| {
+        SessionError::Subscriber(format!(
+            "Failed to declare subscriber on '{}': {}",
+            key_expr, e
+        ))
+    })?;
 
-        let pipeline_clone = Arc::clone(&pipeline);
-        let pattern_clone = pattern.clone();
+    let pipeline_clone = Arc::clone(&pipeline);
+    let key_expr_clone = key_expr.clone();
 
-        let handle = tokio::spawn(async move {
-            loop {
-                match subscriber.recv_async().await {
-                    Ok(sample) => {
-                        if let Err(e) = handle_sample(&pipeline_clone, sample).await {
-                            warn!(
-                                "Failed to handle Zenoh sample on '{}': {}",
-                                pattern_clone, e
-                            );
-                        }
-                    }
-                    Err(e) => {
-                        error!("Subscriber '{}' recv error: {}", pattern_clone, e);
-                        break;
+    let handle = tokio::spawn(async move {
+        loop {
+            match subscriber.recv_async().await {
+                Ok(sample) => {
+                    if let Err(e) = handle_sample(&pipeline_clone, sample).await {
+                        warn!(
+                            "Failed to handle Zenoh sample on '{}': {}",
+                            key_expr_clone, e
+                        );
                     }
                 }
+                Err(e) => {
+                    error!("Subscriber '{}' recv error: {}", key_expr_clone, e);
+                    break;
+                }
             }
-        });
+        }
+    });
 
-        handles.push(handle);
-    }
+    handles.push(handle);
 
     Ok(handles)
 }
@@ -267,12 +359,12 @@ async fn spawn_queryables(
 ) -> Result<Vec<tokio::task::JoinHandle<()>>, SessionError> {
     let mut handles = Vec::new();
 
-    // Declare queryable on the key prefix to handle all queries
-    let key_expr = format!("{}/**", config.key_prefix);
+    // Use the configured key expression (guaranteed to be Some by caller)
+    let key_expr = config.query_keyexprs.as_ref().unwrap();
     info!("Declaring Zenoh queryable on key expression: {}", key_expr);
 
     let queryable = session
-        .declare_queryable(&key_expr)
+        .declare_queryable(key_expr.as_str())
         .await
         .map_err(|e| SessionError::Queryable(format!("Failed to declare queryable: {}", e)))?;
 

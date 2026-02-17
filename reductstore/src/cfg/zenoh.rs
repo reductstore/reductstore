@@ -5,44 +5,48 @@ use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use std::fmt::{Display, Formatter};
 
-/// Configuration for the optional Zenoh API bridge.
+const DEFAULT_BUCKET: &str = "zenoh";
+
+/// Configuration for the minimal Zenoh API integration (single-bucket mode).
+///
+/// # Supported Environment Variables
+///
+/// - `RS_ZENOH_ENABLED`: Enable/disable the Zenoh integration (default: false)
+/// - `RS_ZENOH_CONFIG`: Inline Zenoh config string (e.g., "mode=client;peer=localhost:7447")
+/// - `RS_ZENOH_CONFIG_PATH`: Path to a Zenoh JSON5 config file
+/// - `RS_ZENOH_BUCKET`: The single bucket for all Zenoh data (default: "zenoh")
+/// - `RS_ZENOH_SUB_KEYEXPRS`: Key expression for subscriber (write path), e.g., "**"
+/// - `RS_ZENOH_QUERY_KEYEXPRS`: Key expression for queryable (read path), e.g., "**"
+///
+/// If both `RS_ZENOH_CONFIG` and `RS_ZENOH_CONFIG_PATH` are set, inline config takes precedence.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZenohApiConfig {
     /// Enables the Zenoh API runtime.
     pub enabled: bool,
-    /// Prefix for all Zenoh key expressions served by ReductStore.
-    pub key_prefix: String,
-    /// Endpoints this node should listen on.
-    pub listen_endpoints: Vec<String>,
-    /// Endpoints this node should connect to as a client/peer.
-    pub connect_endpoints: Vec<String>,
-    /// Optional mode override (`peer`, `client`, `router`).
-    pub mode: Option<String>,
-    /// True to disable multicast scouting for discovery.
-    pub disable_multicast_scouting: bool,
-    /// Key expression patterns to subscribe to for data ingestion.
-    /// Each pattern maps to bucket/entry based on the key structure: `{prefix}/{bucket}/{entry}/**`
-    pub subscribe_patterns: Vec<String>,
-    /// Enable advanced subscriber features: history recovery and sample miss detection.
-    pub enable_recovery: bool,
-    /// Enable queryable endpoints to allow Zenoh queries to read data from ReductStore.
-    pub enable_queryable: bool,
+    /// Inline Zenoh configuration string (e.g., "mode=client;peer=localhost:7447").
+    /// Takes precedence over `config_path` if both are set.
+    pub config_inline: Option<String>,
+    /// Path to a Zenoh JSON5 configuration file.
+    pub config_path: Option<String>,
+    /// The single ReductStore bucket used for all Zenoh data.
+    pub bucket: String,
+    /// Key expression for the Zenoh subscriber (write path).
+    /// If unset, the write path is disabled.
+    pub sub_keyexprs: Option<String>,
+    /// Key expression for the Zenoh queryable (read path).
+    /// If unset, the read path is disabled.
+    pub query_keyexprs: Option<String>,
 }
-
-const DEFAULT_KEY_PREFIX: &str = "reduct";
 
 impl Default for ZenohApiConfig {
     fn default() -> Self {
         ZenohApiConfig {
             enabled: false,
-            key_prefix: DEFAULT_KEY_PREFIX.to_string(),
-            listen_endpoints: Vec::new(),
-            connect_endpoints: Vec::new(),
-            mode: None,
-            disable_multicast_scouting: false,
-            subscribe_patterns: Vec::new(),
-            enable_recovery: false,
-            enable_queryable: true,
+            config_inline: None,
+            config_path: None,
+            bucket: DEFAULT_BUCKET.to_string(),
+            sub_keyexprs: None,
+            query_keyexprs: None,
         }
     }
 }
@@ -51,16 +55,13 @@ impl Display for ZenohApiConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "enabled={}, prefix={}, listen={:?}, connect={:?}, mode={:?}, disable_multicast={}, subscribe={:?}, recovery={}, queryable={}",
+            "enabled={}, bucket={}, config={}, config_path={}, sub_keyexprs={}, query_keyexprs={}",
             self.enabled,
-            self.key_prefix,
-            self.listen_endpoints,
-            self.connect_endpoints,
-            self.mode,
-            self.disable_multicast_scouting,
-            self.subscribe_patterns,
-            self.enable_recovery,
-            self.enable_queryable
+            self.bucket,
+            self.config_inline.as_deref().unwrap_or("<none>"),
+            self.config_path.as_deref().unwrap_or("<none>"),
+            self.sub_keyexprs.as_deref().unwrap_or("<disabled>"),
+            self.query_keyexprs.as_deref().unwrap_or("<disabled>")
         )
     }
 }
@@ -69,34 +70,17 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(super) fn parse_zenoh_api_config(env: &mut Env<EnvGetter>) -> ZenohApiConfig {
         ZenohApiConfig {
             enabled: parse_bool(env.get_optional::<String>("RS_ZENOH_ENABLED"), false),
-            key_prefix: env
-                .get_optional("RS_ZENOH_KEY_PREFIX")
+            config_inline: parse_optional_string(env.get_optional::<String>("RS_ZENOH_CONFIG")),
+            config_path: parse_optional_string(env.get_optional::<String>("RS_ZENOH_CONFIG_PATH")),
+            bucket: env
+                .get_optional("RS_ZENOH_BUCKET")
                 .filter(|value: &String| !value.trim().is_empty())
-                .unwrap_or_else(|| DEFAULT_KEY_PREFIX.to_string()),
-            listen_endpoints: parse_endpoints(env.get_optional::<String>("RS_ZENOH_LISTEN")),
-            connect_endpoints: parse_endpoints(env.get_optional::<String>("RS_ZENOH_CONNECT")),
-            mode: env
-                .get_optional::<String>("RS_ZENOH_MODE")
-                .and_then(|value| {
-                    let trimmed = value.trim();
-                    if trimmed.is_empty() {
-                        None
-                    } else {
-                        Some(trimmed.to_lowercase())
-                    }
-                }),
-            disable_multicast_scouting: parse_bool(
-                env.get_optional::<String>("RS_ZENOH_DISABLE_MULTICAST"),
-                false,
+                .unwrap_or_else(|| DEFAULT_BUCKET.to_string()),
+            sub_keyexprs: parse_optional_string(
+                env.get_optional::<String>("RS_ZENOH_SUB_KEYEXPRS"),
             ),
-            subscribe_patterns: parse_endpoints(env.get_optional::<String>("RS_ZENOH_SUBSCRIBE")),
-            enable_recovery: parse_bool(
-                env.get_optional::<String>("RS_ZENOH_ENABLE_RECOVERY"),
-                false,
-            ),
-            enable_queryable: parse_bool(
-                env.get_optional::<String>("RS_ZENOH_ENABLE_QUERYABLE"),
-                true,
+            query_keyexprs: parse_optional_string(
+                env.get_optional::<String>("RS_ZENOH_QUERY_KEYEXPRS"),
             ),
         }
     }
@@ -111,15 +95,8 @@ fn parse_bool(raw: Option<String>, default: bool) -> bool {
     .unwrap_or(default)
 }
 
-fn parse_endpoints(raw: Option<String>) -> Vec<String> {
-    raw.map(|value| {
-        value
-            .split(|ch| ch == ',' || ch == ';' || ch == '\n')
-            .map(|segment| segment.trim().to_string())
-            .filter(|segment| !segment.is_empty())
-            .collect()
-    })
-    .unwrap_or_default()
+fn parse_optional_string(raw: Option<String>) -> Option<String> {
+    raw.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
 #[cfg(test)]
@@ -140,58 +117,86 @@ mod tests {
             .return_const(Ok("yes".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_ZENOH_KEY_PREFIX"))
+            .with(eq("RS_ZENOH_CONFIG"))
+            .times(1)
+            .return_const(Ok("mode=client;peer=localhost:7447".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_CONFIG_PATH"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_BUCKET"))
             .times(1)
             .return_const(Ok("telemetry".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_ZENOH_LISTEN"))
+            .with(eq("RS_ZENOH_SUB_KEYEXPRS"))
             .times(1)
-            .return_const(Ok("tcp/0.0.0.0:7447;udp/224.0.0.1:7447".to_string()));
+            .return_const(Ok("**".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_ZENOH_CONNECT"))
+            .with(eq("RS_ZENOH_QUERY_KEYEXPRS"))
             .times(1)
-            .return_const(Ok("tcp/10.0.0.1:7447".to_string()));
-        env_getter
-            .expect_get()
-            .with(eq("RS_ZENOH_MODE"))
-            .times(1)
-            .return_const(Ok("Peer".to_string()));
-        env_getter
-            .expect_get()
-            .with(eq("RS_ZENOH_DISABLE_MULTICAST"))
-            .times(1)
-            .return_const(Ok("true".to_string()));
-        env_getter
-            .expect_get()
-            .with(eq("RS_ZENOH_SUBSCRIBE"))
-            .times(1)
-            .return_const(Ok("sensors/**,telemetry/imu/**".to_string()));
-        env_getter
-            .expect_get()
-            .with(eq("RS_ZENOH_ENABLE_RECOVERY"))
-            .times(1)
-            .return_const(Ok("true".to_string()));
-        env_getter
-            .expect_get()
-            .with(eq("RS_ZENOH_ENABLE_QUERYABLE"))
-            .times(1)
-            .return_const(Ok("false".to_string()));
+            .return_const(Ok("factory/**".to_string()));
 
         let cfg = CfgParser::<MockEnvGetter>::parse_zenoh_api_config(&mut Env::new(env_getter));
         assert!(cfg.enabled);
-        assert_eq!(cfg.key_prefix, "telemetry");
-        assert_eq!(cfg.listen_endpoints.len(), 2);
-        assert_eq!(cfg.connect_endpoints, vec!["tcp/10.0.0.1:7447".to_string()]);
-        assert_eq!(cfg.mode, Some("peer".to_string()));
-        assert!(cfg.disable_multicast_scouting);
         assert_eq!(
-            cfg.subscribe_patterns,
-            vec!["sensors/**".to_string(), "telemetry/imu/**".to_string()]
+            cfg.config_inline,
+            Some("mode=client;peer=localhost:7447".to_string())
         );
-        assert!(cfg.enable_recovery);
-        assert!(!cfg.enable_queryable);
+        assert_eq!(cfg.config_path, None);
+        assert_eq!(cfg.bucket, "telemetry");
+        assert_eq!(cfg.sub_keyexprs, Some("**".to_string()));
+        assert_eq!(cfg.query_keyexprs, Some("factory/**".to_string()));
+    }
+
+    #[rstest]
+    fn parses_config_path() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_ENABLED"))
+            .times(1)
+            .return_const(Ok("true".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_CONFIG"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_CONFIG_PATH"))
+            .times(1)
+            .return_const(Ok("/etc/reductstore/zenoh.json5".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_BUCKET"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_SUB_KEYEXPRS"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_QUERY_KEYEXPRS"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::<MockEnvGetter>::parse_zenoh_api_config(&mut Env::new(env_getter));
+        assert!(cfg.enabled);
+        assert_eq!(cfg.config_inline, None);
+        assert_eq!(
+            cfg.config_path,
+            Some("/etc/reductstore/zenoh.json5".to_string())
+        );
+        assert_eq!(cfg.bucket, DEFAULT_BUCKET);
+        assert_eq!(cfg.sub_keyexprs, None);
+        assert_eq!(cfg.query_keyexprs, None);
     }
 
     #[rstest]
@@ -203,13 +208,10 @@ mod tests {
 
         let cfg = CfgParser::<MockEnvGetter>::parse_zenoh_api_config(&mut Env::new(env_getter));
         assert!(!cfg.enabled);
-        assert_eq!(cfg.key_prefix, DEFAULT_KEY_PREFIX.to_string());
-        assert!(cfg.listen_endpoints.is_empty());
-        assert!(cfg.connect_endpoints.is_empty());
-        assert_eq!(cfg.mode, None);
-        assert!(!cfg.disable_multicast_scouting);
-        assert!(cfg.subscribe_patterns.is_empty());
-        assert!(!cfg.enable_recovery);
-        assert!(cfg.enable_queryable);
+        assert_eq!(cfg.config_inline, None);
+        assert_eq!(cfg.config_path, None);
+        assert_eq!(cfg.bucket, DEFAULT_BUCKET);
+        assert_eq!(cfg.sub_keyexprs, None);
+        assert_eq!(cfg.query_keyexprs, None);
     }
 }

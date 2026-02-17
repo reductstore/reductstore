@@ -39,6 +39,16 @@ impl ZenohRuntimeHandle {
     pub async fn shutdown(self) {}
 }
 
+/// Sanitizes a Zenoh key expression for use as a ReductStore entry name.
+///
+/// ReductStore entry names only allow alphanumeric characters, hyphens, and underscores.
+/// This function replaces slashes with underscores to make nested Zenoh key expressions
+/// compatible with ReductStore's naming requirements.
+#[cfg(feature = "zenoh-api")]
+pub(crate) fn sanitize_entry_name(key_expr: &str) -> String {
+    key_expr.replace('/', "_")
+}
+
 pub fn spawn_runtime(
     config: ZenohApiConfig,
     state_keeper: Arc<StateKeeper>,

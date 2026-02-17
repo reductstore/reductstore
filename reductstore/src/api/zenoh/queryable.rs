@@ -1,7 +1,7 @@
 // Copyright 2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::zenoh::subscriber::{KeyParseError, KeyPattern};
+use super::sanitize_entry_name;
 use crate::cfg::io::IoConfig;
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::components::Components;
@@ -17,16 +17,21 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
+/// Queryable pipeline for handling Zenoh queries against ReductStore.
+///
+/// In single-bucket mode, all queries target a fixed bucket configured via
+/// `RS_ZENOH_BUCKET`. The full Zenoh key expression becomes the entry name.
 pub(crate) struct QueryablePipeline {
     components: Arc<Components>,
-    key_pattern: KeyPattern,
+    /// The fixed bucket name for all queries.
+    bucket: String,
 }
 
 impl QueryablePipeline {
     pub(crate) fn new(config: ZenohApiConfig, components: Arc<Components>) -> Self {
         QueryablePipeline {
             components,
-            key_pattern: KeyPattern::new(config.key_prefix),
+            bucket: config.bucket.clone(),
         }
     }
 
@@ -38,35 +43,38 @@ impl QueryablePipeline {
             .await
             .map_err(|err| err.to_string())?;
 
-        let selector = QuerySelector::new(&self.key_pattern, "probe-bucket", "probe-entry", None);
-        debug!(
-            "Zenoh queryable probe target key={} labels={:?}",
-            selector.key_expr(),
-            selector.label_filter()
-        );
         info!(
-            "Zenoh query interface online for prefix {} ({} buckets)",
-            self.key_pattern.prefix(),
-            server_info.bucket_count
+            "Zenoh queryable ready (storage version {}): bucket='{}'",
+            server_info.version, self.bucket
         );
         Ok(())
     }
 
     /// Resolves a Zenoh selector and query parameters into ReductStore records.
+    ///
+    /// The full key expression is used as the entry name within the configured bucket.
+    /// Slashes in the key expression are replaced with underscores since ReductStore
+    /// entry names only allow alphanumeric characters, hyphens, and underscores.
     pub(crate) async fn handle_query(
         &self,
         key_expr: &str,
         params: &HashMap<String, String>,
     ) -> Result<QueryResult, QueryError> {
-        let route = self.key_pattern.parse(key_expr)?;
+        // In single-bucket mode: entry = full Zenoh key (with slashes replaced)
+        let entry_name = sanitize_entry_name(key_expr.trim_matches('/'));
+
+        debug!(
+            "Handling Zenoh query: bucket={} entry={}",
+            self.bucket, entry_name
+        );
 
         let bucket = self
             .components
             .storage
-            .get_bucket(&route.bucket)
+            .get_bucket(&self.bucket)
             .await?
             .upgrade()?;
-        let entry = bucket.get_entry(&route.entry).await?.upgrade()?;
+        let entry = bucket.get_entry(&entry_name).await?.upgrade()?;
 
         if let Some(ts) = parse_timestamp(params)? {
             let reader = entry.begin_read(ts).await?;
@@ -96,7 +104,6 @@ pub(crate) enum QueryResult {
 
 #[derive(Debug)]
 pub(crate) enum QueryError {
-    KeyParse(KeyParseError),
     Storage(ReductError),
     InvalidParameter(String),
 }
@@ -104,7 +111,6 @@ pub(crate) enum QueryError {
 impl Display for QueryError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            QueryError::KeyParse(err) => write!(f, "Invalid selector: {}", err),
             QueryError::Storage(err) => write!(f, "Storage error: {}", err),
             QueryError::InvalidParameter(param) => write!(f, "{}", param),
         }
@@ -112,12 +118,6 @@ impl Display for QueryError {
 }
 
 impl Error for QueryError {}
-
-impl From<KeyParseError> for QueryError {
-    fn from(value: KeyParseError) -> Self {
-        QueryError::KeyParse(value)
-    }
-}
 
 impl From<ReductError> for QueryError {
     fn from(value: ReductError) -> Self {
@@ -276,56 +276,9 @@ fn parse_include_exclude_filters(
     (include, exclude)
 }
 
-#[derive(Debug, Clone, PartialEq)]
-struct QuerySelector {
-    key_expr: String,
-    label_filter: Option<String>,
-}
-
-impl QuerySelector {
-    fn new(
-        pattern: &KeyPattern,
-        bucket: impl AsRef<str>,
-        entry: impl AsRef<str>,
-        label_filter: Option<String>,
-    ) -> Self {
-        QuerySelector {
-            key_expr: pattern.format(bucket.as_ref(), entry.as_ref()),
-            label_filter,
-        }
-    }
-
-    fn key_expr(&self) -> &str {
-        &self.key_expr
-    }
-
-    fn label_filter(&self) -> Option<&str> {
-        self.label_filter.as_deref()
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn builds_selector() {
-        let selector = QuerySelector::new(
-            &KeyPattern::new("reduct"),
-            "bucket",
-            "entry",
-            Some("sensor=imu".into()),
-        );
-        assert_eq!(selector.key_expr(), "reduct/bucket/entry");
-        assert_eq!(selector.label_filter(), Some("sensor=imu"));
-    }
-
-    #[test]
-    fn trims_segments() {
-        let selector =
-            QuerySelector::new(&KeyPattern::new("/reduct/"), "/bucket/", "/entry/", None);
-        assert_eq!(selector.key_expr(), "reduct/bucket/entry");
-    }
 
     #[test]
     fn parses_timestamp_param() {
