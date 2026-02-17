@@ -21,7 +21,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 
         for (name, token) in &self.cfg.tokens {
             let is_generated = match token_repo
-                .generate_token(&name, token.permissions.clone().unwrap_or_default())
+                .generate_token(&name, token.permissions.clone().unwrap_or_default(), None)
                 .await
             {
                 Ok(_) => Ok(()),
@@ -234,7 +234,7 @@ mod tests {
         .build(env_with_tokens.get("RS_DATA_PATH").unwrap().into())
         .await;
         let _ = auth_repo
-            .generate_token("token1", Permissions::default())
+            .generate_token("token1", Permissions::default(), None)
             .await
             .unwrap();
 

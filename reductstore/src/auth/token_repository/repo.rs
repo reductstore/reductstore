@@ -95,6 +95,7 @@ impl TokenRepository {
                 write: vec![],
             }),
             is_provisioned: true,
+            expires_at: None,
         };
 
         token_repository
@@ -138,6 +139,7 @@ impl ManageTokens for TokenRepository {
         &mut self,
         name: &str,
         permissions: Permissions,
+        expires_at: Option<DateTime<Utc>>,
     ) -> Result<TokenCreateResponse, ReductError> {
         // Check if the token isn't empty
         if name.is_empty() {
@@ -175,6 +177,7 @@ impl ManageTokens for TokenRepository {
                     created_at: created_at.clone(),
                     permissions: Some(permissions),
                     is_provisioned: false,
+                    expires_at,
                 },
             )
         };
@@ -296,6 +299,7 @@ mod tests {
                         read: vec![],
                         write: vec![],
                     },
+                    None,
                 )
                 .await;
 
@@ -317,6 +321,7 @@ mod tests {
                         read: vec![],
                         write: vec![],
                     },
+                    None,
                 )
                 .await;
 
@@ -335,6 +340,7 @@ mod tests {
                         read: vec![],
                         write: vec![],
                     },
+                    None,
                 )
                 .await
                 .unwrap();
@@ -360,6 +366,7 @@ mod tests {
                     read: vec![],
                     write: vec![],
                 },
+                None,
             )
             .await
             .unwrap();
@@ -394,6 +401,7 @@ mod tests {
                         read: vec![bucket.to_string()],
                         write: vec![],
                     },
+                    None,
                 )
                 .await;
 
@@ -426,6 +434,7 @@ mod tests {
                         read: vec![],
                         write: vec![bucket.to_string()],
                     },
+                    None,
                 )
                 .await;
 
@@ -489,6 +498,7 @@ mod tests {
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-2".to_string()],
                     },
+                    None,
                 )
                 .await
                 .unwrap()
@@ -511,6 +521,7 @@ mod tests {
                         write: vec!["bucket-2".to_string()],
                     }),
                     is_provisioned: false,
+                    expires_at: None,
                 }
             );
         }
@@ -558,7 +569,7 @@ mod tests {
         async fn test_remove_token_persistent(path: PathBuf, init_token: &str, cfg: Cfg) {
             let mut repo = build_repo_at(&path, &cfg).await;
             let _ = repo
-                .generate_token(init_token, Permissions::default())
+                .generate_token(init_token, Permissions::default(), None)
                 .await;
             repo.generate_token(
                 "test",
@@ -567,6 +578,7 @@ mod tests {
                     read: vec![],
                     write: vec![],
                 },
+                None,
             )
             .await
             .unwrap();
@@ -605,6 +617,7 @@ mod tests {
                     read: vec!["bucket-1".to_string()],
                     write: vec!["bucket-1".to_string()],
                 },
+                None,
             )
             .await
             .expect("Failed to generate token");
@@ -636,7 +649,7 @@ mod tests {
         async fn test_rename_bucket_persistent(path: PathBuf, init_token: &str, cfg: Cfg) {
             let mut repo = build_repo_at(&path, &cfg).await;
             let _ = repo
-                .generate_token(init_token, Permissions::default())
+                .generate_token(init_token, Permissions::default(), None)
                 .await;
             repo.generate_token(
                 "test-2",
@@ -645,6 +658,7 @@ mod tests {
                     read: vec!["bucket-1".to_string()],
                     write: vec!["bucket-1".to_string()],
                 },
+                None,
             )
             .await
             .expect("Failed to generate token");
@@ -690,6 +704,7 @@ mod tests {
                     read: vec![],
                     write: vec![],
                 },
+                None,
             )
             .await;
 
@@ -701,6 +716,7 @@ mod tests {
                     read: vec![],
                     write: vec![],
                 },
+                None, 
             )
             .await;
 

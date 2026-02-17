@@ -33,6 +33,14 @@ pub struct Token {
     pub permissions: Option<Permissions>,
     /// Provisioned
     pub is_provisioned: bool,
+    /// Expiration time
+    pub expires_at: Option<DateTime<Utc>>,
+}
+/// Request for created token
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub struct TokenCreateRequest {
+    pub permissions: Permissions,
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 /// Response for created token

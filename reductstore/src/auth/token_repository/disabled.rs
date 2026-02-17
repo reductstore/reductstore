@@ -24,6 +24,7 @@ impl ManageTokens for NoAuthRepository {
         &mut self,
         _name: &str,
         _permissions: Permissions,
+        _expires_at: Option<DateTime<Utc>>,
     ) -> Result<TokenCreateResponse, ReductError> {
         Err(bad_request!("Authentication is disabled"))
     }
@@ -51,6 +52,7 @@ impl ManageTokens for NoAuthRepository {
                 write: vec![],
             }),
             is_provisioned: false,
+            expires_at: None,
         })
     }
 
@@ -88,6 +90,7 @@ mod tests {
                     read: vec![],
                     write: vec![],
                 },
+                None,
             )
             .await;
         assert_eq!(token, Err(bad_request!("Authentication is disabled")));

@@ -14,7 +14,7 @@ use chrono::{DateTime, Utc};
 use log::warn;
 use prost_wkt_types::Timestamp;
 use reduct_base::error::ReductError;
-use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
+use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenCreateRequest};
 use reduct_base::{not_found, unauthorized};
 use std::path::PathBuf;
 use std::time::{Duration, UNIX_EPOCH};
@@ -83,6 +83,7 @@ impl Into<Token> for crate::auth::proto::Token {
             created_at,
             permissions,
             is_provisioned: false,
+            expires_at: None,
         }
     }
 }
@@ -102,7 +103,7 @@ pub(crate) trait ManageTokens {
     async fn generate_token(
         &mut self,
         name: &str,
-        permissions: Permissions,
+        request: TokenCreateRequest,
     ) -> Result<TokenCreateResponse, ReductError>;
 
     /// Get a token by name
@@ -198,12 +199,23 @@ pub(super) trait AccessTokens {
 
     fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
         let value = parse_bearer_token(header.unwrap_or(""))?;
-        self.repo()
+        let token = self.repo()
             .values()
             .find(|token| token.value == value)
             .cloned()
-            .ok_or_else(|| unauthorized!("Invalid token"))
+            .ok_or_else(|| unauthorized!("Invalid token"))?;
+        check_token_lifetime(&token)?;
+        Ok(token)
     }
+}
+
+fn check_token_lifetime(token: &Token) -> Result<(), ReductError> {
+    if let Some(expiry) = token.expires_at {
+        if Utc::now() >= expiry {
+            return Err(unauthorized!("Token has expired"));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) type BoxedTokenRepository = Box<dyn ManageTokens + Send + Sync>;

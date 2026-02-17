@@ -94,6 +94,7 @@ impl ReadOnlyTokenRepository {
                     write: vec![],
                 }),
                 is_provisioned: true,
+                expires_at: None,
             };
 
             repo.insert(init_token.name.clone(), init_token);
@@ -131,6 +132,7 @@ impl ManageTokens for ReadOnlyTokenRepository {
         &mut self,
         _name: &str,
         _permissions: Permissions,
+        _expires_at: Option<DateTime<Utc>>,
     ) -> Result<TokenCreateResponse, ReductError> {
         Err(forbidden!("Cannot generate token in read-only mode"))
     }
@@ -228,6 +230,7 @@ mod tests {
                     write: vec![],
                 }),
                 is_provisioned: true,
+                expires_at: None,
             };
 
             write_token_to_file(&path, &new_token).await;
@@ -258,7 +261,7 @@ mod tests {
                 read: vec![],
                 write: vec![],
             };
-            let res = repo.generate_token("test", perms).await;
+            let res = repo.generate_token("test", perms, None).await;
             assert_eq!(
                 res.err().unwrap(),
                 forbidden!("Cannot generate token in read-only mode")
@@ -285,6 +288,7 @@ mod tests {
                         write: vec![],
                     }),
                     is_provisioned: true,
+                    expires_at: None
                 }
             );
         }
@@ -344,6 +348,7 @@ mod tests {
                         write: vec![],
                     }),
                     is_provisioned: true,
+                    expires_at: None
                 }
             );
         }
@@ -424,6 +429,7 @@ mod tests {
                 write: vec![],
             }),
             is_provisioned: true,
+            expires_at: None,
         };
 
         write_token_to_file(&path, &token).await;

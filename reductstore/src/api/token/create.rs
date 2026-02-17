@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::token::{PermissionsAxum, TokenCreateResponseAxum};
+use crate::api::token::{TokenCreateRequestAxum, TokenCreateResponseAxum};
 use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
@@ -13,7 +13,7 @@ pub(super) async fn create_token(
     State(keeper): State<Arc<StateKeeper>>,
     Path(token_name): Path<String>,
     headers: HeaderMap,
-    permissions: PermissionsAxum,
+    body: TokenCreateRequestAxum,
 ) -> Result<TokenCreateResponseAxum, HttpError> {
     let components = keeper
         .get_with_permissions(&headers, FullAccessPolicy {})
@@ -22,7 +22,7 @@ pub(super) async fn create_token(
         .token_repo
         .write()
         .await?
-        .generate_token(&token_name, permissions.into())
+        .generate_token(&token_name, body.0.permissions.into(), None)
         .await?;
     Ok(TokenCreateResponseAxum(token))
 }
@@ -44,7 +44,9 @@ mod tests {
             State(keeper.await),
             Path("new-token".to_string()),
             headers,
-            PermissionsAxum(Permissions::default()),
+            TokenCreateRequestAxum(TokenCreateRequest {
+                permissions: Permissions::default(), 
+            }),
         )
         .await
         .unwrap()
@@ -62,7 +64,9 @@ mod tests {
             State(keeper.await),
             Path("test".to_string()),
             headers,
-            PermissionsAxum(Permissions::default()),
+            TokenCreateRequestAxum(TokenCreateRequest {
+                permissions: Permissions::default(),
+            }),
         )
         .await
         .err()
