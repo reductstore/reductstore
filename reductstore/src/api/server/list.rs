@@ -47,7 +47,7 @@ mod tests {
     use super::*;
     use crate::api::tests::{headers, keeper};
     use axum::http::HeaderValue;
-    use reduct_base::msg::token_api::Permissions;
+    use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
     use rstest::rstest;
 
     #[rstest]
@@ -69,9 +69,12 @@ mod tests {
             .unwrap()
             .generate_token(
                 "with-one-bucket",
-                Permissions {
-                    read: vec!["bucket-1".to_string()],
-                    ..Default::default()
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        read: vec!["bucket-1".to_string()],
+                        ..Default::default()
+                    },
+                    expires_in: None,
                 },
             )
             .await

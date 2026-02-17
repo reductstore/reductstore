@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reduct_base::bad_request;
 use reduct_base::error::ReductError;
-use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
+use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
 use std::time::SystemTime;
 
 /// A repository that doesn't require authentication
@@ -23,8 +23,7 @@ impl ManageTokens for NoAuthRepository {
     async fn generate_token(
         &mut self,
         _name: &str,
-        _permissions: Permissions,
-        _expires_at: Option<DateTime<Utc>>,
+        _request: TokenCreateRequest,
     ) -> Result<TokenCreateResponse, ReductError> {
         Err(bad_request!("Authentication is disabled"))
     }
@@ -85,12 +84,14 @@ mod tests {
         let token = disabled_repo
             .generate_token(
                 "test",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access: true,
+                        read: vec![],
+                        write: vec![],
+                    },
+                    expires_in: None,
                 },
-                None,
             )
             .await;
         assert_eq!(token, Err(bad_request!("Authentication is disabled")));

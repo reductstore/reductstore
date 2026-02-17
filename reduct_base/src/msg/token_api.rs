@@ -40,7 +40,8 @@ pub struct Token {
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct TokenCreateRequest {
     pub permissions: Permissions,
-    pub expires_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub expires_in: Option<String>,
 }
 
 /// Response for created token

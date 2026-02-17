@@ -20,6 +20,7 @@ message Token {
   string value = 2;                           // string which represents token
   google.protobuf.Timestamp created_at = 3;   // creating time
   Permissions permissions = 4;                // permissions
+  google.protobuf.Timestamp expires_at = 5;   // expiration time
 }
 
 message TokenRepo {
