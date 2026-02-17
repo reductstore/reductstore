@@ -24,7 +24,7 @@ use crate::api::token::list::list_tokens;
 use crate::api::token::remove::remove_token;
 use crate::api::{HttpError, StateKeeper};
 
-use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse, TokenList};
+use reduct_base::msg::token_api::{Token, TokenCreateResponse, TokenCreateRequest, TokenList};
 use reduct_macros::{IntoResponse, Twin};
 
 #[derive(IntoResponse, Twin)]
@@ -37,9 +37,9 @@ pub struct TokenCreateResponseAxum(TokenCreateResponse);
 pub struct TokenListAxum(TokenList);
 
 #[derive(IntoResponse, Twin)]
-pub struct PermissionsAxum(Permissions);
+pub struct TokenCreateRequestAxum(TokenCreateRequest);
 
-impl<S> FromRequest<S> for PermissionsAxum
+impl<S> FromRequest<S> for TokenCreateRequestAxum
 where
     Bytes: FromRequest<S>,
     S: Send + Sync,
@@ -50,12 +50,10 @@ where
         let bytes = Bytes::from_request(req, state)
             .await
             .map_err(|_| HttpError::new(ErrorCode::UnprocessableEntity, "Invalid body"))?;
-        let response = match serde_json::from_slice::<Permissions>(&*bytes) {
-            Ok(x) => Ok(PermissionsAxum::from(x)),
+        match serde_json::from_slice::<TokenCreateRequest>(&bytes) {
+            Ok(x) => Ok(TokenCreateRequestAxum::from(x)),
             Err(e) => Err(HttpError::from(e)),
-        };
-
-        response
+        }
     }
 }
 
