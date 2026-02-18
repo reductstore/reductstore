@@ -38,13 +38,9 @@ runs:
       env:
         CARGO_TERM_COLOR: always
         RUST_LOG: debug
-        MINIO_ACCESS_KEY: minioadmin
-        MINIO_SECRET_KEY: minioadmin
-        MINIO_BUCKET: test
-        MINIO_ENDPOINT: http://127.0.0.1:9000
       run: |
         set -e -x
-        cargo llvm-cov --features s3-backend,fs-backend,ci --workspace --lcov --output-path lcov.info
+        cargo llvm-cov --features fs-backend,ci --workspace --lcov --output-path lcov.info
 
     - name: Upload coverage artifact
       uses: actions/upload-artifact@v4

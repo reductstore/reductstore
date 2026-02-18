@@ -120,17 +120,8 @@ jobs:
     env:
       CARGO_TERM_COLOR: always
       RUST_LOG: debug
-      MINIO_ACCESS_KEY: minioadmin
-      MINIO_SECRET_KEY: minioadmin
-      MINIO_BUCKET: test
-      MINIO_ENDPOINT: http://127.0.0.1:9000
     steps:
       - uses: actions/checkout@v4
-      - uses: ./.github/actions/run-minio
-        with:
-          access_key: ${{ env.MINIO_ACCESS_KEY }}
-          secret_key: ${{ env.MINIO_SECRET_KEY }}
-          bucket_name: ${{ env.MINIO_BUCKET }}
 
       - uses: ./.github/actions/coverage
         with:
