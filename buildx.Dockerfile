@@ -20,7 +20,6 @@ RUN groupadd --gid 10001 reduct \
 COPY .image-build/usr/local/bin/reductstore /usr/local/bin/reductstore
 COPY .image-build/usr/local/bin/reduct-cli /usr/local/bin/reduct-cli
 COPY --chown=reduct:reduct .image-build/data /data
-COPY --chown=reduct:reduct .image-build/artifacts /opt/reduct/artifacts
 
 USER reduct
 

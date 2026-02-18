@@ -197,7 +197,6 @@ mod tests {
     use std::collections::HashMap;
     use std::env;
 
-    use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, LazyLock};
     use std::thread::{spawn, JoinHandle};
@@ -235,23 +234,16 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_launch_https() {
-        let project_path = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let cert_path = resolve_misc_file("certificate.crt");
+        let cert_key_path = resolve_misc_file("privateKey.key");
         let mut cfg = HashMap::new();
         cfg.insert(
             "RS_CERT_PATH".to_string(),
-            project_path
-                .join("../misc/certificate.crt")
-                .to_str()
-                .unwrap()
-                .to_string(),
+            cert_path.to_string_lossy().to_string(),
         );
         cfg.insert(
             "RS_CERT_KEY_PATH".to_string(),
-            project_path
-                .join("../misc/privateKey.key")
-                .to_str()
-                .unwrap()
-                .to_string(),
+            cert_key_path.to_string_lossy().to_string(),
         );
 
         let task = set_env_and_run(cfg).await;
@@ -322,5 +314,19 @@ mod tests {
 
         sleep(Duration::from_secs(1)).await;
         task
+    }
+
+    fn resolve_misc_file(file_name: &str) -> std::path::PathBuf {
+        let candidates = [format!("misc/{file_name}"), format!("../misc/{file_name}")];
+
+        for candidate in candidates {
+            let path = std::path::PathBuf::from(candidate);
+            if path.exists() {
+                return std::fs::canonicalize(path)
+                    .expect("Failed to resolve path in misc directory");
+            }
+        }
+
+        panic!("Failed to find misc/{file_name}");
     }
 }
