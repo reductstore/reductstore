@@ -38,14 +38,6 @@ def requires_env(key):
     )
 
 
-def requires_backend(*backends):
-    backend = os.environ.get("STORAGE_BACKEND", "fs")
-    return pytest.mark.skipif(
-        backend not in backends,
-        reason=f"Not suitable backend {backend} for current test",
-    )
-
-
 def auth_headers(token):
     return {"Authorization": f"Bearer {token}"}
 

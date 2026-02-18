@@ -170,8 +170,6 @@ jobs:
       matrix:
         token: [ "", "XXXX" ]
         cert_path: [ "", "/misc/certificate.crt" ]
-        license_path: [ "", "/misc/license.lic" ]
-        backend: [ "fs" ]
         include:
           - cert_path: "/misc/certificate.crt"
             url: https://127.0.0.1:8383
@@ -188,20 +186,11 @@ jobs:
       - name: Login Docker
         run: docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
 
-      - name: Create license
-        run: echo '${{secrets.LICENSE_KEY}}' > ./misc/license.lic
-
       - uses: ./.github/actions/api-tests
         with:
           token: ${{ matrix.token }}
           cert_path: ${{ matrix.cert_path }}
-          license_path: ${{ matrix.license_path }}
-          backend: ${{ matrix.backend }}
           url: ${{ matrix.url }}
-          minio_access_key: ${{ env.MINIO_ACCESS_KEY }}
-          minio_secret_key: ${{ env.MINIO_SECRET_KEY }}
-          minio_bucket: ${{ env.MINIO_BUCKET }}
-          minio_endpoint: ${{ env.MINIO_ENDPOINT }}
 
   migration_test:
     name: Migration Tests

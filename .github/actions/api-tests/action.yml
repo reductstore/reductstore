@@ -7,27 +7,9 @@ inputs:
   cert_path:
     description: 'Certificate path.'
     required: true
-  license_path:
-    description: 'License path.'
-    required: true
-  backend:
-    description: 'Backend type (fs).'
-    required: true
   url:
     description: 'ReductStore URL.'
     required: true
-  minio_access_key:
-    description: 'MinIO access key.'
-    required: true
-  minio_secret_key:
-    description: 'MinIO secret key.'
-    required: true
-  minio_bucket:
-    description: 'MinIO bucket.'
-    required: true
-  minio_endpoint:
-    description: 'MinIO endpoint.'
-    required: false
 runs:
   using: 'composite'
   steps:
@@ -52,7 +34,6 @@ runs:
         docker run --network=host -v ${PWD}/misc:/misc \
           --env RS_API_TOKEN=${{ inputs.token }} \
           --env RS_CERT_PATH=${{ inputs.cert_path }} \
-          --env RS_LICENSE_PATH=${{ inputs.license_path }} \
           --env RS_CERT_KEY_PATH=/misc/privateKey.key \
           --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
           --name reduct -d ${{ github.repository }}
@@ -76,7 +57,6 @@ runs:
         docker run --network=host \
           --env API_TOKEN=${{ inputs.token }} \
           --env LICENSE_PATH=${{ inputs.license_path }} \
-          --env STORAGE_BACKEND=${{ inputs.backend }} \
           --env STORAGE_URL=${{ inputs.url }} api
 
     - name: Print docker logs
