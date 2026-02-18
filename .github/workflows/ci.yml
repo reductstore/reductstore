@@ -460,7 +460,14 @@ jobs:
   push_image_dockerhub:
     runs-on: ubuntu-latest
     name: Build image and push it to DockerHub Registry
-    needs: [ check_tag, integration_tests, recovery_test, read_only_replica_test, primary_secondary_test ]
+    needs:
+      - check_tag
+      - api_tests
+      - migration_test
+      - recovery_test
+      - replication_test
+      - read_only_replica_test
+      - primary_secondary_test
     if: github.event_name != 'pull_request'
     strategy:
       matrix:
