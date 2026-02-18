@@ -1,38 +1,99 @@
 name: 'Build Docker Image'
-description: 'Builds the Linux Docker image and uploads it as an artifact.'
+description: 'Builds Linux Docker image from prebuilt artifacts and uploads it.'
 inputs:
-  artifact_sas_url:
-    description: 'SAS URL for artifact download.'
+  platform:
+    description: 'Docker platform (linux/amd64, linux/arm64, linux/arm/v7).'
     required: true
-  rust_version:
-    description: 'Minimal Rust version.'
+  target:
+    description: 'Rust target triple.'
     required: true
-  build_profile:
-    description: 'Build profile (e.g., ci, release).'
+  image_artifact_name:
+    description: 'Artifact name for exported image tar.'
+    required: true
+  image_tag:
+    description: 'Tag used for docker export.'
     required: true
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/download-artifact@v4
+      with:
+        name: reductstore-${{ inputs.target }}
+        path: /tmp/reductstore/
+
+    - name: Download reduct-cli from latest release
+      shell: bash
+      run: |
+        set -euo pipefail
+        target="${{ inputs.target }}"
+        ext="tar.gz"
+        if [[ "$target" == *windows* ]]; then
+          ext="zip"
+        fi
+        asset_name="reduct-cli.${target}.${ext}"
+        asset_url="https://github.com/reductstore/reduct-cli/releases/latest/download/${asset_name}"
+
+        mkdir -p /tmp/reduct-cli
+        wget -q -O "/tmp/${asset_name}" "$asset_url"
+        echo "Downloaded ${asset_name} from ${asset_url}"
+
+        if [ "$ext" = "zip" ]; then
+          unzip -q "/tmp/${asset_name}" -d /tmp/reduct-cli
+        else
+          tar -xzf "/tmp/${asset_name}" -C /tmp/reduct-cli
+        fi
+
+        REDUCT_CLI_BIN="$(find /tmp/reduct-cli -type f -name reduct-cli | head -n 1)"
+        if [ -z "$REDUCT_CLI_BIN" ]; then
+          echo "reduct-cli binary not found in extracted archive /tmp/${asset_name}"
+          find /tmp/reduct-cli -maxdepth 3 -type f -print || true
+          exit 1
+        fi
+        chmod +x "$REDUCT_CLI_BIN"
+
+    - name: Prepare docker build context from artifacts
+      shell: bash
+      run: |
+        set -euo pipefail
+        REDUCTSTORE_BIN="$(find /tmp/reductstore -type f -name reductstore | head -n 1)"
+        if [ -z "$REDUCTSTORE_BIN" ]; then
+          echo "reductstore binary not found in /tmp/reductstore"
+          exit 1
+        fi
+        REDUCT_CLI_BIN="$(find /tmp/reduct-cli -type f -name reduct-cli | head -n 1)"
+        if [ -z "$REDUCT_CLI_BIN" ]; then
+          echo "reduct-cli binary not found in /tmp/reduct-cli"
+          exit 1
+        fi
+
+        rm -rf .image-build
+        mkdir -p .image-build/usr/local/bin .image-build/data .image-build/artifacts/reductstore
+        install -m 0755 "$REDUCTSTORE_BIN" .image-build/usr/local/bin/reductstore
+        install -m 0755 "$REDUCT_CLI_BIN" .image-build/usr/local/bin/reduct-cli
+        cp -R /tmp/reductstore/. .image-build/artifacts/reductstore-enterprise/
+
+    - name: Verify build context binaries
+      shell: bash
+      run: |
+        set -euo pipefail
+        test -x .image-build/usr/local/bin/reductstore
+        test -x .image-build/usr/local/bin/reduct-cli
+        ls -l .image-build/usr/local/bin/reductstore .image-build/usr/local/bin/reduct-cli
 
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
 
     - name: Build and export
-      uses: docker/build-push-action@v4
+      uses: docker/build-push-action@v6
       with:
         context: .
         file: buildx.Dockerfile
-        tags: ${{ github.repository }}:latest
+        tags: ${{ inputs.image_tag }}
+        platforms: ${{ inputs.platform }}
         outputs: type=docker,dest=/tmp/image.tar
-
-        build-args: |
-          ARTIFACT_SAS_URL=${{ inputs.artifact_sas_url }}
-          RUST_VERSION=${{ inputs.rust_version }}
-          BUILD_PROFILE=${{ inputs.build_profile }}
 
     - name: Upload artifact
       uses: actions/upload-artifact@v4
       with:
-        name: image
+        name: ${{ inputs.image_artifact_name }}
         path: /tmp/image.tar

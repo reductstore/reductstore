@@ -1,26 +1,11 @@
 name: 'Recovery Test'
 description: 'Runs recovery tests for ReductStore.'
 inputs:
-  backend:
-    description: 'Storage backend type (fs or s3).'
-    required: true
   cmd:
     description: 'Docker command to stop or kill.'
     required: true
   rs_api_token:
     description: 'API token for ReductStore.'
-    required: true
-  minio_access_key:
-    description: 'MinIO access key.'
-    required: true
-  minio_secret_key:
-    description: 'MinIO secret key.'
-    required: true
-  minio_bucket:
-    description: 'MinIO bucket.'
-    required: true
-  repository:
-    description: 'GitHub repository.'
     required: true
 runs:
   using: 'composite'
@@ -42,35 +27,12 @@ runs:
         docker image ls -a
 
     - name: Run ReductStore with FileSystem backend
-      if: ${{ inputs.backend == 'fs' }}
       shell: bash
       run: |
         docker run --network=host -v ./data:/data --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name reductstore -d ${{ inputs.repository }}
         sleep 5
         docker logs reductstore
 
-    - name: Run MiniO server and create bucket
-      if: ${{ inputs.backend == 's3' }}
-      uses: ./.github/actions/run-minio
-      with:
-        access_key: ${{ inputs.minio_access_key }}
-        secret_key: ${{ inputs.minio_secret_key }}
-        bucket_name: ${{ inputs.minio_bucket }}
-
-    - name: Run ReductStore with S3 backend
-      if: ${{ inputs.backend == 's3' }}
-      shell: bash
-      run: |
-        docker run --network=host -v ./data:/data \
-          --env RS_API_TOKEN=${{ inputs.rs_api_token }} \
-          --env RS_STORAGE_TYPE=s3 \
-          --env RS_REMOTE_BACKEND_ENDPOINT=http://127.0.0.1:9000 \
-          --env RS_REMOTE_ACCESS_KEY=${{ inputs.minio_access_key }} \
-          --env RS_REMOTE_SECRET_KEY=${{ inputs.minio_secret_key }} \
-          --env RS_REMOTE_BUCKET=${{ inputs.minio_bucket }} \
-          --name reductstore -d ${{ inputs.repository }}
-        sleep 5
-        docker logs reductstore
 
     - name: Upload data
       shell: bash
@@ -102,7 +64,7 @@ runs:
     - uses: actions/upload-artifact@v4
       if: always()
       with:
-        name: docker-log-recovery-${{ inputs.cmd }}-${{ inputs.backend }}
+        name: docker-log-recovery-${{ inputs.cmd }}
         path: /tmp/docker-log.zip
 
     - name: Show replication report

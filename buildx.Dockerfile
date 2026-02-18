@@ -1,66 +1,32 @@
 # syntax=docker/dockerfile:1
-ARG CARGO_TARGET=x86_64-unknown-linux-gnu
-
 FROM --platform=${BUILDPLATFORM} ubuntu:22.04 AS  builder
-ARG TARGETPLATFORM
 ARG BUILDPLATFORM
-ARG CARGO_TARGET
-ARG GCC_COMPILER=gcc-11
 ARG RUST_VERSION
-ARG BUILD_PROFILE=release
 
-ENV AWS_LC_SYS_USE_PREBUILT=0
-
-RUN apt-get update && apt-get install -y \
-    cmake \
-    build-essential \
-    curl \
-    protobuf-compiler \
-    clang \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
-    ${GCC_COMPILER}
-
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
-# Add .cargo/bin to PATH
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup default ${RUST_VERSION}
-RUN rustup target add ${CARGO_TARGET}
-
-WORKDIR /src
-
-COPY reductstore reductstore
-COPY reduct_base reduct_base
-COPY reduct_macros reduct_macros
-COPY .cargo /root/.cargo
-COPY Cargo.toml Cargo.toml
-COPY Cargo.lock Cargo.lock
-
-ARG GIT_COMMIT=unspecified
-
-RUN cargo install --force --locked bindgen-cli
-
-# Use release directory for all builds
-RUN CARGO_TARGET_DIR=/build/ \
-    GIT_COMMIT=${GIT_COMMIT} \
-    cargo build --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features
-RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /build
-
-RUN mkdir /data
-RUN mv /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
-RUN mv /build/bin/reduct-cli /usr/local/bin/reduct-cli
+    && rm -rf /var/lib/apt/lists/*
 
 FROM ubuntu:22.04
 
-ARG CARGO_TARGET
-ARG BUILD_PROFILE
-COPY --from=builder /usr/local/bin/reductstore /usr/local/bin/reductstore
-COPY --from=builder /usr/local/bin/reduct-cli /usr/local/bin/reduct-cli
-COPY --from=builder /data /data
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN groupadd --gid 10001 reduct \
+    && useradd --uid 10001 --gid reduct --create-home --home-dir /home/reduct --shell /usr/sbin/nologin reduct
+
+# Binaries and artifacts are prepared on GitHub runner.
+COPY .image-build/usr/local/bin/reductstore /usr/local/bin/reductstore
+COPY .image-build/usr/local/bin/reduct-cli /usr/local/bin/reduct-cli
+COPY --chown=reduct:reduct .image-build/data /data
+COPY --chown=reduct:reduct .image-build/artifacts /opt/reduct/artifacts
+
+USER reduct
+
 
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-
 
 EXPOSE 8383
 

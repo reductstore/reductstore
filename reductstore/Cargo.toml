@@ -21,7 +21,6 @@ default = ["web-console", "fs-backend"]
 web-console = []
 ci = [] # features enables CI-specific tests
 
-
 fs-backend = []
 
 
