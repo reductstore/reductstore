@@ -1,4 +1,4 @@
-from ..conftest import requires_env, requires_backend, auth_headers
+from ..conftest import requires_env, auth_headers
 
 
 def test_remove_entry(base_url, session, bucket):

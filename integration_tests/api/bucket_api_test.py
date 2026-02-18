@@ -1,7 +1,7 @@
 import json
 from time import sleep
 
-from .conftest import requires_env, requires_backend, auth_headers
+from .conftest import requires_env, auth_headers
 
 
 def test__create_bucket_ok(base_url, session, bucket_name):
