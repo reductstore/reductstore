@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Move licensing and remote connectors to enterprise-only runtime and align CI pipelines for core-only backend coverage, [PR-1176](https://github.com/reductstore/reductstore/pull/1176)
+
 
 ## 1.18.4 - 2026-02-06
 
