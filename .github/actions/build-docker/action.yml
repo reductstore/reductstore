@@ -9,10 +9,27 @@ inputs:
     required: true
   image_artifact_name:
     description: 'Artifact name for exported image tar.'
-    required: true
+    required: false
+    default: image
   image_tag:
     description: 'Tag used for docker export.'
     required: true
+  docker_labels:
+    description: 'Optional docker labels.'
+    required: false
+    default: ''
+  build_outputs:
+    description: 'Outputs for docker/build-push-action.'
+    required: false
+    default: type=docker,dest=/tmp/image.tar
+  upload_artifact:
+    description: 'Upload /tmp/image.tar as artifact.'
+    required: false
+    default: 'true'
+outputs:
+  digest:
+    description: 'Image digest from docker/build-push-action.'
+    value: ${{ steps.build.outputs.digest }}
 runs:
   using: 'composite'
   steps:
@@ -67,10 +84,9 @@ runs:
         fi
 
         rm -rf .image-build
-        mkdir -p .image-build/usr/local/bin .image-build/data .image-build/artifacts/reductstore
+        mkdir -p .image-build/usr/local/bin .image-build/data
         install -m 0755 "$REDUCTSTORE_BIN" .image-build/usr/local/bin/reductstore
         install -m 0755 "$REDUCT_CLI_BIN" .image-build/usr/local/bin/reduct-cli
-        cp -R /tmp/reductstore/. .image-build/artifacts/reductstore-enterprise/
 
     - name: Verify build context binaries
       shell: bash
@@ -84,15 +100,18 @@ runs:
       uses: docker/setup-buildx-action@v3
 
     - name: Build and export
+      id: build
       uses: docker/build-push-action@v6
       with:
         context: .
         file: buildx.Dockerfile
         tags: ${{ inputs.image_tag }}
         platforms: ${{ inputs.platform }}
-        outputs: type=docker,dest=/tmp/image.tar
+        labels: ${{ inputs.docker_labels }}
+        outputs: ${{ inputs.build_outputs }}
 
     - name: Upload artifact
+      if: ${{ inputs.upload_artifact == 'true' }}
       uses: actions/upload-artifact@v4
       with:
         name: ${{ inputs.image_artifact_name }}

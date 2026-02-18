@@ -456,10 +456,11 @@ jobs:
           rs_api_token: ${{ env.rs_api_token }}
           repository: ${{ github.repository }}
 
+
   push_image_dockerhub:
     runs-on: ubuntu-latest
     name: Build image and push it to DockerHub Registry
-    needs: [ check_tag, api_tests, migration_test, replication_test, read_only_replica_test ]
+    needs: [ check_tag, integration_tests, recovery_test, read_only_replica_test, primary_secondary_test ]
     if: github.event_name != 'pull_request'
     strategy:
       matrix:
@@ -480,13 +481,6 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Take build commit
-        run: |
-          echo "GITHUB_SHA=$(git rev-parse --short "$GITHUB_SHA")" >> $GITHUB_ENV
-
       - name: Log in to the Container registry
         uses: docker/login-action@v2
         with:
@@ -500,21 +494,15 @@ jobs:
           images: ${{ env.REGISTRY_IMAGE }}
 
       - name: Build and push Docker image to GitHub repo
-        uses: docker/build-push-action@v4
         id: build
+        uses: ./.github/actions/build-docker
         with:
-          context: .
-          file: buildx.Dockerfile
-          labels: ${{ steps.meta.outputs.labels }}
-          platforms: ${{ matrix.platform }}
-          build-args: |
-            GIT_COMMIT=${{env.GITHUB_SHA}}
-            CARGO_TARGET=${{matrix.cargo_target}}
-            GCC_COMPILER=${{matrix.gcc_compiler}}
-            ARTIFACT_SAS_URL=${{ secrets.ARTIFACT_SAS_URL }}
-            RUST_VERSION=${{ vars.MINIMAL_RUST_VERSION }}
-
-          outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          platform: ${{ matrix.platform }}
+          target: ${{ matrix.cargo_target }}
+          image_tag: ${{ env.REGISTRY_IMAGE }}
+          docker_labels: ${{ steps.meta.outputs.labels }}
+          upload_artifact: 'false'
+          build_outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
 
       - name: Export digest
         run: |
@@ -569,45 +557,6 @@ jobs:
         run: |
           docker buildx imagetools inspect ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
 
-  push_image_ecr_public:
-    name: Push to ECR Public
-    runs-on: ubuntu-latest
-    needs:
-      - merge_digests
-    steps:
-      - name: Show OIDC subject
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const token = await core.getIDToken('sts.amazonaws.com');
-            const claims = JSON.parse(Buffer.from(token.split('.')[1], 'base64').toString());
-            console.log('aud:', claims.aud);
-            console.log('sub:', claims.sub);
-            console.log('ref:', process.env.GITHUB_REF);
-            console.log('event name:', process.env.GITHUB_EVENT_NAME);
-
-      - name: Configure AWS credentials (OIDC)
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: "us-east-1"
-
-      - name: Login to ECR Public
-        run: |
-          aws ecr-public get-login-password --region "us-east-1" \
-            | docker login --username AWS --password-stdin public.ecr.aws
-
-      - name: Extract metadata (tags, labels) for Docker
-        id: meta
-        uses: docker/metadata-action@98669ae865ea3cffbcbaa878cf57c20bbf1c6c38
-        with:
-          images: ${{ env.REGISTRY_IMAGE }}
-
-      - name: Tag and push to ECR Public
-        run: |
-          docker pull ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }}
-          docker tag ${{ env.REGISTRY_IMAGE }}:${{ steps.meta.outputs.version }} ${{ secrets.ECR_PUBLIC_REPOSITORY }}:${{ steps.meta.outputs.version }}
-          docker push ${{ secrets.ECR_PUBLIC_REPOSITORY }}:${{ steps.meta.outputs.version }}
 
 
   snap_release:
