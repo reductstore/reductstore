@@ -5,3 +5,4 @@ src/asset/console.zip
 .cache
 lcov.info
 .vscode/settings.json
+.image-build/
