@@ -64,7 +64,7 @@ impl<EnvGetter: GetEnv> Env<EnvGetter> {
     /// # Returns
     ///
     /// The value of the environment variable.
-    pub(crate) fn get<T: EnvValue>(&mut self, key: &str, default_value: T) -> T {
+    pub fn get<T: EnvValue>(&mut self, key: &str, default_value: T) -> T {
         self.get_impl(key, default_value, false)
     }
 
@@ -78,12 +78,12 @@ impl<EnvGetter: GetEnv> Env<EnvGetter> {
     /// # Returns
     ///
     /// The value of the environment variable.
-    pub(crate) fn get_masked<T: EnvValue>(&mut self, key: &str, default_value: T) -> T {
+    pub fn get_masked<T: EnvValue>(&mut self, key: &str, default_value: T) -> T {
         self.get_impl(key, default_value, true)
     }
 
     /// Get a value from the environment. without default value
-    pub(crate) fn get_optional<T: EnvValue>(&mut self, key: &str) -> Option<T> {
+    pub fn get_optional<T: EnvValue>(&mut self, key: &str) -> Option<T> {
         let mut additional = String::new();
         let value = match self.getter.get(key) {
             Ok(value) => match T::from_str(&value) {

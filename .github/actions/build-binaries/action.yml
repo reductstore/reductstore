@@ -26,8 +26,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v4
-
     - uses: arduino/setup-protoc@v3
       with:
         version: '26.x'
@@ -72,7 +70,7 @@ runs:
 
     - name: Build binary (PR)
       if: github.event_name == 'pull_request'
-      run: cargo build --profile ci -p reductstore --target ${{ inputs.target }} --all-features
+      run: cargo build --profile ci -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console"
       shell: bash
 
     - name: Upload binary (PR)
@@ -86,7 +84,7 @@ runs:
 
     - name: Build binary (Release)
       if: github.event_name != 'pull_request'
-      run: cargo build --profile release -p reductstore --target ${{ inputs.target }} --all-features
+      run: cargo build --profile release -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console"
       shell: bash
 
 

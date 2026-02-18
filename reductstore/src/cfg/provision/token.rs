@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
-use crate::cfg::CfgParser;
+use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use log::{error, info, warn};
 use reduct_base::error::ErrorCode;
@@ -10,7 +10,7 @@ use reduct_base::msg::token_api::{Permissions, Token};
 use std::collections::HashMap;
 use std::path::PathBuf;
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_tokens(
         &self,
         data_path: &PathBuf,

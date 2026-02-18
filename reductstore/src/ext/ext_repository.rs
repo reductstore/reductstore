@@ -4,7 +4,6 @@
 mod create;
 mod load;
 
-use crate::asset::asset_manager::ManageStaticAsset;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{Parser, Value};
@@ -81,9 +80,6 @@ struct ExtRepository {
 
     #[allow(dead_code)]
     ext_wrappers: Vec<Container<ExtensionApi>>, // we need to keep the wrappers alive
-
-    #[allow(dead_code)]
-    embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>, // we need to keep them from being cleaned up
 }
 
 #[async_trait]

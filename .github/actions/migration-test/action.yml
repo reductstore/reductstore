@@ -42,6 +42,11 @@ runs:
       shell: bash
       run: docker stop latest
 
+    - name: Normalize migrated data permissions
+      shell: bash
+      run: |
+        sudo chown -R "$(id -u)":"$(id -g)" ./data
+
     - name: Download artifact
       uses: actions/download-artifact@v4
       with:

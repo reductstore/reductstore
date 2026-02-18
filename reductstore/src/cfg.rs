@@ -20,15 +20,15 @@ use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
 use crate::core::cache::Cache;
-use crate::core::env::{Env, GetEnv};
+use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
-use crate::license::parse_license;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
+use async_trait::async_trait;
 use log::info;
 use reduct_base::error::ReductError;
-use reduct_base::ext::ExtSettings;
+use reduct_base::ext::{ExtSettings, IoExtension};
 use reduct_base::internal_server_error;
 use reduct_base::logger::Logger;
 use reduct_base::msg::bucket_api::BucketSettings;
@@ -68,7 +68,6 @@ pub struct Cfg {
     pub api_token: String,
     pub cert_path: Option<PathBuf>,
     pub cert_key_path: Option<PathBuf>,
-    pub license_path: Option<String>,
     pub ext_path: Option<PathBuf>,
     pub cors_allow_origin: Vec<String>,
     pub role: InstanceRole,
@@ -96,7 +95,6 @@ impl Default for Cfg {
             api_token: "".to_string(),
             cert_path: None,
             cert_key_path: None,
-            license_path: None,
             ext_path: None,
             cors_allow_origin: vec![],
             role: InstanceRole::Primary,
@@ -113,15 +111,102 @@ impl Default for Cfg {
     }
 }
 
+#[derive(Clone)]
+pub struct CoreExtCfg {
+    pub role: InstanceRole,
+    pub data_path: PathBuf,
+}
+
+#[async_trait]
+pub trait ExtCfgBounds: Clone + Send + Sync {
+    fn role(&self) -> InstanceRole;
+    fn data_path(&self) -> PathBuf;
+    fn license(&self) -> Option<License> {
+        None
+    }
+    fn remote_storage_config(&self) -> RemoteStorageConfig {
+        RemoteStorageConfig::default()
+    }
+    async fn init_backend(&self) -> Result<Backend, ReductError> {
+        let builder = Backend::builder()
+            .backend_type(self.remote_storage_config().backend_type.clone())
+            .local_data_path(self.data_path());
+        builder.try_build().await
+    }
+    fn static_extensions(&self, _settings: ExtSettings) -> Vec<Box<dyn IoExtension + Send + Sync>> {
+        vec![]
+    }
+}
+
+#[async_trait]
+impl ExtCfgBounds for CoreExtCfg {
+    fn role(&self) -> InstanceRole {
+        self.role.clone()
+    }
+
+    fn data_path(&self) -> PathBuf {
+        self.data_path.clone()
+    }
+}
+
 /// Database configuration
-pub struct CfgParser<EnvGetter: GetEnv> {
+pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: ExtCfgBounds = CoreExtCfg> {
     pub cfg: Cfg,
     pub license: Option<License>,
     pub env: Env<EnvGetter>,
+    pub ext_cfg: ExtCfg,
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+#[async_trait]
+pub trait ExtCfgParser<EnvGetter: GetEnv> {
+    type Cfg: ExtCfgBounds;
+    async fn from_env(&self, env: &mut Env<EnvGetter>, version: &str) -> Self::Cfg;
+}
+
+#[derive(Default)]
+pub struct CoreExtCfgParser;
+
+#[async_trait]
+impl<EnvGetter: GetEnv + Send> ExtCfgParser<EnvGetter> for CoreExtCfgParser {
+    type Cfg = CoreExtCfg;
+
+    async fn from_env(&self, env: &mut Env<EnvGetter>, _version: &str) -> Self::Cfg {
+        let role = match env
+            .get::<String>("RS_INSTANCE_ROLE", "STANDALONE".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "standalone" => InstanceRole::Standalone,
+            "primary" => InstanceRole::Primary,
+            "secondary" => InstanceRole::Secondary,
+            "replica" => InstanceRole::Replica,
+            _ => {
+                panic!("Invalid value for RS_INSTANCE_ROLE: must be one of STANDALONE, PRIMARY, SECONDARY, REPLICA")
+            }
+        };
+
+        CoreExtCfg {
+            role,
+            data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string())),
+        }
+    }
+}
+
+impl<EnvGetter: GetEnv + Send> CfgParser<EnvGetter, CoreExtCfg> {
     pub async fn from_env(env_getter: EnvGetter, version: &str) -> Self {
+        Self::from_env_with_ext(env_getter, &CoreExtCfgParser, version).await
+    }
+}
+
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
+    pub async fn from_env_with_ext<ExtParser>(
+        env_getter: EnvGetter,
+        ext_parser: &ExtParser,
+        version: &str,
+    ) -> Self
+    where
+        ExtParser: ExtCfgParser<EnvGetter, Cfg = ExtCfg>,
+    {
         let mut env = Env::new(env_getter);
 
         let mut api_base_path = env.get("RS_API_BASE_PATH", "/".to_string());
@@ -151,19 +236,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             public_url.push('/');
         }
 
-        let role = match env
-            .get::<String>("RS_INSTANCE_ROLE", "STANDALONE".to_string())
-            .to_lowercase()
-            .as_str()
-        {
-            "standalone" => InstanceRole::Standalone,
-            "primary" => InstanceRole::Primary,
-            "secondary" => InstanceRole::Secondary,
-            "replica" => InstanceRole::Replica,
-            _ => {
-                panic!("Invalid value for RS_INSTANCE_ROLE: must be one of STANDALONE, PRIMARY, SECONDARY, REPLICA")
-            }
-        };
+        let ext_cfg = ext_parser.from_env(&mut env, version).await;
 
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
@@ -171,12 +244,11 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             public_url,
             port,
             api_base_path,
-            data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string())),
+            data_path: ext_cfg.data_path(),
             api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
             cert_path,
             cert_key_path,
-            role,
-            license_path: env.get_optional("RS_LICENSE_PATH"),
+            role: ext_cfg.role(),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
@@ -184,7 +256,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             replications: Self::parse_replications(&mut env),
             io_conf: Self::parse_io_config(&mut env),
             replication_conf: Self::parse_replication_config(&mut env, port),
-            cs_config: Self::parse_remote_storage_cfg(&mut env),
+            cs_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
@@ -193,8 +265,13 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         set_rwlock_timeout(cfg.rw_lock_config.timeout);
         set_rwlock_failure_action(cfg.rw_lock_config.failure_action);
 
-        let license = parse_license(cfg.license_path.clone());
-        let me = Self { cfg, env, license };
+        let license = ext_cfg.license();
+        let me = Self {
+            cfg,
+            env,
+            license,
+            ext_cfg,
+        };
 
         Logger::init(&me.cfg.log_level);
         info!("Configuration: \n {}", me);
@@ -249,8 +326,6 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         let storage = Arc::new(self.provision_buckets(&data_path).await);
         let token_repo = self.provision_tokens(&data_path);
         let console = create_asset_manager(load_console());
-        let select_ext = create_asset_manager(load_select_ext());
-        let ros_ext = create_asset_manager(load_ros_ext());
         let replication_engine = self
             .provision_replication_repo(Arc::clone(&storage))
             .await?;
@@ -267,6 +342,11 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         };
 
         let server_info = storage.info().await?;
+        let ext_settings = ExtSettings::builder()
+            .log_level(&self.cfg.log_level)
+            .server_info(server_info.clone())
+            .build();
+        let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
 
         Ok(Components {
             storage,
@@ -276,11 +356,8 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             replication_repo: AsyncRwLock::new(replication_engine),
             ext_repo: create_ext_repository(
                 ext_path,
-                vec![select_ext, ros_ext],
-                ExtSettings::builder()
-                    .log_level(&self.cfg.log_level)
-                    .server_info(server_info)
-                    .build(),
+                static_extensions,
+                ext_settings,
                 self.cfg.io_conf.clone(),
             )?,
             query_link_cache: AsyncRwLock::new(Cache::new(
@@ -307,42 +384,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     }
 
     async fn init_storage_backend(&self) -> Result<(), ReductError> {
-        // Initialize storage backend
-        let mut backend_builder = Backend::builder()
-            .backend_type(self.cfg.cs_config.backend_type.clone())
-            .local_data_path(self.cfg.data_path.clone())
-            .cache_size(self.cfg.cs_config.cache_size)
-            .remote_default_storage_class(self.cfg.cs_config.default_storage_class.clone());
-
-        if let Some(bucket) = &self.cfg.cs_config.bucket {
-            backend_builder = backend_builder.remote_bucket(bucket);
-        }
-
-        if let Some(region) = &self.cfg.cs_config.region {
-            backend_builder = backend_builder.remote_region(region);
-        }
-
-        if let Some(endpoint) = &self.cfg.cs_config.endpoint {
-            backend_builder = backend_builder.remote_endpoint(endpoint);
-        }
-
-        if let Some(access_key) = &self.cfg.cs_config.access_key {
-            backend_builder = backend_builder.remote_access_key(access_key);
-        }
-
-        if let Some(secret_key) = &self.cfg.cs_config.secret_key {
-            backend_builder = backend_builder.remote_secret_key(secret_key);
-        }
-
-        if let Some(cache_path) = &self.cfg.cs_config.cache_path {
-            backend_builder = backend_builder.remote_cache_path(cache_path.clone());
-        }
-
-        if let Some(license) = &self.license {
-            backend_builder = backend_builder.license(license.clone());
-        }
-
-        let backend = backend_builder.try_build().await.map_err(|e| {
+        let backend = self.ext_cfg.init_backend().await.map_err(|e| {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?;
 
@@ -375,31 +417,7 @@ fn load_console() -> &'static [u8] {
     b""
 }
 
-#[cfg(feature = "select-ext")]
-fn load_select_ext() -> &'static [u8] {
-    info!("Load Reduct Select Extension");
-    include_bytes!(concat!(env!("OUT_DIR"), "/select-ext.zip"))
-}
-
-#[cfg(not(feature = "select-ext"))]
-fn load_select_ext() -> &'static [u8] {
-    info!("Reduct Select Extension is disabled");
-    b""
-}
-
-#[cfg(feature = "ros-ext")]
-fn load_ros_ext() -> &'static [u8] {
-    info!("Load Reduct ROS Extension");
-    include_bytes!(concat!(env!("OUT_DIR"), "/ros-ext.zip"))
-}
-
-#[cfg(not(feature = "ros-ext"))]
-fn load_ros_ext() -> &'static [u8] {
-    info!("Reduct ROS Extension is disabled");
-    b""
-}
-
-impl<EnvGetter: GetEnv> Display for CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> Display for CfgParser<EnvGetter, ExtCfg> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.env.message())
     }
@@ -671,20 +689,12 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "current_thread")]
-    async fn test_license_path(mut env_getter: MockEnvGetter) {
-        env_getter
-            .expect_get()
-            .with(eq("RS_LICENSE_PATH"))
-            .times(1)
-            .return_const(Ok("/tmp/license.lic".to_string())); // must be created from CI
+    async fn test_no_license_by_default(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter, "0.0.0").await;
-        assert_eq!(
-            parser.cfg.license_path,
-            Some("/tmp/license.lic".to_string())
-        );
+        assert!(parser.license.is_none());
     }
 
     #[rstest]

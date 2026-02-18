@@ -1,7 +1,7 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::CfgParser;
+use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use crate::lock_file::FailureAction;
 use std::time::Duration;
@@ -35,7 +35,7 @@ impl Default for LockFileConfig {
     }
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_lock_file_config(env: &mut Env<EnvGetter>) -> LockFileConfig {
         LockFileConfig {
             polling_interval: Duration::from_secs(
