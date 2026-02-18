@@ -26,7 +26,7 @@ checksum = "b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0"
 dependencies = [
  "cfg-if",
  "cipher 0.4.4",
- "cpufeatures",
+ "cpufeatures 0.2.17",
 ]
 
 [[package]]
@@ -37,7 +37,7 @@ checksum = "04097e08a47d9ad181c2e1f4a5fabc9ae06ce8839a333ba9a949bcb0d31fd2a3"
 dependencies = [
  "cipher 0.5.0",
  "cpubits",
- "cpufeatures",
+ "cpufeatures 0.2.17",
 ]
 
 [[package]]
@@ -146,7 +146,7 @@ checksum = "5cc32af0fde8095068147d01a5dfbc0e0b06307924138d992df7c8f18d34c585"
 dependencies = [
  "base64ct",
  "blake2",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "password-hash",
 ]
 
@@ -429,6 +429,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "613afe47fcd5fac7ccf1db93babcb082c5994d996f20b8b159f2ad1658eb5724"
 
 [[package]]
+name = "chacha20"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6f8d983286843e49675a4b7a2d174efe136dc93a18d69130dd18198a6c167601"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.3.0",
+ "rand_core 0.10.0",
+]
+
+[[package]]
 name = "chrono"
 version = "0.4.43"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -512,6 +523,15 @@ name = "cpufeatures"
 version = "0.2.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280"
+dependencies = [
+ "libc",
+]
+
+[[package]]
+name = "cpufeatures"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b2a41393f66f16b0823bb79094d54ac5fbd34ab292ddafb9a0456ac9f87d201"
 dependencies = [
  "libc",
 ]
@@ -1933,7 +1953,7 @@ dependencies = [
  "bytes",
  "getrandom 0.3.4",
  "lru-slab",
- "rand",
+ "rand 0.9.2",
  "ring",
  "rustc-hash",
  "rustls",
@@ -1982,6 +2002,17 @@ checksum = "6db2770f06117d490610c7488547d543617b21bfa07796d7a12f6f1bd53850d1"
 dependencies = [
  "rand_chacha",
  "rand_core 0.9.5",
+]
+
+[[package]]
+name = "rand"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bc266eb313df6c5c09c1c7b1fbe2510961e5bcd3add930c1e31f7ed9da0feff8"
+dependencies = [
+ "chacha20",
+ "getrandom 0.4.1",
+ "rand_core 0.10.0",
 ]
 
 [[package]]
@@ -2088,7 +2119,7 @@ dependencies = [
  "prost",
  "prost-build",
  "prost-wkt-types",
- "rand",
+ "rand 0.10.0",
  "reduct-base",
  "reduct-macros",
  "regex",
@@ -2434,7 +2465,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e3bf829a2d51ab4a5ddf1352d8470c140cadc8301b2ae1789db023f01cedd6ba"
 dependencies = [
  "cfg-if",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "digest 0.10.7",
 ]
 
@@ -2445,7 +2476,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
 dependencies = [
  "cfg-if",
- "cpufeatures",
+ "cpufeatures 0.2.17",
  "digest 0.10.7",
 ]
 
