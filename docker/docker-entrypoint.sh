@@ -17,11 +17,13 @@ if [ "$(id -u)" = "0" ]; then
     run_gid="$(stat -c '%g' /data 2>/dev/null || true)"
   fi
 
-  run_uid="${run_uid:-$default_uid}"
-  run_gid="${run_gid:-$default_gid}"
-
-  if [ "$run_uid" = "0" ] && [ "$run_gid" = "0" ]; then
-    exec "$@"
+  # If /data is root-owned (common when Docker auto-creates the host path),
+  # fall back to the default non-root runtime user.
+  if [ -z "$run_uid" ] || [ "$run_uid" = "0" ]; then
+    run_uid="$default_uid"
+  fi
+  if [ -z "$run_gid" ] || [ "$run_gid" = "0" ]; then
+    run_gid="$default_gid"
   fi
 
   exec setpriv --reuid "$run_uid" --regid "$run_gid" --clear-groups "$@"
