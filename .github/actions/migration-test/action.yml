@@ -23,11 +23,19 @@ runs:
       with:
         python-version: 3.12
 
+    - name: Prepare data volume
+      shell: bash
+      run: |
+        DATA_VOLUME="reductstore-migration-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        echo "DATA_VOLUME=$DATA_VOLUME" >> "$GITHUB_ENV"
+        docker volume rm "$DATA_VOLUME" >/dev/null 2>&1 || true
+        docker volume create "$DATA_VOLUME"
+
     - name: Run latest stable ReductStore
       shell: bash
       run: |
         docker login -u ${{ inputs.docker_user }} -p ${{ inputs.docker_token }}
-        docker run --network=host -v ./data:/data --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name latest -d reduct/store:${{ inputs.version }}
+        docker run --network=host -v "${DATA_VOLUME}:/data" --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name latest -d reduct/store:${{ inputs.version }}
         sleep 5
         docker logs latest
     - name: Upload data
@@ -41,11 +49,6 @@ runs:
     - name: Stop latest stable ReductStore
       shell: bash
       run: docker stop latest
-
-    - name: Normalize migrated data permissions
-      shell: bash
-      run: |
-        sudo chown -R "$(id -u)":"$(id -g)" ./data
 
     - name: Download artifact
       uses: actions/download-artifact@v4
@@ -62,7 +65,7 @@ runs:
     - name: Run current ReductStore
       shell: bash
       run: |
-        docker run --network=host -v ./data:/data --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name current -d ${{ inputs.repository }}
+        docker run --network=host -v "${DATA_VOLUME}:/data" --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name current -d ${{ inputs.repository }}
         sleep 5
         docker logs current
 
@@ -100,3 +103,10 @@ runs:
       if: always()
       shell: bash
       run: cat ./report.json
+
+    - name: Cleanup docker resources
+      if: always()
+      shell: bash
+      run: |
+        docker rm -f latest current >/dev/null 2>&1 || true
+        docker volume rm "${DATA_VOLUME}" >/dev/null 2>&1 || true

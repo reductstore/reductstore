@@ -30,6 +30,9 @@ ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
 
 EXPOSE 8383
+USER 10001:10001
+
+VOLUME [ "/data" ]
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["reductstore"]

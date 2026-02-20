@@ -33,10 +33,19 @@ runs:
       run: |
         docker load --input /tmp/image.tar
         docker image ls -a
+
+    - name: Prepare data volume
+      shell: bash
+      run: |
+        DATA_VOLUME="reductstore-replication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        echo "DATA_VOLUME=$DATA_VOLUME" >> "$GITHUB_ENV"
+        docker volume rm "$DATA_VOLUME" >/dev/null 2>&1 || true
+        docker volume create "$DATA_VOLUME"
+
     - name: Run current ReductStore
       shell: bash
       run: |
-        docker run --network=host -v ./data:/data \
+        docker run --network=host -v "${DATA_VOLUME}:/data" \
           --env RS_LOG_LEVEL=DEBUG \
           --env RS_API_TOKEN=${{ inputs.rs_api_token }} \
           --env RS_BUCKET_1_NAME=src \
@@ -91,3 +100,10 @@ runs:
       shell: bash
       run: |
         curl -H "Authorization: Bearer ${{ inputs.rs_api_token }}" http://127.0.0.1:8383/api/v1/replications/replication | jq
+
+    - name: Cleanup docker resources
+      if: always()
+      shell: bash
+      run: |
+        docker rm -f current >/dev/null 2>&1 || true
+        docker volume rm "${DATA_VOLUME}" >/dev/null 2>&1 || true

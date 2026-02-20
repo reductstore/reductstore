@@ -39,9 +39,10 @@ runs:
           minio_endpoint="http://localhost:9000"
         fi
         lock_file_ttl_s="${{ inputs.lock_file_ttl_s }}"
-        mkdir -p /tmp/reductstore-primary-secondary-data
-        mkdir -p /tmp/reductstore-primary-secondary-cache-primary
-        mkdir -p /tmp/reductstore-primary-secondary-cache-secondary
+        data_volume="reductstore-primary-secondary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        echo "DATA_VOLUME=$data_volume" >> "$GITHUB_ENV"
+        docker volume rm "$data_volume" >/dev/null 2>&1 || true
+        docker volume create "$data_volume"
 
         primary_env=(
           --env RS_INSTANCE_ROLE=PRIMARY
@@ -61,11 +62,11 @@ runs:
           --env RS_DATA_PATH=/data
         )
 
-        docker run --network=host -v /tmp/reductstore-primary-secondary-data:/data \
+        docker run --network=host -v "$data_volume:/data" \
           "${primary_env[@]}" \
           --name reduct-primary-secondary-primary -d ${{ inputs.repository }}
 
-        docker run --network=host -v /tmp/reductstore-primary-secondary-data:/data \
+        docker run --network=host -v "$data_volume:/data" \
           "${secondary_env[@]}" \
           --name reduct-primary-secondary-secondary -d ${{ inputs.repository }}
 
@@ -92,7 +93,7 @@ runs:
         SECONDARY_STORAGE_URL: http://127.0.0.1:8386
         PRIMARY_CONTAINER: reduct-primary-secondary-primary
         SECONDARY_CONTAINER: reduct-primary-secondary-secondary
-        DATA_PATH: /tmp/reductstore-primary-secondary-data
+        DATA_VOLUME: ${{ env.DATA_VOLUME }}
         LOCK_FILE_TTL_S: ${{ inputs.lock_file_ttl_s }}
       run: |
         pip install -r ./integration_tests/deployment/requirements.txt
@@ -111,3 +112,4 @@ runs:
       run: |
         docker rm -f reduct-primary-secondary-primary || true
         docker rm -f reduct-primary-secondary-secondary || true
+        docker volume rm "${DATA_VOLUME}" >/dev/null 2>&1 || true
