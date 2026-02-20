@@ -26,10 +26,17 @@ runs:
         docker load --input /tmp/image.tar
         docker image ls -a
 
+    - name: Prepare data volume
+      shell: bash
+      run: |
+        DATA_VOLUME="reductstore-recovery-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        echo "DATA_VOLUME=$DATA_VOLUME" >> "$GITHUB_ENV"
+        docker volume create "$DATA_VOLUME"
+
     - name: Run ReductStore with FileSystem backend
       shell: bash
       run: |
-        docker run --network=host -v ./data:/data --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name reductstore -d ${{ inputs.repository }}
+        docker run --network=host -v "${DATA_VOLUME}:/data" --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name reductstore -d ${{ inputs.repository }}
         sleep 5
         docker logs reductstore
 
@@ -46,7 +53,7 @@ runs:
       shell: bash
       run: |
         docker ${{ inputs.cmd }} reductstore
-        docker run --network=host -v ./data:/data --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name reductstore-1 -d ${{ inputs.repository }}
+        docker run --network=host -v "${DATA_VOLUME}:/data" --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name reductstore-1 -d ${{ inputs.repository }}
         sleep 5
         docker logs reductstore-1
 

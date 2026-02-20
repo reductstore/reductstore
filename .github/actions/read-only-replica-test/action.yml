@@ -32,8 +32,9 @@ runs:
       run: |
         set -euo pipefail
 
-        mkdir -p /tmp/reductstore-primary-data /tmp/reductstore-replica-data
-        mkdir -p /tmp/reductstore-primary-cache /tmp/reductstore-replica-cache
+        data_volume="reductstore-read-only-replica-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+        echo "DATA_VOLUME=$data_volume" >> "$GITHUB_ENV"
+        docker volume create "$data_volume"
 
         primary_env=(
           --env RS_INSTANCE_ROLE=PRIMARY
@@ -57,12 +58,11 @@ runs:
           --env RS_DATA_PATH=/data
         )
 
-
-        docker run --network=host -v /tmp/reductstore-primary-data:/data \
+        docker run --network=host -v "$data_volume:/data" \
           "${primary_env[@]}" \
           --name reduct-primary -d ${{ inputs.repository }}
 
-        docker run --network=host -v /tmp/reductstore-primary-data:/data \
+        docker run --network=host -v "$data_volume:/data" \
           "${replica_env[@]}" \
           --name reduct-replica -d ${{ inputs.repository }}
 
@@ -118,10 +118,3 @@ runs:
       run: |
         docker logs reduct-primary || true
         docker logs reduct-replica || true
-
-    - name: Cleanup docker containers
-      if: always()
-      shell: bash
-      run: |
-        docker rm -f reduct-primary || true
-        docker rm -f reduct-replica || true

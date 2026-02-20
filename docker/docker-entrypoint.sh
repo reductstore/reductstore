@@ -1,32 +1,24 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+data_path="${RS_DATA_PATH:-/data}"
+
 if [ "$(id -u)" = "0" ]; then
-  default_uid=10001
-  default_gid=10001
+  mkdir -p "$data_path"
+fi
 
-  mkdir -p /data
-
-  run_uid="${RS_RUN_UID:-}"
-  run_gid="${RS_RUN_GID:-}"
-
-  if [ -z "$run_uid" ]; then
-    run_uid="$(stat -c '%u' /data 2>/dev/null || true)"
-  fi
-  if [ -z "$run_gid" ]; then
-    run_gid="$(stat -c '%g' /data 2>/dev/null || true)"
-  fi
-
-  # If /data is root-owned (common when Docker auto-creates the host path),
-  # fall back to the default non-root runtime user.
-  if [ -z "$run_uid" ] || [ "$run_uid" = "0" ]; then
-    run_uid="$default_uid"
-  fi
-  if [ -z "$run_gid" ] || [ "$run_gid" = "0" ]; then
-    run_gid="$default_gid"
-  fi
-
-  exec setpriv --reuid "$run_uid" --regid "$run_gid" --clear-groups "$@"
+if ! test -r "$data_path" -a -w "$data_path" -a -x "$data_path"; then
+  owner_uid="$(stat -c '%u' "$data_path" 2>/dev/null || echo 'unknown')"
+  owner_gid="$(stat -c '%g' "$data_path" 2>/dev/null || echo 'unknown')"
+  mode="$(stat -c '%a' "$data_path" 2>/dev/null || echo 'unknown')"
+  echo "Error: '$data_path' is not accessible for process UID:GID $(id -u):$(id -g)." >&2
+  echo "Folder owner UID:GID is $owner_uid:$owner_gid (mode=$mode)." >&2
+  echo "Since v1.19, ReductStore Docker images run as non-root by default. See: https://github.com/reductstore/reductstore/pull/1180" >&2
+  echo "Fix options:" >&2
+  echo "  1) Change owner on the host path to $(id -u):$(id -g) (for example: sudo chown -R $(id -u):$(id -g) <host_data_dir>)" >&2
+  echo "  2) Adjust permissions on the host path (for example: sudo chmod -R 770 <host_data_dir>)" >&2
+  echo "  3) Run with a matching user (docker --user $owner_uid:$owner_gid ...)" >&2
+  exit 1
 fi
 
 exec "$@"
