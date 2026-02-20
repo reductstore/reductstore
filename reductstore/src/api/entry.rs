@@ -38,13 +38,14 @@ use crate::api::entry::update_single::update_record;
 
 use crate::api::entry::read_query_post::read_query_json;
 use crate::api::entry::remove_query_post::remove_query_json;
-use axum::body::Body;
+use crate::api::ErrorCode;
+use axum::body::{to_bytes, Body};
 use axum::http::{HeaderMap, Request};
 use axum::response::IntoResponse;
 use axum::routing::{delete, get, head, patch, post, put};
 use bytes::Bytes;
 use hyper::Response;
-use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType, RemoveQueryInfo};
+use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType, RemoveQueryInfo, RenameEntry};
 use reduct_macros::{IntoResponse, Twin};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -136,37 +137,161 @@ async fn query_entry_router(
     }
 }
 
+fn patch_entry_path(
+    path: &HashMap<String, String>,
+    entry_name: String,
+) -> Path<HashMap<String, String>> {
+    let mut path = path.clone();
+    path.insert("entry_name".to_string(), entry_name);
+    Path(path)
+}
+
+fn strip_route_suffix(
+    path: &HashMap<String, String>,
+    suffix: &str,
+) -> Option<Path<HashMap<String, String>>> {
+    let entry_name = path.get("entry_name")?;
+    let entry_name = entry_name.strip_suffix(suffix)?;
+    if entry_name.is_empty() {
+        return None;
+    }
+
+    Some(patch_entry_path(path, entry_name.to_string()))
+}
+
+async fn read_entry_router(
+    keeper: State<Arc<StateKeeper>>,
+    Path(path): Path<HashMap<String, String>>,
+    Query(params): Query<HashMap<String, String>>,
+    headers: HeaderMap,
+    method: MethodExtractor,
+) -> Response<Body> {
+    if let Some(path) = strip_route_suffix(&path, "/batch") {
+        return read_batched_records(keeper, path, Query(params), headers, method)
+            .await
+            .into_response();
+    }
+
+    if let Some(path) = strip_route_suffix(&path, "/q") {
+        return read_query::read_query(keeper, path, Query(params), headers)
+            .await
+            .into_response();
+    }
+
+    read_record(keeper, Path(path), Query(params), headers, method)
+        .await
+        .into_response()
+}
+
+async fn write_entry_router(
+    keeper: State<Arc<StateKeeper>>,
+    headers: HeaderMap,
+    Path(path): Path<HashMap<String, String>>,
+    Query(params): Query<HashMap<String, String>>,
+    body: Body,
+) -> Response<Body> {
+    if let Some(path) = strip_route_suffix(&path, "/batch") {
+        return write_batched_records(keeper, headers, path, body)
+            .await
+            .into_response();
+    }
+
+    if let Some(path) = strip_route_suffix(&path, "/q") {
+        let body = match to_bytes(body, usize::MAX).await {
+            Ok(body) => body,
+            Err(e) => return HttpError::from(e).into_response(),
+        };
+
+        let request: QueryEntry = match serde_json::from_slice(&body) {
+            Ok(request) => request,
+            Err(e) => return HttpError::from(e).into_response(),
+        };
+        return query_entry_router(keeper, headers, path, QueryEntryAxum(request)).await;
+    }
+
+    write_record(keeper, headers, Path(path), Query(params), body)
+        .await
+        .into_response()
+}
+
+async fn update_entry_router(
+    keeper: State<Arc<StateKeeper>>,
+    headers: HeaderMap,
+    Path(path): Path<HashMap<String, String>>,
+    Query(params): Query<HashMap<String, String>>,
+    body: Body,
+) -> Response<Body> {
+    if let Some(path) = strip_route_suffix(&path, "/batch") {
+        return update_batched_records(keeper, headers, path, body)
+            .await
+            .into_response();
+    }
+
+    update_record(keeper, headers, Path(path), Query(params), body)
+        .await
+        .into_response()
+}
+
+async fn remove_entry_dispatcher(
+    keeper: State<Arc<StateKeeper>>,
+    headers: HeaderMap,
+    Path(path): Path<HashMap<String, String>>,
+    Query(params): Query<HashMap<String, String>>,
+    body: Body,
+) -> Response<Body> {
+    if let Some(path) = strip_route_suffix(&path, "/batch") {
+        return remove_batched_records(keeper, headers, path, body)
+            .await
+            .into_response();
+    }
+
+    if let Some(path) = strip_route_suffix(&path, "/q") {
+        return remove_query(keeper, path, Query(params), headers)
+            .await
+            .into_response();
+    }
+
+    remove_entry_router(keeper, headers, Path(path), Query(params))
+        .await
+        .into_response()
+}
+
+async fn rename_entry_dispatcher(
+    keeper: State<Arc<StateKeeper>>,
+    headers: HeaderMap,
+    Path(path): Path<HashMap<String, String>>,
+    body: Body,
+) -> Response<Body> {
+    if let Some(path) = strip_route_suffix(&path, "/rename") {
+        let body = match to_bytes(body, usize::MAX).await {
+            Ok(body) => body,
+            Err(e) => return HttpError::from(e).into_response(),
+        };
+
+        let request: RenameEntry = match serde_json::from_slice(&body) {
+            Ok(request) => request,
+            Err(e) => return HttpError::from(e).into_response(),
+        };
+
+        return rename_entry(keeper, path, headers, axum::Json(request))
+            .await
+            .into_response();
+    }
+
+    HttpError::new(ErrorCode::NotFound, "Not found").into_response()
+}
+
 pub(super) fn create_entry_api_routes() -> axum::Router<Arc<StateKeeper>> {
     axum::Router::new()
-        .route("/{bucket_name}/{entry_name}", post(write_record))
+        .route("/{bucket_name}/{*entry_name}", post(write_entry_router))
+        .route("/{bucket_name}/{*entry_name}", patch(update_entry_router))
+        .route("/{bucket_name}/{*entry_name}", get(read_entry_router))
+        .route("/{bucket_name}/{*entry_name}", head(read_entry_router))
         .route(
-            "/{bucket_name}/{entry_name}/batch",
-            post(write_batched_records),
+            "/{bucket_name}/{*entry_name}",
+            delete(remove_entry_dispatcher),
         )
-        .route("/{bucket_name}/{entry_name}", patch(update_record))
-        .route(
-            "/{bucket_name}/{entry_name}/batch",
-            patch(update_batched_records),
-        )
-        .route("/{bucket_name}/{entry_name}", get(read_record))
-        .route("/{bucket_name}/{entry_name}", head(read_record))
-        .route(
-            "/{bucket_name}/{entry_name}/batch",
-            get(read_batched_records),
-        )
-        .route(
-            "/{bucket_name}/{entry_name}/batch",
-            head(read_batched_records),
-        )
-        .route("/{bucket_name}/{entry_name}/q", get(read_query::read_query)) // deprecated
-        .route("/{bucket_name}/{entry_name}", delete(remove_entry_router))
-        .route(
-            "/{bucket_name}/{entry_name}/batch",
-            delete(remove_batched_records),
-        )
-        .route("/{bucket_name}/{entry_name}/q", delete(remove_query)) // deprecated
-        .route("/{bucket_name}/{entry_name}/rename", put(rename_entry))
-        .route("/{bucket_name}/{entry_name}/q", post(query_entry_router))
+        .route("/{bucket_name}/{*entry_name}", put(rename_entry_dispatcher))
 }
 
 #[cfg(test)]
@@ -200,6 +325,31 @@ mod tests {
                 .unwrap();
             let extractor = MethodExtractor::from_request(req, &()).await.unwrap();
             assert_eq!(extractor.name(), "HEAD");
+        }
+    }
+
+    mod strip_route_suffix {
+        use super::*;
+
+        #[test]
+        fn test_strip_route_suffix_nested_entry() {
+            let path = HashMap::from_iter(vec![
+                ("bucket_name".to_string(), "bucket-1".to_string()),
+                ("entry_name".to_string(), "x/y/z/batch".to_string()),
+            ]);
+
+            let Path(path) = strip_route_suffix(&path, "/batch").unwrap();
+            assert_eq!(path.get("entry_name").unwrap(), "x/y/z");
+        }
+
+        #[test]
+        fn test_strip_route_suffix_returns_none() {
+            let path = HashMap::from_iter(vec![
+                ("bucket_name".to_string(), "bucket-1".to_string()),
+                ("entry_name".to_string(), "x/y/z".to_string()),
+            ]);
+
+            assert!(strip_route_suffix(&path, "/batch").is_none());
         }
     }
 
