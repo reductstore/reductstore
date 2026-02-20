@@ -31,7 +31,6 @@ runs:
       run: |
         DATA_VOLUME="reductstore-recovery-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
         echo "DATA_VOLUME=$DATA_VOLUME" >> "$GITHUB_ENV"
-        docker volume rm "$DATA_VOLUME" >/dev/null 2>&1 || true
         docker volume create "$DATA_VOLUME"
 
     - name: Run ReductStore with FileSystem backend
@@ -79,10 +78,3 @@ runs:
       if: always()
       shell: bash
       run: cat ./report.json
-
-    - name: Cleanup docker resources
-      if: always()
-      shell: bash
-      run: |
-        docker rm -f reductstore reductstore-1 >/dev/null 2>&1 || true
-        docker volume rm "${DATA_VOLUME}" >/dev/null 2>&1 || true

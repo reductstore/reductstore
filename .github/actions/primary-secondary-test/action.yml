@@ -41,7 +41,6 @@ runs:
         lock_file_ttl_s="${{ inputs.lock_file_ttl_s }}"
         data_volume="reductstore-primary-secondary-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
         echo "DATA_VOLUME=$data_volume" >> "$GITHUB_ENV"
-        docker volume rm "$data_volume" >/dev/null 2>&1 || true
         docker volume create "$data_volume"
 
         primary_env=(
@@ -105,11 +104,3 @@ runs:
       run: |
         docker logs reduct-primary-secondary-primary || true
         docker logs reduct-primary-secondary-secondary || true
-
-    - name: Cleanup docker containers
-      if: always()
-      shell: bash
-      run: |
-        docker rm -f reduct-primary-secondary-primary || true
-        docker rm -f reduct-primary-secondary-secondary || true
-        docker volume rm "${DATA_VOLUME}" >/dev/null 2>&1 || true

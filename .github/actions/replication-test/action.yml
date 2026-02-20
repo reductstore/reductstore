@@ -39,7 +39,6 @@ runs:
       run: |
         DATA_VOLUME="reductstore-replication-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
         echo "DATA_VOLUME=$DATA_VOLUME" >> "$GITHUB_ENV"
-        docker volume rm "$DATA_VOLUME" >/dev/null 2>&1 || true
         docker volume create "$DATA_VOLUME"
 
     - name: Run current ReductStore
@@ -100,10 +99,3 @@ runs:
       shell: bash
       run: |
         curl -H "Authorization: Bearer ${{ inputs.rs_api_token }}" http://127.0.0.1:8383/api/v1/replications/replication | jq
-
-    - name: Cleanup docker resources
-      if: always()
-      shell: bash
-      run: |
-        docker rm -f current >/dev/null 2>&1 || true
-        docker volume rm "${DATA_VOLUME}" >/dev/null 2>&1 || true

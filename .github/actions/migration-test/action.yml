@@ -28,7 +28,6 @@ runs:
       run: |
         DATA_VOLUME="reductstore-migration-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
         echo "DATA_VOLUME=$DATA_VOLUME" >> "$GITHUB_ENV"
-        docker volume rm "$DATA_VOLUME" >/dev/null 2>&1 || true
         docker volume create "$DATA_VOLUME"
 
     - name: Run latest stable ReductStore
@@ -49,6 +48,12 @@ runs:
     - name: Stop latest stable ReductStore
       shell: bash
       run: docker stop latest
+
+    - name: Normalize migrated data permissions
+      shell: bash
+      run: |
+        docker run --rm -v "${DATA_VOLUME}:/data" busybox sh -c \
+          "chown -R 10001:10001 /data && chmod -R 770 /data"
 
     - name: Download artifact
       uses: actions/download-artifact@v4
@@ -103,10 +108,3 @@ runs:
       if: always()
       shell: bash
       run: cat ./report.json
-
-    - name: Cleanup docker resources
-      if: always()
-      shell: bash
-      run: |
-        docker rm -f latest current >/dev/null 2>&1 || true
-        docker volume rm "${DATA_VOLUME}" >/dev/null 2>&1 || true

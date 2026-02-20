@@ -34,7 +34,6 @@ runs:
 
         data_volume="reductstore-read-only-replica-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
         echo "DATA_VOLUME=$data_volume" >> "$GITHUB_ENV"
-        docker volume rm "$data_volume" >/dev/null 2>&1 || true
         docker volume create "$data_volume"
 
         primary_env=(
@@ -119,11 +118,3 @@ runs:
       run: |
         docker logs reduct-primary || true
         docker logs reduct-replica || true
-
-    - name: Cleanup docker containers
-      if: always()
-      shell: bash
-      run: |
-        docker rm -f reduct-primary || true
-        docker rm -f reduct-replica || true
-        docker volume rm "${DATA_VOLUME}" >/dev/null 2>&1 || true
