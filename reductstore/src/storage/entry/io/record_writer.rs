@@ -486,9 +486,11 @@ mod tests {
 
         #[fixture]
         async fn block_manager(path: PathBuf) -> Arc<AsyncRwLock<BlockManager>> {
-            let manager = BlockManager::build(
+            let manager = BlockManager::build_with_names(
                 path.clone(),
                 BlockIndex::new(path.clone()),
+                "bucket".to_string(),
+                "entry".to_string(),
                 Cfg::default().into(),
             )
             .await;

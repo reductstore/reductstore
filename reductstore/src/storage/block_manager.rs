@@ -62,15 +62,16 @@ impl BlockManager {
     ///
     /// * `path` - Path to the block manager directory.
     /// * `index` - Block index to use.
+    /// * `bucket` - Bucket name.
+    /// * `entry` - Full entry name.
     /// * `cfg` - Configuration.
-    pub(crate) async fn build(path: PathBuf, index: BlockIndex, cfg: Arc<Cfg>) -> Self {
-        let (bucket, entry) = {
-            let mut parts = path.iter().rev();
-            let entry = parts.next().unwrap().to_str().unwrap().to_string();
-            let bucket = parts.next().unwrap().to_str().unwrap().to_string();
-            (bucket, entry)
-        };
-
+    pub(crate) async fn build_with_names(
+        path: PathBuf,
+        index: BlockIndex,
+        bucket: String,
+        entry: String,
+        cfg: Arc<Cfg>,
+    ) -> Self {
         Self {
             path: path.clone(),
             bucket,
@@ -730,9 +731,14 @@ mod tests {
             let path = tempdir().unwrap().keep().join("bucket").join("entry");
             let mut cfg = Cfg::default();
             cfg.role = InstanceRole::Replica;
-            let block_manager =
-                BlockManager::build(path.clone(), BlockIndex::new(path.clone()), Arc::new(cfg))
-                    .await;
+            let block_manager = BlockManager::build_with_names(
+                path.clone(),
+                BlockIndex::new(path.clone()),
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(cfg),
+            )
+            .await;
             block_manager.sync_data_block(1).await.unwrap();
         }
 
@@ -741,9 +747,14 @@ mod tests {
         async fn test_sync_data_block_ok_for_missing_path() {
             let path = tempdir().unwrap().keep().join("bucket").join("entry");
             let cfg = Cfg::default();
-            let block_manager =
-                BlockManager::build(path.clone(), BlockIndex::new(path.clone()), Arc::new(cfg))
-                    .await;
+            let block_manager = BlockManager::build_with_names(
+                path.clone(),
+                BlockIndex::new(path.clone()),
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(cfg),
+            )
+            .await;
             block_manager.sync_data_block(999).await.unwrap();
         }
 
@@ -1300,9 +1311,11 @@ mod tests {
     async fn block_manager(block_id: u64) -> BlockManager {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
 
-        let mut bm = BlockManager::build(
+        let mut bm = BlockManager::build_with_names(
             path.clone(),
             BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            "bucket".to_string(),
+            "entry".to_string(),
             Cfg::default().into(),
         )
         .await;

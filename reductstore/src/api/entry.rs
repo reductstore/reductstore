@@ -297,7 +297,7 @@ pub(super) fn create_entry_api_routes() -> axum::Router<Arc<StateKeeper>> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::tests::{headers, path_to_entry_1};
+    use crate::api::tests::{headers, keeper, path_to_entry_1};
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::entry_api::QueryEntry;
     use rstest::rstest;
@@ -350,6 +350,36 @@ mod tests {
             ]);
 
             assert!(strip_route_suffix(&path, "/batch").is_none());
+        }
+    }
+
+    mod write_entry_router {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn accepts_hierarchical_name(
+            #[future] keeper: Arc<StateKeeper>,
+            mut headers: HeaderMap,
+        ) {
+            headers.insert("content-length", "0".parse().unwrap());
+
+            let response = write_entry_router(
+                State(keeper.await),
+                headers,
+                Path(HashMap::from_iter(vec![
+                    ("bucket_name".to_string(), "bucket-1".to_string()),
+                    ("entry_name".to_string(), "entry/a".to_string()),
+                ])),
+                Query(HashMap::from_iter(vec![(
+                    "ts".to_string(),
+                    "1".to_string(),
+                )])),
+                Body::empty(),
+            )
+            .await;
+
+            assert_eq!(response.status(), 200);
         }
     }
 

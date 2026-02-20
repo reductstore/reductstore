@@ -76,22 +76,18 @@ impl Entry {
         settings: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Self, ReductError> {
+        let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let path = path.join(name);
         Ok(Self {
             name: name.to_string(),
-            bucket_name: path
-                .parent()
-                .unwrap()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_string(),
+            bucket_name: bucket_name.clone(),
             settings: AsyncRwLock::new(settings),
             block_manager: Arc::new(AsyncRwLock::new(
-                BlockManager::build(
+                BlockManager::build_with_names(
                     path.clone(),
                     BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                    bucket_name.clone(),
+                    name.to_string(),
                     cfg.clone(),
                 )
                 .await,
@@ -103,12 +99,34 @@ impl Entry {
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn restore(
         path: PathBuf,
         options: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Option<Entry>, ReductError> {
-        let entry = EntryLoader::restore_entry(path, options, cfg).await?;
+        let entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let bucket_name = path
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        Self::restore_with_names(path, entry_name, bucket_name, options, cfg).await
+    }
+
+    pub(crate) async fn restore_with_names(
+        path: PathBuf,
+        entry_name: String,
+        bucket_name: String,
+        options: EntrySettings,
+        cfg: Arc<Cfg>,
+    ) -> Result<Option<Entry>, ReductError> {
+        let entry =
+            EntryLoader::restore_entry_with_names(path, entry_name, bucket_name, options, cfg)
+                .await?;
         Ok(entry)
     }
 
@@ -652,6 +670,30 @@ mod tests {
         assert_eq!(info.block_count, 1);
         assert_eq!(info.oldest_record, 1000000);
         assert_eq!(info.latest_record, 3000000);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_nested_entry_name_in_record_metadata(path: PathBuf) {
+        use reduct_base::io::ReadRecord;
+
+        let entry = Arc::new(
+            Entry::try_build(
+                "x/y/z",
+                path.clone(),
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 10000,
+                },
+                Cfg::default().into(),
+            )
+            .await
+            .unwrap(),
+        );
+
+        write_stub_record(&entry, 1000000).await;
+        let reader = entry.begin_read(1000000).await.unwrap();
+        assert_eq!(reader.meta().entry_name(), "x/y/z");
     }
 
     mod try_remove_oldest_block {

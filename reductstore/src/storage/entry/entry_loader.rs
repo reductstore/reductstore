@@ -31,32 +31,63 @@ pub(super) struct EntryLoader {}
 
 impl EntryLoader {
     // Restore the entry from the given path
+    #[allow(dead_code)]
     pub async fn restore_entry(
         path: PathBuf,
         options: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Option<Entry>, ReductError> {
+        let entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
+        let bucket_name = path
+            .parent()
+            .unwrap()
+            .file_name()
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .to_string();
+        Self::restore_entry_with_names(path, entry_name, bucket_name, options, cfg).await
+    }
+
+    pub async fn restore_entry_with_names(
+        path: PathBuf,
+        entry_name: String,
+        bucket_name: String,
+        options: EntrySettings,
+        cfg: Arc<Cfg>,
+    ) -> Result<Option<Entry>, ReductError> {
         let start_time = Instant::now();
 
-        let mut entry =
-            match Self::try_restore_entry_from_index(path.clone(), options.clone(), cfg.clone())
-                .await
-            {
-                Ok(entry) => entry,
-                Err(err) => {
-                    if cfg.role == Replica {
-                        return Ok(None);
-                    }
-
-                    warn!(
-                        "Failed to restore from block index {:?}: {}",
-                        path, err.message
-                    );
-                    info!("Rebuilding the block index {:?} from blocks", path);
-                    Self::restore_entry_from_blocks(path.clone(), options.clone(), cfg.clone())
-                        .await?
+        let mut entry = match Self::try_restore_entry_from_index(
+            path.clone(),
+            entry_name.clone(),
+            bucket_name.clone(),
+            options.clone(),
+            cfg.clone(),
+        )
+        .await
+        {
+            Ok(entry) => entry,
+            Err(err) => {
+                if cfg.role == Replica {
+                    return Ok(None);
                 }
-            };
+
+                warn!(
+                    "Failed to restore from block index {:?}: {}",
+                    path, err.message
+                );
+                info!("Rebuilding the block index {:?} from blocks", path);
+                Self::restore_entry_from_blocks(
+                    path.clone(),
+                    entry_name.clone(),
+                    bucket_name.clone(),
+                    options.clone(),
+                    cfg.clone(),
+                )
+                .await?
+            }
+        };
 
         Self::restore_uncommitted_changes(path.clone(), &mut entry).await?;
 
@@ -77,7 +108,14 @@ impl EntryLoader {
 
             if needs_rebuild {
                 warn!("Block index is inconsistent. Rebuilding the block index from blocks");
-                entry = Self::restore_entry_from_blocks(path.clone(), options, cfg.clone()).await?;
+                entry = Self::restore_entry_from_blocks(
+                    path.clone(),
+                    entry_name,
+                    bucket_name,
+                    options,
+                    cfg.clone(),
+                )
+                .await?;
             }
         }
 
@@ -99,6 +137,8 @@ impl EntryLoader {
     /// Restore the entry from blocks and create a new block index
     async fn restore_entry_from_blocks(
         path: PathBuf,
+        entry_name: String,
+        bucket_name: String,
         options: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Entry, ReductError> {
@@ -184,22 +224,19 @@ impl EntryLoader {
         }
 
         block_index.save().await?;
-        let name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let bucket_name = path
-            .parent()
-            .unwrap()
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
-
         Ok(Entry {
-            name,
-            bucket_name,
+            name: entry_name.clone(),
+            bucket_name: bucket_name.clone(),
             settings: AsyncRwLock::new(options),
             block_manager: Arc::new(AsyncRwLock::new(
-                BlockManager::build(path.clone(), block_index, cfg.clone()).await,
+                BlockManager::build_with_names(
+                    path.clone(),
+                    block_index,
+                    bucket_name.clone(),
+                    entry_name.clone(),
+                    cfg.clone(),
+                )
+                .await,
             )),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
@@ -211,27 +248,26 @@ impl EntryLoader {
     /// Try to restore the entry from the block index
     async fn try_restore_entry_from_index(
         path: PathBuf,
+        entry_name: String,
+        bucket_name: String,
         options: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
-        let name = path.file_name().unwrap().to_str().unwrap().to_string();
-
-        let bucket_name = path
-            .parent()
-            .unwrap()
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
 
         Ok(Entry {
-            name,
-            bucket_name,
+            name: entry_name.clone(),
+            bucket_name: bucket_name.clone(),
             settings: AsyncRwLock::new(options),
             block_manager: Arc::new(AsyncRwLock::new(
-                BlockManager::build(path.clone(), block_index, cfg.clone()).await,
+                BlockManager::build_with_names(
+                    path.clone(),
+                    block_index,
+                    bucket_name.clone(),
+                    entry_name.clone(),
+                    cfg.clone(),
+                )
+                .await,
             )),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
@@ -518,9 +554,11 @@ mod tests {
         let path = path.join("entry");
         FILE_CACHE.create_dir_all(&path).await.unwrap();
 
-        let mut block_manager = BlockManager::build(
+        let mut block_manager = BlockManager::build_with_names(
             path.clone(),
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
+            "bucket".to_string(),
+            "entry".to_string(),
             Cfg::default().into(),
         )
         .await;
@@ -581,8 +619,14 @@ mod tests {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))
             .await
             .unwrap();
-        let mut block_manager =
-            BlockManager::build(path.clone(), block_index, Cfg::default().into()).await;
+        let mut block_manager = BlockManager::build_with_names(
+            path.clone(),
+            block_index,
+            "bucket".to_string(),
+            "entry".to_string(),
+            Cfg::default().into(),
+        )
+        .await;
         let block_v1_9 = block_manager
             .load_block(1)
             .await
@@ -970,7 +1014,7 @@ mod tests {
         async fn test_corrupted_wal(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix.await;
 
-            fs::write(path.join("wal/1.wal"), b"bad data").unwrap();
+            fs::write(path.join(".wal/1.wal"), b"bad data").unwrap();
             let entry = EntryLoader::restore_entry(
                 path.clone(),
                 entry.settings().await.unwrap(),
@@ -979,7 +1023,7 @@ mod tests {
             .await;
             assert!(entry.is_ok());
             assert!(
-                !path.join("wal/1.wal").exists(),
+                !path.join(".wal/1.wal").exists(),
                 "should remove corrupted wal"
             );
         }

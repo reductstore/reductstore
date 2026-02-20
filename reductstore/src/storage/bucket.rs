@@ -19,7 +19,7 @@ use crate::storage::bucket::query::MultiEntryQuery;
 use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
-use crate::storage::engine::{check_name_convention, ReadOnlyMode};
+use crate::storage::engine::{check_entry_name_convention, ReadOnlyMode};
 use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::folder_keeper::FolderKeeper;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
@@ -37,6 +37,10 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+
+fn normalize_entry_name(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
 
 /// Bucket is a single storage bucket.
 pub(crate) struct Bucket {
@@ -121,9 +125,16 @@ impl Bucket {
         let mut task_set = Vec::new();
         let folder_keeper = FolderKeeper::new(path.clone(), cfg.as_ref()).await;
 
-        for path in folder_keeper.list_folders().await? {
-            let handler = Entry::restore(
-                path,
+        for entry_path in folder_keeper.list_folders().await? {
+            let entry_name = normalize_entry_name(
+                entry_path
+                    .strip_prefix(&path)
+                    .unwrap_or(entry_path.as_path()),
+            );
+            let handler = Entry::restore_with_names(
+                entry_path,
+                entry_name,
+                bucket_name.clone(),
                 EntrySettings {
                     max_block_size: settings.max_block_size.unwrap(),
                     max_block_records: settings.max_block_records.unwrap(),
@@ -166,7 +177,7 @@ impl Bucket {
     ///
     /// * `&mut Entry` - The entry or an HTTPError
     pub async fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
-        check_name_convention(key)?;
+        check_entry_name_convention(key)?;
         self.ensure_not_deleting().await?;
 
         let entry = {
@@ -327,7 +338,7 @@ impl Bucket {
         let cfg = self.cfg.clone();
         let folder_keeper = self.folder_keeper.clone();
 
-        check_name_convention(&new_name)?;
+        check_entry_name_convention(&new_name)?;
         if new_path.exists() {
             return Err(conflict!(
                 "Entry '{}' already exists in bucket '{}'",
@@ -350,8 +361,10 @@ impl Bucket {
         folder_keeper.rename_folder(old_name, new_name).await?;
         entries.write().await?.remove(old_name);
 
-        if let Some(entry) = Entry::restore(
+        if let Some(entry) = Entry::restore_with_names(
             new_path,
+            new_name.to_string(),
+            bucket_name.clone(),
             EntrySettings {
                 max_block_size: settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
                 max_block_records: settings.max_block_records.unwrap_or(DEFAULT_MAX_RECORDS),
@@ -481,9 +494,29 @@ mod tests {
         async fn test_get_or_create_entry_invalid_name(#[future] bucket: Arc<Bucket>) {
             let bucket = bucket.await;
             assert_eq!(
-                bucket.get_or_create_entry("test-1/").await.err(),
+                bucket.get_or_create_entry("test-1$").await.err(),
                 Some(unprocessable_entity!(
-                    "Bucket or entry name can contain only letters, digests and [-,_] symbols"
+                    "Entry name can contain only letters, digests and [-,_,/] symbols"
+                ))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_or_create_entry_with_path(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            let entry = bucket.get_or_create_entry("test-1/a").await.unwrap();
+            assert_eq!(entry.upgrade().unwrap().name(), "test-1/a");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_or_create_entry_reserved_wal_name(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            assert_eq!(
+                bucket.get_or_create_entry("test/wal").await.err(),
+                Some(unprocessable_entity!(
+                    "Entry path segment 'wal' is reserved"
                 ))
             );
         }
@@ -546,9 +579,21 @@ mod tests {
         async fn test_rename_invalid_name(#[future] bucket: Arc<Bucket>) {
             let bucket = bucket.await;
             assert_eq!(
-                bucket.rename_entry("test-1", "test-2/").await.err(),
+                bucket.rename_entry("test-1", "test-2$").await.err(),
                 Some(unprocessable_entity!(
-                    "Bucket or entry name can contain only letters, digests and [-,_] symbols"
+                    "Entry name can contain only letters, digests and [-,_,/] symbols"
+                ))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rename_reserved_wal_name(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            assert_eq!(
+                bucket.rename_entry("test-1", "test/wal").await.err(),
+                Some(unprocessable_entity!(
+                    "Entry path segment 'wal' is reserved"
                 ))
             );
         }
@@ -643,6 +688,24 @@ mod tests {
                     "Entry 'test-1' in bucket 'test' is being deleted"
                 ))
             );
+        }
+    }
+
+    mod restore {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_restore_nested_entry_path(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            write(&bucket, "entry/a", 1, b"test").await.unwrap();
+            bucket.sync_fs().await.unwrap();
+
+            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+                .await
+                .unwrap();
+            let mut reader = bucket.begin_read("entry/a", 1).await.unwrap();
+            assert_eq!(reader.read_chunk().unwrap().unwrap(), Bytes::from("test"));
         }
     }
 

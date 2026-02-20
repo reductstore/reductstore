@@ -2,6 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::{Cfg, InstanceRole};
+use crate::core::file_cache::FILE_CACHE;
+use crate::storage::bucket::settings::SETTINGS_NAME;
 use crate::storage::bucket::Bucket;
 use crate::storage::engine::{ReadOnlyMode, StorageEngine};
 use async_trait::async_trait;
@@ -39,6 +41,14 @@ impl ReadOnlyMode for StorageEngine {
         let mut buckets_to_retain = vec![];
         self.folder_keeper.reload().await?;
         for path in self.folder_keeper.list_folders().await? {
+            if !FILE_CACHE
+                .try_exists(&path.join(SETTINGS_NAME))
+                .await
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
             if current_bucket_paths.contains(&path) {
                 buckets_to_retain.push(path);
                 continue;

@@ -71,8 +71,14 @@ mod tests {
 
         let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
         index.save().await.unwrap();
-        let mut block_manager =
-            BlockManager::build(path.clone(), index, Arc::new(cfg.clone())).await;
+        let mut block_manager = BlockManager::build_with_names(
+            path.clone(),
+            index,
+            "bucket".to_string(),
+            "entry".to_string(),
+            Arc::new(cfg.clone()),
+        )
+        .await;
 
         // change index on disc
         let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))
@@ -111,8 +117,14 @@ mod tests {
         index.insert_or_update_with_crc(Block::new(1), 1);
         index.save().await.unwrap();
 
-        let mut block_manager =
-            BlockManager::build(entry_path.clone(), index, Arc::new(cfg.clone())).await;
+        let mut block_manager = BlockManager::build_with_names(
+            entry_path.clone(),
+            index,
+            "bucket".to_string(),
+            "entry".to_string(),
+            Arc::new(cfg.clone()),
+        )
+        .await;
 
         let mut updated_index = BlockIndex::new(index_path.clone());
         updated_index.insert_or_update_with_crc(Block::new(1), 2);

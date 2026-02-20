@@ -50,7 +50,9 @@ impl Bucket {
             entry_queries.insert(entry_name, entry_query_id);
         }
 
-        let (aggregated_rx, io_settings) = self.init_aggregator(&entry_queries).await?;
+        let (aggregated_rx, io_settings) = self
+            .init_aggregator(&entry_queries, options.continuous)
+            .await?;
 
         let multi_query = MultiEntryQuery {
             entry_queries,
@@ -134,6 +136,7 @@ impl Bucket {
     async fn init_aggregator(
         &self,
         entry_queries: &HashMap<String, u64>,
+        continuous: bool,
     ) -> Result<(Arc<AsyncRwLock<QueryRx>>, IoConfig), ReductError> {
         let mut entry_receivers: HashMap<String, Arc<AsyncRwLock<QueryRx>>> = HashMap::new();
         let mut io_settings: Option<IoConfig> = None;
@@ -153,7 +156,7 @@ impl Bucket {
         let (tx, rx_out) = mpsc::channel(AGGREGATOR_BUFFER_SIZE);
 
         tokio::spawn(async move {
-            Self::aggregate(entry_receivers, tx).await;
+            Self::aggregate(entry_receivers, tx, continuous).await;
         });
 
         Ok((
@@ -180,6 +183,7 @@ impl Bucket {
     async fn aggregate(
         entry_receivers: HashMap<String, Arc<AsyncRwLock<QueryRx>>>,
         tx: mpsc::Sender<Result<RecordReader, ReductError>>,
+        continuous: bool,
     ) {
         let mut pending_readers: HashMap<String, Option<RecordReader>> = HashMap::new();
         let mut completed: HashSet<String> = HashSet::new();
@@ -204,25 +208,43 @@ impl Bucket {
                     continue;
                 }
 
-                let recv_result = match rx.write().await {
-                    Ok(mut guard) => guard.try_recv(),
-                    Err(err) => {
-                        last_error = Some(err);
-                        break;
+                let recv_result = if continuous {
+                    match rx.write().await {
+                        Ok(mut guard) => guard.try_recv().map(Some),
+                        Err(err) => {
+                            last_error = Some(err);
+                            break;
+                        }
+                    }
+                } else {
+                    match rx.write().await {
+                        Ok(mut guard) => Ok(guard.recv().await),
+                        Err(err) => {
+                            last_error = Some(err);
+                            break;
+                        }
                     }
                 };
 
                 match recv_result {
-                    Ok(Ok(reader)) => {
+                    Ok(Some(Ok(reader))) => {
                         pending_readers.insert(entry_name.clone(), Some(reader));
                         made_progress = true;
                     }
-                    Ok(Err(err)) => {
+                    Ok(Some(Err(err))) => {
                         if err.status() != ErrorCode::NoContent {
                             last_error = Some(err);
                             break;
                         }
-                        // NoContent just means no records right now; keep polling the entry
+                        // Non-continuous query: entry is drained.
+                        // Continuous query: no records right now; keep polling.
+                        if !continuous {
+                            completed.insert(entry_name.clone());
+                        }
+                        made_progress = true;
+                    }
+                    Ok(None) => {
+                        completed.insert(entry_name.clone());
                         made_progress = true;
                     }
                     Err(tokio::sync::mpsc::error::TryRecvError::Disconnected) => {
@@ -279,14 +301,17 @@ impl Bucket {
 mod tests {
     use super::*;
     use crate::storage::bucket::tests::{bucket, write};
+    use crate::storage::proto::{record, us_to_ts, Record};
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
-    use reduct_base::not_found;
+    use reduct_base::{no_content, not_found};
     use rstest::rstest;
+    use std::collections::HashMap;
     use std::sync::Arc;
     use std::time::Duration;
-    use tokio::time::timeout;
+    use tokio::sync::mpsc;
+    use tokio::time::{sleep, timeout};
 
     async fn collect_records(rx: Weak<AsyncRwLock<QueryRx>>) -> Vec<(String, u64)> {
         let rx = rx.upgrade().unwrap();
@@ -454,9 +479,66 @@ mod tests {
         // Should exit immediately because the receiver is gone.
         assert!(timeout(
             Duration::from_millis(100),
-            Bucket::aggregate(HashMap::new(), tx)
+            Bucket::aggregate(HashMap::new(), tx, false)
         )
         .await
         .is_ok());
+    }
+
+    #[tokio::test]
+    async fn aggregate_non_continuous_keeps_global_time_order() {
+        let (tx_a, rx_a) = mpsc::channel(8);
+        let (tx_b, rx_b) = mpsc::channel(8);
+
+        let mut entry_receivers: HashMap<String, Arc<AsyncRwLock<QueryRx>>> = HashMap::new();
+        entry_receivers.insert("entry-a".to_string(), Arc::new(AsyncRwLock::new(rx_a)));
+        entry_receivers.insert("entry-b".to_string(), Arc::new(AsyncRwLock::new(rx_b)));
+
+        let (tx_out, mut rx_out) = mpsc::channel(8);
+        tokio::spawn(async move {
+            Bucket::aggregate(entry_receivers, tx_out, false).await;
+        });
+
+        let fast_reader = RecordReader::form_record(
+            "entry-a",
+            Record {
+                timestamp: Some(us_to_ts(&20)),
+                begin: 0,
+                end: 0,
+                content_type: "text/plain".to_string(),
+                state: record::State::Finished as i32,
+                labels: vec![],
+            },
+        );
+        tx_a.send(Ok(fast_reader)).await.unwrap();
+
+        sleep(Duration::from_millis(10)).await;
+
+        let slow_reader = RecordReader::form_record(
+            "entry-b",
+            Record {
+                timestamp: Some(us_to_ts(&10)),
+                begin: 0,
+                end: 0,
+                content_type: "text/plain".to_string(),
+                state: record::State::Finished as i32,
+                labels: vec![],
+            },
+        );
+        tx_b.send(Ok(slow_reader)).await.unwrap();
+
+        tx_a.send(Err(no_content!("No content"))).await.unwrap();
+        tx_b.send(Err(no_content!("No content"))).await.unwrap();
+
+        let first = rx_out.recv().await.unwrap().unwrap();
+        let second = rx_out.recv().await.unwrap().unwrap();
+        let terminal = match rx_out.recv().await.unwrap() {
+            Ok(_) => panic!("expected NoContent"),
+            Err(err) => err,
+        };
+
+        assert_eq!(first.meta().timestamp(), 10);
+        assert_eq!(second.meta().timestamp(), 20);
+        assert_eq!(terminal.status(), ErrorCode::NoContent);
     }
 }

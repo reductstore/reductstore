@@ -6,8 +6,9 @@ use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
+use crate::storage::bucket::settings::SETTINGS_NAME;
 use crate::storage::bucket::Bucket;
-use crate::storage::folder_keeper::FolderKeeper;
+use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use async_trait::async_trait;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
@@ -74,14 +75,22 @@ impl StorageEngineBuilder {
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
-        let folder_keeper = FolderKeeper::new(data_path.clone(), &cfg).await;
-
+        let folder_keeper =
+            FolderKeeper::new_with_depth(data_path.clone(), &cfg, DiscoveryDepth::FirstLevel).await;
         for path in folder_keeper
             .list_folders()
             .await
             .expect("Failed to list folders")
         {
-            match Bucket::restore(data_path.join(&path), cfg.clone()).await {
+            if !FILE_CACHE
+                .try_exists(&path.join(SETTINGS_NAME))
+                .await
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
+            match Bucket::restore(path.clone(), cfg.clone()).await {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
                     buckets.insert(bucket.name().to_string(), bucket);
@@ -373,6 +382,22 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
     if !regex.is_match(name) {
         return Err(unprocessable_entity!(
             "Bucket or entry name can contain only letters, digests and [-,_] symbols",
+        ));
+    }
+    Ok(())
+}
+
+pub(super) fn check_entry_name_convention(name: &str) -> Result<(), ReductError> {
+    let regex = regex::Regex::new(r"^[A-Za-z0-9_/-]*$").unwrap();
+    if !regex.is_match(name) {
+        return Err(unprocessable_entity!(
+            "Entry name can contain only letters, digests and [-,_,/] symbols",
+        ));
+    }
+
+    if name.split('/').any(|segment| segment == "wal") {
+        return Err(unprocessable_entity!(
+            "Entry path segment 'wal' is reserved",
         ));
     }
     Ok(())

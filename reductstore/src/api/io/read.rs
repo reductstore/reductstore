@@ -252,7 +252,8 @@ async fn fetch_and_response_batched_records(
         record.entry_index = *remapped_indices.get(&record.entry_index).unwrap();
     }
 
-    records.sort_by_key(|record| (record.entry_index, record.timestamp));
+    // Keep global chronological ordering across all entries.
+    records.sort_by_key(|record| (record.timestamp, record.entry_index));
 
     // Build response headers (entries list, start timestamp, and label index).
     let mut resp_headers = http::HeaderMap::new();
@@ -482,6 +483,90 @@ mod tests {
         assert_eq!(resp_headers["x-reduct-start-ts"], "1000");
         assert_eq!(resp_headers["x-reduct-last"], "true");
         assert_eq!(body, Bytes::from("bbbaa"));
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sorts_records_globally_by_timestamp(
+        #[future] keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        for (entry, ts, data) in [
+            ("entry-a", 1000u64, "a1"),
+            ("entry-a", 1010u64, "a2"),
+            ("entry-b", 1005u64, "b1"),
+        ] {
+            let mut writer = bucket
+                .begin_write(
+                    entry,
+                    ts,
+                    data.len() as u64,
+                    "text/plain".to_string(),
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(Bytes::from(data.to_string()))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["entry-a".into(), "entry-b".into()]),
+            start: Some(1000),
+            ..Default::default()
+        };
+        let path = Path(path_to_bucket_1.0.clone());
+        let response = query(
+            State(keeper.clone()),
+            headers.clone(),
+            path,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
+        );
+
+        let response = read_batched_records(
+            State(keeper.clone()),
+            headers,
+            path_to_bucket_1,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        let resp_headers = response.headers().clone();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+
+        assert_eq!(resp_headers["x-reduct-entries"], "entry-a,entry-b");
+        assert!(resp_headers.contains_key("x-reduct-0-0"));
+        assert!(resp_headers.contains_key("x-reduct-1-5"));
+        assert!(resp_headers.contains_key("x-reduct-0-10"));
+        assert_eq!(resp_headers["x-reduct-start-ts"], "1000");
+        assert_eq!(resp_headers["x-reduct-last"], "true");
+        assert_eq!(body, Bytes::from("a1b1a2"));
     }
 
     #[rstest]

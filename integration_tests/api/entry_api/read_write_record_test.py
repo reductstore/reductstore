@@ -315,7 +315,7 @@ def test_write_batched_records(base_url, session, bucket):
     """Should write batched records"""
     ts = 1000
     resp = session.post(
-        f"{base_url}/b/{bucket}/entry/batch",
+        f"{base_url}/b/{bucket}/entry/a/batch",
         data=b"x" * 1000_000 + b"y" * 1000_000 + b"z" * 1000_000,
         headers={
             "x-reduct-time-1000": "1000000,",
@@ -325,11 +325,11 @@ def test_write_batched_records(base_url, session, bucket):
     )
     assert resp.status_code == 200
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry/q?start={1000}")
+    resp = session.get(f"{base_url}/b/{bucket}/entry/a/q?start={1000}")
     assert resp.status_code == 200
     query_id = int(json.loads(resp.content)["id"])
 
-    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
+    resp = session.get(f"{base_url}/b/{bucket}/entry/a?q={query_id}")
     assert resp.status_code == 200
     assert resp.content == b"x" * 1000_000
     assert resp.headers["content-type"] == "application/octet-stream"

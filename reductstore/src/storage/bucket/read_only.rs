@@ -11,6 +11,10 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::Instant;
 
+fn normalize_entry_name(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
 #[async_trait]
 impl ReadOnlyMode for Bucket {
     fn cfg(&self) -> &Cfg {
@@ -40,16 +44,23 @@ impl ReadOnlyMode for Bucket {
 
         let mut entries_to_retain = vec![];
         self.folder_keeper.reload().await?;
-        for path in self.folder_keeper.list_folders().await? {
-            if current_bucket_paths.contains(&path) {
-                entries_to_retain.push(path);
+        for entry_path in self.folder_keeper.list_folders().await? {
+            if current_bucket_paths.contains(&entry_path) {
+                entries_to_retain.push(entry_path);
                 continue;
             }
 
             // Restore new bucket
             let settings = self.settings.read().await?;
-            let handler = Entry::restore(
-                path,
+            let entry_name = normalize_entry_name(
+                entry_path
+                    .strip_prefix(self.path())
+                    .unwrap_or(entry_path.as_path()),
+            );
+            let handler = Entry::restore_with_names(
+                entry_path,
+                entry_name,
+                self.name().to_string(),
                 EntrySettings {
                     max_block_size: settings.max_block_size.unwrap(),
                     max_block_records: settings.max_block_records.unwrap(),

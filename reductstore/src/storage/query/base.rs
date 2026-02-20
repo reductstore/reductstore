@@ -134,9 +134,11 @@ pub(crate) mod tests {
         // the second block has a record: 1000
         let dir = tempdir().unwrap().keep().join("bucket").join("entry");
 
-        let mut block_manager = BlockManager::build(
+        let mut block_manager = BlockManager::build_with_names(
             dir.clone(),
             BlockIndex::new(dir.join("index")),
+            "bucket".to_string(),
+            "entry".to_string(),
             Cfg::default().into(),
         )
         .await;

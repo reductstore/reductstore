@@ -5,6 +5,7 @@ use crate::backend::BackendType;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
+use crate::storage::block_manager::BLOCK_INDEX_FILE;
 use crate::storage::proto::folder_map::Item;
 use crate::storage::proto::FolderMap;
 use log::warn;
@@ -15,23 +16,34 @@ use std::io::SeekFrom::Start;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(super) enum DiscoveryDepth {
+    FirstLevel,
+    Recursive,
+}
+
 /// A simple folder keeper that maintains a list of folders in a `.folder` file.
 ///
 /// Mostly needed for S3 compatible storage backends that do not support listing folders natively.
 pub(super) struct FolderKeeper {
     path: PathBuf,
     full_access: bool,
+    depth: DiscoveryDepth,
     map: AsyncRwLock<FolderMap>,
 }
 
 impl FolderKeeper {
     pub async fn new(path: PathBuf, cfg: &Cfg) -> Self {
+        Self::new_with_depth(path, cfg, DiscoveryDepth::Recursive).await
+    }
+
+    pub async fn new_with_depth(path: PathBuf, cfg: &Cfg, depth: DiscoveryDepth) -> Self {
         let list_path = path.join(".folder");
         let full_access = cfg.role != InstanceRole::Replica;
 
         // for Filesystem backend, always rebuild from FS since it is cheap and reliable
         let proto = if cfg.cs_config.backend_type == BackendType::Filesystem {
-            let proto = Self::build_from_fs(&path).await;
+            let proto = Self::build_from_fs(&path, depth).await;
             if full_access {
                 if let Err(err) =
                     Self::save_static(&list_path, &AsyncRwLock::new(proto.clone())).await
@@ -41,12 +53,13 @@ impl FolderKeeper {
             }
             proto
         } else {
-            Self::read_or_build_map(&path, &list_path, full_access).await
+            Self::read_or_build_map(&path, &list_path, full_access, depth).await
         };
 
         FolderKeeper {
             path,
             full_access,
+            depth,
             map: AsyncRwLock::new(proto),
         }
     }
@@ -55,6 +68,7 @@ impl FolderKeeper {
         path: &PathBuf,
         list_path: &PathBuf,
         save_on_change: bool,
+        depth: DiscoveryDepth,
     ) -> FolderMap {
         if FILE_CACHE.try_exists(list_path).await.unwrap_or(false) {
             match Self::read_folder_map(list_path).await {
@@ -64,11 +78,11 @@ impl FolderKeeper {
                         "Failed to decode folder map at {:?}: {}. Rebuilding cache.",
                         list_path, err
                     );
-                    Self::build_from_fs(path).await
+                    Self::build_from_fs(path, depth).await
                 }
             }
         } else {
-            let proto = Self::build_from_fs(path).await;
+            let proto = Self::build_from_fs(path, depth).await;
             if save_on_change {
                 Self::save_static(list_path, &AsyncRwLock::new(proto.clone()))
                     .await
@@ -88,6 +102,11 @@ impl FolderKeeper {
     pub async fn list_folders(&self) -> Result<Vec<PathBuf>, ReductError> {
         let mut folders = Vec::new();
         for item in &self.map.read().await?.items {
+            if self.depth == DiscoveryDepth::FirstLevel
+                && (item.folder_name.contains('/') || item.folder_name.contains('\\'))
+            {
+                continue;
+            }
             let folder_path = self.path.join(&item.folder_name);
             folders.push(folder_path);
         }
@@ -144,7 +163,9 @@ impl FolderKeeper {
     pub async fn reload(&self) -> Result<(), ReductError> {
         let file_path = self.path.join(".folder"); // remove cached file
         FILE_CACHE.invalidate_local_cache_file(&file_path).await?;
-        let proto = Self::read_or_build_map(&self.path, &self.path.join(".folder"), false).await;
+        let proto =
+            Self::read_or_build_map(&self.path, &self.path.join(".folder"), false, self.depth)
+                .await;
         let mut map = self.map.write().await?;
         *map = proto;
         Ok(())
@@ -172,20 +193,71 @@ impl FolderKeeper {
         Ok(())
     }
 
-    async fn build_from_fs(path: &PathBuf) -> FolderMap {
-        let mut proto = FolderMap { items: vec![] };
-        for path in FILE_CACHE.read_dir(path).await.unwrap() {
-            if path.is_dir() {
-                if let Some(name) = path.file_name().and_then(|n| n.to_str()) {
-                    if !name.starts_with('.') {
-                        proto.items.push(Item {
-                            name: name.to_string(),
-                            folder_name: name.to_string(),
-                        });
+    async fn build_from_fs(path: &PathBuf, depth: DiscoveryDepth) -> FolderMap {
+        if depth == DiscoveryDepth::FirstLevel {
+            let mut proto = FolderMap { items: vec![] };
+            for item in FILE_CACHE.read_dir(path).await.unwrap_or_default() {
+                if item.is_dir() {
+                    let skip_dir = item
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|name| name.starts_with('.'));
+                    if !skip_dir {
+                        if let Some(name) = item.file_name().and_then(|n| n.to_str()) {
+                            proto.items.push(Item {
+                                name: name.to_string(),
+                                folder_name: name.to_string(),
+                            });
+                        }
                     }
                 }
             }
+            proto
+                .items
+                .sort_by(|a, b| a.folder_name.cmp(&b.folder_name));
+            return proto;
         }
+
+        let mut proto = FolderMap { items: vec![] };
+        let mut stack = vec![path.clone()];
+
+        while let Some(current) = stack.pop() {
+            let mut child_dirs = Vec::new();
+            for item in FILE_CACHE.read_dir(&current).await.unwrap_or_default() {
+                if item.is_dir() {
+                    let skip_dir = item
+                        .file_name()
+                        .and_then(|n| n.to_str())
+                        .is_some_and(|name| name.starts_with('.') || name == "wal");
+                    if !skip_dir {
+                        child_dirs.push(item);
+                    }
+                }
+            }
+
+            let has_block_index = FILE_CACHE
+                .try_exists(&current.join(BLOCK_INDEX_FILE))
+                .await
+                .unwrap_or(false);
+
+            if current != *path && (has_block_index || child_dirs.is_empty()) {
+                if let Ok(relative) = current.strip_prefix(path) {
+                    let name = relative.to_string_lossy().replace('\\', "/");
+                    proto.items.push(Item {
+                        name: name.clone(),
+                        folder_name: name,
+                    });
+                }
+            }
+
+            // Keep traversing even if current directory is already an entry.
+            // This allows nested entries like `entry` and `entry/a` to coexist.
+            stack.extend(child_dirs);
+        }
+
+        proto
+            .items
+            .sort_by(|a, b| a.folder_name.cmp(&b.folder_name));
 
         proto
     }
@@ -198,6 +270,7 @@ mod tests {
     use crate::backend::BackendType;
     use crate::cfg::{Cfg, InstanceRole};
     use crate::core::file_cache::FILE_CACHE;
+    use crate::storage::block_manager::BLOCK_INDEX_FILE;
     use rstest::{fixture, rstest};
     use std::io::SeekFrom;
     use tempfile::tempdir;
@@ -285,6 +358,122 @@ mod tests {
             FILE_CACHE.try_exists(&list_path).await.unwrap_or(false),
             ".folder should be created after rebuild"
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn scans_nested_entry_paths_for_filesystem_backend(#[future] path: PathBuf) {
+        let path = path.await;
+        let base_path = path.join("fs_bucket_nested");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+        FILE_CACHE
+            .create_dir_all(&base_path.join("entry").join("a"))
+            .await
+            .unwrap();
+        FILE_CACHE
+            .write_or_create(
+                &base_path.join("entry").join("a").join(BLOCK_INDEX_FILE),
+                SeekFrom::Start(0),
+            )
+            .await
+            .unwrap();
+
+        let mut cfg = Cfg::default();
+        cfg.cs_config.backend_type = BackendType::Filesystem;
+
+        let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
+        let folders = keeper.list_folders().await.unwrap();
+
+        assert!(
+            folders.iter().any(|path| path.ends_with("entry/a")),
+            "Should include nested entry path"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn ignores_wal_directories_for_filesystem_backend(#[future] path: PathBuf) {
+        let path = path.await;
+        let base_path = path.join("fs_bucket_ignore_wal");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+        FILE_CACHE
+            .create_dir_all(&base_path.join("entry").join("wal"))
+            .await
+            .unwrap();
+
+        let mut cfg = Cfg::default();
+        cfg.cs_config.backend_type = BackendType::Filesystem;
+
+        let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
+        let folders = keeper.list_folders().await.unwrap();
+
+        assert!(
+            !folders.iter().any(|path| path.ends_with("entry/wal")),
+            "Should ignore internal wal directory"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn scans_parent_and_nested_entries_when_both_have_index(#[future] path: PathBuf) {
+        let path = path.await;
+        let base_path = path.join("fs_bucket_parent_and_nested");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+        FILE_CACHE
+            .create_dir_all(&base_path.join("entry"))
+            .await
+            .unwrap();
+        FILE_CACHE
+            .write_or_create(
+                &base_path.join("entry").join(BLOCK_INDEX_FILE),
+                SeekFrom::Start(0),
+            )
+            .await
+            .unwrap();
+        FILE_CACHE
+            .create_dir_all(&base_path.join("entry").join("a"))
+            .await
+            .unwrap();
+        FILE_CACHE
+            .write_or_create(
+                &base_path.join("entry").join("a").join(BLOCK_INDEX_FILE),
+                SeekFrom::Start(0),
+            )
+            .await
+            .unwrap();
+
+        let mut cfg = Cfg::default();
+        cfg.cs_config.backend_type = BackendType::Filesystem;
+        let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
+        let folders = keeper.list_folders().await.unwrap();
+
+        assert!(folders.iter().any(|p| p.ends_with("entry")));
+        assert!(folders.iter().any(|p| p.ends_with("entry/a")));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn first_level_discovery_filters_nested_paths(#[future] path: PathBuf) {
+        let path = path.await;
+        let base_path = path.join("fs_first_level_only");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+        FILE_CACHE
+            .create_dir_all(&base_path.join("bucket-1"))
+            .await
+            .unwrap();
+        FILE_CACHE
+            .create_dir_all(&base_path.join("bucket-1").join("entry"))
+            .await
+            .unwrap();
+
+        let mut cfg = Cfg::default();
+        cfg.cs_config.backend_type = BackendType::Filesystem;
+        let keeper =
+            FolderKeeper::new_with_depth(base_path.clone(), &cfg, DiscoveryDepth::FirstLevel).await;
+        let folders = keeper.list_folders().await.unwrap();
+
+        assert!(folders.iter().any(|p| p.ends_with("bucket-1")));
+        assert!(!folders.iter().any(|p| p.ends_with("bucket-1/entry")));
     }
 
     #[rstest]
