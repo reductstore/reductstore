@@ -260,3 +260,46 @@ def test_meta_entry_upsert_by_key(base_url, session, bucket):
     resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts=1010")
     assert resp.status_code == 200
     assert resp.content == b'{"v":2}'
+
+
+def test_meta_entry_query_via_get_q_endpoint(base_url, session, bucket):
+    entry = "a/x/y/$meta"
+    ts = 2000
+
+    resp = session.post(
+        f"{base_url}/b/{bucket}/{entry}?ts={ts}",
+        data=b'{"schema":"v1"}',
+        headers={"x-reduct-label-key": "$plugin-a"},
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}/q?start={ts}&stop={ts + 1}")
+    assert resp.status_code == 200
+    query_id = int(resp.json()["id"])
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}?q={query_id}")
+    assert resp.status_code == 200
+    assert resp.content == b'{"schema":"v1"}'
+
+
+def test_meta_entry_query_via_post_q_endpoint(base_url, session, bucket):
+    entry = "a/x/y/$meta"
+    ts = 2100
+
+    resp = session.post(
+        f"{base_url}/b/{bucket}/{entry}?ts={ts}",
+        data=b'{"schema":"v2"}',
+        headers={"x-reduct-label-key": "$plugin-b"},
+    )
+    assert resp.status_code == 200
+
+    resp = session.post(
+        f"{base_url}/b/{bucket}/{entry}/q",
+        json={"query_type": "QUERY", "start": ts, "stop": ts + 1},
+    )
+    assert resp.status_code == 200
+    query_id = int(resp.json()["id"])
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}?q={query_id}")
+    assert resp.status_code == 200
+    assert resp.content == b'{"schema":"v2"}'
