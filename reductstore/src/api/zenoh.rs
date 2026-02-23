@@ -81,4 +81,11 @@ mod tests {
         let handle = spawn_runtime(config, keeper);
         assert!(handle.is_none());
     }
+
+    #[cfg(not(feature = "zenoh-api"))]
+    #[tokio::test]
+    async fn test_noop_shutdown() {
+        let handle = ZenohRuntimeHandle;
+        handle.shutdown().await;
+    }
 }
