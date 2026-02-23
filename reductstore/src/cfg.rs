@@ -269,7 +269,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         let server_info = storage.info().await?;
 
         Ok(Components {
-            storage,
+            storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(&self.cfg.api_token),
             console,
@@ -282,6 +282,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                     .server_info(server_info)
                     .build(),
                 self.cfg.io_conf.clone(),
+                Some(Arc::clone(&storage)),
             )?,
             query_link_cache: AsyncRwLock::new(Cache::new(
                 DEFAULT_CACHED_QUERIES,

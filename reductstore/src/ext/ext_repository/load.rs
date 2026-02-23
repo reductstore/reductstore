@@ -5,6 +5,7 @@ use crate::asset::asset_manager::ManageStaticAsset;
 use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::{ExtRepository, ExtensionApi, IoExtMap};
+use crate::storage::engine::StorageEngine;
 use dlopen2::wrapper::Container;
 use log::{error, info};
 use reduct_base::error::ReductError;
@@ -20,6 +21,7 @@ impl ExtRepository {
         embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
         settings: ExtSettings,
         io_config: IoConfig,
+        storage: Option<Arc<StorageEngine>>,
     ) -> Result<ExtRepository, ReductError> {
         let mut extension_map = IoExtMap::new();
 
@@ -68,6 +70,7 @@ impl ExtRepository {
             ext_wrappers,
             embedded_extensions,
             io_config,
+            storage,
         })
     }
 }
@@ -114,7 +117,8 @@ mod tests {
         fs::create_dir_all(&path).unwrap();
         fs::write(&path.join("libtest.so"), b"test").unwrap();
         let ext_repo =
-            ExtRepository::try_load(vec![path], vec![], ext_settings, IoConfig::default()).unwrap();
+            ExtRepository::try_load(vec![path], vec![], ext_settings, IoConfig::default(), None)
+                .unwrap();
         assert_eq!(ext_repo.extension_map.len(), 0);
     }
 
@@ -122,7 +126,7 @@ mod tests {
     fn test_failed_open_dir(ext_settings: ExtSettings) {
         let path = PathBuf::from("non_existing_dir");
         let ext_repo =
-            ExtRepository::try_load(vec![path], vec![], ext_settings, IoConfig::default());
+            ExtRepository::try_load(vec![path], vec![], ext_settings, IoConfig::default(), None);
         assert_eq!(
             ext_repo.err().unwrap(),
             internal_server_error!("Extension directory \"non_existing_dir\" does not exist")
@@ -194,6 +198,7 @@ mod tests {
             vec![],
             ext_settings,
             IoConfig::default(),
+            None,
         )
         .unwrap()
     }

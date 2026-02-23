@@ -5,6 +5,7 @@ use crate::asset::asset_manager::ManageStaticAsset;
 use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::{BoxedManageExtensions, ExtRepository, ManageExtensions};
+use crate::storage::engine::StorageEngine;
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
@@ -20,6 +21,7 @@ pub fn create_ext_repository(
     embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
     settings: ExtSettings,
     io_config: IoConfig,
+    storage: Option<Arc<StorageEngine>>,
 ) -> Result<BoxedManageExtensions, ReductError> {
     if external_path.is_some() || !embedded_extensions.is_empty() {
         let mut paths = if let Some(path) = external_path {
@@ -39,6 +41,7 @@ pub fn create_ext_repository(
             embedded_extensions,
             settings,
             io_config,
+            storage,
         )?))
     } else {
         // Dummy extension repository if
@@ -103,6 +106,7 @@ mod tests {
                 .server_info(ServerInfo::default())
                 .build(),
             IoConfig::default(),
+            None,
         )
         .unwrap();
 
