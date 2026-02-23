@@ -225,10 +225,22 @@ impl FolderKeeper {
             let mut child_dirs = Vec::new();
             for item in FILE_CACHE.read_dir(&current).await.unwrap_or_default() {
                 if item.is_dir() {
-                    let skip_dir = item
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .is_some_and(|name| name.starts_with('.'));
+                    let skip_dir = if let Some(name) = item.file_name().and_then(|n| n.to_str()) {
+                        if name.starts_with('.') {
+                            true
+                        } else if name == "wal" {
+                            // Old layouts (before v1.19) may contain `<entry>/wal` as internal WAL storage.
+                            // If `.wal` doesn't exist yet, treat `wal` as internal and skip it.
+                            !FILE_CACHE
+                                .try_exists(&current.join(".wal"))
+                                .await
+                                .unwrap_or(false)
+                        } else {
+                            false
+                        }
+                    } else {
+                        false
+                    };
                     if !skip_dir {
                         child_dirs.push(item);
                     }
@@ -459,6 +471,29 @@ mod tests {
 
         assert!(folders.iter().any(|p| p.ends_with("entry")));
         assert!(folders.iter().any(|p| p.ends_with("entry/a")));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn ignores_legacy_wal_dir_when_dot_wal_is_missing(#[future] path: PathBuf) {
+        let path = path.await;
+        let base_path = path.join("fs_bucket_legacy_wal");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+        FILE_CACHE
+            .create_dir_all(&base_path.join("entry").join("wal"))
+            .await
+            .unwrap();
+
+        let mut cfg = Cfg::default();
+        cfg.cs_config.backend_type = BackendType::Filesystem;
+
+        let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
+        let folders = keeper.list_folders().await.unwrap();
+
+        assert!(
+            !folders.iter().any(|path| path.ends_with("entry/wal")),
+            "Should ignore legacy internal wal directory when .wal is absent"
+        );
     }
 
     #[rstest]
