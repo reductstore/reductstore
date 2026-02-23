@@ -460,6 +460,8 @@ mod tests {
         let mut block_manager = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join("index")),
+            "bucket".to_string(),
+            "entry".to_string(),
             Cfg::default().into(),
         )
         .await;

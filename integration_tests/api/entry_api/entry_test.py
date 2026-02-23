@@ -1,4 +1,6 @@
-from ..conftest import requires_env, requires_backend, auth_headers
+import json
+
+from ..conftest import requires_env, auth_headers
 
 
 def test_remove_entry(base_url, session, bucket):
@@ -50,7 +52,6 @@ def test_remove_with_bucket_write_permissions(
     assert resp.status_code == 200
 
 
-@requires_backend("fs")
 def test_rename_entry(base_url, session, bucket):
     """Should rename entry"""
     ts = 1000
@@ -70,21 +71,7 @@ def test_rename_entry(base_url, session, bucket):
     assert resp.content == b"some_data1"
 
 
-@requires_backend("s3")
-def test_rename_entry_s3_not_allowed(base_url, session, bucket):
-    """Should not rename entry with S3 backend"""
-    ts = 1000
-    resp = session.post(f"{base_url}/b/{bucket}/entry?ts={ts}", data="some_data1")
-    assert resp.status_code == 200
-
-    resp = session.put(
-        f"{base_url}/b/{bucket}/entry/rename", json={"new_name": "new_name"}
-    )
-    assert resp.status_code == 405
-
-
 @requires_env("API_TOKEN")
-@requires_backend("fs")
 def test_rename_with_bucket_write_permissions(
     base_url,
     session,
@@ -117,3 +104,84 @@ def test_rename_with_bucket_write_permissions(
         headers=auth_headers(token_write_bucket.value),
     )
     assert resp.status_code == 200
+
+
+def test_crud_single_record_for_deep_entry_path(base_url, session, bucket):
+    entry = "factory-1/line-2/cell-3/sensor-4"
+    renamed = "factory-1/line-2/cell-3/sensor-4-renamed"
+    ts = 1000
+
+    resp = session.post(f"{base_url}/b/{bucket}/{entry}?ts={ts}", data=b"raw-data")
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts={ts}")
+    assert resp.status_code == 200
+    assert resp.content == b"raw-data"
+
+    resp = session.put(
+        f"{base_url}/b/{bucket}/{entry}/rename", json={"new_name": renamed}
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts={ts}")
+    assert resp.status_code == 404
+
+    resp = session.get(f"{base_url}/b/{bucket}/{renamed}?ts={ts}")
+    assert resp.status_code == 200
+    assert resp.content == b"raw-data"
+
+    resp = session.delete(f"{base_url}/b/{bucket}/{renamed}?ts={ts}")
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}/{renamed}?ts={ts}")
+    assert resp.status_code == 404
+
+    resp = session.post(
+        f"{base_url}/b/{bucket}/{renamed}?ts={ts + 1}", data=b"new-record"
+    )
+    assert resp.status_code == 200
+
+    resp = session.delete(f"{base_url}/b/{bucket}/{renamed}")
+    assert resp.status_code == 200
+
+    from time import sleep
+
+    sleep(0.1)  # entry deletion is async
+    resp = session.get(f"{base_url}/b/{bucket}/{renamed}?ts={ts + 1}")
+    assert resp.status_code == 404
+
+
+def test_batch_and_query_for_deep_entry_path(base_url, session, bucket):
+    entry = "factory-9/line-8/cell-7/sensor-6"
+
+    resp = session.post(
+        f"{base_url}/b/{bucket}/{entry}/batch",
+        data=b"aaa" + b"bbb",
+        headers={
+            "x-reduct-time-1000": "3,",
+            "x-reduct-time-1010": "3,",
+        },
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}/q?start=1000&stop=1020")
+    assert resp.status_code == 200
+    query_id = int(json.loads(resp.content)["id"])
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}?q={query_id}")
+    assert resp.status_code == 200
+    assert resp.content == b"aaa"
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}/batch?q={query_id}")
+    assert resp.status_code == 200
+    assert resp.content == b"bbb"
+
+    resp = session.post(
+        f"{base_url}/b/{bucket}/{entry}/q",
+        json={"query_type": "REMOVE", "start": 1000, "stop": 1020},
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"removed_records": 2}
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts=1000")
+    assert resp.status_code == 404
