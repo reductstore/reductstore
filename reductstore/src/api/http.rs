@@ -1010,4 +1010,27 @@ pub(crate) mod tests {
 
         async fn release(&self) {}
     }
+
+    mod lock_file_helpers {
+        use super::*;
+        use rstest::rstest;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_waiting_lock_file_methods() {
+            let lf = WaitingLockFile {};
+            assert!(!lf.is_failed().await.unwrap());
+            assert!(lf.is_waiting().await.unwrap());
+            lf.release().await;
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_not_ready_lock_file_methods() {
+            let lf = NotReadyLockFile {};
+            assert!(!lf.is_failed().await.unwrap());
+            assert!(lf.is_waiting().await.unwrap());
+            lf.release().await;
+        }
+    }
 }
