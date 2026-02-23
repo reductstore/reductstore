@@ -86,7 +86,7 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::bucket::tests::{bucket, write};
+    use crate::storage::bucket::tests::{bucket, write, write_meta};
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use reduct_base::not_found;
     use rstest::rstest;
@@ -200,7 +200,7 @@ mod tests {
     async fn query_remove_records_wildcard_includes_meta_entries(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         write(&bucket, "entry-one", 1, b"one-1").await.unwrap();
-        write(&bucket, "entry-one/$meta", 1, b"meta-1")
+        write_meta(&bucket, "entry-one/$meta", 1, b"meta-1")
             .await
             .unwrap();
 
