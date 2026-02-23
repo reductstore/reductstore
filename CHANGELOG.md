@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Move licensing and remote connectors to enterprise-only runtime and align CI pipelines for core-only backend coverage, [PR-1176](https://github.com/reductstore/reductstore/pull/1176)
+- Keep Docker runtime non-root when `/data` is auto-created as `root:root` and ensure UID/GID 10001 user metadata is available in the final image, [PR-1178](https://github.com/reductstore/reductstore/pull/1178)
+- Use Docker named volumes in CI deployment actions for `/data` to stay compatible with non-root runtime defaults and simplify entrypoint permission checks, [PR-1180](https://github.com/reductstore/reductstore/pull/1180)
+
+
+## 1.18.4 - 2026-02-06
+
+### Fixed
+
+- Stop replication tasks before HTTP shutdown and sync storage after server exit, [PR-1164](https://github.com/reductstore/reductstore/pull/1164)
+- Fix write latency spikes when replication is enabled by moving replication notifications out of API write paths, [PR-1165](https://github.com/reductstore/reductstore/pull/1165)
+
 ## 1.18.3 - 2026-02-05
 
 ### Fixed

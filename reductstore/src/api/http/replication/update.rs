@@ -62,9 +62,9 @@ mod tests {
                 .read()
                 .await
                 .unwrap()
-                .get_replication("test")
+                .get_replication_settings("test")
+                .await
                 .unwrap()
-                .settings()
                 .dst_bucket,
             "bucket-3"
         );

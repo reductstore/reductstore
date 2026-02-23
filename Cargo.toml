@@ -8,7 +8,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "1.18.3"
+version = "1.18.4"
 authors = ["Alexey Timin <atimin@reduct.store>", "ReductSoftware UG <info@reduct.store>"]
 edition = "2021"
 rust-version = "1.89.0"

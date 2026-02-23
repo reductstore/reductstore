@@ -1,67 +1,33 @@
 # syntax=docker/dockerfile:1
-ARG CARGO_TARGET=x86_64-unknown-linux-gnu
-
-FROM --platform=${BUILDPLATFORM} ubuntu:22.04 AS  builder
-ARG TARGETPLATFORM
+FROM --platform=${BUILDPLATFORM} ubuntu:24.04 AS builder
 ARG BUILDPLATFORM
-ARG CARGO_TARGET
-ARG GCC_COMPILER=gcc-11
-ARG RUST_VERSION
-ARG BUILD_PROFILE=release
 
-ENV AWS_LC_SYS_USE_PREBUILT=0
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
-RUN apt-get update && apt-get install -y \
-    cmake \
-    build-essential \
-    curl \
-    protobuf-compiler \
-    clang \
-    ca-certificates \
-    ${GCC_COMPILER}
+RUN groupadd --gid 10001 reduct \
+    && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin reduct
 
-RUN curl https://sh.rustup.rs -sSf | sh -s -- -y
-# Add .cargo/bin to PATH
-ENV PATH="/root/.cargo/bin:${PATH}"
-RUN rustup default ${RUST_VERSION}
-RUN rustup target add ${CARGO_TARGET}
+RUN mkdir -p /data && chown 10001:10001 /data
 
-WORKDIR /src
+FROM ubuntu:24.04
 
-COPY reductstore reductstore
-COPY reduct_base reduct_base
-COPY reduct_macros reduct_macros
-COPY .cargo /root/.cargo
-COPY Cargo.toml Cargo.toml
-COPY Cargo.lock Cargo.lock
+# Binaries are prepared on GitHub runner.
+COPY .image-build/usr/local/bin/reductstore /usr/local/bin/reductstore
+COPY .image-build/usr/local/bin/reduct-cli /usr/local/bin/reduct-cli
+COPY --from=builder /etc/passwd /etc/passwd
+COPY --from=builder /etc/group /etc/group
+COPY --from=builder /etc/shadow /etc/shadow
+COPY --from=builder /etc/gshadow /etc/gshadow
+COPY --chown=10001:10001 --from=builder /data /data
+COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
-ARG GIT_COMMIT=unspecified
-
-RUN cargo install --force --locked bindgen-cli
-
-# Use release directory for all builds
-RUN CARGO_TARGET_DIR=/build/ \
-    GIT_COMMIT=${GIT_COMMIT} \
-    cargo build --profile ${BUILD_PROFILE} --target ${CARGO_TARGET} --package reductstore --all-features
-RUN cargo install reduct-cli --target ${CARGO_TARGET} --root /build
-
-RUN mkdir /data
-RUN mv /build/${CARGO_TARGET}/${BUILD_PROFILE}/reductstore /usr/local/bin/reductstore
-RUN mv /build/bin/reduct-cli /usr/local/bin/reduct-cli
-
-FROM ubuntu:22.04
-
-ARG CARGO_TARGET
-ARG BUILD_PROFILE
-COPY --from=builder /usr/local/bin/reductstore /usr/local/bin/reductstore
-COPY --from=builder /usr/local/bin/reduct-cli /usr/local/bin/reduct-cli
-COPY --from=builder /data /data
-COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
-
-ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
-ENV AWS_CA_BUNDLE=/etc/ssl/certs/ca-certificates.crt
-
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8383
+USER 10001:10001
 
+VOLUME [ "/data" ]
+
+ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["reductstore"]

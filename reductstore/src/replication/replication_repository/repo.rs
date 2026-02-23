@@ -3,6 +3,7 @@
 
 use crate::cfg::{Cfg, DEFAULT_PORT};
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::AsyncRwLock;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
     Label as ProtoLabel, ReplicationMode as ProtoReplicationMode,
@@ -28,6 +29,8 @@ use std::io::SeekFrom::Start;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::task::JoinHandle;
 use url::Url;
 
 const REPLICATION_REPO_FILE_NAME: &str = ".replications";
@@ -133,12 +136,19 @@ impl From<ProtoReplicationMode> for ReplicationMode {
 
 /// A repository for managing replications from HTTP API
 
+enum NotificationCommand {
+    Notify(TransactionNotification),
+    Stop,
+}
+
 pub(crate) struct ReplicationRepository {
-    replications: HashMap<String, ReplicationTask>,
+    replications: Arc<AsyncRwLock<HashMap<String, ReplicationTask>>>,
     storage: Arc<StorageEngine>,
     repo_path: PathBuf,
     config: Cfg,
     started: bool,
+    notification_tx: UnboundedSender<NotificationCommand>,
+    notification_worker: Option<JoinHandle<()>>,
 }
 
 #[async_trait]
@@ -149,7 +159,7 @@ impl ManageReplications for ReplicationRepository {
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
         // check if replication already exists
-        if self.replications.contains_key(name) {
+        if self.replications.read().await?.contains_key(name) {
             return Err(ReductError::conflict(&format!(
                 "Replication '{}' already exists",
                 name
@@ -166,7 +176,7 @@ impl ManageReplications for ReplicationRepository {
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
         // check if replication exists and not provisioned
-        match self.replications.get(name) {
+        match self.replications.read().await?.get(name) {
             Some(replication) => {
                 if replication.is_provisioned() {
                     Err(ReductError::conflict(&format!(
@@ -189,14 +199,18 @@ impl ManageReplications for ReplicationRepository {
 
     async fn replications(&self) -> Result<Vec<ReplicationInfo>, ReductError> {
         let mut replications = Vec::new();
-        for (_, replication) in self.replications.iter() {
+        let guard = self.replications.read().await?;
+        for (_, replication) in guard.iter() {
             replications.push(replication.info().await?);
         }
         Ok(replications)
     }
 
     async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError> {
-        let replication = self.get_replication(name)?;
+        let guard = self.replications.read().await?;
+        let replication = guard.get(name).ok_or_else(|| {
+            ReductError::not_found(&format!("Replication '{}' does not exist", name))
+        })?;
         let info = FullReplicationInfo {
             info: replication.info().await?,
             settings: replication.masked_settings().clone(),
@@ -205,43 +219,84 @@ impl ManageReplications for ReplicationRepository {
         Ok(info)
     }
 
-    fn get_replication(&self, name: &str) -> Result<&ReplicationTask, ReductError> {
-        self.replications.get(name).ok_or_else(|| {
-            ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })
+    async fn get_replication_settings(
+        &self,
+        name: &str,
+    ) -> Result<ReplicationSettings, ReductError> {
+        let guard = self.replications.read().await?;
+        guard
+            .get(name)
+            .map(|replication| replication.settings().clone())
+            .ok_or_else(|| {
+                ReductError::not_found(&format!("Replication '{}' does not exist", name))
+            })
     }
 
-    fn get_mut_replication(&mut self, name: &str) -> Result<&mut ReplicationTask, ReductError> {
-        self.replications.get_mut(name).ok_or_else(|| {
+    async fn is_replication_running(&self, name: &str) -> Result<bool, ReductError> {
+        let guard = self.replications.read().await?;
+        guard
+            .get(name)
+            .map(|replication| replication.is_running())
+            .ok_or_else(|| {
+                ReductError::not_found(&format!("Replication '{}' does not exist", name))
+            })
+    }
+
+    async fn set_replication_provisioned(
+        &mut self,
+        name: &str,
+        provisioned: bool,
+    ) -> Result<(), ReductError> {
+        let mut guard = self.replications.write().await?;
+        let replication = guard.get_mut(name).ok_or_else(|| {
             ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })
+        })?;
+        replication.set_provisioned(provisioned);
+        Ok(())
     }
 
     async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError> {
-        let repl = self.get_replication(name)?;
+        let mut guard = self.replications.write().await?;
+        let repl = guard.get(name).ok_or_else(|| {
+            ReductError::not_found(&format!("Replication '{}' does not exist", name))
+        })?;
         if repl.is_provisioned() {
             return Err(ReductError::conflict(&format!(
                 "Can't remove provisioned replication '{}'",
                 name
             )));
         }
-        self.replications.remove(name);
+        let removed = guard.remove(name);
+        drop(guard);
+        if let Some(mut repl) = removed {
+            repl.stop().await;
+        }
         self.save_repo().await
     }
 
     async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
-        let replication = self.get_mut_replication(name)?;
+        let mut guard = self.replications.write().await?;
+        let replication = guard.get_mut(name).ok_or_else(|| {
+            ReductError::not_found(&format!("Replication '{}' does not exist", name))
+        })?;
         replication.set_mode(mode);
+        drop(guard);
         self.save_repo().await
     }
 
     async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
-        for (_, replication) in self.replications.iter_mut() {
-            if replication.settings().src_bucket != notification.bucket {
-                continue; // skip if the replication is not for the source bucket
-            }
-
-            let _ = replication.notify(notification.clone()).await?;
+        let should_enqueue = {
+            let guard = self.replications.read().await?;
+            guard
+                .iter()
+                .any(|(_, replication)| replication.settings().src_bucket == notification.bucket)
+        };
+        if should_enqueue {
+            self.notification_tx
+                .send(NotificationCommand::Notify(notification))
+                .map_err(|_| {
+                    ReductError::internal_server_error("Failed to enqueue replication notification")
+                })?;
         }
         Ok(())
     }
@@ -249,18 +304,63 @@ impl ManageReplications for ReplicationRepository {
     fn start(&mut self) {
         self.start_all();
     }
+
+    async fn stop(&mut self) {
+        let _ = self.notification_tx.send(NotificationCommand::Stop);
+        if let Some(worker) = self.notification_worker.take() {
+            if let Err(err) = worker.await {
+                error!("Failed to join replication notification worker: {:?}", err);
+            }
+        }
+
+        let mut guard = self.replications.write().await.unwrap();
+        for (_, task) in guard.iter_mut() {
+            task.stop().await;
+        }
+    }
 }
 
 impl ReplicationRepository {
     pub(crate) async fn load_or_create(storage: Arc<StorageEngine>, config: Cfg) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
+        let replications = Arc::new(AsyncRwLock::new(HashMap::<String, ReplicationTask>::new()));
+        let (notification_tx, mut notification_rx) = unbounded_channel::<NotificationCommand>();
+        let worker_replications = Arc::clone(&replications);
+        let notification_worker = tokio::spawn(async move {
+            while let Some(command) = notification_rx.recv().await {
+                match command {
+                    NotificationCommand::Notify(notification) => {
+                        let mut replications = match worker_replications.write().await {
+                            Ok(guard) => guard,
+                            Err(err) => {
+                                error!("Failed to lock replication map: {}", err);
+                                continue;
+                            }
+                        };
+
+                        for (_, replication) in replications.iter_mut() {
+                            if replication.settings().src_bucket != notification.bucket {
+                                continue;
+                            }
+
+                            if let Err(err) = replication.notify(notification.clone()).await {
+                                error!("Failed to notify replication task: {}", err);
+                            }
+                        }
+                    }
+                    NotificationCommand::Stop => break,
+                }
+            }
+        });
 
         let mut repo = Self {
-            replications: HashMap::new(),
+            replications,
             storage,
             repo_path,
             config,
             started: false,
+            notification_tx,
+            notification_worker: Some(notification_worker),
         };
 
         let read_conf_file = async || {
@@ -302,9 +402,9 @@ impl ReplicationRepository {
     }
 
     async fn save_repo(&self) -> Result<(), ReductError> {
+        let replications = self.replications.read().await?;
         let proto_repo = ProtoReplicationRepo {
-            replications: self
-                .replications
+            replications: replications
                 .iter()
                 .map(|(name, replication)| Item {
                     name: name.clone(),
@@ -388,13 +488,18 @@ impl ReplicationRepository {
         }
 
         // remove old replication because before creating new one
-        let removed = self.replications.remove(name);
+        let mut removed = self.replications.write().await?.remove(name);
 
         // we keep the old token if the new one is empty (meaning not updated)
-        let init_token = settings
-            .dst_token
-            .clone()
-            .or_else(|| removed.and_then(|r| r.settings().dst_token.clone()));
+        let init_token = settings.dst_token.clone().or_else(|| {
+            removed
+                .as_ref()
+                .and_then(|r| r.settings().dst_token.clone())
+        });
+
+        if let Some(mut old) = removed.take() {
+            old.stop().await;
+        }
 
         let mut settings = settings;
         settings.dst_token = init_token;
@@ -405,7 +510,10 @@ impl ReplicationRepository {
         if self.started {
             replication.start();
         }
-        self.replications.insert(name.to_string(), replication);
+        self.replications
+            .write()
+            .await?
+            .insert(name.to_string(), replication);
         self.save_repo().await
     }
 }
@@ -416,8 +524,24 @@ impl ReplicationRepository {
             return;
         }
 
-        for (_, task) in self.replications.iter_mut() {
-            task.start();
+        if let Some(mut replications) = self.replications.try_write() {
+            for (_, task) in replications.iter_mut() {
+                task.start();
+            }
+        } else {
+            let replications = Arc::clone(&self.replications);
+            tokio::spawn(async move {
+                let mut replications = match replications.write().await {
+                    Ok(guard) => guard,
+                    Err(err) => {
+                        error!("Failed to lock replication map: {}", err);
+                        return;
+                    }
+                };
+                for (_, task) in replications.iter_mut() {
+                    task.start();
+                }
+            });
         }
         self.started = true;
     }
@@ -426,10 +550,12 @@ impl ReplicationRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::sync::{reset_rwlock_config, set_rwlock_timeout};
     use crate::replication::Transaction::WriteRecord;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::{conflict, Labels};
+    use reduct_base::{conflict, internal_server_error, not_found, Labels};
     use rstest::*;
+    use serial_test::serial;
     use tokio::time::{sleep, Duration};
 
     mod create {
@@ -449,8 +575,8 @@ mod tests {
             assert_eq!(repls.len(), 1);
             assert_eq!(repls[0].name, "test");
             assert_eq!(
-                repo.get_replication("test").unwrap().settings(),
-                &settings,
+                repo.get_replication_settings("test").await.unwrap(),
+                settings,
                 "Should create replication with the same name and settings"
             );
         }
@@ -564,8 +690,8 @@ mod tests {
                 ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
             assert_eq!(repo.replications().await.unwrap().len(), 1);
             assert_eq!(
-                repo.get_replication("test").unwrap().settings(),
-                &settings,
+                repo.get_replication_settings("test").await.unwrap(),
+                settings,
                 "Should load replication from file"
             );
         }
@@ -590,8 +716,8 @@ mod tests {
                 .await
                 .unwrap();
 
-            let replication = repo.get_replication("test").unwrap();
-            assert_eq!(replication.settings().dst_bucket, "bucket-3");
+            let replication = repo.get_replication_settings("test").await.unwrap();
+            assert_eq!(replication.dst_bucket, "bucket-3");
         }
 
         #[rstest]
@@ -605,8 +731,9 @@ mod tests {
                 .await
                 .unwrap();
 
-            let replication = repo.get_mut_replication("test").unwrap();
-            replication.set_provisioned(true);
+            repo.set_replication_provisioned("test", true)
+                .await
+                .unwrap();
 
             assert_eq!(
                 repo.update_replication("test", settings).await,
@@ -722,7 +849,28 @@ mod tests {
                 "Should not update replication with invalid when condition"
             );
 
-            assert!(repo.get_replication("test").is_ok(), "Was not removed");
+            assert!(repo.get_info("test").await.is_ok(), "Was not removed");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_update_replication_keep_dst_token_if_not_set(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
+
+            let mut updated = settings;
+            updated.dst_bucket = "bucket-3".to_string();
+            updated.dst_token = None;
+            repo.update_replication("test", updated).await.unwrap();
+
+            let replication = repo.get_replication_settings("test").await.unwrap();
+            assert_eq!(replication.dst_bucket, "bucket-3");
+            assert_eq!(replication.dst_token, Some("token".to_string()));
         }
     }
 
@@ -776,8 +924,9 @@ mod tests {
                 .await
                 .unwrap();
 
-            let replication = repo.get_mut_replication("test").unwrap();
-            replication.set_provisioned(true);
+            repo.set_replication_provisioned("test", true)
+                .await
+                .unwrap();
 
             assert_eq!(
                 repo.remove_replication("test").await,
@@ -802,8 +951,7 @@ mod tests {
                 .await
                 .unwrap();
             {
-                let repl = repo.get_mut_replication("test").unwrap();
-                repl.notify(TransactionNotification {
+                repo.notify(TransactionNotification {
                     bucket: "bucket-1".to_string(),
                     entry: "entry-1".to_string(),
                     meta: RecordMeta::builder().build(),
@@ -815,10 +963,8 @@ mod tests {
             }
 
             let info = repo.get_info("test").await.unwrap();
-            let repl = repo.get_replication("test").unwrap();
-            assert_eq!(info.settings, repl.masked_settings().clone());
-            assert_eq!(info.info, repl.info().await.unwrap());
-            assert_eq!(info.diagnostics, repl.diagnostics().await.unwrap());
+            assert_eq!(info.settings.src_bucket, settings.src_bucket);
+            assert_eq!(info.info.name, "test");
         }
 
         #[rstest]
@@ -830,6 +976,16 @@ mod tests {
                 Some(not_found!("Replication 'test-2' does not exist")),
                 "Should not get non existing replication"
             );
+            assert_eq!(
+                repo.get_replication_settings("test-2").await.err(),
+                Some(not_found!("Replication 'test-2' does not exist")),
+                "Should not get settings for non existing replication"
+            );
+            assert_eq!(
+                repo.is_replication_running("test-2").await.err(),
+                Some(not_found!("Replication 'test-2' does not exist")),
+                "Should not get running state for non existing replication"
+            );
         }
 
         #[rstest]
@@ -837,7 +993,7 @@ mod tests {
         async fn test_get_mut_non_existing_replication(#[future] mut repo: ReplicationRepository) {
             let mut repo = repo.await;
             assert_eq!(
-                repo.get_mut_replication("test-2").err(),
+                repo.set_replication_provisioned("test-2", true).await.err(),
                 Some(not_found!("Replication 'test-2' does not exist")),
                 "Should not get non existing replication"
             );
@@ -847,6 +1003,7 @@ mod tests {
     mod notify {
         use super::*;
         use reduct_base::io::RecordMeta;
+        use tokio::time::{sleep, Duration};
 
         #[rstest]
         #[tokio::test]
@@ -867,8 +1024,8 @@ mod tests {
             };
 
             repo.notify(notification.clone()).await.unwrap();
-            let repl = repo.get_replication("test").unwrap();
-            assert_eq!(repl.info().await.unwrap().pending_records, 1);
+            sleep(Duration::from_millis(50)).await;
+            assert_eq!(repo.get_info("test").await.unwrap().info.pending_records, 1);
         }
 
         #[rstest]
@@ -890,12 +1047,111 @@ mod tests {
             };
 
             repo.notify(notification).await.unwrap();
-            let repl = repo.get_replication("test").unwrap();
+            sleep(Duration::from_millis(50)).await;
             assert_eq!(
-                repl.info().await.unwrap().pending_records,
+                repo.get_info("test").await.unwrap().info.pending_records,
                 0,
                 "Should not notify replication for wrong bucket"
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_notify_after_stop_returns_error(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test", settings).await.unwrap();
+            repo.stop().await;
+
+            let notification = TransactionNotification {
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            };
+
+            assert_eq!(
+                repo.notify(notification).await.err(),
+                Some(internal_server_error!(
+                    "Failed to enqueue replication notification"
+                ))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_notify_skips_non_matching_replications(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            let mut settings_1 = settings.clone();
+            settings_1.src_bucket = "bucket-1".to_string();
+            repo.create_replication("test-1", settings_1).await.unwrap();
+
+            repo.storage
+                .create_bucket("bucket-2", BucketSettings::default())
+                .await
+                .unwrap();
+            let mut settings_2 = settings;
+            settings_2.src_bucket = "bucket-2".to_string();
+            settings_2.dst_bucket = "bucket-1".to_string();
+            repo.create_replication("test-2", settings_2).await.unwrap();
+
+            let notification = TransactionNotification {
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            };
+
+            repo.notify(notification).await.unwrap();
+            sleep(Duration::from_millis(50)).await;
+            assert_eq!(
+                repo.get_info("test-1").await.unwrap().info.pending_records,
+                1
+            );
+            assert_eq!(
+                repo.get_info("test-2").await.unwrap().info.pending_records,
+                0
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        #[serial]
+        async fn test_notify_worker_lock_timeout(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            struct ResetGuard;
+            impl Drop for ResetGuard {
+                fn drop(&mut self) {
+                    reset_rwlock_config();
+                }
+            }
+            let _reset = ResetGuard;
+
+            let mut repo = repo.await;
+            repo.create_replication("test", settings).await.unwrap();
+
+            set_rwlock_timeout(Duration::from_millis(20));
+            let replications = Arc::clone(&repo.replications);
+            let guard = replications.read().await.unwrap();
+
+            let notification = TransactionNotification {
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            };
+            repo.notify(notification).await.unwrap();
+            sleep(Duration::from_millis(50)).await;
+            drop(guard);
+
+            assert_eq!(repo.get_info("test").await.unwrap().info.pending_records, 0);
         }
     }
 
@@ -917,12 +1173,14 @@ mod tests {
                 .unwrap();
 
             repo.start();
-
-            let repl1 = repo.get_replication("test-1").unwrap();
-            let repl2 = repo.get_replication("test-2").unwrap();
-
-            assert!(repl1.is_running(), "Replication 'test-1' should be running");
-            assert!(repl2.is_running(), "Replication 'test-2' should be running");
+            assert!(
+                repo.is_replication_running("test-1").await.unwrap(),
+                "Replication 'test-1' should be running"
+            );
+            assert!(
+                repo.is_replication_running("test-2").await.unwrap(),
+                "Replication 'test-2' should be running"
+            );
         }
 
         #[rstest]
@@ -939,9 +1197,60 @@ mod tests {
             repo.start();
             repo.start(); // second start should have no effect
 
-            let repl1 = repo.get_replication("test-1").unwrap();
+            assert!(
+                repo.is_replication_running("test-1").await.unwrap(),
+                "Replication 'test-1' should be running"
+            );
+        }
 
-            assert!(repl1.is_running(), "Replication 'test-1' should be running");
+        #[rstest]
+        #[tokio::test]
+        async fn test_start_all_when_lock_contended(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let mut repo = repo.await;
+            repo.create_replication("test-1", settings.clone())
+                .await
+                .unwrap();
+            repo.create_replication("test-2", settings).await.unwrap();
+
+            let replications = Arc::clone(&repo.replications);
+            let guard = replications.write().await.unwrap();
+            repo.start();
+            drop(guard);
+            sleep(Duration::from_millis(50)).await;
+
+            assert!(repo.is_replication_running("test-1").await.unwrap());
+            assert!(repo.is_replication_running("test-2").await.unwrap());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        #[serial]
+        async fn test_start_all_lock_timeout(
+            #[future] mut repo: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            struct ResetGuard;
+            impl Drop for ResetGuard {
+                fn drop(&mut self) {
+                    reset_rwlock_config();
+                }
+            }
+            let _reset = ResetGuard;
+
+            let mut repo = repo.await;
+            repo.create_replication("test-1", settings).await.unwrap();
+
+            set_rwlock_timeout(Duration::from_millis(20));
+            let replications = Arc::clone(&repo.replications);
+            let guard = replications.read().await.unwrap();
+            repo.start();
+            sleep(Duration::from_millis(50)).await;
+            drop(guard);
+
+            assert!(!repo.is_replication_running("test-1").await.unwrap());
         }
     }
 
@@ -963,8 +1272,18 @@ mod tests {
                 .unwrap();
 
             assert_eq!(
-                repo.get_replication("test-1").unwrap().mode(),
+                repo.get_info("test-1").await.unwrap().info.mode,
                 ReplicationMode::Paused
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_set_mode_non_existing(#[future] mut repo: ReplicationRepository) {
+            let mut repo = repo.await;
+            assert_eq!(
+                repo.set_mode("test-1", ReplicationMode::Paused).await,
+                Err(not_found!("Replication 'test-1' does not exist"))
             );
         }
     }

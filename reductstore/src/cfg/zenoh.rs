@@ -1,7 +1,7 @@
 // Copyright 2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::cfg::CfgParser;
+use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use std::fmt::{Display, Formatter};
 
@@ -66,7 +66,7 @@ impl Display for ZenohApiConfig {
     }
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_zenoh_api_config(env: &mut Env<EnvGetter>) -> ZenohApiConfig {
         ZenohApiConfig {
             enabled: parse_bool(env.get_optional::<String>("RS_ZENOH_ENABLED"), false),

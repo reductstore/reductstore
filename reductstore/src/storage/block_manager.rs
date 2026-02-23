@@ -101,6 +101,15 @@ impl BlockManager {
         Ok(())
     }
 
+    pub async fn save_cache_metadata_on_disk(&mut self) -> Result<(), ReductError> {
+        let blocks = self.block_cache.write_values();
+        for block in blocks {
+            self.save_meta_on_disk(block).await?;
+        }
+
+        Ok(())
+    }
+
     pub async fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
         self.update_and_get_index().await?;
 
@@ -119,6 +128,17 @@ impl BlockManager {
         };
 
         self.load_block(id).await
+    }
+
+    pub fn find_cached_block(&self, start: u64) -> Option<BlockRef> {
+        let start_block_id = self.block_index.tree().range(start..).next();
+        let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
+            *start_block_id.unwrap()
+        } else {
+            *self.block_index.tree().range(..start).rev().next()?
+        };
+
+        self.block_cache.get_read(&id)
     }
 
     pub async fn load_block(&mut self, block_id: u64) -> Result<BlockRef, ReductError> {

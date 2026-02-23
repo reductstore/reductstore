@@ -1,7 +1,6 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::replication::replication_task::ReplicationTask;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
@@ -116,11 +115,21 @@ pub trait ManageReplications {
     /// Get replication information.
     async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError>;
 
-    /// Get replication task.
-    fn get_replication(&self, name: &str) -> Result<&ReplicationTask, ReductError>;
+    /// Get replication settings.
+    async fn get_replication_settings(
+        &self,
+        name: &str,
+    ) -> Result<ReplicationSettings, ReductError>;
 
-    /// Get mutable replication task.
-    fn get_mut_replication(&mut self, name: &str) -> Result<&mut ReplicationTask, ReductError>;
+    /// Check if replication worker is running.
+    async fn is_replication_running(&self, name: &str) -> Result<bool, ReductError>;
+
+    /// Mark replication as provisioned/unprovisioned.
+    async fn set_replication_provisioned(
+        &mut self,
+        name: &str,
+        provisioned: bool,
+    ) -> Result<(), ReductError>;
 
     /// Remove a replication task
     async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
@@ -141,6 +150,9 @@ pub trait ManageReplications {
 
     /// Start background workers if they are not running yet.
     fn start(&mut self);
+
+    /// Stop background workers and wait until they finish.
+    async fn stop(&mut self);
 }
 
 pub(crate) use replication_repository::ReplicationRepoBuilder;

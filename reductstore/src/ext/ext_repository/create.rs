@@ -1,14 +1,13 @@
 // Copyright 2025 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::asset::asset_manager::ManageStaticAsset;
 use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::{BoxedManageExtensions, ExtRepository, ManageExtensions};
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
-use reduct_base::ext::ExtSettings;
+use reduct_base::ext::{ExtSettings, IoExtension};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::no_content;
@@ -17,26 +16,20 @@ use std::sync::Arc;
 
 pub fn create_ext_repository(
     external_path: Option<PathBuf>,
-    embedded_extensions: Vec<Box<dyn ManageStaticAsset + Sync + Send>>,
+    static_extensions: Vec<Box<dyn IoExtension + Send + Sync>>,
     settings: ExtSettings,
     io_config: IoConfig,
 ) -> Result<BoxedManageExtensions, ReductError> {
-    if external_path.is_some() || !embedded_extensions.is_empty() {
-        let mut paths = if let Some(path) = external_path {
+    if external_path.is_some() || !static_extensions.is_empty() {
+        let paths = if let Some(path) = external_path {
             vec![path]
         } else {
             Vec::new()
         };
 
-        for embedded in &embedded_extensions {
-            if let Ok(path) = embedded.absolut_path("") {
-                paths.push(path);
-            }
-        }
-
         Ok(Box::new(ExtRepository::try_load(
             paths,
-            embedded_extensions,
+            static_extensions,
             settings,
             io_config,
         )?))

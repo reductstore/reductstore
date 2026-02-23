@@ -1,7 +1,6 @@
 // Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
@@ -44,12 +43,27 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         Err(forbidden!("Cannot get replication info in read-only mode"))
     }
 
-    fn get_replication(&self, _name: &str) -> Result<&ReplicationTask, ReductError> {
+    async fn get_replication_settings(
+        &self,
+        _name: &str,
+    ) -> Result<ReplicationSettings, ReductError> {
+        Err(forbidden!(
+            "Cannot get replication settings in read-only mode"
+        ))
+    }
+
+    async fn is_replication_running(&self, _name: &str) -> Result<bool, ReductError> {
         Err(forbidden!("Cannot get replication in read-only mode"))
     }
 
-    fn get_mut_replication(&mut self, _name: &str) -> Result<&mut ReplicationTask, ReductError> {
-        Err(forbidden!("Cannot get replication in read-only mode"))
+    async fn set_replication_provisioned(
+        &mut self,
+        _name: &str,
+        _provisioned: bool,
+    ) -> Result<(), ReductError> {
+        Err(forbidden!(
+            "Cannot set replication provisioned state in read-only mode"
+        ))
     }
 
     async fn remove_replication(&mut self, _name: &str) -> Result<(), ReductError> {
@@ -67,6 +81,10 @@ impl ManageReplications for ReadOnlyReplicationRepository {
     }
 
     fn start(&mut self) {
+        // No-op
+    }
+
+    async fn stop(&mut self) {
         // No-op
     }
 }
@@ -136,8 +154,19 @@ mod tests {
     mod get_replication {
         use super::*;
         #[rstest]
-        fn test_get_replication_forbidden(repo: ReadOnlyReplicationRepository) {
-            let err = repo.get_replication("test").err().unwrap();
+        #[tokio::test]
+        async fn test_get_replication_settings_forbidden(repo: ReadOnlyReplicationRepository) {
+            let err = repo.get_replication_settings("test").await.err().unwrap();
+            assert_eq!(
+                err,
+                forbidden!("Cannot get replication settings in read-only mode")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_replication_forbidden(repo: ReadOnlyReplicationRepository) {
+            let err = repo.is_replication_running("test").await.err().unwrap();
             assert_eq!(err, forbidden!("Cannot get replication in read-only mode"));
         }
     }
@@ -145,9 +174,17 @@ mod tests {
     mod get_mut_replication {
         use super::*;
         #[rstest]
-        fn test_get_mut_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
-            let err = repo.get_mut_replication("test").err().unwrap();
-            assert_eq!(err, forbidden!("Cannot get replication in read-only mode"));
+        #[tokio::test]
+        async fn test_get_mut_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
+            let err = repo
+                .set_replication_provisioned("test", true)
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(
+                err,
+                forbidden!("Cannot set replication provisioned state in read-only mode")
+            );
         }
     }
 

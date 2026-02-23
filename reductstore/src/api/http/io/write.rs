@@ -367,6 +367,7 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use reduct_base::io::WriteRecord;
+    use reduct_base::msg::replication_api::ReplicationMode;
     use reduct_base::Labels;
     use rstest::rstest;
     use std::sync::{Arc as StdArc, Mutex};
@@ -381,6 +382,14 @@ mod tests {
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
+        components
+            .replication_repo
+            .write()
+            .await
+            .unwrap()
+            .set_mode("api-test", ReplicationMode::Paused)
+            .await
+            .unwrap();
         headers.insert("content-length", HeaderValue::from_static("10"));
         headers.insert(
             "x-reduct-entries",
@@ -452,15 +461,24 @@ mod tests {
             assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("d")));
         }
 
-        let info = components
-            .replication_repo
-            .read()
-            .await
-            .unwrap()
-            .get_info("api-test")
-            .await
-            .unwrap();
-        assert_eq!(info.info.pending_records, 4);
+        let mut pending_records = 0;
+        for _ in 0..20 {
+            pending_records = components
+                .replication_repo
+                .read()
+                .await
+                .unwrap()
+                .get_info("api-test")
+                .await
+                .unwrap()
+                .info
+                .pending_records;
+            if pending_records == 4 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(pending_records, 4);
     }
 
     #[rstest]

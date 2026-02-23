@@ -463,24 +463,25 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        #[should_panic(expected = "not implemented")]
         fn test_seek_unimplemented(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
             let (records, _) = records;
-            records
+            let err = records
                 .into_iter()
                 .next()
                 .unwrap()
                 .seek(SeekFrom::Start(0))
-                .unwrap();
+                .unwrap_err();
+
+            assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
         }
 
         #[rstest]
-        #[should_panic(expected = "not implemented")]
         fn test_read_unimplemented(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
             let (records, _) = records;
             let mut record = records.into_iter().next().unwrap();
             let mut buf = [0; 10];
-            let _ = record.read(&mut buf);
+            let err = record.read(&mut buf).unwrap_err();
+            assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
         }
     }
 
@@ -503,13 +504,19 @@ pub(super) mod tests {
 
     impl Read for MockRecordReader {
         fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
-            unimplemented!()
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "not implemented",
+            ))
         }
     }
 
     impl Seek for MockRecordReader {
         fn seek(&mut self, _pos: SeekFrom) -> std::io::Result<u64> {
-            unimplemented!()
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "not implemented",
+            ))
         }
     }
 

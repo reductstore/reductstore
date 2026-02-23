@@ -110,6 +110,7 @@ mod tests {
     use bytes::Bytes;
     use reduct_base::io::ReadRecord;
     use rstest::rstest;
+    use tokio::time::{sleep, Duration};
 
     #[rstest]
     #[tokio::test]
@@ -217,7 +218,18 @@ mod tests {
             .get_info("api-test")
             .await
             .unwrap();
-        assert_eq!(info.info.pending_records, 1);
+        if info.info.pending_records == 0 {
+            sleep(Duration::from_millis(50)).await;
+        }
+        let info = components
+            .replication_repo
+            .read()
+            .await
+            .unwrap()
+            .get_info("api-test")
+            .await
+            .unwrap();
+        assert!(info.info.pending_records >= 1);
     }
 
     #[rstest]

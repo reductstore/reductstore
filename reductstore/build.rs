@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use reqwest::blocking::get;
-use reqwest::{blocking::Client, StatusCode, Url};
+use reqwest::StatusCode;
 use std::path::Path;
 use std::time::SystemTime;
 use std::{env, fs};
@@ -26,12 +26,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     #[cfg(feature = "web-console")]
     download_web_console("v1.13.0");
-
-    #[cfg(feature = "select-ext")]
-    download_ext("select-ext", "v0.7.0");
-
-    #[cfg(feature = "ros-ext")]
-    download_ext("ros-ext", "v0.5.2");
 
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
@@ -71,42 +65,4 @@ fn download_web_console(version: &str) {
     }
     fs::write(console_path, resp.bytes().unwrap()).expect("Failed to write console.zip");
     fs::copy(console_path, format!("{}/console.zip", out_dir)).expect("Failed to copy console.zip");
-}
-
-#[allow(dead_code)]
-fn download_ext(name: &str, version: &str) {
-    let artifacts_host_url =
-        Url::parse("https://reductsoft.z6.web.core.windows.net/").expect("Failed to parse SAS URL");
-
-    let target = env::var("TARGET").unwrap();
-    let out_dir = env::var("OUT_DIR").unwrap();
-
-    let ext_path = &format!("{}/{}-{}.zip", out_dir.clone(), name, version);
-    if Path::exists(Path::new(ext_path)) {
-        return;
-    }
-
-    println!("Downloading {}...", name);
-    let mut ext_url = artifacts_host_url
-        .join(&format!(
-            "/{}/{}/{}.zip/{}.zip",
-            name, version, target, target
-        ))
-        .expect("Failed to create URL");
-    ext_url.set_query(artifacts_host_url.query());
-
-    let client = Client::builder().user_agent("ReductStore").build().unwrap();
-    let resp = client
-        .get(ext_url)
-        .send()
-        .expect(format!("Failed to download {}.zip", name).as_str());
-    if resp.status() != StatusCode::OK {
-        panic!("Failed to download {}: {}", name, resp.status());
-    }
-
-    println!("Writing {}.zip...", ext_path);
-
-    fs::write(ext_path, resp.bytes().unwrap())
-        .expect(format!("Failed to write {}.zip", name).as_str());
-    fs::copy(ext_path, format!("{}/{}.zip", out_dir, name)).expect("Failed to copy extension");
 }

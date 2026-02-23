@@ -69,8 +69,14 @@ mod tests {
         .await
         .unwrap();
 
-        let repo = components.replication_repo.read().await.unwrap();
-        let repl = repo.get_replication("test").unwrap();
-        assert_eq!(repl.mode(), ReplicationMode::Paused);
+        let info = components
+            .replication_repo
+            .read()
+            .await
+            .unwrap()
+            .get_info("test")
+            .await
+            .unwrap();
+        assert_eq!(info.info.mode, ReplicationMode::Paused);
     }
 }

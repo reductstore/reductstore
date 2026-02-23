@@ -318,6 +318,15 @@ impl ReplicationTask {
         self.worker_handle = Some(handle);
     }
 
+    pub async fn stop(&mut self) {
+        self.stop_flag.store(true, Ordering::Relaxed);
+        if let Some(handle) = self.worker_handle.take() {
+            if let Err(err) = handle.await {
+                error!("Replication worker task failed to join: {:?}", err);
+            }
+        }
+    }
+
     pub async fn notify(
         &mut self,
         notification: TransactionNotification,
@@ -407,10 +416,6 @@ impl ReplicationTask {
         self.mode.store(mode as u8, Ordering::Relaxed);
     }
 
-    pub fn mode(&self) -> ReplicationMode {
-        self.load_mode()
-    }
-
     pub fn is_running(&self) -> bool {
         self.worker_handle.is_some()
     }
@@ -474,8 +479,7 @@ impl Drop for ReplicationTask {
     fn drop(&mut self) {
         self.stop_flag.store(true, Ordering::Relaxed);
         if let Some(handle) = self.worker_handle.take() {
-            // Use recv() without unwrap to avoid panic if the channel is disconnected
-            // (e.g., during test cleanup or thread pool shutdown)
+            // We can't block in Drop, so join on a detached task as best effort fallback.
             tokio::spawn(async move {
                 if let Err(err) = handle.await {
                     error!("Replication worker task failed to join: {:?}", err);
@@ -611,7 +615,10 @@ mod tests {
         remote_bucket
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
-        remote_bucket.expect_is_active().return_const(true);
+        remote_bucket
+            .expect_is_active()
+            .times(0..)
+            .returning(|| false);
         let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
 
         notification.entry = "new_entry".to_string();
@@ -784,20 +791,17 @@ mod tests {
     #[tokio::test]
     async fn test_replication_filter_each_entry(
         mut notification: TransactionNotification,
-        mut remote_bucket: MockRmBucket,
+        remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
         path: PathBuf,
     ) {
-        remote_bucket
-            .expect_write_batch()
-            .returning(|_, _| Ok(ErrorRecordMap::new()));
-
         let settings = ReplicationSettings {
             each_n: Some(2),
             ..settings
         };
 
-        let mut replication = build_replication(path, MockRmBucket::new(), settings.clone()).await;
+        let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
+        replication.stop().await;
 
         let mut time = 10;
         for entry in &["test1", "test2"] {
@@ -808,7 +812,6 @@ mod tests {
                 time += 10;
             }
         }
-
         assert_eq!(replication.log_map.read().await.unwrap().len(), 2);
         assert_eq!(
             get_entries_from_transaction_log(&mut replication, "test1").await,
@@ -909,6 +912,12 @@ mod tests {
         let path = tempfile::tempdir().unwrap().keep();
         let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
         replication.notify(notification.clone()).await.unwrap();
+        for _ in 0..20 {
+            if replication.info().await.unwrap().pending_records == 1 {
+                break;
+            }
+            tokio_sleep(Duration::from_millis(10)).await;
+        }
         {
             let _lock = replication.log_map.write().await.unwrap();
             tokio_sleep(rwlock_timeout() + Duration::from_millis(100)).await;

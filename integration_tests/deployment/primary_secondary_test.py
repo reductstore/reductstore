@@ -47,6 +47,20 @@ def _docker_try(*args):
 
 
 def _remove_lock_file():
+    data_volume = os.getenv("DATA_VOLUME")
+    if data_volume:
+        _docker_try(
+            "run",
+            "--rm",
+            "-v",
+            f"{data_volume}:/data",
+            "busybox",
+            "rm",
+            "-f",
+            "/data/.lock",
+        )
+        return
+
     data_path = os.getenv("DATA_PATH")
     if data_path:
         lock_path = os.path.join(data_path, ".lock")
