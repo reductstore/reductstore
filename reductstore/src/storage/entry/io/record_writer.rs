@@ -489,6 +489,8 @@ mod tests {
             let manager = BlockManager::build(
                 path.clone(),
                 BlockIndex::new(path.clone()),
+                "bucket".to_string(),
+                "entry".to_string(),
                 Cfg::default().into(),
             )
             .await;
