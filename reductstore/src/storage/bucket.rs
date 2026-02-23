@@ -131,7 +131,7 @@ impl Bucket {
                     .strip_prefix(&path)
                     .unwrap_or(entry_path.as_path()),
             );
-            let handler = Entry::restore_with_names(
+            let handler = Entry::restore(
                 entry_path,
                 entry_name,
                 bucket_name.clone(),
@@ -361,7 +361,7 @@ impl Bucket {
         folder_keeper.rename_folder(old_name, new_name).await?;
         entries.write().await?.remove(old_name);
 
-        if let Some(entry) = Entry::restore_with_names(
+        if let Some(entry) = Entry::restore(
             new_path,
             new_name.to_string(),
             bucket_name.clone(),
@@ -511,14 +511,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_or_create_entry_reserved_wal_name(#[future] bucket: Arc<Bucket>) {
+        async fn test_get_or_create_entry_with_wal_segment(#[future] bucket: Arc<Bucket>) {
             let bucket = bucket.await;
-            assert_eq!(
-                bucket.get_or_create_entry("test/wal").await.err(),
-                Some(unprocessable_entity!(
-                    "Entry path segment 'wal' is reserved"
-                ))
-            );
+            let entry = bucket.get_or_create_entry("test/wal").await.unwrap();
+            assert_eq!(entry.upgrade().unwrap().name(), "test/wal");
         }
     }
 
@@ -588,13 +584,20 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rename_reserved_wal_name(#[future] bucket: Arc<Bucket>) {
+        async fn test_rename_with_wal_segment(#[future] bucket: Arc<Bucket>) {
             let bucket = bucket.await;
+            write(&bucket, "test/a", 1, b"test").await.unwrap();
+            bucket.rename_entry("test/a", "test/wal").await.unwrap();
+            assert_eq!(bucket.get_entry("test/a").await.is_err(), true);
             assert_eq!(
-                bucket.rename_entry("test-1", "test/wal").await.err(),
-                Some(unprocessable_entity!(
-                    "Entry path segment 'wal' is reserved"
-                ))
+                bucket
+                    .get_entry("test/wal")
+                    .await
+                    .unwrap()
+                    .upgrade()
+                    .unwrap()
+                    .name(),
+                "test/wal"
             );
         }
 

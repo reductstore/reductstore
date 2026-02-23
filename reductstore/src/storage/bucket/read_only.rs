@@ -57,7 +57,7 @@ impl ReadOnlyMode for Bucket {
                     .strip_prefix(self.path())
                     .unwrap_or(entry_path.as_path()),
             );
-            let handler = Entry::restore_with_names(
+            let handler = Entry::restore(
                 entry_path,
                 entry_name,
                 self.name().to_string(),

@@ -228,7 +228,7 @@ impl FolderKeeper {
                     let skip_dir = item
                         .file_name()
                         .and_then(|n| n.to_str())
-                        .is_some_and(|name| name.starts_with('.') || name == "wal");
+                        .is_some_and(|name| name.starts_with('.'));
                     if !skip_dir {
                         child_dirs.push(item);
                     }
@@ -392,10 +392,16 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn ignores_wal_directories_for_filesystem_backend(#[future] path: PathBuf) {
+    async fn ignores_dot_wal_but_not_regular_wal_dirs_for_filesystem_backend(
+        #[future] path: PathBuf,
+    ) {
         let path = path.await;
         let base_path = path.join("fs_bucket_ignore_wal");
         FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+        FILE_CACHE
+            .create_dir_all(&base_path.join("entry").join(".wal"))
+            .await
+            .unwrap();
         FILE_CACHE
             .create_dir_all(&base_path.join("entry").join("wal"))
             .await
@@ -408,8 +414,12 @@ mod tests {
         let folders = keeper.list_folders().await.unwrap();
 
         assert!(
-            !folders.iter().any(|path| path.ends_with("entry/wal")),
-            "Should ignore internal wal directory"
+            !folders.iter().any(|path| path.ends_with("entry/.wal")),
+            "Should ignore internal .wal directory"
+        );
+        assert!(
+            folders.iter().any(|path| path.ends_with("entry/wal")),
+            "Regular wal directory is not reserved and should be discoverable"
         );
     }
 

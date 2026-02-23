@@ -229,7 +229,7 @@ impl EntryLoader {
             bucket_name: bucket_name.clone(),
             settings: AsyncRwLock::new(options),
             block_manager: Arc::new(AsyncRwLock::new(
-                BlockManager::build_with_names(
+                BlockManager::build(
                     path.clone(),
                     block_index,
                     bucket_name.clone(),
@@ -260,7 +260,7 @@ impl EntryLoader {
             bucket_name: bucket_name.clone(),
             settings: AsyncRwLock::new(options),
             block_manager: Arc::new(AsyncRwLock::new(
-                BlockManager::build_with_names(
+                BlockManager::build(
                     path.clone(),
                     block_index,
                     bucket_name.clone(),
@@ -554,7 +554,7 @@ mod tests {
         let path = path.join("entry");
         FILE_CACHE.create_dir_all(&path).await.unwrap();
 
-        let mut block_manager = BlockManager::build_with_names(
+        let mut block_manager = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
             "bucket".to_string(),
@@ -619,7 +619,7 @@ mod tests {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))
             .await
             .unwrap();
-        let mut block_manager = BlockManager::build_with_names(
+        let mut block_manager = BlockManager::build(
             path.clone(),
             block_index,
             "bucket".to_string(),

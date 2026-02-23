@@ -394,12 +394,6 @@ pub(super) fn check_entry_name_convention(name: &str) -> Result<(), ReductError>
             "Entry name can contain only letters, digests and [-,_,/] symbols",
         ));
     }
-
-    if name.split('/').any(|segment| segment == "wal") {
-        return Err(unprocessable_entity!(
-            "Entry path segment 'wal' is reserved",
-        ));
-    }
     Ok(())
 }
 

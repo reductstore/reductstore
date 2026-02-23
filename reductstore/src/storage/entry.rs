@@ -83,7 +83,7 @@ impl Entry {
             bucket_name: bucket_name.clone(),
             settings: AsyncRwLock::new(settings),
             block_manager: Arc::new(AsyncRwLock::new(
-                BlockManager::build_with_names(
+                BlockManager::build(
                     path.clone(),
                     BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
                     bucket_name.clone(),
@@ -99,25 +99,7 @@ impl Entry {
         })
     }
 
-    #[allow(dead_code)]
     pub(crate) async fn restore(
-        path: PathBuf,
-        options: EntrySettings,
-        cfg: Arc<Cfg>,
-    ) -> Result<Option<Entry>, ReductError> {
-        let entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let bucket_name = path
-            .parent()
-            .unwrap()
-            .file_name()
-            .unwrap()
-            .to_str()
-            .unwrap()
-            .to_string();
-        Self::restore_with_names(path, entry_name, bucket_name, options, cfg).await
-    }
-
-    pub(crate) async fn restore_with_names(
         path: PathBuf,
         entry_name: String,
         bucket_name: String,
@@ -461,6 +443,8 @@ mod tests {
             bm.save_cache_on_disk().await.unwrap();
             let entry = Entry::restore(
                 path.join(entry.name()),
+                "entry".to_string(),
+                "bucket".to_string(),
                 entry_settings,
                 Cfg::default().into(),
             )

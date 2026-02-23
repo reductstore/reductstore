@@ -65,7 +65,7 @@ impl BlockManager {
     /// * `bucket` - Bucket name.
     /// * `entry` - Full entry name.
     /// * `cfg` - Configuration.
-    pub(crate) async fn build_with_names(
+    pub(crate) async fn build(
         path: PathBuf,
         index: BlockIndex,
         bucket: String,
@@ -731,7 +731,7 @@ mod tests {
             let path = tempdir().unwrap().keep().join("bucket").join("entry");
             let mut cfg = Cfg::default();
             cfg.role = InstanceRole::Replica;
-            let block_manager = BlockManager::build_with_names(
+            let block_manager = BlockManager::build(
                 path.clone(),
                 BlockIndex::new(path.clone()),
                 "bucket".to_string(),
@@ -747,7 +747,7 @@ mod tests {
         async fn test_sync_data_block_ok_for_missing_path() {
             let path = tempdir().unwrap().keep().join("bucket").join("entry");
             let cfg = Cfg::default();
-            let block_manager = BlockManager::build_with_names(
+            let block_manager = BlockManager::build(
                 path.clone(),
                 BlockIndex::new(path.clone()),
                 "bucket".to_string(),
@@ -1311,7 +1311,7 @@ mod tests {
     async fn block_manager(block_id: u64) -> BlockManager {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
 
-        let mut bm = BlockManager::build_with_names(
+        let mut bm = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
             "bucket".to_string(),

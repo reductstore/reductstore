@@ -457,7 +457,7 @@ mod tests {
             .keep()
             .join("bucket")
             .join("entry");
-        let mut block_manager = BlockManager::build_with_names(
+        let mut block_manager = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join("index")),
             "bucket".to_string(),

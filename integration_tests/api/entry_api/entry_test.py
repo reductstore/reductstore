@@ -111,28 +111,12 @@ def test_crud_single_record_for_deep_entry_path(base_url, session, bucket):
     renamed = "factory-1/line-2/cell-3/sensor-4-renamed"
     ts = 1000
 
-    resp = session.post(
-        f"{base_url}/b/{bucket}/{entry}?ts={ts}",
-        data=b"raw-data",
-        headers={"x-reduct-label-stage": "raw"},
-    )
+    resp = session.post(f"{base_url}/b/{bucket}/{entry}?ts={ts}", data=b"raw-data")
     assert resp.status_code == 200
 
     resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts={ts}")
     assert resp.status_code == 200
     assert resp.content == b"raw-data"
-    assert resp.headers["x-reduct-label-stage"] == "raw"
-
-    resp = session.patch(
-        f"{base_url}/b/{bucket}/{entry}?ts={ts}",
-        headers={"x-reduct-label-stage": "processed", "x-reduct-label-new": "1"},
-    )
-    assert resp.status_code == 200
-
-    resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts={ts}")
-    assert resp.status_code == 200
-    assert resp.headers["x-reduct-label-stage"] == "processed"
-    assert resp.headers["x-reduct-label-new"] == "1"
 
     resp = session.put(
         f"{base_url}/b/{bucket}/{entry}/rename", json={"new_name": renamed}

@@ -71,7 +71,7 @@ mod tests {
 
         let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
         index.save().await.unwrap();
-        let mut block_manager = BlockManager::build_with_names(
+        let mut block_manager = BlockManager::build(
             path.clone(),
             index,
             "bucket".to_string(),
@@ -117,7 +117,7 @@ mod tests {
         index.insert_or_update_with_crc(Block::new(1), 1);
         index.save().await.unwrap();
 
-        let mut block_manager = BlockManager::build_with_names(
+        let mut block_manager = BlockManager::build(
             entry_path.clone(),
             index,
             "bucket".to_string(),
