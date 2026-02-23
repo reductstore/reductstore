@@ -82,14 +82,6 @@ impl StorageEngineBuilder {
             .await
             .expect("Failed to list folders")
         {
-            if !FILE_CACHE
-                .try_exists(&path.join(SETTINGS_NAME))
-                .await
-                .unwrap_or(false)
-            {
-                continue;
-            }
-
             match Bucket::restore(path.clone(), cfg.clone()).await {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
