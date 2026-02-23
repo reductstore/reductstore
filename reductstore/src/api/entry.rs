@@ -358,6 +358,24 @@ mod tests {
 
             assert!(strip_route_suffix(&path, "/batch").is_none());
         }
+
+        #[test]
+        fn test_strip_route_suffix_returns_none_when_suffix_consumes_entry() {
+            let path = HashMap::from_iter(vec![
+                ("bucket_name".to_string(), "bucket-1".to_string()),
+                ("entry_name".to_string(), "/batch".to_string()),
+            ]);
+
+            assert!(strip_route_suffix(&path, "/batch").is_none());
+        }
+
+        #[test]
+        fn test_strip_route_suffix_without_entry_name() {
+            let path =
+                HashMap::from_iter(vec![("bucket_name".to_string(), "bucket-1".to_string())]);
+
+            assert!(strip_route_suffix(&path, "/batch").is_none());
+        }
     }
 
     mod write_entry_router {
@@ -477,6 +495,24 @@ mod tests {
 
             assert_eq!(response.status(), 200);
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn returns_422_for_invalid_query_json(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let response = write_entry_router(
+                State(keeper.await),
+                headers,
+                path_to("bucket-1", "entry-1/q"),
+                Query(HashMap::new()),
+                Body::from("{}"),
+            )
+            .await;
+
+            assert_eq!(response.status(), 422);
+        }
     }
 
     mod update_entry_router_dispatch {
@@ -543,6 +579,24 @@ mod tests {
 
             assert_eq!(response.status(), 200);
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn dispatches_remove_entry_for_regular_path(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let response = remove_entry_dispatcher(
+                State(keeper.await),
+                headers,
+                path_to("bucket-1", "entry-1"),
+                Query(HashMap::new()),
+                Body::empty(),
+            )
+            .await;
+
+            assert!(response.status() == 200 || response.status() == 409);
+        }
     }
 
     mod rename_entry_dispatcher_dispatch {
@@ -577,6 +631,23 @@ mod tests {
             .await;
 
             assert_eq!(response.status(), 404);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn returns_422_for_invalid_rename_payload(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let response = rename_entry_dispatcher(
+                State(keeper.await),
+                headers,
+                path_to("bucket-1", "entry-1/rename"),
+                Body::from("{}"),
+            )
+            .await;
+
+            assert_eq!(response.status(), 422);
         }
     }
 

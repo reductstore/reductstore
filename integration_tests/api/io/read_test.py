@@ -1,4 +1,5 @@
 import pytest
+from urllib.parse import quote
 
 from ..conftest import auth_headers, requires_env
 
@@ -37,7 +38,9 @@ def test_read_batched_records_v2(base_url, session, bucket, entry_root):
     print(resp.headers)
 
     assert resp.status_code == 200
-    assert resp.headers["x-reduct-entries"] == f"{entry_1},{entry_0}"
+    assert resp.headers["x-reduct-entries"] == (
+        f"{quote(entry_1, safe='')},{quote(entry_0, safe='')}"
+    )
     assert resp.headers["x-reduct-start-ts"] == "1000"
     assert resp.headers["x-reduct-0-0"].startswith("3,text/plain")
     assert resp.headers["x-reduct-1-10"].startswith("2,text/plain")
