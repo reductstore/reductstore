@@ -1,7 +1,6 @@
 // Copyright 2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use super::sanitize_entry_name;
 use crate::api::zenoh::attachments;
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::components::Components;
@@ -37,8 +36,6 @@ impl SubscriberPipeline {
     /// Handles a single Zenoh sample by writing it into storage and notifying replications.
     ///
     /// The full key expression is used as the entry name within the configured bucket.
-    /// Slashes in the key expression are replaced with underscores since ReductStore
-    /// entry names only allow alphanumeric characters, hyphens, and underscores.
     pub(crate) async fn handle_sample(
         &self,
         key_expr: &str,
@@ -46,8 +43,7 @@ impl SubscriberPipeline {
         attachment: Option<Vec<u8>>,
         timestamp: Option<u64>,
     ) -> Result<(), IngestError> {
-        // In single-bucket mode: entry = full Zenoh key (with slashes replaced)
-        let entry_name = sanitize_entry_name(key_expr.trim_matches('/'));
+        let entry_name = key_expr.trim_matches('/');
 
         let labels = match attachment {
             Some(raw_labels) => match attachments::deserialize_labels(&raw_labels) {
