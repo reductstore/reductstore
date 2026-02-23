@@ -160,8 +160,8 @@ jobs:
           name: image
           path: /tmp/image.tar
 
-  api_tests:
-    name: API Tests
+  http_api_tests:
+    name: HTTP API Tests
     runs-on: ubuntu-latest
     needs:
       - unit_tests
@@ -186,11 +186,26 @@ jobs:
       - name: Login Docker
         run: docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
 
-      - uses: ./.github/actions/api-tests
+      - uses: ./.github/actions/api/http-tests
         with:
           token: ${{ matrix.token }}
           cert_path: ${{ matrix.cert_path }}
           url: ${{ matrix.url }}
+
+  zenoh_api_tests:
+    name: Zenoh API Tests
+    runs-on: ubuntu-latest
+    needs:
+      - unit_tests
+      - build_test_docker_image
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login Docker
+        run: docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+
+      - uses: ./.github/actions/api/zenoh-tests
 
   migration_test:
     name: Migration Tests
@@ -345,7 +360,8 @@ jobs:
     permissions:
       contents: write
     needs:
-      - api_tests
+      - http_api_tests
+      - zenoh_api_tests
       - migration_test
       - replication_test
       - read_only_replica_test
@@ -451,7 +467,8 @@ jobs:
     name: Build image and push it to DockerHub Registry
     needs:
       - check_tag
-      - api_tests
+      - http_api_tests
+      - zenoh_api_tests
       - migration_test
       - recovery_test
       - replication_test
@@ -561,7 +578,7 @@ jobs:
     strategy:
       matrix:
         arch: [ amd64, arm64 ]
-    needs: [ check_tag, api_tests, migration_test, replication_test ]
+    needs: [ check_tag, http_api_tests, zenoh_api_tests, migration_test, replication_test ]
     if: github.event_name != 'pull_request'
     steps:
       - uses: actions/checkout@v4
