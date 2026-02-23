@@ -1,6 +1,5 @@
 """Integration tests for querying ReductStore data via Zenoh.
 
-In single-bucket mode, the Zenoh key expression becomes the entry name.
 All data is read from the bucket configured via RS_ZENOH_BUCKET.
 """
 
@@ -104,7 +103,6 @@ async def test_query_include_label_filter(bucket, entry_name, zenoh_session):
 
 async def test_query_nested_key(bucket, zenoh_session):
     """Query with a nested/hierarchical key expression."""
-    # Write via Zenoh (since HTTP API can't handle slashes in entry names)
     import random
 
     entry_name = f"entry_{random.randint(0, 1_000_000_000)}"

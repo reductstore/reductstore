@@ -1,6 +1,5 @@
 """Integration tests for Zenoh data ingestion into ReductStore.
 
-In single-bucket mode, the Zenoh key expression becomes the entry name.
 All data is written to the bucket configured via RS_ZENOH_BUCKET.
 """
 
@@ -20,7 +19,6 @@ async def read_first_payload(bucket, entry_name):
 
 async def test_publish_simple_data(bucket, entry_name, zenoh_session):
     """Publish data via Zenoh and verify via reduct-py."""
-    # In single-bucket mode: key_expr = entry_name
     key_expr = entry_name
     payload = b"hello from zenoh"
 
@@ -88,8 +86,6 @@ async def test_publish_empty_payload(bucket, entry_name, zenoh_session):
 
 async def test_publish_nested_key(bucket, zenoh_session):
     """Handle nested/hierarchical key expressions."""
-    # Nested key becomes nested entry name
-    # Note: Keys with slashes can only be read via Zenoh, not via reduct-py HTTP API
     import random
 
     entry_name = f"entry_{random.randint(0, 1_000_000_000)}"
@@ -99,7 +95,6 @@ async def test_publish_nested_key(bucket, zenoh_session):
     zenoh_session.put(key_expr, payload)
     await asyncio.sleep(0.5)
 
-    # Query via Zenoh queryable (not reduct-py) since entry name has slashes
     selector = f"{key_expr}?limit=1"
     replies = [reply for reply in zenoh_session.get(selector, timeout=5.0) if reply.ok]
     assert replies, "Expected at least one reply from Zenoh queryable"

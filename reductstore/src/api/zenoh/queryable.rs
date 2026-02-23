@@ -57,7 +57,6 @@ impl QueryablePipeline {
         key_expr: &str,
         params: &HashMap<String, String>,
     ) -> Result<QueryResult, QueryError> {
-        // In single-bucket mode: entry = full Zenoh key
         let entry_name = key_expr.trim_matches('/');
 
         debug!(

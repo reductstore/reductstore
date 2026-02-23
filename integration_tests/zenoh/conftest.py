@@ -1,8 +1,4 @@
-"""Pytest fixtures for Zenoh integration tests.
-
-In single-bucket mode, all Zenoh data is stored in a fixed bucket configured
-via RS_ZENOH_BUCKET (default: "zenoh"). The full Zenoh key becomes the entry name.
-"""
+"""Pytest fixtures for Zenoh integration tests."""
 
 import json
 import os
@@ -82,7 +78,6 @@ async def bucket(client: Client, zenoh_bucket: str):
     """Get the fixed Zenoh bucket (auto-created by ReductStore on startup)."""
     bucket = await client.get_bucket(zenoh_bucket)
     yield bucket
-    # Don't remove - the bucket is managed by the server
 
 
 @pytest.fixture(scope="session")

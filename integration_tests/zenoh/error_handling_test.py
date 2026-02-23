@@ -1,6 +1,5 @@
 """Integration tests for error handling and edge cases.
 
-In single-bucket mode, the Zenoh key expression becomes the entry name.
 All data flows through the bucket configured via RS_ZENOH_BUCKET.
 """
 

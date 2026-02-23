@@ -359,7 +359,6 @@ async fn spawn_queryables(
 ) -> Result<Vec<tokio::task::JoinHandle<()>>, SessionError> {
     let mut handles = Vec::new();
 
-    // Use the configured key expression (guaranteed to be Some by caller)
     let key_expr = config.query_keyexprs.as_ref().unwrap();
     info!("Declaring Zenoh queryable on key expression: {}", key_expr);
 

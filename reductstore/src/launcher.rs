@@ -82,6 +82,7 @@ where
         .with_lock_file(lock_file.clone())
         .build();
 
+    // Spawn Zenoh API runtime if enabled
     let _zenoh_runtime = zenoh::spawn_runtime(cfg.zenoh_api.clone(), state_keeper.clone());
 
     #[cfg(not(test))]
