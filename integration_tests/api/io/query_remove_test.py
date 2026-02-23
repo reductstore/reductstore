@@ -1,22 +1,27 @@
+import pytest
+
 from ..conftest import auth_headers, requires_env
 
 
-def _write_records(base_url, session, bucket):
-    records = [("entry-0", 1000, b"aaa"), ("entry-1", 1100, b"bbb")]
+def _write_records(base_url, session, bucket, entry_0, entry_1):
+    records = [(entry_0, 1000, b"aaa"), (entry_1, 1100, b"bbb")]
     for entry, ts, data in records:
         resp = session.post(f"{base_url}/b/{bucket}/{entry}?ts={ts}", data=data)
         assert resp.status_code == 200
     return records
 
 
-def test_remove_records_across_entries(base_url, session, bucket):
-    records = _write_records(base_url, session, bucket)
+@pytest.mark.parametrize("entry_root", ["x", "x/y", "x/y/z"])
+def test_remove_records_across_entries(base_url, session, bucket, entry_root):
+    entry_0 = f"{entry_root}-0"
+    entry_1 = f"{entry_root}-1"
+    records = _write_records(base_url, session, bucket, entry_0, entry_1)
 
     resp = session.post(
         f"{base_url}/io/{bucket}/q",
         json={
             "query_type": "REMOVE",
-            "entries": ["entry-0", "entry-1"],
+            "entries": [entry_0, entry_1],
             "start": 0,
             "stop": 2000,
         },
@@ -40,6 +45,7 @@ def test_remove_records_requires_filter(base_url, session, bucket):
 
 
 @requires_env("API_TOKEN")
+@pytest.mark.parametrize("entry_root", ["x", "x/y", "x/y/z"])
 def test_remove_records_requires_bucket_write_permissions(
     base_url,
     session,
@@ -47,11 +53,14 @@ def test_remove_records_requires_bucket_write_permissions(
     token_without_permissions,
     token_read_bucket,
     token_write_bucket,
+    entry_root,
 ):
-    records = _write_records(base_url, session, bucket)
+    entry_0 = f"{entry_root}-0"
+    entry_1 = f"{entry_root}-1"
+    records = _write_records(base_url, session, bucket, entry_0, entry_1)
     query_body = {
         "query_type": "REMOVE",
-        "entries": ["entry-0", "entry-1"],
+        "entries": [entry_0, entry_1],
         "start": 0,
         "stop": 2000,
     }
