@@ -121,7 +121,7 @@ impl Bucket {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::bucket::tests::{bucket, path, write};
+    use crate::storage::bucket::tests::{bucket, path, write, write_meta};
     use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
     use rstest::rstest;
@@ -177,7 +177,7 @@ mod tests {
         .await;
 
         let blob: &[u8] = &[0u8; 40];
-        write(&bucket, "data-1/$meta", 0, blob).await.unwrap();
+        write_meta(&bucket, "data-1/$meta", 0, blob).await.unwrap();
         write(&bucket, "data-1", 1, blob).await.unwrap();
         write(&bucket, "data-2", 2, blob).await.unwrap();
 

@@ -278,7 +278,7 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::bucket::tests::{bucket, write};
+    use crate::storage::bucket::tests::{bucket, write, write_meta};
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
@@ -395,7 +395,9 @@ mod tests {
     async fn wildcard_query_includes_meta_entries(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         write(&bucket, "acc-a", 10, b"a1").await.unwrap();
-        write(&bucket, "acc-a/$meta", 11, b"meta").await.unwrap();
+        write_meta(&bucket, "acc-a/$meta", 11, b"meta")
+            .await
+            .unwrap();
         write(&bucket, "other", 15, b"c1").await.unwrap();
 
         let query = QueryEntry {
