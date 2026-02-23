@@ -230,4 +230,34 @@ mod tests {
             &not_found!("Entry 'missing' not found in bucket 'test'")
         );
     }
+
+    #[rstest]
+    #[tokio::test]
+    async fn remove_true_deletes_meta_record(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        let meta_entry = bucket
+            .get_or_create_entry("entry-1/$meta")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        write_with_labels(
+            &meta_entry,
+            1000,
+            Labels::from_iter(vec![("key".to_string(), "meta-1".to_string())]),
+        )
+        .await;
+
+        bucket
+            .update_labels(vec![UpdateLabelsMulti {
+                entry_name: "entry-1/$meta".into(),
+                time: 1000,
+                update: Labels::from_iter(vec![("remove".into(), "true".into())]),
+                remove: HashSet::new(),
+            }])
+            .await
+            .unwrap();
+
+        assert!(meta_entry.begin_read(1000).await.is_err());
+    }
 }
