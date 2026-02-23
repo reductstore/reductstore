@@ -227,3 +227,74 @@ impl From<ComponentError> for ReductError {
         err.inner
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    fn test_component_error_new_and_accessors() {
+        let err = ComponentError::new(ErrorCode::NotFound, "resource not found");
+        assert_eq!(err.status(), ErrorCode::NotFound);
+        assert_eq!(err.message(), "resource not found");
+        assert_eq!(err.log_hint(), LogHint::Default);
+    }
+
+    #[rstest]
+    fn test_component_error_log_hint() {
+        let err = ComponentError::new(ErrorCode::ServiceUnavailable, "busy")
+            .with_log_hint(LogHint::SkipErrorLogging);
+        assert_eq!(err.log_hint(), LogHint::SkipErrorLogging);
+    }
+
+    #[rstest]
+    fn test_component_error_inner() {
+        let err = ComponentError::new(ErrorCode::BadRequest, "oops");
+        let inner = err.inner();
+        assert_eq!(inner.status, ErrorCode::BadRequest);
+        assert_eq!(inner.message, "oops");
+    }
+
+    #[rstest]
+    fn test_component_error_into_inner() {
+        let err = ComponentError::new(ErrorCode::Forbidden, "denied");
+        let inner = err.into_inner();
+        assert_eq!(inner.status, ErrorCode::Forbidden);
+        assert_eq!(inner.message, "denied");
+    }
+
+    #[rstest]
+    fn test_component_error_debug() {
+        let err = ComponentError::new(ErrorCode::Conflict, "clash");
+        assert!(format!("{err:?}").contains("Conflict"));
+    }
+
+    #[rstest]
+    fn test_component_error_display() {
+        let err = ComponentError::new(ErrorCode::NotFound, "gone");
+        assert!(format!("{err}").contains("NotFound"));
+    }
+
+    #[rstest]
+    fn test_component_error_source() {
+        use std::error::Error;
+        let err = ComponentError::new(ErrorCode::InternalServerError, "boom");
+        assert!(err.source().is_none());
+    }
+
+    #[rstest]
+    fn test_component_error_from_reduct_error() {
+        let re = ReductError::new(ErrorCode::TooManyRequests, "slow down");
+        let ce: ComponentError = re.into();
+        assert_eq!(ce.status(), ErrorCode::TooManyRequests);
+        assert_eq!(ce.log_hint(), LogHint::Default);
+    }
+
+    #[rstest]
+    fn test_reduct_error_from_component_error() {
+        let ce = ComponentError::new(ErrorCode::UnprocessableEntity, "bad data");
+        let re: ReductError = ce.into();
+        assert_eq!(re.status, ErrorCode::UnprocessableEntity);
+    }
+}

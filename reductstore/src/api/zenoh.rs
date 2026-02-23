@@ -76,3 +76,19 @@ pub fn spawn_runtime(
         None
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::http::tests::keeper;
+    use rstest::rstest;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_spawn_runtime_disabled(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let config = ZenohApiConfig::default(); // enabled=false by default
+        let handle = spawn_runtime(config, keeper);
+        assert!(handle.is_none());
+    }
+}

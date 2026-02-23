@@ -273,7 +273,7 @@ impl AxumAppBuilder {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_auth::TokenAuthorization;
@@ -409,6 +409,20 @@ mod tests {
                 "ReductError { status: BadRequest, message: \"boom\" }"
             );
             assert!(StdError::source(&err).is_none());
+        }
+
+        #[rstest]
+        fn test_http_error_message() {
+            let err = HttpError::new(ErrorCode::NotFound, "not found");
+            assert_eq!(err.message(), "not found");
+        }
+
+        #[rstest]
+        fn test_http_error_into_inner() {
+            let err = HttpError::new(ErrorCode::Forbidden, "denied");
+            let inner = err.into_inner();
+            assert_eq!(inner.status, ErrorCode::Forbidden);
+            assert_eq!(inner.message, "denied");
         }
 
         #[rstest]

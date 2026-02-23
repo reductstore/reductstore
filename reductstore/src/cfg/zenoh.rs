@@ -214,4 +214,86 @@ mod tests {
         assert_eq!(cfg.sub_keyexprs, None);
         assert_eq!(cfg.query_keyexprs, None);
     }
+
+    #[rstest]
+    fn parses_invalid_enabled_falls_back_to_default() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_ENABLED"))
+            .times(1)
+            .return_const(Ok("maybe".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::<MockEnvGetter>::parse_zenoh_api_config(&mut Env::new(env_getter));
+        assert!(!cfg.enabled);
+    }
+
+    #[rstest]
+    fn parses_empty_bucket_falls_back_to_default() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_ENABLED"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_CONFIG"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_CONFIG_PATH"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_BUCKET"))
+            .times(1)
+            .return_const(Ok("   ".to_string())); // whitespace-only
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_SUB_KEYEXPRS"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_QUERY_KEYEXPRS"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::<MockEnvGetter>::parse_zenoh_api_config(&mut Env::new(env_getter));
+        assert_eq!(cfg.bucket, DEFAULT_BUCKET);
+    }
+
+    #[rstest]
+    fn test_display() {
+        let cfg = ZenohApiConfig {
+            enabled: true,
+            config_inline: Some("mode=client".to_string()),
+            config_path: Some("/etc/zenoh.json5".to_string()),
+            bucket: "sensor-data".to_string(),
+            sub_keyexprs: Some("**".to_string()),
+            query_keyexprs: None,
+        };
+        let display = format!("{cfg}");
+        assert!(display.contains("enabled=true"));
+        assert!(display.contains("bucket=sensor-data"));
+        assert!(display.contains("config=mode=client"));
+        assert!(display.contains("config_path=/etc/zenoh.json5"));
+        assert!(display.contains("sub_keyexprs=**"));
+        assert!(display.contains("query_keyexprs=<disabled>"));
+    }
+
+    #[rstest]
+    fn test_display_defaults() {
+        let cfg = ZenohApiConfig::default();
+        let display = format!("{cfg}");
+        assert!(display.contains("enabled=false"));
+        assert!(display.contains("config=<none>"));
+        assert!(display.contains("config_path=<none>"));
+    }
 }
