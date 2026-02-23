@@ -5,14 +5,13 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
-use crate::storage::entry::is_system_meta_entry;
 use crate::storage::proto::record;
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::io::{WriteChunk, WriteRecord};
-use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
+use reduct_base::{bad_request, internal_server_error};
 use std::io::SeekFrom;
 use std::io::Write;
 use std::path::PathBuf;
@@ -119,11 +118,6 @@ impl RecordWriter {
     async fn receive(mut rx: Rx, ctx: WriteContext) {
         let mut recv = async || {
             let mut written_bytes = 0u64;
-            let mut payload = if is_system_meta_entry(&ctx.entry_name) {
-                Some(Vec::with_capacity(ctx.content_size as usize))
-            } else {
-                None
-            };
             while let Some(chunk) = rx.recv().await {
                 let chunk: Option<Bytes> = chunk?;
                 match chunk {
@@ -145,10 +139,6 @@ impl RecordWriter {
 
                             lock.write_all(chunk.as_ref())?;
                         }
-
-                        if let Some(payload) = payload.as_mut() {
-                            payload.extend_from_slice(chunk.as_ref());
-                        }
                     }
                     None => {
                         break;
@@ -158,15 +148,6 @@ impl RecordWriter {
 
             if written_bytes < ctx.content_size {
                 Err(bad_request!("Content is smaller than in content-length",))
-            } else if let Some(payload) = payload {
-                serde_json::from_slice::<serde_json::Value>(&payload).map_err(|err| {
-                    unprocessable_entity!(
-                        "System entry '{}' records must contain valid JSON: {}",
-                        ctx.entry_name,
-                        err
-                    )
-                })?;
-                Ok(())
             } else {
                 Ok(())
             }
