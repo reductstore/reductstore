@@ -10,6 +10,10 @@ inputs:
   url:
     description: 'ReductStore URL.'
     required: true
+  zenoh_connect:
+    description: 'Zenoh router connection string.'
+    required: false
+    default: 'tcp/127.0.0.1:7447'
 runs:
   using: 'composite'
   steps:
@@ -23,10 +27,15 @@ runs:
       shell: bash
       run: docker load --input /tmp/image.tar
 
-
     - name: Check dir
       run: ls -la ./misc
       shell: bash
+
+    - name: Start Zenoh router
+      if: ${{ inputs.zenoh_enabled == 'true' }}
+      shell: bash
+      run: |
+        docker run --init -d --name zenoh-router -p 7447:7447/tcp -p 8000:8000/tcp eclipse/zenoh
 
     - name: Run ReductStore
       shell: bash
@@ -36,6 +45,9 @@ runs:
           --env RS_CERT_PATH=${{ inputs.cert_path }} \
           --env RS_CERT_KEY_PATH=/misc/privateKey.key \
           --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
+          --env RS_ZENOH_ENABLED=1 \
+          --env RS_ZENOH_CONNECT=$zenoh_connect \
+          --env RS_ZENOH_DISABLE_MULTICAST=1 \
           --name reduct -d ${{ github.repository }}
 
         for _ in {1..20}; do
@@ -60,13 +72,11 @@ runs:
           --env STORAGE_URL=${{ inputs.url }} api
 
     - name: Build Zenoh tests
-      if: ${{ inputs.zenoh_enabled == 'true' }}
       shell: bash
       run: |
         docker build -t zenoh-tests ./integration_tests/zenoh
 
     - name: Run Zenoh tests
-      if: ${{ inputs.zenoh_enabled == 'true' }}
       shell: bash
       run: |
         docker run --network=host \
