@@ -496,6 +496,7 @@ mod tests {
     mod recovery {
         use super::*;
         use crate::storage::bucket::settings::SETTINGS_NAME;
+        use reduct_base::io::ReadRecord;
         #[rstest]
         #[tokio::test]
         async fn test_recover_from_fs(#[future] storage: Arc<StorageEngine>) {
@@ -572,6 +573,84 @@ mod tests {
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
             assert_eq!(bucket.settings().await.unwrap(), bucket_settings);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_recover_nested_entry_tree(#[future] storage: Arc<StorageEngine>) {
+            let storage = storage.await;
+            let bucket = storage
+                .create_bucket("tree-bucket", Bucket::defaults())
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+
+            for (entry_name, ts, payload) in [
+                ("part-1/a/b/c", 1000u64, "aaaa"),
+                ("part-1/a/b/d", 1010u64, "bbbb"),
+                ("part-2/x/y/z", 1020u64, "cccc"),
+            ] {
+                let entry = bucket
+                    .get_or_create_entry(entry_name)
+                    .await
+                    .unwrap()
+                    .upgrade_and_unwrap();
+                let mut sender = entry
+                    .begin_write(
+                        ts,
+                        payload.len() as u64,
+                        "text/plain".to_string(),
+                        Labels::new(),
+                    )
+                    .await
+                    .unwrap();
+                sender.send(Ok(Some(Bytes::from(payload)))).await.unwrap();
+                sender.send(Ok(None)).await.unwrap();
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            storage.sync_fs().await.unwrap();
+
+            let cfg = Cfg {
+                data_path: storage.data_path.clone(),
+                ..Cfg::default()
+            };
+            let storage = Arc::new(
+                StorageEngine::builder()
+                    .with_data_path(cfg.data_path.clone())
+                    .with_cfg(cfg)
+                    .build()
+                    .await,
+            );
+
+            let bucket = storage
+                .get_bucket("tree-bucket")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+
+            let info = bucket.clone().info().await.unwrap();
+            let mut names = info
+                .entries
+                .iter()
+                .map(|entry| entry.name.clone())
+                .collect::<Vec<_>>();
+            names.sort();
+            assert_eq!(
+                names,
+                vec![
+                    "part-1/a/b/c".to_string(),
+                    "part-1/a/b/d".to_string(),
+                    "part-2/x/y/z".to_string(),
+                ]
+            );
+
+            let rec = bucket.begin_read("part-1/a/b/c", 1000).await.unwrap();
+            assert_eq!(rec.meta().entry_name(), "part-1/a/b/c");
+            let rec = bucket.begin_read("part-1/a/b/d", 1010).await.unwrap();
+            assert_eq!(rec.meta().entry_name(), "part-1/a/b/d");
+            let rec = bucket.begin_read("part-2/x/y/z", 1020).await.unwrap();
+            assert_eq!(rec.meta().entry_name(), "part-2/x/y/z");
         }
 
         #[rstest]
