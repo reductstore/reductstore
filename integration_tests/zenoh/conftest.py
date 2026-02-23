@@ -46,7 +46,8 @@ def api_token() -> str:
 
 @pytest.fixture(scope="session")
 def client(storage_url: str, api_token: str) -> Client:
-    return Client(storage_url, api_token=api_token)
+    verify_ssl = storage_url.startswith("http://")
+    return Client(storage_url, api_token=api_token, verify_ssl=verify_ssl)
 
 
 @pytest.fixture(scope="function")
