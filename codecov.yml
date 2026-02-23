@@ -3,6 +3,9 @@ coverage:
     project:
       default:
         target: 90
+    patch:
+      default:
+        target: 95
 
 comment:                  #this is a top-level key
   layout: " diff, flags, files"
