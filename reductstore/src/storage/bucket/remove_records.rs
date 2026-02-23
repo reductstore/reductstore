@@ -197,6 +197,30 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn query_remove_records_wildcard_includes_meta_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "entry-one", 1, b"one-1").await.unwrap();
+        write(&bucket, "entry-one/$meta", 1, b"meta-1")
+            .await
+            .unwrap();
+
+        let request = QueryEntry {
+            query_type: QueryType::Remove,
+            entries: Some(vec!["entry-one*".into()]),
+            start: Some(1),
+            stop: Some(2),
+            ..Default::default()
+        };
+
+        let removed = bucket.clone().query_remove_records(request).await.unwrap();
+        assert_eq!(removed, 2);
+
+        assert!(bucket.begin_read("entry-one", 1).await.is_err());
+        assert!(bucket.begin_read("entry-one/$meta", 1).await.is_err());
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn query_remove_records_supports_all_entries_wildcard(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         write(&bucket, "entry-a", 1, b"a1").await.unwrap();

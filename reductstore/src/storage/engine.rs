@@ -380,12 +380,23 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 
 pub(super) fn check_entry_name_convention(name: &str) -> Result<(), ReductError> {
     let regex = regex::Regex::new(r"^[A-Za-z0-9_/-]*$").unwrap();
-    if !regex.is_match(name) {
-        return Err(unprocessable_entity!(
-            "Entry name can contain only letters, digests and [-,_,/] symbols",
-        ));
+    if regex.is_match(name) {
+        return Ok(());
     }
-    Ok(())
+
+    // Allow system attachment entries that end with `/$meta`.
+    if name == "$meta" {
+        return Ok(());
+    }
+    if let Some(parent) = name.strip_suffix("/$meta") {
+        if regex.is_match(parent) {
+            return Ok(());
+        }
+    }
+
+    Err(unprocessable_entity!(
+        "Entry name can contain only letters, digits and [-,_,/] symbols or end with '/$meta'",
+    ))
 }
 
 #[cfg(test)]
@@ -406,6 +417,14 @@ mod tests {
     use rstest::{fixture, rstest};
     use std::time::Duration;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_check_entry_name_convention_with_meta() {
+        assert!(check_entry_name_convention("entry").is_ok());
+        assert!(check_entry_name_convention("entry/$meta").is_ok());
+        assert!(check_entry_name_convention("x/y/$meta").is_ok());
+        assert!(check_entry_name_convention("entry/$other").is_err());
+    }
 
     #[rstest]
     #[tokio::test]

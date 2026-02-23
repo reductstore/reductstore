@@ -392,6 +392,30 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn wildcard_query_includes_meta_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "acc-a", 10, b"a1").await.unwrap();
+        write(&bucket, "acc-a/$meta", 11, b"meta").await.unwrap();
+        write(&bucket, "other", 15, b"c1").await.unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["acc-a*".into()]),
+            ..Default::default()
+        };
+
+        let id = bucket.query(query).await.unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        let records = collect_records(rx).await;
+        assert_eq!(
+            records,
+            vec![("acc-a".to_string(), 10), ("acc-a/$meta".to_string(), 11)]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn wildcard_all_entries(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         write(&bucket, "entry-a", 10, b"a1").await.unwrap();
