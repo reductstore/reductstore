@@ -205,6 +205,7 @@ mod tests {
     use crate::storage::proto::{record, us_to_ts, Record};
     use bytes::Bytes;
     use reduct_base::error::ReductError;
+    use reduct_base::internal_server_error;
     use reduct_base::Labels;
     use rstest::rstest;
     use serial_test::serial;
@@ -616,14 +617,14 @@ mod tests {
         let mut sender = entry
             .begin_write(
                 1,
-                5,
+                7,
                 "application/json".to_string(),
                 Labels::from_iter([("key".to_string(), "schema".to_string())]),
             )
             .await
             .unwrap();
         sender
-            .send(Ok(Some(Bytes::from_static(b"old-1"))))
+            .send(Ok(Some(Bytes::from_static(br#"{"v":1}"#))))
             .await
             .unwrap();
         sender.send(Ok(None)).await.unwrap();
@@ -631,19 +632,58 @@ mod tests {
         let mut sender = entry
             .begin_write(
                 2,
-                5,
+                7,
                 "application/json".to_string(),
                 Labels::from_iter([("key".to_string(), "schema".to_string())]),
             )
             .await
             .unwrap();
         sender
-            .send(Ok(Some(Bytes::from_static(b"new-2"))))
+            .send(Ok(Some(Bytes::from_static(br#"{"v":2}"#))))
             .await
             .unwrap();
         sender.send(Ok(None)).await.unwrap();
 
         assert!(entry.begin_read(1).await.is_err());
         assert!(entry.begin_read(2).await.is_ok());
+    }
+
+    #[rstest]
+    #[serial]
+    #[tokio::test]
+    async fn test_meta_entry_rejects_invalid_json_payload(path: PathBuf) {
+        let entry = Arc::new(
+            Entry::try_build(
+                "entry/$meta",
+                path,
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 10000,
+                },
+                Cfg::default().into(),
+            )
+            .await
+            .unwrap(),
+        );
+
+        let mut sender = entry
+            .begin_write(
+                1,
+                7,
+                "application/json".to_string(),
+                Labels::from_iter([("key".to_string(), "schema".to_string())]),
+            )
+            .await
+            .unwrap();
+        sender
+            .send(Ok(Some(Bytes::from_static(b"badjson"))))
+            .await
+            .unwrap();
+        sender.send(Ok(None)).await.unwrap();
+
+        assert_eq!(
+            entry.begin_read(1).await.err().unwrap(),
+            internal_server_error!("Record with timestamp 1 in bucket/entry/$meta is broken")
+        );
     }
 }

@@ -680,6 +680,7 @@ mod tests {
                 .server_info(ServerInfo::default())
                 .build(),
             IoConfig::default(),
+            None,
         )
         .unwrap()
     }

@@ -5,6 +5,8 @@ mod create;
 mod load;
 
 use crate::core::sync::AsyncRwLock;
+use crate::storage::engine::StorageEngine;
+use crate::storage::entry::meta_entry_name;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{Parser, Value};
 use crate::storage::query::QueryRx;
@@ -12,13 +14,15 @@ use async_trait::async_trait;
 use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
 use log::warn;
-use reduct_base::error::ErrorCode::NoContent;
+use reduct_base::error::ErrorCode::{NoContent, NotFound};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{
     BoxedCommiter, BoxedProcessor, BoxedRecordStream, ExtSettings, IoExtension,
 };
+use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{no_content, unprocessable_entity};
+use serde_json::Map;
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -77,6 +81,7 @@ struct ExtRepository {
     extension_map: IoExtMap,
     query_map: AsyncRwLock<HashMap<u64, QueryContext>>,
     io_config: IoConfig,
+    storage: Option<Arc<StorageEngine>>,
 
     #[allow(dead_code)]
     ext_wrappers: Vec<Container<ExtensionApi>>, // we need to keep the wrappers alive
@@ -152,14 +157,21 @@ impl ManageExtensions for ExtRepository {
                     ));
                 }
 
-                let Some(name) = ext_query.keys().next() else {
+                let Some(name) = ext_query.keys().next().cloned() else {
                     return Err(unprocessable_entity!(
                         "Extension name is not found in query id={}",
                         query_id
                     ));
                 };
 
-                if let Some(ext) = self.extension_map.get(name) {
+                if let Some(meta_params) = self
+                    .get_meta_ext_params(bucket_name, entry_name, &name)
+                    .await?
+                {
+                    Self::attach_meta_ext_params(ext_query, &name, meta_params);
+                }
+
+                if let Some(ext) = self.extension_map.get(&name) {
                     query_request.ext = Some(serde_json::Value::Object(ext_query.clone()));
                     let (processor, commiter) =
                         ext.write()
@@ -342,6 +354,93 @@ impl ManageExtensions for ExtRepository {
     }
 }
 
+impl ExtRepository {
+    async fn get_meta_ext_params(
+        &self,
+        bucket_name: &str,
+        entry_name: &str,
+        ext_name: &str,
+    ) -> Result<Option<serde_json::Value>, ReductError> {
+        if entry_name.is_empty() {
+            return Ok(None);
+        }
+
+        let Some(storage) = &self.storage else {
+            return Ok(None);
+        };
+
+        let bucket = match storage.get_bucket(bucket_name).await {
+            Ok(bucket) => bucket.upgrade()?,
+            Err(err) if err.status == NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+
+        let meta_name = meta_entry_name(entry_name);
+        let meta_entry = match bucket.get_entry(&meta_name).await {
+            Ok(entry) => entry.upgrade()?,
+            Err(err) if err.status == NotFound => return Ok(None),
+            Err(err) => return Err(err),
+        };
+
+        let query_id = meta_entry
+            .query(QueryEntry {
+                include: Some(HashMap::from([("key".to_string(), format!("${ext_name}"))])),
+                limit: Some(1),
+                ..Default::default()
+            })
+            .await?;
+
+        let (rx, _) = meta_entry.get_query_receiver(query_id).await?;
+        let rx = rx.upgrade()?;
+
+        let result = rx.write().await?.recv().await;
+        let Some(result) = result else {
+            return Ok(None);
+        };
+
+        let mut record = match result {
+            Ok(record) => record,
+            Err(err) if err.status == NoContent => return Ok(None),
+            Err(err) => return Err(err),
+        };
+
+        let mut data = Vec::new();
+        while let Some(chunk) = record.read_chunk() {
+            let chunk = chunk?;
+            data.extend_from_slice(chunk.as_ref());
+        }
+
+        let parsed = serde_json::from_slice::<serde_json::Value>(&data).map_err(|err| {
+            unprocessable_entity!(
+                "Meta attachment '${}' in '{}/{}' must be valid JSON: {}",
+                ext_name,
+                bucket_name,
+                meta_name,
+                err
+            )
+        })?;
+
+        Ok(Some(parsed))
+    }
+
+    fn attach_meta_ext_params(
+        ext_query: &mut Map<String, serde_json::Value>,
+        name: &str,
+        meta: serde_json::Value,
+    ) {
+        if !ext_query.contains_key(name) {
+            ext_query.insert(name.to_string(), serde_json::json!({}));
+        }
+
+        if let Some(current) = ext_query
+            .get_mut(name)
+            .and_then(|value| value.as_object_mut())
+        {
+            current.entry("meta".to_string()).or_insert(meta);
+        }
+    }
+}
+
 use crate::cfg::io::IoConfig;
 use crate::ext::filter::DummyFilter;
 use crate::storage::query::filters::{RecordFilter, WhenFilter};
@@ -351,6 +450,8 @@ use reduct_base::io::BoxedReadRecord;
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
+    use crate::cfg::Cfg;
+    use crate::storage::engine::StorageEngine;
     use crate::storage::entry::RecordReader;
     use crate::storage::proto::Record;
     use async_stream::stream;
@@ -362,6 +463,7 @@ pub(super) mod tests {
     use reduct_base::ext::{Commiter, IoExtensionInfo, Processor};
     use reduct_base::io::records::OneShotRecord;
     use reduct_base::io::RecordMeta;
+    use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
@@ -425,6 +527,84 @@ pub(super) mod tests {
                 1,
                 "We need to register the query with 'ext' part"
             );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_with_ext_params_from_meta_entry(
+            mut mock_ext: MockIoExtension,
+            processor: BoxedProcessor,
+            commiter: BoxedCommiter,
+        ) {
+            let cfg = Cfg {
+                data_path: tempdir().unwrap().keep(),
+                ..Cfg::default()
+            };
+            let storage = Arc::new(
+                StorageEngine::builder()
+                    .with_data_path(cfg.data_path.clone())
+                    .with_cfg(cfg)
+                    .build()
+                    .await,
+            );
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            let bucket = storage
+                .get_bucket("bucket")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let meta_payload = br#"{"scale":100}"#;
+            let mut writer = bucket
+                .begin_write(
+                    "entry/$meta",
+                    1,
+                    meta_payload.len() as u64,
+                    "application/json".to_string(),
+                    Labels::from_iter([("key".to_string(), "$test-ext".to_string())]),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(Bytes::from_static(meta_payload))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            let query = QueryEntry {
+                ext: Some(json!({
+                    "test-ext": {},
+                })),
+                ..Default::default()
+            };
+            let expected_query = QueryEntry {
+                ext: Some(json!({
+                    "test-ext": {"meta": {"scale": 100}},
+                })),
+                ..Default::default()
+            };
+
+            mock_ext
+                .expect_query()
+                .with(eq("bucket"), eq("entry"), eq(expected_query))
+                .return_once(|_, _, _| Ok((processor, commiter)));
+
+            let mocked_ext_repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            assert_eq!(
+                mocked_ext_repo
+                    .get_meta_ext_params("bucket", "entry", "test-ext")
+                    .await
+                    .unwrap(),
+                Some(json!({"scale": 100}))
+            );
+
+            assert!(mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .is_ok());
         }
 
         #[rstest]
@@ -1007,6 +1187,14 @@ pub(super) mod tests {
     }
 
     fn mocked_ext_repo(name: &str, mock_ext: MockIoExtension) -> ExtRepository {
+        mocked_ext_repo_with_storage(name, mock_ext, None)
+    }
+
+    fn mocked_ext_repo_with_storage(
+        name: &str,
+        mock_ext: MockIoExtension,
+        storage: Option<Arc<StorageEngine>>,
+    ) -> ExtRepository {
         let ext_settings = ExtSettings::builder()
             .server_info(ServerInfo::default())
             .build();
@@ -1015,6 +1203,7 @@ pub(super) mod tests {
             vec![],
             ext_settings,
             IoConfig::default(),
+            storage,
         )
         .unwrap();
         ext_repo.extension_map.insert(
