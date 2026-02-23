@@ -2,15 +2,12 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockRef;
-use crate::storage::entry::{is_system_meta_entry, Entry, RecordDrainer, RecordType, RecordWriter};
+use crate::storage::entry::{Entry, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
-use reduct_base::msg::entry_api::QueryEntry;
-use reduct_base::unprocessable_entity;
 use reduct_base::Labels;
-use std::collections::HashMap;
 use std::sync::Arc;
 
 impl Entry {
@@ -34,20 +31,8 @@ impl Entry {
         content_type: String,
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
-        if is_system_meta_entry(&self.name) {
-            let key = labels.get("key").ok_or_else(|| {
-                unprocessable_entity!(
-                    "System entry '{}' records must contain label 'key'",
-                    self.name
-                )
-            })?;
-            self.remove_existing_meta_records_by_key(key).await?;
-
-            // remove=true means hard-delete for the key without creating a new record
-            if labels.get("remove").is_some_and(|value| value == "true") {
-                return Ok(Box::new(RecordDrainer::new()));
-            }
-        }
+        // Strategy validates labels and can perform pre-write maintenance.
+        let _ = self.system_behavior.prepare_write(self, &labels).await?;
 
         let settings = self.settings.read().await?;
         let mut block_ref = {
@@ -186,18 +171,6 @@ impl Entry {
         };
 
         block.insert_or_update_record(record);
-        Ok(())
-    }
-
-    async fn remove_existing_meta_records_by_key(&self, key: &str) -> Result<(), ReductError> {
-        let _ = self
-            .query_remove_records(QueryEntry {
-                start: Some(0),
-                stop: Some(u64::MAX),
-                include: Some(HashMap::from([("key".to_string(), key.to_string())])),
-                ..Default::default()
-            })
-            .await?;
         Ok(())
     }
 }
@@ -655,7 +628,7 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_meta_entry_remove_true_deletes_without_new_record(path: PathBuf) {
+    async fn test_meta_entry_remove_true_is_rejected(path: PathBuf) {
         let entry = Arc::new(
             Entry::try_build(
                 "entry/$meta",
@@ -685,7 +658,7 @@ mod tests {
             .unwrap();
         sender.send(Ok(None)).await.unwrap();
 
-        let mut sender = entry
+        let err = entry
             .begin_write(
                 2,
                 2,
@@ -696,14 +669,15 @@ mod tests {
                 ]),
             )
             .await
+            .err()
             .unwrap();
-        sender
-            .send(Ok(Some(Bytes::from_static(br#"{}"#))))
-            .await
-            .unwrap();
-        sender.send(Ok(None)).await.unwrap();
 
-        assert!(entry.begin_read(1).await.is_err());
-        assert!(entry.begin_read(2).await.is_err());
+        assert_eq!(
+            err,
+            ReductError::unprocessable_entity(
+                "System entry 'entry/$meta' does not support writing records with label 'remove=true'; use record update"
+            )
+        );
+        assert!(entry.begin_read(1).await.is_ok());
     }
 }
