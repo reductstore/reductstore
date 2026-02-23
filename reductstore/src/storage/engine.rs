@@ -6,7 +6,6 @@ use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
-use crate::storage::bucket::settings::SETTINGS_NAME;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use async_trait::async_trait;
