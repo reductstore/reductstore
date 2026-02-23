@@ -426,6 +426,12 @@ pub(crate) mod tests {
         }
 
         #[rstest]
+        fn test_http_error_log_hint_default() {
+            let err = HttpError::new(ErrorCode::NotFound, "missing");
+            assert_eq!(err.log_hint(), LogHint::Default);
+        }
+
+        #[rstest]
         #[tokio::test]
         async fn test_http_error_skip_log_header() {
             let err = HttpError::new(ErrorCode::ServiceUnavailable, "starting up")

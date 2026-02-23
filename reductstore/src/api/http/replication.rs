@@ -166,5 +166,50 @@ mod tests {
             assert_eq!(err.status(), UnprocessableEntity);
             assert_eq!(err.message(), "Invalid body");
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_replication_settings_ok() {
+            use crate::api::http::replication::ReplicationSettingsAxum;
+
+            let json = r#"{"src_bucket":"b1","dst_bucket":"b2","dst_host":"http://localhost"}"#;
+            let req = Request::builder().body(Body::from(json)).unwrap();
+
+            let payload = ReplicationSettingsAxum::from_request(req, &())
+                .await
+                .expect("parse settings");
+            assert_eq!(payload.0.src_bucket, "b1");
+            assert_eq!(payload.0.dst_bucket, "b2");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_replication_settings_invalid_json() {
+            use crate::api::http::replication::ReplicationSettingsAxum;
+
+            let req = Request::builder().body(Body::from("{bad json")).unwrap();
+
+            let err = ReplicationSettingsAxum::from_request(req, &())
+                .await
+                .expect_err("should fail");
+            assert_eq!(err.status(), UnprocessableEntity);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_replication_settings_body_error() {
+            use crate::api::http::replication::ReplicationSettingsAxum;
+
+            let stream = stream::once(async {
+                Err::<Bytes, _>(io::Error::new(io::ErrorKind::Other, "boom"))
+            });
+            let req = Request::builder().body(Body::from_stream(stream)).unwrap();
+
+            let err = ReplicationSettingsAxum::from_request(req, &())
+                .await
+                .expect_err("should fail");
+            assert_eq!(err.status(), UnprocessableEntity);
+            assert_eq!(err.message(), "Invalid body");
+        }
     }
 }
