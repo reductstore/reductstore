@@ -2,12 +2,15 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockRef;
-use crate::storage::entry::{Entry, RecordType, RecordWriter};
+use crate::storage::entry::{is_system_meta_entry, Entry, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
+use reduct_base::msg::entry_api::QueryEntry;
+use reduct_base::unprocessable_entity;
 use reduct_base::Labels;
+use std::collections::HashMap;
 use std::sync::Arc;
 
 impl Entry {
@@ -31,6 +34,16 @@ impl Entry {
         content_type: String,
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        if is_system_meta_entry(&self.name) {
+            let key = labels.get("key").ok_or_else(|| {
+                unprocessable_entity!(
+                    "System entry '{}' records must contain label 'key'",
+                    self.name
+                )
+            })?;
+            self.remove_existing_meta_records_by_key(key).await?;
+        }
+
         let settings = self.settings.read().await?;
         let mut block_ref = {
             let mut bm = self.block_manager.write().await?;
@@ -170,10 +183,23 @@ impl Entry {
         block.insert_or_update_record(record);
         Ok(())
     }
+
+    async fn remove_existing_meta_records_by_key(&self, key: &str) -> Result<(), ReductError> {
+        let _ = self
+            .query_remove_records(QueryEntry {
+                start: Some(0),
+                stop: Some(u64::MAX),
+                include: Some(HashMap::from([("key".to_string(), key.to_string())])),
+                ..Default::default()
+            })
+            .await?;
+        Ok(())
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::cfg::Cfg;
     use crate::storage::entry::tests::{entry, path, write_stub_record};
     use crate::storage::entry::{Entry, EntrySettings};
     use crate::storage::proto::{record, us_to_ts, Record};
@@ -536,5 +562,88 @@ mod tests {
         // We must be able to read the belated record back
         let reader = entry.begin_read(2000000).await;
         assert!(reader.is_ok(), "Belated record should be readable");
+    }
+
+    #[rstest]
+    #[serial]
+    #[tokio::test]
+    async fn test_meta_entry_requires_key_label(path: PathBuf) {
+        let entry = Arc::new(
+            Entry::try_build(
+                "entry/$meta",
+                path,
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 10000,
+                },
+                Cfg::default().into(),
+            )
+            .await
+            .unwrap(),
+        );
+
+        let err = entry
+            .begin_write(1, 4, "application/json".to_string(), Labels::new())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            ReductError::unprocessable_entity(
+                "System entry 'entry/$meta' records must contain label 'key'"
+            )
+        );
+    }
+
+    #[rstest]
+    #[serial]
+    #[tokio::test]
+    async fn test_meta_entry_replaces_previous_record_with_same_key(path: PathBuf) {
+        let entry = Arc::new(
+            Entry::try_build(
+                "entry/$meta",
+                path,
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 10000,
+                },
+                Cfg::default().into(),
+            )
+            .await
+            .unwrap(),
+        );
+
+        let mut sender = entry
+            .begin_write(
+                1,
+                5,
+                "application/json".to_string(),
+                Labels::from_iter([("key".to_string(), "schema".to_string())]),
+            )
+            .await
+            .unwrap();
+        sender
+            .send(Ok(Some(Bytes::from_static(b"old-1"))))
+            .await
+            .unwrap();
+        sender.send(Ok(None)).await.unwrap();
+
+        let mut sender = entry
+            .begin_write(
+                2,
+                5,
+                "application/json".to_string(),
+                Labels::from_iter([("key".to_string(), "schema".to_string())]),
+            )
+            .await
+            .unwrap();
+        sender
+            .send(Ok(Some(Bytes::from_static(b"new-2"))))
+            .await
+            .unwrap();
+        sender.send(Ok(None)).await.unwrap();
+
+        assert!(entry.begin_read(1).await.is_err());
+        assert!(entry.begin_read(2).await.is_ok());
     }
 }

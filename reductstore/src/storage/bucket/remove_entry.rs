@@ -4,7 +4,9 @@
 use super::Bucket;
 use crate::storage::engine::ReadOnlyMode;
 use crate::storage::entry::Entry;
+use crate::storage::entry::{is_system_meta_entry, meta_entry_name};
 use log::{debug, error};
+use reduct_base::conflict;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::status::ResourceStatus;
 use std::sync::Arc;
@@ -22,35 +24,51 @@ impl Bucket {
     pub async fn remove_entry(&self, name: &str) -> Result<(), ReductError> {
         self.ensure_not_deleting().await?;
         self.check_mode()?;
+        if is_system_meta_entry(name) {
+            return Err(conflict!(
+                "System entry '{}' can be removed only with its parent entry",
+                name
+            ));
+        }
 
+        let mut entries_to_remove = Vec::new();
         let entry = self.get_entry(name).await?.upgrade()?;
         entry.mark_deleting().await?;
+        entries_to_remove.push((name.to_string(), entry));
 
-        let entries = self.entries.clone();
-        let path = self.path.join(name);
+        let meta_entry = meta_entry_name(name);
+        if let Some(entry) = self.entries.read().await?.get(&meta_entry).cloned() {
+            entry.ensure_not_deleting().await?;
+            entry.mark_deleting().await?;
+            entries_to_remove.push((meta_entry, entry));
+        }
+
+        let entries_map = self.entries.clone();
         let bucket_name = self.name.clone();
-        let entry_name = name.to_string();
         let folder_keeper = self.folder_keeper.clone();
 
         tokio::spawn(async move {
             let remove_entry_from_backend = async || {
-                entry.remove_all_blocks().await?;
-                folder_keeper.remove_folder(&entry_name).await?;
+                for (entry_name, entry) in entries_to_remove {
+                    let path = entry.path().to_path_buf();
+                    entry.remove_all_blocks().await?;
+                    folder_keeper.remove_folder(&entry_name).await?;
 
-                debug!(
-                    "Remove entry '{}' from bucket '{}' and folder '{}'",
-                    entry_name,
-                    bucket_name,
-                    path.display()
-                );
-                entries.write().await?.remove(&entry_name);
+                    debug!(
+                        "Remove entry '{}' from bucket '{}' and folder '{}'",
+                        entry_name,
+                        bucket_name,
+                        path.display()
+                    );
+                    entries_map.write().await?.remove(&entry_name);
+                }
                 Ok::<(), ReductError>(())
             };
 
             if let Err(err) = remove_entry_from_backend().await {
                 error!(
-                    "Failed to remove entry '{}' from bucket '{}': {}",
-                    entry_name, bucket_name, err
+                    "Failed to remove entry from bucket '{}': {}",
+                    bucket_name, err
                 );
             }
         });
@@ -132,6 +150,21 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_remove_entry_removes_meta(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+        write(&bucket, "test-1/$meta", 1, b"meta").await.unwrap();
+
+        bucket.remove_entry("test-1").await.unwrap();
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        assert!(bucket.get_entry("test-1").await.is_err());
+        assert!(bucket.get_entry("test-1/$meta").await.is_err());
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_remove_entry_not_found(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         assert_eq!(
@@ -140,6 +173,34 @@ mod tests {
                 "Entry 'test-1' not found in bucket 'test'"
             ))
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_meta_entry_directly_forbidden(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        let mut sender = bucket
+            .begin_write(
+                "test-1/$meta",
+                1,
+                4,
+                "application/octet-stream".to_string(),
+                reduct_base::Labels::from_iter([("key".to_string(), "default".to_string())]),
+            )
+            .await
+            .unwrap();
+        sender
+            .send(Ok(Some(bytes::Bytes::from_static(b"meta"))))
+            .await
+            .unwrap();
+        sender.send(Ok(None)).await.unwrap();
+        assert_eq!(
+            bucket.remove_entry("test-1/$meta").await.err(),
+            Some(ReductError::conflict(
+                "System entry 'test-1/$meta' can be removed only with its parent entry"
+            ))
+        );
+        assert!(bucket.get_entry("test-1/$meta").await.is_ok());
     }
 
     #[rstest]

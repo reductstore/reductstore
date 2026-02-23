@@ -3,6 +3,7 @@
 
 mod entry_loader;
 pub(crate) mod io;
+mod meta;
 mod read_record;
 mod remove_records;
 pub(crate) mod update_labels;
@@ -21,6 +22,9 @@ use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryR
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 use log::{debug, error};
+pub(crate) use meta::{
+    is_system_meta_entry, meta_entry_name, meta_entry_parent, META_ENTRY_MAX_BLOCK_SIZE,
+};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;

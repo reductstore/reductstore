@@ -1,4 +1,5 @@
 import json
+from urllib.parse import quote
 
 from ..conftest import requires_env, auth_headers
 
@@ -185,3 +186,77 @@ def test_batch_and_query_for_deep_entry_path(base_url, session, bucket):
 
     resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts=1000")
     assert resp.status_code == 404
+
+
+def test_meta_entry_visibility_and_bucket_count(base_url, session, bucket):
+    entry = "a/x/y"
+    meta_entry = f"{entry}/$meta"
+    ts = 1000
+
+    resp = session.post(f"{base_url}/b/{bucket}/{entry}?ts={ts}", data=b"data")
+    assert resp.status_code == 200
+
+    resp = session.post(
+        f"{base_url}/b/{bucket}/{meta_entry}?ts={ts+1}",
+        data=b'{"v":1}',
+        headers={"x-reduct-label-key": "schema"},
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}/{meta_entry}?ts={ts+1}")
+    assert resp.status_code == 200
+    assert resp.content == b'{"v":1}'
+
+    resp = session.post(
+        f"{base_url}/io/{bucket}/q",
+        json={
+            "query_type": "QUERY",
+            "entries": [f"{entry}*"],
+            "start": ts,
+            "stop": ts + 2,
+        },
+    )
+    assert resp.status_code == 200
+    query_id = int(resp.json()["id"])
+
+    resp = session.get(
+        f"{base_url}/io/{bucket}/read", headers={"x-reduct-query-id": str(query_id)}
+    )
+    assert resp.status_code == 200
+    expected_entries = f"{quote(entry, safe='')},{quote(meta_entry, safe='')}"
+    assert resp.headers["x-reduct-entries"] == expected_entries
+
+    resp = session.get(f"{base_url}/b/{bucket}")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["info"]["entry_count"] == 1
+    assert data["info"]["size"] >= len(b"data") + len(b'{"v":1}')
+    assert all(entry_info["name"] != meta_entry for entry_info in data["entries"])
+
+
+def test_meta_entry_requires_key_label(base_url, session, bucket):
+    entry = "a/x/y/$meta"
+    resp = session.post(f"{base_url}/b/{bucket}/{entry}?ts=1000", data=b'{"v":1}')
+    assert resp.status_code == 422
+
+
+def test_meta_entry_upsert_by_key(base_url, session, bucket):
+    entry = "a/x/y/$meta"
+
+    headers = {"x-reduct-label-key": "schema"}
+    resp = session.post(
+        f"{base_url}/b/{bucket}/{entry}?ts=1000", data=b'{"v":1}', headers=headers
+    )
+    assert resp.status_code == 200
+
+    resp = session.post(
+        f"{base_url}/b/{bucket}/{entry}?ts=1010", data=b'{"v":2}', headers=headers
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts=1000")
+    assert resp.status_code == 404
+
+    resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts=1010")
+    assert resp.status_code == 200
+    assert resp.content == b'{"v":2}'

@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::Bucket;
+use crate::storage::entry::is_system_meta_entry;
 use crate::storage::entry::Entry;
 use log::debug;
 use reduct_base::error::ReductError;
@@ -65,6 +66,9 @@ impl Bucket {
                 let mut candidates: Vec<(u64, &Entry)> = vec![];
                 let entries = self.entries.read().await?;
                 for (_, entry) in entries.iter() {
+                    if is_system_meta_entry(entry.name()) {
+                        continue;
+                    }
                     let info = entry.info().await?;
                     candidates.push((info.oldest_record, entry));
                 }
@@ -157,6 +161,38 @@ mod tests {
                 "Entry 'test-1' not found in bucket 'test'"
             ))
         );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_fifo_quota_ignores_meta_entries_for_eviction(path: PathBuf) {
+        let bucket = bucket(
+            BucketSettings {
+                max_block_size: Some(20),
+                quota_type: Some(QuotaType::FIFO),
+                quota_size: Some(120),
+                max_block_records: Some(100),
+            },
+            path,
+        )
+        .await;
+
+        let blob: &[u8] = &[0u8; 40];
+        write(&bucket, "data-1/$meta", 0, blob).await.unwrap();
+        write(&bucket, "data-1", 1, blob).await.unwrap();
+        write(&bucket, "data-2", 2, blob).await.unwrap();
+
+        assert!(crate::storage::bucket::tests::read(&bucket, "data-1", 1)
+            .await
+            .is_err());
+        assert!(
+            crate::storage::bucket::tests::read(&bucket, "data-1/$meta", 0)
+                .await
+                .is_ok()
+        );
+        assert!(crate::storage::bucket::tests::read(&bucket, "data-2", 2)
+            .await
+            .is_ok());
     }
 
     #[rstest]
