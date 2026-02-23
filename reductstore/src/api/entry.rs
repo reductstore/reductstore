@@ -302,6 +302,13 @@ mod tests {
     use reduct_base::msg::entry_api::QueryEntry;
     use rstest::rstest;
 
+    fn path_to(bucket: &str, entry: &str) -> Path<HashMap<String, String>> {
+        Path(HashMap::from_iter(vec![
+            ("bucket_name".to_string(), bucket.to_string()),
+            ("entry_name".to_string(), entry.to_string()),
+        ]))
+    }
+
     mod method_extractor {
         use super::*;
 
@@ -380,6 +387,196 @@ mod tests {
             .await;
 
             assert_eq!(response.status(), 200);
+        }
+    }
+
+    mod read_entry_router_dispatch {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn dispatches_query_suffix(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+            let response = read_entry_router(
+                State(keeper.await),
+                path_to("bucket-1", "entry-1/q"),
+                Query(HashMap::from_iter(vec![(
+                    "start".to_string(),
+                    "0".to_string(),
+                )])),
+                headers,
+                MethodExtractor::new("GET"),
+            )
+            .await;
+
+            assert_eq!(response.status(), 200);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn dispatches_batch_suffix(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+            path_to_entry_1: Path<HashMap<String, String>>,
+        ) {
+            let keeper = keeper.await;
+            let q = super::query(&path_to_entry_1, keeper.clone(), Some(1)).await;
+            let response = read_entry_router(
+                State(keeper),
+                path_to("bucket-1", "entry-1/batch"),
+                Query(HashMap::from_iter(vec![("q".to_string(), q.to_string())])),
+                headers,
+                MethodExtractor::new("GET"),
+            )
+            .await;
+
+            assert_eq!(response.status(), 200);
+        }
+    }
+
+    mod write_entry_router_dispatch {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn dispatches_query_suffix(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+            let response = write_entry_router(
+                State(keeper.await),
+                headers,
+                path_to("bucket-1", "entry-1/q"),
+                Query(HashMap::new()),
+                Body::from(
+                    serde_json::to_vec(&QueryEntry {
+                        query_type: QueryType::Query,
+                        ..Default::default()
+                    })
+                    .unwrap(),
+                ),
+            )
+            .await;
+
+            assert_eq!(response.status(), 200);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn dispatches_batch_suffix(
+            #[future] keeper: Arc<StateKeeper>,
+            mut headers: HeaderMap,
+        ) {
+            headers.insert("x-reduct-time-1000", "1,".parse().unwrap());
+            headers.insert("content-length", "1".parse().unwrap());
+
+            let response = write_entry_router(
+                State(keeper.await),
+                headers,
+                path_to("bucket-1", "entry-dispatch/batch"),
+                Query(HashMap::new()),
+                Body::from("x"),
+            )
+            .await;
+
+            assert_eq!(response.status(), 200);
+        }
+    }
+
+    mod update_entry_router_dispatch {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn dispatches_batch_suffix(
+            #[future] keeper: Arc<StateKeeper>,
+            mut headers: HeaderMap,
+        ) {
+            headers.insert("x-reduct-time-1", "".parse().unwrap());
+
+            let response = update_entry_router(
+                State(keeper.await),
+                headers,
+                path_to("bucket-1", "entry-1/batch"),
+                Query(HashMap::new()),
+                Body::empty(),
+            )
+            .await;
+
+            assert_eq!(response.status(), 422);
+        }
+    }
+
+    mod remove_entry_dispatcher_dispatch {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn dispatches_query_suffix(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+            let response = remove_entry_dispatcher(
+                State(keeper.await),
+                headers,
+                path_to("bucket-1", "entry-1/q"),
+                Query(HashMap::from_iter(vec![
+                    ("start".to_string(), "0".to_string()),
+                    ("stop".to_string(), "1".to_string()),
+                ])),
+                Body::empty(),
+            )
+            .await;
+
+            assert_eq!(response.status(), 200);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn dispatches_batch_suffix(
+            #[future] keeper: Arc<StateKeeper>,
+            mut headers: HeaderMap,
+        ) {
+            headers.insert("x-reduct-time-0", "".parse().unwrap());
+
+            let response = remove_entry_dispatcher(
+                State(keeper.await),
+                headers,
+                path_to("bucket-1", "entry-1/batch"),
+                Query(HashMap::new()),
+                Body::empty(),
+            )
+            .await;
+
+            assert_eq!(response.status(), 200);
+        }
+    }
+
+    mod rename_entry_dispatcher_dispatch {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn dispatches_rename_suffix(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+            let response = rename_entry_dispatcher(
+                State(keeper.await),
+                headers,
+                path_to("bucket-1", "entry-1/rename"),
+                Body::from(r#"{"new_name":"entry-1-renamed"}"#),
+            )
+            .await;
+
+            assert_eq!(response.status(), 200);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn returns_not_found_for_non_rename_path(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let response = rename_entry_dispatcher(
+                State(keeper.await),
+                headers,
+                path_to("bucket-1", "entry-1"),
+                Body::from(r#"{"new_name":"entry-1-renamed"}"#),
+            )
+            .await;
+
+            assert_eq!(response.status(), 404);
         }
     }
 
