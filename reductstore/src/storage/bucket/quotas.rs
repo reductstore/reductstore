@@ -2,7 +2,6 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::is_system_meta_entry;
 use crate::storage::entry::Entry;
 use log::debug;
 use reduct_base::error::ReductError;
@@ -66,7 +65,7 @@ impl Bucket {
                 let mut candidates: Vec<(u64, &Entry)> = vec![];
                 let entries = self.entries.read().await?;
                 for (_, entry) in entries.iter() {
-                    if is_system_meta_entry(entry.name()) {
+                    if entry.is_system() {
                         continue;
                     }
                     let info = entry.info().await?;

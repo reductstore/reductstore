@@ -3,9 +3,9 @@
 
 mod entry_loader;
 pub(crate) mod io;
-mod meta;
 mod read_record;
 mod remove_records;
+mod system;
 pub(crate) mod update_labels;
 mod write_record;
 
@@ -22,9 +22,6 @@ use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryR
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 use log::{debug, error};
-pub(crate) use meta::{
-    is_system_meta_entry, meta_entry_name, meta_entry_parent, META_ENTRY_MAX_BLOCK_SIZE,
-};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;
@@ -33,6 +30,10 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+pub(crate) use system::{
+    is_system_meta_entry, meta_entry_name, meta_entry_parent, strategy_for_entry,
+    SystemEntryBehavior, META_ENTRY_MAX_BLOCK_SIZE,
+};
 use tokio::task::JoinHandle;
 
 struct QueryHandle {
@@ -53,6 +54,7 @@ pub(crate) struct Entry {
     bucket_name: String,
     settings: AsyncRwLock<EntrySettings>,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
+    system_behavior: Box<dyn SystemEntryBehavior + Send + Sync>,
     queries: QueryHandleMapRef,
     status: AsyncRwLock<ResourceStatus>,
     path: PathBuf,
@@ -96,6 +98,7 @@ impl Entry {
                 )
                 .await,
             )),
+            system_behavior: strategy_for_entry(name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
@@ -313,6 +316,10 @@ impl Entry {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub fn is_system(&self) -> bool {
+        self.system_behavior.is_system()
     }
 
     pub async fn settings(&self) -> Result<EntrySettings, ReductError> {

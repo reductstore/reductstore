@@ -251,19 +251,16 @@ impl Bucket {
         let mut latest_record = 0u64;
         let mut entry_infos = Vec::new();
 
-        let entries = self.entries.read().await?;
-        let infos = entries
-            .values()
-            .into_iter()
-            .map(|entry| entry.info())
-            .collect::<Vec<_>>();
+        let entries_guard = self.entries.read().await?;
+        let entries = entries_guard.values().cloned().collect::<Vec<_>>();
+        drop(entries_guard);
 
-        for info in infos {
-            let info = info.await?;
+        for entry in entries {
+            let info = entry.info().await?;
             size += info.size;
             oldest_record = oldest_record.min(info.oldest_record);
             latest_record = latest_record.max(info.latest_record);
-            if !is_system_meta_entry(&info.name) {
+            if !entry.is_system() {
                 entry_infos.push(info);
             }
         }

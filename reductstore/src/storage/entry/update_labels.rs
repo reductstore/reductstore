@@ -1,7 +1,8 @@
 // Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::entry::{is_system_meta_entry, Entry};
+use crate::storage::entry::system::UpdateDisposition;
+use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::Record;
 use reduct_base::error::ReductError;
@@ -39,67 +40,67 @@ impl Entry {
     ) -> Result<UpdateResult, ReductError> {
         let mut result = UpdateResult::new();
         let mut records_per_block = BTreeMap::new();
-        let mut records_to_remove = Vec::new();
-        let is_meta_entry = is_system_meta_entry(&self.name);
-
+        for UpdateLabels {
+            time,
+            update,
+            remove,
+        } in updates
         {
-            let mut bm = self.block_manager.write().await?;
-            for UpdateLabels {
-                time,
-                update,
-                remove,
-            } in updates
-            {
-                // Find the block that contains the record
-                // TODO: Try to avoid the lookup for each record
+            // Find the block/record first, then let strategy apply update/delete behavior.
+            let located = {
+                let mut bm = self.block_manager.write().await?;
                 match bm.find_block(time).await {
                     Ok(block_ref) => {
                         let block = block_ref.read().await?;
-                        if let Some(record) = block.get_record(time) {
-                            let remove_marker = update.get("remove").is_some_and(|v| v == "true");
-                            if is_meta_entry && remove_marker {
-                                let updated =
-                                    Self::update_single_label(record.clone(), update, remove);
-                                records_to_remove.push(time);
-                                result.insert(
-                                    time,
-                                    Ok(updated
-                                        .labels
-                                        .iter()
-                                        .map(|label| (label.name.clone(), label.value.clone()))
-                                        .collect()),
-                                );
-                                continue;
-                            }
-
-                            let record = Self::update_single_label(record.clone(), update, remove);
-                            records_per_block
-                                .entry(block.block_id())
-                                .or_insert_with(Vec::new)
-                                .push(record.clone());
-                            result.insert(
-                                time,
-                                Ok(record
-                                    .labels
-                                    .iter()
-                                    .map(|label| (label.name.clone(), label.value.clone()))
-                                    .collect()),
-                            );
-                        } else {
-                            result.insert(
-                                time,
-                                Err(not_found!(
-                                    "Record {} not found in entry {}/{}",
-                                    time,
-                                    self.bucket_name,
-                                    self.name
-                                )),
-                            );
-                        }
+                        block
+                            .get_record(time)
+                            .cloned()
+                            .map(|record| (block.block_id(), record))
                     }
                     Err(err) => {
                         result.insert(time, Err(err));
+                        continue;
                     }
+                }
+            };
+
+            let Some((block_id, record)) = located else {
+                result.insert(
+                    time,
+                    Err(not_found!(
+                        "Record {} not found in entry {}/{}",
+                        time,
+                        self.bucket_name,
+                        self.name
+                    )),
+                );
+                continue;
+            };
+
+            match self
+                .system_behavior
+                .apply_update(self.clone(), time, record, update, remove)
+                .await
+            {
+                Ok(UpdateDisposition::Persist(record)) => {
+                    records_per_block
+                        .entry(block_id)
+                        .or_insert_with(Vec::new)
+                        .push(record.clone());
+                    result.insert(
+                        time,
+                        Ok(record
+                            .labels
+                            .iter()
+                            .map(|label| (label.name.clone(), label.value.clone()))
+                            .collect()),
+                    );
+                }
+                Ok(UpdateDisposition::Removed(labels)) => {
+                    result.insert(time, Ok(labels));
+                }
+                Err(err) => {
+                    result.insert(time, Err(err));
                 }
             }
         }
@@ -122,17 +123,10 @@ impl Entry {
             handler.await.unwrap()?;
         }
 
-        if !records_to_remove.is_empty() {
-            let errors = self.clone().remove_records(records_to_remove).await?;
-            for (time, err) in errors {
-                result.insert(time, Err(err));
-            }
-        }
-
         Ok(result)
     }
 
-    fn update_single_label(
+    pub(in crate::storage::entry) fn update_single_label(
         mut record: Record,
         mut update: Labels,
         remove: HashSet<String>,
