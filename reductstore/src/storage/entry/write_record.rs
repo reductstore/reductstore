@@ -2,7 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::block_manager::BlockRef;
-use crate::storage::entry::{is_system_meta_entry, Entry, RecordType, RecordWriter};
+use crate::storage::entry::{is_system_meta_entry, Entry, RecordDrainer, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
 use log::debug;
 use reduct_base::error::ReductError;
@@ -42,6 +42,11 @@ impl Entry {
                 )
             })?;
             self.remove_existing_meta_records_by_key(key).await?;
+
+            // remove=true means hard-delete for the key without creating a new record
+            if labels.get("remove").is_some_and(|value| value == "true") {
+                return Ok(Box::new(RecordDrainer::new()));
+            }
         }
 
         let settings = self.settings.read().await?;
@@ -645,5 +650,60 @@ mod tests {
 
         assert!(entry.begin_read(1).await.is_err());
         assert!(entry.begin_read(2).await.is_ok());
+    }
+
+    #[rstest]
+    #[serial]
+    #[tokio::test]
+    async fn test_meta_entry_remove_true_deletes_without_new_record(path: PathBuf) {
+        let entry = Arc::new(
+            Entry::try_build(
+                "entry/$meta",
+                path,
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 10000,
+                },
+                Cfg::default().into(),
+            )
+            .await
+            .unwrap(),
+        );
+
+        let mut sender = entry
+            .begin_write(
+                1,
+                7,
+                "application/json".to_string(),
+                Labels::from_iter([("key".to_string(), "$plugin".to_string())]),
+            )
+            .await
+            .unwrap();
+        sender
+            .send(Ok(Some(Bytes::from_static(br#"{"v":1}"#))))
+            .await
+            .unwrap();
+        sender.send(Ok(None)).await.unwrap();
+
+        let mut sender = entry
+            .begin_write(
+                2,
+                2,
+                "application/json".to_string(),
+                Labels::from_iter([
+                    ("key".to_string(), "$plugin".to_string()),
+                    ("remove".to_string(), "true".to_string()),
+                ]),
+            )
+            .await
+            .unwrap();
+        sender
+            .send(Ok(Some(Bytes::from_static(br#"{}"#))))
+            .await
+            .unwrap();
+        sender.send(Ok(None)).await.unwrap();
+
+        assert!(entry.begin_read(1).await.is_err());
+        assert!(entry.begin_read(2).await.is_err());
     }
 }

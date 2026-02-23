@@ -32,9 +32,6 @@ impl Bucket {
         }
 
         let mut entries_to_remove = Vec::new();
-        let entry = self.get_entry(name).await?.upgrade()?;
-        entry.mark_deleting().await?;
-        entries_to_remove.push((name.to_string(), entry));
 
         let meta_entry = meta_entry_name(name);
         if let Some(entry) = self.entries.read().await?.get(&meta_entry).cloned() {
@@ -42,6 +39,10 @@ impl Bucket {
             entry.mark_deleting().await?;
             entries_to_remove.push((meta_entry, entry));
         }
+
+        let entry = self.get_entry(name).await?.upgrade()?;
+        entry.mark_deleting().await?;
+        entries_to_remove.push((name.to_string(), entry));
 
         let entries_map = self.entries.clone();
         let bucket_name = self.name.clone();
@@ -52,7 +53,12 @@ impl Bucket {
                 for (entry_name, entry) in entries_to_remove {
                     let path = entry.path().to_path_buf();
                     entry.remove_all_blocks().await?;
-                    folder_keeper.remove_folder(&entry_name).await?;
+                    if crate::core::file_cache::FILE_CACHE
+                        .try_exists(&path)
+                        .await?
+                    {
+                        folder_keeper.remove_folder(&entry_name).await?;
+                    }
 
                     debug!(
                         "Remove entry '{}' from bucket '{}' and folder '{}'",
@@ -88,6 +94,14 @@ impl Bucket {
                 .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
                 .collect()
         };
+        let mut entries_snapshot = entries_snapshot;
+        // Remove system meta entries first to avoid removing parent entry folder
+        // before its `$meta` folder.
+        entries_snapshot.sort_by(|(a, _), (b, _)| {
+            let a_meta = is_system_meta_entry(a);
+            let b_meta = is_system_meta_entry(b);
+            b_meta.cmp(&a_meta).then_with(|| a.cmp(b))
+        });
 
         for (name, entry) in &entries_snapshot {
             if let Err(err) = entry.mark_deleting().await {
@@ -105,7 +119,12 @@ impl Bucket {
             }
 
             entry.remove_all_blocks().await?;
-            self.folder_keeper.remove_folder(name).await?;
+            if crate::core::file_cache::FILE_CACHE
+                .try_exists(&self.path.join(name))
+                .await?
+            {
+                self.folder_keeper.remove_folder(name).await?;
+            }
         }
 
         let mut entries = self.entries.write().await?;
@@ -153,7 +172,9 @@ mod tests {
     async fn test_remove_entry_removes_meta(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         write(&bucket, "test-1", 1, b"test").await.unwrap();
-        write(&bucket, "test-1/$meta", 1, b"meta").await.unwrap();
+        write_meta(&bucket, "test-1/$meta", 1, b"meta")
+            .await
+            .unwrap();
 
         bucket.remove_entry("test-1").await.unwrap();
 
@@ -254,6 +275,29 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_remove_entries_for_bucket_removal_with_meta(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+        write_meta(&bucket, "test-1/$meta", 2, b"meta")
+            .await
+            .unwrap();
+
+        bucket.remove_entries_for_bucket_removal().await.unwrap();
+
+        let info = bucket.clone().info().await.unwrap();
+        assert!(info.entries.is_empty());
+        assert!(!FILE_CACHE
+            .try_exists(&bucket.path.join("test-1"))
+            .await
+            .unwrap());
+        assert!(!FILE_CACHE
+            .try_exists(&bucket.path.join("test-1/$meta"))
+            .await
+            .unwrap());
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_remove_entries_for_bucket_removal_with_deleting_entry(
         #[future] bucket: Arc<Bucket>,
     ) {
@@ -286,6 +330,32 @@ mod tests {
                 content.len() as u64,
                 "".to_string(),
                 Labels::new(),
+            )
+            .await?;
+        sender
+            .send(Ok(Some(Bytes::from(content))))
+            .await
+            .map_err(|e| internal_server_error!("Failed to send data: {}", e))?;
+        sender
+            .send(Ok(None))
+            .await
+            .map_err(|e| internal_server_error!("Failed to sync channel: {}", e))?;
+        Ok(())
+    }
+
+    pub async fn write_meta(
+        bucket: &Arc<Bucket>,
+        entry_name: &str,
+        time: u64,
+        content: &'static [u8],
+    ) -> Result<(), ReductError> {
+        let mut sender = bucket
+            .begin_write(
+                entry_name,
+                time,
+                content.len() as u64,
+                "".to_string(),
+                Labels::from_iter([("key".to_string(), "default".to_string())]),
             )
             .await?;
         sender
