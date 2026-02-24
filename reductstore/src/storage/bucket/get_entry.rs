@@ -69,6 +69,7 @@ mod tests {
     use super::*;
     use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
+    use crate::storage::block_manager::BLOCK_INDEX_FILE;
     use crate::storage::entry::META_ENTRY_MAX_BLOCK_SIZE;
     use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
     use reduct_base::unprocessable_entity;
@@ -115,6 +116,18 @@ mod tests {
         assert!(bucket.get_entry("a").await.is_ok());
         assert!(bucket.get_entry("a/b").await.is_ok());
         assert!(bucket.get_entry("a/b/c").await.is_ok());
+        assert!(FILE_CACHE
+            .try_exists(&bucket.path().join("a").join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap());
+        assert!(FILE_CACHE
+            .try_exists(&bucket.path().join("a/b").join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap());
+        assert!(FILE_CACHE
+            .try_exists(&bucket.path().join("a/b/c").join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap());
     }
 
     #[rstest]
