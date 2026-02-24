@@ -332,6 +332,10 @@ impl Entry {
         self.system_behavior.is_removable_by_query()
     }
 
+    pub(crate) fn is_queryable_by_wildcard(&self) -> bool {
+        self.system_behavior.is_queryable_by_wildcard()
+    }
+
     pub async fn settings(&self) -> Result<EntrySettings, ReductError> {
         Ok(self.settings.read().await?.clone())
     }
