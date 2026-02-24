@@ -73,26 +73,6 @@ pub(crate) struct Bucket {
 }
 
 impl Bucket {
-    fn parent_prefixes(key: &str) -> Vec<String> {
-        let mut prefixes = Vec::new();
-        let mut current = String::new();
-        for segment in key.split('/') {
-            if !current.is_empty() {
-                current.push('/');
-            }
-            current.push_str(segment);
-            prefixes.push(current.clone());
-        }
-        prefixes
-    }
-
-    fn entry_with_descendants<'a>(entry_name: &'a str, candidate: &'a str) -> bool {
-        candidate == entry_name
-            || candidate
-                .strip_prefix(entry_name)
-                .is_some_and(|suffix| suffix.starts_with('/'))
-    }
-
     /// Create a new Bucket
     ///
     /// # Arguments
@@ -387,6 +367,26 @@ impl Bucket {
         } else {
             Ok(())
         }
+    }
+
+    fn parent_prefixes(key: &str) -> Vec<String> {
+        let mut prefixes = Vec::new();
+        let mut current = String::new();
+        for segment in key.split('/') {
+            if !current.is_empty() {
+                current.push('/');
+            }
+            current.push_str(segment);
+            prefixes.push(current.clone());
+        }
+        prefixes
+    }
+
+    fn entry_with_descendants<'a>(entry_name: &'a str, candidate: &'a str) -> bool {
+        candidate == entry_name
+            || candidate
+                .strip_prefix(entry_name)
+                .is_some_and(|suffix| suffix.starts_with('/'))
     }
 }
 

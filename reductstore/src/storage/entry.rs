@@ -234,6 +234,11 @@ impl Entry {
         Ok(())
     }
 
+    pub(crate) async fn mark_ready(&self) -> Result<(), ReductError> {
+        *self.status.write().await? = ResourceStatus::Ready;
+        Ok(())
+    }
+
     pub(crate) async fn ensure_not_deleting(&self) -> Result<(), ReductError> {
         if self.status().await? == ResourceStatus::Deleting {
             Err(conflict!(

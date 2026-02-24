@@ -78,34 +78,48 @@ impl Bucket {
         tokio::spawn(async move {
             for (entry_name, entry) in entries_to_remove {
                 let path = entry.path().to_path_buf();
+                let mut failed = false;
+
                 if let Err(err) = entry.remove_all_blocks().await {
                     error!(
                         "Failed to remove blocks for entry '{}' in bucket '{}': {}",
                         entry_name, bucket_name, err
                     );
-                    continue;
+                    failed = true;
                 }
 
-                match crate::core::file_cache::FILE_CACHE.try_exists(&path).await {
-                    Ok(true) => {
-                        if let Err(err) = folder_keeper.remove_folder(&entry_name).await {
-                            if err.status() != ErrorCode::NotFound {
-                                error!(
-                                    "Failed to remove folder for entry '{}' in bucket '{}': {}",
-                                    entry_name, bucket_name, err
-                                );
-                                continue;
+                if !failed {
+                    match crate::core::file_cache::FILE_CACHE.try_exists(&path).await {
+                        Ok(true) => {
+                            if let Err(err) = folder_keeper.remove_folder(&entry_name).await {
+                                if err.status() != ErrorCode::NotFound {
+                                    error!(
+                                        "Failed to remove folder for entry '{}' in bucket '{}': {}",
+                                        entry_name, bucket_name, err
+                                    );
+                                    failed = true;
+                                }
                             }
                         }
+                        Ok(false) => {}
+                        Err(err) => {
+                            error!(
+                                "Failed to check folder for entry '{}' in bucket '{}': {}",
+                                entry_name, bucket_name, err
+                            );
+                            failed = true;
+                        }
                     }
-                    Ok(false) => {}
-                    Err(err) => {
+                }
+
+                if failed {
+                    if let Err(err) = entry.mark_ready().await {
                         error!(
-                            "Failed to check folder for entry '{}' in bucket '{}': {}",
+                            "Failed to recover entry '{}' to READY in bucket '{}': {}",
                             entry_name, bucket_name, err
                         );
-                        continue;
                     }
+                    continue;
                 }
 
                 debug!(

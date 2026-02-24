@@ -1,7 +1,7 @@
 // Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use super::{settings_for_entry, Bucket};
+use super::{normalize_entry_name, settings_for_entry, Bucket};
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::engine::{check_entry_name_convention, ReadOnlyMode};
 use crate::storage::entry::Entry;
@@ -11,15 +11,46 @@ use reduct_base::not_found;
 use std::sync::Arc;
 
 impl Bucket {
+    async fn rebuild_entries_from_fs(
+        &self,
+        settings: &reduct_base::msg::bucket_api::BucketSettings,
+    ) -> Result<(), ReductError> {
+        self.folder_keeper.reload().await?;
+
+        let mut rebuilt_entries = std::collections::BTreeMap::new();
+        let mut task_set = Vec::new();
+        for entry_path in self.folder_keeper.list_folders().await? {
+            let entry_name = normalize_entry_name(
+                entry_path
+                    .strip_prefix(&self.path)
+                    .unwrap_or(entry_path.as_path()),
+            );
+            task_set.push(Entry::restore(
+                entry_path,
+                entry_name.clone(),
+                self.name.clone(),
+                settings_for_entry(&entry_name, settings),
+                self.cfg.clone(),
+            ));
+        }
+
+        for task in task_set {
+            if let Some(entry) = task.await? {
+                rebuilt_entries.insert(entry.name().to_string(), Arc::new(entry));
+            }
+        }
+
+        *self.entries.write().await? = rebuilt_entries;
+        Ok(())
+    }
+
     pub async fn rename_entry(&self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
         self.check_mode()?;
         self.ensure_not_deleting().await?;
 
         let new_path = self.path.join(new_name);
         let bucket_name = self.name.clone();
-        let entries = self.entries.clone();
         let settings = self.settings().await?;
-        let cfg = self.cfg.clone();
         let folder_keeper = self.folder_keeper.clone();
 
         check_entry_name_convention(&new_name)?;
@@ -31,8 +62,8 @@ impl Bucket {
             ));
         }
 
-        let affected_entries: Vec<(String, Arc<Entry>)> = {
-            let entries_guard = entries.read().await?;
+        let affected_children: Vec<(String, Arc<Entry>)> = {
+            let entries_guard = self.entries.read().await?;
             entries_guard
                 .iter()
                 .filter(|(entry_name, _)| Self::entry_with_descendants(old_name, entry_name))
@@ -40,7 +71,7 @@ impl Bucket {
                 .collect()
         };
 
-        if affected_entries.is_empty() {
+        if affected_children.is_empty() {
             return Err(not_found!(
                 "Entry '{}' not found in bucket '{}'",
                 old_name,
@@ -56,7 +87,7 @@ impl Bucket {
             ));
         }
 
-        let renamed_entries: Vec<(String, String, Arc<Entry>)> = affected_entries
+        let renamed_children: Vec<(String, String, Arc<Entry>)> = affected_children
             .into_iter()
             .map(|(entry_name, entry)| {
                 (
@@ -67,13 +98,13 @@ impl Bucket {
             })
             .collect();
 
-        let old_entry_names: Vec<String> = renamed_entries
+        let old_entry_names: Vec<String> = renamed_children
             .iter()
             .map(|(old_entry_name, _, _)| old_entry_name.clone())
             .collect();
         {
-            let entries_guard = entries.read().await?;
-            for (_, new_entry_name, _) in &renamed_entries {
+            let entries_guard = self.entries.read().await?;
+            for (_, new_entry_name, _) in &renamed_children {
                 if entries_guard.contains_key(new_entry_name)
                     && !old_entry_names.iter().any(|name| name == new_entry_name)
                 {
@@ -86,35 +117,26 @@ impl Bucket {
             }
         }
 
-        for (_, _, entry) in &renamed_entries {
+        for (_, _, entry) in &renamed_children {
             entry.ensure_not_deleting().await?;
             entry.compact().await?;
         }
 
         folder_keeper.rename_folder(old_name, new_name).await?;
 
-        {
-            let mut entries_guard = entries.write().await?;
-            for (old_entry_name, _, _) in &renamed_entries {
-                entries_guard.remove(old_entry_name);
-            }
-        }
+        if let Err(err) = self.rebuild_entries_from_fs(&settings).await {
+            log::error!(
+                "Failed to rebuild bucket '{}' entries after renaming '{}' to '{}': {}. Rolling back.",
+                bucket_name,
+                old_name,
+                new_name,
+                err
+            );
 
-        for (_, new_entry_name, _) in &renamed_entries {
-            if let Some(entry) = Entry::restore(
-                self.path.join(new_entry_name),
-                new_entry_name.clone(),
-                bucket_name.clone(),
-                settings_for_entry(new_entry_name, &settings),
-                cfg.clone(),
-            )
-            .await?
-            {
-                entries
-                    .write()
-                    .await?
-                    .insert(new_entry_name.clone(), Arc::new(entry));
-            }
+            folder_keeper.rename_folder(new_name, old_name).await?;
+            // recovery can also fail, but we should try to restore the previous state as much as possible
+            self.rebuild_entries_from_fs(&settings).await?;
+            return Err(err);
         }
 
         Ok(())
