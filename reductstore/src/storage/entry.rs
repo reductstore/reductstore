@@ -11,6 +11,7 @@ mod write_record;
 
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
+use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndex;
@@ -84,6 +85,15 @@ impl Entry {
     ) -> Result<Self, ReductError> {
         let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let path = path.join(name);
+        let block_index_path = path.join(BLOCK_INDEX_FILE);
+        let block_index = BlockIndex::new(block_index_path.clone());
+
+        // create block index file if it doesn't exist.
+        if !FILE_CACHE.try_exists(&block_index_path).await? {
+            FILE_CACHE.create_dir_all(&path).await?;
+            block_index.save().await?;
+        }
+
         Ok(Self {
             name: name.to_string(),
             bucket_name: bucket_name.clone(),
@@ -91,7 +101,7 @@ impl Entry {
             block_manager: Arc::new(AsyncRwLock::new(
                 BlockManager::build(
                     path.clone(),
-                    BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                    block_index,
                     bucket_name.clone(),
                     name.to_string(),
                     cfg.clone(),
