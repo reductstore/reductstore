@@ -32,7 +32,7 @@ use std::sync::Arc;
 use std::time::Instant;
 pub(crate) use system::{
     is_system_meta_entry, meta_entry_name, meta_entry_parent, strategy_for_entry,
-    SystemEntryBehavior, META_ENTRY_MAX_BLOCK_SIZE,
+    validate_remove_entry, validate_remove_records, SystemEntryBehavior, META_ENTRY_MAX_BLOCK_SIZE,
 };
 use tokio::task::JoinHandle;
 
@@ -129,7 +129,9 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub async fn query(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
+    pub async fn query(&self, mut query_parameters: QueryEntry) -> Result<u64, ReductError> {
+        self.system_behavior
+            .apply_default_query_filters(&mut query_parameters);
         let (start, stop) = self.get_query_time_range(&query_parameters).await?;
         let id = next_query_id();
         let block_manager = Arc::clone(&self.block_manager);

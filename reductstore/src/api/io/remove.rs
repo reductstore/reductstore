@@ -3,6 +3,7 @@
 
 use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::WriteAccessPolicy;
+use crate::storage::entry::validate_remove_records;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::batch::v2::{
@@ -39,6 +40,9 @@ pub(super) async fn remove_batched_records(
 
     let start_ts = parse_start_timestamp(&headers).map_err(HttpError::from)?;
     let entries = parse_entries(&headers).map_err(HttpError::from)?;
+    for entry_name in &entries {
+        validate_remove_records(entry_name)?;
+    }
     let parsed_headers = sort_headers_by_entry_and_time(&headers)?;
 
     let mut records_by_entry: HashMap<String, Vec<IndexedTimestamp>> = HashMap::new();
@@ -296,5 +300,35 @@ mod tests {
             .unwrap();
 
         assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_meta_entries(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+    ) {
+        let keeper = keeper.await;
+        headers.insert(
+            "x-reduct-entries",
+            HeaderValue::from_str(encode_entry_name("entry-1/$meta").as_str()).unwrap(),
+        );
+        headers.insert("x-reduct-start-ts", HeaderValue::from_static("1000"));
+        headers.insert(
+            axum::http::HeaderName::from_static("x-reduct-0-0"),
+            HeaderValue::from_static(""),
+        );
+
+        let err = remove_batched_records(State(keeper), headers, path_to_bucket_1)
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+        assert_eq!(
+            err.message(),
+            "Can't delete records from system entry 'entry-1/$meta'; use label update with remove=true"
+        );
     }
 }

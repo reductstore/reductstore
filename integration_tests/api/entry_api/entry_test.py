@@ -284,10 +284,9 @@ def test_meta_entry_remove_marker_by_key(base_url, session, bucket):
     assert resp.status_code == 200
 
     resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts=1000")
-    assert resp.status_code == 404
-
-    resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts=1010")
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert resp.headers["x-reduct-label-key"] == "$plugin"
+    assert resp.headers["x-reduct-label-remove"] == "true"
 
 
 def test_meta_entry_query_via_get_q_endpoint(base_url, session, bucket):

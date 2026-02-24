@@ -1,7 +1,6 @@
 // Copyright 2024-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::storage::entry::system::UpdateDisposition;
 use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
 use crate::storage::proto::Record;
@@ -46,7 +45,7 @@ impl Entry {
             remove,
         } in updates
         {
-            // Find the block/record first, then let strategy apply update/delete behavior.
+            // Find the block/record first, then apply a label update.
             let located = {
                 let mut bm = self.block_manager.write().await?;
                 match bm.find_block(time).await {
@@ -77,32 +76,19 @@ impl Entry {
                 continue;
             };
 
-            match self
-                .system_behavior
-                .apply_update(self.clone(), time, record, update, remove)
-                .await
-            {
-                Ok(UpdateDisposition::Persist(record)) => {
-                    records_per_block
-                        .entry(block_id)
-                        .or_insert_with(Vec::new)
-                        .push(record.clone());
-                    result.insert(
-                        time,
-                        Ok(record
-                            .labels
-                            .iter()
-                            .map(|label| (label.name.clone(), label.value.clone()))
-                            .collect()),
-                    );
-                }
-                Ok(UpdateDisposition::Removed(labels)) => {
-                    result.insert(time, Ok(labels));
-                }
-                Err(err) => {
-                    result.insert(time, Err(err));
-                }
-            }
+            let record = Entry::update_single_label(record, update, remove);
+            records_per_block
+                .entry(block_id)
+                .or_insert_with(Vec::new)
+                .push(record.clone());
+            result.insert(
+                time,
+                Ok(record
+                    .labels
+                    .iter()
+                    .map(|label| (label.name.clone(), label.value.clone()))
+                    .collect()),
+            );
         }
 
         // Update blocks

@@ -22,6 +22,16 @@ async def read_record(bucket: Bucket, entry: str, ts: int):
         raise
 
 
+async def read_record_with_labels(bucket: Bucket, entry: str, ts: int):
+    try:
+        async with bucket.read(entry, timestamp=ts) as record:
+            return await record.read_all(), record.labels
+    except ReductError as err:
+        if err.status_code in (404, 409):
+            return None
+        raise
+
+
 async def wait_until(
     predicate, label: str, timeout_s: float = 30.0, step_s: float = 0.25
 ):
@@ -81,17 +91,29 @@ async def check():
             labels={"key": "$plugin", "remove": "true"},
         )
 
-        async def removed_on_source():
-            return await read_record(src, meta_entry, meta_ts_2) is None
+        async def tombstone_on_source():
+            record = await read_record_with_labels(src, meta_entry, meta_ts_2)
+            return (
+                record is not None
+                and record[0] == b'{"version":2}'
+                and record[1].get("key") == "$plugin"
+                and record[1].get("remove") == "true"
+            )
 
-        await wait_until(removed_on_source, "source meta removal by key")
+        await wait_until(tombstone_on_source, "source meta tombstone by key")
 
-        async def removed_on_dest():
+        async def tombstone_on_dest():
             main_data = await read_record(dest, entry, main_ts)
-            latest_meta = await read_record(dest, meta_entry, meta_ts_2)
-            return main_data == b"main-record" and latest_meta is None
+            latest_meta = await read_record_with_labels(dest, meta_entry, meta_ts_2)
+            return (
+                main_data == b"main-record"
+                and latest_meta is not None
+                and latest_meta[0] == b'{"version":2}'
+                and latest_meta[1].get("key") == "$plugin"
+                and latest_meta[1].get("remove") == "true"
+            )
 
-        await wait_until(removed_on_dest, "dest meta removal by key")
+        await wait_until(tombstone_on_dest, "dest meta tombstone by key")
 
     print("Meta replication check passed")
 

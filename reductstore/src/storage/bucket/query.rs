@@ -279,11 +279,13 @@ impl Bucket {
 mod tests {
     use super::*;
     use crate::storage::bucket::tests::{bucket, write, write_meta};
+    use crate::storage::bucket::update_records::UpdateLabelsMulti;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use reduct_base::not_found;
     use rstest::rstest;
+    use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::timeout;
@@ -414,6 +416,40 @@ mod tests {
             records,
             vec![("acc-a".to_string(), 10), ("acc-a/$meta".to_string(), 11)]
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn wildcard_query_excludes_meta_tombstones_by_default(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "acc-a", 10, b"a1").await.unwrap();
+        write_meta(&bucket, "acc-a/$meta", 11, b"meta")
+            .await
+            .unwrap();
+
+        bucket
+            .clone()
+            .update_labels(vec![UpdateLabelsMulti {
+                entry_name: "acc-a/$meta".to_string(),
+                time: 11,
+                update: [("remove".to_string(), "true".to_string())]
+                    .into_iter()
+                    .collect(),
+                remove: HashSet::new(),
+            }])
+            .await
+            .unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["acc-a*".into()]),
+            ..Default::default()
+        };
+        let id = bucket.query(query).await.unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        let records = collect_records(rx).await;
+        assert_eq!(records, vec![("acc-a".to_string(), 10)]);
     }
 
     #[rstest]

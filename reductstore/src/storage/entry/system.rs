@@ -2,13 +2,11 @@
 // Licensed under the Business Source License 1.1
 
 use crate::storage::entry::Entry;
-use crate::storage::proto::Record;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{unprocessable_entity, Labels};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::collections::HashMap;
 
 /// Reserved segment for system metadata entries.
 ///
@@ -21,6 +19,8 @@ use std::sync::Arc;
 /// - Every `$meta` record must include label `key`.
 /// - `$meta` behaves as upsert-by-key: writing a record with `key=K` removes existing `$meta`
 ///   records with the same key before adding the new one.
+/// - Updating a `$meta` record with label `remove=true` creates a tombstone (label-only update)
+///   and does not physically delete the record.
 pub(crate) const META_ENTRY_SEGMENT: &str = "$meta";
 
 /// Max block size for system metadata entries.
@@ -40,33 +40,20 @@ pub(crate) fn meta_entry_name(entry_name: &str) -> String {
     format!("{entry_name}/{META_ENTRY_SEGMENT}")
 }
 
-pub(crate) enum WriteDisposition {
-    Write,
-}
-
-pub(crate) enum UpdateDisposition {
-    Persist(Record),
-    Removed(Labels),
-}
-
 #[async_trait]
 pub(crate) trait SystemEntryBehavior {
     fn is_system(&self) -> bool;
+    fn validate_remove_records(&self, _entry_name: &str) -> Result<(), ReductError> {
+        Ok(())
+    }
 
-    async fn prepare_write(
-        &self,
-        entry: &Entry,
-        labels: &Labels,
-    ) -> Result<WriteDisposition, ReductError>;
+    fn validate_remove_entry(&self, _entry_name: &str) -> Result<(), ReductError> {
+        Ok(())
+    }
 
-    async fn apply_update(
-        &self,
-        entry: Arc<Entry>,
-        time: u64,
-        record: Record,
-        update: Labels,
-        remove: HashSet<String>,
-    ) -> Result<UpdateDisposition, ReductError>;
+    async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError>;
+
+    fn apply_default_query_filters(&self, query: &mut QueryEntry);
 }
 
 pub(crate) struct RegularEntryBehavior;
@@ -77,26 +64,11 @@ impl SystemEntryBehavior for RegularEntryBehavior {
         false
     }
 
-    async fn prepare_write(
-        &self,
-        _entry: &Entry,
-        _labels: &Labels,
-    ) -> Result<WriteDisposition, ReductError> {
-        Ok(WriteDisposition::Write)
+    async fn prepare_write(&self, _entry: &Entry, _labels: &Labels) -> Result<(), ReductError> {
+        Ok(())
     }
 
-    async fn apply_update(
-        &self,
-        _entry: Arc<Entry>,
-        _time: u64,
-        record: Record,
-        update: Labels,
-        remove: HashSet<String>,
-    ) -> Result<UpdateDisposition, ReductError> {
-        Ok(UpdateDisposition::Persist(Entry::update_single_label(
-            record, update, remove,
-        )))
-    }
+    fn apply_default_query_filters(&self, _query: &mut QueryEntry) {}
 }
 
 pub(crate) struct MetaEntryBehavior;
@@ -107,11 +79,7 @@ impl SystemEntryBehavior for MetaEntryBehavior {
         true
     }
 
-    async fn prepare_write(
-        &self,
-        entry: &Entry,
-        labels: &Labels,
-    ) -> Result<WriteDisposition, ReductError> {
+    async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError> {
         let key = labels.get("key").ok_or_else(|| {
             unprocessable_entity!(
                 "System entry '{}' records must contain label 'key'",
@@ -134,33 +102,36 @@ impl SystemEntryBehavior for MetaEntryBehavior {
                 ..Default::default()
             })
             .await?;
-        Ok(WriteDisposition::Write)
+        Ok(())
     }
 
-    async fn apply_update(
-        &self,
-        entry: Arc<Entry>,
-        time: u64,
-        record: Record,
-        update: Labels,
-        remove: HashSet<String>,
-    ) -> Result<UpdateDisposition, ReductError> {
-        let updated = Entry::update_single_label(record, update, remove);
-        let labels: Labels = updated
-            .labels
-            .iter()
-            .map(|label| (label.name.clone(), label.value.clone()))
-            .collect();
-
-        if labels.get("remove").is_some_and(|value| value == "true") {
-            let errors = entry.clone().remove_records(vec![time]).await?;
-            if let Some(err) = errors.get(&time) {
-                return Err(err.clone());
-            }
-            Ok(UpdateDisposition::Removed(labels))
-        } else {
-            Ok(UpdateDisposition::Persist(updated))
+    fn apply_default_query_filters(&self, query: &mut QueryEntry) {
+        if query
+            .include
+            .as_ref()
+            .is_some_and(|include| include.contains_key("remove"))
+        {
+            return;
         }
+
+        let exclude = query.exclude.get_or_insert_with(HashMap::new);
+        exclude
+            .entry("remove".to_string())
+            .or_insert_with(|| "true".to_string());
+    }
+
+    fn validate_remove_records(&self, entry_name: &str) -> Result<(), ReductError> {
+        Err(unprocessable_entity!(
+            "Can't delete records from system entry '{}'; use label update with remove=true",
+            entry_name
+        ))
+    }
+
+    fn validate_remove_entry(&self, entry_name: &str) -> Result<(), ReductError> {
+        Err(unprocessable_entity!(
+            "Can't delete system entry '{}'; remove the parent entry instead",
+            entry_name
+        ))
     }
 }
 
@@ -170,6 +141,14 @@ pub(crate) fn strategy_for_entry(entry_name: &str) -> Box<dyn SystemEntryBehavio
     } else {
         Box::new(RegularEntryBehavior)
     }
+}
+
+pub(crate) fn validate_remove_records(entry_name: &str) -> Result<(), ReductError> {
+    strategy_for_entry(entry_name).validate_remove_records(entry_name)
+}
+
+pub(crate) fn validate_remove_entry(entry_name: &str) -> Result<(), ReductError> {
+    strategy_for_entry(entry_name).validate_remove_entry(entry_name)
 }
 
 #[cfg(test)]
@@ -217,6 +196,61 @@ mod tests {
     #[tokio::test]
     async fn meta_behavior_is_system() {
         assert!(MetaEntryBehavior.is_system());
+    }
+
+    #[tokio::test]
+    async fn regular_behavior_allows_delete() {
+        assert!(RegularEntryBehavior
+            .validate_remove_records("entry-1")
+            .is_ok());
+        assert!(RegularEntryBehavior
+            .validate_remove_entry("entry-1")
+            .is_ok());
+    }
+
+    #[tokio::test]
+    async fn meta_behavior_blocks_delete() {
+        let err = MetaEntryBehavior
+            .validate_remove_records("entry-1/$meta")
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            ReductError::unprocessable_entity(
+                "Can't delete records from system entry 'entry-1/$meta'; use label update with remove=true"
+            )
+        );
+
+        let err = MetaEntryBehavior
+            .validate_remove_entry("entry-1/$meta")
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            ReductError::unprocessable_entity(
+                "Can't delete system entry 'entry-1/$meta'; remove the parent entry instead"
+            )
+        );
+    }
+
+    #[tokio::test]
+    async fn meta_behavior_adds_default_remove_filter() {
+        let mut query = QueryEntry::default();
+        MetaEntryBehavior.apply_default_query_filters(&mut query);
+        assert_eq!(
+            query.exclude.unwrap().get("remove"),
+            Some(&"true".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn meta_behavior_does_not_override_explicit_remove_include() {
+        let mut query = QueryEntry {
+            include: Some(HashMap::from([("remove".to_string(), "true".to_string())])),
+            ..Default::default()
+        };
+        MetaEntryBehavior.apply_default_query_filters(&mut query);
+        assert!(query.exclude.is_none());
     }
 
     #[tokio::test]
