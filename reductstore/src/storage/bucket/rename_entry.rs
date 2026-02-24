@@ -87,6 +87,14 @@ impl Bucket {
             ));
         }
 
+        // Create missing target parent entries so renames like `a/b -> c/b` work
+        // even when `c` does not exist yet.
+        if let Some((target_parent, _)) = new_name.rsplit_once('/') {
+            if !target_parent.is_empty() {
+                let _ = self.get_or_create_entry(target_parent).await?;
+            }
+        }
+
         let renamed_children: Vec<(String, String, Arc<Entry>)> = affected_children
             .into_iter()
             .map(|(entry_name, entry)| {
@@ -353,6 +361,23 @@ mod tests {
         assert!(bucket.get_entry("renamed/b").await.is_ok());
         assert!(bucket.get_entry("renamed/b/c").await.is_ok());
         assert!(bucket.get_entry("renamed/b/c/$meta").await.is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_rename_creates_missing_target_parent_path(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "a/b", 1, b"test").await.unwrap();
+
+        bucket.rename_entry("a/b", "c/b").await.unwrap();
+
+        assert!(bucket.get_entry("a/b").await.is_err());
+        assert!(bucket.get_entry("a").await.is_ok());
+        assert!(bucket.get_entry("c").await.is_ok());
+        assert!(bucket.get_entry("c/b").await.is_ok());
+
+        let mut reader = bucket.begin_read("c/b", 1).await.unwrap();
+        assert_eq!(reader.read_chunk().unwrap().unwrap(), Bytes::from("test"));
     }
 
     #[rstest]
