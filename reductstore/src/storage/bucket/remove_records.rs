@@ -75,6 +75,10 @@ impl Bucket {
                 continue;
             }
 
+            if !entry.is_removable_by_query() {
+                continue;
+            }
+
             let removed_records = entry.query_remove_records(options.clone()).await?;
             total_removed += removed_records;
         }
@@ -197,7 +201,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn query_remove_records_wildcard_includes_meta_entries(#[future] bucket: Arc<Bucket>) {
+    async fn query_remove_records_wildcard_excludes_meta_entries(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         write(&bucket, "entry-one", 1, b"one-1").await.unwrap();
         write_meta(&bucket, "entry-one/$meta", 1, b"meta-1")
@@ -213,10 +217,10 @@ mod tests {
         };
 
         let removed = bucket.clone().query_remove_records(request).await.unwrap();
-        assert_eq!(removed, 2);
+        assert_eq!(removed, 1);
 
         assert!(bucket.begin_read("entry-one", 1).await.is_err());
-        assert!(bucket.begin_read("entry-one/$meta", 1).await.is_err());
+        assert!(bucket.begin_read("entry-one/$meta", 1).await.is_ok());
     }
 
     #[rstest]

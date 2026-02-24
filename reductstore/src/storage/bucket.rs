@@ -260,7 +260,7 @@ impl Bucket {
             size += info.size;
             oldest_record = oldest_record.min(info.oldest_record);
             latest_record = latest_record.max(info.latest_record);
-            if !entry.is_system() {
+            if entry.is_visible_in_bucket_info() {
                 entry_infos.push(info);
             }
         }

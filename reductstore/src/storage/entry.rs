@@ -320,8 +320,16 @@ impl Entry {
         &self.name
     }
 
-    pub fn is_system(&self) -> bool {
-        self.system_behavior.is_system()
+    pub(crate) fn is_visible_in_bucket_info(&self) -> bool {
+        self.system_behavior.is_visible_in_bucket_info()
+    }
+
+    pub(crate) fn is_eligible_for_fifo_eviction(&self) -> bool {
+        self.system_behavior.is_eligible_for_fifo_eviction()
+    }
+
+    pub(crate) fn is_removable_by_query(&self) -> bool {
+        self.system_behavior.is_removable_by_query()
     }
 
     pub async fn settings(&self) -> Result<EntrySettings, ReductError> {
