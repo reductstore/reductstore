@@ -36,12 +36,14 @@ impl SubscriberPipeline {
     /// Handles a single Zenoh sample by writing it into storage and notifying replications.
     ///
     /// The full key expression is used as the entry name within the configured bucket.
+    /// The content_type is derived from the Zenoh sample's encoding.
     pub(crate) async fn handle_sample(
         &self,
         key_expr: &str,
         payload: Bytes,
         attachment: Option<Vec<u8>>,
         timestamp: Option<u64>,
+        content_type: String,
     ) -> Result<(), IngestError> {
         let entry_name = key_expr.trim_matches('/');
 
@@ -63,8 +65,8 @@ impl SubscriberPipeline {
         let content_size = payload.len() as u64;
 
         debug!(
-            "Ingesting Zenoh sample bucket={} entry={} timestamp={} bytes={}",
-            self.bucket, entry_name, ts, content_size
+            "Ingesting Zenoh sample bucket={} entry={} timestamp={} bytes={} content_type={}",
+            self.bucket, entry_name, ts, content_size, content_type
         );
 
         let bucket = self
@@ -75,13 +77,7 @@ impl SubscriberPipeline {
             .upgrade()?;
 
         let mut writer = bucket
-            .begin_write(
-                &entry_name,
-                ts,
-                content_size,
-                "application/octet-stream".to_string(),
-                labels.clone(),
-            )
+            .begin_write(&entry_name, ts, content_size, content_type, labels.clone())
             .await?;
 
         writer.send(Ok(Some(payload))).await?;

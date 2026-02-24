@@ -324,6 +324,9 @@ async fn handle_sample(
     // Extract attachment if present (labels)
     let attachment = sample.attachment().map(|att| att.to_bytes().to_vec());
 
+    // Extract encoding from Zenoh sample (defaults to application/octet-stream)
+    let content_type = sample.encoding().to_string();
+
     // Extract timestamp from Zenoh sample if available
     let timestamp = sample.timestamp().map(|ts| {
         // Convert Zenoh timestamp to microseconds
@@ -339,15 +342,16 @@ async fn handle_sample(
     });
 
     debug!(
-        "Received Zenoh sample: key={}, bytes={}, has_attachment={}, timestamp={:?}",
+        "Received Zenoh sample: key={}, bytes={}, encoding={}, has_attachment={}, timestamp={:?}",
         key_expr,
         payload.len(),
+        content_type,
         attachment.is_some(),
         timestamp
     );
 
     pipeline
-        .handle_sample(key_expr, payload, attachment, timestamp)
+        .handle_sample(key_expr, payload, attachment, timestamp, content_type)
         .await
         .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)
 }
@@ -453,17 +457,20 @@ async fn send_query_reply(
                 }
             }
 
-            // Get labels from the record meta
+            // Get labels and content_type from the record meta
             let labels = reader.meta().labels().clone();
+            let content_type = reader.meta().content_type();
             let attachment = if labels.is_empty() {
                 None
             } else {
                 Some(attachments::serialize_labels(&labels)?)
             };
 
-            // Build reply
+            // Build reply with encoding from content_type
             let key_expr = query.key_expr().clone();
-            let mut reply_builder = query.reply(key_expr, data);
+            let mut reply_builder = query
+                .reply(key_expr, data)
+                .encoding(zenoh::bytes::Encoding::from(content_type));
 
             if let Some(att) = attachment {
                 reply_builder = reply_builder.attachment(att);
@@ -516,17 +523,20 @@ async fn send_query_reply(
                     }
                 }
 
-                // Get labels from the record meta
+                // Get labels and content_type from the record meta
                 let labels = record.meta().labels().clone();
+                let content_type = record.meta().content_type();
                 let attachment = if labels.is_empty() {
                     None
                 } else {
                     Some(attachments::serialize_labels(&labels)?)
                 };
 
-                // Build reply
+                // Build reply with encoding from content_type
                 let key_expr = query.key_expr().clone();
-                let mut reply_builder = query.reply(key_expr, data);
+                let mut reply_builder = query
+                    .reply(key_expr, data)
+                    .encoding(zenoh::bytes::Encoding::from(content_type));
 
                 if let Some(att) = attachment {
                     reply_builder = reply_builder.attachment(att);

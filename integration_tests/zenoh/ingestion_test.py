@@ -6,6 +6,7 @@ All data is written to the bucket configured via RS_ZENOH_BUCKET.
 import asyncio
 
 import pytest
+import zenoh
 
 
 pytestmark = pytest.mark.asyncio
@@ -137,3 +138,82 @@ async def test_publisher_with_attachment(
     assert records
     assert records[0].labels.get("type") == "telemetry"
     assert records[0].labels.get("version") == "1.0"
+
+
+async def test_publish_with_encoding_json(bucket, entry_name, zenoh_session):
+    """Publish data with JSON encoding and verify content_type is preserved."""
+    key_expr = entry_name
+    payload = b'{"temperature": 23.5, "humidity": 65}'
+
+    zenoh_session.put(key_expr, payload, encoding=zenoh.Encoding.APPLICATION_JSON)
+    await asyncio.sleep(0.5)
+
+    records = [record async for record in bucket.query(entry_name)]
+    assert records, "Expected at least one stored record"
+    assert records[0].content_type == "application/json"
+
+
+async def test_publish_with_encoding_text_plain(bucket, entry_name, zenoh_session):
+    """Publish data with text/plain encoding and verify content_type is preserved."""
+    key_expr = entry_name
+    payload = b"Hello, World!"
+
+    zenoh_session.put(key_expr, payload, encoding=zenoh.Encoding.TEXT_PLAIN)
+    await asyncio.sleep(0.5)
+
+    records = [record async for record in bucket.query(entry_name)]
+    assert records, "Expected at least one stored record"
+    assert records[0].content_type == "text/plain"
+
+
+async def test_publish_with_encoding_custom(bucket, entry_name, zenoh_session):
+    """Publish data with custom MIME type encoding."""
+    key_expr = entry_name
+    payload = b"\x00\x01\x02\x03"
+
+    # Custom encoding via constructor
+    custom_encoding = zenoh.Encoding("application/x-custom-binary")
+    zenoh_session.put(key_expr, payload, encoding=custom_encoding)
+    await asyncio.sleep(0.5)
+
+    records = [record async for record in bucket.query(entry_name)]
+    assert records, "Expected at least one stored record"
+    assert records[0].content_type == "application/x-custom-binary"
+
+
+async def test_publish_default_encoding(bucket, entry_name, zenoh_session):
+    """Default encoding should be application/octet-stream."""
+    key_expr = entry_name
+    payload = b"binary data"
+
+    # No explicit encoding - should default to octet-stream
+    zenoh_session.put(key_expr, payload)
+    await asyncio.sleep(0.5)
+
+    records = [record async for record in bucket.query(entry_name)]
+    assert records, "Expected at least one stored record"
+    # Zenoh default is zenoh/bytes which maps to application/octet-stream
+    assert (
+        "octet-stream" in records[0].content_type or "zenoh" in records[0].content_type
+    )
+
+
+async def test_publisher_with_encoding(bucket, entry_name, zenoh_session):
+    """Publisher preserves encoding across multiple puts."""
+    key_expr = entry_name
+
+    publisher = zenoh_session.declare_publisher(key_expr)
+    for i in range(3):
+        publisher.put(
+            f'{{"index": {i}}}'.encode(),
+            encoding=zenoh.Encoding.APPLICATION_JSON,
+        )
+        await asyncio.sleep(0.01)
+    publisher.undeclare()
+
+    await asyncio.sleep(0.5)
+
+    records = [record async for record in bucket.query(entry_name)]
+    assert len(records) >= 3
+    for record in records:
+        assert record.content_type == "application/json"

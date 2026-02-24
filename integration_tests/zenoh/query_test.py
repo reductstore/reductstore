@@ -6,6 +6,7 @@ All data is read from the bucket configured via RS_ZENOH_BUCKET.
 import asyncio
 
 import pytest
+import zenoh
 
 
 pytestmark = pytest.mark.asyncio
@@ -118,3 +119,76 @@ async def test_query_nested_key(bucket, zenoh_session):
     replies = [reply for reply in zenoh_session.get(selector, timeout=5.0) if reply.ok]
     assert replies, "Expected at least one reply"
     assert replies[0].ok.payload.to_bytes() == payload
+
+
+async def test_query_returns_encoding_json(bucket, entry_name, zenoh_session):
+    """Query returns correct encoding for JSON content."""
+    timestamp = 10_000_000
+    payload = b'{"status": "ok"}'
+    await bucket.write(
+        entry_name, payload, timestamp=timestamp, content_type="application/json"
+    )
+
+    key_expr = entry_name
+    selector = f"{key_expr}?ts={timestamp}"
+
+    replies = [reply for reply in zenoh_session.get(selector, timeout=5.0) if reply.ok]
+    assert replies, "No reply received"
+    assert replies[0].ok.payload.to_bytes() == payload
+    # Check encoding is preserved in reply
+    encoding_str = str(replies[0].ok.encoding)
+    assert "application/json" in encoding_str
+
+
+async def test_query_returns_encoding_text_plain(bucket, entry_name, zenoh_session):
+    """Query returns correct encoding for text/plain content."""
+    timestamp = 11_000_000
+    payload = b"Hello, World!"
+    await bucket.write(
+        entry_name, payload, timestamp=timestamp, content_type="text/plain"
+    )
+
+    key_expr = entry_name
+    selector = f"{key_expr}?ts={timestamp}"
+
+    replies = [reply for reply in zenoh_session.get(selector, timeout=5.0) if reply.ok]
+    assert replies, "No reply received"
+    assert replies[0].ok.payload.to_bytes() == payload
+    encoding_str = str(replies[0].ok.encoding)
+    assert "text/plain" in encoding_str
+
+
+async def test_query_returns_encoding_custom(bucket, entry_name, zenoh_session):
+    """Query returns correct encoding for custom MIME type."""
+    timestamp = 12_000_000
+    payload = b"\x00\x01\x02\x03"
+    await bucket.write(
+        entry_name, payload, timestamp=timestamp, content_type="application/x-protobuf"
+    )
+
+    key_expr = entry_name
+    selector = f"{key_expr}?ts={timestamp}"
+
+    replies = [reply for reply in zenoh_session.get(selector, timeout=5.0) if reply.ok]
+    assert replies, "No reply received"
+    assert replies[0].ok.payload.to_bytes() == payload
+    encoding_str = str(replies[0].ok.encoding)
+    assert "application/x-protobuf" in encoding_str
+
+
+async def test_query_encoding_roundtrip(bucket, entry_name, zenoh_session):
+    """Verify encoding roundtrip: publish via Zenoh, query via Zenoh."""
+    key_expr = entry_name
+    payload = b'{"temperature": 42.0}'
+
+    # Publish with JSON encoding via Zenoh
+    zenoh_session.put(key_expr, payload, encoding=zenoh.Encoding.APPLICATION_JSON)
+    await asyncio.sleep(0.5)
+
+    # Query via Zenoh and check encoding is preserved
+    selector = f"{key_expr}?limit=1"
+    replies = [reply for reply in zenoh_session.get(selector, timeout=5.0) if reply.ok]
+    assert replies, "No reply received"
+    assert replies[0].ok.payload.to_bytes() == payload
+    encoding_str = str(replies[0].ok.encoding)
+    assert "application/json" in encoding_str
