@@ -113,17 +113,31 @@ impl FolderKeeper {
         Ok(folders)
     }
 
+    /// Add a folder and all its parent prefixes into the folder map.
+    ///
+    /// Example: adding `a/b/c` persists map entries for `a`, `a/b`, and `a/b/c`.
     pub async fn add_folder(&self, folder_name: &str) -> Result<(), ReductError> {
         let folder_path = self.path.join(folder_name);
         FILE_CACHE.create_dir_all(&folder_path).await?;
         {
             let mut map = self.map.write().await?;
+            let mut current = String::new();
+            for segment in folder_name.split('/') {
+                // Build path prefixes incrementally:
+                // "a/b/c" -> "a" -> "a/b" -> "a/b/c".
+                if !current.is_empty() {
+                    current.push('/');
+                }
+                current.push_str(segment);
 
-            if !map.items.iter().any(|item| item.folder_name == folder_name) {
-                map.items.push(Item {
-                    name: folder_name.to_string(),
-                    folder_name: folder_name.to_string(),
-                });
+                // Keep each prefix in the folder map so parent folders are
+                // discoverable and can participate in rename/remove cascades.
+                if !map.items.iter().any(|item| item.folder_name == current) {
+                    map.items.push(Item {
+                        name: current.to_string(),
+                        folder_name: current.to_string(),
+                    });
+                }
             }
         }
 
@@ -135,7 +149,10 @@ impl FolderKeeper {
         FILE_CACHE.remove_dir(&folder_path).await?;
         {
             let mut map = self.map.write().await?;
-            map.items.retain(|item| item.folder_name != folder_name);
+            map.items.retain(|item| {
+                item.folder_name != folder_name
+                    && !item.folder_name.starts_with(&format!("{folder_name}/"))
+            });
         }
         self.save().await
     }
@@ -146,13 +163,16 @@ impl FolderKeeper {
         FILE_CACHE.rename(&old_path, &new_path).await?;
         {
             let mut map = self.map.write().await?;
-            if let Some(item) = map
-                .items
-                .iter_mut()
-                .find(|item| item.folder_name == old_name)
-            {
-                item.name = new_name.to_string();
-                item.folder_name = new_name.to_string();
+            for item in map.items.iter_mut() {
+                if item.folder_name == old_name {
+                    item.name = new_name.to_string();
+                    item.folder_name = new_name.to_string();
+                } else if item.folder_name.starts_with(&format!("{old_name}/")) {
+                    let suffix = &item.folder_name[old_name.len()..];
+                    let renamed = format!("{new_name}{suffix}");
+                    item.name = renamed.clone();
+                    item.folder_name = renamed;
+                }
             }
         }
         self.save().await
@@ -586,5 +606,58 @@ mod tests {
         let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
         let folders = keeper.list_folders().await.unwrap();
         assert!(folders.iter().any(|path| path.ends_with("entry_1")));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn add_folder_adds_parent_prefixes(#[future] path: PathBuf) {
+        let path = path.await;
+        let base_path = path.join("bucket_add_parents");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+
+        let keeper = FolderKeeper::new(base_path.clone(), &Cfg::default()).await;
+        keeper.add_folder("a/b/c").await.unwrap();
+
+        let folders = keeper.list_folders().await.unwrap();
+        assert!(folders.iter().any(|p| p.ends_with("a")));
+        assert!(folders.iter().any(|p| p.ends_with("a/b")));
+        assert!(folders.iter().any(|p| p.ends_with("a/b/c")));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rename_folder_renames_descendants(#[future] path: PathBuf) {
+        let path = path.await;
+        let base_path = path.join("bucket_rename_descendants");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+
+        let keeper = FolderKeeper::new(base_path.clone(), &Cfg::default()).await;
+        keeper.add_folder("a/b/c").await.unwrap();
+        keeper.rename_folder("a", "renamed").await.unwrap();
+
+        let folders = keeper.list_folders().await.unwrap();
+        assert!(!folders.iter().any(|p| p.ends_with("a")));
+        assert!(!folders.iter().any(|p| p.ends_with("a/b")));
+        assert!(!folders.iter().any(|p| p.ends_with("a/b/c")));
+        assert!(folders.iter().any(|p| p.ends_with("renamed")));
+        assert!(folders.iter().any(|p| p.ends_with("renamed/b")));
+        assert!(folders.iter().any(|p| p.ends_with("renamed/b/c")));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn remove_folder_removes_descendants(#[future] path: PathBuf) {
+        let path = path.await;
+        let base_path = path.join("bucket_remove_descendants");
+        FILE_CACHE.create_dir_all(&base_path).await.unwrap();
+
+        let keeper = FolderKeeper::new(base_path.clone(), &Cfg::default()).await;
+        keeper.add_folder("a/b/c").await.unwrap();
+        keeper.remove_folder("a").await.unwrap();
+
+        let folders = keeper.list_folders().await.unwrap();
+        assert!(!folders.iter().any(|p| p.ends_with("a")));
+        assert!(!folders.iter().any(|p| p.ends_with("a/b")));
+        assert!(!folders.iter().any(|p| p.ends_with("a/b/c")));
     }
 }
