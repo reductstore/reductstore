@@ -32,7 +32,7 @@ impl Entry {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         // Strategy validates labels and can perform pre-write maintenance.
-        let _ = self.system_behavior.prepare_write(self, &labels).await?;
+        self.system_behavior.prepare_write(self, &labels).await?;
 
         let settings = self.settings.read().await?;
         let mut block_ref = {

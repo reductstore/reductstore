@@ -233,7 +233,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn remove_true_deletes_meta_record(#[future] bucket: Arc<Bucket>) {
+    async fn remove_true_updates_meta_record_with_tombstone(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         let meta_entry = bucket
             .get_or_create_entry("entry-1/$meta")
@@ -258,6 +258,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(meta_entry.begin_read(1000).await.is_err());
+        let reader = meta_entry.begin_read(1000).await.unwrap();
+        assert_eq!(
+            reader.meta().labels().get("remove"),
+            Some(&"true".to_string())
+        );
     }
 }

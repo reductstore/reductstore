@@ -743,6 +743,7 @@ pub(super) mod tests {
 
     mod get_meta_ext_params {
         use super::*;
+        use reduct_base::error::ErrorCode;
 
         async fn create_storage() -> Arc<StorageEngine> {
             let cfg = Cfg {
@@ -868,6 +869,86 @@ pub(super) mod tests {
                     .unwrap(),
                 None
             );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn returns_error_for_malformed_json_payload(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(&storage, "bucket", "entry/$meta", "$test-ext", b"not-json").await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let err = repo
+                .get_meta_ext_params("bucket", "entry", "test-ext")
+                .await
+                .err()
+                .unwrap();
+
+            assert_eq!(err.status, ErrorCode::UnprocessableEntity);
+            assert!(err.message.contains("must be valid JSON"));
+        }
+    }
+
+    mod attach_meta_ext_params {
+        use super::*;
+
+        #[test]
+        fn creates_extension_entry_when_missing() {
+            let mut ext_query = Map::new();
+            ExtRepository::attach_meta_ext_params(
+                &mut ext_query,
+                "test-ext",
+                json!({"scale": 100}),
+            );
+            assert_eq!(
+                ext_query.get("test-ext").cloned().unwrap(),
+                json!({"meta": {"scale": 100}})
+            );
+        }
+
+        #[test]
+        fn inserts_meta_into_empty_extension_object() {
+            let mut ext_query = Map::from_iter([("test-ext".to_string(), json!({}))]);
+            ExtRepository::attach_meta_ext_params(
+                &mut ext_query,
+                "test-ext",
+                json!({"scale": 100}),
+            );
+            assert_eq!(
+                ext_query.get("test-ext").cloned().unwrap(),
+                json!({"meta": {"scale": 100}})
+            );
+        }
+
+        #[test]
+        fn keeps_existing_meta_unchanged() {
+            let mut ext_query =
+                Map::from_iter([("test-ext".to_string(), json!({"meta": {"keep": true}}))]);
+            ExtRepository::attach_meta_ext_params(
+                &mut ext_query,
+                "test-ext",
+                json!({"scale": 100}),
+            );
+            assert_eq!(
+                ext_query.get("test-ext").cloned().unwrap(),
+                json!({"meta": {"keep": true}})
+            );
+        }
+
+        #[test]
+        fn ignores_non_object_extension_value() {
+            let mut ext_query = Map::from_iter([("test-ext".to_string(), json!("bad"))]);
+            ExtRepository::attach_meta_ext_params(
+                &mut ext_query,
+                "test-ext",
+                json!({"scale": 100}),
+            );
+            assert_eq!(ext_query.get("test-ext").cloned().unwrap(), json!("bad"));
         }
     }
 

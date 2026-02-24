@@ -14,6 +14,7 @@ use crate::api::entry::common::err_to_batched_header;
 use crate::api::HttpError;
 use crate::api::StateKeeper;
 use crate::auth::policy::WriteAccessPolicy;
+use crate::storage::entry::validate_remove_records;
 
 // DELETE /:bucket/:entry/batch
 pub(super) async fn remove_batched_records(
@@ -33,6 +34,8 @@ pub(super) async fn remove_batched_records(
         .await?;
 
     let entry_name = path.get("entry_name").unwrap();
+    validate_remove_records(entry_name)?;
+
     let record_headers: Vec<_> = sort_headers_by_time(&headers)?;
 
     let err_map = {
@@ -145,6 +148,32 @@ mod tests {
         assert_eq!(
             err_map.get("x-reduct-error-1").unwrap(),
             "404,Record 1 not found in entry bucket-1/entry-1"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_batched_records_meta_forbidden(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        #[future] empty_body: Body,
+    ) {
+        let keeper = keeper.await;
+        headers.insert("x-reduct-time-0", "".parse().unwrap());
+        let path = Path(HashMap::from_iter(vec![
+            ("bucket_name".to_string(), "bucket-1".to_string()),
+            ("entry_name".to_string(), "entry-1/$meta".to_string()),
+        ]));
+
+        let err = remove_batched_records(State(keeper), headers, path, empty_body.await)
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+        assert_eq!(
+            err.message(),
+            "Can't delete records from system entry 'entry-1/$meta'; use label update with remove=true"
         );
     }
 }
