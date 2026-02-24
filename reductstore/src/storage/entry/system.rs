@@ -42,7 +42,18 @@ pub(crate) fn meta_entry_name(entry_name: &str) -> String {
 
 #[async_trait]
 pub(crate) trait SystemEntryBehavior {
-    fn is_system(&self) -> bool;
+    fn is_visible_in_bucket_info(&self) -> bool {
+        true
+    }
+
+    fn is_eligible_for_fifo_eviction(&self) -> bool {
+        true
+    }
+
+    fn is_removable_by_query(&self) -> bool {
+        true
+    }
+
     fn validate_remove_records(&self, _entry_name: &str) -> Result<(), ReductError> {
         Ok(())
     }
@@ -60,10 +71,6 @@ pub(crate) struct RegularEntryBehavior;
 
 #[async_trait]
 impl SystemEntryBehavior for RegularEntryBehavior {
-    fn is_system(&self) -> bool {
-        false
-    }
-
     async fn prepare_write(&self, _entry: &Entry, _labels: &Labels) -> Result<(), ReductError> {
         Ok(())
     }
@@ -75,10 +82,6 @@ pub(crate) struct MetaEntryBehavior;
 
 #[async_trait]
 impl SystemEntryBehavior for MetaEntryBehavior {
-    fn is_system(&self) -> bool {
-        true
-    }
-
     async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError> {
         let key = labels.get("key").ok_or_else(|| {
             unprocessable_entity!(
@@ -132,6 +135,18 @@ impl SystemEntryBehavior for MetaEntryBehavior {
             "Can't delete system entry '{}'; remove the parent entry instead",
             entry_name
         ))
+    }
+
+    fn is_visible_in_bucket_info(&self) -> bool {
+        false
+    }
+
+    fn is_eligible_for_fifo_eviction(&self) -> bool {
+        false
+    }
+
+    fn is_removable_by_query(&self) -> bool {
+        false
     }
 }
 
@@ -189,16 +204,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn regular_behavior_is_not_system() {
-        assert!(!RegularEntryBehavior.is_system());
-    }
-
-    #[tokio::test]
-    async fn meta_behavior_is_system() {
-        assert!(MetaEntryBehavior.is_system());
-    }
-
-    #[tokio::test]
     async fn regular_behavior_allows_delete() {
         assert!(RegularEntryBehavior
             .validate_remove_records("entry-1")
@@ -206,6 +211,9 @@ mod tests {
         assert!(RegularEntryBehavior
             .validate_remove_entry("entry-1")
             .is_ok());
+        assert!(RegularEntryBehavior.is_visible_in_bucket_info());
+        assert!(RegularEntryBehavior.is_eligible_for_fifo_eviction());
+        assert!(RegularEntryBehavior.is_removable_by_query());
     }
 
     #[tokio::test]
@@ -231,6 +239,9 @@ mod tests {
                 "Can't delete system entry 'entry-1/$meta'; remove the parent entry instead"
             )
         );
+        assert!(!MetaEntryBehavior.is_visible_in_bucket_info());
+        assert!(!MetaEntryBehavior.is_eligible_for_fifo_eviction());
+        assert!(!MetaEntryBehavior.is_removable_by_query());
     }
 
     #[tokio::test]

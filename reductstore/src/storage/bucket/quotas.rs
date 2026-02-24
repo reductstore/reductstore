@@ -65,7 +65,7 @@ impl Bucket {
                 let mut candidates: Vec<(u64, &Entry)> = vec![];
                 let entries = self.entries.read().await?;
                 for (_, entry) in entries.iter() {
-                    if entry.is_system() {
+                    if !entry.is_eligible_for_fifo_eviction() {
                         continue;
                     }
                     let info = entry.info().await?;
