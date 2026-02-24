@@ -223,8 +223,26 @@ def test_meta_entry_visibility_and_bucket_count(base_url, session, bucket):
         f"{base_url}/io/{bucket}/read", headers={"x-reduct-query-id": str(query_id)}
     )
     assert resp.status_code == 200
-    expected_entries = f"{quote(entry, safe='')},{quote(meta_entry, safe='$')}"
-    assert resp.headers["x-reduct-entries"] == expected_entries
+    assert resp.headers["x-reduct-entries"] == quote(entry, safe="")
+
+    resp = session.post(
+        f"{base_url}/io/{bucket}/q",
+        json={
+            "query_type": "QUERY",
+            "entries": [meta_entry],
+            "start": ts,
+            "stop": ts + 2,
+        },
+    )
+    assert resp.status_code == 200
+    meta_query_id = int(resp.json()["id"])
+
+    resp = session.get(
+        f"{base_url}/io/{bucket}/read",
+        headers={"x-reduct-query-id": str(meta_query_id)},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["x-reduct-entries"] == quote(meta_entry, safe="$")
 
     resp = session.get(f"{base_url}/b/{bucket}")
     assert resp.status_code == 200
