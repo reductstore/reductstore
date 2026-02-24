@@ -18,6 +18,16 @@ const DEFAULT_BUCKET: &str = "zenoh";
 /// - `RS_ZENOH_SUB_KEYEXPRS`: Key expression for subscriber (write path), e.g., "**"
 /// - `RS_ZENOH_QUERY_KEYEXPRS`: Key expression for queryable (read path), e.g., "**"
 ///
+/// ## Inline Credential Files (for cloud environments)
+///
+/// When using `RS_ZENOH_CONFIG`, the Zenoh config can reference credential file paths.
+/// These env vars allow providing file content inline, which is written to temp files:
+///
+/// - `RS_ZENOH_TLS_ROOT_CA`: Inline root CA certificate (for `transport/link/tls/root_ca_certificate`)
+/// - `RS_ZENOH_TLS_CONNECT_CERT`: Inline mTLS client certificate (for `transport/link/tls/connect_certificate`)
+/// - `RS_ZENOH_TLS_CONNECT_KEY`: Inline mTLS client private key (for `transport/link/tls/connect_private_key`)
+/// - `RS_ZENOH_AUTH_DICTIONARY`: Inline auth dictionary content (for `transport/auth/usrpwd/dictionary_file`)
+///
 /// If both `RS_ZENOH_CONFIG` and `RS_ZENOH_CONFIG_PATH` are set, inline config takes precedence.
 #[derive(Clone, Debug, PartialEq)]
 pub struct ZenohApiConfig {
@@ -36,6 +46,18 @@ pub struct ZenohApiConfig {
     /// Key expression for the Zenoh queryable (read path).
     /// If unset, the read path is disabled.
     pub query_keyexprs: Option<String>,
+    /// Inline root CA certificate content.
+    /// Written to a temp file and injected as `transport/link/tls/root_ca_certificate`.
+    pub tls_root_ca_cert: Option<String>,
+    /// Inline mTLS client certificate content.
+    /// Written to a temp file and injected as `transport/link/tls/connect_certificate`.
+    pub tls_connect_cert: Option<String>,
+    /// Inline mTLS client private key content.
+    /// Written to a temp file and injected as `transport/link/tls/connect_private_key`.
+    pub tls_connect_key: Option<String>,
+    /// Inline user/password dictionary content (user:password per line).
+    /// Written to a temp file and injected as `transport/auth/usrpwd/dictionary_file`.
+    pub auth_dictionary: Option<String>,
 }
 
 impl Default for ZenohApiConfig {
@@ -47,6 +69,10 @@ impl Default for ZenohApiConfig {
             bucket: DEFAULT_BUCKET.to_string(),
             sub_keyexprs: None,
             query_keyexprs: None,
+            tls_root_ca_cert: None,
+            tls_connect_cert: None,
+            tls_connect_key: None,
+            auth_dictionary: None,
         }
     }
 }
@@ -55,13 +81,15 @@ impl Display for ZenohApiConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "enabled={}, bucket={}, config={}, config_path={}, sub_keyexprs={}, query_keyexprs={}",
+            "enabled={}, bucket={}, config={}, config_path={}, sub_keyexprs={}, query_keyexprs={}, tls={}, auth={}",
             self.enabled,
             self.bucket,
             self.config_inline.as_deref().unwrap_or("<none>"),
             self.config_path.as_deref().unwrap_or("<none>"),
             self.sub_keyexprs.as_deref().unwrap_or("<disabled>"),
-            self.query_keyexprs.as_deref().unwrap_or("<disabled>")
+            self.query_keyexprs.as_deref().unwrap_or("<disabled>"),
+            self.tls_root_ca_cert.is_some() || self.tls_connect_cert.is_some(),
+            self.auth_dictionary.is_some()
         )
     }
 }
@@ -81,6 +109,18 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             ),
             query_keyexprs: parse_optional_string(
                 env.get_optional::<String>("RS_ZENOH_QUERY_KEYEXPRS"),
+            ),
+            tls_root_ca_cert: parse_optional_string(
+                env.get_optional::<String>("RS_ZENOH_TLS_ROOT_CA"),
+            ),
+            tls_connect_cert: parse_optional_string(
+                env.get_optional::<String>("RS_ZENOH_TLS_CONNECT_CERT"),
+            ),
+            tls_connect_key: parse_optional_string(
+                env.get_optional::<String>("RS_ZENOH_TLS_CONNECT_KEY"),
+            ),
+            auth_dictionary: parse_optional_string(
+                env.get_optional::<String>("RS_ZENOH_AUTH_DICTIONARY"),
             ),
         }
     }
@@ -140,6 +180,26 @@ mod tests {
             .with(eq("RS_ZENOH_QUERY_KEYEXPRS"))
             .times(1)
             .return_const(Ok("factory/**".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_TLS_ROOT_CA"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_TLS_CONNECT_CERT"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_TLS_CONNECT_KEY"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_AUTH_DICTIONARY"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
 
         let cfg = CfgParser::<MockEnvGetter>::parse_zenoh_api_config(&mut Env::new(env_getter));
         assert!(cfg.enabled);
@@ -184,6 +244,26 @@ mod tests {
         env_getter
             .expect_get()
             .with(eq("RS_ZENOH_QUERY_KEYEXPRS"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_TLS_ROOT_CA"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_TLS_CONNECT_CERT"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_TLS_CONNECT_KEY"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_AUTH_DICTIONARY"))
             .times(1)
             .return_const(Err(VarError::NotPresent));
 
@@ -264,6 +344,26 @@ mod tests {
             .with(eq("RS_ZENOH_QUERY_KEYEXPRS"))
             .times(1)
             .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_TLS_ROOT_CA"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_TLS_CONNECT_CERT"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_TLS_CONNECT_KEY"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_AUTH_DICTIONARY"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
 
         let cfg = CfgParser::<MockEnvGetter>::parse_zenoh_api_config(&mut Env::new(env_getter));
         assert_eq!(cfg.bucket, DEFAULT_BUCKET);
@@ -278,6 +378,10 @@ mod tests {
             bucket: "sensor-data".to_string(),
             sub_keyexprs: Some("**".to_string()),
             query_keyexprs: None,
+            tls_root_ca_cert: None,
+            tls_connect_cert: Some("-----BEGIN CERTIFICATE-----".to_string()),
+            tls_connect_key: None,
+            auth_dictionary: None,
         };
         let display = format!("{cfg}");
         assert!(display.contains("enabled=true"));
@@ -286,6 +390,7 @@ mod tests {
         assert!(display.contains("config_path=/etc/zenoh.json5"));
         assert!(display.contains("sub_keyexprs=**"));
         assert!(display.contains("query_keyexprs=<disabled>"));
+        assert!(display.contains("tls=true"));
     }
 
     #[rstest]

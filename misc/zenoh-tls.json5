@@ -1,0 +1,15 @@
+{
+  mode: "router",
+  listen: { endpoints: ["tls/0.0.0.0:7447"] },
+  scouting: {
+    multicast: { enabled: false }
+  },
+  transport: {
+    link: {
+      tls: {
+        listen_certificate: "/certs/certificate.crt",
+        listen_private_key: "/certs/privateKey.key",
+      }
+    }
+  }
+}

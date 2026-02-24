@@ -26,6 +26,9 @@ def storage_url() -> str:
 
 @pytest.fixture(scope="session")
 def zenoh_connect() -> str:
+    # If TLS is configured, default to tls/ endpoint
+    if os.environ.get("RS_ZENOH_TLS_ROOT_CA"):
+        return os.environ.get("ZENOH_CONNECT", "tls/127.0.0.1:7447")
     return os.environ.get("ZENOH_CONNECT", "tcp/127.0.0.1:7447")
 
 
@@ -68,6 +71,22 @@ def zenoh_session(zenoh_connect: str):
         "on",
     }:
         config.insert_json5("transport/shared_memory/enabled", "false")
+
+    # Configure TLS if root CA is provided
+    tls_root_ca = os.environ.get("RS_ZENOH_TLS_ROOT_CA")
+    if tls_root_ca:
+        import tempfile
+
+        # Write the cert to a temp file for Zenoh to use
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".pem", delete=False) as f:
+            f.write(tls_root_ca)
+            ca_path = f.name
+        config.insert_json5(
+            "transport/link/tls/root_ca_certificate", json.dumps(ca_path)
+        )
+        # Disable hostname verification for test certificates without proper SANs
+        config.insert_json5("transport/link/tls/verify_name_on_connect", "false")
+
     session = zenoh.open(config)
     yield session
     session.close()

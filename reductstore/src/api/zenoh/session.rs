@@ -15,14 +15,29 @@ use reduct_base::Labels;
 use std::collections::HashMap;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
+use std::io::Write;
 use std::path::Path;
 use std::sync::Arc;
+use tempfile::NamedTempFile;
 use tokio::sync::watch;
 use tokio::time::{sleep, Duration};
 
 use zenoh::config::Config;
 use zenoh::sample::Sample;
 use zenoh::Session;
+
+/// Holds temporary credential files to keep them alive for the session duration.
+///
+/// When inline TLS certificates or auth dictionaries are provided via environment variables,
+/// they are written to temporary files. This struct holds those files to prevent
+/// them from being deleted while the Zenoh session is active.
+#[allow(dead_code)]
+struct CredentialFiles {
+    tls_root_ca: Option<NamedTempFile>,
+    tls_connect_cert: Option<NamedTempFile>,
+    tls_connect_key: Option<NamedTempFile>,
+    auth_dictionary: Option<NamedTempFile>,
+}
 
 /// Runs the Zenoh session, creating subscribers and queryables based on configuration.
 pub(crate) async fn run_session(
@@ -60,8 +75,8 @@ pub(crate) async fn run_session(
     // Ensure the target bucket exists (auto-create if not)
     ensure_bucket_exists(&components, &config.bucket).await?;
 
-    // Build Zenoh configuration
-    let zenoh_config = build_zenoh_config(&config)?;
+    // Build Zenoh configuration (including credential files that must stay alive)
+    let (zenoh_config, _credential_files) = build_zenoh_config(&config)?;
 
     // Open Zenoh session
     info!("Opening Zenoh session...");
@@ -165,19 +180,136 @@ async fn ensure_bucket_exists(
     }
 }
 
-fn build_zenoh_config(config: &ZenohApiConfig) -> Result<Config, SessionError> {
-    // Priority: inline config > config file path > error
-    if let Some(ref inline_config) = config.config_inline {
+fn build_zenoh_config(config: &ZenohApiConfig) -> Result<(Config, CredentialFiles), SessionError> {
+    // Build base config: inline config > config file path > error
+    let mut zenoh_config = if let Some(ref inline_config) = config.config_inline {
         info!("Building Zenoh config from inline string");
-        parse_inline_config(inline_config)
+        parse_inline_config(inline_config)?
     } else if let Some(ref config_path) = config.config_path {
         info!("Loading Zenoh config from file: {}", config_path);
-        load_config_file(config_path)
+        load_config_file(config_path)?
     } else {
-        Err(SessionError::InvalidConfig(
+        return Err(SessionError::InvalidConfig(
             "Either RS_ZENOH_CONFIG or RS_ZENOH_CONFIG_PATH must be set".to_string(),
-        ))
+        ));
+    };
+
+    // Create credential files and inject TLS/auth config
+    let credential_files = inject_credentials(&mut zenoh_config, config)?;
+
+    Ok((zenoh_config, credential_files))
+}
+
+/// Creates temp files for inline credentials and injects paths into Zenoh config.
+fn inject_credentials(
+    zenoh_config: &mut Config,
+    config: &ZenohApiConfig,
+) -> Result<CredentialFiles, SessionError> {
+    let mut cred_files = CredentialFiles {
+        tls_root_ca: None,
+        tls_connect_cert: None,
+        tls_connect_key: None,
+        auth_dictionary: None,
+    };
+
+    // TLS Root CA Certificate (for validating server cert)
+    if let Some(ref cert_content) = config.tls_root_ca_cert {
+        let temp_file = write_credential_file("zenoh_root_ca", ".pem", cert_content)?;
+        let path = temp_file.path().to_string_lossy().to_string();
+        info!("Injecting TLS root CA certificate from inline config");
+        zenoh_config
+            .insert_json5(
+                "transport/link/tls/root_ca_certificate",
+                &format!("\"{}\"", path),
+            )
+            .map_err(|e| {
+                SessionError::InvalidConfig(format!("Failed to set TLS root CA path: {}", e))
+            })?;
+        cred_files.tls_root_ca = Some(temp_file);
     }
+
+    // TLS Connect Certificate (for mTLS client authentication)
+    if let Some(ref cert_content) = config.tls_connect_cert {
+        let temp_file = write_credential_file("zenoh_connect_cert", ".pem", cert_content)?;
+        let path = temp_file.path().to_string_lossy().to_string();
+        info!("Injecting mTLS client certificate from inline config");
+        zenoh_config
+            .insert_json5(
+                "transport/link/tls/connect_certificate",
+                &format!("\"{}\"", path),
+            )
+            .map_err(|e| {
+                SessionError::InvalidConfig(format!("Failed to set mTLS client cert path: {}", e))
+            })?;
+        cred_files.tls_connect_cert = Some(temp_file);
+    }
+
+    // TLS Connect Private Key (for mTLS client authentication)
+    if let Some(ref key_content) = config.tls_connect_key {
+        let temp_file = write_credential_file("zenoh_connect_key", ".pem", key_content)?;
+        let path = temp_file.path().to_string_lossy().to_string();
+        info!("Injecting mTLS client private key from inline config");
+        zenoh_config
+            .insert_json5(
+                "transport/link/tls/connect_private_key",
+                &format!("\"{}\"", path),
+            )
+            .map_err(|e| {
+                SessionError::InvalidConfig(format!("Failed to set mTLS client key path: {}", e))
+            })?;
+        cred_files.tls_connect_key = Some(temp_file);
+    }
+
+    // User/Password Dictionary (for routers/peers accepting connections)
+    if let Some(ref dict_content) = config.auth_dictionary {
+        let temp_file = write_credential_file("zenoh_auth_dict", ".txt", dict_content)?;
+        let path = temp_file.path().to_string_lossy().to_string();
+        info!("Injecting auth dictionary from inline config");
+        zenoh_config
+            .insert_json5(
+                "transport/auth/usrpwd/dictionary_file",
+                &format!("\"{}\"", path),
+            )
+            .map_err(|e| {
+                SessionError::InvalidConfig(format!("Failed to set auth dictionary path: {}", e))
+            })?;
+        cred_files.auth_dictionary = Some(temp_file);
+    }
+
+    Ok(cred_files)
+}
+
+/// Writes credential content to a temporary file.
+fn write_credential_file(
+    prefix: &str,
+    suffix: &str,
+    content: &str,
+) -> Result<NamedTempFile, SessionError> {
+    let mut temp_file = tempfile::Builder::new()
+        .prefix(prefix)
+        .suffix(suffix)
+        .tempfile()
+        .map_err(|e| {
+            SessionError::InvalidConfig(format!("Failed to create temp file for {}: {}", prefix, e))
+        })?;
+
+    temp_file.write_all(content.as_bytes()).map_err(|e| {
+        SessionError::InvalidConfig(format!(
+            "Failed to write credential content for {}: {}",
+            prefix, e
+        ))
+    })?;
+
+    temp_file.flush().map_err(|e| {
+        SessionError::InvalidConfig(format!("Failed to flush credential file {}: {}", prefix, e))
+    })?;
+
+    debug!(
+        "Created credential temp file: {}",
+        temp_file.path().display()
+    );
+
+    Ok(temp_file)
 }
 
 /// Parses an inline config string like "mode=client;peer=localhost:7447"
@@ -610,5 +742,99 @@ impl Error for SessionError {}
 impl From<serde_json::Error> for SessionError {
     fn from(value: serde_json::Error) -> Self {
         SessionError::AttachmentCodec(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+    use std::fs;
+
+    #[rstest]
+    fn writes_credential_file_with_correct_content() {
+        let content = "-----BEGIN CERTIFICATE-----\nTEST\n-----END CERTIFICATE-----";
+        let temp_file = write_credential_file("test_cert", ".pem", content).unwrap();
+
+        let read_content = fs::read_to_string(temp_file.path()).unwrap();
+        assert_eq!(read_content, content);
+    }
+
+    #[rstest]
+    fn writes_credential_file_uses_prefix_and_suffix() {
+        let content = "test";
+        let temp_file = write_credential_file("my_prefix", ".txt", content).unwrap();
+
+        let filename = temp_file.path().file_name().unwrap().to_string_lossy();
+        assert!(filename.starts_with("my_prefix"));
+        assert!(filename.ends_with(".txt"));
+    }
+
+    #[rstest]
+    fn injects_tls_root_ca_into_config() {
+        let mut zenoh_config = Config::default();
+        let api_config = ZenohApiConfig {
+            tls_root_ca_cert: Some("root-ca-content".to_string()),
+            ..Default::default()
+        };
+
+        let cred_files = inject_credentials(&mut zenoh_config, &api_config).unwrap();
+
+        // Credential file should exist
+        assert!(cred_files.tls_root_ca.is_some());
+        let temp_file = cred_files.tls_root_ca.as_ref().unwrap();
+        let read_content = fs::read_to_string(temp_file.path()).unwrap();
+        assert_eq!(read_content, "root-ca-content");
+    }
+
+    #[rstest]
+    fn injects_mtls_credentials_into_config() {
+        let mut zenoh_config = Config::default();
+        let api_config = ZenohApiConfig {
+            tls_connect_cert: Some("client-cert".to_string()),
+            tls_connect_key: Some("client-key".to_string()),
+            ..Default::default()
+        };
+
+        let cred_files = inject_credentials(&mut zenoh_config, &api_config).unwrap();
+
+        assert!(cred_files.tls_connect_cert.is_some());
+        assert!(cred_files.tls_connect_key.is_some());
+
+        let cert_content =
+            fs::read_to_string(cred_files.tls_connect_cert.as_ref().unwrap().path()).unwrap();
+        let key_content =
+            fs::read_to_string(cred_files.tls_connect_key.as_ref().unwrap().path()).unwrap();
+        assert_eq!(cert_content, "client-cert");
+        assert_eq!(key_content, "client-key");
+    }
+
+    #[rstest]
+    fn injects_auth_dictionary_into_config() {
+        let mut zenoh_config = Config::default();
+        let api_config = ZenohApiConfig {
+            auth_dictionary: Some("user1:pass1\nuser2:pass2".to_string()),
+            ..Default::default()
+        };
+
+        let cred_files = inject_credentials(&mut zenoh_config, &api_config).unwrap();
+
+        assert!(cred_files.auth_dictionary.is_some());
+        let read_content =
+            fs::read_to_string(cred_files.auth_dictionary.as_ref().unwrap().path()).unwrap();
+        assert_eq!(read_content, "user1:pass1\nuser2:pass2");
+    }
+
+    #[rstest]
+    fn no_credentials_leaves_config_unchanged() {
+        let mut zenoh_config = Config::default();
+        let api_config = ZenohApiConfig::default();
+
+        let cred_files = inject_credentials(&mut zenoh_config, &api_config).unwrap();
+
+        assert!(cred_files.tls_root_ca.is_none());
+        assert!(cred_files.tls_connect_cert.is_none());
+        assert!(cred_files.tls_connect_key.is_none());
+        assert!(cred_files.auth_dictionary.is_none());
     }
 }
