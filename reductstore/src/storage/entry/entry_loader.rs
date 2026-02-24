@@ -21,7 +21,6 @@ use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
     BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
-use crate::storage::entry::system::strategy_for_entry;
 use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
 use reduct_base::error::ReductError;
@@ -239,7 +238,6 @@ impl EntryLoader {
                 )
                 .await,
             )),
-            behavior: strategy_for_entry(&entry_name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
@@ -271,7 +269,6 @@ impl EntryLoader {
                 )
                 .await,
             )),
-            behavior: strategy_for_entry(&entry_name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,

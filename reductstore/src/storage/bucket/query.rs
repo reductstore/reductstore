@@ -29,33 +29,6 @@ pub(super) struct MultiEntryQuery {
     last_access: Instant,
 }
 
-fn matches_pattern(entry: &str, patterns: &[String]) -> bool {
-    patterns.iter().any(|pattern| {
-        if let Some(prefix) = pattern.strip_suffix('*') {
-            entry.starts_with(prefix)
-        } else {
-            entry == pattern
-        }
-    })
-}
-
-fn include_entry_in_query(
-    entry: &str,
-    wildcard_queryable: bool,
-    requested_entries: Option<&[String]>,
-) -> bool {
-    match requested_entries {
-        None => wildcard_queryable,
-        Some(patterns) => {
-            if patterns.iter().any(|pattern| pattern == entry) {
-                return true;
-            }
-
-            matches_pattern(entry, patterns) && wildcard_queryable
-        }
-    }
-}
-
 impl Bucket {
     /// Initiate a query across multiple entries in the bucket.
     ///
@@ -134,14 +107,23 @@ impl Bucket {
             None => None,
         };
 
+        let matches_pattern = |entry: &str, patterns: &[String]| {
+            patterns.iter().any(|pattern| {
+                if let Some(prefix) = pattern.strip_suffix('*') {
+                    entry.starts_with(prefix)
+                } else {
+                    entry == pattern
+                }
+            })
+        };
+
         let results: Vec<(String, Arc<Entry>)> = entries
             .iter()
-            .filter(|(name, entry)| {
-                include_entry_in_query(
-                    name,
-                    entry.is_queryable_by_wildcard(),
-                    requested_entries.as_deref(),
-                )
+            .filter(|(name, _)| {
+                requested_entries
+                    .as_ref()
+                    .map(|patterns| matches_pattern(name, patterns))
+                    .unwrap_or(true)
             })
             .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
             .collect();
@@ -430,27 +412,6 @@ mod tests {
             records,
             vec![("entry-a".to_string(), 10), ("entry-b".to_string(), 20)]
         );
-    }
-
-    #[test]
-    fn wildcard_prefix_excludes_system_entries() {
-        let patterns = vec!["entry-a*".to_string()];
-        assert!(include_entry_in_query("entry-a", true, Some(&patterns)));
-        assert!(!include_entry_in_query(
-            "entry-a/$meta",
-            false,
-            Some(&patterns)
-        ));
-    }
-
-    #[test]
-    fn direct_system_entry_query_is_allowed() {
-        let patterns = vec!["entry-a/$meta".to_string()];
-        assert!(include_entry_in_query(
-            "entry-a/$meta",
-            false,
-            Some(&patterns)
-        ));
     }
 
     #[rstest]
