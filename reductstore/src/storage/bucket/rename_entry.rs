@@ -149,6 +149,7 @@ mod tests {
     use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
     use prost::bytes::Bytes;
+    use reduct_base::error::ErrorCode;
     use reduct_base::error::ReductError;
     use reduct_base::internal_server_error;
     use reduct_base::io::ReadRecord;
@@ -157,7 +158,9 @@ mod tests {
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::path::PathBuf;
+    use std::time::Duration;
     use tempfile::tempdir;
+    use tokio::time::sleep;
 
     #[rstest]
     #[tokio::test]
@@ -205,6 +208,81 @@ mod tests {
             bucket.rename_entry("test-1", "test-2").await.err(),
             Some(conflict!("Entry 'test-2' already exists in bucket 'test'"))
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_rename_entry_same_name_conflict(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+
+        assert_eq!(
+            bucket.rename_entry("test-1", "test-1").await.err(),
+            Some(conflict!("Entry 'test-1' already exists in bucket 'test'"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_rename_entry_to_descendant_conflict(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "a/b", 1, b"test").await.unwrap();
+
+        assert_eq!(
+            bucket.rename_entry("a", "a/c").await.err(),
+            Some(conflict!("Entry 'a/c' already exists in bucket 'test'"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_rename_entry_conflict_with_existing_child_key(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "old/child", 1, b"test").await.unwrap();
+        let old_child = bucket
+            .get_entry("old/child")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+
+        bucket
+            .entries
+            .write()
+            .await
+            .unwrap()
+            .insert("new/child".to_string(), old_child);
+
+        assert_eq!(
+            bucket.rename_entry("old", "new").await.err(),
+            Some(conflict!(
+                "Entry 'new/child' already exists in bucket 'test'"
+            ))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_rename_entry_rolls_back_when_rebuild_fails(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+
+        let entries_guard = bucket.entries.read().await.unwrap();
+        let bucket_for_rename = bucket.clone();
+        let handle =
+            tokio::spawn(async move { bucket_for_rename.rename_entry("test-1", "test-2").await });
+
+        sleep(Duration::from_millis(5300)).await;
+        drop(entries_guard);
+
+        let err = handle.await.unwrap().err().unwrap();
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(err
+            .message()
+            .contains("Failed to acquire async write lock within timeout"));
+
+        assert!(bucket.get_entry("test-1").await.is_ok());
+        assert!(bucket.get_entry("test-2").await.is_err());
     }
 
     #[rstest]

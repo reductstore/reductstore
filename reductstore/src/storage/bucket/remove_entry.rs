@@ -204,11 +204,13 @@ mod tests {
     use reduct_base::error::ReductError;
     use reduct_base::internal_server_error;
     use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
+    use reduct_base::msg::status::ResourceStatus;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::path::PathBuf;
     use std::sync::Arc;
     use tempfile::tempdir;
+    use tokio::time::{sleep, Duration};
 
     #[rstest]
     #[tokio::test]
@@ -317,6 +319,27 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_remove_entry_recovers_when_blocks_are_missing(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+        let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+
+        FILE_CACHE.remove_dir(entry.path()).await.unwrap();
+        bucket.remove_entry("test-1").await.unwrap();
+
+        for _ in 0..50 {
+            if entry.status().await.unwrap() == ResourceStatus::Ready {
+                break;
+            }
+            sleep(Duration::from_millis(20)).await;
+        }
+
+        assert_eq!(entry.status().await.unwrap(), ResourceStatus::Ready);
+        assert!(bucket.get_entry("test-1").await.is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_remove_entries_for_bucket_removal(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         write(&bucket, "test-1", 1, b"test").await.unwrap();
@@ -388,6 +411,27 @@ mod tests {
                 "Entry 'test-1' not found in bucket 'test'"
             ))
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_entries_for_bucket_removal_with_empty_entry(
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        bucket.get_or_create_entry("empty").await.unwrap();
+
+        assert!(FILE_CACHE
+            .try_exists(&bucket.path.join("empty"))
+            .await
+            .unwrap());
+
+        bucket.remove_entries_for_bucket_removal().await.unwrap();
+
+        assert!(!FILE_CACHE
+            .try_exists(&bucket.path.join("empty"))
+            .await
+            .unwrap());
     }
 
     pub async fn write(
