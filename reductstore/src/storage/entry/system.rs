@@ -54,6 +54,10 @@ pub(crate) trait SystemEntryBehavior {
         true
     }
 
+    fn is_queryable_by_wildcard(&self) -> bool {
+        true
+    }
+
     fn validate_remove_records(&self, _entry_name: &str) -> Result<(), ReductError> {
         Ok(())
     }
@@ -148,6 +152,10 @@ impl SystemEntryBehavior for MetaEntryBehavior {
     fn is_removable_by_query(&self) -> bool {
         false
     }
+
+    fn is_queryable_by_wildcard(&self) -> bool {
+        false
+    }
 }
 
 pub(crate) fn strategy_for_entry(entry_name: &str) -> Box<dyn SystemEntryBehavior + Send + Sync> {
@@ -214,6 +222,7 @@ mod tests {
         assert!(RegularEntryBehavior.is_visible_in_bucket_info());
         assert!(RegularEntryBehavior.is_eligible_for_fifo_eviction());
         assert!(RegularEntryBehavior.is_removable_by_query());
+        assert!(RegularEntryBehavior.is_queryable_by_wildcard());
     }
 
     #[tokio::test]
@@ -242,6 +251,7 @@ mod tests {
         assert!(!MetaEntryBehavior.is_visible_in_bucket_info());
         assert!(!MetaEntryBehavior.is_eligible_for_fifo_eviction());
         assert!(!MetaEntryBehavior.is_removable_by_query());
+        assert!(!MetaEntryBehavior.is_queryable_by_wildcard());
     }
 
     #[tokio::test]
