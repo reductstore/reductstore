@@ -643,8 +643,14 @@ mod tests {
             assert_eq!(
                 names,
                 vec![
+                    "part-1".to_string(),
+                    "part-1/a".to_string(),
+                    "part-1/a/b".to_string(),
                     "part-1/a/b/c".to_string(),
                     "part-1/a/b/d".to_string(),
+                    "part-2".to_string(),
+                    "part-2/x".to_string(),
+                    "part-2/x/y".to_string(),
                     "part-2/x/y/z".to_string(),
                 ]
             );
