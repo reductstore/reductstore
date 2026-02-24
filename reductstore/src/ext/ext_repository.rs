@@ -741,6 +741,136 @@ pub(super) mod tests {
         }
     }
 
+    mod get_meta_ext_params {
+        use super::*;
+
+        async fn create_storage() -> Arc<StorageEngine> {
+            let cfg = Cfg {
+                data_path: tempdir().unwrap().keep(),
+                ..Cfg::default()
+            };
+            Arc::new(
+                StorageEngine::builder()
+                    .with_data_path(cfg.data_path.clone())
+                    .with_cfg(cfg)
+                    .build()
+                    .await,
+            )
+        }
+
+        async fn write_meta_record(
+            storage: &Arc<StorageEngine>,
+            bucket_name: &str,
+            entry_name: &str,
+            key: &str,
+            payload: &'static [u8],
+        ) {
+            let bucket = storage
+                .get_bucket(bucket_name)
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+
+            let mut writer = bucket
+                .begin_write(
+                    entry_name,
+                    1,
+                    payload.len() as u64,
+                    "application/json".to_string(),
+                    Labels::from_iter([("key".to_string(), key.to_string())]),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(Bytes::from_static(payload))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn returns_none_for_empty_entry_name(mock_ext: MockIoExtension) {
+            let repo = mocked_ext_repo("test-ext", mock_ext);
+            assert_eq!(
+                repo.get_meta_ext_params("bucket", "", "test-ext")
+                    .await
+                    .unwrap(),
+                None
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn returns_none_without_storage(mock_ext: MockIoExtension) {
+            let repo = mocked_ext_repo("test-ext", mock_ext);
+            assert_eq!(
+                repo.get_meta_ext_params("bucket", "entry", "test-ext")
+                    .await
+                    .unwrap(),
+                None
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn returns_none_when_bucket_not_found(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            assert_eq!(
+                repo.get_meta_ext_params("missing", "entry", "test-ext")
+                    .await
+                    .unwrap(),
+                None
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn returns_none_when_meta_entry_not_found(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            assert_eq!(
+                repo.get_meta_ext_params("bucket", "entry", "test-ext")
+                    .await
+                    .unwrap(),
+                None
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn returns_none_when_key_not_found(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$another-ext",
+                br#"{"scale":100}"#,
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            assert_eq!(
+                repo.get_meta_ext_params("bucket", "entry", "test-ext")
+                    .await
+                    .unwrap(),
+                None
+            );
+        }
+    }
+
     mod next_processed_record {
         use super::*;
         use crate::storage::entry::RecordReader;
