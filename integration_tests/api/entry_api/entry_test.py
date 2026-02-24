@@ -4,6 +4,90 @@ from urllib.parse import quote
 from ..conftest import requires_env, auth_headers
 
 
+def _wait_parent_tree_removed(base_url, session, bucket, parent, timeout=3.0):
+    from time import sleep, time
+
+    deadline = time() + timeout
+    while time() < deadline:
+        resp = session.get(f"{base_url}/b/{bucket}")
+        assert resp.status_code == 200
+        names = [
+            entry["name"]
+            for entry in resp.json()["entries"]
+            if entry["name"] == parent or entry["name"].startswith(f"{parent}/")
+        ]
+        if not names:
+            return
+        sleep(0.05)
+
+    raise AssertionError(f"Entries under '{parent}' are still present")
+
+
+def test_create_parent_entries_automatically(base_url, session, bucket):
+    ts = 1000
+    resp = session.post(f"{base_url}/b/{bucket}/a/b/c?ts={ts}", data=b"data-c")
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}")
+    assert resp.status_code == 200
+    names = {entry["name"] for entry in resp.json()["entries"]}
+
+    assert "a" in names
+    assert "a/b" in names
+    assert "a/b/c" in names
+
+
+def test_rename_parent_entry_renames_children(base_url, session, bucket):
+    resp = session.post(f"{base_url}/b/{bucket}/a/b/c?ts=1000", data=b"data-c")
+    assert resp.status_code == 200
+    resp = session.post(f"{base_url}/b/{bucket}/a/b/d?ts=1010", data=b"data-d")
+    assert resp.status_code == 200
+
+    resp = session.put(f"{base_url}/b/{bucket}/a/rename", json={"new_name": "renamed"})
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/b/{bucket}/a/b/c?ts=1000")
+    assert resp.status_code == 404
+    resp = session.get(f"{base_url}/b/{bucket}/a/b/d?ts=1010")
+    assert resp.status_code == 404
+
+    resp = session.get(f"{base_url}/b/{bucket}/renamed/b/c?ts=1000")
+    assert resp.status_code == 200
+    assert resp.content == b"data-c"
+    resp = session.get(f"{base_url}/b/{bucket}/renamed/b/d?ts=1010")
+    assert resp.status_code == 200
+    assert resp.content == b"data-d"
+
+    resp = session.get(f"{base_url}/b/{bucket}")
+    assert resp.status_code == 200
+    names = {entry["name"] for entry in resp.json()["entries"]}
+    assert "a" not in names
+    assert "a/b" not in names
+    assert "a/b/c" not in names
+    assert "a/b/d" not in names
+    assert "renamed" in names
+    assert "renamed/b" in names
+    assert "renamed/b/c" in names
+    assert "renamed/b/d" in names
+
+
+def test_remove_parent_entry_removes_children(base_url, session, bucket):
+    resp = session.post(f"{base_url}/b/{bucket}/a/b/c?ts=1000", data=b"data-c")
+    assert resp.status_code == 200
+    resp = session.post(f"{base_url}/b/{bucket}/a/b/d?ts=1010", data=b"data-d")
+    assert resp.status_code == 200
+
+    resp = session.delete(f"{base_url}/b/{bucket}/a")
+    assert resp.status_code == 200
+
+    _wait_parent_tree_removed(base_url, session, bucket, "a")
+
+    resp = session.get(f"{base_url}/b/{bucket}/a/b/c?ts=1000")
+    assert resp.status_code == 404
+    resp = session.get(f"{base_url}/b/{bucket}/a/b/d?ts=1010")
+    assert resp.status_code == 404
+
+
 def test_remove_entry(base_url, session, bucket):
     """Should remove entry"""
     ts = 1000
