@@ -5,6 +5,7 @@ mod entry_loader;
 pub(crate) mod io;
 mod read_record;
 mod remove_records;
+mod system;
 pub(crate) mod update_labels;
 mod write_record;
 
@@ -15,6 +16,7 @@ use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
 use crate::storage::entry::entry_loader::EntryLoader;
+use crate::storage::entry::system::{strategy_for_entry, EntryBehavior};
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
@@ -49,6 +51,7 @@ pub(crate) struct Entry {
     bucket_name: String,
     settings: AsyncRwLock<EntrySettings>,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
+    behavior: Box<dyn EntryBehavior + Send + Sync>,
     queries: QueryHandleMapRef,
     status: AsyncRwLock<ResourceStatus>,
     path: PathBuf,
@@ -92,6 +95,7 @@ impl Entry {
                 )
                 .await,
             )),
+            behavior: strategy_for_entry(name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
@@ -309,6 +313,10 @@ impl Entry {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub(crate) fn is_queryable_by_wildcard(&self) -> bool {
+        self.behavior.is_queryable_by_wildcard()
     }
 
     pub async fn settings(&self) -> Result<EntrySettings, ReductError> {
