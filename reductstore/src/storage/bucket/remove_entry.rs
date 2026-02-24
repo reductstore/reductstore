@@ -3,13 +3,28 @@
 
 use super::Bucket;
 use crate::storage::engine::ReadOnlyMode;
+use crate::storage::entry::is_system_meta_entry;
 use crate::storage::entry::Entry;
-use crate::storage::entry::{is_system_meta_entry, meta_entry_name};
 use log::{debug, error};
 use reduct_base::conflict;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::status::ResourceStatus;
 use std::sync::Arc;
+
+fn sort_entries_for_removal(entries: &mut [(String, Arc<Entry>)]) {
+    // Remove system meta entries first to avoid removing a parent folder
+    // before its `$meta` folder.
+    entries.sort_by(|(a, _), (b, _)| {
+        let a_meta = is_system_meta_entry(a);
+        let b_meta = is_system_meta_entry(b);
+        let a_depth = a.split('/').count();
+        let b_depth = b.split('/').count();
+        b_meta
+            .cmp(&a_meta)
+            .then_with(|| b_depth.cmp(&a_depth))
+            .then_with(|| b.cmp(a))
+    });
+}
 
 impl Bucket {
     /// Remove entry from the bucket
@@ -31,51 +46,86 @@ impl Bucket {
             ));
         }
 
-        let mut entries_to_remove = Vec::new();
+        let mut entries_to_remove: Vec<(String, Arc<Entry>)> = {
+            let entries = self.entries.read().await?;
+            entries
+                .iter()
+                .filter(|(entry_name, _)| {
+                    *entry_name == name || entry_name.starts_with(&format!("{name}/"))
+                })
+                .map(|(entry_name, entry)| (entry_name.clone(), Arc::clone(entry)))
+                .collect()
+        };
 
-        let meta_entry = meta_entry_name(name);
-        if let Some(entry) = self.entries.read().await?.get(&meta_entry).cloned() {
-            entry.ensure_not_deleting().await?;
-            entry.mark_deleting().await?;
-            entries_to_remove.push((meta_entry, entry));
+        if entries_to_remove.is_empty() {
+            return Err(ReductError::not_found(&format!(
+                "Entry '{}' not found in bucket '{}'",
+                name, self.name
+            )));
         }
 
-        let entry = self.get_entry(name).await?.upgrade()?;
-        entry.mark_deleting().await?;
-        entries_to_remove.push((name.to_string(), entry));
+        sort_entries_for_removal(&mut entries_to_remove);
+
+        for (_, entry) in &entries_to_remove {
+            entry.ensure_not_deleting().await?;
+            entry.mark_deleting().await?;
+        }
 
         let entries_map = self.entries.clone();
         let bucket_name = self.name.clone();
         let folder_keeper = self.folder_keeper.clone();
 
         tokio::spawn(async move {
-            let remove_entry_from_backend = async || {
-                for (entry_name, entry) in entries_to_remove {
-                    let path = entry.path().to_path_buf();
-                    entry.remove_all_blocks().await?;
-                    if crate::core::file_cache::FILE_CACHE
-                        .try_exists(&path)
-                        .await?
-                    {
-                        folder_keeper.remove_folder(&entry_name).await?;
-                    }
-
-                    debug!(
-                        "Remove entry '{}' from bucket '{}' and folder '{}'",
-                        entry_name,
-                        bucket_name,
-                        path.display()
+            for (entry_name, entry) in entries_to_remove {
+                let path = entry.path().to_path_buf();
+                if let Err(err) = entry.remove_all_blocks().await {
+                    error!(
+                        "Failed to remove blocks for entry '{}' in bucket '{}': {}",
+                        entry_name, bucket_name, err
                     );
-                    entries_map.write().await?.remove(&entry_name);
+                    continue;
                 }
-                Ok::<(), ReductError>(())
-            };
 
-            if let Err(err) = remove_entry_from_backend().await {
-                error!(
-                    "Failed to remove entry from bucket '{}': {}",
-                    bucket_name, err
+                match crate::core::file_cache::FILE_CACHE.try_exists(&path).await {
+                    Ok(true) => {
+                        if let Err(err) = folder_keeper.remove_folder(&entry_name).await {
+                            if err.status() != ErrorCode::NotFound {
+                                error!(
+                                    "Failed to remove folder for entry '{}' in bucket '{}': {}",
+                                    entry_name, bucket_name, err
+                                );
+                                continue;
+                            }
+                        }
+                    }
+                    Ok(false) => {}
+                    Err(err) => {
+                        error!(
+                            "Failed to check folder for entry '{}' in bucket '{}': {}",
+                            entry_name, bucket_name, err
+                        );
+                        continue;
+                    }
+                }
+
+                debug!(
+                    "Remove entry '{}' from bucket '{}' and folder '{}'",
+                    entry_name,
+                    bucket_name,
+                    path.display()
                 );
+
+                match entries_map.write().await {
+                    Ok(mut entries) => {
+                        entries.remove(&entry_name);
+                    }
+                    Err(err) => {
+                        error!(
+                            "Failed to remove entry '{}' from bucket map '{}': {}",
+                            entry_name, bucket_name, err
+                        );
+                    }
+                }
             }
         });
 
@@ -95,13 +145,7 @@ impl Bucket {
                 .collect()
         };
         let mut entries_snapshot = entries_snapshot;
-        // Remove system meta entries first to avoid removing parent entry folder
-        // before its `$meta` folder.
-        entries_snapshot.sort_by(|(a, _), (b, _)| {
-            let a_meta = is_system_meta_entry(a);
-            let b_meta = is_system_meta_entry(b);
-            b_meta.cmp(&a_meta).then_with(|| a.cmp(b))
-        });
+        sort_entries_for_removal(&mut entries_snapshot);
 
         for (name, entry) in &entries_snapshot {
             if let Err(err) = entry.mark_deleting().await {
@@ -178,10 +222,25 @@ mod tests {
 
         bucket.remove_entry("test-1").await.unwrap();
 
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-
         assert!(bucket.get_entry("test-1").await.is_err());
         assert!(bucket.get_entry("test-1/$meta").await.is_err());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_parent_entry_removes_children(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "a/b/c", 1, b"test").await.unwrap();
+        write_meta(&bucket, "a/b/c/$meta", 1, b"meta")
+            .await
+            .unwrap();
+
+        bucket.remove_entry("a").await.unwrap();
+
+        assert!(bucket.get_entry("a").await.is_err());
+        assert!(bucket.get_entry("a/b").await.is_err());
+        assert!(bucket.get_entry("a/b/c").await.is_err());
+        assert!(bucket.get_entry("a/b/c/$meta").await.is_err());
     }
 
     #[rstest]

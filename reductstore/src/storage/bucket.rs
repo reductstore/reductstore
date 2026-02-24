@@ -1,11 +1,13 @@
 // Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+mod get_entry;
 mod query;
 mod quotas;
 mod read_only;
 mod remove_entry;
 mod remove_records;
+mod rename_entry;
 pub(super) mod settings;
 pub(crate) mod update_records;
 
@@ -19,9 +21,9 @@ use crate::storage::bucket::query::MultiEntryQuery;
 use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
-use crate::storage::engine::{check_entry_name_convention, ReadOnlyMode};
+use crate::storage::engine::ReadOnlyMode;
 use crate::storage::entry::{
-    is_system_meta_entry, meta_entry_name, Entry, EntrySettings, META_ENTRY_MAX_BLOCK_SIZE,
+    is_system_meta_entry, Entry, EntrySettings, META_ENTRY_MAX_BLOCK_SIZE,
 };
 use crate::storage::folder_keeper::FolderKeeper;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
@@ -32,7 +34,7 @@ use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::status::ResourceStatus;
-use reduct_base::{conflict, internal_server_error, not_found, Labels};
+use reduct_base::{conflict, internal_server_error, Labels};
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
@@ -71,6 +73,26 @@ pub(crate) struct Bucket {
 }
 
 impl Bucket {
+    fn parent_prefixes(key: &str) -> Vec<String> {
+        let mut prefixes = Vec::new();
+        let mut current = String::new();
+        for segment in key.split('/') {
+            if !current.is_empty() {
+                current.push('/');
+            }
+            current.push_str(segment);
+            prefixes.push(current.clone());
+        }
+        prefixes
+    }
+
+    fn entry_with_descendants<'a>(entry_name: &'a str, candidate: &'a str) -> bool {
+        candidate == entry_name
+            || candidate
+                .strip_prefix(entry_name)
+                .is_some_and(|suffix| suffix.starts_with('/'))
+    }
+
     /// Create a new Bucket
     ///
     /// # Arguments
@@ -175,49 +197,6 @@ impl Bucket {
             folder_keeper: Arc::new(folder_keeper),
             queries: AsyncRwLock::new(HashMap::new()),
         })
-    }
-
-    /// Get or create an entry in the bucket
-    ///
-    /// # Arguments
-    ///
-    /// * `key` - The key of the entry
-    ///
-    /// # Returns
-    ///
-    /// * `&mut Entry` - The entry or an HTTPError
-    pub async fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
-        check_entry_name_convention(key)?;
-        self.ensure_not_deleting().await?;
-
-        let entry = {
-            let entries = self.entries.read().await?;
-            entries.get(key).cloned()
-        };
-
-        let entry = if let Some(entry) = entry {
-            entry
-        } else {
-            self.check_mode()?;
-            let settings = self.settings.read().await?;
-            self.folder_keeper.add_folder(key).await?;
-            let entry = Arc::new(
-                Entry::try_build(
-                    &key,
-                    self.path.clone(),
-                    settings_for_entry(key, &settings),
-                    self.cfg.clone(),
-                )
-                .await?,
-            );
-            let mut entries = self.entries.write().await?;
-            entries
-                .entry(key.to_string())
-                .or_insert_with(|| Arc::clone(&entry))
-                .clone()
-        };
-        entry.ensure_not_deleting().await?;
-        Ok(entry.into())
     }
 
     /// Get an entry in the bucket
@@ -334,87 +313,6 @@ impl Bucket {
         }
     }
 
-    pub async fn rename_entry(&self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
-        self.check_mode()?;
-
-        let new_path = self.path.join(new_name);
-        let bucket_name = self.name.clone();
-        let entries = self.entries.clone();
-        let settings = self.settings().await?;
-        let cfg = self.cfg.clone();
-        let folder_keeper = self.folder_keeper.clone();
-
-        check_entry_name_convention(&new_name)?;
-        if new_path.exists() {
-            return Err(conflict!(
-                "Entry '{}' already exists in bucket '{}'",
-                new_name,
-                bucket_name
-            ));
-        }
-
-        let old_meta_name = meta_entry_name(old_name);
-        let new_meta_name = meta_entry_name(new_name);
-        let has_meta_entry = entries.read().await?.contains_key(&old_meta_name);
-        if has_meta_entry && self.path.join(&new_meta_name).exists() {
-            return Err(conflict!(
-                "Entry '{}' already exists in bucket '{}'",
-                new_meta_name,
-                bucket_name
-            ));
-        }
-
-        if let Some(entry) = entries.read().await?.get(old_name) {
-            entry.ensure_not_deleting().await?;
-            entry.compact().await?;
-        } else {
-            return Err(not_found!(
-                "Entry '{}' not found in bucket '{}'",
-                old_name,
-                bucket_name
-            ));
-        }
-
-        folder_keeper.rename_folder(old_name, new_name).await?;
-        entries.write().await?.remove(old_name);
-
-        if let Some(entry) = Entry::restore(
-            new_path,
-            new_name.to_string(),
-            bucket_name.clone(),
-            settings_for_entry(new_name, &settings),
-            cfg.clone(),
-        )
-        .await?
-        {
-            entries
-                .write()
-                .await?
-                .insert(new_name.to_string(), Arc::new(entry));
-        }
-
-        if has_meta_entry {
-            entries.write().await?.remove(&old_meta_name);
-
-            if let Some(entry) = Entry::restore(
-                self.path.join(&new_meta_name),
-                new_meta_name.clone(),
-                bucket_name.clone(),
-                settings_for_entry(&new_meta_name, &settings),
-                cfg,
-            )
-            .await?
-            {
-                entries
-                    .write()
-                    .await?
-                    .insert(new_meta_name, Arc::new(entry));
-            }
-        }
-
-        Ok(())
-    }
-
     /// Sync all entries to the file system
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
         if self.cfg.role == InstanceRole::Replica {
@@ -510,194 +408,6 @@ mod tests {
     use rstest::{fixture, rstest};
     use std::sync::Arc;
     use tempfile::tempdir;
-
-    mod get_or_create {
-        use super::*;
-        use reduct_base::unprocessable_entity;
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_get_or_create_entry(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            let entry = bucket.get_or_create_entry("test-1").await.unwrap();
-            assert_eq!(entry.upgrade().unwrap().name(), "test-1");
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_get_or_create_entry_invalid_name(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            assert_eq!(
-                bucket.get_or_create_entry("test-1$").await.err(),
-                Some(unprocessable_entity!(
-                    "Entry name can contain only letters, digits and [-,_,/] symbols or end with '/$meta'"
-                ))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_get_or_create_entry_with_path(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            let entry = bucket.get_or_create_entry("test-1/a").await.unwrap();
-            assert_eq!(entry.upgrade().unwrap().name(), "test-1/a");
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_get_or_create_entry_with_wal_segment(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            let entry = bucket.get_or_create_entry("test/wal").await.unwrap();
-            assert_eq!(entry.upgrade().unwrap().name(), "test/wal");
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_get_or_create_meta_entry(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            let entry = bucket.get_or_create_entry("test/$meta").await.unwrap();
-            assert_eq!(entry.upgrade().unwrap().name(), "test/$meta");
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_get_or_create_meta_entry_uses_small_block_size(
-            #[future] bucket: Arc<Bucket>,
-        ) {
-            let bucket = bucket.await;
-            let entry = bucket
-                .get_or_create_entry("test/$meta")
-                .await
-                .unwrap()
-                .upgrade()
-                .unwrap();
-            let settings = entry.settings().await.unwrap();
-            assert_eq!(settings.max_block_size, META_ENTRY_MAX_BLOCK_SIZE);
-        }
-    }
-
-    mod rename_entry {
-        use super::*;
-        use reduct_base::unprocessable_entity;
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_rename_entry(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            write(&bucket, "test-1", 1, b"test").await.unwrap();
-
-            bucket.rename_entry("test-1", "test-2").await.unwrap();
-            assert_eq!(
-                bucket.get_entry("test-1").await.err(),
-                Some(ReductError::not_found(
-                    "Entry 'test-1' not found in bucket 'test'"
-                ))
-            );
-            assert_eq!(
-                bucket
-                    .get_entry("test-2")
-                    .await
-                    .unwrap()
-                    .upgrade()
-                    .unwrap()
-                    .name(),
-                "test-2"
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_rename_entry_not_found(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            assert_eq!(
-                bucket.rename_entry("test-1", "test-2").await.err(),
-                Some(not_found!("Entry 'test-1' not found in bucket 'test'"))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_rename_entry_already_exists(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            write(&bucket, "test-1", 1, b"test").await.unwrap();
-            write(&bucket, "test-2", 1, b"test").await.unwrap();
-
-            assert_eq!(
-                bucket.rename_entry("test-1", "test-2").await.err(),
-                Some(conflict!("Entry 'test-2' already exists in bucket 'test'"))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_rename_invalid_name(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            assert_eq!(
-                bucket.rename_entry("test-1", "test-2$").await.err(),
-                Some(unprocessable_entity!(
-                    "Entry name can contain only letters, digits and [-,_,/] symbols or end with '/$meta'"
-                ))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_rename_with_wal_segment(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            write(&bucket, "test/a", 1, b"test").await.unwrap();
-            bucket.rename_entry("test/a", "test/wal").await.unwrap();
-            assert_eq!(bucket.get_entry("test/a").await.is_err(), true);
-            assert_eq!(
-                bucket
-                    .get_entry("test/wal")
-                    .await
-                    .unwrap()
-                    .upgrade()
-                    .unwrap()
-                    .name(),
-                "test/wal"
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_rename_moves_meta_entry(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            write(&bucket, "test/a", 1, b"data").await.unwrap();
-            write_meta(&bucket, "test/a/$meta", 1, b"meta")
-                .await
-                .unwrap();
-
-            bucket.rename_entry("test/a", "test/b").await.unwrap();
-
-            assert!(bucket.get_entry("test/a").await.is_err());
-            assert!(bucket.get_entry("test/a/$meta").await.is_err());
-            assert!(bucket.get_entry("test/b").await.is_ok());
-            assert!(bucket.get_entry("test/b/$meta").await.is_ok());
-        }
-
-        #[rstest]
-        #[tokio::test(flavor = "multi_thread")]
-        async fn test_rename_entry_persisted(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            write(&bucket, "test-1", 1, b"test").await.unwrap();
-            bucket.sync_fs().await.unwrap();
-            bucket.rename_entry("test-1", "test-2").await.unwrap();
-
-            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
-                .await
-                .unwrap();
-            assert_eq!(
-                bucket.get_entry("test-1").await.err(),
-                Some(ReductError::not_found(
-                    "Entry 'test-1' not found in bucket 'test'"
-                ))
-            );
-
-            let mut reader = bucket.begin_read("test-2", 1).await.unwrap();
-            assert_eq!(reader.read_chunk().unwrap().unwrap(), Bytes::from("test"));
-        }
-    }
 
     mod status {
         use super::*;
