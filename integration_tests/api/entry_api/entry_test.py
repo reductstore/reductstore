@@ -331,9 +331,11 @@ def test_meta_entry_visibility_and_bucket_count(base_url, session, bucket):
     resp = session.get(f"{base_url}/b/{bucket}")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["info"]["entry_count"] == 1
+    assert data["info"]["entry_count"] == 3
     assert data["info"]["size"] >= len(b"data") + len(b'{"v":1}')
-    assert all(entry_info["name"] != meta_entry for entry_info in data["entries"])
+    names = {entry_info["name"] for entry_info in data["entries"]}
+    assert names == {entry, "a", "a/x"}
+    assert meta_entry not in names
 
 
 def test_meta_entry_requires_key_label(base_url, session, bucket):
