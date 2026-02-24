@@ -74,12 +74,10 @@ async def check():
 
         await wait_until(updated_on_dest, "meta update replication")
 
-        print("Step 3/3: remove attachment by key via remove=true marker")
-        meta_ts_3 = main_ts + 30
-        await src.write(
+        print("Step 3/3: remove attachment by key via remove=true update")
+        await src.update(
             meta_entry,
-            b"{}",
-            timestamp=meta_ts_3,
+            timestamp=meta_ts_2,
             labels={"key": "$plugin", "remove": "true"},
         )
 
@@ -88,18 +86,12 @@ async def check():
 
         await wait_until(removed_on_source, "source meta removal by key")
 
-        async def unchanged_on_dest():
-            # remove=true does not create a new record; removals are not replicated
+        async def removed_on_dest():
             main_data = await read_record(dest, entry, main_ts)
             latest_meta = await read_record(dest, meta_entry, meta_ts_2)
-            no_marker = await read_record(dest, meta_entry, meta_ts_3)
-            return (
-                main_data == b"main-record"
-                and latest_meta == b'{"version":2}'
-                and no_marker is None
-            )
+            return main_data == b"main-record" and latest_meta is None
 
-        await wait_until(unchanged_on_dest, "dest remains unchanged for remove=true")
+        await wait_until(removed_on_dest, "dest meta removal by key")
 
     print("Meta replication check passed")
 

@@ -223,7 +223,7 @@ def test_meta_entry_visibility_and_bucket_count(base_url, session, bucket):
         f"{base_url}/io/{bucket}/read", headers={"x-reduct-query-id": str(query_id)}
     )
     assert resp.status_code == 200
-    expected_entries = f"{quote(entry, safe='')},{quote(meta_entry, safe='')}"
+    expected_entries = f"{quote(entry, safe='')},{quote(meta_entry, safe='$')}"
     assert resp.headers["x-reduct-entries"] == expected_entries
 
     resp = session.get(f"{base_url}/b/{bucket}")
@@ -272,12 +272,13 @@ def test_meta_entry_remove_marker_by_key(base_url, session, bucket):
     )
     assert resp.status_code == 200
 
-    resp = session.post(
-        f"{base_url}/b/{bucket}/{entry}?ts=1010",
-        data=b"{}",
+    resp = session.patch(
+        f"{base_url}/io/{bucket}/update",
         headers={
-            "x-reduct-label-key": "$plugin",
-            "x-reduct-label-remove": "true",
+            "x-reduct-entries": entry,
+            "x-reduct-start-ts": "1000",
+            "x-reduct-labels": "key,remove",
+            "x-reduct-0-0": "0,,0=$plugin,1=true",
         },
     )
     assert resp.status_code == 200
