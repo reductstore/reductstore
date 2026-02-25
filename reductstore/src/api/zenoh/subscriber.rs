@@ -17,11 +17,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Subscriber pipeline for ingesting Zenoh samples into ReductStore.
 ///
-/// In single-bucket mode, all data is written to a fixed bucket configured via
-/// `RS_ZENOH_BUCKET`. The full Zenoh key expression becomes the entry name.
+/// All data is written to a fixed bucket configured via `RS_ZENOH_BUCKET`.
+/// The full Zenoh key expression becomes the entry name.
 pub(crate) struct SubscriberPipeline {
     components: Arc<Components>,
-    /// The fixed bucket name for all ingested data.
     bucket: String,
 }
 
@@ -34,9 +33,6 @@ impl SubscriberPipeline {
     }
 
     /// Handles a single Zenoh sample by writing it into storage and notifying replications.
-    ///
-    /// The full key expression is used as the entry name within the configured bucket.
-    /// The content_type is derived from the Zenoh sample's encoding.
     pub(crate) async fn handle_sample(
         &self,
         key_expr: &str,
@@ -44,10 +40,11 @@ impl SubscriberPipeline {
         attachment: Option<Vec<u8>>,
         timestamp: Option<u64>,
         content_type: String,
+        source_labels: Labels,
     ) -> Result<(), IngestError> {
         let entry_name = key_expr.trim_matches('/');
 
-        let labels = match attachment {
+        let mut labels = match attachment {
             Some(raw_labels) => match attachments::deserialize_labels(&raw_labels) {
                 Ok(labels) => labels,
                 Err(err) => {
@@ -60,6 +57,10 @@ impl SubscriberPipeline {
             },
             None => Labels::new(),
         };
+
+        for (key, value) in source_labels {
+            labels.insert(key, value);
+        }
 
         let ts = timestamp.unwrap_or_else(|| current_time_us());
         let content_size = payload.len() as u64;
@@ -83,14 +84,12 @@ impl SubscriberPipeline {
         writer.send(Ok(Some(payload))).await?;
         writer.send(Ok(None)).await?;
 
-        // Notify replication system about the write
         self.notify_replication(&self.bucket, &entry_name, ts, labels)
             .await?;
 
         Ok(())
     }
 
-    /// Notifies the replication system about a write event.
     async fn notify_replication(
         &self,
         bucket: &str,

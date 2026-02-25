@@ -18,11 +18,10 @@ use std::sync::Arc;
 
 /// Queryable pipeline for handling Zenoh queries against ReductStore.
 ///
-/// In single-bucket mode, all queries target a fixed bucket configured via
-/// `RS_ZENOH_BUCKET`. The full Zenoh key expression becomes the entry name.
+/// All queries target a fixed bucket configured via `RS_ZENOH_BUCKET`.
+/// The full Zenoh key expression becomes the entry name.
 pub(crate) struct QueryablePipeline {
     components: Arc<Components>,
-    /// The fixed bucket name for all queries.
     bucket: String,
 }
 
@@ -144,8 +143,6 @@ fn build_query_entry(
     params: HashMap<String, String>,
     only_metadata: bool,
 ) -> Result<QueryEntry, QueryError> {
-    let continuous = parse_bool_flag(&params, "continuous")?;
-    let ttl = parse_ttl(&params)?;
     let (start, stop) = parse_time_range(&params)?;
     let (include, exclude) = parse_include_exclude_filters(&params);
     let each_s = parse_each_s(&params)?;
@@ -162,34 +159,13 @@ fn build_query_entry(
         each_s,
         each_n,
         limit,
-        continuous,
-        ttl,
+        continuous: None,
+        ttl: None,
         only_metadata: Some(only_metadata),
         when: None,
         strict: None,
         ext: None,
     })
-}
-
-fn parse_bool_flag(
-    params: &HashMap<String, String>,
-    key: &str,
-) -> Result<Option<bool>, QueryError> {
-    match params.get(key) {
-        Some(raw) => raw.parse::<bool>().map(Some).map_err(|_| {
-            QueryError::InvalidParameter(format!("'{}' must be a boolean value", key))
-        }),
-        None => Ok(None),
-    }
-}
-
-fn parse_ttl(params: &HashMap<String, String>) -> Result<Option<u64>, QueryError> {
-    match params.get("ttl") {
-        Some(raw) => raw.parse::<u64>().map(Some).map_err(|_| {
-            QueryError::InvalidParameter("'ttl' must be an unsigned integer in seconds".into())
-        }),
-        None => Ok(None),
-    }
 }
 
 fn parse_time_range(

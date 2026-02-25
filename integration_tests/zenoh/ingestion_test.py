@@ -217,3 +217,25 @@ async def test_publisher_with_encoding(bucket, entry_name, zenoh_session):
     assert len(records) >= 3
     for record in records:
         assert record.content_type == "application/json"
+
+
+async def test_publish_stores_zenoh_source_metadata(bucket, entry_name, zenoh_session):
+    """Verify zenoh_source_id and zenoh_ts_ntp64 labels are stored."""
+    key_expr = entry_name
+    payload = b"sample with timestamp"
+
+    zenoh_session.put(key_expr, payload)
+    await asyncio.sleep(0.5)
+
+    records = [record async for record in bucket.query(entry_name)]
+    assert records, "Expected at least one stored record"
+
+    record = records[0]
+    assert "zenoh_source_id" in record.labels, "Expected zenoh_source_id label"
+    assert "zenoh_ts_ntp64" in record.labels, "Expected zenoh_ts_ntp64 label"
+
+    source_id = record.labels["zenoh_source_id"]
+    ts_ntp64 = record.labels["zenoh_ts_ntp64"]
+
+    assert len(source_id) > 0, "zenoh_source_id should not be empty"
+    assert ts_ntp64.isdigit(), f"zenoh_ts_ntp64 should be numeric, got: {ts_ntp64}"

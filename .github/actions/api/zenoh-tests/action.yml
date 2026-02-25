@@ -4,7 +4,7 @@ inputs:
   zenoh_config:
     description: 'Inline Zenoh config string.'
     required: false
-    default: 'mode=client;connect=tcp/127.0.0.1:7447'
+    default: 'mode=client;connect/endpoints=[tcp/127.0.0.1:7447]'
   tls_root_ca:
     description: 'Inline root CA certificate content (PEM format).'
     required: false
@@ -56,10 +56,10 @@ runs:
       shell: bash
       run: |
         if [ -n "${{ inputs.tls_root_ca }}" ]; then
-          echo "config=mode=client;connect=tls/127.0.0.1:7447" >> $GITHUB_OUTPUT
+          echo "config=mode=client;connect/endpoints=[tls/127.0.0.1:7447]" >> $GITHUB_OUTPUT
           echo "connect=tls/127.0.0.1:7447" >> $GITHUB_OUTPUT
         else
-          echo "config=mode=client;connect=tcp/127.0.0.1:7447" >> $GITHUB_OUTPUT
+          echo "config=mode=client;connect/endpoints=[tcp/127.0.0.1:7447]" >> $GITHUB_OUTPUT
           echo "connect=tcp/127.0.0.1:7447" >> $GITHUB_OUTPUT
         fi
 

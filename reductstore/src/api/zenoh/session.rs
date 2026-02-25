@@ -20,17 +20,12 @@ use std::path::Path;
 use std::sync::Arc;
 use tempfile::NamedTempFile;
 use tokio::sync::watch;
-use tokio::time::{sleep, Duration};
+use tokio::time::{sleep, timeout, Duration, Instant};
 
 use zenoh::config::Config;
 use zenoh::sample::Sample;
 use zenoh::Session;
 
-/// Holds temporary credential files to keep them alive for the session duration.
-///
-/// When inline TLS certificates or auth dictionaries are provided via environment variables,
-/// they are written to temporary files. This struct holds those files to prevent
-/// them from being deleted while the Zenoh session is active.
 #[allow(dead_code)]
 struct CredentialFiles {
     tls_root_ca: Option<NamedTempFile>,
@@ -39,7 +34,6 @@ struct CredentialFiles {
     auth_dictionary: Option<NamedTempFile>,
 }
 
-/// Runs the Zenoh session, creating subscribers and queryables based on configuration.
 pub(crate) async fn run_session(
     config: ZenohApiConfig,
     state_keeper: Arc<StateKeeper>,
@@ -51,8 +45,6 @@ pub(crate) async fn run_session(
         config.sub_keyexprs.as_deref().unwrap_or("<disabled>"),
         config.query_keyexprs.as_deref().unwrap_or("<disabled>")
     );
-
-    validate_label_codec()?;
 
     let components = {
         let mut logged_wait = false;
@@ -72,13 +64,10 @@ pub(crate) async fn run_session(
         }
     };
 
-    // Ensure the target bucket exists (auto-create if not)
     ensure_bucket_exists(&components, &config.bucket).await?;
 
-    // Build Zenoh configuration (including credential files that must stay alive)
     let (zenoh_config, _credential_files) = build_zenoh_config(&config)?;
 
-    // Open Zenoh session
     info!("Opening Zenoh session...");
     let session = zenoh::open(zenoh_config)
         .await
@@ -86,7 +75,6 @@ pub(crate) async fn run_session(
 
     info!("Zenoh session opened successfully");
 
-    // Create pipelines
     let subscriber_pipeline = Arc::new(SubscriberPipeline::new(
         config.clone(),
         Arc::clone(&components),
@@ -96,7 +84,6 @@ pub(crate) async fn run_session(
         Arc::clone(&components),
     ));
 
-    // Bootstrap pipelines (validation)
     subscriber_pipeline
         .bootstrap()
         .await
@@ -106,14 +93,12 @@ pub(crate) async fn run_session(
         .await
         .map_err(SessionError::Queryable)?;
 
-    // Spawn subscriber tasks (only if sub_keyexprs is set)
     let subscriber_handles = if config.sub_keyexprs.is_some() {
         spawn_subscribers(&session, &config, Arc::clone(&subscriber_pipeline)).await?
     } else {
         Vec::new()
     };
 
-    // Spawn queryable tasks (only if query_keyexprs is set)
     let queryable_handles = if config.query_keyexprs.is_some() {
         spawn_queryables(&session, &config, queryable_pipeline).await?
     } else {
@@ -126,7 +111,6 @@ pub(crate) async fn run_session(
         queryable_handles.len()
     );
 
-    // Wait for shutdown signal
     loop {
         tokio::select! {
             _ = shutdown_rx.changed() => {
@@ -138,7 +122,6 @@ pub(crate) async fn run_session(
         }
     }
 
-    // Clean shutdown - close session
     info!("Closing Zenoh session...");
     session
         .close()
@@ -149,7 +132,6 @@ pub(crate) async fn run_session(
     Ok(())
 }
 
-/// Ensures the target bucket exists, creating it with default settings if not.
 async fn ensure_bucket_exists(
     components: &Arc<crate::core::components::Components>,
     bucket_name: &str,
@@ -181,7 +163,6 @@ async fn ensure_bucket_exists(
 }
 
 fn build_zenoh_config(config: &ZenohApiConfig) -> Result<(Config, CredentialFiles), SessionError> {
-    // Build base config: inline config > config file path > error
     let mut zenoh_config = if let Some(ref inline_config) = config.config_inline {
         info!("Building Zenoh config from inline string");
         parse_inline_config(inline_config)?
@@ -194,13 +175,11 @@ fn build_zenoh_config(config: &ZenohApiConfig) -> Result<(Config, CredentialFile
         ));
     };
 
-    // Create credential files and inject TLS/auth config
     let credential_files = inject_credentials(&mut zenoh_config, config)?;
 
     Ok((zenoh_config, credential_files))
 }
 
-/// Creates temp files for inline credentials and injects paths into Zenoh config.
 fn inject_credentials(
     zenoh_config: &mut Config,
     config: &ZenohApiConfig,
@@ -279,7 +258,6 @@ fn inject_credentials(
     Ok(cred_files)
 }
 
-/// Writes credential content to a temporary file.
 fn write_credential_file(
     prefix: &str,
     suffix: &str,
@@ -312,8 +290,16 @@ fn write_credential_file(
     Ok(temp_file)
 }
 
-/// Parses an inline config string like "mode=client;peer=localhost:7447"
 fn parse_inline_config(inline: &str) -> Result<Config, SessionError> {
+    let trimmed = inline.trim();
+
+    // If it looks like JSON5
+    if trimmed.starts_with('{') {
+        return Config::from_json5(trimmed)
+            .map_err(|e| SessionError::InvalidConfig(format!("Invalid JSON5 config: {}", e)));
+    }
+
+    // Otherwise, parse simple key=value;key=value format
     let mut zenoh_config = Config::default();
 
     for part in inline.split(';') {
@@ -323,65 +309,41 @@ fn parse_inline_config(inline: &str) -> Result<Config, SessionError> {
         }
 
         if let Some((key, value)) = part.split_once('=') {
-            let key = key.trim().to_lowercase();
+            let key = key.trim();
             let value = value.trim();
 
-            match key.as_str() {
-                "mode" => {
-                    zenoh_config
-                        .insert_json5("mode", &format!("\"{}\"", value))
-                        .map_err(|e| {
-                            SessionError::InvalidConfig(format!("Failed to set mode: {}", e))
-                        })?;
-                }
-                "peer" | "connect" => {
-                    // Support comma-separated peers
-                    let endpoints: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
-                    let endpoints_json = serde_json::to_string(&endpoints).map_err(|e| {
-                        SessionError::InvalidConfig(format!(
-                            "Failed to serialize connect endpoints: {}",
-                            e
-                        ))
-                    })?;
-                    zenoh_config
-                        .insert_json5("connect/endpoints", &endpoints_json)
-                        .map_err(|e| {
-                            SessionError::InvalidConfig(format!(
-                                "Failed to set connect endpoints: {}",
-                                e
-                            ))
-                        })?;
-                }
-                "listen" => {
-                    let endpoints: Vec<&str> = value.split(',').map(|s| s.trim()).collect();
-                    let endpoints_json = serde_json::to_string(&endpoints).map_err(|e| {
-                        SessionError::InvalidConfig(format!(
-                            "Failed to serialize listen endpoints: {}",
-                            e
-                        ))
-                    })?;
-                    zenoh_config
-                        .insert_json5("listen/endpoints", &endpoints_json)
-                        .map_err(|e| {
-                            SessionError::InvalidConfig(format!(
-                                "Failed to set listen endpoints: {}",
-                                e
-                            ))
-                        })?;
-                }
-                _ => {
-                    warn!("Unknown inline config key '{}', ignoring", key);
-                }
-            }
+            let json_value = if value == "true"
+                || value == "false"
+                || value.parse::<i64>().is_ok()
+                || value.parse::<f64>().is_ok()
+            {
+                value.to_string()
+            } else if value.starts_with('[') && value.ends_with(']') {
+                // Array: quote each element as a string
+                let inner = &value[1..value.len() - 1];
+                let elements: Vec<String> = inner
+                    .split(',')
+                    .map(|s| format!("\"{}\"", s.trim()))
+                    .collect();
+                format!("[{}]", elements.join(","))
+            } else {
+                format!("\"{}\"", value)
+            };
+
+            zenoh_config.insert_json5(key, &json_value).map_err(|e| {
+                SessionError::InvalidConfig(format!("Invalid config '{}={}': {}", key, value, e))
+            })?;
         } else {
-            warn!("Invalid inline config part '{}', expected key=value", part);
+            return Err(SessionError::InvalidConfig(format!(
+                "Invalid config part '{}', expected key=value",
+                part
+            )));
         }
     }
 
     Ok(zenoh_config)
 }
 
-/// Loads a Zenoh config from a JSON5 file.
 fn load_config_file(path: &str) -> Result<Config, SessionError> {
     let path = Path::new(path);
     if !path.exists() {
@@ -406,8 +368,6 @@ async fn spawn_subscribers(
     pipeline: Arc<SubscriberPipeline>,
 ) -> Result<Vec<tokio::task::JoinHandle<()>>, SessionError> {
     let mut handles = Vec::new();
-
-    // Use the configured key expression (guaranteed to be Some by caller)
     let key_expr = config.sub_keyexprs.as_ref().unwrap();
 
     info!("Declaring Zenoh subscriber on key expression: {}", key_expr);
@@ -453,25 +413,26 @@ async fn handle_sample(
     let key_expr = sample.key_expr().as_str();
     let payload = Bytes::from(sample.payload().to_bytes().to_vec());
 
-    // Extract attachment if present (labels)
     let attachment = sample.attachment().map(|att| att.to_bytes().to_vec());
-
-    // Extract encoding from Zenoh sample (defaults to application/octet-stream)
     let content_type = sample.encoding().to_string();
 
-    // Extract timestamp from Zenoh sample if available
-    let timestamp = sample.timestamp().map(|ts| {
-        // Convert Zenoh timestamp to microseconds
-        let ntp64 = ts.get_time().as_u64();
-        // NTP64 to Unix microseconds conversion
-        // NTP epoch is 1900-01-01, Unix epoch is 1970-01-01
-        // Difference is 2208988800 seconds
-        const NTP_TO_UNIX_OFFSET: u64 = 2_208_988_800;
-        let secs = (ntp64 >> 32).saturating_sub(NTP_TO_UNIX_OFFSET);
-        let frac = ntp64 & 0xFFFF_FFFF;
-        let micros = (frac * 1_000_000) >> 32;
-        secs * 1_000_000 + micros
-    });
+    let (timestamp, source_labels) = match sample.timestamp() {
+        Some(ts) => {
+            let micros = ts
+                .get_time()
+                .to_system_time()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros() as u64;
+
+            let mut labels = Labels::new();
+            labels.insert("zenoh_source_id".into(), ts.get_id().to_string());
+            labels.insert("zenoh_ts_ntp64".into(), ts.get_time().as_u64().to_string());
+
+            (Some(micros), labels)
+        }
+        None => (None, Labels::new()),
+    };
 
     debug!(
         "Received Zenoh sample: key={}, bytes={}, encoding={}, has_attachment={}, timestamp={:?}",
@@ -483,7 +444,14 @@ async fn handle_sample(
     );
 
     pipeline
-        .handle_sample(key_expr, payload, attachment, timestamp, content_type)
+        .handle_sample(
+            key_expr,
+            payload,
+            attachment,
+            timestamp,
+            content_type,
+            source_labels,
+        )
         .await
         .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)
 }
@@ -545,31 +513,10 @@ async fn spawn_queryables(
 }
 
 fn expand_query_params(params: &zenoh::query::Parameters) -> HashMap<String, String> {
-    let mut expanded = HashMap::new();
-    for (key, value) in params.iter() {
-        let raw = value.to_string();
-        if raw.contains('&') {
-            let mut first = true;
-            for part in raw.split('&') {
-                if part.is_empty() {
-                    continue;
-                }
-                if first {
-                    expanded.insert((*key).to_string(), part.to_string());
-                    first = false;
-                    continue;
-                }
-                if let Some((extra_key, extra_value)) = part.split_once('=') {
-                    expanded.insert(extra_key.to_string(), extra_value.to_string());
-                } else {
-                    expanded.insert(part.to_string(), String::new());
-                }
-            }
-        } else {
-            expanded.insert((*key).to_string(), raw);
-        }
-    }
-    expanded
+    params
+        .iter()
+        .map(|(k, v)| (k.to_string(), v.to_string()))
+        .collect()
 }
 
 async fn send_query_reply(
@@ -580,7 +527,6 @@ async fn send_query_reply(
 
     match result {
         QueryResult::Record(mut reader) => {
-            // Read the record content using the ReadRecord trait
             let mut data = Vec::new();
             while let Some(chunk_result) = reader.read_chunk() {
                 match chunk_result {
@@ -589,24 +535,15 @@ async fn send_query_reply(
                 }
             }
 
-            // Get labels and content_type from the record meta
             let labels = reader.meta().labels().clone();
             let content_type = reader.meta().content_type();
-            let attachment = if labels.is_empty() {
-                None
-            } else {
-                Some(attachments::serialize_labels(&labels)?)
-            };
+            let attachment = attachments::serialize_labels(&labels)?;
 
-            // Build reply with encoding from content_type
             let key_expr = query.key_expr().clone();
-            let mut reply_builder = query
+            let reply_builder = query
                 .reply(key_expr, data)
-                .encoding(zenoh::bytes::Encoding::from(content_type));
-
-            if let Some(att) = attachment {
-                reply_builder = reply_builder.attachment(att);
-            }
+                .encoding(zenoh::bytes::Encoding::from(content_type))
+                .attachment(attachment);
 
             reply_builder.await.map_err(|e| {
                 Box::new(std::io::Error::new(
@@ -619,7 +556,6 @@ async fn send_query_reply(
             receiver,
             io_config,
         } => {
-            // For streaming queries, send multiple replies
             let query_rx = receiver.upgrade().map_err(|e| {
                 Box::new(std::io::Error::new(
                     std::io::ErrorKind::Other,
@@ -629,8 +565,14 @@ async fn send_query_reply(
 
             let mut count = 0;
             let limit = io_config.batch_max_records;
+            let start_time = Instant::now();
 
             loop {
+                if start_time.elapsed() > io_config.batch_timeout {
+                    debug!("Batch timeout reached after {} records", count);
+                    break;
+                }
+
                 let mut record = {
                     let mut rx = query_rx.write().await.map_err(|e| {
                         Box::new(std::io::Error::new(
@@ -639,14 +581,18 @@ async fn send_query_reply(
                         )) as Box<dyn Error + Send + Sync>
                     })?;
 
-                    match rx.recv().await {
-                        Some(Ok(record)) => record,
-                        Some(Err(e)) => return Err(Box::new(e)),
-                        None => break,
+                    match timeout(io_config.batch_records_timeout, rx.recv()).await {
+                        Ok(Some(Ok(record))) => record,
+                        Ok(Some(Err(e))) if e.status == ErrorCode::NoContent => break,
+                        Ok(Some(Err(e))) => return Err(Box::new(e)),
+                        Ok(None) => break,
+                        Err(_) => {
+                            debug!("Record receive timeout, continuing");
+                            continue;
+                        }
                     }
                 };
 
-                // Read record data using the ReadRecord trait
                 let mut data = Vec::new();
                 while let Some(chunk_result) = record.read_chunk() {
                     match chunk_result {
@@ -655,24 +601,15 @@ async fn send_query_reply(
                     }
                 }
 
-                // Get labels and content_type from the record meta
                 let labels = record.meta().labels().clone();
                 let content_type = record.meta().content_type();
-                let attachment = if labels.is_empty() {
-                    None
-                } else {
-                    Some(attachments::serialize_labels(&labels)?)
-                };
+                let attachment = attachments::serialize_labels(&labels)?;
 
-                // Build reply with encoding from content_type
                 let key_expr = query.key_expr().clone();
-                let mut reply_builder = query
+                let reply_builder = query
                     .reply(key_expr, data)
-                    .encoding(zenoh::bytes::Encoding::from(content_type));
-
-                if let Some(att) = attachment {
-                    reply_builder = reply_builder.attachment(att);
-                }
+                    .encoding(zenoh::bytes::Encoding::from(content_type))
+                    .attachment(attachment);
 
                 reply_builder.await.map_err(|e| {
                     Box::new(std::io::Error::new(
@@ -692,27 +629,11 @@ async fn send_query_reply(
     Ok(())
 }
 
-fn validate_label_codec() -> Result<(), SessionError> {
-    let mut labels = Labels::new();
-    labels.insert("codec".into(), "probe".into());
-
-    let encoded = attachments::serialize_labels(&labels)?;
-    let decoded = attachments::deserialize_labels(&encoded)?;
-
-    if decoded != labels {
-        return Err(SessionError::AttachmentCodecMismatch);
-    }
-
-    Ok(())
-}
-
 #[derive(Debug)]
 pub(crate) enum SessionError {
     Component(ComponentError),
     Subscriber(String),
     Queryable(String),
-    AttachmentCodec(serde_json::Error),
-    AttachmentCodecMismatch,
     ZenohOpen(String),
     ZenohClose(String),
     InvalidConfig(String),
@@ -724,24 +645,10 @@ impl Display for SessionError {
             SessionError::Component(err) => write!(f, "{}", err),
             SessionError::Subscriber(err) => write!(f, "Subscriber pipeline error: {}", err),
             SessionError::Queryable(err) => write!(f, "Queryable pipeline error: {}", err),
-            SessionError::AttachmentCodec(err) => {
-                write!(f, "Failed to serialize labels: {}", err)
-            }
-            SessionError::AttachmentCodecMismatch => {
-                write!(f, "Label codec roundtrip produced mismatched values")
-            }
             SessionError::ZenohOpen(err) => write!(f, "Failed to open Zenoh session: {}", err),
             SessionError::ZenohClose(err) => write!(f, "Failed to close Zenoh session: {}", err),
             SessionError::InvalidConfig(err) => write!(f, "Invalid Zenoh configuration: {}", err),
         }
-    }
-}
-
-impl Error for SessionError {}
-
-impl From<serde_json::Error> for SessionError {
-    fn from(value: serde_json::Error) -> Self {
-        SessionError::AttachmentCodec(value)
     }
 }
 
@@ -836,5 +743,66 @@ mod tests {
         assert!(cred_files.tls_connect_cert.is_none());
         assert!(cred_files.tls_connect_key.is_none());
         assert!(cred_files.auth_dictionary.is_none());
+    }
+
+    #[rstest]
+    fn parses_json5_inline_config() {
+        let config = r#"{ mode: "client" }"#;
+        let result = parse_inline_config(config);
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn parses_simple_key_value_config() {
+        let config = "mode=client";
+        let result = parse_inline_config(config);
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn parses_multiple_key_value_pairs() {
+        let config = "mode=client;scouting/multicast/enabled=false";
+        let result = parse_inline_config(config);
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn parses_array_values_with_endpoints() {
+        let config = "mode=router;listen/endpoints=[tcp/127.0.0.1:7447]";
+        let result = parse_inline_config(config);
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn parses_array_with_multiple_endpoints() {
+        let config = "connect/endpoints=[tcp/10.0.0.1:7447, tcp/10.0.0.2:7447]";
+        let result = parse_inline_config(config);
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn ignores_empty_parts_in_config() {
+        let config = "mode=client;;";
+        let result = parse_inline_config(config);
+        assert!(result.is_ok());
+    }
+
+    #[rstest]
+    fn errors_on_missing_equals() {
+        let config = "mode";
+        let result = parse_inline_config(config);
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("expected key=value"));
+    }
+
+    #[rstest]
+    fn errors_on_invalid_json5() {
+        let config = "{ invalid json }";
+        let result = parse_inline_config(config);
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid JSON5"));
     }
 }

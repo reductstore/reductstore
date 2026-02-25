@@ -2,9 +2,9 @@
 
 Quick run (local):
 1) Start the Zenoh router:
-   `docker run --init -d --name zenoh-router -p 7447:7447/tcp -p 8000:8000/tcp eclipse/zenoh`
+   `docker run --init -d --name zenoh-router -p 7447:7447/tcp eclipse/zenoh`
 2) Start ReductStore:
-   `RS_DATA_PATH=~/data-test RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG="mode=client;connect=tcp/127.0.0.1:7447" RS_ZENOH_SUB_KEYEXPRS="**" RS_ZENOH_QUERY_KEYEXPRS="**" RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" cargo run -p reductstore --features "fs-backend web-console zenoh-api"`
+   `RS_DATA_PATH=~/data-test RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tcp/127.0.0.1:7447]" RS_ZENOH_SUB_KEYEXPRS="**" RS_ZENOH_QUERY_KEYEXPRS="**" RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" cargo run -p reductstore --features "fs-backend web-console zenoh-api"`
 3) Run tests:
    `pytest integration_tests/zenoh`
 
@@ -33,7 +33,7 @@ To test inline credentials, start ReductStore with the credential env vars, then
 ```bash
 docker rm -f zenoh-router && docker run --init -d --name zenoh-router -p 7447:7447/tcp eclipse/zenoh
 
-RS_DATA_PATH=~/data-test RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG="mode=client;connect=tcp/127.0.0.1:7447" RS_ZENOH_SUB_KEYEXPRS="**" RS_ZENOH_AUTH_DICTIONARY="testuser:testpassword" cargo run -p reductstore --features "fs-backend web-console zenoh-api"
+RS_DATA_PATH=~/data-test RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tcp/127.0.0.1:7447]" RS_ZENOH_SUB_KEYEXPRS="**" RS_ZENOH_AUTH_DICTIONARY="testuser:testpassword" cargo run -p reductstore --features "fs-backend web-console zenoh-api"
 ```
 
 2) Run tests:
@@ -66,7 +66,7 @@ docker rm -f zenoh-router && docker run --init -d --name zenoh-router -p 7447:74
 
 Start ReductStore and run tests:
 ```bash
-RS_DATA_PATH=~/data-test RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG="mode=client;connect=tls/127.0.0.1:7447" RS_ZENOH_SUB_KEYEXPRS="**" RS_ZENOH_TLS_ROOT_CA="$(cat misc/certificate.crt)" cargo run -p reductstore --features "fs-backend web-console zenoh-api"
+RS_DATA_PATH=~/data-test RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tls/127.0.0.1:7447]" RS_ZENOH_SUB_KEYEXPRS="**" RS_ZENOH_TLS_ROOT_CA="$(cat misc/certificate.crt)" cargo run -p reductstore --features "fs-backend web-console zenoh-api"
 
 RS_ZENOH_TLS_ROOT_CA="$(cat misc/certificate.crt)" pytest integration_tests/zenoh/credentials_test.py -v
 ```

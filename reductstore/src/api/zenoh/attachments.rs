@@ -3,12 +3,10 @@
 
 use reduct_base::Labels;
 
-/// Encodes ReductStore labels as a JSON attachment payload compatible with Zenoh samples.
 pub(crate) fn serialize_labels(labels: &Labels) -> Result<Vec<u8>, serde_json::Error> {
     serde_json::to_vec(labels)
 }
 
-/// Restores labels from a JSON attachment payload.
 pub(crate) fn deserialize_labels(payload: &[u8]) -> Result<Labels, serde_json::Error> {
     serde_json::from_slice(payload)
 }
