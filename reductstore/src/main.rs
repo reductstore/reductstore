@@ -5,6 +5,6 @@ use reductstore::{cfg::CoreExtCfgParser, launcher::launch_server};
 
 #[tokio::main]
 async fn main() {
-    let ext_cfg_pareser = CoreExtCfgParser;
-    launch_server(ext_cfg_pareser).await;
+    let ext_cfg_parser = CoreExtCfgParser;
+    launch_server(ext_cfg_parser).await;
 }
