@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.18.5 - 2026-02-25
+
+### Fixed
+
+- Fix batch v2 parsing in `/io/*/update` to preserve per-entry label delta removals and reuse semantics, [PR-1189](https://github.com/reductstore/reductstore/pull/1189)
+
 ## 1.18.4 - 2026-02-06
 
 ### Fixed
