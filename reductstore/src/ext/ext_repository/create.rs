@@ -2,16 +2,10 @@
 // Licensed under the Business Source License 1.1
 
 use crate::cfg::io::IoConfig;
-use crate::core::sync::AsyncRwLock;
-use crate::ext::ext_repository::{BoxedManageExtensions, ExtRepository, ManageExtensions};
+use crate::ext::ext_repository::{BoxedManageExtensions, ExtRepository};
 use crate::storage::engine::StorageEngine;
-use crate::storage::query::QueryRx;
-use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::ext::{ExtSettings, IoExtension};
-use reduct_base::io::BoxedReadRecord;
-use reduct_base::msg::entry_api::QueryEntry;
-use reduct_base::no_content;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -22,60 +16,19 @@ pub fn create_ext_repository(
     io_config: IoConfig,
     storage: Option<Arc<StorageEngine>>,
 ) -> Result<BoxedManageExtensions, ReductError> {
-    if external_path.is_some() || !static_extensions.is_empty() {
-        let paths = if let Some(path) = external_path {
-            vec![path]
-        } else {
-            Vec::new()
-        };
-
-        Ok(Box::new(ExtRepository::try_load(
-            paths,
-            static_extensions,
-            settings,
-            io_config,
-            storage,
-        )?))
+    let paths = if let Some(path) = external_path {
+        vec![path]
     } else {
-        // Dummy extension repository if
-        struct NoExtRepository;
+        Vec::new()
+    };
 
-        #[async_trait]
-        impl ManageExtensions for NoExtRepository {
-            async fn register_query(
-                &self,
-                _query_id: u64,
-                _bucket_name: &str,
-                _entry_name: &str,
-                _query: QueryEntry,
-            ) -> Result<(), ReductError> {
-                Ok(())
-            }
-
-            async fn fetch_and_process_record(
-                &self,
-                _query_id: u64,
-                query_rx: Arc<AsyncRwLock<QueryRx>>,
-            ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
-                let result = match query_rx.write().await {
-                    Ok(mut rx) => rx
-                        .recv()
-                        .await
-                        .map(|record| vec![record.map(|r| Box::new(r) as BoxedReadRecord)]),
-                    Err(err) => return Some(vec![Err(err)]),
-                };
-
-                if result.is_none() {
-                    // If no record is available, return a no content error to finish the query.
-                    return Some(vec![Err(no_content!("No content"))]);
-                }
-
-                result
-            }
-        }
-
-        Ok(Box::new(NoExtRepository))
-    }
+    Ok(Box::new(ExtRepository::try_load(
+        paths,
+        static_extensions,
+        settings,
+        io_config,
+        storage,
+    )?))
 }
 
 #[cfg(test)]
@@ -83,15 +36,18 @@ mod tests {
     use crate::cfg::io::IoConfig;
     use crate::core::sync::AsyncRwLock;
     use crate::ext::ext_repository::create_ext_repository;
+    use reduct_base::error::ErrorCode;
     use reduct_base::error::ErrorCode::NoContent;
     use reduct_base::ext::ExtSettings;
+    use reduct_base::msg::entry_api::QueryEntry;
     use reduct_base::msg::server_api::ServerInfo;
+    use serde_json::json;
     use std::sync::Arc;
     use tokio::sync::mpsc;
 
     #[tokio::test]
     async fn test_no_content_error_returned() {
-        // Create the dummy extension repository
+        // Create extension repository without loading any extensions
         let ext_repo = create_ext_repository(
             None,
             vec![],
@@ -117,5 +73,36 @@ mod tests {
             result.unwrap()[0].as_ref().err().unwrap().status(),
             NoContent
         );
+    }
+
+    #[tokio::test]
+    async fn test_query_with_unknown_extension_returns_error() {
+        let ext_repo = create_ext_repository(
+            None,
+            vec![],
+            ExtSettings::builder()
+                .server_info(ServerInfo::default())
+                .build(),
+            IoConfig::default(),
+            None,
+        )
+        .unwrap();
+
+        let err = ext_repo
+            .register_query(
+                1,
+                "bucket-1",
+                "entry-1",
+                QueryEntry {
+                    ext: Some(json!({"test-ext": {"param": 1}})),
+                    ..Default::default()
+                },
+            )
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+        assert!(err.message().starts_with("Unknown extension 'test-ext'"));
     }
 }
