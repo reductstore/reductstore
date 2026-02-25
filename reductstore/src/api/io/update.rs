@@ -9,20 +9,14 @@ use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 use reduct_base::batch::v2::{
     make_entries_header, make_error_batched_header, make_start_timestamp_header,
-    parse_batched_headers, parse_entries, parse_label_delta, parse_labels, parse_start_timestamp,
-    sort_headers_by_entry_and_time, ENTRIES_HEADER, START_TS_HEADER,
+    parse_batched_update_headers, parse_entries, parse_start_timestamp, ENTRIES_HEADER,
+    START_TS_HEADER,
 };
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
-use reduct_base::{unprocessable_entity, Labels};
-use std::collections::{HashMap, HashSet};
+use reduct_base::unprocessable_entity;
+use std::collections::HashMap;
 use std::sync::Arc;
-
-struct IndexedUpdate {
-    entry_index: usize,
-    delta: u64,
-    labels: UpdateLabelsMulti,
-}
 
 // PATCH /io/:bucket_name/update
 pub(super) async fn update_batched_records(
@@ -40,93 +34,59 @@ pub(super) async fn update_batched_records(
         )
         .await?;
 
-    let entries = parse_entries(&headers)?;
-    let label_names = parse_labels(&headers)?;
-    let start_ts = parse_start_timestamp(&headers)?;
-
-    // Validate headers and resolve final labels so we mirror protocol v2 behaviour.
-    let parsed_headers = parse_batched_headers(&headers)?;
-    let raw_headers = sort_headers_by_entry_and_time(&headers)?;
-
-    if parsed_headers.len() != raw_headers.len() {
-        return Err(HttpError::from(unprocessable_entity!(
-            "Invalid batched headers"
-        )));
-    }
-
-    let mut updates = Vec::new();
-    for ((entry_index, delta, value), parsed) in
-        raw_headers.into_iter().zip(parsed_headers.into_iter())
-    {
-        let entry_name = entries.get(entry_index).ok_or_else(|| {
-            HttpError::from(unprocessable_entity!(
-                "Invalid header 'x-reduct-{}-{}': entry index out of range",
-                entry_index,
-                delta
-            ))
-        })?;
-
-        let raw_value = value
-            .to_str()
-            .map_err(|_| HttpError::from(unprocessable_entity!("Invalid batched header")))?;
-        let (update, remove) = parse_label_updates(raw_value, label_names.as_ref())?;
-
-        updates.push(IndexedUpdate {
-            entry_index,
-            delta,
-            labels: UpdateLabelsMulti {
-                entry_name: entry_name.clone(),
-                time: parsed.timestamp,
-                update,
-                remove,
-            },
-        });
-    }
+    let updates = parse_batched_update_headers(&headers)?
+        .into_iter()
+        .map(|header_record| UpdateLabelsMulti {
+            entry_name: header_record.entry,
+            time: header_record.timestamp,
+            update: header_record.update,
+            remove: header_record.remove,
+        })
+        .collect::<Vec<_>>();
 
     let bucket = components
         .storage
         .get_bucket(bucket_name)
         .await?
         .upgrade()?;
-    let result = bucket
-        .update_labels(
-            updates
-                .iter()
-                .map(|update| UpdateLabelsMulti {
-                    entry_name: update.labels.entry_name.clone(),
-                    time: update.labels.time,
-                    update: update.labels.update.clone(),
-                    remove: update.labels.remove.clone(),
-                })
-                .collect(),
-        )
-        .await?;
+    let result = bucket.update_labels(updates.clone()).await?;
 
     let mut resp_headers = HeaderMap::new();
+    let start_ts = parse_start_timestamp(&headers)?;
+    let entries = parse_entries(&headers)?;
     resp_headers.insert(START_TS_HEADER, make_start_timestamp_header(start_ts));
     resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
 
     for update in updates {
-        if let Some(entry_results) = result.get(&update.labels.entry_name) {
-            if let Some(res) = entry_results.get(&update.labels.time) {
+        if let Some(entry_results) = result.get(&update.entry_name) {
+            if let Some(res) = entry_results.get(&update.time) {
                 match res {
                     Ok(labels) => {
                         let mut replication_repo = components.replication_repo.write().await?;
                         replication_repo
                             .notify(TransactionNotification {
                                 bucket: bucket_name.clone(),
-                                entry: update.labels.entry_name.clone(),
+                                entry: update.entry_name.clone(),
                                 meta: RecordMeta::builder()
-                                    .timestamp(update.labels.time)
+                                    .timestamp(update.time)
                                     .labels(labels.clone())
                                     .build(),
-                                event: Transaction::UpdateRecord(update.labels.time),
+                                event: Transaction::UpdateRecord(update.time),
                             })
                             .await?;
                     }
                     Err(err) => {
+                        let entry_index = entries
+                            .iter()
+                            .position(|entry| entry == &update.entry_name)
+                            .ok_or_else(|| {
+                                HttpError::from(unprocessable_entity!(
+                                    "Entry '{}' is missing in x-reduct-entries",
+                                    update.entry_name
+                                ))
+                            })?;
                         let (name, value) =
-                            make_error_batched_header(update.entry_index, update.delta, err);
+                            make_error_batched_header(entry_index, update.time - start_ts, err);
                         resp_headers.insert(name, value);
                     }
                 }
@@ -135,30 +95,6 @@ pub(super) async fn update_batched_records(
     }
 
     Ok(resp_headers)
-}
-
-fn parse_label_updates(
-    raw_header: &str,
-    label_names: Option<&Vec<String>>,
-) -> Result<(Labels, HashSet<String>), HttpError> {
-    let (content_length_str, rest) = raw_header
-        .split_once(',')
-        .map(|(len, rest)| (len.trim(), Some(rest)))
-        .unwrap_or((raw_header.trim(), None));
-
-    content_length_str
-        .parse::<u64>()
-        .map_err(|_| HttpError::from(unprocessable_entity!("Invalid batched header")))?;
-
-    let labels_raw = match rest {
-        None => None,
-        Some(rest) => rest.split_once(',').map(|(_, labels)| labels),
-    };
-
-    match labels_raw {
-        None => Ok((Labels::new(), HashSet::new())),
-        Some(labels_raw) => parse_label_delta(labels_raw, label_names).map_err(HttpError::from),
-    }
 }
 
 #[cfg(test)]
@@ -171,6 +107,7 @@ mod tests {
     use reduct_base::batch::v2::encode_entry_name;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
+    use reduct_base::Labels;
     use rstest::rstest;
 
     async fn write_record_with_labels(
@@ -384,6 +321,66 @@ mod tests {
         assert_eq!(
             record.meta().labels(),
             &Labels::from_iter(vec![("a".into(), "hello,world".into())])
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn reuses_labels_for_subsequent_records(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        write_record_with_labels(&bucket, "entry-1", 1000, Labels::new()).await;
+        write_record_with_labels(&bucket, "entry-1", 1001, Labels::new()).await;
+
+        headers.insert(
+            "x-reduct-entries",
+            HeaderValue::from_str(encode_entry_name("entry-1").as_str()).unwrap(),
+        );
+        headers.insert("x-reduct-start-ts", HeaderValue::from_static("1000"));
+        headers.insert("x-reduct-labels", HeaderValue::from_static("key,remove"));
+        headers.insert(
+            axum::http::HeaderName::from_static("x-reduct-0-0"),
+            HeaderValue::from_static("0,,0=meta-1,1=true"),
+        );
+        headers.insert(
+            axum::http::HeaderName::from_static("x-reduct-0-1"),
+            HeaderValue::from_static("0,,0=meta-2"),
+        );
+
+        let resp_headers = update_batched_records(State(keeper.clone()), headers, path_to_bucket_1)
+            .await
+            .unwrap();
+        assert_eq!(resp_headers.len(), 2);
+        assert_eq!(resp_headers[ENTRIES_HEADER].to_str().unwrap(), "entry-1");
+        assert_eq!(resp_headers[START_TS_HEADER].to_str().unwrap(), "1000");
+
+        let record_1 = bucket.begin_read("entry-1", 1000).await.unwrap();
+        assert_eq!(
+            record_1.meta().labels(),
+            &Labels::from_iter(vec![
+                ("key".into(), "meta-1".into()),
+                ("remove".into(), "true".into()),
+            ])
+        );
+
+        let record_2 = bucket.begin_read("entry-1", 1001).await.unwrap();
+        assert_eq!(
+            record_2.meta().labels(),
+            &Labels::from_iter(vec![
+                ("key".into(), "meta-2".into()),
+                ("remove".into(), "true".into()),
+            ])
         );
     }
 }
