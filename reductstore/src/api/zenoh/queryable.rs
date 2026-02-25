@@ -87,8 +87,6 @@ impl QueryablePipeline {
         })
     }
 }
-
-/// Result of resolving a Zenoh query selector.
 pub(crate) enum QueryResult {
     Record(RecordReader),
     Stream {

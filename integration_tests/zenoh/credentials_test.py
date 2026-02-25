@@ -35,7 +35,6 @@ async def test_server_accepts_inline_credential_env_vars(client, zenoh_bucket):
     This test passes if the server is running and the bucket is accessible.
     The credentials may or may not be used depending on the Zenoh router config.
     """
-    # If we can get the bucket, the server started successfully
     bucket = await client.get_bucket(zenoh_bucket)
     info = await bucket.info()
     assert info.name == zenoh_bucket
@@ -50,15 +49,12 @@ async def test_ingestion_works_with_credential_config(
     """Verify data ingestion still works when credential env vars are set."""
     import time
 
-    # Publish via Zenoh
     keyexpr = entry_name
     payload = b"test with credentials"
     zenoh_session.put(keyexpr, payload)
 
-    # Wait for ingestion
     time.sleep(0.5)
 
-    # Verify data arrived
     async with bucket.read(entry_name) as record:
         data = await record.read_all()
         assert data == payload
@@ -76,7 +72,6 @@ async def test_tls_root_ca_is_used(bucket, entry_name, zenoh_session):
     """
     import time
 
-    # If we got here, TLS is configured and working
     keyexpr = entry_name
     payload = b"tls secured data"
     zenoh_session.put(keyexpr, payload)

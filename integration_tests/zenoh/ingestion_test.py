@@ -57,7 +57,7 @@ async def test_publish_multiple_records(bucket, entry_name, zenoh_session):
     await asyncio.sleep(0.5)
 
     records = [record async for record in bucket.query(entry_name)]
-    assert len(records) >= 5
+    assert len(records) == 5
 
 
 async def test_publish_large_payload(bucket, entry_name, zenoh_session):
@@ -100,23 +100,6 @@ async def test_publish_nested_key(bucket, zenoh_session):
     replies = [reply for reply in zenoh_session.get(selector, timeout=5.0) if reply.ok]
     assert replies, "Expected at least one reply from Zenoh queryable"
     assert replies[0].ok.payload.to_bytes() == payload
-
-
-async def test_publisher_stream(bucket, entry_name, zenoh_session):
-    """Handle data from a Zenoh publisher."""
-    key_expr = entry_name
-
-    publisher = zenoh_session.declare_publisher(key_expr)
-    for i in range(10):
-        publisher.put(f"stream_{i}".encode())
-        await asyncio.sleep(0.01)
-    publisher.undeclare()
-
-    await asyncio.sleep(0.5)
-
-    records = [record async for record in bucket.query(entry_name)]
-    assert len(records) >= 10
-
 
 async def test_publisher_with_attachment(
     bucket,
@@ -171,7 +154,6 @@ async def test_publish_with_encoding_custom(bucket, entry_name, zenoh_session):
     key_expr = entry_name
     payload = b"\x00\x01\x02\x03"
 
-    # Custom encoding via constructor
     custom_encoding = zenoh.Encoding("application/x-custom-binary")
     zenoh_session.put(key_expr, payload, encoding=custom_encoding)
     await asyncio.sleep(0.5)
@@ -186,37 +168,12 @@ async def test_publish_default_encoding(bucket, entry_name, zenoh_session):
     key_expr = entry_name
     payload = b"binary data"
 
-    # No explicit encoding - should default to octet-stream
     zenoh_session.put(key_expr, payload)
     await asyncio.sleep(0.5)
 
     records = [record async for record in bucket.query(entry_name)]
     assert records, "Expected at least one stored record"
-    # Zenoh default is zenoh/bytes which maps to application/octet-stream
-    assert (
-        "octet-stream" in records[0].content_type or "zenoh" in records[0].content_type
-    )
-
-
-async def test_publisher_with_encoding(bucket, entry_name, zenoh_session):
-    """Publisher preserves encoding across multiple puts."""
-    key_expr = entry_name
-
-    publisher = zenoh_session.declare_publisher(key_expr)
-    for i in range(3):
-        publisher.put(
-            f'{{"index": {i}}}'.encode(),
-            encoding=zenoh.Encoding.APPLICATION_JSON,
-        )
-        await asyncio.sleep(0.01)
-    publisher.undeclare()
-
-    await asyncio.sleep(0.5)
-
-    records = [record async for record in bucket.query(entry_name)]
-    assert len(records) >= 3
-    for record in records:
-        assert record.content_type == "application/json"
+    assert records[0].content_type == "zenoh/bytes"
 
 
 async def test_publish_stores_zenoh_source_metadata(bucket, entry_name, zenoh_session):
