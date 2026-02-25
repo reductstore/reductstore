@@ -626,6 +626,33 @@ mod tests {
             let token = repo.validate_token(Some("Bearer invalid-value")).await;
             assert_eq!(token, Err(unauthorized!("Invalid token")));
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_validate_token_expired(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let value = repo
+                .generate_token(
+                    "test-expired",
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_in: None,
+                    },
+                )
+                .await
+                .unwrap()
+                .value;
+
+            let token = repo.get_mut_token("test-expired").await.unwrap();
+            token.expires_at = Some(chrono::Utc::now() - chrono::Duration::seconds(1));
+
+            let err = repo
+                .validate_token(Some(&format!("Bearer {}", value)))
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, unauthorized!("Token has expired"));
+        }
     }
 
     mod remove_token {

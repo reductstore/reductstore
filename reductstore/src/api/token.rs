@@ -64,3 +64,56 @@ pub(super) fn create_token_api_routes() -> axum::Router<Arc<StateKeeper>> {
         .route("/{token_name}", get(get_token))
         .route("/{token_name}", delete(remove_token))
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_token_create_request_from_request() {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/tokens/new")
+            .body(Body::from(
+                r#"{"permissions":{"full_access":true,"read":["bucket-1"],"write":[]}, "expires_in":"5D"}"#,
+            ))
+            .unwrap();
+
+        let parsed = TokenCreateRequestAxum::from_request(req, &())
+            .await
+            .unwrap();
+        assert_eq!(parsed.0.permissions.full_access, true);
+        assert_eq!(parsed.0.permissions.read, vec!["bucket-1"]);
+        assert_eq!(parsed.0.expires_in, Some("5D".to_string()));
+    }
+
+    #[tokio::test]
+    async fn test_token_create_request_from_request_invalid() {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/tokens/new")
+            .body(Body::from(r#"{"permissions":"invalid"}"#))
+            .unwrap();
+
+        let err = TokenCreateRequestAxum::from_request(req, &())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+    }
+
+    #[tokio::test]
+    async fn test_token_create_request_from_request_missing_permissions() {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/tokens/new")
+            .body(Body::from(r#"{"expires_in":"5D"}"#))
+            .unwrap();
+
+        let err = TokenCreateRequestAxum::from_request(req, &())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+    }
+}
