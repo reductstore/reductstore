@@ -76,6 +76,18 @@ impl QueryablePipeline {
             return Ok(QueryResult::Record(reader));
         }
 
+        if parse_last(params)? {
+            let info = entry.info().await?;
+            if info.record_count == 0 {
+                return Err(QueryError::Storage(reduct_base::not_found!(
+                    "No records in entry {}",
+                    entry_name
+                )));
+            }
+            let reader = entry.begin_read(info.latest_record).await?;
+            return Ok(QueryResult::Record(reader));
+        }
+
         let only_metadata = parse_only_metadata(params)?;
         let query_entry = build_query_entry(params.clone(), only_metadata)?;
         let query_id = entry.query(query_entry).await?;
@@ -125,6 +137,15 @@ fn parse_timestamp(params: &HashMap<String, String>) -> Result<Option<u64>, Quer
             .map(Some)
             .map_err(|_| QueryError::InvalidParameter("'ts' must be an unsigned integer".into())),
         None => Ok(None),
+    }
+}
+
+fn parse_last(params: &HashMap<String, String>) -> Result<bool, QueryError> {
+    match params.get("last") {
+        Some(raw) => raw
+            .parse::<bool>()
+            .map_err(|_| QueryError::InvalidParameter("'last' must be a boolean value".into())),
+        None => Ok(false),
     }
 }
 
@@ -254,6 +275,30 @@ mod tests {
     fn parses_timestamp_param() {
         let params = HashMap::from_iter(vec![("ts".to_string(), "123".to_string())]);
         assert_eq!(parse_timestamp(&params).unwrap(), Some(123));
+    }
+
+    #[test]
+    fn parses_last_param_true() {
+        let params = HashMap::from_iter(vec![("last".to_string(), "true".to_string())]);
+        assert_eq!(parse_last(&params).unwrap(), true);
+    }
+
+    #[test]
+    fn parses_last_param_false() {
+        let params = HashMap::from_iter(vec![("last".to_string(), "false".to_string())]);
+        assert_eq!(parse_last(&params).unwrap(), false);
+    }
+
+    #[test]
+    fn parses_last_param_missing() {
+        let params = HashMap::new();
+        assert_eq!(parse_last(&params).unwrap(), false);
+    }
+
+    #[test]
+    fn rejects_invalid_last() {
+        let params = HashMap::from_iter(vec![("last".to_string(), "abc".to_string())]);
+        assert!(parse_last(&params).is_err());
     }
 
     #[test]

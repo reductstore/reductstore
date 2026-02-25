@@ -163,3 +163,22 @@ async def test_query_encoding_preserved(bucket, entry_name, zenoh_session):
     assert replies
     assert replies[0].ok.payload.to_bytes() == payload
     assert "application/json" in str(replies[0].ok.encoding)
+
+
+async def test_query_last(bucket, entry_name, zenoh_session):
+    """Query the last record using the last parameter."""
+    base_ts = 7_000_000_000
+    for i in range(5):
+        await bucket.write(
+            entry_name, f"record_{i}".encode(), timestamp=base_ts + i * 1_000_000
+        )
+
+    selector = f"{entry_name}?last=true"
+    replies = [
+        r
+        for r in zenoh_session.get(selector, timeout=5.0, consolidation=CONSOLIDATION)
+        if r.ok
+    ]
+
+    assert len(replies) == 1
+    assert replies[0].ok.payload.to_bytes() == b"record_4"

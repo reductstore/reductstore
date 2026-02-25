@@ -15,7 +15,6 @@ use tokio::sync::watch;
 #[cfg(feature = "zenoh-api")]
 use tokio::task::JoinHandle;
 
-/// Handle to the Zenoh runtime, allows graceful shutdown.
 #[cfg(feature = "zenoh-api")]
 pub struct ZenohRuntimeHandle {
     task: JoinHandle<()>,
@@ -24,7 +23,6 @@ pub struct ZenohRuntimeHandle {
 
 #[cfg(feature = "zenoh-api")]
 impl ZenohRuntimeHandle {
-    /// Signal the Zenoh runtime to shut down and wait for it to complete.
     pub async fn shutdown(self) {
         let _ = self.shutdown_tx.send(true);
         let _ = self.task.await;
