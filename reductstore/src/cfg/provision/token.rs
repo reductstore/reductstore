@@ -1,12 +1,10 @@
 // Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
-use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::auth::token_repository::{
     parse_token_expiry_duration, BoxedTokenRepository, TokenRepositoryBuilder,
 };
-use crate::cfg::CfgParser;
+use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use chrono::{DateTime, Utc};
 use log::{error, info, warn};
