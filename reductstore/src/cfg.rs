@@ -349,7 +349,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
 
         Ok(Components {
-            storage,
+            storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(&self.cfg.api_token),
             console,
@@ -359,6 +359,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 static_extensions,
                 ext_settings,
                 self.cfg.io_conf.clone(),
+                Some(Arc::clone(&storage)),
             )?,
             query_link_cache: AsyncRwLock::new(Cache::new(
                 DEFAULT_CACHED_QUERIES,

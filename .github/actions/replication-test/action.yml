@@ -78,6 +78,14 @@ runs:
         BUCKET_NAME: dest
       run: python3 ./integration_tests/data_check/checker.py
 
+    - name: Check replicated meta attachments
+      shell: bash
+      env:
+        RS_API_TOKEN: ${{ inputs.rs_api_token }}
+        SRC_BUCKET_NAME: src
+        DEST_BUCKET_NAME: dest
+      run: python3 ./integration_tests/data_check/replication_meta_test.py
+
     - name: Save docker logs
       if: always()
       shell: bash
