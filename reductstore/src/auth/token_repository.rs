@@ -321,7 +321,6 @@ mod tests {
     use reduct_base::{forbidden, unauthorized, unprocessable_entity};
     use rstest::rstest;
     use tempfile::tempdir;
-    
 
     #[rstest]
     #[case("5D", "2026-02-22T00:00:00+00:00")]
@@ -379,10 +378,7 @@ mod tests {
             .with_timezone(&Utc);
         assert_eq!(
             parse_token_expiry_duration(expires_in, from).err().unwrap(),
-            unprocessable_entity!(
-                "Token expiration duration '{}' is too large",
-                expires_in
-            )
+            unprocessable_entity!("Token expiration duration '{}' is too large", expires_in)
         );
     }
 
@@ -392,10 +388,7 @@ mod tests {
         let expires_in = "1s";
         assert_eq!(
             parse_token_expiry_duration(expires_in, from).err().unwrap(),
-            unprocessable_entity!(
-                "Token expiration duration '{}' is too large",
-                expires_in
-            )
+            unprocessable_entity!("Token expiration duration '{}' is too large", expires_in)
         );
     }
 
@@ -448,9 +441,6 @@ mod tests {
             .await
             .err()
             .unwrap();
-        assert_eq!(
-            err,
-            forbidden!("Cannot generate token in read-only mode")
-        );
+        assert_eq!(err, forbidden!("Cannot generate token in read-only mode"));
     }
 }
