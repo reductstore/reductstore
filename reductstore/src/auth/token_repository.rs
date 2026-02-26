@@ -317,8 +317,11 @@ impl TokenRepositoryBuilder {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reduct_base::unprocessable_entity;
+    use chrono::Duration;
+    use reduct_base::{forbidden, unauthorized, unprocessable_entity};
     use rstest::rstest;
+    use tempfile::tempdir;
+    
 
     #[rstest]
     #[case("5D", "2026-02-22T00:00:00+00:00")]
@@ -361,6 +364,93 @@ mod tests {
         assert_eq!(
             parse_token_expiry_duration(expires_in, from).err().unwrap(),
             unprocessable_entity!(message)
+        );
+    }
+
+    #[rstest]
+    #[case("9223372036854775808s")]
+    #[case("4294967296M")]
+    #[case("4294967296y")]
+    #[case("18446744073709551615y")]
+    #[case("9223372036854775808D")]
+    fn test_parse_token_expiry_duration_overflow(#[case] expires_in: &str) {
+        let from = DateTime::parse_from_rfc3339("2026-02-17T00:00:00Z")
+            .unwrap()
+            .with_timezone(&Utc);
+        assert_eq!(
+            parse_token_expiry_duration(expires_in, from).err().unwrap(),
+            unprocessable_entity!(
+                "Token expiration duration '{}' is too large",
+                expires_in
+            )
+        );
+    }
+
+    #[test]
+    fn test_parse_token_expiry_duration_overflow_from_max_datetime() {
+        let from = DateTime::<Utc>::MAX_UTC;
+        let expires_in = "1s";
+        assert_eq!(
+            parse_token_expiry_duration(expires_in, from).err().unwrap(),
+            unprocessable_entity!(
+                "Token expiration duration '{}' is too large",
+                expires_in
+            )
+        );
+    }
+
+    #[test]
+    fn test_check_token_lifetime_expired() {
+        let token = Token {
+            name: "expired".to_string(),
+            value: "expired".to_string(),
+            created_at: Utc::now(),
+            permissions: None,
+            is_provisioned: false,
+            expires_at: Some(Utc::now() - Duration::seconds(1)),
+        };
+
+        assert_eq!(
+            check_token_lifetime(&token).err().unwrap(),
+            unauthorized!("Token has expired")
+        );
+    }
+
+    #[test]
+    fn test_check_token_lifetime_no_expiry() {
+        let token = Token {
+            name: "no-expiry".to_string(),
+            value: "no-expiry".to_string(),
+            created_at: Utc::now(),
+            permissions: None,
+            is_provisioned: false,
+            expires_at: None,
+        };
+
+        assert!(check_token_lifetime(&token).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_token_repository_builder_replica_read_only() {
+        let mut cfg = Cfg::default();
+        cfg.role = InstanceRole::Replica;
+        let path = tempdir().unwrap().keep();
+
+        let mut repo = TokenRepositoryBuilder::new(cfg).build(path).await;
+        let err = repo
+            .generate_token(
+                "test",
+                TokenCreateRequest {
+                    permissions: Permissions::default(),
+                    expires_in: None,
+                },
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            forbidden!("Cannot generate token in read-only mode")
         );
     }
 }

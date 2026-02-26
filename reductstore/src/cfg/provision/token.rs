@@ -383,4 +383,30 @@ mod tests {
             .return_const(Ok("token1".to_string()));
         mock_getter
     }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_tokens_invalid_expiry_duration(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
+        env_with_tokens
+            .expect_get()
+            .with(eq("RS_TOKEN_1_VALUE"))
+            .return_const(Ok("TOKEN".to_string()));
+        env_with_tokens
+            .expect_get()
+            .with(eq("RS_TOKEN_1_EXPIRES_IN"))
+            .return_const(Ok("invalid-duration".to_string()));
+        env_with_tokens
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
+        let components = cfg.build().await.unwrap();
+
+        let mut repo = components.token_repo.write().await.unwrap();
+        let token1 = repo.get_token("token1").await.unwrap().clone();
+        assert_eq!(token1.value, "TOKEN");
+        assert_eq!(token1.expires_at, None);
+    }
 }
