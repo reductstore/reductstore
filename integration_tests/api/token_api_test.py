@@ -111,6 +111,7 @@ def test__get_token(base_url, session, bucket_name, token_name):
         "value": "",
         "permissions": permissions,
         "is_provisioned": False,
+        "expires_at": None,
     }
 
 
