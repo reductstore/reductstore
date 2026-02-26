@@ -20,6 +20,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use Docker named volumes in CI deployment actions for `/data` to stay compatible with non-root runtime defaults and simplify entrypoint permission checks, [PR-1180](https://github.com/reductstore/reductstore/pull/1180)
 - Merge `v1.18.5` release branch into `main` and recover lock file updates, [PR-1191](https://github.com/reductstore/reductstore/pull/1191)
 
+### Fixed
+
+- Restore `Unknown extension` validation for queries with `ext` when no extensions are loaded, [PR-1192](https://github.com/reductstore/reductstore/pull/1192)
+
 ## 1.18.5 - 2026-02-25
 
 ### Fixed
