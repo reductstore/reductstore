@@ -15,7 +15,10 @@ def test__create_token(base_url, session, token_name, bucket_name):
         "write": [bucket_name],
     }
 
-    resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
+    resp = session.post(
+        f"{base_url}/tokens/{token_name}",
+        json={"permissions": permissions},
+    )
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/json"
     assert "token-" in json.loads(resp.content)["value"]
@@ -29,13 +32,15 @@ def test__creat_token_with_full_access(
     permissions = {}
 
     resp = session.post(
-        f"{base_url}/tokens/{token_name}", json=permissions, headers=auth_headers("")
+        f"{base_url}/tokens/{token_name}",
+        json={"permissions": permissions},
+        headers=auth_headers(""),
     )
     assert resp.status_code == 401
 
     resp = session.post(
         f"{base_url}/tokens/{token_name}",
-        json=permissions,
+        json={"permissions": permissions},
         headers=auth_headers(token_without_permissions.value),
     )
     assert resp.status_code == 403
@@ -50,7 +55,10 @@ def test__list_tokens(base_url, session, token_name):
     """Should list all tokens"""
     permissions = {}
 
-    resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
+    resp = session.post(
+        f"{base_url}/tokens/{token_name}",
+        json={"permissions": permissions},
+    )
     assert resp.status_code == 200
 
     resp = session.get(f"{base_url}/tokens")
@@ -87,7 +95,10 @@ def test__get_token(base_url, session, bucket_name, token_name):
         "write": [bucket_name],
     }
 
-    resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
+    resp = session.post(
+        f"{base_url}/tokens/{token_name}",
+        json={"permissions": permissions},
+    )
     assert resp.status_code == 200
     created_at = json.loads(resp.content)["created_at"]
 
@@ -125,7 +136,10 @@ def test__delete_token(base_url, session, token_name):
     """Should delete a token"""
     permissions = {}
 
-    resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
+    resp = session.post(
+        f"{base_url}/tokens/{token_name}",
+        json={"permissions": permissions},
+    )
     assert resp.status_code == 200
 
     resp = session.delete(f"{base_url}/tokens/{token_name}")
