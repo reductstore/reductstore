@@ -17,13 +17,16 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::io::Write;
 use std::path::Path;
+use std::str::FromStr;
 use std::sync::Arc;
+use std::time::Duration as StdDuration;
 use tempfile::NamedTempFile;
 use tokio::sync::watch;
 use tokio::time::{sleep, timeout, Duration, Instant};
 
 use zenoh::config::Config;
 use zenoh::sample::Sample;
+use zenoh::time::{Timestamp, TimestampId, NTP64};
 use zenoh::Session;
 
 #[allow(dead_code)]
@@ -426,8 +429,8 @@ async fn handle_sample(
                 .as_micros() as u64;
 
             let mut labels = Labels::new();
-            labels.insert("zenoh_source_id".into(), ts.get_id().to_string());
-            labels.insert("zenoh_ts_ntp64".into(), ts.get_time().as_u64().to_string());
+            labels.insert(ZENOH_SOURCE_ID_LABEL.into(), ts.get_id().to_string());
+            labels.insert(ZENOH_TS_LABEL.into(), ts.get_time().as_u64().to_string());
 
             (Some(micros), labels)
         }
@@ -468,6 +471,7 @@ async fn spawn_queryables(
 
     let queryable = session
         .declare_queryable(key_expr.as_str())
+        .allowed_origin(zenoh::sample::Locality::Remote)
         .await
         .map_err(|e| SessionError::Queryable(format!("Failed to declare queryable: {}", e)))?;
 
@@ -477,10 +481,11 @@ async fn spawn_queryables(
                 Ok(query) => {
                     let key_expr = query.key_expr().as_str().to_string();
                     let params = expand_query_params(query.selector().parameters());
+                    // let query_attachments = query.attachment();
 
                     debug!(
                         "Received Zenoh query: key={}, params={:?}",
-                        key_expr, params
+                        key_expr, params,
                     );
 
                     match pipeline.handle_query(&key_expr, &params).await {
@@ -535,15 +540,22 @@ async fn send_query_reply(
                 }
             }
 
-            let labels = reader.meta().labels().clone();
-            let content_type = reader.meta().content_type();
+            let meta = reader.meta();
+            let labels = meta.labels().clone();
+            let content_type = meta.content_type();
+            let record_timestamp = meta.timestamp();
+            let reply_timestamp = build_reply_timestamp(&labels, record_timestamp);
             let attachment = attachments::serialize_labels(&labels)?;
 
             let key_expr = query.key_expr().clone();
-            let reply_builder = query
+            let mut reply_builder = query
                 .reply(key_expr, data)
                 .encoding(zenoh::bytes::Encoding::from(content_type))
                 .attachment(attachment);
+
+            if let Some(ts) = reply_timestamp {
+                reply_builder = reply_builder.timestamp(ts);
+            }
 
             reply_builder.await.map_err(|e| {
                 Box::new(std::io::Error::new(
@@ -601,15 +613,22 @@ async fn send_query_reply(
                     }
                 }
 
-                let labels = record.meta().labels().clone();
-                let content_type = record.meta().content_type();
+                let meta = record.meta();
+                let labels = meta.labels().clone();
+                let content_type = meta.content_type();
+                let record_timestamp = meta.timestamp();
+                let reply_timestamp = build_reply_timestamp(&labels, record_timestamp);
                 let attachment = attachments::serialize_labels(&labels)?;
 
                 let key_expr = query.key_expr().clone();
-                let reply_builder = query
+                let mut reply_builder = query
                     .reply(key_expr, data)
                     .encoding(zenoh::bytes::Encoding::from(content_type))
                     .attachment(attachment);
+
+                if let Some(ts) = reply_timestamp {
+                    reply_builder = reply_builder.timestamp(ts);
+                }
 
                 reply_builder.await.map_err(|e| {
                     Box::new(std::io::Error::new(
@@ -627,6 +646,69 @@ async fn send_query_reply(
     }
 
     Ok(())
+}
+
+const ZENOH_TS_LABEL: &str = "zenoh_ts_ntp64";
+const ZENOH_SOURCE_ID_LABEL: &str = "zenoh_source_id";
+const FALLBACK_ZENOH_SOURCE_ID: u128 = 1;
+
+fn build_reply_timestamp(labels: &Labels, record_timestamp_us: u64) -> Option<Timestamp> {
+    parse_timestamp_from_labels(labels)
+        .or_else(|| timestamp_from_microseconds(labels, record_timestamp_us))
+}
+
+fn parse_timestamp_from_labels(labels: &Labels) -> Option<Timestamp> {
+    let ntp_raw = labels.get(ZENOH_TS_LABEL)?;
+    let source_id_raw = labels.get(ZENOH_SOURCE_ID_LABEL)?;
+
+    let ntp = match NTP64::from_str(ntp_raw) {
+        Ok(value) => value,
+        Err(err) => {
+            debug!(
+                "Failed to parse label '{}'='{}' as NTP64: {}",
+                ZENOH_TS_LABEL, ntp_raw, err.cause
+            );
+            return None;
+        }
+    };
+
+    let source_id = match TimestampId::from_str(source_id_raw) {
+        Ok(value) => value,
+        Err(err) => {
+            debug!(
+                "Failed to parse label '{}'='{}' as zenoh ID: {}",
+                ZENOH_SOURCE_ID_LABEL, source_id_raw, err.cause
+            );
+            return None;
+        }
+    };
+
+    Some(Timestamp::new(ntp, source_id))
+}
+
+fn timestamp_from_microseconds(labels: &Labels, record_timestamp_us: u64) -> Option<Timestamp> {
+    let source_id = labels
+        .get(ZENOH_SOURCE_ID_LABEL)
+        .and_then(|raw| match TimestampId::from_str(raw) {
+            Ok(value) => Some(value),
+            Err(err) => {
+                debug!(
+                    "Failed to parse label '{}'='{}' as zenoh ID: {}",
+                    ZENOH_SOURCE_ID_LABEL, raw, err.cause
+                );
+                None
+            }
+        })
+        .or_else(|| match TimestampId::try_from(FALLBACK_ZENOH_SOURCE_ID) {
+            Ok(value) => Some(value),
+            Err(err) => {
+                debug!("Failed to build fallback zenoh timestamp ID: {}", err);
+                None
+            }
+        })?;
+
+    let duration = StdDuration::from_micros(record_timestamp_us);
+    Some(Timestamp::new(NTP64::from(duration), source_id))
 }
 
 #[derive(Debug)]
@@ -657,6 +739,50 @@ mod tests {
     use super::*;
     use rstest::rstest;
     use std::fs;
+    use std::time::Duration as StdDuration;
+
+    fn build_labels_with_timestamp() -> Labels {
+        let mut labels = Labels::new();
+        let ts = NTP64::from(StdDuration::from_secs(42));
+        let id = TimestampId::try_from(99u128).unwrap();
+        labels.insert(ZENOH_TS_LABEL.into(), ts.to_string());
+        labels.insert(ZENOH_SOURCE_ID_LABEL.into(), id.to_string());
+        labels
+    }
+
+    #[test]
+    fn reply_timestamp_prefers_label_values() {
+        let labels = build_labels_with_timestamp();
+        let record_ts = 1;
+
+        let result = build_reply_timestamp(&labels, record_ts).unwrap();
+        let expected_time = NTP64::from(StdDuration::from_secs(42));
+        let expected_id = TimestampId::try_from(99u128).unwrap();
+
+        assert_eq!(result.get_time().as_u64(), expected_time.as_u64());
+        assert_eq!(result.get_id().to_string(), expected_id.to_string());
+    }
+
+    #[test]
+    fn timestamp_from_microseconds_uses_label_source_id() {
+        let mut labels = Labels::new();
+        let source_id = TimestampId::try_from(123u128).unwrap();
+        labels.insert(ZENOH_SOURCE_ID_LABEL.into(), source_id.to_string());
+
+        let result = timestamp_from_microseconds(&labels, 500_000).unwrap();
+
+        assert_eq!(result.get_id().to_string(), source_id.to_string());
+    }
+
+    #[test]
+    fn timestamp_from_microseconds_falls_back_when_label_missing() {
+        let labels = Labels::new();
+        let fallback_id = TimestampId::try_from(FALLBACK_ZENOH_SOURCE_ID).unwrap();
+
+        let result = timestamp_from_microseconds(&labels, 750_000).unwrap();
+
+        assert_eq!(result.get_id().to_string(), fallback_id.to_string());
+    }
 
     #[rstest]
     fn writes_credential_file_with_correct_content() {

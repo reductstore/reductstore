@@ -45,7 +45,7 @@ async def test_query_time_range(bucket, entry_name, zenoh_session):
         if r.ok
     ]
 
-    assert 2 <= len(replies) <= 3
+    assert len(replies) == 3
 
 
 async def test_query_with_limit(bucket, entry_name, zenoh_session):
