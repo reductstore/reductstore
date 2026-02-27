@@ -3,13 +3,12 @@
 
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
-use crate::auth::token_repository::{
-    parse_token_expiry_duration, ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME,
-};
+use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
+use crate::core::duration::parse_single_duration;
 use crate::core::file_cache::FILE_CACHE;
 use async_trait::async_trait;
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration, Utc};
 use log::debug;
 use prost::Message;
 use rand::Rng;
@@ -166,7 +165,23 @@ impl ManageTokens for TokenRepository {
         let created_at = DateTime::<Utc>::from(SystemTime::now());
         let expires_at = request
             .expires_in
-            .map(|expires_in| parse_token_expiry_duration(&expires_in, created_at))
+            .map(|expires_in| {
+                let usec = parse_single_duration(&expires_in)?;
+                if usec < 0 {
+                    return Err(unprocessable_entity!(
+                        "Token expiration duration must be non-negative, got '{}'",
+                        expires_in
+                    ));
+                }
+                created_at
+                    .checked_add_signed(Duration::microseconds(usec))
+                    .ok_or_else(|| {
+                        unprocessable_entity!(
+                            "Token expiration duration '{}' is too large",
+                            expires_in
+                        )
+                    })
+            })
             .transpose()?;
 
         // Create a random hex string
@@ -372,7 +387,7 @@ mod tests {
                     "test-exp",
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_in: Some("5D".to_string()),
+                        expires_in: Some("5d".to_string()),
                     },
                 )
                 .await
@@ -401,9 +416,7 @@ mod tests {
 
             assert_eq!(
                 token.err().unwrap(),
-                unprocessable_entity!(
-                    "Token expiration duration must start with an unsigned integer, got 'bad'"
-                )
+                unprocessable_entity!("Invalid duration value: bad")
             );
         }
 
@@ -448,7 +461,7 @@ mod tests {
                     "test-exp-persistent",
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_in: Some("5D".to_string()),
+                        expires_in: Some("5d".to_string()),
                     },
                 )
                 .await

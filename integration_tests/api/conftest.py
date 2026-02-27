@@ -77,10 +77,7 @@ def _make_token_permissions(session, base_url, token_generator):
         "full_access": False,
     }
     name = token_generator()
-    resp = session.post(
-        f"{base_url}/tokens/{name}",
-        json={"permissions": permissions},
-    )
+    resp = session.post(f"{base_url}/tokens/{name}", json=permissions)
     assert resp.status_code == 200
     return namedtuple("Token", ["name", "value"])(
         name, json.loads(resp.content)["value"]
@@ -95,10 +92,7 @@ def _make_token_read_bucket(session, base_url, bucket_name, token_generator):
         "read": [bucket_name],
     }
     name = token_generator()
-    resp = session.post(
-        f"{base_url}/tokens/{name}",
-        json={"permissions": permissions},
-    )
+    resp = session.post(f"{base_url}/tokens/{name}", json=permissions)
     assert resp.status_code == 200
     return namedtuple("Token", ["name", "value"])(
         name, json.loads(resp.content)["value"]
@@ -114,10 +108,7 @@ def _make_token_write_bucket(session, base_url, bucket_name, token_generator):
         "write": [bucket_name],
     }
     name = token_generator()
-    resp = session.post(
-        f"{base_url}/tokens/{name}",
-        json={"permissions": permissions},
-    )
+    resp = session.post(f"{base_url}/tokens/{name}", json=permissions)
     assert resp.status_code == 200
     return namedtuple("Token", ["name", "value"])(
         name, json.loads(resp.content)["value"]

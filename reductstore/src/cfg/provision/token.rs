@@ -1,10 +1,9 @@
 // Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::auth::token_repository::{
-    parse_token_expiry_duration, BoxedTokenRepository, TokenRepositoryBuilder,
-};
+use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
 use crate::cfg::{CfgParser, ExtCfgBounds};
+use crate::core::duration::parse_single_duration;
 use crate::core::env::{Env, GetEnv};
 use chrono::{DateTime, Utc};
 use log::{error, info, warn};
@@ -113,9 +112,21 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             if let Some(expires_in) =
                 env.get_optional::<String>(&format!("RS_TOKEN_{}_EXPIRES_IN", id))
             {
-                match parse_token_expiry_duration(&expires_in, token.created_at) {
-                    Ok(value) => token.expires_at = Some(value),
-                    Err(_) => warn!(
+                match parse_single_duration(&expires_in) {
+                    Ok(usec) if usec >= 0 => {
+                        if let Some(value) = token
+                            .created_at
+                            .checked_add_signed(chrono::Duration::microseconds(usec))
+                        {
+                            token.expires_at = Some(value);
+                        } else {
+                            warn!(
+                                "Token '{}' has invalid expiry duration '{}'. Ignore it.",
+                                token.name, expires_in
+                            );
+                        }
+                    }
+                    _ => warn!(
                         "Token '{}' has invalid expiry duration '{}'. Ignore it.",
                         token.name, expires_in
                     ),
@@ -256,7 +267,7 @@ mod tests {
         env_with_tokens
             .expect_get()
             .with(eq("RS_TOKEN_1_EXPIRES_IN"))
-            .return_const(Ok("5D".to_string()));
+            .return_const(Ok("5d".to_string()));
         env_with_tokens
             .expect_get()
             .return_const(Err(VarError::NotPresent));
