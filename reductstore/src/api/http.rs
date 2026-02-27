@@ -802,7 +802,7 @@ pub(crate) mod tests {
         let console_bytes: &[u8] = &[];
 
         Components {
-            storage,
+            storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
@@ -814,6 +814,7 @@ pub(crate) mod tests {
                     .server_info(ServerInfo::default())
                     .build(),
                 cfg.io_conf.clone(),
+                Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
             cfg,
@@ -915,6 +916,7 @@ pub(crate) mod tests {
                     .server_info(ServerInfo::default())
                     .build(),
                 cfg.io_conf.clone(),
+                Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
             cfg: Cfg::default(),

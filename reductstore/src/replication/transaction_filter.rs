@@ -3,6 +3,7 @@
 
 use crate::cfg::io::IoConfig;
 use crate::replication::TransactionNotification;
+use crate::storage::entry::meta_entry_parent;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
@@ -121,13 +122,7 @@ impl TransactionFilter {
         if !self.entries.is_empty() {
             let mut found = false;
             for entry in self.entries.iter() {
-                if entry.contains('*') {
-                    let entry = entry.replace("*", "");
-                    if notification.entry.starts_with(&entry) {
-                        found = true;
-                        break;
-                    }
-                } else if notification.entry == *entry {
+                if Self::entry_matches(entry, &notification.entry) {
                     found = true;
                     break;
                 }
@@ -158,6 +153,15 @@ impl TransactionFilter {
                 vec![]
             }
         }
+    }
+
+    fn entry_matches(entry_filter: &str, entry_name: &str) -> bool {
+        if entry_filter.contains('*') {
+            let prefix = entry_filter.replace('*', "");
+            return entry_name.starts_with(&prefix);
+        }
+
+        entry_name == entry_filter || meta_entry_parent(entry_name) == Some(entry_filter)
     }
 }
 
@@ -222,6 +226,26 @@ mod tests {
 
         let filtered = filter.filter(notification);
         assert_eq!(filtered.is_empty(), !expected);
+    }
+
+    #[rstest]
+    fn test_transaction_filter_includes_meta_for_exact_entry(
+        mut notification: TransactionNotification,
+    ) {
+        notification.entry = "entry/$meta".to_string();
+
+        let mut filter = TransactionFilter::try_new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                entries: vec!["entry".to_string()],
+                ..ReplicationSettings::default()
+            },
+            IoConfig::default(),
+        )
+        .unwrap();
+
+        assert_eq!(filter.filter(notification).len(), 1);
     }
 
     #[rstest]

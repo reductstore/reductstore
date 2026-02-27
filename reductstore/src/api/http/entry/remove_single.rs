@@ -11,6 +11,7 @@ use crate::api::http::entry::common::parse_timestamp_from_query;
 use crate::api::http::HttpError;
 use crate::api::http::StateKeeper;
 use crate::auth::policy::WriteAccessPolicy;
+use crate::storage::entry::validate_remove_records;
 
 // DELETE /:bucket/:entry?ts=<number>
 pub(super) async fn remove_record(
@@ -26,6 +27,7 @@ pub(super) async fn remove_record(
 
     let ts = parse_timestamp_from_query(&params)?;
     let entry_name = path.get("entry_name").unwrap();
+    validate_remove_records(entry_name)?;
     let err_map = components
         .storage
         .get_bucket(bucket)
@@ -150,6 +152,39 @@ mod tests {
             err,
             HttpError::from(unprocessable_entity!(
                 "'ts' must be an unix timestamp in microseconds"
+            ))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_single_meta_forbidden(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let path = Path(HashMap::from_iter(vec![
+            ("bucket_name".to_string(), "bucket-1".to_string()),
+            ("entry_name".to_string(), "entry-1/$meta".to_string()),
+        ]));
+
+        let err = remove_record(
+            State(Arc::clone(&keeper)),
+            headers,
+            path,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "1".to_string(),
+            )])),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(
+            err,
+            HttpError::from(unprocessable_entity!(
+                "Can't delete records from system entry 'entry-1/$meta'; use label update with remove=true"
             ))
         );
     }
