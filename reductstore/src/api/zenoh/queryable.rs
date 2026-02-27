@@ -1,6 +1,7 @@
 // Copyright 2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::api::zenoh::attachments::QueryAttachments;
 use crate::cfg::io::IoConfig;
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::components::Components;
@@ -55,12 +56,13 @@ impl QueryablePipeline {
         &self,
         key_expr: &str,
         params: &HashMap<String, String>,
+        attachments: &QueryAttachments,
     ) -> Result<QueryResult, QueryError> {
         let entry_name = key_expr.trim_matches('/');
 
         debug!(
-            "Handling Zenoh query: bucket={} entry={}",
-            self.bucket, entry_name
+            "Handling Zenoh query: bucket={} entry={} when={:?}",
+            self.bucket, entry_name, attachments.when
         );
 
         let bucket = self
@@ -88,8 +90,7 @@ impl QueryablePipeline {
             return Ok(QueryResult::Record(reader));
         }
 
-        let only_metadata = parse_only_metadata(params)?;
-        let query_entry = build_query_entry(params.clone(), only_metadata)?;
+        let query_entry = build_query_entry(params.clone(), attachments)?;
         let query_id = entry.query(query_entry).await?;
         let (receiver, io_config) = entry.get_query_receiver(query_id).await?;
 
@@ -149,42 +150,39 @@ fn parse_last(params: &HashMap<String, String>) -> Result<bool, QueryError> {
     }
 }
 
-fn parse_only_metadata(params: &HashMap<String, String>) -> Result<bool, QueryError> {
-    match params.get("metadata") {
-        Some(raw) => raw
-            .parse::<bool>()
-            .map_err(|_| QueryError::InvalidParameter("'metadata' must be a boolean value".into())),
-        None => Ok(false),
-    }
-}
-
 fn build_query_entry(
     params: HashMap<String, String>,
-    only_metadata: bool,
+    attachments: &QueryAttachments,
 ) -> Result<QueryEntry, QueryError> {
     let (start, stop) = parse_time_range(&params)?;
-    let (include, exclude) = parse_include_exclude_filters(&params);
-    let each_s = parse_each_s(&params)?;
-    let each_n = parse_each_n(&params)?;
-    let limit = parse_limit(&params)?;
-
+    let strict = parse_strict(&params)?;
     Ok(QueryEntry {
         query_type: QueryType::Query,
         entries: None,
         start,
         stop,
-        include: Some(include),
-        exclude: Some(exclude),
-        each_s,
-        each_n,
-        limit,
+        include: None,
+        exclude: None,
+        each_s: None,
+        each_n: None,
+        limit: None,
         continuous: None,
         ttl: None,
-        only_metadata: Some(only_metadata),
-        when: None,
-        strict: None,
+        only_metadata: None,
+        when: attachments.when.clone(),
+        strict,
         ext: None,
     })
+}
+
+fn parse_strict(params: &HashMap<String, String>) -> Result<Option<bool>, QueryError> {
+    match params.get("strict") {
+        Some(raw) => raw
+            .parse::<bool>()
+            .map(Some)
+            .map_err(|_| QueryError::InvalidParameter("'strict' must be a boolean value".into())),
+        None => Ok(None),
+    }
 }
 
 fn parse_time_range(
@@ -205,66 +203,6 @@ fn parse_time_range(
     };
 
     Ok((start, stop))
-}
-
-fn parse_each_s(params: &HashMap<String, String>) -> Result<Option<f64>, QueryError> {
-    match params.get("each_s") {
-        Some(raw) => {
-            let value = raw.parse::<f64>().map_err(|_| {
-                QueryError::InvalidParameter("'each_s' must be a floating point value".into())
-            })?;
-            if value <= 0.0 {
-                return Err(QueryError::InvalidParameter(
-                    "'each_s' must be greater than 0".into(),
-                ));
-            }
-            Ok(Some(value))
-        }
-        None => Ok(None),
-    }
-}
-
-fn parse_each_n(params: &HashMap<String, String>) -> Result<Option<u64>, QueryError> {
-    match params.get("each_n") {
-        Some(raw) => {
-            let value = raw.parse::<u64>().map_err(|_| {
-                QueryError::InvalidParameter("'each_n' must be an unsigned integer".into())
-            })?;
-            if value == 0 {
-                return Err(QueryError::InvalidParameter(
-                    "'each_n' must be greater than 0".into(),
-                ));
-            }
-            Ok(Some(value))
-        }
-        None => Ok(None),
-    }
-}
-
-fn parse_limit(params: &HashMap<String, String>) -> Result<Option<u64>, QueryError> {
-    match params.get("limit") {
-        Some(raw) => raw.parse::<u64>().map(Some).map_err(|_| {
-            QueryError::InvalidParameter("'limit' must be an unsigned integer".into())
-        }),
-        None => Ok(None),
-    }
-}
-
-fn parse_include_exclude_filters(
-    params: &HashMap<String, String>,
-) -> (HashMap<String, String>, HashMap<String, String>) {
-    let mut include = HashMap::new();
-    let mut exclude = HashMap::new();
-
-    for (key, value) in params.iter() {
-        if let Some(label) = key.strip_prefix("include-") {
-            include.insert(label.to_string(), value.to_string());
-        } else if let Some(label) = key.strip_prefix("exclude-") {
-            exclude.insert(label.to_string(), value.to_string());
-        }
-    }
-
-    (include, exclude)
 }
 
 #[cfg(test)]
@@ -302,19 +240,45 @@ mod tests {
     }
 
     #[test]
-    fn rejects_invalid_each_s() {
-        let params = HashMap::from_iter(vec![("each_s".to_string(), "0".to_string())]);
-        assert!(parse_each_s(&params).is_err());
+    fn build_query_entry_with_when_attachment() {
+        use serde_json::json;
+
+        let params = HashMap::from_iter(vec![
+            ("start".to_string(), "100".to_string()),
+            ("stop".to_string(), "200".to_string()),
+            ("strict".to_string(), "true".to_string()),
+        ]);
+        let attachments = QueryAttachments {
+            when: Some(json!({"$and": [{"&status": "ok"}, {"$limit": 10}]})),
+        };
+
+        let query = build_query_entry(params, &attachments).unwrap();
+
+        assert_eq!(query.start, Some(100));
+        assert_eq!(query.stop, Some(200));
+        assert_eq!(
+            query.when,
+            Some(json!({"$and": [{"&status": "ok"}, {"$limit": 10}]}))
+        );
+        assert_eq!(query.strict, Some(true));
     }
 
     #[test]
-    fn include_exclude_filters() {
+    fn build_query_entry_without_attachments() {
         let params = HashMap::from_iter(vec![
-            ("include-scope".to_string(), "a".to_string()),
-            ("exclude-tag".to_string(), "b".to_string()),
+            ("start".to_string(), "0".to_string()),
+            ("stop".to_string(), "1000".to_string()),
         ]);
-        let (include, exclude) = parse_include_exclude_filters(&params);
-        assert_eq!(include.get("scope"), Some(&"a".to_string()));
-        assert_eq!(exclude.get("tag"), Some(&"b".to_string()));
+        let attachments = QueryAttachments::default();
+
+        let query = build_query_entry(params, &attachments).unwrap();
+
+        assert_eq!(query.start, Some(0));
+        assert_eq!(query.stop, Some(1000));
+        assert_eq!(query.limit, None);
+        assert_eq!(query.only_metadata, None);
+        assert_eq!(query.when, None);
+        assert_eq!(query.strict, None);
+        assert_eq!(query.ext, None);
     }
 }

@@ -2,7 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::zenoh::{
-    attachments, queryable::QueryablePipeline, subscriber::SubscriberPipeline,
+    attachments, attachments::QueryAttachments, queryable::QueryablePipeline,
+    subscriber::SubscriberPipeline,
 };
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::components::{ComponentError, StateKeeper};
@@ -481,14 +482,19 @@ async fn spawn_queryables(
                 Ok(query) => {
                     let key_expr = query.key_expr().as_str().to_string();
                     let params = expand_query_params(query.selector().parameters());
-                    // let query_attachments = query.attachment();
+                    let query_attachments = parse_query_attachments(query.attachment());
 
                     debug!(
-                        "Received Zenoh query: key={}, params={:?}",
-                        key_expr, params,
+                        "Received Zenoh query: key={}, params={:?}, has_when={}",
+                        key_expr,
+                        params,
+                        query_attachments.when.is_some(),
                     );
 
-                    match pipeline.handle_query(&key_expr, &params).await {
+                    match pipeline
+                        .handle_query(&key_expr, &params, &query_attachments)
+                        .await
+                    {
                         Ok(result) => {
                             if let Err(e) = send_query_reply(&query, result).await {
                                 warn!("Failed to send query reply: {}", e);
@@ -522,6 +528,21 @@ fn expand_query_params(params: &zenoh::query::Parameters) -> HashMap<String, Str
         .iter()
         .map(|(k, v)| (k.to_string(), v.to_string()))
         .collect()
+}
+
+fn parse_query_attachments(attachment: Option<&zenoh::bytes::ZBytes>) -> QueryAttachments {
+    attachment
+        .and_then(|att| {
+            let bytes = att.to_bytes();
+            match attachments::deserialize_query_attachments(&bytes) {
+                Ok(parsed) => Some(parsed),
+                Err(e) => {
+                    debug!("Failed to parse query attachments: {}", e);
+                    None
+                }
+            }
+        })
+        .unwrap_or_default()
 }
 
 async fn send_query_reply(
