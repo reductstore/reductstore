@@ -12,11 +12,11 @@ mod token;
 mod ui;
 mod utils;
 
+use crate::api::components::ComponentError;
+use crate::api::components::{Components, LogHint, StateKeeper};
 use crate::api::http::io::create_io_api_routes;
 use crate::api::http::ui::{redirect_to_index, show_ui};
 use crate::cfg::Cfg;
-use crate::core::components::ComponentError;
-use crate::core::components::{Components, LogHint, StateKeeper};
 use crate::lock_file::BoxedLockFile;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
@@ -275,11 +275,11 @@ impl AxumAppBuilder {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::api::components::ComponentError;
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::core::cache::Cache;
-    use crate::core::components::ComponentError;
     use crate::core::sync::AsyncRwLock;
     use crate::ext::ext_repository::create_ext_repository;
     use crate::lock_file::{LockFile, LockFileBuilder};

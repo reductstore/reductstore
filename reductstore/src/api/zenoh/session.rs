@@ -1,12 +1,12 @@
 // Copyright 2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
+use crate::api::components::{ComponentError, StateKeeper};
 use crate::api::zenoh::{
     attachments, attachments::QueryAttachments, queryable::QueryablePipeline,
     subscriber::SubscriberPipeline,
 };
 use crate::cfg::zenoh::ZenohApiConfig;
-use crate::core::components::{ComponentError, StateKeeper};
 use bytes::Bytes;
 use log::{debug, error, info, warn};
 use reduct_base::error::ErrorCode;
@@ -137,7 +137,7 @@ pub(crate) async fn run_session(
 }
 
 async fn ensure_bucket_exists(
-    components: &Arc<crate::core::components::Components>,
+    components: &Arc<crate::api::Components>,
     bucket_name: &str,
 ) -> Result<(), SessionError> {
     match components.storage.get_bucket(bucket_name).await {

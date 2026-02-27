@@ -2,9 +2,9 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::zenoh::attachments::QueryAttachments;
+use crate::api::Components;
 use crate::cfg::io::IoConfig;
 use crate::cfg::zenoh::ZenohApiConfig;
-use crate::core::components::Components;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::entry::RecordReader;

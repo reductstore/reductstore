@@ -2,8 +2,8 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::zenoh::attachments;
+use crate::api::Components;
 use crate::cfg::zenoh::ZenohApiConfig;
-use crate::core::components::Components;
 use crate::replication::{Transaction, TransactionNotification};
 use bytes::Bytes;
 use log::{debug, info, warn};

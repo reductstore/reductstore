@@ -2,6 +2,7 @@
 // Licensed under the Business Source License 1.1
 
 use crate::api::http::AxumAppBuilder;
+#[cfg(feature = "zenoh-api")]
 use crate::api::zenoh;
 use crate::cfg::{CfgParser, ExtCfgBounds, ExtCfgParser};
 use crate::core::env::StdEnvGetter;
@@ -83,7 +84,8 @@ where
         .build();
 
     // Spawn Zenoh API runtime if enabled
-    let _zenoh_runtime = zenoh::spawn_runtime(cfg.zenoh_api.clone(), state_keeper.clone());
+    #[cfg(feature = "zenoh-api")]
+    let zenoh_runtime = zenoh::spawn_runtime(cfg.zenoh_api.clone(), state_keeper.clone());
 
     #[cfg(not(test))]
     {
@@ -132,6 +134,10 @@ where
     };
 
     // shutdown procedure
+    #[cfg(feature = "zenoh-api")]
+    if let Some(handle) = zenoh_runtime {
+        handle.shutdown().await;
+    }
     state_keeper
         .get_anonymous()
         .await

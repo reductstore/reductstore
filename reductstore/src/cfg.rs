@@ -8,8 +8,10 @@ pub mod remote_storage;
 pub mod replication;
 pub mod rw_lock;
 pub mod storage_engine;
+#[cfg(feature = "zenoh-api")]
 pub mod zenoh;
 
+use crate::api::components::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType};
@@ -19,9 +21,9 @@ use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
+#[cfg(feature = "zenoh-api")]
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::cache::Cache;
-use crate::core::components::Components;
 use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
@@ -83,6 +85,7 @@ pub struct Cfg {
     pub lock_file_config: LockFileConfig,
     pub rw_lock_config: RwLockConfig,
     pub engine_config: StorageEngineConfig,
+    #[cfg(feature = "zenoh-api")]
     pub zenoh_api: ZenohApiConfig,
 }
 
@@ -110,6 +113,7 @@ impl Default for Cfg {
             lock_file_config: LockFileConfig::default(),
             rw_lock_config: RwLockConfig::default(),
             engine_config: StorageEngineConfig::default(),
+            #[cfg(feature = "zenoh-api")]
             zenoh_api: ZenohApiConfig::default(),
         }
     }
@@ -264,6 +268,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
+            #[cfg(feature = "zenoh-api")]
             zenoh_api: Self::parse_zenoh_api_config(&mut env),
         };
 
