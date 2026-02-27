@@ -4,6 +4,7 @@
 use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use std::fmt::{Display, Formatter};
+use std::str::FromStr;
 
 const DEFAULT_BUCKET: &str = "zenoh";
 
@@ -17,6 +18,7 @@ const DEFAULT_BUCKET: &str = "zenoh";
 /// - `RS_ZENOH_BUCKET`: The single bucket for all Zenoh data (default: "zenoh")
 /// - `RS_ZENOH_SUB_KEYEXPRS`: Key expression for subscriber (write path), e.g., "**"
 /// - `RS_ZENOH_QUERY_KEYEXPRS`: Key expression for queryable (read path), e.g., "**"
+/// - `RS_ZENOH_QUERY_LOCALITY`: Allowed origin for query replies. One of `SessionLocal`, `Remote`, or `Any` (default)
 ///
 /// ## Inline Credential Files (for cloud environments)
 ///
@@ -46,6 +48,8 @@ pub struct ZenohApiConfig {
     /// Key expression for the Zenoh queryable (read path).
     /// If unset, the read path is disabled.
     pub query_keyexprs: Option<String>,
+    /// Allowed locality for the Zenoh queryable responses.
+    pub query_locality: ZenohQueryableLocality,
     /// Inline root CA certificate content.
     /// Written to a temp file and injected as `transport/link/tls/root_ca_certificate`.
     pub tls_root_ca_cert: Option<String>,
@@ -69,6 +73,7 @@ impl Default for ZenohApiConfig {
             bucket: DEFAULT_BUCKET.to_string(),
             sub_keyexprs: None,
             query_keyexprs: None,
+            query_locality: ZenohQueryableLocality::default(),
             tls_root_ca_cert: None,
             tls_connect_cert: None,
             tls_connect_key: None,
@@ -77,17 +82,55 @@ impl Default for ZenohApiConfig {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ZenohQueryableLocality {
+    SessionLocal,
+    Remote,
+    Any,
+}
+
+impl Default for ZenohQueryableLocality {
+    fn default() -> Self {
+        ZenohQueryableLocality::Any
+    }
+}
+
+impl Display for ZenohQueryableLocality {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            ZenohQueryableLocality::SessionLocal => "SessionLocal",
+            ZenohQueryableLocality::Remote => "Remote",
+            ZenohQueryableLocality::Any => "Any",
+        };
+        write!(f, "{}", value)
+    }
+}
+
+impl FromStr for ZenohQueryableLocality {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "sessionlocal" => Ok(ZenohQueryableLocality::SessionLocal),
+            "remote" => Ok(ZenohQueryableLocality::Remote),
+            "any" => Ok(ZenohQueryableLocality::Any),
+            _ => Err(()),
+        }
+    }
+}
+
 impl Display for ZenohApiConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "enabled={}, bucket={}, config={}, config_path={}, sub_keyexprs={}, query_keyexprs={}, tls={}, auth={}",
+            "enabled={}, bucket={}, config={}, config_path={}, sub_keyexprs={}, query_keyexprs={}, query_locality={}, tls={}, auth={}",
             self.enabled,
             self.bucket,
             self.config_inline.as_deref().unwrap_or("<none>"),
             self.config_path.as_deref().unwrap_or("<none>"),
             self.sub_keyexprs.as_deref().unwrap_or("<disabled>"),
             self.query_keyexprs.as_deref().unwrap_or("<disabled>"),
+            self.query_locality,
             self.tls_root_ca_cert.is_some() || self.tls_connect_cert.is_some(),
             self.auth_dictionary.is_some()
         )
@@ -109,6 +152,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             ),
             query_keyexprs: parse_optional_string(
                 env.get_optional::<String>("RS_ZENOH_QUERY_KEYEXPRS"),
+            ),
+            query_locality: parse_query_locality(
+                env.get_optional::<String>("RS_ZENOH_QUERY_LOCALITY"),
             ),
             tls_root_ca_cert: parse_optional_string(
                 env.get_optional::<String>("RS_ZENOH_TLS_ROOT_CA"),
@@ -137,6 +183,11 @@ fn parse_bool(raw: Option<String>, default: bool) -> bool {
 
 fn parse_optional_string(raw: Option<String>) -> Option<String> {
     raw.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+fn parse_query_locality(raw: Option<String>) -> ZenohQueryableLocality {
+    raw.and_then(|value| ZenohQueryableLocality::from_str(&value).ok())
+        .unwrap_or_default()
 }
 
 #[cfg(test)]
@@ -182,6 +233,11 @@ mod tests {
             .return_const(Ok("factory/**".to_string()));
         env_getter
             .expect_get()
+            .with(eq("RS_ZENOH_QUERY_LOCALITY"))
+            .times(1)
+            .return_const(Ok("Remote".to_string()));
+        env_getter
+            .expect_get()
             .with(eq("RS_ZENOH_TLS_ROOT_CA"))
             .times(1)
             .return_const(Err(VarError::NotPresent));
@@ -211,6 +267,7 @@ mod tests {
         assert_eq!(cfg.bucket, "telemetry");
         assert_eq!(cfg.sub_keyexprs, Some("**".to_string()));
         assert_eq!(cfg.query_keyexprs, Some("factory/**".to_string()));
+        assert_eq!(cfg.query_locality, ZenohQueryableLocality::Remote);
     }
 
     #[rstest]
@@ -248,6 +305,11 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
         env_getter
             .expect_get()
+            .with(eq("RS_ZENOH_QUERY_LOCALITY"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
             .with(eq("RS_ZENOH_TLS_ROOT_CA"))
             .times(1)
             .return_const(Err(VarError::NotPresent));
@@ -277,6 +339,7 @@ mod tests {
         assert_eq!(cfg.bucket, DEFAULT_BUCKET);
         assert_eq!(cfg.sub_keyexprs, None);
         assert_eq!(cfg.query_keyexprs, None);
+        assert_eq!(cfg.query_locality, ZenohQueryableLocality::default());
     }
 
     #[rstest]
@@ -293,6 +356,7 @@ mod tests {
         assert_eq!(cfg.bucket, DEFAULT_BUCKET);
         assert_eq!(cfg.sub_keyexprs, None);
         assert_eq!(cfg.query_keyexprs, None);
+        assert_eq!(cfg.query_locality, ZenohQueryableLocality::default());
     }
 
     #[rstest]
@@ -346,6 +410,11 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
         env_getter
             .expect_get()
+            .with(eq("RS_ZENOH_QUERY_LOCALITY"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
             .with(eq("RS_ZENOH_TLS_ROOT_CA"))
             .times(1)
             .return_const(Err(VarError::NotPresent));
@@ -378,6 +447,7 @@ mod tests {
             bucket: "sensor-data".to_string(),
             sub_keyexprs: Some("**".to_string()),
             query_keyexprs: None,
+            query_locality: ZenohQueryableLocality::Remote,
             tls_root_ca_cert: None,
             tls_connect_cert: Some("-----BEGIN CERTIFICATE-----".to_string()),
             tls_connect_key: None,
@@ -390,6 +460,7 @@ mod tests {
         assert!(display.contains("config_path=/etc/zenoh.json5"));
         assert!(display.contains("sub_keyexprs=**"));
         assert!(display.contains("query_keyexprs=<disabled>"));
+        assert!(display.contains("query_locality=Remote"));
         assert!(display.contains("tls=true"));
     }
 
@@ -398,7 +469,12 @@ mod tests {
         let cfg = ZenohApiConfig::default();
         let display = format!("{cfg}");
         assert!(display.contains("enabled=false"));
+        assert!(display.contains(&format!("bucket={DEFAULT_BUCKET}")));
         assert!(display.contains("config=<none>"));
         assert!(display.contains("config_path=<none>"));
+        assert!(display.contains("sub_keyexprs=<disabled>"));
+        assert!(display.contains("query_keyexprs=<disabled>"));
+        assert!(display.contains("query_locality=Any"));
+        assert!(display.contains("tls=false"));
     }
 }

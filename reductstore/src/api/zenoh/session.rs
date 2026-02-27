@@ -6,7 +6,7 @@ use crate::api::zenoh::{
     attachments, attachments::QueryAttachments, queryable::QueryablePipeline,
     subscriber::SubscriberPipeline,
 };
-use crate::cfg::zenoh::ZenohApiConfig;
+use crate::cfg::zenoh::{ZenohApiConfig, ZenohQueryableLocality};
 use bytes::Bytes;
 use log::{debug, error, info, warn};
 use reduct_base::error::ErrorCode;
@@ -468,11 +468,16 @@ async fn spawn_queryables(
     let mut handles = Vec::new();
 
     let key_expr = config.query_keyexprs.as_ref().unwrap();
-    info!("Declaring Zenoh queryable on key expression: {}", key_expr);
+    let allowed_origin = to_zenoh_locality(config.query_locality);
+
+    info!(
+        "Declaring Zenoh queryable on key expression: {} (locality={})",
+        key_expr, config.query_locality
+    );
 
     let queryable = session
         .declare_queryable(key_expr.as_str())
-        .allowed_origin(zenoh::sample::Locality::Remote)
+        .allowed_origin(allowed_origin)
         .await
         .map_err(|e| SessionError::Queryable(format!("Failed to declare queryable: {}", e)))?;
 
@@ -521,6 +526,14 @@ async fn spawn_queryables(
 
     handles.push(handle);
     Ok(handles)
+}
+
+fn to_zenoh_locality(locality: ZenohQueryableLocality) -> zenoh::sample::Locality {
+    match locality {
+        ZenohQueryableLocality::SessionLocal => zenoh::sample::Locality::SessionLocal,
+        ZenohQueryableLocality::Remote => zenoh::sample::Locality::Remote,
+        ZenohQueryableLocality::Any => zenoh::sample::Locality::Any,
+    }
 }
 
 fn expand_query_params(params: &zenoh::query::Parameters) -> HashMap<String, String> {
@@ -803,6 +816,22 @@ mod tests {
         let result = timestamp_from_microseconds(&labels, 750_000).unwrap();
 
         assert_eq!(result.get_id().to_string(), fallback_id.to_string());
+    }
+
+    #[test]
+    fn to_zenoh_locality_covers_all_variants() {
+        assert!(matches!(
+            to_zenoh_locality(ZenohQueryableLocality::SessionLocal),
+            zenoh::sample::Locality::SessionLocal
+        ));
+        assert!(matches!(
+            to_zenoh_locality(ZenohQueryableLocality::Remote),
+            zenoh::sample::Locality::Remote
+        ));
+        assert!(matches!(
+            to_zenoh_locality(ZenohQueryableLocality::Any),
+            zenoh::sample::Locality::Any
+        ));
     }
 
     #[rstest]
