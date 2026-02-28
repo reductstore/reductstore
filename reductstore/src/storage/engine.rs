@@ -7,7 +7,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
-use crate::storage::folder_keeper::FolderKeeper;
+use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use async_trait::async_trait;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
@@ -74,14 +74,14 @@ impl StorageEngineBuilder {
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
-        let folder_keeper = FolderKeeper::new(data_path.clone(), &cfg).await;
-
+        let folder_keeper =
+            FolderKeeper::new_with_depth(data_path.clone(), &cfg, DiscoveryDepth::FirstLevel).await;
         for path in folder_keeper
             .list_folders()
             .await
             .expect("Failed to list folders")
         {
-            match Bucket::restore(data_path.join(&path), cfg.clone()).await {
+            match Bucket::restore(path.clone(), cfg.clone()).await {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
                     buckets.insert(bucket.name().to_string(), bucket);
@@ -378,6 +378,27 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
     Ok(())
 }
 
+pub(super) fn check_entry_name_convention(name: &str) -> Result<(), ReductError> {
+    let regex = regex::Regex::new(r"^[A-Za-z0-9_/-]*$").unwrap();
+    if regex.is_match(name) {
+        return Ok(());
+    }
+
+    // Allow system attachment entries that end with `/$meta`.
+    if name == "$meta" {
+        return Ok(());
+    }
+    if let Some(parent) = name.strip_suffix("/$meta") {
+        if regex.is_match(parent) {
+            return Ok(());
+        }
+    }
+
+    Err(unprocessable_entity!(
+        "Entry name can contain only letters, digits and [-,_,/] symbols or end with '/$meta'",
+    ))
+}
+
 #[cfg(test)]
 impl StorageEngine {
     pub async fn reset_last_replica_sync(&self) {
@@ -396,6 +417,14 @@ mod tests {
     use rstest::{fixture, rstest};
     use std::time::Duration;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_check_entry_name_convention_with_meta() {
+        assert!(check_entry_name_convention("entry").is_ok());
+        assert!(check_entry_name_convention("entry/$meta").is_ok());
+        assert!(check_entry_name_convention("x/y/$meta").is_ok());
+        assert!(check_entry_name_convention("entry/$other").is_err());
+    }
 
     #[rstest]
     #[tokio::test]
@@ -471,6 +500,7 @@ mod tests {
     mod recovery {
         use super::*;
         use crate::storage::bucket::settings::SETTINGS_NAME;
+        use reduct_base::io::ReadRecord;
         #[rstest]
         #[tokio::test]
         async fn test_recover_from_fs(#[future] storage: Arc<StorageEngine>) {
@@ -547,6 +577,90 @@ mod tests {
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
             assert_eq!(bucket.settings().await.unwrap(), bucket_settings);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_recover_nested_entry_tree(#[future] storage: Arc<StorageEngine>) {
+            let storage = storage.await;
+            let bucket = storage
+                .create_bucket("tree-bucket", Bucket::defaults())
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+
+            for (entry_name, ts, payload) in [
+                ("part-1/a/b/c", 1000u64, "aaaa"),
+                ("part-1/a/b/d", 1010u64, "bbbb"),
+                ("part-2/x/y/z", 1020u64, "cccc"),
+            ] {
+                let entry = bucket
+                    .get_or_create_entry(entry_name)
+                    .await
+                    .unwrap()
+                    .upgrade_and_unwrap();
+                let mut sender = entry
+                    .begin_write(
+                        ts,
+                        payload.len() as u64,
+                        "text/plain".to_string(),
+                        Labels::new(),
+                    )
+                    .await
+                    .unwrap();
+                sender.send(Ok(Some(Bytes::from(payload)))).await.unwrap();
+                sender.send(Ok(None)).await.unwrap();
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            storage.sync_fs().await.unwrap();
+
+            let cfg = Cfg {
+                data_path: storage.data_path.clone(),
+                ..Cfg::default()
+            };
+            let storage = Arc::new(
+                StorageEngine::builder()
+                    .with_data_path(cfg.data_path.clone())
+                    .with_cfg(cfg)
+                    .build()
+                    .await,
+            );
+
+            let bucket = storage
+                .get_bucket("tree-bucket")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+
+            let info = bucket.clone().info().await.unwrap();
+            let mut names = info
+                .entries
+                .iter()
+                .map(|entry| entry.name.clone())
+                .collect::<Vec<_>>();
+            names.sort();
+            assert_eq!(
+                names,
+                vec![
+                    "part-1".to_string(),
+                    "part-1/a".to_string(),
+                    "part-1/a/b".to_string(),
+                    "part-1/a/b/c".to_string(),
+                    "part-1/a/b/d".to_string(),
+                    "part-2".to_string(),
+                    "part-2/x".to_string(),
+                    "part-2/x/y".to_string(),
+                    "part-2/x/y/z".to_string(),
+                ]
+            );
+
+            let rec = bucket.begin_read("part-1/a/b/c", 1000).await.unwrap();
+            assert_eq!(rec.meta().entry_name(), "part-1/a/b/c");
+            let rec = bucket.begin_read("part-1/a/b/d", 1010).await.unwrap();
+            assert_eq!(rec.meta().entry_name(), "part-1/a/b/d");
+            let rec = bucket.begin_read("part-2/x/y/z", 1020).await.unwrap();
+            assert_eq!(rec.meta().entry_name(), "part-2/x/y/z");
         }
 
         #[rstest]

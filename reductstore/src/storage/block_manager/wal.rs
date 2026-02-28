@@ -20,6 +20,8 @@ use crate::storage::proto::Record;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
 const WAL_FILE_SIZE: u64 = 1_000_000;
+const WAL_DIR: &str = ".wal";
+const LEGACY_WAL_DIR: &str = "wal";
 
 #[derive(PartialEq, Debug)]
 pub(in crate::storage) enum WalEntry {
@@ -268,14 +270,26 @@ impl Wal for WalImpl {
 ///
 /// This function will panic if it fails to create the WAL directory.
 pub(in crate::storage) async fn create_wal(entry_path: PathBuf) -> Box<dyn Wal + Send + Sync> {
-    let wal_folder = entry_path.join("wal");
+    let wal_folder = entry_path.join(WAL_DIR);
+    let legacy_wal_folder = entry_path.join(LEGACY_WAL_DIR);
+
+    if !wal_folder.try_exists().unwrap_or(false) && legacy_wal_folder.try_exists().unwrap_or(false)
+    {
+        if let Err(err) = FILE_CACHE.rename(&legacy_wal_folder, &wal_folder).await {
+            warn!(
+                "Failed to migrate legacy WAL folder {:?} to {:?}: {}",
+                legacy_wal_folder, wal_folder, err
+            );
+        }
+    }
+
     if !wal_folder.try_exists().unwrap() {
         FILE_CACHE
             .create_dir_all(&wal_folder)
             .await
             .expect("Failed to create WAL folder");
     }
-    Box::new(WalImpl::new(entry_path.join("wal")))
+    Box::new(WalImpl::new(entry_path.join(WAL_DIR)))
 }
 
 #[cfg(test)]
@@ -385,10 +399,25 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_migrate_legacy_wal_dir() {
+        let path = tempfile::tempdir().unwrap().keep();
+        let entry_path = path.join("entry");
+        std::fs::create_dir_all(entry_path.join(LEGACY_WAL_DIR)).unwrap();
+        std::fs::write(entry_path.join(LEGACY_WAL_DIR).join("1.wal"), [STOP_MARKER]).unwrap();
+
+        let wal = create_wal(entry_path.clone()).await;
+
+        assert!(entry_path.join(WAL_DIR).exists());
+        assert!(!entry_path.join(LEGACY_WAL_DIR).exists());
+        assert!(wal.read(1).await.is_ok());
+    }
+
     #[fixture]
     fn wal() -> WalImpl {
         let path = tempfile::tempdir().unwrap().keep();
-        std::fs::create_dir_all(path.join("wal")).unwrap();
-        WalImpl::new(path.join("wal"))
+        std::fs::create_dir_all(path.join(WAL_DIR)).unwrap();
+        WalImpl::new(path.join(WAL_DIR))
     }
 }

@@ -137,6 +137,8 @@ pub(crate) mod tests {
         let mut block_manager = BlockManager::build(
             dir.clone(),
             BlockIndex::new(dir.join("index")),
+            "bucket".to_string(),
+            "entry".to_string(),
             Cfg::default().into(),
         )
         .await;

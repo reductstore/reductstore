@@ -55,6 +55,15 @@ pub struct EntryRecordHeader {
     pub header: RecordHeader,
 }
 
+/// Represents parsed label update operations for a single record in batch update requests.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EntryLabelUpdateHeader {
+    pub entry: String,
+    pub timestamp: u64,
+    pub update: Labels,
+    pub remove: HashSet<String>,
+}
+
 fn is_tchar(byte: u8) -> bool {
     byte.is_ascii_alphanumeric()
         || matches!(
@@ -629,6 +638,77 @@ pub fn parse_batched_headers(headers: &HeaderMap) -> Result<Vec<EntryRecordHeade
     Ok(result)
 }
 
+/// Parse and sort v2 batched headers into label update operations.
+///
+/// The parser preserves explicit removals from deltas (for example `k=`), while still applying
+/// per-entry state re-use between subsequent records in the same batch.
+pub fn parse_batched_update_headers(
+    headers: &HeaderMap,
+) -> Result<Vec<EntryLabelUpdateHeader>, ReductError> {
+    let entries = parse_entries(headers)?;
+    let start_ts = parse_start_timestamp(headers)?;
+    let label_names = parse_labels(headers)?;
+    let mut last_header_per_entry: HashMap<String, RecordHeader> = HashMap::new();
+    let mut entry_state: HashMap<String, HashMap<String, Option<String>>> = HashMap::new();
+    let mut result = Vec::new();
+
+    for (entry_index, delta, value) in sort_headers_by_entry_and_time(headers)? {
+        let entry = entries.get(entry_index).ok_or_else(|| {
+            unprocessable_entity!(
+                "Invalid header '{}{}-{}': entry index out of range",
+                HEADER_PREFIX,
+                entry_index,
+                delta
+            )
+        })?;
+
+        let raw_value = value
+            .to_str()
+            .map_err(|_| unprocessable_entity!("Invalid batched header"))?;
+        let parsed_header = parse_record_header_with_defaults(
+            raw_value,
+            last_header_per_entry.get(entry),
+            label_names.as_ref(),
+        )?;
+        last_header_per_entry.insert(entry.clone(), parsed_header);
+
+        if let Some(raw_labels) = raw_value.splitn(3, ',').nth(2) {
+            let (label_updates, label_removals) =
+                parse_label_delta(raw_labels, label_names.as_ref())?;
+            let state = entry_state.entry(entry.clone()).or_default();
+            for (key, value) in label_updates {
+                state.insert(key, Some(value));
+            }
+            for key in label_removals {
+                state.insert(key, None);
+            }
+        }
+
+        let state = entry_state.entry(entry.clone()).or_default();
+        let mut update = Labels::new();
+        let mut remove = HashSet::new();
+        for (key, value) in state {
+            match value {
+                Some(value) => {
+                    update.insert(key.clone(), value.clone());
+                }
+                None => {
+                    remove.insert(key.clone());
+                }
+            }
+        }
+
+        result.push(EntryLabelUpdateHeader {
+            entry: entry.clone(),
+            timestamp: start_ts + delta,
+            update,
+            remove,
+        });
+    }
+
+    Ok(result)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -813,6 +893,50 @@ mod tests {
         assert_eq!(parsed[0].header.labels.get("b").unwrap(), "2");
         assert!(!parsed[1].header.labels.contains_key("a"));
         assert_eq!(parsed[1].header.labels.get("b").unwrap(), "2");
+    }
+
+    #[test]
+    fn test_parse_batched_update_headers_preserves_removal_ops() {
+        let mut headers = HeaderMap::new();
+        headers.insert(ENTRIES_HEADER, HeaderValue::from_static("entry"));
+        headers.insert(START_TS_HEADER, HeaderValue::from_static("1000"));
+        headers.insert(
+            make_batched_header_name(0, 0),
+            HeaderValue::from_static("0,,a=\"hello,world\",b="),
+        );
+
+        let parsed = parse_batched_update_headers(&headers).unwrap();
+        assert_eq!(parsed.len(), 1);
+        assert_eq!(parsed[0].entry, "entry");
+        assert_eq!(parsed[0].timestamp, 1000);
+        assert_eq!(parsed[0].update.get("a").unwrap(), "hello,world");
+        assert!(parsed[0].remove.contains("b"));
+    }
+
+    #[test]
+    fn test_parse_batched_update_headers_reuses_entry_state() {
+        let mut headers = HeaderMap::new();
+        headers.insert(ENTRIES_HEADER, HeaderValue::from_static("entry"));
+        headers.insert(START_TS_HEADER, HeaderValue::from_static("1000"));
+        headers.insert(LABELS_HEADER, HeaderValue::from_static("key,remove"));
+        headers.insert(
+            make_batched_header_name(0, 0),
+            HeaderValue::from_static("0,,0=meta-1,1=true"),
+        );
+        headers.insert(
+            make_batched_header_name(0, 1),
+            HeaderValue::from_static("0,,0=meta-2"),
+        );
+
+        let parsed = parse_batched_update_headers(&headers).unwrap();
+        assert_eq!(parsed.len(), 2);
+        assert_eq!(parsed[0].update.get("key").unwrap(), "meta-1");
+        assert_eq!(parsed[0].update.get("remove").unwrap(), "true");
+        assert!(parsed[0].remove.is_empty());
+
+        assert_eq!(parsed[1].update.get("key").unwrap(), "meta-2");
+        assert_eq!(parsed[1].update.get("remove").unwrap(), "true");
+        assert!(parsed[1].remove.is_empty());
     }
 
     #[test]

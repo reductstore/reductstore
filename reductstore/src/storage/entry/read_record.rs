@@ -103,7 +103,6 @@ mod tests {
     };
     use crate::storage::entry::EntrySettings;
     use bytes::Bytes;
-    use reduct_base::error::ReductError;
     use reduct_base::io::ReadRecord;
     use reduct_base::Labels;
     use rstest::rstest;

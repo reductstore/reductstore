@@ -8,8 +8,10 @@ pub mod remote_storage;
 pub mod replication;
 pub mod rw_lock;
 pub mod storage_engine;
+#[cfg(feature = "zenoh-api")]
+pub mod zenoh;
 
-use crate::api::Components;
+use crate::api::components::Components;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType};
@@ -19,6 +21,8 @@ use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
+#[cfg(feature = "zenoh-api")]
+use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::cache::Cache;
 use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
@@ -81,6 +85,8 @@ pub struct Cfg {
     pub lock_file_config: LockFileConfig,
     pub rw_lock_config: RwLockConfig,
     pub engine_config: StorageEngineConfig,
+    #[cfg(feature = "zenoh-api")]
+    pub zenoh_api: ZenohApiConfig,
 }
 
 impl Default for Cfg {
@@ -107,6 +113,8 @@ impl Default for Cfg {
             lock_file_config: LockFileConfig::default(),
             rw_lock_config: RwLockConfig::default(),
             engine_config: StorageEngineConfig::default(),
+            #[cfg(feature = "zenoh-api")]
+            zenoh_api: ZenohApiConfig::default(),
         }
     }
 }
@@ -260,6 +268,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
+            #[cfg(feature = "zenoh-api")]
+            zenoh_api: Self::parse_zenoh_api_config(&mut env),
         };
 
         set_rwlock_timeout(cfg.rw_lock_config.timeout);
@@ -349,7 +359,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
 
         Ok(Components {
-            storage,
+            storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(&self.cfg.api_token),
             console,
@@ -359,6 +369,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 static_extensions,
                 ext_settings,
                 self.cfg.io_conf.clone(),
+                Some(Arc::clone(&storage)),
             )?,
             query_link_cache: AsyncRwLock::new(Cache::new(
                 DEFAULT_CACHED_QUERIES,
