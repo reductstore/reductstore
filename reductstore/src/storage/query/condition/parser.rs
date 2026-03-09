@@ -605,6 +605,19 @@ mod tests {
                 node.print()
             );
         }
+
+        #[rstest]
+        fn test_in_with_numeric_string_label_reference(parser: Parser) {
+            let json = serde_json::json!({
+                "$in": ["&key", "1"]
+            });
+            let (mut node, _) = parser.parse(json).unwrap();
+
+            let mut context = Context::default();
+            context.labels.insert("key", "1");
+
+            assert_eq!(node.apply(&context).unwrap(), Value::Bool(true));
+        }
     }
 
     #[fixture]
