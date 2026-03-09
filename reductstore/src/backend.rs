@@ -505,6 +505,26 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_backend_builder_s3_accepts_session_token(license: License) {
+            let result = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
+                .remote_region("us-east-1")
+                .remote_endpoint("http://localhost:9000")
+                .remote_access_key("access_key")
+                .remote_secret_key("secret_key")
+                .remote_session_token("session_token")
+                .cache_size(1024 * 1024 * 1024)
+                .license(license)
+                .try_build()
+                .await;
+
+            assert!(result.is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_backend_builder_s3_cache_size_missing(license: License) {
             let err = Backend::builder()
                 .backend_type(BackendType::S3)
