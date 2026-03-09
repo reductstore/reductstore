@@ -184,16 +184,15 @@ impl BackpackBuilder {
                     ))?
                 };
 
-                let Some(access_key) = self.remote_access_key else {
-                    Err(internal_server_error!(
-                        "remote_access_key is required for S3 backend"
-                    ))?
-                };
-
-                let Some(secret_key) = self.remote_secret_key else {
-                    Err(internal_server_error!(
-                        "remote_secret_key is required for S3 backend"
-                    ))?
+                let (access_key, secret_key) = match (
+                    self.remote_access_key,
+                    self.remote_secret_key,
+                ) {
+                    (Some(access_key), Some(secret_key)) => (access_key, secret_key),
+                    (None, None) => ("".to_string(), "".to_string()),
+                    _ => Err(internal_server_error!(
+                        "remote_access_key and remote_secret_key must be set together or both unset for S3 backend"
+                    ))?,
                 };
 
                 let Some(cache_size) = self.remote_cache_size else {
@@ -456,7 +455,9 @@ mod tests {
 
             assert_eq!(
                 err,
-                internal_server_error!("remote_access_key is required for S3 backend")
+                internal_server_error!(
+                    "remote_access_key and remote_secret_key must be set together or both unset for S3 backend"
+                )
             );
         }
 
@@ -479,8 +480,27 @@ mod tests {
 
             assert_eq!(
                 err,
-                internal_server_error!("remote_secret_key is required for S3 backend")
+                internal_server_error!(
+                    "remote_access_key and remote_secret_key must be set together or both unset for S3 backend"
+                )
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_backend_builder_s3_uses_default_credentials_provider_chain(license: License) {
+            let result = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
+                .remote_region("us-east-1")
+                .remote_endpoint("http://localhost:9000")
+                .cache_size(1024 * 1024 * 1024)
+                .license(license)
+                .try_build()
+                .await;
+
+            assert!(result.is_ok());
         }
 
         #[rstest]

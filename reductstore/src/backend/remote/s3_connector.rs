@@ -48,20 +48,31 @@ impl S3Connector {
         info!("Initializing S3 client for bucket: {}", settings.bucket);
         let base = base_config.load().await;
 
-        let creds = Credentials::from_keys(
-            settings.access_key.clone(),
-            settings.secret_key.clone(),
-            settings.session_token.clone(),
-        );
-        let conf = aws_sdk_s3::config::Builder::from(&base)
+        let creds = if settings.access_key.is_empty() && settings.secret_key.is_empty() {
+            info!("Using default AWS credentials provider chain");
+            None
+        } else {
+            info!("Using provided AWS credentials");
+            Some(Credentials::from_keys(
+                settings.access_key.clone(),
+                settings.secret_key.clone(),
+                settings.session_token.clone(),
+            ))
+        };
+
+        let builder = aws_sdk_s3::config::Builder::from(&base)
             .set_endpoint_url(settings.endpoint)
             .clone()
-            .credentials_provider(creds)
             .force_path_style(true)
             .request_checksum_calculation(
                 aws_sdk_s3::config::RequestChecksumCalculation::WhenRequired,
-            )
-            .build();
+            );
+
+        let conf = if let Some(creds) = creds {
+            builder.credentials_provider(creds).build()
+        } else {
+            builder.build()
+        };
 
         let client = Client::from_conf(conf.clone());
 
