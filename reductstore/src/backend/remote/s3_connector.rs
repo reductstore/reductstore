@@ -51,7 +51,7 @@ impl S3Connector {
         let creds = Credentials::from_keys(
             settings.access_key.clone(),
             settings.secret_key.clone(),
-            None,
+            settings.session_token.clone(),
         );
         let conf = aws_sdk_s3::config::Builder::from(&base)
             .set_endpoint_url(settings.endpoint)
@@ -577,6 +577,7 @@ mod tests {
                 endpoint: Some("http://xxxxx:9000".to_string()), // we do just a dry run
                 access_key: "minioadmin".to_string(),
                 secret_key: "minioadmin".to_string(),
+                session_token: None,
                 cache_size: 0,
                 default_storage_class: None,
             }
@@ -769,6 +770,7 @@ mod tests {
                 secret_key: env
                     .get_optional("MINIO_SECRET_KEY")
                     .unwrap_or("minioadmin".to_string()),
+                session_token: None,
                 cache_size: 1000,
                 default_storage_class: None,
             }

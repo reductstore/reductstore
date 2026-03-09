@@ -17,6 +17,7 @@ pub struct RemoteStorageConfig {
     pub region: Option<String>,
     pub access_key: Option<String>,
     pub secret_key: Option<String>,
+    pub session_token: Option<String>,
     pub cache_path: Option<PathBuf>,
     pub cache_size: u64,
     pub sync_interval: Duration,
@@ -26,6 +27,7 @@ pub struct RemoteStorageConfig {
 impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub(super) fn parse_remote_storage_cfg(env: &mut Env<EnvGetter>) -> RemoteStorageConfig {
         let secret_key = env.get_masked("RS_REMOTE_SECRET_KEY", "".to_string());
+        let session_token = env.get_masked("RS_REMOTE_SESSION_TOKEN", "".to_string());
         let (backend_type, default_sync_interval) = match env
             .get_optional::<String>("RS_REMOTE_BACKEND_TYPE")
             .map(|s| s.to_lowercase())
@@ -45,6 +47,11 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                 None
             } else {
                 Some(secret_key)
+            },
+            session_token: if session_token.is_empty() {
+                None
+            } else {
+                Some(session_token)
             },
             cache_path: env
                 .get_optional::<String>("RS_REMOTE_CACHE_PATH")
@@ -100,6 +107,10 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
         env_getter
             .expect_get()
+            .with(eq("RS_REMOTE_SESSION_TOKEN"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
             .with(eq("RS_REMOTE_CACHE_PATH"))
             .return_const(Err(VarError::NotPresent));
         env_getter
@@ -127,6 +138,7 @@ mod tests {
                 region: None,
                 access_key: None,
                 secret_key: None,
+                session_token: None,
                 cache_path: None,
                 cache_size: ByteSize::gb(1).as_u64(),
                 sync_interval: Duration::from_millis(100),
@@ -165,6 +177,10 @@ mod tests {
             .return_const(Ok("my-secret-key".to_string()));
         env_getter
             .expect_get()
+            .with(eq("RS_REMOTE_SESSION_TOKEN"))
+            .return_const(Ok("my-session-token".to_string()));
+        env_getter
+            .expect_get()
             .with(eq("RS_REMOTE_CACHE_PATH"))
             .return_const(Ok("/tmp/cache".to_string()));
         env_getter
@@ -192,6 +208,7 @@ mod tests {
                 region: Some("us-west-1".to_string()),
                 access_key: Some("my-access-key".to_string()),
                 secret_key: Some("my-secret-key".to_string()),
+                session_token: Some("my-session-token".to_string()),
                 cache_path: Some(PathBuf::from("/tmp/cache")),
                 cache_size: ByteSize::gb(2).as_u64(),
                 sync_interval: Duration::from_secs(60),

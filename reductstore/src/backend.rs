@@ -76,6 +76,7 @@ pub struct BackpackBuilder {
     remote_endpoint: Option<String>,
     remote_access_key: Option<String>,
     remote_secret_key: Option<String>,
+    remote_session_token: Option<String>,
     remote_cache_size: Option<u64>,
     remote_default_storage_class: Option<String>,
     license: Option<License>,
@@ -128,6 +129,11 @@ impl BackpackBuilder {
 
     pub fn remote_secret_key(mut self, secret_key: &str) -> Self {
         self.remote_secret_key = Some(secret_key.to_string());
+        self
+    }
+
+    pub fn remote_session_token(mut self, session_token: &str) -> Self {
+        self.remote_session_token = Some(session_token.to_string());
         self
     }
 
@@ -202,6 +208,7 @@ impl BackpackBuilder {
                     endpoint: self.remote_endpoint,
                     access_key,
                     secret_key,
+                    session_token: self.remote_session_token,
                     region: self.remote_region,
                     bucket,
                     cache_size,
