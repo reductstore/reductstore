@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Restore `Unknown extension` validation for queries with `ext` when no extensions are loaded, [PR-1192](https://github.com/reductstore/reductstore/pull/1192)
+- Fix numeric attachment key matching in `when` conditions, [PR-1198](https://github.com/reductstore/reductstore/pull/1198)
 
 ## 1.18.5 - 2026-02-25
 
