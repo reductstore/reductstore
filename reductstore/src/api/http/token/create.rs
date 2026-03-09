@@ -1,7 +1,7 @@
 // Copyright 2023-2024 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::api::token::{TokenCreateRequestAxum, TokenCreateResponseAxum};
+use crate::api::http::token::{TokenCreateRequestAxum, TokenCreateResponseAxum};
 use crate::api::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
