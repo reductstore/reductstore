@@ -3,6 +3,16 @@
 
 use crate::storage::query::condition::value::Value;
 
+fn parse_string_like(value: &str) -> Option<Value> {
+    if let Ok(parsed) = value.parse::<i64>() {
+        Some(Value::Int(parsed))
+    } else if let Ok(parsed) = value.parse::<f64>() {
+        Some(Value::Float(parsed))
+    } else {
+        None
+    }
+}
+
 impl PartialEq<Self> for Value {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
@@ -30,8 +40,8 @@ impl PartialEq<Self> for Value {
             (Value::Float(left), Value::Bool(right)) => *left == *right as i64 as f64,
 
             (Value::String(left), Value::String(right)) => left == right,
-            (Value::String(_), _) => false,
-            (_, Value::String(_)) => false,
+            (Value::String(left), right) => parse_string_like(left).is_some_and(|v| v == *right),
+            (left, Value::String(right)) => parse_string_like(right).is_some_and(|v| *left == v),
         }
     }
 }
@@ -63,8 +73,12 @@ impl PartialOrd for Value {
             (Value::Float(left), Value::Bool(right)) => left.partial_cmp(&(*right as i64 as f64)),
 
             (Value::String(left), Value::String(right)) => left.partial_cmp(right),
-            (Value::String(_), _) => None,
-            (_, Value::String(_)) => None,
+            (Value::String(left), right) => {
+                parse_string_like(left).and_then(|v| v.partial_cmp(right))
+            }
+            (left, Value::String(right)) => {
+                parse_string_like(right).and_then(|v| left.partial_cmp(&v))
+            }
         }
     }
 }
@@ -150,6 +164,10 @@ mod tests {
         #[case(Value::String("a".to_string()), Value::Int(1), false)]
         #[case(Value::String("a".to_string()), Value::Float(1.0), false)]
         #[case(Value::String("a".to_string()), Value::Duration(1), false)]
+        #[case(Value::String("1".to_string()), Value::Int(1), true)]
+        #[case(Value::String("1.0".to_string()), Value::Float(1.0), true)]
+        #[case(Value::String("true".to_string()), Value::Bool(true), false)]
+        #[case(Value::String("1".to_string()), Value::Duration(1), true)]
         fn partial_eq_string(#[case] left: Value, #[case] right: Value, #[case] expected: bool) {
             let result = left == right;
             assert_eq!(result, expected);
@@ -182,6 +200,7 @@ mod tests {
         #[case(Value::Bool(false), Value::String("string".to_string()), None)]
         #[case(Value::Bool(true), Value::String("true".to_string()), None)]
         #[case(Value::Bool(false), Value::String("true".to_string()), None)]
+        #[case(Value::Bool(true), Value::String("1".to_string()), Some(Ordering::Equal))]
         #[case(Value::Bool(true), Value::Duration(1), Some(Ordering::Equal))]
         #[case(Value::Bool(false), Value::Duration(1), Some(Ordering::Less))]
         #[case(Value::Bool(true), Value::Duration(0), Some(Ordering::Greater))]
@@ -211,6 +230,7 @@ mod tests {
         #[case(Value::Int(1), Value::Float(-1.0), Some(Ordering::Greater))]
         #[case(Value::Int(1), Value::String("string".to_string()), None)]
         #[case(Value::Int(-1), Value::String("string".to_string()), None)]
+        #[case(Value::Int(1), Value::String("1".to_string()), Some(Ordering::Equal))]
         #[case(Value::Int(1), Value::Duration(1), Some(Ordering::Equal))]
         #[case(Value::Int(-1), Value::Duration(1), Some(Ordering::Less))]
         #[case(Value::Int(1), Value::Duration(0), Some(Ordering::Greater))]
