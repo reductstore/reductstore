@@ -1,52 +1,11 @@
-// Copyright 2023-2025 ReductSoftware UG
+// Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
-//
-mod bucket;
-mod entry;
-mod io;
-mod links;
-mod middleware;
-mod replication;
-mod server;
-mod token;
-mod ui;
-mod utils;
 
-use crate::api::io::create_io_api_routes;
-use crate::api::ui::{redirect_to_index, show_ui};
-use crate::asset::asset_manager::ManageStaticAsset;
-use crate::auth::policy::Policy;
-use crate::auth::token_auth::TokenAuthorization;
-use crate::auth::token_repository::ManageTokens;
-use crate::cfg::Cfg;
-use crate::core::cache::Cache;
-use crate::core::sync::AsyncRwLock;
-use crate::ext::ext_repository::ManageExtensions;
-use crate::lock_file::BoxedLockFile;
-use crate::replication::ManageReplications;
-use crate::storage::engine::StorageEngine;
-use axum::http::{HeaderMap, StatusCode};
-use axum::response::{IntoResponse, Response};
-use axum::routing::get;
-use axum::{middleware::from_fn, Router};
-use bucket::create_bucket_api_routes;
-use entry::create_entry_api_routes;
-use hyper::http::HeaderValue;
-use log::{error, warn};
-use middleware::{default_headers, print_statuses};
-pub use reduct_base::error::ErrorCode;
-use reduct_base::error::ReductError;
-use reduct_base::io::BoxedReadRecord;
-use reduct_base::service_unavailable;
-use replication::create_replication_api_routes;
-use serde::de::StdError;
-use server::create_server_api_routes;
-use std::fmt::{Debug, Display, Formatter};
-use std::sync::Arc;
-use token::create_token_api_routes;
-use tokio::sync::mpsc::Receiver;
-use tokio::sync::Mutex;
-use tower_http::cors::{Any, CorsLayer};
+pub use components::{Components, LogHint, StateKeeper};
+pub use http::HttpError;
+#[cfg(feature = "zenoh-api")]
+pub use zenoh::{spawn_runtime as spawn_zenoh_runtime, ZenohRuntimeHandle};
+;
 
 pub struct Components {
     pub storage: Arc<StorageEngine>,

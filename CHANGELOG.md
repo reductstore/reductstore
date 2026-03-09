@@ -11,7 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Support hierarchical entry paths and preserve nested tree recovery, [PR-1185](https://github.com/reductstore/reductstore/pull/1185)
 - Store attachments in system `$meta` entries with strategy-based behavior and replication coverage, [PR-1186](https://github.com/reductstore/reductstore/pull/1186)
-- Added support for token expiry dates and durations, [PR-1175](https://github.com/reductstore/reductstore/pull/1175)
+- Zenoh API for ingestion and query, [PR-1157](https://github.com/reductstore/reductstore/pull/1157)
 
 ### Changed
 

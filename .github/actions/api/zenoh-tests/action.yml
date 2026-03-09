@@ -1,0 +1,118 @@
+name: 'Run Zenoh API Tests'
+description: 'Runs Zenoh API integration tests for ReductStore.'
+inputs:
+  zenoh_config:
+    description: 'Inline Zenoh config string.'
+    required: false
+    default: 'mode=client;connect/endpoints=[tcp/127.0.0.1:7447]'
+  tls_root_ca:
+    description: 'Inline root CA certificate content (PEM format).'
+    required: false
+    default: ''
+  tls_connect_cert:
+    description: 'Inline mTLS client certificate content (PEM format).'
+    required: false
+    default: ''
+  tls_connect_key:
+    description: 'Inline mTLS client private key content (PEM format).'
+    required: false
+    default: ''
+  auth_dictionary:
+    description: 'Inline user:password dictionary (one per line).'
+    required: false
+    default: ''
+runs:
+  using: 'composite'
+  steps:
+    - name: Download Docker image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: image
+        path: /tmp/
+
+    - name: Load Docker image
+      shell: bash
+      run: docker load --input /tmp/image.tar
+
+    - name: Start Zenoh router
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.tls_root_ca }}" ]; then
+          # Start TLS-enabled Zenoh router using config from misc/
+          docker run --init -d --name zenoh-router -p 7447:7447/tcp \
+            -v ${PWD}/misc:/certs:ro \
+            -v ${PWD}/misc/zenoh-tls.json5:/zenoh.json5:ro \
+            eclipse/zenoh -c /zenoh.json5
+        else
+          # Start plain TCP Zenoh router
+          docker run --init -d --name zenoh-router -p 7447:7447/tcp -p 8000:8000/tcp eclipse/zenoh
+        fi
+        # Wait for router to start
+        sleep 2
+        docker logs zenoh-router
+
+    - name: Determine Zenoh connect endpoint
+      id: zenoh-endpoint
+      shell: bash
+      run: |
+        if [ -n "${{ inputs.tls_root_ca }}" ]; then
+          echo "config=mode=client;connect/endpoints=[tls/127.0.0.1:7447]" >> $GITHUB_OUTPUT
+          echo "connect=tls/127.0.0.1:7447" >> $GITHUB_OUTPUT
+        else
+          echo "config=mode=client;connect/endpoints=[tcp/127.0.0.1:7447]" >> $GITHUB_OUTPUT
+          echo "connect=tcp/127.0.0.1:7447" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Run ReductStore
+      shell: bash
+      env:
+        RS_ZENOH_TLS_ROOT_CA: ${{ inputs.tls_root_ca }}
+        RS_ZENOH_TLS_CONNECT_CERT: ${{ inputs.tls_connect_cert }}
+        RS_ZENOH_TLS_CONNECT_KEY: ${{ inputs.tls_connect_key }}
+        RS_ZENOH_AUTH_DICTIONARY: ${{ inputs.auth_dictionary }}
+      run: |
+        docker run --network=host -v ${PWD}/misc:/misc \
+          --env RS_ZENOH_ENABLED=1 \
+          --env RS_ZENOH_CONFIG="${{ steps.zenoh-endpoint.outputs.config }}" \
+          --env RS_ZENOH_SUB_KEYEXPRS="**" \
+          --env RS_ZENOH_QUERY_KEYEXPRS="**" \
+          --env RS_ZENOH_TLS_ROOT_CA \
+          --env RS_ZENOH_TLS_CONNECT_CERT \
+          --env RS_ZENOH_TLS_CONNECT_KEY \
+          --env RS_ZENOH_AUTH_DICTIONARY \
+          --name reduct -d ${{ github.repository }}
+
+        for _ in {1..20}; do
+          if curl -fsS "http://127.0.0.1:8383/api/v1/ready" >/dev/null 2>&1; then
+            break
+          fi
+          sleep 1
+        done
+        docker logs reduct
+
+    - name: Build Zenoh API tests
+      shell: bash
+      run: |
+        docker build -t zenoh-tests ./integration_tests/zenoh
+
+    - name: Run Zenoh API tests
+      shell: bash
+      env:
+        RS_ZENOH_TLS_ROOT_CA: ${{ inputs.tls_root_ca }}
+        RS_ZENOH_TLS_CONNECT_CERT: ${{ inputs.tls_connect_cert }}
+        RS_ZENOH_TLS_CONNECT_KEY: ${{ inputs.tls_connect_key }}
+        RS_ZENOH_AUTH_DICTIONARY: ${{ inputs.auth_dictionary }}
+      run: |
+        docker run --network=host \
+          --env STORAGE_URL=http://127.0.0.1:8383 \
+          --env ZENOH_CONNECT=${{ steps.zenoh-endpoint.outputs.connect }} \
+          --env RS_ZENOH_TLS_ROOT_CA \
+          --env RS_ZENOH_TLS_CONNECT_CERT \
+          --env RS_ZENOH_TLS_CONNECT_KEY \
+          --env RS_ZENOH_AUTH_DICTIONARY \
+          zenoh-tests
+
+    - name: Print docker logs
+      if: always()
+      shell: bash
+      run: docker logs reduct

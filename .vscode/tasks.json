@@ -8,7 +8,7 @@
 			"args": [
 				"build",
 				"--features",
-				"fs-backend web-console"
+				"fs-backend web-console zenoh-api"
 			],
 			"group": {
 				"kind": "build",
