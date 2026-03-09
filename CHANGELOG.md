@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Allow S3 remote storage to use the default AWS credential chain and optional session token, [PR-1199](https://github.com/reductstore/reductstore/pull/1199)
+
 ## 1.18.5 - 2026-02-25
 
 ### Fixed
