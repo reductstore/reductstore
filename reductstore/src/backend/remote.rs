@@ -41,6 +41,7 @@ pub(crate) struct RemoteBackendSettings {
     pub endpoint: Option<String>,
     pub access_key: String,
     pub secret_key: String,
+    pub session_token: Option<String>,
     pub region: Option<String>,
     pub bucket: String,
     pub default_storage_class: Option<String>,

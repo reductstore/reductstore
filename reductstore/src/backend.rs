@@ -76,6 +76,7 @@ pub struct BackpackBuilder {
     remote_endpoint: Option<String>,
     remote_access_key: Option<String>,
     remote_secret_key: Option<String>,
+    remote_session_token: Option<String>,
     remote_cache_size: Option<u64>,
     remote_default_storage_class: Option<String>,
     license: Option<License>,
@@ -131,6 +132,11 @@ impl BackpackBuilder {
         self
     }
 
+    pub fn remote_session_token(mut self, session_token: &str) -> Self {
+        self.remote_session_token = Some(session_token.to_string());
+        self
+    }
+
     pub fn remote_default_storage_class(mut self, storage_class: Option<String>) -> Self {
         self.remote_default_storage_class = storage_class;
         self
@@ -178,16 +184,15 @@ impl BackpackBuilder {
                     ))?
                 };
 
-                let Some(access_key) = self.remote_access_key else {
-                    Err(internal_server_error!(
-                        "remote_access_key is required for S3 backend"
-                    ))?
-                };
-
-                let Some(secret_key) = self.remote_secret_key else {
-                    Err(internal_server_error!(
-                        "remote_secret_key is required for S3 backend"
-                    ))?
+                let (access_key, secret_key) = match (
+                    self.remote_access_key,
+                    self.remote_secret_key,
+                ) {
+                    (Some(access_key), Some(secret_key)) => (access_key, secret_key),
+                    (None, None) => ("".to_string(), "".to_string()),
+                    _ => Err(internal_server_error!(
+                        "remote_access_key and remote_secret_key must be set together or both unset for S3 backend"
+                    ))?,
                 };
 
                 let Some(cache_size) = self.remote_cache_size else {
@@ -202,6 +207,7 @@ impl BackpackBuilder {
                     endpoint: self.remote_endpoint,
                     access_key,
                     secret_key,
+                    session_token: self.remote_session_token,
                     region: self.remote_region,
                     bucket,
                     cache_size,
@@ -449,7 +455,9 @@ mod tests {
 
             assert_eq!(
                 err,
-                internal_server_error!("remote_access_key is required for S3 backend")
+                internal_server_error!(
+                    "remote_access_key and remote_secret_key must be set together or both unset for S3 backend"
+                )
             );
         }
 
@@ -472,8 +480,47 @@ mod tests {
 
             assert_eq!(
                 err,
-                internal_server_error!("remote_secret_key is required for S3 backend")
+                internal_server_error!(
+                    "remote_access_key and remote_secret_key must be set together or both unset for S3 backend"
+                )
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_backend_builder_s3_uses_default_credentials_provider_chain(license: License) {
+            let result = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
+                .remote_region("us-east-1")
+                .remote_endpoint("http://localhost:9000")
+                .cache_size(1024 * 1024 * 1024)
+                .license(license)
+                .try_build()
+                .await;
+
+            assert!(result.is_ok());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_backend_builder_s3_accepts_session_token(license: License) {
+            let result = Backend::builder()
+                .backend_type(BackendType::S3)
+                .remote_bucket("my-bucket")
+                .remote_cache_path(PathBuf::from("/tmp/cache"))
+                .remote_region("us-east-1")
+                .remote_endpoint("http://localhost:9000")
+                .remote_access_key("access_key")
+                .remote_secret_key("secret_key")
+                .remote_session_token("session_token")
+                .cache_size(1024 * 1024 * 1024)
+                .license(license)
+                .try_build()
+                .await;
+
+            assert!(result.is_ok());
         }
 
         #[rstest]

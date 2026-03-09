@@ -334,6 +334,10 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             backend_builder = backend_builder.remote_secret_key(secret_key);
         }
 
+        if let Some(session_token) = &self.cfg.cs_config.session_token {
+            backend_builder = backend_builder.remote_session_token(session_token);
+        }
+
         if let Some(cache_path) = &self.cfg.cs_config.cache_path {
             backend_builder = backend_builder.remote_cache_path(cache_path.clone());
         }
