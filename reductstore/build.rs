@@ -25,7 +25,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to compile protos");
 
     #[cfg(feature = "web-console")]
-    download_web_console("v1.13.0");
+    download_web_console("v1.14.0-beta.0");
 
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
