@@ -402,6 +402,26 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_create_token_with_negative_expires_in(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo
+                .generate_token(
+                    "test-exp",
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_in: Some("-5d".to_string()),
+                    },
+                )
+                .await;
+
+            assert_eq!(
+                token.err().unwrap(),
+                unprocessable_entity!("Token expiration duration must be non-negative, got '-5d'")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_create_token_with_invalid_expires_in(#[future] repo: BoxedTokenRepository) {
             let mut repo = repo.await;
             let token = repo
@@ -417,6 +437,26 @@ mod tests {
             assert_eq!(
                 token.err().unwrap(),
                 unprocessable_entity!("Invalid duration value: bad")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_create_token_with_too_large_expires_in(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo
+                .generate_token(
+                    "test-exp",
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_in: Some("1000000000000d".to_string()),
+                    },
+                )
+                .await;
+
+            assert_eq!(
+                token.err().unwrap(),
+                unprocessable_entity!("Token expiration duration '1000000000000d' is too large")
             );
         }
 
