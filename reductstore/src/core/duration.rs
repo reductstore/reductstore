@@ -27,13 +27,13 @@ pub(crate) fn parse_single_duration(duration_string: &str) -> Result<i64, Reduct
         .map_err(|_| unprocessable_entity!("Invalid duration value: {}", duration_string))?;
 
     let unit = unit_part.as_str();
-    let seconds = match unit {
-        "us" => value,
-        "ms" => value * 1000,
-        "s" => value * 1_000_000,
-        "m" => value * 60_000_000,
-        "h" => value * 3_600_000_000,
-        "d" => value * 86_400_000_000,
+    let multiplier = match unit {
+        "us" => 1,
+        "ms" => 1_000,
+        "s" => 1_000_000,
+        "m" => 60_000_000,
+        "h" => 3_600_000_000,
+        "d" => 86_400_000_000,
         _ => {
             return Err(unprocessable_entity!(
                 "Invalid duration unit: {}",
@@ -41,6 +41,9 @@ pub(crate) fn parse_single_duration(duration_string: &str) -> Result<i64, Reduct
             ))
         }
     };
+    let seconds = value
+        .checked_mul(multiplier)
+        .ok_or_else(|| unprocessable_entity!("Duration '{}' is too large", duration_string))?;
     Ok(seconds)
 }
 
@@ -58,10 +61,12 @@ pub(crate) fn parse_duration_usecs(duration_string: &str) -> Result<i64, ReductE
         return Err(unprocessable_entity!("Duration literal cannot be empty"));
     }
 
-    let mut total_seconds = 0;
+    let mut total_seconds: i64 = 0;
     for part in duration_string.split_whitespace() {
         let seconds = parse_single_duration(part)?;
-        total_seconds += seconds;
+        total_seconds = total_seconds
+            .checked_add(seconds)
+            .ok_or_else(|| unprocessable_entity!("Duration '{}' is too large", duration_string))?;
     }
     Ok(total_seconds)
 }
@@ -131,6 +136,19 @@ mod tests {
     }
 
     #[rstest]
+    #[case("0us", 0)]
+    #[case("1us", 1)]
+    #[case("-1us", -1)]
+    #[case("100ms", 100_000)]
+    #[case("1s", 1_000_000)]
+    #[case("30m", 1_800_000_000)]
+    #[case("2h", 7_200_000_000)]
+    #[case("2d", 172_800_000_000)]
+    fn test_parse_single_duration(#[case] literal: &str, #[case] value: i64) {
+        assert_eq!(parse_single_duration(literal).unwrap(), value);
+    }
+
+    #[rstest]
     fn test_parse_invalid_duration() {
         assert_eq!(
             parse_single_duration("").err().unwrap(),
@@ -148,6 +166,10 @@ mod tests {
         assert_eq!(
             parse_single_duration("2.5m").err().unwrap(),
             unprocessable_entity!("Invalid duration value: 2.5m")
+        );
+        assert_eq!(
+            parse_single_duration("1000000000000d").err().unwrap(),
+            unprocessable_entity!("Duration '1000000000000d' is too large")
         );
     }
 
@@ -171,6 +193,12 @@ mod tests {
         assert_eq!(
             parse_duration_usecs("1h,2m").err().unwrap(),
             unprocessable_entity!("Invalid duration unit: h,m")
+        );
+        assert_eq!(
+            parse_duration_usecs("9223372036854775807us 1us")
+                .err()
+                .unwrap(),
+            unprocessable_entity!("Duration '9223372036854775807us 1us' is too large")
         );
     }
 }

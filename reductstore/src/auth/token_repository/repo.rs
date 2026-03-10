@@ -166,7 +166,18 @@ impl ManageTokens for TokenRepository {
         let expires_at = request
             .expires_in
             .map(|expires_in| {
-                let usec = parse_single_duration(&expires_in)?;
+                let usec = parse_single_duration(&expires_in).map_err(|err| {
+                    if err.status == reduct_base::error::ErrorCode::UnprocessableEntity
+                        && err.message == format!("Duration '{}' is too large", expires_in)
+                    {
+                        unprocessable_entity!(
+                            "Token expiration duration '{}' is too large",
+                            expires_in
+                        )
+                    } else {
+                        err
+                    }
+                })?;
                 if usec < 0 {
                     return Err(unprocessable_entity!(
                         "Token expiration duration must be non-negative, got '{}'",
