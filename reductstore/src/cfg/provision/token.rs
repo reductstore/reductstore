@@ -27,7 +27,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     &name,
                     TokenCreateRequest {
                         permissions: token.permissions.clone().unwrap_or_default(),
-                        expires_in: None,
+                        expires_at: None,
                     },
                 )
                 .await
@@ -320,7 +320,7 @@ mod tests {
                 "token1",
                 TokenCreateRequest {
                     permissions: Permissions::default(),
-                    expires_in: None,
+                    expires_at: None,
                 },
             )
             .await

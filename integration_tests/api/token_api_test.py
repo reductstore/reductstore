@@ -32,7 +32,7 @@ def test__create_v2_token(base_url, session, token_name, bucket_name):
         "read": [bucket_name],
         "write": [bucket_name],
     }
-    payload = {"permissions": permissions, "expires_in": "5d"}
+    payload = {"permissions": permissions, "expires_at": "2026-03-16T10:00:00Z"}
 
     resp = session.post(f"{base_url}/tokens/{token_name}", json=payload)
     assert resp.status_code == 200

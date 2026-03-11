@@ -46,7 +46,7 @@ mod tests {
             headers,
             TokenCreateRequestAxum(TokenCreateRequest {
                 permissions: Permissions::default(),
-                expires_in: None,
+                expires_at: None,
             }),
         )
         .await
@@ -67,7 +67,7 @@ mod tests {
             headers,
             TokenCreateRequestAxum(TokenCreateRequest {
                 permissions: Permissions::default(),
-                expires_in: None,
+                expires_at: None,
             }),
         )
         .await

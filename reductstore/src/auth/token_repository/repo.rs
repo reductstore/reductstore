@@ -4,11 +4,10 @@
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
-use crate::core::duration::parse_single_duration;
 use crate::core::file_cache::FILE_CACHE;
 use async_trait::async_trait;
 use bytes::Bytes;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Utc};
 use log::debug;
 use prost::Message;
 use rand::Rng;
@@ -164,34 +163,15 @@ impl ManageTokens for TokenRepository {
 
         let created_at = DateTime::<Utc>::from(SystemTime::now());
         let expires_at = request
-            .expires_in
-            .map(|expires_in| {
-                let usec = parse_single_duration(&expires_in).map_err(|err| {
-                    if err.status == reduct_base::error::ErrorCode::UnprocessableEntity
-                        && err.message == format!("Duration '{}' is too large", expires_in)
-                    {
-                        unprocessable_entity!(
-                            "Token expiration duration '{}' is too large",
-                            expires_in
-                        )
-                    } else {
-                        err
-                    }
-                })?;
-                if usec < 0 {
-                    return Err(unprocessable_entity!(
-                        "Token expiration duration must be non-negative, got '{}'",
-                        expires_in
-                    ));
+            .expires_at
+            .map(|expires_at| {
+                if expires_at < created_at {
+                    Err(unprocessable_entity!(
+                        "Token expiration date must not be in the past"
+                    ))
+                } else {
+                    Ok(expires_at)
                 }
-                created_at
-                    .checked_add_signed(Duration::microseconds(usec))
-                    .ok_or_else(|| {
-                        unprocessable_entity!(
-                            "Token expiration duration '{}' is too large",
-                            expires_in
-                        )
-                    })
             })
             .transpose()?;
 
@@ -333,7 +313,7 @@ mod tests {
                             read: vec![],
                             write: vec![],
                         },
-                        expires_in: None,
+                        expires_at: None,
                     },
                 )
                 .await;
@@ -357,7 +337,7 @@ mod tests {
                             read: vec![],
                             write: vec![],
                         },
-                        expires_in: None,
+                        expires_at: None,
                     },
                 )
                 .await;
@@ -378,7 +358,7 @@ mod tests {
                             read: vec![],
                             write: vec![],
                         },
-                        expires_in: None,
+                        expires_at: None,
                     },
                 )
                 .await
@@ -391,83 +371,42 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_create_token_with_expires_in(#[future] repo: BoxedTokenRepository) {
+        async fn test_create_token_with_expires_at(#[future] repo: BoxedTokenRepository) {
             let mut repo = repo.await;
+            let expires_at = chrono::Utc::now() + chrono::Duration::days(5);
             let created = repo
                 .generate_token(
                     "test-exp",
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_in: Some("5d".to_string()),
+                        expires_at: Some(expires_at),
                     },
                 )
                 .await
                 .unwrap();
 
             let token = repo.get_token("test-exp").await.unwrap();
-            assert_eq!(
-                token.expires_at.unwrap(),
-                created.created_at + chrono::Duration::days(5)
-            );
+            assert_eq!(token.expires_at, Some(expires_at));
+            assert!(created.created_at.timestamp() > 0);
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_create_token_with_negative_expires_in(#[future] repo: BoxedTokenRepository) {
+        async fn test_create_token_with_past_expires_at(#[future] repo: BoxedTokenRepository) {
             let mut repo = repo.await;
             let token = repo
                 .generate_token(
                     "test-exp",
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_in: Some("-5d".to_string()),
+                        expires_at: Some(chrono::Utc::now() - chrono::Duration::days(5)),
                     },
                 )
                 .await;
 
             assert_eq!(
                 token.err().unwrap(),
-                unprocessable_entity!("Token expiration duration must be non-negative, got '-5d'")
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_create_token_with_invalid_expires_in(#[future] repo: BoxedTokenRepository) {
-            let mut repo = repo.await;
-            let token = repo
-                .generate_token(
-                    "test-exp",
-                    TokenCreateRequest {
-                        permissions: Permissions::default(),
-                        expires_in: Some("bad".to_string()),
-                    },
-                )
-                .await;
-
-            assert_eq!(
-                token.err().unwrap(),
-                unprocessable_entity!("Invalid duration value: bad")
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_create_token_with_too_large_expires_in(#[future] repo: BoxedTokenRepository) {
-            let mut repo = repo.await;
-            let token = repo
-                .generate_token(
-                    "test-exp",
-                    TokenCreateRequest {
-                        permissions: Permissions::default(),
-                        expires_in: Some("1000000000000d".to_string()),
-                    },
-                )
-                .await;
-
-            assert_eq!(
-                token.err().unwrap(),
-                unprocessable_entity!("Token expiration duration '1000000000000d' is too large")
+                unprocessable_entity!("Token expiration date must not be in the past")
             );
         }
 
@@ -488,7 +427,7 @@ mod tests {
                         read: vec![],
                         write: vec![],
                     },
-                    expires_in: None,
+                    expires_at: None,
                 },
             )
             .await
@@ -507,12 +446,13 @@ mod tests {
             };
 
             let mut repo = build_repo_at(&path, &cfg).await;
+            let expires_at = chrono::Utc::now() + chrono::Duration::days(5);
             let created = repo
                 .generate_token(
                     "test-exp-persistent",
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_in: Some("5d".to_string()),
+                        expires_at: Some(expires_at),
                     },
                 )
                 .await
@@ -520,10 +460,8 @@ mod tests {
 
             let mut repo = build_repo_at(&path, &cfg).await;
             let token = repo.get_token("test-exp-persistent").await.unwrap();
-            assert_eq!(
-                token.expires_at,
-                Some(created.created_at + chrono::Duration::days(5))
-            );
+            assert_eq!(token.expires_at, Some(expires_at));
+            assert!(created.created_at.timestamp() > 0);
         }
 
         #[rstest]
@@ -553,7 +491,7 @@ mod tests {
                             read: vec![bucket.to_string()],
                             write: vec![],
                         },
-                        expires_in: None,
+                        expires_at: None,
                     },
                 )
                 .await;
@@ -588,7 +526,7 @@ mod tests {
                             read: vec![],
                             write: vec![bucket.to_string()],
                         },
-                        expires_in: None,
+                        expires_at: None,
                     },
                 )
                 .await;
@@ -654,7 +592,7 @@ mod tests {
                             read: vec!["bucket-1".to_string()],
                             write: vec!["bucket-2".to_string()],
                         },
-                        expires_in: None,
+                        expires_at: None,
                     },
                 )
                 .await
@@ -700,7 +638,7 @@ mod tests {
                     "test-expired",
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_in: None,
+                        expires_at: None,
                     },
                 )
                 .await
@@ -757,7 +695,7 @@ mod tests {
                     init_token,
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_in: None,
+                        expires_at: None,
                     },
                 )
                 .await;
@@ -769,7 +707,7 @@ mod tests {
                         read: vec![],
                         write: vec![],
                     },
-                    expires_in: None,
+                    expires_at: None,
                 },
             )
             .await
@@ -810,7 +748,7 @@ mod tests {
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-1".to_string()],
                     },
-                    expires_in: None,
+                    expires_at: None,
                 },
             )
             .await
@@ -847,7 +785,7 @@ mod tests {
                     init_token,
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_in: None,
+                        expires_at: None,
                     },
                 )
                 .await;
@@ -859,7 +797,7 @@ mod tests {
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-1".to_string()],
                     },
-                    expires_in: None,
+                    expires_at: None,
                 },
             )
             .await
@@ -907,7 +845,7 @@ mod tests {
                         read: vec![],
                         write: vec![],
                     },
-                    expires_in: None,
+                    expires_at: None,
                 },
             )
             .await;
@@ -921,7 +859,7 @@ mod tests {
                         read: vec![],
                         write: vec![],
                     },
-                    expires_in: None,
+                    expires_at: None,
                 },
             )
             .await;

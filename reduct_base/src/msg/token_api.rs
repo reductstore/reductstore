@@ -41,7 +41,7 @@ pub struct Token {
 pub struct TokenCreateRequest {
     pub permissions: Permissions,
     #[serde(default)]
-    pub expires_in: Option<String>,
+    pub expires_at: Option<DateTime<Utc>>,
 }
 
 /// Response for created token

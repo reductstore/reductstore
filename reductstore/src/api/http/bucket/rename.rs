@@ -66,7 +66,7 @@ mod tests {
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-1".to_string()],
                     },
-                    expires_in: None,
+                    expires_at: None,
                 },
             )
             .await
