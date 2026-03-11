@@ -22,6 +22,39 @@ def test__create_token(base_url, session, token_name, bucket_name):
 
 
 @requires_env("API_TOKEN")
+def test__create_v2_token(base_url, session, token_name, bucket_name):
+    """Should create a token with v2 json format"""
+    resp = session.post(f"{base_url}/b/{bucket_name}")
+    assert resp.status_code == 200
+
+    permissions = {
+        "full_access": True,
+        "read": [bucket_name],
+        "write": [bucket_name],
+    }
+    payload = {"permissions": permissions, "expires_in": "5D"}
+
+    resp = session.post(f"{base_url}/tokens/{token_name}", json=payload)
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/json"
+    created_at = json.loads(resp.content)["created_at"]
+    assert "token-" in json.loads(resp.content)["value"]
+
+    resp = session.get(f"{base_url}/tokens/{token_name}")
+    assert resp.status_code == 200
+    assert resp.headers["content-type"] == "application/json"
+    assert json.loads(resp.content) == {
+        "name": token_name,
+        "created_at": created_at,
+        "value": "",
+        "permissions": permissions,
+        "is_provisioned": False,
+        "expires_at": json.loads(resp.content)["expires_at"],
+    }
+    assert json.loads(resp.content)["expires_at"] is not None
+
+
+@requires_env("API_TOKEN")
 def test__creat_token_with_full_access(
     base_url, session, token_name, token_without_permissions
 ):

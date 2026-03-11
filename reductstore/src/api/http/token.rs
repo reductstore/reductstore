@@ -28,6 +28,7 @@ use reduct_base::msg::token_api::{
     Permissions, Token, TokenCreateRequest, TokenCreateResponse, TokenList,
 };
 use reduct_macros::{IntoResponse, Twin};
+use serde::Deserialize;
 
 #[derive(IntoResponse, Twin)]
 pub struct TokenAxum(Token);
@@ -66,44 +67,41 @@ pub(super) fn create_token_api_routes() -> axum::Router<Arc<StateKeeper>> {
 
 // compatibility with v1, remove in v2
 fn parse_token_create_request(body: Bytes) -> Result<TokenCreateRequest, HttpError> {
-    let v: serde_json::Value = serde_json::from_slice(&body)
-        .map_err(|_| HttpError::new(ErrorCode::UnprocessableEntity, "Invalid body"))?;
+    serde_json::from_slice::<CompatTokenCreateRequest>(&body)
+        .map(Into::into)
+        .map_err(|_| HttpError::new(ErrorCode::UnprocessableEntity, "Invalid body"))
+}
 
-    if v.get("permissions").is_some() {
-        // v2 format
-        serde_json::from_value::<TokenCreateRequest>(v)
-            .map_err(|_| HttpError::new(ErrorCode::UnprocessableEntity, "Invalid body"))
-    } else {
-        // v1 format: body IS permissions
-        let permissions_value = match v {
-            serde_json::Value::Object(ref map) => {
-                let is_permissions_shape = map
-                    .keys()
-                    .all(|key| matches!(key.as_str(), "full_access" | "read" | "write"));
-                if !is_permissions_shape {
-                    return Err(HttpError::new(
-                        ErrorCode::UnprocessableEntity,
-                        "Invalid body",
-                    ));
-                }
-                v
-            }
-            _ => {
-                return Err(HttpError::new(
-                    ErrorCode::UnprocessableEntity,
-                    "Invalid body",
-                ));
-            }
-        };
+#[cfg_attr(not(test), allow(dead_code))]
+fn parse_token_create_request_v2(body: Bytes) -> Result<TokenCreateRequest, HttpError> {
+    serde_json::from_slice::<TokenCreateRequest>(&body)
+        .map_err(|_| HttpError::new(ErrorCode::UnprocessableEntity, "Invalid body"))
+}
 
-        let permissions: Permissions = serde_json::from_value(permissions_value)
-            .map_err(|_| HttpError::new(ErrorCode::UnprocessableEntity, "Invalid body"))?;
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum CompatTokenCreateRequest {
+    V2(TokenCreateRequest),
+    V1(V1PermissionsRequest),
+}
 
-        Ok(TokenCreateRequest {
-            permissions,
-            expires_in: None,
-        })
+impl From<CompatTokenCreateRequest> for TokenCreateRequest {
+    fn from(value: CompatTokenCreateRequest) -> Self {
+        match value {
+            CompatTokenCreateRequest::V2(request) => request,
+            CompatTokenCreateRequest::V1(request) => TokenCreateRequest {
+                permissions: request.permissions,
+                expires_in: None,
+            },
+        }
     }
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct V1PermissionsRequest {
+    #[serde(flatten)]
+    permissions: Permissions,
 }
 
 #[cfg(test)]
@@ -175,5 +173,39 @@ mod tests {
         assert_eq!(parsed.0.permissions.read, vec!["bucket-1"]);
         assert_eq!(parsed.0.permissions.write.len(), 0);
         assert_eq!(parsed.0.expires_in, None);
+    }
+
+    #[test]
+    fn test_parse_token_create_request_v2_strict() {
+        let parsed = parse_token_create_request_v2(Bytes::from(
+            r#"{"permissions":{"full_access":true,"read":["bucket-1"],"write":[]}, "expires_in":"5D"}"#,
+        ))
+        .unwrap();
+
+        assert!(parsed.permissions.full_access);
+        assert_eq!(parsed.permissions.read, vec!["bucket-1"]);
+        assert_eq!(parsed.expires_in, Some("5D".to_string()));
+    }
+
+    #[test]
+    fn test_parse_token_create_request_v2_rejects_v1_shape() {
+        let err = parse_token_create_request_v2(Bytes::from(
+            r#"{"full_access":true,"read":["bucket-1"],"write":[]}"#,
+        ))
+        .unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+    }
+
+    #[test]
+    fn test_parse_token_create_request_v1_uses_permissions_structure() {
+        let parsed = parse_token_create_request(Bytes::from(
+            r#"{"full_access":true,"read":["bucket-1"],"write":[]}"#,
+        ))
+        .unwrap();
+
+        assert!(parsed.permissions.full_access);
+        assert_eq!(parsed.permissions.read, vec!["bucket-1"]);
+        assert_eq!(parsed.expires_in, None);
     }
 }
