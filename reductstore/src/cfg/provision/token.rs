@@ -3,7 +3,6 @@
 
 use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
 use crate::cfg::{CfgParser, ExtCfgBounds};
-use crate::core::duration::parse_single_duration;
 use crate::core::env::{Env, GetEnv};
 use chrono::{DateTime, Utc};
 use log::{error, info, warn};
@@ -109,29 +108,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
             token.permissions = Some(permissions);
 
-            if let Some(expires_in) =
-                env.get_optional::<String>(&format!("RS_TOKEN_{}_EXPIRES_IN", id))
-            {
-                match parse_single_duration(&expires_in) {
-                    Ok(usec) if usec >= 0 => {
-                        if let Some(value) = token
-                            .created_at
-                            .checked_add_signed(chrono::Duration::microseconds(usec))
-                        {
-                            token.expires_at = Some(value);
-                        } else {
-                            warn!(
-                                "Token '{}' has invalid expiry duration '{}'. Ignore it.",
-                                token.name, expires_in
-                            );
-                        }
-                    }
-                    _ => warn!(
-                        "Token '{}' has invalid expiry duration '{}'. Ignore it.",
-                        token.name, expires_in
-                    ),
-                }
-            } else if let Some(expires_at) =
+            if let Some(expires_at) =
                 env.get_optional::<String>(&format!("RS_TOKEN_{}_EXPIRES_AT", id))
             {
                 match DateTime::parse_from_rfc3339(&expires_at) {
@@ -258,34 +235,6 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_tokens_with_expiry_duration(#[future] env_with_tokens: MockEnvGetter) {
-        let mut env_with_tokens = env_with_tokens.await;
-        env_with_tokens
-            .expect_get()
-            .with(eq("RS_TOKEN_1_VALUE"))
-            .return_const(Ok("TOKEN".to_string()));
-        env_with_tokens
-            .expect_get()
-            .with(eq("RS_TOKEN_1_EXPIRES_IN"))
-            .return_const(Ok("5d".to_string()));
-        env_with_tokens
-            .expect_get()
-            .return_const(Err(VarError::NotPresent));
-
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
-        let components = cfg.build().await.unwrap();
-
-        let mut repo = components.token_repo.write().await.unwrap();
-        let token1 = repo.get_token("token1").await.unwrap().clone();
-        assert_eq!(
-            token1.expires_at,
-            Some(token1.created_at + chrono::Duration::days(5))
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    #[serial]
     async fn test_tokens_no_value(#[future] env_with_tokens: MockEnvGetter) {
         let mut env_with_tokens = env_with_tokens.await;
         env_with_tokens
@@ -393,57 +342,5 @@ mod tests {
             .with(eq("RS_TOKEN_1_NAME"))
             .return_const(Ok("token1".to_string()));
         mock_getter
-    }
-
-    #[rstest]
-    #[tokio::test]
-    #[serial]
-    async fn test_tokens_invalid_expiry_duration(#[future] env_with_tokens: MockEnvGetter) {
-        let mut env_with_tokens = env_with_tokens.await;
-        env_with_tokens
-            .expect_get()
-            .with(eq("RS_TOKEN_1_VALUE"))
-            .return_const(Ok("TOKEN".to_string()));
-        env_with_tokens
-            .expect_get()
-            .with(eq("RS_TOKEN_1_EXPIRES_IN"))
-            .return_const(Ok("invalid-duration".to_string()));
-        env_with_tokens
-            .expect_get()
-            .return_const(Err(VarError::NotPresent));
-
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
-        let components = cfg.build().await.unwrap();
-
-        let mut repo = components.token_repo.write().await.unwrap();
-        let token1 = repo.get_token("token1").await.unwrap().clone();
-        assert_eq!(token1.value, "TOKEN");
-        assert_eq!(token1.expires_at, None);
-    }
-
-    #[rstest]
-    #[tokio::test]
-    #[serial]
-    async fn test_tokens_expiry_duration_overflow(#[future] env_with_tokens: MockEnvGetter) {
-        let mut env_with_tokens = env_with_tokens.await;
-        env_with_tokens
-            .expect_get()
-            .with(eq("RS_TOKEN_1_VALUE"))
-            .return_const(Ok("TOKEN".to_string()));
-        env_with_tokens
-            .expect_get()
-            .with(eq("RS_TOKEN_1_EXPIRES_IN"))
-            .return_const(Ok("9223372036854775807us".to_string()));
-        env_with_tokens
-            .expect_get()
-            .return_const(Err(VarError::NotPresent));
-
-        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
-        let components = cfg.build().await.unwrap();
-
-        let mut repo = components.token_repo.write().await.unwrap();
-        let token1 = repo.get_token("token1").await.unwrap().clone();
-        assert_eq!(token1.value, "TOKEN");
-        assert_eq!(token1.expires_at, None);
     }
 }
