@@ -294,7 +294,7 @@ pub(crate) mod tests {
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
     use reduct_base::msg::server_api::ServerInfo;
-    use reduct_base::msg::token_api::Permissions;
+    use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
     use rstest::fixture;
     use std::collections::HashMap;
     use std::time::Duration;
@@ -870,7 +870,13 @@ pub(crate) mod tests {
         };
 
         token_repo
-            .generate_token("test", permissions)
+            .generate_token(
+                "test",
+                TokenCreateRequest {
+                    permissions,
+                    expires_at: None,
+                },
+            )
             .await
             .unwrap();
 

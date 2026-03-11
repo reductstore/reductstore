@@ -12,7 +12,7 @@ use log::debug;
 use prost::Message;
 use rand::Rng;
 use reduct_base::error::ReductError;
-use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
+use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
 use reduct_base::{conflict, not_found, unprocessable_entity};
 use regex::Regex;
 use std::collections::HashMap;
@@ -95,6 +95,7 @@ impl TokenRepository {
                 write: vec![],
             }),
             is_provisioned: true,
+            expires_at: None,
         };
 
         token_repository
@@ -137,8 +138,10 @@ impl ManageTokens for TokenRepository {
     async fn generate_token(
         &mut self,
         name: &str,
-        permissions: Permissions,
+        request: TokenCreateRequest,
     ) -> Result<TokenCreateResponse, ReductError> {
+        let permissions = request.permissions;
+
         // Check if the token isn't empty
         if name.is_empty() {
             return Err(unprocessable_entity!("Token name can't be empty"));
@@ -159,6 +162,18 @@ impl ManageTokens for TokenRepository {
         }
 
         let created_at = DateTime::<Utc>::from(SystemTime::now());
+        let expires_at = request
+            .expires_at
+            .map(|expires_at| {
+                if expires_at < created_at {
+                    Err(unprocessable_entity!(
+                        "Token expiration date must not be in the past"
+                    ))
+                } else {
+                    Ok(expires_at)
+                }
+            })
+            .transpose()?;
 
         // Create a random hex string
         let (value, token) = {
@@ -175,6 +190,7 @@ impl ManageTokens for TokenRepository {
                     created_at: created_at.clone(),
                     permissions: Some(permissions),
                     is_provisioned: false,
+                    expires_at,
                 },
             )
         };
@@ -291,10 +307,13 @@ mod tests {
             let token = repo
                 .generate_token(
                     "",
-                    Permissions {
-                        full_access: true,
-                        read: vec![],
-                        write: vec![],
+                    TokenCreateRequest {
+                        permissions: Permissions {
+                            full_access: true,
+                            read: vec![],
+                            write: vec![],
+                        },
+                        expires_at: None,
                     },
                 )
                 .await;
@@ -312,10 +331,13 @@ mod tests {
             let token = repo
                 .generate_token(
                     "test",
-                    Permissions {
-                        full_access: true,
-                        read: vec![],
-                        write: vec![],
+                    TokenCreateRequest {
+                        permissions: Permissions {
+                            full_access: true,
+                            read: vec![],
+                            write: vec![],
+                        },
+                        expires_at: None,
                     },
                 )
                 .await;
@@ -330,10 +352,13 @@ mod tests {
             let token = repo
                 .generate_token(
                     "test-1",
-                    Permissions {
-                        full_access: true,
-                        read: vec![],
-                        write: vec![],
+                    TokenCreateRequest {
+                        permissions: Permissions {
+                            full_access: true,
+                            read: vec![],
+                            write: vec![],
+                        },
+                        expires_at: None,
                     },
                 )
                 .await
@@ -342,6 +367,47 @@ mod tests {
             assert_eq!(token.value.len(), 39);
             assert_eq!(token.value, "test-1-".to_string() + &token.value[7..]);
             assert!(token.created_at.timestamp() > 0);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_create_token_with_expires_at(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let expires_at = chrono::Utc::now() + chrono::Duration::days(5);
+            let created = repo
+                .generate_token(
+                    "test-exp",
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_at: Some(expires_at),
+                    },
+                )
+                .await
+                .unwrap();
+
+            let token = repo.get_token("test-exp").await.unwrap();
+            assert_eq!(token.expires_at, Some(expires_at));
+            assert!(created.created_at.timestamp() > 0);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_create_token_with_past_expires_at(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let token = repo
+                .generate_token(
+                    "test-exp",
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_at: Some(chrono::Utc::now() - chrono::Duration::days(5)),
+                    },
+                )
+                .await;
+
+            assert_eq!(
+                token.err().unwrap(),
+                unprocessable_entity!("Token expiration date must not be in the past")
+            );
         }
 
         #[rstest]
@@ -355,10 +421,13 @@ mod tests {
             let mut repo = build_repo_at(&path, &cfg).await;
             repo.generate_token(
                 "test",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access: true,
+                        read: vec![],
+                        write: vec![],
+                    },
+                    expires_at: None,
                 },
             )
             .await
@@ -366,6 +435,33 @@ mod tests {
 
             let mut repo = build_repo_at(&path, &cfg).await;
             assert_eq!(repo.get_token("test").await.unwrap().name, "test");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_create_token_expiry_persistent(path: PathBuf, init_token: &str) {
+            let cfg = Cfg {
+                api_token: init_token.to_string(),
+                ..Default::default()
+            };
+
+            let mut repo = build_repo_at(&path, &cfg).await;
+            let expires_at = chrono::Utc::now() + chrono::Duration::days(5);
+            let created = repo
+                .generate_token(
+                    "test-exp-persistent",
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_at: Some(expires_at),
+                    },
+                )
+                .await
+                .unwrap();
+
+            let mut repo = build_repo_at(&path, &cfg).await;
+            let token = repo.get_token("test-exp-persistent").await.unwrap();
+            assert_eq!(token.expires_at, Some(expires_at));
+            assert!(created.created_at.timestamp() > 0);
         }
 
         #[rstest]
@@ -389,10 +485,13 @@ mod tests {
             let token = repo
                 .generate_token(
                     "test-1",
-                    Permissions {
-                        full_access: true,
-                        read: vec![bucket.to_string()],
-                        write: vec![],
+                    TokenCreateRequest {
+                        permissions: Permissions {
+                            full_access: true,
+                            read: vec![bucket.to_string()],
+                            write: vec![],
+                        },
+                        expires_at: None,
                     },
                 )
                 .await;
@@ -421,10 +520,13 @@ mod tests {
             let token = repo
                 .generate_token(
                     "test-1",
-                    Permissions {
-                        full_access: true,
-                        read: vec![],
-                        write: vec![bucket.to_string()],
+                    TokenCreateRequest {
+                        permissions: Permissions {
+                            full_access: true,
+                            read: vec![],
+                            write: vec![bucket.to_string()],
+                        },
+                        expires_at: None,
                     },
                 )
                 .await;
@@ -484,10 +586,13 @@ mod tests {
             let value = repo
                 .generate_token(
                     "test-1",
-                    Permissions {
-                        full_access: true,
-                        read: vec!["bucket-1".to_string()],
-                        write: vec!["bucket-2".to_string()],
+                    TokenCreateRequest {
+                        permissions: Permissions {
+                            full_access: true,
+                            read: vec!["bucket-1".to_string()],
+                            write: vec!["bucket-2".to_string()],
+                        },
+                        expires_at: None,
                     },
                 )
                 .await
@@ -511,6 +616,7 @@ mod tests {
                         write: vec!["bucket-2".to_string()],
                     }),
                     is_provisioned: false,
+                    expires_at: None,
                 }
             );
         }
@@ -521,6 +627,33 @@ mod tests {
             let mut repo = repo.await;
             let token = repo.validate_token(Some("Bearer invalid-value")).await;
             assert_eq!(token, Err(unauthorized!("Invalid token")));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_validate_token_expired(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let value = repo
+                .generate_token(
+                    "test-expired",
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_at: None,
+                    },
+                )
+                .await
+                .unwrap()
+                .value;
+
+            let token = repo.get_mut_token("test-expired").await.unwrap();
+            token.expires_at = Some(chrono::Utc::now() - chrono::Duration::seconds(1));
+
+            let err = repo
+                .validate_token(Some(&format!("Bearer {}", value)))
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, unauthorized!("Token has expired"));
         }
     }
 
@@ -558,14 +691,23 @@ mod tests {
         async fn test_remove_token_persistent(path: PathBuf, init_token: &str, cfg: Cfg) {
             let mut repo = build_repo_at(&path, &cfg).await;
             let _ = repo
-                .generate_token(init_token, Permissions::default())
+                .generate_token(
+                    init_token,
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_at: None,
+                    },
+                )
                 .await;
             repo.generate_token(
                 "test",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access: true,
+                        read: vec![],
+                        write: vec![],
+                    },
+                    expires_at: None,
                 },
             )
             .await
@@ -600,10 +742,13 @@ mod tests {
             let mut repo = repo.await;
             repo.generate_token(
                 "test-2",
-                Permissions {
-                    full_access: true,
-                    read: vec!["bucket-1".to_string()],
-                    write: vec!["bucket-1".to_string()],
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access: true,
+                        read: vec!["bucket-1".to_string()],
+                        write: vec!["bucket-1".to_string()],
+                    },
+                    expires_at: None,
                 },
             )
             .await
@@ -636,14 +781,23 @@ mod tests {
         async fn test_rename_bucket_persistent(path: PathBuf, init_token: &str, cfg: Cfg) {
             let mut repo = build_repo_at(&path, &cfg).await;
             let _ = repo
-                .generate_token(init_token, Permissions::default())
+                .generate_token(
+                    init_token,
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_at: None,
+                    },
+                )
                 .await;
             repo.generate_token(
                 "test-2",
-                Permissions {
-                    full_access: true,
-                    read: vec!["bucket-1".to_string()],
-                    write: vec!["bucket-1".to_string()],
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access: true,
+                        read: vec!["bucket-1".to_string()],
+                        write: vec!["bucket-1".to_string()],
+                    },
+                    expires_at: None,
                 },
             )
             .await
@@ -685,10 +839,13 @@ mod tests {
         let _ = repo
             .generate_token(
                 cfg.api_token.as_str(),
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access: true,
+                        read: vec![],
+                        write: vec![],
+                    },
+                    expires_at: None,
                 },
             )
             .await;
@@ -696,10 +853,13 @@ mod tests {
         let _ = repo
             .generate_token(
                 "test",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access: true,
+                        read: vec![],
+                        write: vec![],
+                    },
+                    expires_at: None,
                 },
             )
             .await;

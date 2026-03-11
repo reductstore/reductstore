@@ -14,10 +14,10 @@ use chrono::{DateTime, Utc};
 use log::warn;
 use prost_wkt_types::Timestamp;
 use reduct_base::error::ReductError;
-use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
+use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
 use reduct_base::{not_found, unauthorized};
 use std::path::PathBuf;
-use std::time::{Duration, UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 const TOKEN_REPO_FILE_NAME: &str = ".auth";
 const INIT_TOKEN_NAME: &str = "init-token";
@@ -52,6 +52,10 @@ impl From<Token> for crate::auth::proto::Token {
                 seconds: token.created_at.timestamp(),
                 nanos: token.created_at.timestamp_subsec_nanos() as i32,
             }),
+            expires_at: token.expires_at.map(|ts| Timestamp {
+                seconds: ts.timestamp(),
+                nanos: ts.timestamp_subsec_nanos() as i32,
+            }),
             permissions,
         }
     }
@@ -70,12 +74,17 @@ impl Into<Token> for crate::auth::proto::Token {
         };
 
         let created_at = if let Some(ts) = self.created_at {
-            let since_epoch = Duration::new(ts.seconds as u64, ts.nanos as u32);
+            let since_epoch = std::time::Duration::new(ts.seconds as u64, ts.nanos as u32);
             DateTime::<Utc>::from(UNIX_EPOCH + since_epoch)
         } else {
             warn!("Token has no creation time");
             Utc::now()
         };
+
+        let expires_at = self.expires_at.map(|ts| {
+            let since_epoch = std::time::Duration::new(ts.seconds as u64, ts.nanos as u32);
+            DateTime::<Utc>::from(UNIX_EPOCH + since_epoch)
+        });
 
         Token {
             name: self.name,
@@ -83,6 +92,7 @@ impl Into<Token> for crate::auth::proto::Token {
             created_at,
             permissions,
             is_provisioned: false,
+            expires_at,
         }
     }
 }
@@ -102,7 +112,7 @@ pub(crate) trait ManageTokens {
     async fn generate_token(
         &mut self,
         name: &str,
-        permissions: Permissions,
+        request: TokenCreateRequest,
     ) -> Result<TokenCreateResponse, ReductError>;
 
     /// Get a token by name
@@ -198,12 +208,24 @@ pub(super) trait AccessTokens {
 
     fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
         let value = parse_bearer_token(header.unwrap_or(""))?;
-        self.repo()
+        let token = self
+            .repo()
             .values()
             .find(|token| token.value == value)
             .cloned()
-            .ok_or_else(|| unauthorized!("Invalid token"))
+            .ok_or_else(|| unauthorized!("Invalid token"))?;
+        check_token_lifetime(&token)?;
+        Ok(token)
     }
+}
+
+fn check_token_lifetime(token: &Token) -> Result<(), ReductError> {
+    if let Some(expiry) = token.expires_at {
+        if Utc::now() >= expiry {
+            return Err(unauthorized!("Token has expired"));
+        }
+    }
+    Ok(())
 }
 
 pub(crate) type BoxedTokenRepository = Box<dyn ManageTokens + Send + Sync>;
@@ -219,13 +241,75 @@ impl TokenRepositoryBuilder {
 
     pub async fn build(self, config_path: PathBuf) -> BoxedTokenRepository {
         if self.cfg.role == InstanceRole::Replica {
-            return Box::new(ReadOnlyTokenRepository::new(config_path, self.cfg.clone()).await);
+            return Box::new(ReadOnlyTokenRepository::new(config_path, self.cfg.clone()).await)
+                as BoxedTokenRepository;
         }
 
         if !self.cfg.api_token.is_empty() {
             Box::new(TokenRepository::new(config_path, self.cfg.api_token).await)
+                as BoxedTokenRepository
         } else {
-            Box::new(NoAuthRepository::new())
+            Box::new(NoAuthRepository::new()) as BoxedTokenRepository
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::Duration;
+    use reduct_base::{forbidden, unauthorized};
+    use tempfile::tempdir;
+
+    #[test]
+    fn test_check_token_lifetime_expired() {
+        let token = Token {
+            name: "expired".to_string(),
+            value: "expired".to_string(),
+            created_at: Utc::now(),
+            permissions: None,
+            is_provisioned: false,
+            expires_at: Some(Utc::now() - Duration::seconds(1)),
+        };
+
+        assert_eq!(
+            check_token_lifetime(&token).err().unwrap(),
+            unauthorized!("Token has expired")
+        );
+    }
+
+    #[test]
+    fn test_check_token_lifetime_no_expiry() {
+        let token = Token {
+            name: "no-expiry".to_string(),
+            value: "no-expiry".to_string(),
+            created_at: Utc::now(),
+            permissions: None,
+            is_provisioned: false,
+            expires_at: None,
+        };
+
+        assert!(check_token_lifetime(&token).is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_token_repository_builder_replica_read_only() {
+        let mut cfg = Cfg::default();
+        cfg.role = InstanceRole::Replica;
+        let path = tempdir().unwrap().keep();
+
+        let mut repo = TokenRepositoryBuilder::new(cfg).build(path).await;
+        let err = repo
+            .generate_token(
+                "test",
+                TokenCreateRequest {
+                    permissions: Permissions::default(),
+                    expires_at: None,
+                },
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(err, forbidden!("Cannot generate token in read-only mode"));
     }
 }
