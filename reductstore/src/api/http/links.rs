@@ -54,8 +54,8 @@ pub(super) fn derive_key_from_secret(secret: &[u8], salt: &[u8]) -> [u8; 32] {
 
 pub(super) fn create_query_link_api_routes() -> axum::Router<Arc<StateKeeper>> {
     axum::Router::new()
-        .route("/{file_name}", post(create))
-        .route("/{file_name}", get(get::get))
+        .route("/{*file_name}", post(create))
+        .route("/{*file_name}", get(get::get))
 }
 
 #[cfg(test)]
@@ -63,14 +63,17 @@ pub(super) mod tests {
     use super::*;
     use crate::api::http::links::create::create;
     use crate::api::http::links::{QueryLinkCreateRequestAxum, QueryLinkCreateResponseAxum};
+    use crate::api::http::tests::{headers, keeper};
     use crate::api::http::HttpError;
+    use axum::body::Body;
     use axum::extract::{Path, State};
-    use axum::http::HeaderMap;
+    use axum::http::{HeaderMap, Method, Request, StatusCode};
     use chrono::{DateTime, Utc};
     use reduct_base::msg::entry_api::QueryEntry;
     use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
     use rstest::rstest;
     use std::sync::Arc;
+    use tower::ServiceExt;
 
     #[rstest]
     #[tokio::test]
@@ -131,6 +134,76 @@ pub(super) mod tests {
             .unwrap();
         let err: ReductError = err.into();
         assert_eq!(err, unprocessable_entity!("Invalid JSON: unknown variant `INVALID_TYPE`, expected `QUERY` or `REMOVE` at line 6 column 44"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_route_with_multi_segment_file_name_post(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let app = create_query_link_api_routes().with_state(keeper.await);
+        let auth = headers.get("authorization").unwrap().to_str().unwrap();
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::POST)
+                    .uri("/a/b/c")
+                    .header("authorization", auth)
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{
+                            "expire_at": 4102444800,
+                            "bucket": "bucket-1",
+                            "entry": "entry-1",
+                            "query": {
+                                "query_type": "QUERY"
+                            }
+                        }"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_route_with_multi_segment_file_name_get(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let app = create_query_link_api_routes().with_state(keeper.clone());
+        let link = create_query_link(
+            headers,
+            keeper,
+            QueryEntry {
+                query_type: reduct_base::msg::entry_api::QueryType::Query,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+        let query = link.split('?').nth(1).unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method(Method::GET)
+                    .uri(format!("/a/b/c?{}", query))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     pub(super) async fn create_query_link(
