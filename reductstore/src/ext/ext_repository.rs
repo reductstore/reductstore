@@ -6,7 +6,7 @@ mod load;
 
 use crate::core::sync::AsyncRwLock;
 use crate::storage::engine::StorageEngine;
-use crate::storage::entry::meta_entry_name;
+use crate::storage::entry::{is_system_meta_entry, meta_entry_name};
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{Parser, Value};
 use crate::storage::query::QueryRx;
@@ -164,11 +164,11 @@ impl ManageExtensions for ExtRepository {
                     ));
                 };
 
-                if let Some(meta_params) = self
-                    .get_meta_ext_params(bucket_name, entry_name, &name)
+                if let Some(attachments) = self
+                    .get_ext_attachments(bucket_name, entry_name, &query_request, &name)
                     .await?
                 {
-                    Self::attach_meta_ext_params(ext_query, &name, meta_params);
+                    Self::attach_ext_attachments(ext_query, &name, attachments);
                 }
 
                 if let Some(ext) = self.extension_map.get(&name) {
@@ -355,16 +355,13 @@ impl ManageExtensions for ExtRepository {
 }
 
 impl ExtRepository {
-    async fn get_meta_ext_params(
+    async fn get_ext_attachments(
         &self,
         bucket_name: &str,
         entry_name: &str,
+        query_request: &QueryEntry,
         ext_name: &str,
     ) -> Result<Option<serde_json::Value>, ReductError> {
-        if entry_name.is_empty() {
-            return Ok(None);
-        }
-
         let Some(storage) = &self.storage else {
             return Ok(None);
         };
@@ -375,58 +372,99 @@ impl ExtRepository {
             Err(err) => return Err(err),
         };
 
-        let meta_name = meta_entry_name(entry_name);
-        let meta_entry = match bucket.get_entry(&meta_name).await {
-            Ok(entry) => entry.upgrade()?,
-            Err(err) if err.status == NotFound => return Ok(None),
-            Err(err) => return Err(err),
+        let patterns = if let Some(entries) = query_request.entries.clone() {
+            entries
+        } else if !entry_name.is_empty() {
+            vec![entry_name.to_string()]
+        } else {
+            vec![]
         };
 
-        let query_id = meta_entry
-            .query(QueryEntry {
-                include: Some(HashMap::from([("key".to_string(), format!("${ext_name}"))])),
-                limit: Some(1),
-                ..Default::default()
-            })
-            .await?;
-
-        let (rx, _) = meta_entry.get_query_receiver(query_id).await?;
-        let rx = rx.upgrade()?;
-
-        let result = rx.write().await?.recv().await;
-        let Some(result) = result else {
+        if patterns.is_empty() {
             return Ok(None);
-        };
-
-        let mut record = match result {
-            Ok(record) => record,
-            Err(err) if err.status == NoContent => return Ok(None),
-            Err(err) => return Err(err),
-        };
-
-        let mut data = Vec::new();
-        while let Some(chunk) = record.read_chunk() {
-            let chunk = chunk?;
-            data.extend_from_slice(chunk.as_ref());
         }
 
-        let parsed = serde_json::from_slice::<serde_json::Value>(&data).map_err(|err| {
-            unprocessable_entity!(
-                "Meta attachment '${}' in '{}/{}' must be valid JSON: {}",
-                ext_name,
-                bucket_name,
-                meta_name,
-                err
-            )
-        })?;
+        let has_all_wildcard = patterns.iter().any(|p| p == "*");
+        let matches_pattern = |entry: &str| {
+            if has_all_wildcard {
+                return true;
+            }
 
-        Ok(Some(parsed))
+            patterns.iter().any(|pattern| {
+                if let Some(prefix) = pattern.strip_suffix('*') {
+                    entry.starts_with(prefix)
+                } else {
+                    entry == pattern
+                }
+            })
+        };
+
+        let full_info = bucket.clone().info().await?;
+        let mut attachments = Map::new();
+        for info in full_info.entries {
+            let entry = info.name;
+            if is_system_meta_entry(&entry) || !matches_pattern(&entry) {
+                continue;
+            }
+
+            let meta_name = meta_entry_name(&entry);
+            let meta_entry = match bucket.get_entry(&meta_name).await {
+                Ok(entry) => entry.upgrade()?,
+                Err(err) if err.status == NotFound => continue,
+                Err(err) => return Err(err),
+            };
+
+            let query_id = meta_entry
+                .query(QueryEntry {
+                    include: Some(HashMap::from([("key".to_string(), format!("${ext_name}"))])),
+                    limit: Some(1),
+                    ..Default::default()
+                })
+                .await?;
+
+            let (rx, _) = meta_entry.get_query_receiver(query_id).await?;
+            let rx = rx.upgrade()?;
+
+            let Some(result) = rx.write().await?.recv().await else {
+                continue;
+            };
+
+            let mut record = match result {
+                Ok(record) => record,
+                Err(err) if err.status == NoContent => continue,
+                Err(err) => return Err(err),
+            };
+
+            let mut data = Vec::new();
+            while let Some(chunk) = record.read_chunk() {
+                let chunk = chunk?;
+                data.extend_from_slice(chunk.as_ref());
+            }
+
+            let parsed = serde_json::from_slice::<serde_json::Value>(&data).map_err(|err| {
+                unprocessable_entity!(
+                    "Meta attachment '${}' in '{}/{}' must be valid JSON: {}",
+                    ext_name,
+                    bucket_name,
+                    meta_name,
+                    err
+                )
+            })?;
+
+            attachments.insert(entry, parsed);
+        }
+
+        if attachments.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(serde_json::Value::Object(attachments)))
+        }
     }
 
-    fn attach_meta_ext_params(
+    fn attach_ext_attachments(
         ext_query: &mut Map<String, serde_json::Value>,
         name: &str,
-        meta: serde_json::Value,
+        attachments: serde_json::Value,
     ) {
         if !ext_query.contains_key(name) {
             ext_query.insert(name.to_string(), serde_json::json!({}));
@@ -436,7 +474,9 @@ impl ExtRepository {
             .get_mut(name)
             .and_then(|value| value.as_object_mut())
         {
-            current.entry("meta".to_string()).or_insert(meta);
+            current
+                .entry("attachments".to_string())
+                .or_insert(attachments);
         }
     }
 }
@@ -582,7 +622,7 @@ pub(super) mod tests {
             };
             let expected_query = QueryEntry {
                 ext: Some(json!({
-                    "test-ext": {"meta": {"scale": 100}},
+                    "test-ext": {"attachments": {"entry": {"scale": 100}}},
                 })),
                 ..Default::default()
             };
@@ -595,10 +635,10 @@ pub(super) mod tests {
             let mocked_ext_repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
             assert_eq!(
                 mocked_ext_repo
-                    .get_meta_ext_params("bucket", "entry", "test-ext")
+                    .get_ext_attachments("bucket", "entry", &query, "test-ext")
                     .await
                     .unwrap(),
-                Some(json!({"scale": 100}))
+                Some(json!({"entry": {"scale": 100}}))
             );
 
             assert!(mocked_ext_repo
@@ -737,7 +777,7 @@ pub(super) mod tests {
         }
     }
 
-    mod get_meta_ext_params {
+    mod get_ext_attachments {
         use super::*;
         use reduct_base::error::ErrorCode;
 
@@ -785,12 +825,35 @@ pub(super) mod tests {
             writer.send(Ok(None)).await.unwrap();
         }
 
+        async fn write_record(storage: &Arc<StorageEngine>, bucket_name: &str, entry_name: &str) {
+            let bucket = storage
+                .get_bucket(bucket_name)
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut writer = bucket
+                .begin_write(
+                    entry_name,
+                    1,
+                    2,
+                    "application/json".to_string(),
+                    Labels::new(),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(Bytes::from_static(br#"{}"#))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
         #[rstest]
         #[tokio::test]
         async fn returns_none_for_empty_entry_name(mock_ext: MockIoExtension) {
             let repo = mocked_ext_repo("test-ext", mock_ext);
             assert_eq!(
-                repo.get_meta_ext_params("bucket", "", "test-ext")
+                repo.get_ext_attachments("bucket", "", &QueryEntry::default(), "test-ext")
                     .await
                     .unwrap(),
                 None
@@ -802,7 +865,7 @@ pub(super) mod tests {
         async fn returns_none_without_storage(mock_ext: MockIoExtension) {
             let repo = mocked_ext_repo("test-ext", mock_ext);
             assert_eq!(
-                repo.get_meta_ext_params("bucket", "entry", "test-ext")
+                repo.get_ext_attachments("bucket", "entry", &QueryEntry::default(), "test-ext")
                     .await
                     .unwrap(),
                 None
@@ -815,7 +878,27 @@ pub(super) mod tests {
             let storage = create_storage().await;
             let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
             assert_eq!(
-                repo.get_meta_ext_params("missing", "entry", "test-ext")
+                repo.get_ext_attachments("missing", "entry", &QueryEntry::default(), "test-ext")
+                    .await
+                    .unwrap(),
+                None
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn returns_none_when_request_has_no_entries_and_entry_name_empty(
+            mock_ext: MockIoExtension,
+        ) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            assert_eq!(
+                repo.get_ext_attachments("bucket", "", &QueryEntry::default(), "test-ext")
                     .await
                     .unwrap(),
                 None
@@ -833,7 +916,7 @@ pub(super) mod tests {
 
             let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
             assert_eq!(
-                repo.get_meta_ext_params("bucket", "entry", "test-ext")
+                repo.get_ext_attachments("bucket", "entry", &QueryEntry::default(), "test-ext")
                     .await
                     .unwrap(),
                 None
@@ -860,7 +943,7 @@ pub(super) mod tests {
 
             let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
             assert_eq!(
-                repo.get_meta_ext_params("bucket", "entry", "test-ext")
+                repo.get_ext_attachments("bucket", "entry", &QueryEntry::default(), "test-ext")
                     .await
                     .unwrap(),
                 None
@@ -880,7 +963,7 @@ pub(super) mod tests {
 
             let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
             let err = repo
-                .get_meta_ext_params("bucket", "entry", "test-ext")
+                .get_ext_attachments("bucket", "entry", &QueryEntry::default(), "test-ext")
                 .await
                 .err()
                 .unwrap();
@@ -888,58 +971,186 @@ pub(super) mod tests {
             assert_eq!(err.status, ErrorCode::UnprocessableEntity);
             assert!(err.message.contains("must be valid JSON"));
         }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn collects_attachments_for_all_wildcard(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry-a/$meta",
+                "$test-ext",
+                br#"{"topic":"/a"}"#,
+            )
+            .await;
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry-b/$meta",
+                "$test-ext",
+                br#"{"topic":"/b"}"#,
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let query = QueryEntry {
+                entries: Some(vec!["*".to_string()]),
+                ..Default::default()
+            };
+            assert_eq!(
+                repo.get_ext_attachments("bucket", "", &query, "test-ext")
+                    .await
+                    .unwrap(),
+                Some(json!({
+                    "entry-a": {"topic": "/a"},
+                    "entry-b": {"topic": "/b"}
+                }))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn skips_non_matching_entries_and_entries_without_meta(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry-matched/$meta",
+                "$test-ext",
+                br#"{"topic":"/matched"}"#,
+            )
+            .await;
+            write_meta_record(
+                &storage,
+                "bucket",
+                "other/$meta",
+                "$test-ext",
+                br#"{"topic":"/other"}"#,
+            )
+            .await;
+            write_record(&storage, "bucket", "entry-no-meta").await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let query = QueryEntry {
+                entries: Some(vec!["entry-*".to_string()]),
+                ..Default::default()
+            };
+            assert_eq!(
+                repo.get_ext_attachments("bucket", "", &query, "test-ext")
+                    .await
+                    .unwrap(),
+                Some(json!({
+                    "entry-matched": {"topic": "/matched"}
+                }))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn collects_attachments_for_wildcard_entries(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry-a/$meta",
+                "$test-ext",
+                br#"{"topic":"/a"}"#,
+            )
+            .await;
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry-b/$meta",
+                "$test-ext",
+                br#"{"topic":"/b"}"#,
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let query = QueryEntry {
+                entries: Some(vec!["entry-*".to_string()]),
+                ..Default::default()
+            };
+            assert_eq!(
+                repo.get_ext_attachments("bucket", "", &query, "test-ext")
+                    .await
+                    .unwrap(),
+                Some(json!({
+                    "entry-a": {"topic": "/a"},
+                    "entry-b": {"topic": "/b"}
+                }))
+            );
+        }
     }
 
-    mod attach_meta_ext_params {
+    mod attach_ext_attachments {
         use super::*;
 
         #[test]
         fn creates_extension_entry_when_missing() {
             let mut ext_query = Map::new();
-            ExtRepository::attach_meta_ext_params(
+            ExtRepository::attach_ext_attachments(
                 &mut ext_query,
                 "test-ext",
                 json!({"scale": 100}),
             );
             assert_eq!(
                 ext_query.get("test-ext").cloned().unwrap(),
-                json!({"meta": {"scale": 100}})
+                json!({"attachments": {"scale": 100}})
             );
         }
 
         #[test]
-        fn inserts_meta_into_empty_extension_object() {
+        fn inserts_attachments_into_empty_extension_object() {
             let mut ext_query = Map::from_iter([("test-ext".to_string(), json!({}))]);
-            ExtRepository::attach_meta_ext_params(
+            ExtRepository::attach_ext_attachments(
                 &mut ext_query,
                 "test-ext",
                 json!({"scale": 100}),
             );
             assert_eq!(
                 ext_query.get("test-ext").cloned().unwrap(),
-                json!({"meta": {"scale": 100}})
+                json!({"attachments": {"scale": 100}})
             );
         }
 
         #[test]
-        fn keeps_existing_meta_unchanged() {
-            let mut ext_query =
-                Map::from_iter([("test-ext".to_string(), json!({"meta": {"keep": true}}))]);
-            ExtRepository::attach_meta_ext_params(
+        fn keeps_existing_attachments_unchanged() {
+            let mut ext_query = Map::from_iter([(
+                "test-ext".to_string(),
+                json!({"attachments": {"keep": true}}),
+            )]);
+            ExtRepository::attach_ext_attachments(
                 &mut ext_query,
                 "test-ext",
                 json!({"scale": 100}),
             );
             assert_eq!(
                 ext_query.get("test-ext").cloned().unwrap(),
-                json!({"meta": {"keep": true}})
+                json!({"attachments": {"keep": true}})
             );
         }
 
         #[test]
         fn ignores_non_object_extension_value() {
             let mut ext_query = Map::from_iter([("test-ext".to_string(), json!("bad"))]);
-            ExtRepository::attach_meta_ext_params(
+            ExtRepository::attach_ext_attachments(
                 &mut ext_query,
                 "test-ext",
                 json!({"scale": 100}),
