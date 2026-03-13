@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Extract extension attachments for wildcard-matched entries and pass per-entry attachment maps to extensions, [PR-1203](https://github.com/reductstore/reductstore/pull/1203)
 - Restore `Unknown extension` validation for queries with `ext` when no extensions are loaded, [PR-1192](https://github.com/reductstore/reductstore/pull/1192)
 - Fix share links for entries with nested paths by matching multi-segment filenames in links routes, [PR-1202](https://github.com/reductstore/reductstore/pull/1202)
 
