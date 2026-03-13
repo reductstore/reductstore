@@ -391,9 +391,7 @@ impl ExtRepository {
             }
 
             patterns.iter().any(|pattern| {
-                if pattern == "*" {
-                    true
-                } else if let Some(prefix) = pattern.strip_suffix('*') {
+                if let Some(prefix) = pattern.strip_suffix('*') {
                     entry.starts_with(prefix)
                 } else {
                     entry == pattern
@@ -827,6 +825,29 @@ pub(super) mod tests {
             writer.send(Ok(None)).await.unwrap();
         }
 
+        async fn write_record(storage: &Arc<StorageEngine>, bucket_name: &str, entry_name: &str) {
+            let bucket = storage
+                .get_bucket(bucket_name)
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut writer = bucket
+                .begin_write(
+                    entry_name,
+                    1,
+                    2,
+                    "application/json".to_string(),
+                    Labels::new(),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(Bytes::from_static(br#"{}"#))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
         #[rstest]
         #[tokio::test]
         async fn returns_none_for_empty_entry_name(mock_ext: MockIoExtension) {
@@ -858,6 +879,26 @@ pub(super) mod tests {
             let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
             assert_eq!(
                 repo.get_ext_attachments("missing", "entry", &QueryEntry::default(), "test-ext")
+                    .await
+                    .unwrap(),
+                None
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn returns_none_when_request_has_no_entries_and_entry_name_empty(
+            mock_ext: MockIoExtension,
+        ) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            assert_eq!(
+                repo.get_ext_attachments("bucket", "", &QueryEntry::default(), "test-ext")
                     .await
                     .unwrap(),
                 None
@@ -929,6 +970,90 @@ pub(super) mod tests {
 
             assert_eq!(err.status, ErrorCode::UnprocessableEntity);
             assert!(err.message.contains("must be valid JSON"));
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn collects_attachments_for_all_wildcard(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry-a/$meta",
+                "$test-ext",
+                br#"{"topic":"/a"}"#,
+            )
+            .await;
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry-b/$meta",
+                "$test-ext",
+                br#"{"topic":"/b"}"#,
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let query = QueryEntry {
+                entries: Some(vec!["*".to_string()]),
+                ..Default::default()
+            };
+            assert_eq!(
+                repo.get_ext_attachments("bucket", "", &query, "test-ext")
+                    .await
+                    .unwrap(),
+                Some(json!({
+                    "entry-a": {"topic": "/a"},
+                    "entry-b": {"topic": "/b"}
+                }))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn skips_non_matching_entries_and_entries_without_meta(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry-matched/$meta",
+                "$test-ext",
+                br#"{"topic":"/matched"}"#,
+            )
+            .await;
+            write_meta_record(
+                &storage,
+                "bucket",
+                "other/$meta",
+                "$test-ext",
+                br#"{"topic":"/other"}"#,
+            )
+            .await;
+            write_record(&storage, "bucket", "entry-no-meta").await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let query = QueryEntry {
+                entries: Some(vec!["entry-*".to_string()]),
+                ..Default::default()
+            };
+            assert_eq!(
+                repo.get_ext_attachments("bucket", "", &query, "test-ext")
+                    .await
+                    .unwrap(),
+                Some(json!({
+                    "entry-matched": {"topic": "/matched"}
+                }))
+            );
         }
 
         #[rstest]
