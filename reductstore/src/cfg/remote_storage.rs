@@ -1,4 +1,5 @@
-// Copyright 2026 ReductSoftware UG
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::backend::BackendType;
 use std::path::PathBuf;

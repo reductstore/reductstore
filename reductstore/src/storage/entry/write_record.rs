@@ -1,5 +1,5 @@
-// Copyright 2024-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::storage::block_manager::BlockRef;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
