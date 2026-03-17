@@ -1,7 +1,7 @@
 // Copyright 2023-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucketConfig};
 use async_stream::stream;
 use async_trait::async_trait;
 use axum::http::HeaderName;
@@ -11,7 +11,7 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
-use reqwest::{Body, Client, Error, Method, Response};
+use reqwest::{Body, Certificate, Client, Error, Method, Response};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -55,7 +55,12 @@ struct ReductClient {
 static API_PATH: &str = "api/v1";
 
 impl ReductClient {
-    fn new(url: &str, api_token: &str) -> Self {
+    fn new(
+        url: &str,
+        api_token: &str,
+        verify_ssl: bool,
+        ca_path: Option<&std::path::PathBuf>,
+    ) -> Result<Self, ReductError> {
         let mut headers = reqwest::header::HeaderMap::new();
         if !api_token.is_empty() {
             let mut value = HeaderValue::from_str(&format!("Bearer {}", api_token)).unwrap();
@@ -63,13 +68,33 @@ impl ReductClient {
             headers.insert(reqwest::header::AUTHORIZATION, value);
         }
 
-        let client = Client::builder()
+        let mut client = Client::builder()
             .default_headers(headers)
             .connect_timeout(std::time::Duration::from_secs(10))
-            .danger_accept_invalid_certs(true)
-            .http1_only()
-            .build()
-            .unwrap(); // TODO: Handle error
+            .danger_accept_invalid_certs(!verify_ssl)
+            .http1_only();
+
+        if let Some(ca_path) = ca_path {
+            let cert_bytes = std::fs::read(ca_path).map_err(|err| {
+                unprocessable_entity!(
+                    "Failed to read replication CA certificate '{}': {}",
+                    ca_path.display(),
+                    err
+                )
+            })?;
+            let cert = Certificate::from_pem(&cert_bytes).map_err(|err| {
+                unprocessable_entity!(
+                    "Invalid replication CA certificate '{}': {}",
+                    ca_path.display(),
+                    err
+                )
+            })?;
+            client = client.add_root_certificate(cert);
+        }
+
+        let client = client.build().map_err(|err| {
+            unprocessable_entity!("Failed to build replication HTTP client: {}", err)
+        })?;
 
         let server_url = if !url.ends_with('/') {
             format!("{}/", url)
@@ -77,7 +102,7 @@ impl ReductClient {
             url.to_string()
         };
 
-        Self { client, server_url }
+        Ok(Self { client, server_url })
     }
 }
 
@@ -311,8 +336,13 @@ impl ReductBucketApi for BucketWrapper {
 }
 
 /// Create a new Reduct client wrapper.
-pub(super) fn create_client(url: &str, api_token: &str) -> BoxedClientApi {
-    Box::new(ReductClient::new(url, api_token))
+pub(super) fn create_client(config: &RemoteBucketConfig) -> Result<BoxedClientApi, ReductError> {
+    Ok(Box::new(ReductClient::new(
+        &config.url,
+        &config.api_token,
+        config.verify_ssl,
+        config.ca_path.as_ref(),
+    )?))
 }
 
 #[cfg(test)]
@@ -327,6 +357,7 @@ pub(super) mod tests {
     use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use rstest::*;
     use std::io::{Read, Seek, SeekFrom};
+    use std::path::PathBuf;
     use std::pin::pin;
 
     #[rstest]
@@ -384,8 +415,25 @@ pub(super) mod tests {
 
     #[rstest]
     fn test_add_slash_to_url() {
-        let client = ReductClient::new("http://localhost:8080", "");
+        let client = ReductClient::new("http://localhost:8080", "", true, None).unwrap();
         assert_eq!(client.server_url, "http://localhost:8080/");
+    }
+
+    #[rstest]
+    fn test_invalid_ca_path() {
+        let err = ReductClient::new(
+            "https://localhost:8080",
+            "",
+            true,
+            Some(&PathBuf::from("/definitely/missing/ca.pem")),
+        )
+        .err()
+        .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+        assert!(err
+            .message()
+            .contains("Failed to read replication CA certificate"));
     }
 
     #[rstest]
