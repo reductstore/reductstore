@@ -439,13 +439,20 @@ pub(super) mod tests {
 
     #[rstest]
     fn test_create_client_with_ca_and_token() {
-        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let ca_path = tmp_dir.path().join("ca.crt");
+        std::fs::write(
+            &ca_path,
+            include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../misc/ca.crt")),
+        )
+        .unwrap();
+
         let config = RemoteBucketConfig {
             url: "https://localhost:8080".to_string(),
             bucket_name: "bucket".to_string(),
             api_token: "token".to_string(),
             verify_ssl: true,
-            ca_path: Some(manifest_dir.join("../misc/ca.crt")),
+            ca_path: Some(ca_path),
         };
 
         let client = create_client(&config).unwrap();
