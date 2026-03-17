@@ -101,6 +101,7 @@ async def test_publish_nested_key(bucket, zenoh_session):
     assert replies, "Expected at least one reply from Zenoh queryable"
     assert replies[0].ok.payload.to_bytes() == payload
 
+
 async def test_publisher_with_attachment(
     bucket,
     entry_name,
