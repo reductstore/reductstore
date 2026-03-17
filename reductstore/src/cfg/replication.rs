@@ -48,7 +48,9 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             replication_log_size: env
                 .get_optional("RS_REPLICATION_LOG_SIZE")
                 .unwrap_or(DEFAULT_REPLICATION_LOG_SIZE),
-            verify_ssl: env.get("RS_REPLICATION_VERIFY_SSL", true),
+            verify_ssl: env
+                .get_optional("RS_REPLICATION_VERIFY_SSL")
+                .unwrap_or(true),
             ca_path: env
                 .get_optional::<String>("RS_REPLICATION_CA_PATH")
                 .and_then(|p| {
@@ -115,14 +117,13 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
+        let mut env = Env::new(env_getter);
         let replication_settings = ReplicationConfig::default();
 
         assert_eq!(
             replication_settings,
-            CfgParser::<MockEnvGetter>::parse_replication_config(
-                &mut Env::new(env_getter),
-                DEFAULT_PORT
-            )
+            CfgParser::<MockEnvGetter>::parse_replication_config(&mut env, DEFAULT_PORT)
         );
+        assert_eq!(env.message(), "");
     }
 }
