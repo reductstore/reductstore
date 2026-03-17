@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Move licensing and remote connectors to enterprise-only runtime and align CI pipelines for core-only backend coverage, [PR-1176](https://github.com/reductstore/reductstore/pull/1176)
+- Relicense ReductStore Core to Apache-2.0, update Rust source headers and package license files, add `NOTICE`, and refresh README project/license positioning, [PR-1204](https://github.com/reductstore/reductstore/pull/1204)
 - Keep Docker runtime non-root when `/data` is auto-created as `root:root` and ensure UID/GID 10001 user metadata is available in the final image, [PR-1178](https://github.com/reductstore/reductstore/pull/1178)
 - Use Docker named volumes in CI deployment actions for `/data` to stay compatible with non-root runtime defaults and simplify entrypoint permission checks, [PR-1180](https://github.com/reductstore/reductstore/pull/1180)
 - Merge `v1.18.5` release branch into `main` and recover lock file updates, [PR-1191](https://github.com/reductstore/reductstore/pull/1191)

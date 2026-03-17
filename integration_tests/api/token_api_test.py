@@ -1,4 +1,5 @@
 import json
+from datetime import datetime, timedelta, timezone
 
 from .conftest import auth_headers, requires_env
 
@@ -32,7 +33,11 @@ def test__create_v2_token(base_url, session, token_name, bucket_name):
         "read": [bucket_name],
         "write": [bucket_name],
     }
-    payload = {"permissions": permissions, "expires_at": "2026-03-16T10:00:00Z"}
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=1)).replace(microsecond=0)
+    payload = {
+        "permissions": permissions,
+        "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+    }
 
     resp = session.post(f"{base_url}/tokens/{token_name}", json=payload)
     assert resp.status_code == 200

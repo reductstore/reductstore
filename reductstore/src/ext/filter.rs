@@ -4,8 +4,8 @@ use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use std::collections::HashMap;
 
-// Copyright 2025 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 pub(super) struct DummyFilter {}
 
 impl<R: FilterRecord> RecordFilter<R> for DummyFilter {
