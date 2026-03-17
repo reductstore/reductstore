@@ -349,6 +349,7 @@ pub(super) fn create_client(config: &RemoteBucketConfig) -> Result<BoxedClientAp
 pub(super) mod tests {
     use super::*;
     use crate::core::sync::RwLock;
+    use crate::replication::remote_bucket::RemoteBucketConfig;
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{us_to_ts, Record};
     use crossbeam_channel::{Receiver, Sender};
@@ -434,6 +435,39 @@ pub(super) mod tests {
         assert!(err
             .message()
             .contains("Failed to read replication CA certificate"));
+    }
+
+    #[rstest]
+    fn test_create_client_with_ca_and_token() {
+        let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let config = RemoteBucketConfig {
+            url: "https://localhost:8080".to_string(),
+            bucket_name: "bucket".to_string(),
+            api_token: "token".to_string(),
+            verify_ssl: true,
+            ca_path: Some(manifest_dir.join("../misc/ca.crt")),
+        };
+
+        let client = create_client(&config).unwrap();
+
+        assert_eq!(client.url(), "https://localhost:8080/");
+    }
+
+    #[rstest]
+    fn test_invalid_ca_certificate_content() {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let ca_path = tmp_dir.path().join("ca.pem");
+        std::fs::write(
+            &ca_path,
+            b"-----BEGIN CERTIFICATE-----\ninvalid\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
+
+        let err = ReductClient::new("https://localhost:8080", "", true, Some(&ca_path)).err();
+
+        assert!(err.is_some());
+        let err = err.unwrap();
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
     }
 
     #[rstest]

@@ -126,4 +126,37 @@ mod tests {
         );
         assert_eq!(env.message(), "");
     }
+
+    #[rstest]
+    fn test_empty_replication_ca_path() {
+        let mut env_getter = MockEnvGetter::new();
+
+        env_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_TIMEOUT"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_LOG_SIZE"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_VERIFY_SSL"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_CA_PATH"))
+            .return_const(Ok("".to_string()));
+
+        let config =
+            CfgParser::<MockEnvGetter>::parse_replication_config(&mut Env::new(env_getter), 8000);
+
+        assert_eq!(
+            config,
+            ReplicationConfig {
+                listening_port: 8000,
+                ..ReplicationConfig::default()
+            }
+        );
+    }
 }
