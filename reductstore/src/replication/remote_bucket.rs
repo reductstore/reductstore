@@ -10,6 +10,64 @@ use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use std::collections::BTreeMap;
+use std::path::PathBuf;
+
+#[derive(Clone, Debug, Default)]
+pub(super) struct RemoteBucketConfig {
+    pub(super) url: String,
+    pub(super) bucket_name: String,
+    pub(super) api_token: String,
+    pub(super) verify_ssl: bool,
+    pub(super) ca_path: Option<PathBuf>,
+}
+
+pub(super) struct RemoteBucketBuilder {
+    config: RemoteBucketConfig,
+}
+
+impl RemoteBucketBuilder {
+    pub fn new() -> Self {
+        Self {
+            config: RemoteBucketConfig {
+                verify_ssl: true,
+                ..Default::default()
+            },
+        }
+    }
+
+    pub fn url(mut self, url: impl Into<String>) -> Self {
+        self.config.url = url.into();
+        self
+    }
+
+    pub fn bucket_name(mut self, bucket_name: impl Into<String>) -> Self {
+        self.config.bucket_name = bucket_name.into();
+        self
+    }
+
+    pub fn api_token(mut self, api_token: impl Into<String>) -> Self {
+        self.config.api_token = api_token.into();
+        self
+    }
+
+    pub fn verify_ssl(mut self, verify_ssl: bool) -> Self {
+        self.config.verify_ssl = verify_ssl;
+        self
+    }
+
+    pub fn ca_path(mut self, ca_path: Option<PathBuf>) -> Self {
+        self.config.ca_path = ca_path;
+        self
+    }
+
+    fn build_config(self) -> RemoteBucketConfig {
+        self.config
+    }
+
+    pub fn build(self) -> Result<Box<dyn RemoteBucket + Send + Sync>, ReductError> {
+        Ok(Box::new(RemoteBucketImpl::new(self.build_config())?))
+    }
+}
 
 struct RemoteBucketImpl {
     state: Option<Box<dyn RemoteBucketState + Send + Sync>>,
@@ -32,11 +90,11 @@ pub(crate) trait RemoteBucket {
 }
 
 impl RemoteBucketImpl {
-    pub fn new(url: &str, bucket_name: &str, api_token: &str) -> Self {
-        Self {
-            state: Some(Box::new(InitialState::new(url, bucket_name, api_token))),
+    fn new(config: RemoteBucketConfig) -> Result<Self, ReductError> {
+        Ok(Self {
+            state: Some(Box::new(InitialState::new(&config)?)),
             is_active: false,
-        }
+        })
     }
 }
 
@@ -67,18 +125,6 @@ impl RemoteBucket for RemoteBucketImpl {
     fn is_active(&self) -> bool {
         self.is_active
     }
-}
-
-pub(super) fn create_remote_bucket(
-    url: &str,
-    bucket_name: &str,
-    api_token: Option<String>,
-) -> Box<dyn RemoteBucket + Send + Sync> {
-    Box::new(RemoteBucketImpl::new(
-        url,
-        bucket_name,
-        api_token.as_deref().unwrap_or(""),
-    ))
 }
 
 #[cfg(test)]
@@ -229,7 +275,14 @@ pub(super) mod tests {
     }
 
     fn create_dst_bucket(first_state: MockState) -> RemoteBucketImpl {
-        let mut remote_bucket = RemoteBucketImpl::new("http://localhost:8080", "test", "api_token");
+        let mut remote_bucket = RemoteBucketImpl::new(
+            RemoteBucketBuilder::new()
+                .url("http://localhost:8080")
+                .bucket_name("test")
+                .api_token("api_token")
+                .build_config(),
+        )
+        .unwrap();
         remote_bucket.state = Some(Box::new(first_state));
         remote_bucket
     }
