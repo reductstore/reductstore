@@ -312,7 +312,6 @@ mod tests {
     use super::*;
     use crate::api::http::entry::write_batched::write_batched_records;
     use crate::api::http::tests::{headers, keeper, path_to_entry_1};
-
     use axum_extra::headers::HeaderValue;
     use futures_util::stream;
     use reduct_base::error::ErrorCode;

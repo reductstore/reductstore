@@ -14,6 +14,7 @@ pub struct RemoteStorageConfig {
     pub region: Option<String>,
     pub access_key: Option<String>,
     pub secret_key: Option<String>,
+    pub session_token: Option<String>,
     pub cache_path: Option<PathBuf>,
     pub cache_size: u64,
     pub sync_interval: Duration,

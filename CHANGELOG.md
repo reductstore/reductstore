@@ -28,6 +28,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restore `Unknown extension` validation for queries with `ext` when no extensions are loaded, [PR-1192](https://github.com/reductstore/reductstore/pull/1192)
 - Fix share links for entries with nested paths by matching multi-segment filenames in links routes, [PR-1202](https://github.com/reductstore/reductstore/pull/1202)
 
+## 1.18.7 - 2026-03-17
+
+### Breaking Change
+
+Replication destinations now verify TLS certificates by default.
+Existing deployments that relied on the previous insecure behavior with self-signed or privately issued certificates will need to either set RS_REPLICATION_CA_PATH to a trusted CA bundle or explicitly set RS_REPLICATION_VERIFY_SSL=false.
+This is necessary because the old behavior silently disabled certificate validation for all replication traffic.
+
+### Changed
+
+- Enforce TLS verification for replication by default, add `RS_REPLICATION_VERIFY_SSL` and `RS_REPLICATION_CA_PATH`, and refresh local CA test certificates, [PR-1208](https://github.com/reductstore/reductstore/pull/1208)
+
+## 1.18.6 - 2026-03-09
+
+### Fixed
+
+- Allow S3 remote storage to use the default AWS credential chain and optional session token, [PR-1199](https://github.com/reductstore/reductstore/pull/1199)
+
 ## 1.18.5 - 2026-02-25
 
 ### Fixed

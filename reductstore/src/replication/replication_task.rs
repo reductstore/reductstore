@@ -6,7 +6,7 @@ use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::replication::diagnostics::DiagnosticsCounter;
-use crate::replication::remote_bucket::{create_remote_bucket, RemoteBucket};
+use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketBuilder};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::{TransactionLog, TransactionLogMap, TransactionLogRef};
@@ -66,7 +66,7 @@ impl ReplicationTask {
         settings: ReplicationSettings,
         config: Cfg,
         storage: Arc<StorageEngine>,
-    ) -> Self {
+    ) -> Result<Self, ReductError> {
         let ReplicationSettings {
             dst_bucket: remote_bucket,
             dst_host: remote_host,
@@ -74,8 +74,17 @@ impl ReplicationTask {
             ..
         } = settings.clone();
 
-        let remote_bucket =
-            create_remote_bucket(remote_host.as_str(), remote_bucket.as_str(), remote_token);
+        let mut remote_bucket_builder = RemoteBucketBuilder::new()
+            .url(remote_host)
+            .bucket_name(remote_bucket)
+            .verify_ssl(config.replication_conf.verify_ssl)
+            .ca_path(config.replication_conf.ca_path.clone());
+
+        if let Some(token) = remote_token {
+            remote_bucket_builder = remote_bucket_builder.api_token(token);
+        }
+
+        let remote_bucket = remote_bucket_builder.build()?;
 
         let system_options = ReplicationSystemOptions {
             transaction_log_size: config.replication_conf.replication_log_size,
@@ -83,14 +92,14 @@ impl ReplicationTask {
             ..Default::default()
         };
 
-        Self::build(
+        Ok(Self::build(
             name,
             settings,
             system_options,
             config.io_conf,
             remote_bucket,
             storage,
-        )
+        ))
     }
 
     fn build(
