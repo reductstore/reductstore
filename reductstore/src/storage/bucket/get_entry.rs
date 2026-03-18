@@ -6,6 +6,7 @@ use crate::core::weak::Weak;
 use crate::storage::engine::{check_entry_name_convention, ReadOnlyMode};
 use crate::storage::entry::Entry;
 use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 use std::sync::Arc;
 
 impl Bucket {
@@ -58,7 +59,12 @@ impl Bucket {
                 target_entry = Some(entry);
             }
         }
-        let entry = target_entry.expect("target entry should be created");
+        let entry = target_entry.ok_or_else(|| {
+            internal_server_error!(
+                "Failed to resolve target entry '{}' while creating bucket entry",
+                key
+            )
+        })?;
         entry.ensure_not_deleting().await?;
         Ok(entry.into())
     }

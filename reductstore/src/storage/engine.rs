@@ -379,6 +379,16 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 }
 
 pub(super) fn check_entry_name_convention(name: &str) -> Result<(), ReductError> {
+    if name.is_empty()
+        || name.starts_with('/')
+        || name.ends_with('/')
+        || name.split('/').any(|segment| segment.is_empty())
+    {
+        return Err(unprocessable_entity!(
+            "Entry name must be non-empty and must not contain empty path segments",
+        ));
+    }
+
     let regex = regex::Regex::new(r"^[A-Za-z0-9_/-]*$").unwrap();
     if regex.is_match(name) {
         return Ok(());
@@ -423,6 +433,10 @@ mod tests {
         assert!(check_entry_name_convention("entry").is_ok());
         assert!(check_entry_name_convention("entry/$meta").is_ok());
         assert!(check_entry_name_convention("x/y/$meta").is_ok());
+        assert!(check_entry_name_convention("").is_err());
+        assert!(check_entry_name_convention("/entry").is_err());
+        assert!(check_entry_name_convention("entry/").is_err());
+        assert!(check_entry_name_convention("entry//child").is_err());
         assert!(check_entry_name_convention("entry/$other").is_err());
     }
 

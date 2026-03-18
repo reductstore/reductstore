@@ -143,7 +143,16 @@ pub fn parse_entries_header(entries: &HeaderValue) -> Result<Vec<String>, Reduct
 
     entries
         .split(',')
-        .map(|entry| decode_entry_name(entry.trim()))
+        .map(|entry| {
+            let entry = entry.trim();
+            if entry.is_empty() {
+                return Err(unprocessable_entity!(
+                    "x-reduct-entries header must not contain empty entry names"
+                ));
+            }
+
+            decode_entry_name(entry)
+        })
         .collect()
 }
 
@@ -743,6 +752,16 @@ mod tests {
         let value = HeaderValue::from_str("sensor,ro%2Ftopic").unwrap();
         let entries = parse_entries_header(&value).unwrap();
         assert_eq!(entries, vec!["sensor".to_string(), "ro/topic".to_string()]);
+    }
+
+    #[test]
+    fn test_parse_entries_header_rejects_empty_entry() {
+        let value = HeaderValue::from_str("sensor,,ro%2Ftopic").unwrap();
+        let err = parse_entries_header(&value).err().unwrap();
+        assert_eq!(
+            err,
+            unprocessable_entity!("x-reduct-entries header must not contain empty entry names")
+        );
     }
 
     #[test]
