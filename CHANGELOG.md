@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.18.8 - 2026-03-19
+
 ### Fixed
 
 - Persist reprovisioned token updates so read-only replicas receive token changes and keep provisioned token state across reloads, [PR-1221](https://github.com/reductstore/reductstore/pull/1221)
