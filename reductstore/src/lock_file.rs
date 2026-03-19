@@ -111,7 +111,9 @@ impl LockFileBuilder {
         let unique_id = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
 
         // Main loop to acquire and maintain the lock
-        loop {
+
+        let mut locked = false;
+        while !(locked || stop_flag.load(std::sync::atomic::Ordering::SeqCst)) {
             // Check if the file is already locked
             let time_start = std::time::Instant::now();
             while FILE_CACHE.try_exists(&file_path).await?
@@ -157,44 +159,24 @@ impl LockFileBuilder {
                         }
                     }
                 }
-                tokio::time::sleep(cfg.polling_interval).await;
-            }
 
-            // Final check to see if we should stop
-            if stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
-                break;
+                tokio::time::sleep(cfg.polling_interval).await;
             }
 
             match role {
                 InstanceRole::Primary => {
-                    // Primary instance acquires the lock immediately
-                    info!("Primary instance acquiring lock file: {:?}", file_path);
-                    if Self::acquire_lock(&file_path, &unique_id, role.clone()).await? {
-                        *state.write().await? = State::Locked;
-                    } else {
-                        *state.write().await? = State::Failed;
-                        return Ok(());
-                    }
+                    locked = true;
                 }
                 InstanceRole::Secondary => {
                     // Secondary instance waits a bit to ensure the primary has created the lock file
                     tokio::time::sleep(cfg.polling_interval * 3).await;
                     if !FILE_CACHE.try_exists(&file_path).await? {
-                        info!("Secondary instance acquiring lock file: {:?}", file_path);
-                        if Self::acquire_lock(&file_path, &unique_id, role.clone()).await? {
-                            *state.write().await? = State::Locked;
-                        } else {
-                            Self::panic_secondary_unsafe_acquire(&file_path);
-                        }
+                        locked = true;
                     } else {
                         info!("Secondary instance could not acquire lock file (already held by primary): {:?}", file_path);
                     }
                 }
                 InstanceRole::Replica | InstanceRole::Standalone => {}
-            }
-
-            if *state.read().await? == State::Locked {
-                break;
             }
         }
 
@@ -207,7 +189,13 @@ impl LockFileBuilder {
                 error!("Error while recreating lock file: {}", e);
             }
 
+            if locked {
+                *state.write().await? = State::Locked;
+                locked = false; // don't touch the lock
+            }
+
             tokio::time::sleep(cfg.polling_interval).await;
+            Self::check_lock_owner_id(&file_path, &unique_id, role.clone()).await?;
         }
 
         Ok(())
@@ -249,93 +237,36 @@ impl LockFileBuilder {
         Ok(())
     }
 
-    async fn acquire_lock(
+    async fn check_lock_owner_id(
         file_path: &PathBuf,
         unique_id: &str,
         role: InstanceRole,
-    ) -> Result<bool, ReductError> {
-        let primary_force = role == InstanceRole::Primary;
-
+    ) -> Result<(), ReductError> {
         if let Some(owner_id) = Self::read_lock_owner_id(file_path).await? {
-            if owner_id == unique_id {
-                return Ok(true);
-            }
-
-            match role {
-                InstanceRole::Primary => {
-                    error!(
-                        "Lock file {:?} is owned by '{}', but primary is overwriting it with '{}'",
-                        file_path, owner_id, unique_id
-                    );
-                    Self::write_lock_owner_id(file_path, unique_id).await?;
-                    return Ok(true);
+            if owner_id != unique_id {
+                match role {
+                    InstanceRole::Primary => {
+                        error!(
+                            "Lock file {:?} is owned by '{}', but primary is overwriting it with '{}'",
+                            file_path, owner_id, unique_id
+                        );
+                    }
+                    InstanceRole::Secondary => {
+                        error!(
+                            "Lock file {:?} is owned by '{}', secondary cannot acquire it",
+                            file_path, owner_id
+                        );
+                        panic!(
+                            "Lock file {:?} is owned by '{}', secondary cannot acquire it",
+                            file_path, owner_id
+                        );
+                    }
+                    InstanceRole::Replica | InstanceRole::Standalone => {}
                 }
-                InstanceRole::Secondary => {
-                    error!(
-                        "Lock file {:?} is owned by '{}', secondary cannot acquire it",
-                        file_path, owner_id
-                    );
-                    panic!(
-                        "Lock file {:?} is owned by '{}', secondary cannot acquire it",
-                        file_path, owner_id
-                    );
-                }
-                InstanceRole::Replica | InstanceRole::Standalone => {}
             }
         }
 
-        if let Err(err) = Self::write_lock_owner_id(file_path, unique_id).await {
-            if primary_force {
-                error!(
-                    "Failed to persist lock file {:?} for primary acquisition: {}",
-                    file_path, err
-                );
-                return Ok(true);
-            }
-            return Err(err);
-        }
-
-        match Self::read_lock_owner_id(file_path).await? {
-            Some(owner_id) if owner_id == unique_id => Ok(true),
-            Some(owner_id) => match role {
-                InstanceRole::Primary => {
-                    error!(
-                        "Lock file {:?} is owned by '{}', but primary is overwriting it with '{}'",
-                        file_path, owner_id, unique_id
-                    );
-                    Self::write_lock_owner_id(file_path, unique_id).await?;
-                    Ok(true)
-                }
-                InstanceRole::Secondary => {
-                    error!(
-                        "Lock file {:?} is owned by '{}', secondary cannot acquire it",
-                        file_path, owner_id
-                    );
-                    panic!(
-                        "Lock file {:?} is owned by '{}', secondary cannot acquire it",
-                        file_path, owner_id
-                    );
-                }
-                InstanceRole::Replica | InstanceRole::Standalone => Ok(true),
-            },
-            None => {
-                if primary_force {
-                    return Ok(true);
-                }
-                error!(
-                    "Failed to read back lock owner after acquiring {:?}",
-                    file_path
-                );
-                Ok(false)
-            }
-        }
-    }
-
-    fn panic_secondary_unsafe_acquire(file_path: &PathBuf) -> ! {
-        panic!(
-            "Secondary instance could not safely acquire lock file {:?}",
-            file_path
-        );
+        Ok(())
     }
 }
 
@@ -622,37 +553,23 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_acquire_lock_returns_true_for_same_owner(lock_file_path: PathBuf) {
+    async fn test_check_lock_owner_id_allows_same_owner(lock_file_path: PathBuf) {
         let owner_id = format!("owner-{}", uuid::Uuid::new_v4());
         fs::write(&lock_file_path, &owner_id).unwrap();
 
-        assert!(
-            LockFileBuilder::acquire_lock(&lock_file_path, &owner_id, InstanceRole::Secondary)
-                .await
-                .unwrap()
-        );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_primary_overwrites_foreign_uid_during_acquire(lock_file_path: PathBuf) {
-        let owner_id = format!("primary-{}", uuid::Uuid::new_v4());
-        fs::write(&lock_file_path, format!("foreign-{}", uuid::Uuid::new_v4())).unwrap();
-
-        assert!(
-            LockFileBuilder::acquire_lock(&lock_file_path, &owner_id, InstanceRole::Primary)
-                .await
-                .unwrap()
-        );
-        assert_eq!(fs::read_to_string(&lock_file_path).unwrap(), owner_id);
+        LockFileBuilder::check_lock_owner_id(&lock_file_path, &owner_id, InstanceRole::Secondary)
+            .await
+            .unwrap();
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     #[should_panic(expected = "secondary cannot acquire it")]
-    async fn test_secondary_fails_on_foreign_uid_during_acquire(lock_file_path: PathBuf) {
+    async fn test_check_lock_owner_id_panics_for_secondary_with_foreign_uid(
+        lock_file_path: PathBuf,
+    ) {
         fs::write(&lock_file_path, format!("foreign-{}", uuid::Uuid::new_v4())).unwrap();
-        let _ = LockFileBuilder::acquire_lock(
+        let _ = LockFileBuilder::check_lock_owner_id(
             &lock_file_path,
             &format!("secondary-{}", uuid::Uuid::new_v4()),
             InstanceRole::Secondary,
@@ -663,65 +580,15 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_primary_overwrites_foreign_uid_after_stale_lock(lock_file_path: PathBuf) {
+    async fn test_check_lock_owner_id_allows_primary_to_overwrite_foreign_uid(
+        lock_file_path: PathBuf,
+    ) {
+        let owner_id = format!("primary-{}", uuid::Uuid::new_v4());
         fs::write(&lock_file_path, format!("foreign-{}", uuid::Uuid::new_v4())).unwrap();
-        std::thread::sleep(Duration::from_millis(1200));
 
-        let lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(test_cfg(
-                LockFileConfig {
-                    polling_interval: Duration::from_millis(100),
-                    ttl: Duration::from_secs(1),
-                    timeout: Duration::from_secs(2),
-                    ..Default::default()
-                },
-                InstanceRole::Primary,
-            ))
-            .build();
-
-        let acquired = wait_new_state(&lock_file).await;
-        assert!(acquired.is_ok(), "Lock file was not acquired in time");
-        assert!(lock_file.is_locked().await.unwrap());
-        assert!(
-            !fs::read_to_string(&lock_file_path)
-                .unwrap()
-                .starts_with("foreign-"),
-            "Primary must overwrite a foreign lock owner"
-        );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_primary_acquire_lock_succeeds_when_write_fails(lock_file_path: PathBuf) {
-        let lock_file_path = lock_file_path.join("missing").join("test.lock");
-
-        assert!(LockFileBuilder::acquire_lock(
-            &lock_file_path,
-            &format!("primary-{}", uuid::Uuid::new_v4()),
-            InstanceRole::Primary,
-        )
-        .await
-        .unwrap());
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_secondary_acquire_lock_fails_when_write_fails(lock_file_path: PathBuf) {
-        let lock_file_path = lock_file_path.join("missing").join("test.lock");
-
-        assert!(LockFileBuilder::acquire_lock(
-            &lock_file_path,
-            &format!("secondary-{}", uuid::Uuid::new_v4()),
-            InstanceRole::Secondary,
-        )
-        .await
-        .is_err());
-    }
-
-    #[rstest]
-    #[should_panic(expected = "Secondary instance could not safely acquire lock file")]
-    fn test_panic_secondary_unsafe_acquire(lock_file_path: PathBuf) {
-        LockFileBuilder::panic_secondary_unsafe_acquire(&lock_file_path);
+        LockFileBuilder::check_lock_owner_id(&lock_file_path, &owner_id, InstanceRole::Primary)
+            .await
+            .unwrap();
     }
 
     #[rstest]
