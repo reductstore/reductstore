@@ -296,7 +296,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             info!("License Information: {}", license);
         } else {
             info!(
-                "License: BUSL-1.1 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
+                "License: Apache-2.0 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
                 git_ref
             );
         }

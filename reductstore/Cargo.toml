@@ -6,7 +6,7 @@ authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
-license = "BUSL-1.1"
+license = "Apache-2.0"
 description = "ReductStore is a time series database designed specifically for storing and managing large amounts of blob data."
 homepage = "https://reduct.store"
 documentation = "https://reduct.store/docs"
