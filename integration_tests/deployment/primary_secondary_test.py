@@ -80,9 +80,64 @@ def _container_lock_path(container_name: str) -> str:
     return "/data/.lock"
 
 
+def _uses_remote_cache_lock(container_name: str) -> bool:
+    return _container_env(container_name, "RS_REMOTE_CACHE_PATH") is not None
+
+
+def _remote_lock_key(container_name: str) -> str:
+    lock_path = _container_lock_path(container_name)
+    cache_path = _container_env(container_name, "RS_REMOTE_CACHE_PATH")
+    assert cache_path is not None
+    return lock_path.removeprefix(f"{cache_path.rstrip('/')}/")
+
+
+def _remote_bucket(container_name: str) -> str:
+    bucket = _container_env(container_name, "RS_REMOTE_BUCKET")
+    if not bucket:
+        raise RuntimeError(
+            f"Container {container_name} does not define RS_REMOTE_BUCKET"
+        )
+    return bucket
+
+
+def _minio_write_object(container_name: str, contents: str):
+    bucket = _remote_bucket(container_name)
+    key = _remote_lock_key(container_name)
+    subprocess.run(
+        [
+            "docker",
+            "exec",
+            "-i",
+            "minio-server",
+            "sh",
+            "-c",
+            f"cat | mc pipe local/{bucket}/{key}",
+        ],
+        check=True,
+        input=contents,
+        text=True,
+        capture_output=True,
+    )
+
+
+def _minio_remove_object(container_name: str):
+    bucket = _remote_bucket(container_name)
+    key = _remote_lock_key(container_name)
+    _docker_try("exec", "minio-server", "mc", "rm", "--force", f"local/{bucket}/{key}")
+
+
+def _minio_read_object(container_name: str) -> str:
+    bucket = _remote_bucket(container_name)
+    key = _remote_lock_key(container_name)
+    return _docker_output("exec", "minio-server", "mc", "cat", f"local/{bucket}/{key}")
+
+
 def _remove_lock_file(container_name: str | None = None):
     target_container = container_name or _shared_container()
     if target_container:
+        if _uses_remote_cache_lock(target_container):
+            _minio_remove_object(target_container)
+            return
         _docker_try(
             "run",
             "--rm",
@@ -107,6 +162,9 @@ def _remove_lock_file(container_name: str | None = None):
 
 def _write_lock_file(container_name: str, contents: str):
     if container_name:
+        if _uses_remote_cache_lock(container_name):
+            _minio_write_object(container_name, contents)
+            return
         _docker(
             "run",
             "--rm",
@@ -130,6 +188,8 @@ def _write_lock_file(container_name: str, contents: str):
 def _read_lock_file(container_name: str | None = None):
     target_container = container_name or _shared_container()
     if target_container:
+        if _uses_remote_cache_lock(target_container):
+            return _minio_read_object(target_container)
         return _docker_output(
             "run",
             "--rm",
@@ -231,6 +291,11 @@ async def test_secondary_panics_if_lock_file_is_changed():
     secondary_url = _ready_url(os.environ["SECONDARY_STORAGE_URL"])
     tampered_lock = "tampered-lock"
 
+    if _uses_remote_cache_lock(secondary_container):
+        pytest.skip(
+            "lock tampering test is only valid for shared filesystem lock paths"
+        )
+
     await _reset_cluster(
         primary_container, secondary_container, primary_url, secondary_url
     )
@@ -261,6 +326,11 @@ async def test_primary_overwrites_changed_lock_file():
     primary_url = _ready_url(os.environ["PRIMARY_STORAGE_URL"])
     secondary_url = _ready_url(os.environ["SECONDARY_STORAGE_URL"])
     tampered_lock = "tampered-lock"
+
+    if _uses_remote_cache_lock(primary_container):
+        pytest.skip(
+            "lock tampering test is only valid for shared filesystem lock paths"
+        )
 
     await _reset_cluster(
         primary_container, secondary_container, primary_url, secondary_url
