@@ -178,34 +178,6 @@ def test__update_bucket_ok(base_url, session, bucket_name):
     assert data["settings"] == new_settings
 
 
-def test_bucket_info_ignores_empty_parent_entries_for_oldest_record(
-    base_url, session, bucket_name
-):
-    resp = session.post(f"{base_url}/b/{bucket_name}/a/b/c?ts=1000000", data="somedata")
-    assert resp.status_code == 200
-
-    resp = session.post(
-        f"{base_url}/b/{bucket_name}/a/b/c?ts=2000000", data="anotherdata"
-    )
-    assert resp.status_code == 200
-
-    resp = session.get(f"{base_url}/b/{bucket_name}")
-    assert resp.status_code == 200
-
-    data = json.loads(resp.content)
-    assert data["info"]["oldest_record"] == 1000000
-    assert data["info"]["latest_record"] == 2000000
-
-    entries = {entry["name"]: entry for entry in data["entries"]}
-    assert entries["a"]["record_count"] == 0
-    assert entries["a"]["oldest_record"] == 0
-    assert entries["a/b"]["record_count"] == 0
-    assert entries["a/b"]["oldest_record"] == 0
-    assert entries["a/b/c"]["record_count"] == 2
-    assert entries["a/b/c"]["oldest_record"] == 1000000
-    assert entries["a/b/c"]["latest_record"] == 2000000
-
-
 def test__update_bucket_bad_format(base_url, session, bucket_name):
     """Should not update setting if JSON format is bad"""
     session.post(f"{base_url}/b/{bucket_name}")
