@@ -54,7 +54,7 @@ pub struct ServerInfo {
     pub latest_record: u64,
     /// Default settings
     pub defaults: Defaults,
-    /// License information if it is None, then it is BUSL-1.1
+    /// License information if it is `None`, then the instance uses Apache-2.0
     pub license: Option<License>,
 }
 
