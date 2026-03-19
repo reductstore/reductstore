@@ -6,6 +6,7 @@ use crate::core::weak::Weak;
 use crate::storage::engine::{check_entry_name_convention, ReadOnlyMode};
 use crate::storage::entry::Entry;
 use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 use std::sync::Arc;
 
 impl Bucket {
@@ -58,9 +59,21 @@ impl Bucket {
                 target_entry = Some(entry);
             }
         }
-        let entry = target_entry.expect("target entry should be created");
+        let entry = Self::target_entry_or_err(target_entry, key)?;
         entry.ensure_not_deleting().await?;
         Ok(entry.into())
+    }
+
+    fn target_entry_or_err(
+        target_entry: Option<Arc<Entry>>,
+        key: &str,
+    ) -> Result<Arc<Entry>, ReductError> {
+        target_entry.ok_or_else(|| {
+            internal_server_error!(
+                "Failed to resolve target entry '{}' while creating bucket entry",
+                key
+            )
+        })
     }
 }
 
@@ -93,6 +106,28 @@ mod tests {
             bucket.get_or_create_entry("test-1$").await.err(),
             Some(unprocessable_entity!(
                 "Entry name can contain only letters, digits and [-,_,/] symbols or end with '/$meta'"
+            ))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_or_create_entry_rejects_empty_path_segments(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        assert_eq!(
+            bucket.get_or_create_entry("test-1//a").await.err(),
+            Some(unprocessable_entity!(
+                "Entry name must be non-empty and must not contain empty path segments"
+            ))
+        );
+    }
+
+    #[test]
+    fn test_target_entry_or_err_returns_error_for_missing_target() {
+        assert_eq!(
+            Bucket::target_entry_or_err(None, "test-1").err(),
+            Some(internal_server_error!(
+                "Failed to resolve target entry 'test-1' while creating bucket entry"
             ))
         );
     }
