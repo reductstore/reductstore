@@ -140,7 +140,7 @@ impl ManageTokens for ReadOnlyTokenRepository {
         AccessTokens::get_token(self, name)
     }
 
-    async fn get_mut_token(&mut self, _name: &str) -> Result<&mut Token, ReductError> {
+    async fn update_token(&mut self, _token: Token) -> Result<(), ReductError> {
         Err(forbidden!("Cannot mutate token in read-only mode"))
     }
 
@@ -297,19 +297,6 @@ mod tests {
             assert_eq!(
                 token.err().unwrap(),
                 not_found!("Token 'missing' doesn't exist")
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_get_mut_token_forbidden(
-            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
-        ) {
-            let (mut repo, _) = repo_fixture.await;
-            let res = repo.get_mut_token(INIT_TOKEN_NAME).await;
-            assert_eq!(
-                res.err().unwrap(),
-                forbidden!("Cannot mutate token in read-only mode")
             );
         }
 
