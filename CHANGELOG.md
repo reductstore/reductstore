@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevent split-brain when a secondary sees a foreign lock owner during acquisition and refresh the lock owner token from remote storage before reading it, [PR-1219](https://github.com/reductstore/reductstore/pull/1219)
+
 ## 1.18.7 - 2026-03-17
 
 ### Breaking Change
