@@ -184,10 +184,7 @@ impl LockFileBuilder {
                         if Self::acquire_lock(&file_path, &unique_id, role.clone()).await? {
                             *state.write().await? = State::Locked;
                         } else {
-                            panic!(
-                                "Secondary instance could not safely acquire lock file {:?}",
-                                file_path
-                            );
+                            Self::panic_secondary_unsafe_acquire(&file_path);
                         }
                     } else {
                         info!("Secondary instance could not acquire lock file (already held by primary): {:?}", file_path);
@@ -332,6 +329,13 @@ impl LockFileBuilder {
                 Ok(false)
             }
         }
+    }
+
+    fn panic_secondary_unsafe_acquire(file_path: &PathBuf) -> ! {
+        panic!(
+            "Secondary instance could not safely acquire lock file {:?}",
+            file_path
+        );
     }
 }
 
@@ -712,6 +716,12 @@ mod tests {
         )
         .await
         .is_err());
+    }
+
+    #[rstest]
+    #[should_panic(expected = "Secondary instance could not safely acquire lock file")]
+    fn test_panic_secondary_unsafe_acquire(lock_file_path: PathBuf) {
+        LockFileBuilder::panic_secondary_unsafe_acquire(&lock_file_path);
     }
 
     #[rstest]
