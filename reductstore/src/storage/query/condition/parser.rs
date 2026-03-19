@@ -119,7 +119,7 @@ impl Parser {
             JsonValue::Object(map) => Self::parse_object(map),
             JsonValue::Bool(value) => Self::parse_bool(value),
             JsonValue::Number(value) => Self::parse_number(value),
-            JsonValue::String(value) => Self::parse_string(value),
+            JsonValue::String(value) => Self::parse_literal(value, false),
             JsonValue::Array(_) => Err(unprocessable_entity!(
                 "Array type is not supported: {}",
                 json
@@ -164,13 +164,32 @@ impl Parser {
         }
     }
 
-    fn parse_string(value: &str) -> Result<Vec<BoxedNode>, ReductError> {
+    fn parse_literal(value: &str, is_key: bool) -> Result<Vec<BoxedNode>, ReductError> {
         if value.starts_with("&") {
             Ok(vec![Reference::boxed(value[1..].to_string())])
         } else if value.starts_with("@") {
             Ok(vec![ComputedReference::boxed(value[1..].to_string())])
+        } else if let Some(value) = value.strip_prefix("$$") {
+            if is_key {
+                Err(unprocessable_entity!(
+                    "Escaped '$' literal is not allowed in key position: '{}'",
+                    value
+                ))
+            } else {
+                Ok(vec![Constant::boxed(Value::String(format!("${value}")))])
+            }
         } else if value.starts_with("$") {
-            Ok(vec![Self::parse_operator(value, vec![])?])
+            if is_key {
+                Ok(vec![Self::parse_operator(value, vec![])?])
+            } else {
+                match Self::parse_operator(value, vec![]) {
+                    Ok(operator) => Ok(vec![operator]),
+                    Err(_) => Err(unprocessable_entity!(
+                        "Unknown '$' literal '{}'; use '$$' to escape a string value",
+                        value
+                    )),
+                }
+            }
         } else if let Ok(duration) = parse_duration(value) {
             Ok(vec![Constant::boxed(duration)])
         } else {
@@ -193,8 +212,7 @@ impl Parser {
         left_operand: &str,
         op_right_operand: &Map<String, JsonValue>,
     ) -> Result<BoxedNode, ReductError> {
-        let mut left_operand =
-            Self::parse_recursively(&JsonValue::String(left_operand.to_string()))?;
+        let mut left_operand = Self::parse_literal(left_operand, true)?;
         if op_right_operand.len() != 1 {
             return Err(unprocessable_entity!(
                 "Object notation must have exactly one operator"
@@ -322,6 +340,60 @@ mod tests {
         });
         let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_escaped_dollar_string_literal(parser: Parser, context: Context) {
+        let json = json!({
+            "$eq": ["$$plugin", "$$plugin"]
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_object_syntax_with_escaped_dollar_string_literal(
+        parser: Parser,
+        context: Context,
+    ) {
+        let json = json!({
+            "&label": {"$eq": "$$x"}
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(!node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_in_operator_with_escaped_dollar_string_literal(parser: Parser, context: Context) {
+        let json = json!({
+            "$in": ["&label", "$$x"]
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(!node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_unsupported_dollar_key_is_rejected(parser: Parser) {
+        let json = json!({
+            "$plugin": {"$eq": "value"}
+        });
+        let result = parser.parse(json);
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "[UnprocessableEntity] Operator '$plugin' not supported"
+        );
+    }
+
+    #[rstest]
+    fn test_parse_unknown_dollar_string_literal_is_rejected(parser: Parser) {
+        let json = json!({
+            "$eq": ["$plugin", "$plugin"]
+        });
+        let result = parser.parse(json);
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "[UnprocessableEntity] Unknown '$' literal '$plugin'; use '$$' to escape a string value"
+        );
     }
 
     #[rstest]
