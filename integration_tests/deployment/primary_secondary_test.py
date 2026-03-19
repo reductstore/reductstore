@@ -57,20 +57,43 @@ def _shared_container():
     return os.getenv("PRIMARY_CONTAINER") or os.getenv("SECONDARY_CONTAINER")
 
 
-def _remove_lock_file():
-    shared_container = _shared_container()
-    if shared_container:
+def _container_env(container_name: str, key: str):
+    env_lines = _docker_output(
+        "inspect", "-f", "{{range .Config.Env}}{{println .}}{{end}}", container_name
+    )
+    prefix = f"{key}="
+    for line in env_lines.splitlines():
+        if line.startswith(prefix):
+            return line[len(prefix) :]
+    return None
+
+
+def _container_lock_path(container_name: str) -> str:
+    cache_path = _container_env(container_name, "RS_REMOTE_CACHE_PATH")
+    if cache_path:
+        return f"{cache_path.rstrip('/')}/.lock"
+
+    data_path = _container_env(container_name, "RS_DATA_PATH")
+    if data_path:
+        return f"{data_path.rstrip('/')}/.lock"
+
+    return "/data/.lock"
+
+
+def _remove_lock_file(container_name: str | None = None):
+    target_container = container_name or _shared_container()
+    if target_container:
         _docker_try(
             "run",
             "--rm",
             "--volumes-from",
-            shared_container,
+            target_container,
             "--user",
-            _container_user(shared_container),
+            "0:0",
             "busybox",
             "rm",
             "-f",
-            "/data/.lock",
+            _container_lock_path(target_container),
         )
         return
     data_path = os.getenv("DATA_PATH")
@@ -82,20 +105,19 @@ def _remove_lock_file():
             pass
 
 
-def _write_lock_file(contents: str):
-    shared_container = _shared_container()
-    if shared_container:
+def _write_lock_file(container_name: str, contents: str):
+    if container_name:
         _docker(
             "run",
             "--rm",
             "--volumes-from",
-            shared_container,
+            container_name,
             "--user",
-            _container_user(shared_container),
+            "0:0",
             "busybox",
             "sh",
             "-c",
-            f"printf '%s' '{contents}' > /data/.lock",
+            f"printf '%s' '{contents}' > '{_container_lock_path(container_name)}'",
         )
         return
 
@@ -105,19 +127,19 @@ def _write_lock_file(contents: str):
             lock_file.write(contents)
 
 
-def _read_lock_file():
-    shared_container = _shared_container()
-    if shared_container:
+def _read_lock_file(container_name: str | None = None):
+    target_container = container_name or _shared_container()
+    if target_container:
         return _docker_output(
             "run",
             "--rm",
             "--volumes-from",
-            shared_container,
+            target_container,
             "--user",
-            _container_user(shared_container),
+            "0:0",
             "busybox",
             "cat",
-            "/data/.lock",
+            _container_lock_path(target_container),
         )
 
     data_path = os.getenv("DATA_PATH")
@@ -128,11 +150,6 @@ def _read_lock_file():
     raise RuntimeError(
         "PRIMARY_CONTAINER, SECONDARY_CONTAINER, or DATA_PATH must be set"
     )
-
-
-def _container_user(container_name: str) -> str:
-    user = _docker_output("inspect", "-f", "{{.Config.User}}", container_name)
-    return user or "10001:10001"
 
 
 def _container_exit_code(container_name: str) -> int:
@@ -153,10 +170,12 @@ async def _wait_for_container_exit(container_name: str, timeout_s: float = 15.0)
     raise AssertionError(f"Timed out waiting for container {container_name} to exit")
 
 
-async def _wait_for_lock_contents_not(expected: str, timeout_s: float = 15.0):
+async def _wait_for_lock_contents_not(
+    container_name: str, expected: str, timeout_s: float = 15.0
+):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        if _read_lock_file() != expected:
+        if _read_lock_file(container_name) != expected:
             return
         await asyncio.sleep(0.5)
     raise AssertionError("Timed out waiting for lock file contents to change")
@@ -167,7 +186,8 @@ async def _reset_cluster(
 ):
     _docker_try("stop", secondary_container)
     _docker_try("stop", primary_container)
-    _remove_lock_file()
+    _remove_lock_file(primary_container)
+    _remove_lock_file(secondary_container)
     _docker("start", primary_container)
     await _wait_for_status(primary_url, 200, label="primary ready")
     _docker("start", secondary_container)
@@ -223,7 +243,7 @@ async def test_secondary_panics_if_lock_file_is_changed():
         label="secondary ready after primary stop",
     )
 
-    _write_lock_file(tampered_lock)
+    _write_lock_file(secondary_container, tampered_lock)
 
     await _wait_for_container_exit(secondary_container, timeout_s=10)
     assert _container_exit_code(secondary_container) != 0
@@ -246,10 +266,10 @@ async def test_primary_overwrites_changed_lock_file():
         primary_container, secondary_container, primary_url, secondary_url
     )
 
-    _write_lock_file(tampered_lock)
+    _write_lock_file(primary_container, tampered_lock)
 
-    await _wait_for_lock_contents_not(tampered_lock, timeout_s=10)
-    assert _read_lock_file() != tampered_lock
+    await _wait_for_lock_contents_not(primary_container, tampered_lock, timeout_s=10)
+    assert _read_lock_file(primary_container) != tampered_lock
     await _wait_for_status(primary_url, 200, timeout_s=5, label="primary stays ready")
     await _wait_for_status(
         secondary_url, 503, timeout_s=5, label="secondary stays waiting"
