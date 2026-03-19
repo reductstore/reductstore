@@ -592,6 +592,59 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_read_lock_owner_id_returns_none_for_empty_file(lock_file_path: PathBuf) {
+        fs::write(&lock_file_path, "").unwrap();
+
+        assert_eq!(
+            LockFileBuilder::read_lock_owner_id(&lock_file_path)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_read_lock_owner_id_returns_none_when_read_fails(lock_file_path: PathBuf) {
+        let _ = fs::remove_file(&lock_file_path);
+
+        assert_eq!(
+            LockFileBuilder::read_lock_owner_id(&lock_file_path)
+                .await
+                .unwrap(),
+            None
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_acquire_lock_returns_true_for_same_owner(lock_file_path: PathBuf) {
+        let owner_id = format!("owner-{}", uuid::Uuid::new_v4());
+        fs::write(&lock_file_path, &owner_id).unwrap();
+
+        assert!(
+            LockFileBuilder::acquire_lock(&lock_file_path, &owner_id, InstanceRole::Secondary)
+                .await
+                .unwrap()
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_primary_overwrites_foreign_uid_during_acquire(lock_file_path: PathBuf) {
+        let owner_id = format!("primary-{}", uuid::Uuid::new_v4());
+        fs::write(&lock_file_path, format!("foreign-{}", uuid::Uuid::new_v4())).unwrap();
+
+        assert!(
+            LockFileBuilder::acquire_lock(&lock_file_path, &owner_id, InstanceRole::Primary)
+                .await
+                .unwrap()
+        );
+        assert_eq!(fs::read_to_string(&lock_file_path).unwrap(), owner_id);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     #[should_panic(expected = "secondary cannot acquire it")]
     async fn test_secondary_fails_on_foreign_uid_during_acquire(lock_file_path: PathBuf) {
         fs::write(&lock_file_path, format!("foreign-{}", uuid::Uuid::new_v4())).unwrap();
@@ -631,6 +684,34 @@ mod tests {
                 .starts_with("foreign-"),
             "Primary must overwrite a foreign lock owner"
         );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_primary_acquire_lock_succeeds_when_write_fails(lock_file_path: PathBuf) {
+        let lock_file_path = lock_file_path.join("missing").join("test.lock");
+
+        assert!(LockFileBuilder::acquire_lock(
+            &lock_file_path,
+            &format!("primary-{}", uuid::Uuid::new_v4()),
+            InstanceRole::Primary,
+        )
+        .await
+        .unwrap());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_secondary_acquire_lock_fails_when_write_fails(lock_file_path: PathBuf) {
+        let lock_file_path = lock_file_path.join("missing").join("test.lock");
+
+        assert!(LockFileBuilder::acquire_lock(
+            &lock_file_path,
+            &format!("secondary-{}", uuid::Uuid::new_v4()),
+            InstanceRole::Secondary,
+        )
+        .await
+        .is_err());
     }
 
     #[rstest]
