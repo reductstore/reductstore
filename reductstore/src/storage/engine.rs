@@ -148,8 +148,10 @@ impl StorageEngine {
         for task in infos {
             let bucket = task.await?.info;
             usage += bucket.size;
-            oldest_record = oldest_record.min(bucket.oldest_record);
-            latest_record = latest_record.max(bucket.latest_record);
+            if bucket.oldest_record != u64::MAX {
+                oldest_record = oldest_record.min(bucket.oldest_record);
+                latest_record = latest_record.max(bucket.latest_record);
+            }
         }
 
         Ok(ServerInfo {
@@ -480,6 +482,32 @@ mod tests {
                 license: None,
             }
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_info_ignores_empty_parent_entries_for_oldest_record(
+        #[future] storage: Arc<StorageEngine>,
+    ) {
+        let storage = storage.await;
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        bucket.get_or_create_entry("a").await.unwrap();
+
+        let mut writer = bucket
+            .begin_write("a/b", 1000, 4, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+        writer.send(Ok(Some(Bytes::from("data")))).await.unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let info = storage.info().await.unwrap();
+        assert_eq!(info.oldest_record, 1000);
+        assert_eq!(info.latest_record, 1000);
+        assert_eq!(info.bucket_count, 1);
     }
 
     #[rstest]

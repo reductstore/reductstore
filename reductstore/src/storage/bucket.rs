@@ -217,8 +217,10 @@ impl Bucket {
         for entry in entries {
             let info = entry.info().await?;
             size += info.size;
-            oldest_record = oldest_record.min(info.oldest_record);
-            latest_record = latest_record.max(info.latest_record);
+            if info.record_count > 0 {
+                oldest_record = oldest_record.min(info.oldest_record);
+                latest_record = latest_record.max(info.latest_record);
+            }
             if entry.is_visible_in_bucket_info() {
                 entry_infos.push(info);
             }
@@ -438,6 +440,48 @@ mod tests {
             assert_eq!(info.entries.len(), 1);
             assert_eq!(info.entries[0].name, "entry-1");
             assert!(info.info.size >= 8);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_bucket_info_ignores_empty_parent_entries_for_oldest_record(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            let settings = bucket.settings().await.unwrap();
+            let empty_entry = Arc::new(
+                Entry::try_build(
+                    "empty",
+                    bucket.path.clone(),
+                    settings_for_entry("empty", &settings),
+                    bucket.cfg.clone(),
+                )
+                .await
+                .unwrap(),
+            );
+            bucket
+                .entries
+                .write()
+                .await
+                .unwrap()
+                .insert("empty".to_string(), empty_entry);
+
+            write(&bucket, "filled", 1, b"data").await.unwrap();
+            write(&bucket, "filled", 2, b"more").await.unwrap();
+
+            let info = bucket.info().await.unwrap();
+            assert_eq!(info.info.oldest_record, 1);
+            assert_eq!(info.info.latest_record, 2);
+            assert_eq!(info.info.entry_count, 1);
+
+            let entries = info
+                .entries
+                .into_iter()
+                .map(|entry| (entry.name.clone(), entry))
+                .collect::<HashMap<_, _>>();
+            assert_eq!(entries["filled"].record_count, 2);
+            assert_eq!(entries["filled"].oldest_record, 1);
+            assert_eq!(entries["filled"].latest_record, 2);
         }
 
         #[rstest]

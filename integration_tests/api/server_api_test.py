@@ -55,6 +55,31 @@ def test__get_list_of_buckets(base_url, session):
     assert resp.headers["Content-Type"] == "application/json"
 
 
+def test__info_ignores_empty_parent_entries_for_oldest_record(
+    base_url, session, bucket_name
+):
+    resp = session.post(f"{base_url}/b/{bucket_name}/a/b/c?ts=1000000", data="somedata")
+    assert resp.status_code == 200
+
+    resp = session.post(
+        f"{base_url}/b/{bucket_name}/a/b/c?ts=2000000", data="anotherdata"
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(f"{base_url}/info")
+    assert resp.status_code == 200
+    data = json.loads(resp.content)
+    assert data["oldest_record"] == 1000000
+    assert data["latest_record"] == 2000000
+
+    resp = session.get(f"{base_url}/list")
+    assert resp.status_code == 200
+    data = json.loads(resp.content)
+    bucket = next(item for item in data["buckets"] if item["name"] == bucket_name)
+    assert bucket["oldest_record"] == 1000000
+    assert bucket["latest_record"] == 2000000
+
+
 @requires_env("API_TOKEN")
 def test__authorized_list(base_url, session, token_without_permissions):
     """Needs authenticated token /list with token"""
