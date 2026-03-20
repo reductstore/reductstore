@@ -64,10 +64,15 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         let existing_tokens = token_repo.get_token_list().await.unwrap_or_default();
         for existing_token in existing_tokens {
             if !self.cfg.tokens.contains_key(&existing_token.name) {
-                let mut deprovisioned_token = existing_token.clone();
-                if deprovisioned_token.is_provisioned && existing_token.name != INIT_TOKEN_NAME {
+                if existing_token.is_provisioned && existing_token.name != INIT_TOKEN_NAME {
+                    // we need to get again, since list returns tokens without value
+                    let mut deprovisioned_token = token_repo
+                        .get_token(&existing_token.name)
+                        .await
+                        .expect("Token from the repository list must exist")
+                        .clone();
                     deprovisioned_token.is_provisioned = false;
-                    if let Err(err) = token_repo.update_token(deprovisioned_token.clone()).await {
+                    if let Err(err) = token_repo.update_token(deprovisioned_token).await {
                         error!(
                             "Failed to deprovision token '{}': {}",
                             existing_token.name, err
@@ -145,11 +150,12 @@ mod tests {
 
     use crate::cfg::tests::MockEnvGetter;
     use crate::cfg::Cfg;
+    use crate::core::env::Env;
     use crate::core::file_cache::FILE_CACHE;
 
     use mockall::predicate::eq;
     use reduct_base::error::ReductError;
-    use reduct_base::msg::token_api::Permissions;
+    use reduct_base::msg::token_api::{Permissions, Token};
     use reduct_base::not_found;
     use rstest::{fixture, rstest};
     use serial_test::serial;
@@ -348,6 +354,80 @@ mod tests {
         let token = repo.get_token("token1").await.unwrap();
         assert_ne!(token.value, "TOKEN");
         assert!(!token.is_provisioned);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_deprovision_tokens_removed_from_config(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
+        let data_path = PathBuf::from(env_with_tokens.get("RS_DATA_PATH").unwrap());
+
+        env_with_tokens
+            .expect_get()
+            .with(eq("RS_TOKEN_1_VALUE"))
+            .return_const(Ok("TOKEN".to_string()));
+        env_with_tokens
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
+        let _components = cfg.build().await.unwrap();
+        FILE_CACHE.discard_recursive(&data_path).await.unwrap();
+
+        let empty_cfg = cfg_parser_with_tokens(&data_path, HashMap::new());
+        let components = empty_cfg.build().await.unwrap();
+
+        let mut repo = components.token_repo.write().await.unwrap();
+        let token = repo.get_token("token1").await.unwrap();
+        assert_eq!(token.value, "TOKEN");
+        assert!(!token.is_provisioned);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_keeps_init_token_provisioned_when_not_in_config(
+        #[future] env_with_tokens: MockEnvGetter,
+    ) {
+        let mut env_with_tokens = env_with_tokens.await;
+        let data_path = PathBuf::from(env_with_tokens.get("RS_DATA_PATH").unwrap());
+
+        env_with_tokens
+            .expect_get()
+            .with(eq("RS_TOKEN_1_VALUE"))
+            .return_const(Ok("TOKEN".to_string()));
+        env_with_tokens
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
+        let _components = cfg.build().await.unwrap();
+        FILE_CACHE.discard_recursive(&data_path).await.unwrap();
+
+        let empty_cfg = cfg_parser_with_tokens(&data_path, HashMap::new());
+        let components = empty_cfg.build().await.unwrap();
+
+        let mut repo = components.token_repo.write().await.unwrap();
+        let init_token = repo.get_token(INIT_TOKEN_NAME).await.unwrap();
+        assert!(init_token.is_provisioned);
+        assert_eq!(init_token.value, "XXX");
+    }
+
+    fn cfg_parser_with_tokens(
+        data_path: &PathBuf,
+        tokens: HashMap<String, Token>,
+    ) -> CfgParser<MockEnvGetter> {
+        CfgParser {
+            cfg: Cfg {
+                data_path: data_path.clone(),
+                api_token: "XXX".to_string(),
+                tokens,
+                ..Default::default()
+            },
+            license: None,
+            env: Env::new(MockEnvGetter::new()),
+        }
     }
 
     #[fixture]
