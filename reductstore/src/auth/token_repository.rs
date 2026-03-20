@@ -20,7 +20,7 @@ use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 
 const TOKEN_REPO_FILE_NAME: &str = ".auth";
-const INIT_TOKEN_NAME: &str = "init-token";
+pub(crate) const INIT_TOKEN_NAME: &str = "init-token";
 
 pub(crate) fn parse_bearer_token(authorization_header: &str) -> Result<String, ReductError> {
     if !authorization_header.starts_with("Bearer ") {
