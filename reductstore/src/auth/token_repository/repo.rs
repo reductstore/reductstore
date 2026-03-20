@@ -189,11 +189,13 @@ impl ManageTokens for TokenRepository {
         AccessTokens::get_token(self, name)
     }
 
-    async fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError> {
-        match self.repo.get_mut(name) {
-            Some(token) => Ok(token),
-            None => Err(not_found!("Token '{}' doesn't exist", name)),
+    async fn update_token(&mut self, token: Token) -> Result<(), ReductError> {
+        if !self.repo.contains_key(&token.name) {
+            return Err(not_found!("Token '{}' doesn't exist", token.name));
         }
+
+        self.repo.insert(token.name.clone(), token);
+        self.save_repo().await
     }
 
     async fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
@@ -451,6 +453,55 @@ mod tests {
             let token = repo.get_token("test-1").await;
             assert_eq!(token, Err(not_found!("Token 'test-1' doesn't exist")));
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_update_token_persistent(path: PathBuf, init_token: &str) {
+            let cfg = Cfg {
+                api_token: init_token.to_string(),
+                ..Default::default()
+            };
+
+            let mut repo = build_repo_at(&path, &cfg).await;
+            repo.generate_token(
+                "test",
+                Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                },
+            )
+            .await
+            .unwrap();
+
+            let created_at = repo.get_token("test").await.unwrap().created_at;
+            repo.update_token(Token {
+                name: "test".to_string(),
+                value: "updated-token".to_string(),
+                created_at,
+                permissions: Some(Permissions {
+                    full_access: false,
+                    read: vec!["bucket-1".to_string()],
+                    write: vec![],
+                }),
+                is_provisioned: true,
+            })
+            .await
+            .unwrap();
+
+            let mut reloaded_repo = build_repo_at(&path, &cfg).await;
+            let token = reloaded_repo.get_token("test").await.unwrap();
+            assert_eq!(token.value, "updated-token");
+            assert!(token.is_provisioned);
+            assert_eq!(
+                token.permissions,
+                Some(Permissions {
+                    full_access: false,
+                    read: vec!["bucket-1".to_string()],
+                    write: vec![],
+                })
+            );
+        }
     }
 
     mod token_list {
@@ -583,8 +634,9 @@ mod tests {
         #[tokio::test]
         async fn test_remove_provisioned_token(#[future] repo: BoxedTokenRepository) {
             let mut repo = repo.await;
-            let token = repo.get_mut_token("test").await.unwrap();
+            let mut token = repo.get_token("test").await.unwrap().clone();
             token.is_provisioned = true;
+            repo.update_token(token).await.unwrap();
 
             let err = repo.remove_token("test").await.err().unwrap();
             assert_eq!(err, conflict!("Can't remove provisioned token 'test'"))

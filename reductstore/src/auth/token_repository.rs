@@ -53,6 +53,7 @@ impl From<Token> for crate::auth::proto::Token {
                 nanos: token.created_at.timestamp_subsec_nanos() as i32,
             }),
             permissions,
+            is_provisioned: token.is_provisioned,
         }
     }
 }
@@ -82,7 +83,7 @@ impl Into<Token> for crate::auth::proto::Token {
             value: self.value,
             created_at,
             permissions,
-            is_provisioned: false,
+            is_provisioned: self.is_provisioned,
         }
     }
 }
@@ -115,15 +116,12 @@ pub(crate) trait ManageTokens {
     /// The token without value
     async fn get_token(&mut self, name: &str) -> Result<&Token, ReductError>;
 
-    /// Get a token by name (mutable)
+    /// Replace an existing token and persist the repository if needed.
     ///
     /// # Arguments
     ///
-    /// `name` - The name of the token
-    ///
-    /// # Returns
-    /// The token without value
-    async fn get_mut_token(&mut self, name: &str) -> Result<&mut Token, ReductError>;
+    /// `token` - The token to replace
+    async fn update_token(&mut self, token: Token) -> Result<(), ReductError>;
 
     /// Get token list
     ///
