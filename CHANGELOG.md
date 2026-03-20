@@ -28,6 +28,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Restore `Unknown extension` validation for queries with `ext` when no extensions are loaded, [PR-1192](https://github.com/reductstore/reductstore/pull/1192)
 - Fix share links for entries with nested paths by matching multi-segment filenames in links routes, [PR-1202](https://github.com/reductstore/reductstore/pull/1202)
 
+## 1.18.8 - 2026-03-19
+
+### Fixed
+
+- Persist reprovisioned token updates so read-only replicas receive token changes and keep provisioned token state across reloads, [PR-1221](https://github.com/reductstore/reductstore/pull/1221)
+- Prevent split-brain when a secondary sees a foreign lock owner during acquisition and refresh the lock owner token from remote storage before reading it, [PR-1219](https://github.com/reductstore/reductstore/pull/1219)
+
 ## 1.18.7 - 2026-03-17
 
 ### Breaking Change

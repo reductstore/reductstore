@@ -32,7 +32,7 @@ impl ManageTokens for NoAuthRepository {
         Err(bad_request!("Authentication is disabled"))
     }
 
-    async fn get_mut_token(&mut self, _name: &str) -> Result<&mut Token, ReductError> {
+    async fn update_token(&mut self, _token: Token) -> Result<(), ReductError> {
         Err(bad_request!("Authentication is disabled"))
     }
 
@@ -107,10 +107,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_find_mut_by_name_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+    async fn test_update_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
         let mut disabled_repo = disabled_repo.await;
-        let token = disabled_repo.get_mut_token("test").await;
-        assert_eq!(token, Err(bad_request!("Authentication is disabled")));
+        let result = disabled_repo.update_token(Token::default()).await;
+        assert_eq!(result, Err(bad_request!("Authentication is disabled")));
     }
 
     #[rstest]
