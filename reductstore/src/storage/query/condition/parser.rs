@@ -119,7 +119,7 @@ impl Parser {
             JsonValue::Object(map) => Self::parse_object(map),
             JsonValue::Bool(value) => Self::parse_bool(value),
             JsonValue::Number(value) => Self::parse_number(value),
-            JsonValue::String(value) => Self::parse_literal(value, false),
+            JsonValue::String(value) => Self::parse_literal(value),
             JsonValue::Array(_) => Err(unprocessable_entity!(
                 "Array type is not supported: {}",
                 json
@@ -164,31 +164,20 @@ impl Parser {
         }
     }
 
-    fn parse_literal(value: &str, is_key: bool) -> Result<Vec<BoxedNode>, ReductError> {
+    fn parse_literal(value: &str) -> Result<Vec<BoxedNode>, ReductError> {
         if value.starts_with("&") {
             Ok(vec![Reference::boxed(value[1..].to_string())])
         } else if value.starts_with("@") {
             Ok(vec![ComputedReference::boxed(value[1..].to_string())])
         } else if let Some(value) = value.strip_prefix("$$") {
-            if is_key {
-                Err(unprocessable_entity!(
-                    "Escaped '$' literal is not allowed in key position: '{}'",
-                    value
-                ))
-            } else {
-                Ok(vec![Constant::boxed(Value::String(format!("${value}")))])
-            }
+            Ok(vec![Constant::boxed(Value::String(format!("${value}")))])
         } else if value.starts_with("$") {
-            if is_key {
-                Ok(vec![Self::parse_operator(value, vec![])?])
-            } else {
-                match Self::parse_operator(value, vec![]) {
-                    Ok(operator) => Ok(vec![operator]),
-                    Err(_) => Err(unprocessable_entity!(
-                        "Unknown '$' literal '{}'; use '$$' to escape a string value",
-                        value
-                    )),
-                }
+            match Self::parse_operator(value, vec![]) {
+                Ok(operator) => Ok(vec![operator]),
+                Err(_) => Err(unprocessable_entity!(
+                    "Unknown '$' literal '{}'; use '$$' to escape a string value",
+                    value
+                )),
             }
         } else if let Ok(duration) = parse_duration(value) {
             Ok(vec![Constant::boxed(duration)])
@@ -212,7 +201,8 @@ impl Parser {
         left_operand: &str,
         op_right_operand: &Map<String, JsonValue>,
     ) -> Result<BoxedNode, ReductError> {
-        let mut left_operand = Self::parse_literal(left_operand, true)?;
+        let mut left_operand =
+            Self::parse_recursively(&JsonValue::String(left_operand.to_string()))?;
         if op_right_operand.len() != 1 {
             return Err(unprocessable_entity!(
                 "Object notation must have exactly one operator"
@@ -384,14 +374,14 @@ mod tests {
     }
 
     #[rstest]
-    fn test_parse_unsupported_dollar_key_is_rejected(parser: Parser) {
+    fn test_parse_unknown_dollar_key_is_rejected(parser: Parser) {
         let json = json!({
             "$plugin": {"$eq": "value"}
         });
         let result = parser.parse(json);
         assert_eq!(
             result.err().unwrap().to_string(),
-            "[UnprocessableEntity] Operator '$plugin' not supported"
+            "[UnprocessableEntity] Unknown '$' literal '$plugin'; use '$$' to escape a string value"
         );
     }
 
@@ -408,15 +398,12 @@ mod tests {
     }
 
     #[rstest]
-    fn test_parse_escaped_dollar_key_is_rejected(parser: Parser) {
+    fn test_parse_object_syntax_with_escaped_dollar_key_literal(parser: Parser) {
         let json = json!({
-            "$$plugin": {"$eq": "value"}
+            "$$plugin": {"$eq": "$$plugin"}
         });
-        let result = parser.parse(json);
-        assert_eq!(
-            result.err().unwrap().to_string(),
-            "[UnprocessableEntity] Escaped '$' literal is not allowed in key position: 'plugin'"
-        );
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(node.apply(&Context::default()).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
