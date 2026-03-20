@@ -1,7 +1,9 @@
 // Copyright 2025-2026 ReductSoftware UG
 // Licensed under the Business Source License 1.1
 
-use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
+use crate::auth::token_repository::{
+    BoxedTokenRepository, TokenRepositoryBuilder, INIT_TOKEN_NAME,
+};
 use crate::cfg::CfgParser;
 use crate::core::env::{Env, GetEnv};
 use log::{error, info, warn};
@@ -20,6 +22,8 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             .await;
 
         for (name, token) in &self.cfg.tokens {
+            // Try to generate token, just for name check and to create the token file if it doesn't exist.
+            // If the token already exists, we will update it with the provided value and permissions.
             let is_generated = match token_repo
                 .generate_token(&name, token.permissions.clone().unwrap_or_default())
                 .await
@@ -53,6 +57,26 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
                     "Provisioned token '{}' with {:?}",
                     update_token.name, update_token.permissions
                 );
+            }
+        }
+
+        // Deprovision tokens that are not in the config but exist in the repo
+        let existing_tokens = token_repo.get_token_list().await.unwrap_or_default();
+        for existing_token in existing_tokens {
+            if !self.cfg.tokens.contains_key(&existing_token.name) {
+                let mut deprovisioned_token = existing_token.clone();
+                if deprovisioned_token.is_provisioned && existing_token.name != INIT_TOKEN_NAME {
+                    deprovisioned_token.is_provisioned = false;
+                    if let Err(err) = token_repo.update_token(deprovisioned_token.clone()).await {
+                        error!(
+                            "Failed to deprovision token '{}': {}",
+                            existing_token.name, err
+                        );
+                        continue;
+                    }
+
+                    info!("Deprovisioned token '{}'", existing_token.name);
+                }
             }
         }
         token_repo
