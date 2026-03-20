@@ -210,16 +210,24 @@ impl Entry {
 
         let mut bm = self.block_manager.write().await?;
         let index = bm.update_and_get_index().await?;
-        let (oldest_record, latest_record) = if index.tree().is_empty() {
-            (0, 0)
-        } else {
-            let latest_block_id = index.tree().last().unwrap();
-            let latest_record = match index.get_block(*latest_block_id) {
-                Some(block) => ts_to_us(&block.latest_record_time.as_ref().unwrap()),
-                None => 0,
-            };
-            (*index.tree().first().unwrap(), latest_record)
-        };
+        let oldest_record = index
+            .tree()
+            .iter()
+            .find_map(|block_id| {
+                let block = index.get_block(*block_id)?;
+                (block.record_count > 0).then_some(*block_id)
+            })
+            .unwrap_or(0);
+        let latest_record = index
+            .tree()
+            .iter()
+            .rev()
+            .find_map(|block_id| {
+                let block = index.get_block(*block_id)?;
+                (block.record_count > 0)
+                    .then(|| ts_to_us(block.latest_record_time.as_ref().unwrap()))
+            })
+            .unwrap_or(0);
 
         let status = status_result.await?;
 

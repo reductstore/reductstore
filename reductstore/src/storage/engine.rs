@@ -148,8 +148,10 @@ impl StorageEngine {
         for task in infos {
             let bucket = task.await?.info;
             usage += bucket.size;
-            oldest_record = oldest_record.min(bucket.oldest_record);
-            latest_record = latest_record.max(bucket.latest_record);
+            if bucket.oldest_record != u64::MAX {
+                oldest_record = oldest_record.min(bucket.oldest_record);
+                latest_record = latest_record.max(bucket.latest_record);
+            }
         }
 
         Ok(ServerInfo {
@@ -379,6 +381,16 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
 }
 
 pub(super) fn check_entry_name_convention(name: &str) -> Result<(), ReductError> {
+    if name.is_empty()
+        || name.starts_with('/')
+        || name.ends_with('/')
+        || name.split('/').any(|segment| segment.is_empty())
+    {
+        return Err(unprocessable_entity!(
+            "Entry name must be non-empty and must not contain empty path segments",
+        ));
+    }
+
     let regex = regex::Regex::new(r"^[A-Za-z0-9_/-]*$").unwrap();
     if regex.is_match(name) {
         return Ok(());
@@ -423,6 +435,10 @@ mod tests {
         assert!(check_entry_name_convention("entry").is_ok());
         assert!(check_entry_name_convention("entry/$meta").is_ok());
         assert!(check_entry_name_convention("x/y/$meta").is_ok());
+        assert!(check_entry_name_convention("").is_err());
+        assert!(check_entry_name_convention("/entry").is_err());
+        assert!(check_entry_name_convention("entry/").is_err());
+        assert!(check_entry_name_convention("entry//child").is_err());
         assert!(check_entry_name_convention("entry/$other").is_err());
     }
 
@@ -466,6 +482,32 @@ mod tests {
                 license: None,
             }
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_info_ignores_empty_parent_entries_for_oldest_record(
+        #[future] storage: Arc<StorageEngine>,
+    ) {
+        let storage = storage.await;
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        bucket.get_or_create_entry("a").await.unwrap();
+
+        let mut writer = bucket
+            .begin_write("a/b", 1000, 4, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+        writer.send(Ok(Some(Bytes::from("data")))).await.unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let info = storage.info().await.unwrap();
+        assert_eq!(info.oldest_record, 1000);
+        assert_eq!(info.latest_record, 1000);
+        assert_eq!(info.bucket_count, 1);
     }
 
     #[rstest]

@@ -6,7 +6,7 @@ authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
-license = "BUSL-1.1"
+license = "Apache-2.0"
 description = "ReductStore is a time series database designed specifically for storing and managing large amounts of blob data."
 homepage = "https://reduct.store"
 documentation = "https://reduct.store/docs"
@@ -35,7 +35,7 @@ reduct-macros = { path = "../reduct_macros", version = "1.18.0" }
 
 chrono = { version = "0.4.41", features = ["serde"] }
 zip = "8.1.0"
-tempfile = "3.23.0"
+tempfile = "3.27.0"
 hex = "0.4.3"
 prost-wkt-types = "0.7.0"
 rand = "0.9.2"
@@ -71,7 +71,7 @@ argon2 = "0.6.0-rc.1"
 aes-siv = "0.8.0-rc.1"
 uuid = { version = "1.21.0", features = ["v4"] }
 parking_lot="0.12.5"
-zenoh = { version = "1.7.2", optional = true }
+zenoh = { version = "1.8.0", optional = true }
 
 
 [build-dependencies]
