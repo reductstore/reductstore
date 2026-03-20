@@ -55,7 +55,7 @@ RS_ZENOH_AUTH_DICTIONARY="testuser:testpassword" pytest integration_tests/zenoh/
 
 #### TLS Tests
 
-TLS tests require a TLS-enabled Zenoh router with valid certificates. The test certificate in `misc/certificate.crt` is valid until 2036.
+TLS tests require a TLS-enabled Zenoh router with valid certificates. The test CA certificate in `misc/ca.crt` and the server certificate in `misc/certificate.crt` are valid until 2036.
 
 To regenerate test certificates (if needed):
 ```bash
@@ -78,7 +78,7 @@ docker rm -f zenoh-router && docker run --init -d --name zenoh-router -p 7447:74
 
 Start ReductStore and run tests:
 ```bash
-RS_DATA_PATH=~/data-test RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tls/127.0.0.1:7447]" RS_ZENOH_SUB_KEYEXPRS="**" RS_ZENOH_TLS_ROOT_CA="$(cat misc/certificate.crt)" cargo run -p reductstore --features "fs-backend web-console zenoh-api"
+RS_DATA_PATH=~/data-test RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tls/127.0.0.1:7447]" RS_ZENOH_SUB_KEYEXPRS="**" RS_ZENOH_TLS_ROOT_CA="$(cat misc/ca.crt)" cargo run -p reductstore --features "fs-backend web-console zenoh-api"
 
-RS_ZENOH_TLS_ROOT_CA="$(cat misc/certificate.crt)" pytest integration_tests/zenoh/credentials_test.py -v
+RS_ZENOH_TLS_ROOT_CA="$(cat misc/ca.crt)" pytest integration_tests/zenoh/credentials_test.py -v
 ```

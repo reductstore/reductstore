@@ -6,12 +6,12 @@ use crate::replication::remote_bucket::states::bucket_available::BucketAvailable
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::replication::remote_bucket::RemoteBucketConfig;
 use crate::replication::Transaction;
 use async_trait::async_trait;
 use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
-
 /// Initial state of the remote bucket.
 pub(in crate::replication::remote_bucket) struct InitialState {
     client: BoxedClientApi,
@@ -20,13 +20,13 @@ pub(in crate::replication::remote_bucket) struct InitialState {
 }
 
 impl InitialState {
-    pub fn new(url: &str, bucket: &str, api_token: &str) -> Self {
-        let client = create_client(url, api_token);
-        Self {
+    pub fn new(config: &RemoteBucketConfig) -> Result<Self, ReductError> {
+        let client = create_client(config)?;
+        Ok(Self {
             client,
-            bucket_name: bucket.to_string(),
+            bucket_name: config.bucket_name.clone(),
             last_result: Ok(ErrorRecordMap::new()),
-        }
+        })
     }
 }
 
@@ -93,10 +93,14 @@ mod tests {
 
     #[rstest]
     fn test_initial_state() {
-        let url = "http://localhost:8080";
-        let bucket_name = "test_bucket";
-        let api_token = "test_token";
-        let state = InitialState::new(url, bucket_name, api_token);
+        let state = InitialState::new(&RemoteBucketConfig {
+            url: "http://localhost:8080".to_string(),
+            bucket_name: "test_bucket".to_string(),
+            api_token: "test_token".to_string(),
+            verify_ssl: true,
+            ca_path: None,
+        })
+        .unwrap();
         assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
     }
 

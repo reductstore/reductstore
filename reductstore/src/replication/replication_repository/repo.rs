@@ -505,7 +505,7 @@ impl ReplicationRepository {
         settings.dst_token = init_token;
 
         let replication =
-            ReplicationTask::new(name.to_string(), settings, conf, Arc::clone(&self.storage));
+            ReplicationTask::new(name.to_string(), settings, conf, Arc::clone(&self.storage))?;
         let mut replication = replication;
         if self.started {
             replication.start();

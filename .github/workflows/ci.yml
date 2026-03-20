@@ -222,7 +222,7 @@ jobs:
         run: |
           if [ "${{ matrix.tls_root_ca }}" = "use-misc-cert" ]; then
             echo "cert<<EOF" >> $GITHUB_OUTPUT
-            cat misc/certificate.crt >> $GITHUB_OUTPUT
+            cat misc/ca.crt >> $GITHUB_OUTPUT
             echo "EOF" >> $GITHUB_OUTPUT
           else
             echo "cert=" >> $GITHUB_OUTPUT

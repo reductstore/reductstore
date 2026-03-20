@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
 ### Added
 
 - Support hierarchical entry paths and preserve nested tree recovery, [PR-1185](https://github.com/reductstore/reductstore/pull/1185)
@@ -31,6 +32,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extract extension attachments for wildcard-matched entries and pass per-entry attachment maps to extensions, [PR-1203](https://github.com/reductstore/reductstore/pull/1203)
 - Restore `Unknown extension` validation for queries with `ext` when no extensions are loaded, [PR-1192](https://github.com/reductstore/reductstore/pull/1192)
 - Fix share links for entries with nested paths by matching multi-segment filenames in links routes, [PR-1202](https://github.com/reductstore/reductstore/pull/1202)
+
+## 1.18.9 - 2026-03-20
+
+### Fixed
+
+- Deprovision tokens removed from config while keeping the init token untouched, [PR-1229](https://github.com/reductstore/reductstore/pull/1229)
+
+## 1.18.8 - 2026-03-19
+
+### Fixed
+
+- Persist reprovisioned token updates so read-only replicas receive token changes and keep provisioned token state across reloads, [PR-1221](https://github.com/reductstore/reductstore/pull/1221)
+- Prevent split-brain when a secondary sees a foreign lock owner during acquisition and refresh the lock owner token from remote storage before reading it, [PR-1219](https://github.com/reductstore/reductstore/pull/1219)
+
+## 1.18.7 - 2026-03-17
+
+### Breaking Change
+
+Replication destinations now verify TLS certificates by default.
+Existing deployments that relied on the previous insecure behavior with self-signed or privately issued certificates will need to either set RS_REPLICATION_CA_PATH to a trusted CA bundle or explicitly set RS_REPLICATION_VERIFY_SSL=false.
+This is necessary because the old behavior silently disabled certificate validation for all replication traffic.
+
+### Changed
+
+- Enforce TLS verification for replication by default, add `RS_REPLICATION_VERIFY_SSL` and `RS_REPLICATION_CA_PATH`, and refresh local CA test certificates, [PR-1208](https://github.com/reductstore/reductstore/pull/1208)
+
+## 1.18.6 - 2026-03-09
+
+### Fixed
+
+- Allow S3 remote storage to use the default AWS credential chain and optional session token, [PR-1199](https://github.com/reductstore/reductstore/pull/1199)
 
 ## 1.18.5 - 2026-02-25
 
