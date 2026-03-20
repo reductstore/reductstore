@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Deprovision tokens removed from config while keeping the init token untouched, [PR-1229](https://github.com/reductstore/reductstore/pull/1229)
+
 ## 1.18.8 - 2026-03-19
 
 ### Fixed
