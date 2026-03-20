@@ -103,6 +103,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_update_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let result = disabled_repo.update_token(Token::default()).await;
+        assert_eq!(result, Err(bad_request!("Authentication is disabled")));
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_get_token_list_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
         let mut disabled_repo = disabled_repo.await;
         let token_list = disabled_repo.get_token_list().await.unwrap();

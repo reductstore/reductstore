@@ -121,6 +121,7 @@ mod tests {
 
     use crate::cfg::tests::MockEnvGetter;
     use crate::cfg::Cfg;
+    use crate::core::file_cache::FILE_CACHE;
 
     use mockall::predicate::eq;
     use reduct_base::error::ReductError;
@@ -132,6 +133,7 @@ mod tests {
     use std::default::Default;
     use std::env::VarError;
     use std::fs;
+    use std::os::unix::fs::PermissionsExt;
 
     #[rstest]
     #[tokio::test]
@@ -271,6 +273,57 @@ mod tests {
         let token = repo.get_token("token1").await.unwrap();
         assert_eq!(token.value, "TOKEN");
         assert!(token.is_provisioned);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_override_token_keeps_previous_version_when_update_fails(
+        #[future] env_with_tokens: MockEnvGetter,
+    ) {
+        let mut env_with_tokens = env_with_tokens.await;
+        let data_path = PathBuf::from(env_with_tokens.get("RS_DATA_PATH").unwrap());
+
+        let mut auth_repo = TokenRepositoryBuilder::new(Cfg {
+            api_token: "init".to_string(),
+            ..Default::default()
+        })
+        .build(data_path.clone())
+        .await;
+        auth_repo
+            .generate_token("token1", Permissions::default())
+            .await
+            .unwrap();
+        drop(auth_repo);
+        FILE_CACHE.discard_recursive(&data_path).await.unwrap();
+
+        let token_file = data_path.join(".auth");
+        fs::set_permissions(&data_path, fs::Permissions::from_mode(0o555)).unwrap();
+        fs::set_permissions(&token_file, fs::Permissions::from_mode(0o444)).unwrap();
+
+        env_with_tokens
+            .expect_get()
+            .with(eq("RS_TOKEN_1_VALUE"))
+            .return_const(Ok("TOKEN".to_string()));
+        env_with_tokens
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
+        let _components = cfg.build().await.unwrap();
+
+        fs::set_permissions(&token_file, fs::Permissions::from_mode(0o644)).unwrap();
+        fs::set_permissions(&data_path, fs::Permissions::from_mode(0o755)).unwrap();
+
+        let mut repo = TokenRepositoryBuilder::new(Cfg {
+            api_token: "XXX".to_string(),
+            ..Default::default()
+        })
+        .build(data_path)
+        .await;
+        let token = repo.get_token("token1").await.unwrap();
+        assert_ne!(token.value, "TOKEN");
+        assert!(!token.is_provisioned);
     }
 
     #[fixture]

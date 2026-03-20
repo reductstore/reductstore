@@ -302,6 +302,19 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_update_token_forbidden(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, _) = repo_fixture.await;
+            let result = repo.update_token(Token::default()).await;
+            assert_eq!(
+                result.err().unwrap(),
+                forbidden!("Cannot mutate token in read-only mode")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_get_token_list(#[future] repo_fixture: (BoxedTokenRepository, PathBuf)) {
             let (mut repo, _) = repo_fixture.await;
             let list = repo.get_token_list().await.unwrap();
