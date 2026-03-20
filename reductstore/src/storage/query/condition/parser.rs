@@ -119,7 +119,7 @@ impl Parser {
             JsonValue::Object(map) => Self::parse_object(map),
             JsonValue::Bool(value) => Self::parse_bool(value),
             JsonValue::Number(value) => Self::parse_number(value),
-            JsonValue::String(value) => Self::parse_string(value),
+            JsonValue::String(value) => Self::parse_literal(value),
             JsonValue::Array(_) => Err(unprocessable_entity!(
                 "Array type is not supported: {}",
                 json
@@ -164,13 +164,21 @@ impl Parser {
         }
     }
 
-    fn parse_string(value: &str) -> Result<Vec<BoxedNode>, ReductError> {
+    fn parse_literal(value: &str) -> Result<Vec<BoxedNode>, ReductError> {
         if value.starts_with("&") {
             Ok(vec![Reference::boxed(value[1..].to_string())])
         } else if value.starts_with("@") {
             Ok(vec![ComputedReference::boxed(value[1..].to_string())])
+        } else if let Some(value) = value.strip_prefix("$$") {
+            Ok(vec![Constant::boxed(Value::String(format!("${value}")))])
         } else if value.starts_with("$") {
-            Ok(vec![Self::parse_operator(value, vec![])?])
+            match Self::parse_operator(value, vec![]) {
+                Ok(operator) => Ok(vec![operator]),
+                Err(_) => Err(unprocessable_entity!(
+                    "Unknown '$' literal '{}'; use '$$' to escape a string value",
+                    value
+                )),
+            }
         } else if let Ok(duration) = parse_duration(value) {
             Ok(vec![Constant::boxed(duration)])
         } else {
@@ -322,6 +330,80 @@ mod tests {
         });
         let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_escaped_dollar_string_literal(parser: Parser, context: Context) {
+        let json = json!({
+            "$eq": ["$$plugin", "$$plugin"]
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_computed_reference_literal(parser: Parser) {
+        let json = json!({
+            "$eq": ["@value", 10]
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        let mut context = Context::default();
+        context.computed_labels.insert("value", "10");
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_object_syntax_with_escaped_dollar_string_literal(
+        parser: Parser,
+        context: Context,
+    ) {
+        let json = json!({
+            "&label": {"$eq": "$$x"}
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(!node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_in_operator_with_escaped_dollar_string_literal(parser: Parser, context: Context) {
+        let json = json!({
+            "$in": ["&label", "$$x"]
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(!node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_unknown_dollar_key_is_rejected(parser: Parser) {
+        let json = json!({
+            "$plugin": {"$eq": "value"}
+        });
+        let result = parser.parse(json);
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "[UnprocessableEntity] Unknown '$' literal '$plugin'; use '$$' to escape a string value"
+        );
+    }
+
+    #[rstest]
+    fn test_parse_unknown_dollar_string_literal_is_rejected(parser: Parser) {
+        let json = json!({
+            "$eq": ["$plugin", "$plugin"]
+        });
+        let result = parser.parse(json);
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "[UnprocessableEntity] Unknown '$' literal '$plugin'; use '$$' to escape a string value"
+        );
+    }
+
+    #[rstest]
+    fn test_parse_object_syntax_with_escaped_dollar_key_literal(parser: Parser) {
+        let json = json!({
+            "$$plugin": {"$eq": "$$plugin"}
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(node.apply(&Context::default()).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
