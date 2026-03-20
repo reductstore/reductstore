@@ -352,6 +352,17 @@ mod tests {
     }
 
     #[rstest]
+    fn test_parse_computed_reference_literal(parser: Parser) {
+        let json = json!({
+            "$eq": ["@value", 10]
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        let mut context = Context::default();
+        context.computed_labels.insert("value", "10");
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
     fn test_parse_object_syntax_with_escaped_dollar_string_literal(
         parser: Parser,
         context: Context,
@@ -393,6 +404,18 @@ mod tests {
         assert_eq!(
             result.err().unwrap().to_string(),
             "[UnprocessableEntity] Unknown '$' literal '$plugin'; use '$$' to escape a string value"
+        );
+    }
+
+    #[rstest]
+    fn test_parse_escaped_dollar_key_is_rejected(parser: Parser) {
+        let json = json!({
+            "$$plugin": {"$eq": "value"}
+        });
+        let result = parser.parse(json);
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "[UnprocessableEntity] Escaped '$' literal is not allowed in key position: 'plugin'"
         );
     }
 
