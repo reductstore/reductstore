@@ -10,9 +10,7 @@ use reduct_base::forbidden;
 use std::sync::Arc;
 
 pub(crate) struct ReadOnlyAuditRepository {
-    #[allow(dead_code)]
     cfg: Cfg,
-    #[allow(dead_code)]
     storage: Arc<StorageEngine>,
 }
 

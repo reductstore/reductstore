@@ -13,6 +13,7 @@ pub mod zenoh;
 
 use crate::api::components::Components;
 use crate::asset::asset_manager::create_asset_manager;
+use crate::audit::AuditRepositoryBuilder;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType};
 use crate::cfg::io::IoConfig;
@@ -357,6 +358,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .server_info(server_info.clone())
             .build();
         let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
+        let audit_repo = AuditRepositoryBuilder::new(self.cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
 
         Ok(Components {
             storage: Arc::clone(&storage),
@@ -375,6 +379,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),
+            audit_repo: AsyncRwLock::new(audit_repo),
             cfg: self.cfg.clone(),
         })
     }
