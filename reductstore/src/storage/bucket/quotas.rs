@@ -144,7 +144,7 @@ mod tests {
                 .await
                 .err(),
             Some(ReductError::not_found(
-                "Entry 'test-1' not found in bucket 'test'"
+                "Record 0 not found in entry test/test-1"
             ))
         );
     }
