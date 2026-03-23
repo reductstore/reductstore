@@ -472,7 +472,7 @@ mod tests {
             let info = bucket.info().await.unwrap();
             assert_eq!(info.info.oldest_record, 1);
             assert_eq!(info.info.latest_record, 2);
-            assert_eq!(info.info.entry_count, 1);
+            assert_eq!(info.info.entry_count, 2);
 
             let entries = info
                 .entries

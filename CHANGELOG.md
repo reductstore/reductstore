@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve empty entries after FIFO quota eviction so read-only replicas do not retain undeletable zombie entries, [PR-1236](https://github.com/reductstore/reductstore/pull/1236)
 - Require `$$` escaping for conditional-query string literals that start with `$` while preserving `$timestamp` as an operator, [PR-1222](https://github.com/reductstore/reductstore/pull/1222)
 - Ignore empty entries when reporting oldest record timestamps in bucket and server info, [PR-1218](https://github.com/reductstore/reductstore/pull/1218)
 - Skip replication filters for system `$meta` attachment entries and improve strict filter warnings with entry names; fix the default license print to Apache-2.0, [PR-1217](https://github.com/reductstore/reductstore/pull/1217)

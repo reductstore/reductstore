@@ -102,19 +102,6 @@ impl Bucket {
             size = get_bucket_size().await? + content_size;
         }
 
-        // Remove empty entries
-        let mut entries = self.entries.write().await?;
-        let mut names_to_remove = vec![];
-        for (name, entry) in entries.iter() {
-            if entry.info().await?.record_count != 0 {
-                continue;
-            }
-            names_to_remove.push(name.clone());
-        }
-
-        for name in names_to_remove {
-            entries.remove(&name);
-        }
         Ok(())
     }
 }
@@ -157,7 +144,7 @@ mod tests {
                 .await
                 .err(),
             Some(ReductError::not_found(
-                "Entry 'test-1' not found in bucket 'test'"
+                "Record 0 not found in entry test/test-1"
             ))
         );
     }
