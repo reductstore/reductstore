@@ -47,11 +47,6 @@ pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
     while let Some(pair) = rest.split_once('=') {
         let (key, value) = pair;
         let key = key.trim();
-        if key.starts_with("@") {
-            return Err(unprocessable_entity!(
-                "Label names must not start with '@': reserved for computed labels",
-            ));
-        }
 
         rest = if value.starts_with('\"') {
             let value = value[1..].to_string();
@@ -161,15 +156,11 @@ mod tests {
     }
 
     #[rstest]
-    fn test_parse_header_bad_label() {
-        let err = parse_batched_header("123, text/plain, @label1=value1, label2=value2")
-            .err()
-            .unwrap();
-        assert_eq!(
-            err,
-            unprocessable_entity!(
-                "Label names must not start with '@': reserved for computed labels"
-            )
-        );
+    fn test_parse_header_with_computed_label() {
+        let RecordHeader { labels, .. } =
+            parse_batched_header("123, text/plain, @label1=value1, label2=value2").unwrap();
+
+        assert_eq!(labels.get("@label1"), Some(&"value1".to_string()));
+        assert_eq!(labels.get("label2"), Some(&"value2".to_string()));
     }
 }
