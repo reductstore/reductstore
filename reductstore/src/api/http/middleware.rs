@@ -1,6 +1,11 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::http::{HttpError, StateKeeper};
+use crate::audit::AuditEvent;
+use axum::extract::State;
+use std::sync::Arc;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 
@@ -8,8 +13,7 @@ use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error, Level};
 use reduct_base::error::ErrorCode;
-
-use crate::api::http::HttpError;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub(super) async fn default_headers(
     request: Request<Body>,
@@ -29,6 +33,55 @@ pub(super) async fn default_headers(
     );
     Ok(response)
 }
+
+pub(super) async fn audit_requests(
+    State(keeper): State<Arc<StateKeeper>>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<impl IntoResponse, HttpError> {
+    let start = Instant::now();
+
+    let method = request.method().to_string();
+    let path = request.uri().path().to_string();
+    let auth_header = request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_string());
+
+    let response = next.run(request).await;
+
+    // if should_skip_audit(&path) {
+    //     return Ok(response);
+    // }
+
+    if let Some(header) = auth_header {
+        let components = keeper.get_anonymous().await?;
+        let mut token_repo = components.token_repo.write().await?;
+        let token = token_repo.validate_token(Some(&header)).await?;
+
+        let event = AuditEvent {
+            timestamp: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_micros() as u64,
+            token_name: token.name,
+            endpoint: format!("{} {}", method, path),
+            call_count: 1,
+            duration: start.elapsed().as_micros() as u64,
+        };
+
+        let _ = components.audit_repo.write().await?.log_event(event).await;
+    }
+
+    Ok(response)
+}
+
+// fn should_skip_audit(path: &str) -> bool {
+    // Maybe skip /alive and /ready and /audit endpoints
+    // path.ends_with("/alive") || path.ends_with("/ready") || path.contains("/audit")
+// }
+
 
 pub async fn print_statuses(
     request: Request<Body>,

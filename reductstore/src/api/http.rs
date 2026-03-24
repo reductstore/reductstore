@@ -21,12 +21,12 @@ use crate::lock_file::BoxedLockFile;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::{middleware::from_fn, Router};
+use axum::{middleware::{from_fn, from_fn_with_state}, Router};
 use bucket::create_bucket_api_routes;
 use entry::create_entry_api_routes;
 use hyper::http::HeaderValue;
 use log::{error, warn};
-use middleware::{default_headers, print_statuses};
+use middleware::{audit_requests, default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use replication::create_replication_api_routes;
@@ -246,6 +246,7 @@ impl AxumAppBuilder {
                 // UI
                 .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
                 .fallback(get(show_ui))
+                .layer(from_fn_with_state(state_keeper.clone(), audit_requests))
                 .layer(from_fn(default_headers))
                 .layer(from_fn(print_statuses))
                 .layer(cors)
