@@ -30,6 +30,7 @@ pub(crate) struct AuditEvent {
     pub timestamp: u64,
     pub token_name: String,
     pub endpoint: String,
+    pub status: u16,
     pub call_count: u64,
     pub duration: u64,
 }

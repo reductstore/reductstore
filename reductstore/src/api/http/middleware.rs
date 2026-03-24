@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::components::Components;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::audit::AuditEvent;
 use axum::extract::State;
@@ -51,37 +52,101 @@ pub(super) async fn audit_requests(
 
     let response = next.run(request).await;
 
-    // if should_skip_audit(&path) {
-    //     return Ok(response);
-    // }
+    if should_skip_audit(&path) {
+        return Ok(response);
+    }
 
-    if let Some(header) = auth_header {
-        let components = keeper.get_anonymous().await?;
-        let mut token_repo = components.token_repo.write().await?;
-        let token = token_repo.validate_token(Some(&header)).await?;
+    let components = get_audit_components(&keeper).await;
+    let token_name = resolve_audit_token_name(
+        response.status(),
+        auth_header.as_deref(),
+        components.as_ref(),
+    )
+    .await;
 
-        let event = AuditEvent {
-            timestamp: SystemTime::now()
-                .duration_since(UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_micros() as u64,
-            token_name: token.name,
-            endpoint: format!("{} {}", method, path),
-            call_count: 1,
-            duration: start.elapsed().as_micros() as u64,
-        };
-
-        let _ = components.audit_repo.write().await?.log_event(event).await;
+    if let (Some(token_name), Some(components)) = (token_name, components) {
+        write_audit_event(
+            &components,
+            token_name,
+            format!("{} {}", method, path),
+            response.status().as_u16(),
+            start.elapsed().as_micros() as u64,
+        )
+        .await;
     }
 
     Ok(response)
 }
 
-// fn should_skip_audit(path: &str) -> bool {
+fn should_skip_audit(path: &str) -> bool {
     // Maybe skip /alive and /ready and /audit endpoints
-    // path.ends_with("/alive") || path.ends_with("/ready") || path.contains("/audit")
-// }
+    path.ends_with("/alive") || path.ends_with("/ready") || path.contains("/audit")
+}
 
+async fn get_audit_components(keeper: &StateKeeper) -> Option<Arc<Components>> {
+    match keeper.get_anonymous().await {
+        Ok(components) => Some(components),
+        Err(err) => {
+            debug!("Failed to get components for audit: {}", err);
+            None
+        }
+    }
+}
+
+async fn resolve_audit_token_name(
+    status: StatusCode,
+    auth_header: Option<&str>,
+    components: Option<&Arc<Components>>,
+) -> Option<String> {
+    if status == StatusCode::UNAUTHORIZED {
+        Some("unauthorized".to_string())
+    } else if let (Some(header), Some(components)) = (auth_header, components) {
+        match components.token_repo.write().await {
+            Ok(mut token_repo) => match token_repo.validate_token(Some(header)).await {
+                Ok(token) => Some(token.name),
+                Err(err) => {
+                    debug!("Failed to validate token for audit: {}", err);
+                    None
+                }
+            },
+            Err(err) => {
+                debug!("Failed to lock token repository for audit: {}", err);
+                None
+            }
+        }
+    } else {
+        None
+    }
+}
+
+async fn write_audit_event(
+    components: &Arc<Components>,
+    token_name: String,
+    endpoint: String,
+    status: u16,
+    duration: u64,
+) {
+    let event = AuditEvent {
+        timestamp: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64,
+        token_name,
+        endpoint,
+        status,
+        call_count: 1,
+        duration,
+    };
+
+    match components.audit_repo.write().await {
+        Ok(mut audit_repo) => {
+            if let Err(err) = audit_repo.log_event(event).await {
+                debug!("Failed to persist audit event: {}", err);
+            }
+        }
+        Err(err) => debug!("Failed to lock audit repository: {}", err),
+    }
+}
 
 pub async fn print_statuses(
     request: Request<Body>,
