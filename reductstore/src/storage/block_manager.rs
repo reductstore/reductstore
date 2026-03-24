@@ -22,6 +22,7 @@ use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use reduct_base::too_early;
 use std::fs::OpenOptions;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
@@ -154,6 +155,19 @@ impl BlockManager {
                     buf
                 }
                 Err(err) => {
+                    // Re-check existence to distinguish a transient TOCTOU race
+                    // (descriptor removed after the first check) from a real read failure.
+                    if self.cfg.role == InstanceRole::Replica
+                        && !FILE_CACHE.try_exists(&path).await?
+                    {
+                        self.block_index.remove_block(block_id);
+                        return Err(too_early!(
+                            "Block descriptor {:?} can't be read on replica yet: {}. Reload index and retry",
+                            path,
+                            err
+                        ));
+                    }
+
                     // here we can't read the block descriptor, it might be corrupted or not exist
                     // we should remove it from the index
                     let err_msg = format!("Block descriptor {:?} can't be read: {}", path, err);
@@ -625,6 +639,10 @@ impl BlockManager {
     pub async fn update_and_get_index(&mut self) -> Result<&BlockIndex, ReductError> {
         self.reload_if_readonly().await?;
         Ok(&self.block_index)
+    }
+
+    pub async fn force_reload_index_on_replica(&mut self) -> Result<(), ReductError> {
+        self.reload_if_readonly_with(true).await
     }
 
     pub fn bucket_name(&self) -> &String {
