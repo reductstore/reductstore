@@ -58,6 +58,8 @@ mod tests {
     use crate::storage::block_manager::block::Block;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
+    use crate::storage::proto::Block as BlockProto;
+    use prost::Message;
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
     use std::path::PathBuf;
@@ -162,6 +164,40 @@ mod tests {
         let mut index = BlockIndex::new(index_path);
         index.insert_or_update(Block::new(1));
         index.save().await.unwrap();
+
+        let mut block_manager = BlockManager::build(
+            entry_path,
+            index,
+            "bucket".to_string(),
+            "entry".to_string(),
+            Arc::new(cfg),
+        )
+        .await;
+
+        let err = block_manager.load_block(1).await.err().unwrap();
+        assert_eq!(err.status(), ErrorCode::TooEarly);
+        assert!(block_manager.index().get_block(1).is_none());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_load_block_crc_mismatch_on_replica_returns_too_early(#[future] path: PathBuf) {
+        let path = path.await;
+        let entry_path = path.join("bucket").join("entry");
+
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            data_path: path.clone(),
+            ..Default::default()
+        };
+
+        let index_path = entry_path.join(BLOCK_INDEX_FILE);
+        let mut index = BlockIndex::new(index_path);
+        index.insert_or_update_with_crc(Block::new(1), 1);
+        index.save().await.unwrap();
+
+        let descriptor = BlockProto::from(Block::new(1)).encode_to_vec();
+        std::fs::write(entry_path.join("1.meta"), descriptor).unwrap();
 
         let mut block_manager = BlockManager::build(
             entry_path,

@@ -191,6 +191,20 @@ impl BlockManager {
                 if let Some(block_crc) = block.crc64 {
                     // we check crc if the crc is stored in the index for backward compatibility
                     if block_crc != crc.sum64() {
+                        if self.cfg.role == InstanceRole::Replica {
+                            warn!(
+                                "Block descriptor {:?} CRC mismatch on replica: index CRC {} mismatch with calculated CRC {}. Treat as transient and reload index",
+                                path,
+                                block_crc,
+                                crc.sum64()
+                            );
+                            self.block_index.remove_block(block_id);
+                            return Err(too_early!(
+                                "Block descriptor {:?} CRC mismatch on replica. Reload index and retry",
+                                path
+                            ));
+                        }
+
                         error!("Block descriptor {:?} is corrupted: index CRC {} mismatch with calculated CRC {}.\
                      Remove it and its data block, then restart the database", path, block_crc, crc.sum64());
 
