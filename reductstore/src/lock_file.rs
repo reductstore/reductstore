@@ -6,7 +6,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use std::io::Read;
 use std::io::SeekFrom::Start;
 use std::io::Write;
@@ -41,6 +41,7 @@ pub type BoxedLockFile = Box<dyn LockFile + Sync + Send>;
 struct ImplLockFile {
     path: PathBuf,
     stop_on_drop: Arc<AtomicBool>,
+    released: Arc<AtomicBool>,
     handle: tokio::task::JoinHandle<()>,
     state: Arc<AsyncRwLock<State>>,
 }
@@ -77,6 +78,7 @@ impl LockFileBuilder {
         // Atomic flag to signal the background task to stop
         let stop_on_drop = Arc::new(AtomicBool::new(false));
         let stop_flag = Arc::clone(&stop_on_drop);
+        let released = Arc::new(AtomicBool::new(false));
         let file_path = path.clone();
         let state = Arc::new(AsyncRwLock::new(State::Waiting));
         let state_clone = Arc::clone(&state);
@@ -84,6 +86,7 @@ impl LockFileBuilder {
         let mut this = Box::new(ImplLockFile {
             path,
             stop_on_drop,
+            released,
             handle: tokio::spawn(async {}),
             state,
         });
@@ -270,7 +273,24 @@ impl LockFileBuilder {
     }
 }
 
-impl ImplLockFile {}
+impl ImplLockFile {
+    async fn remove_lock_file_once(path: &PathBuf, released: &AtomicBool) {
+        if released.swap(true, std::sync::atomic::Ordering::SeqCst) {
+            debug!("Lock file already released: {:?}", path);
+            return;
+        }
+
+        match FILE_CACHE.remove(path).await {
+            Ok(_) => {}
+            Err(err) if err.status == ErrorCode::NotFound => {
+                debug!("Lock file already removed: {:?}", path);
+            }
+            Err(err) => {
+                error!("Failed to remove lock file: {:?}", err);
+            }
+        }
+    }
+}
 
 #[async_trait]
 impl LockFile for ImplLockFile {
@@ -297,9 +317,7 @@ impl LockFile for ImplLockFile {
 
         debug!("Releasing lock file: {:?}", self.path);
         let path = self.path.clone();
-        if let Err(err) = FILE_CACHE.remove(&path).await {
-            error!("Failed to remove lock file: {:?}", err);
-        }
+        ImplLockFile::remove_lock_file_once(&path, self.released.as_ref()).await;
     }
 }
 
@@ -309,18 +327,14 @@ impl Drop for ImplLockFile {
             .store(true, std::sync::atomic::Ordering::SeqCst);
 
         let path = self.path.clone();
+        let released = Arc::clone(&self.released);
         // Use block_in_place to handle async cleanup in drop
         let handle =
             tokio::runtime::Handle::try_current().expect("Failed to get current Tokio handle");
         let _ = std::thread::spawn(move || {
             handle.block_on(async {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                match FILE_CACHE.remove(&path).await {
-                    Ok(_) => {}
-                    Err(err) => {
-                        error!("Failed to remove lock file: {:?}", err);
-                    }
-                }
+                ImplLockFile::remove_lock_file_once(&path, released.as_ref()).await;
             });
         })
         .join();
@@ -382,6 +396,25 @@ mod tests {
         assert!(
             !lock_file_path.exists(),
             "Lock file must be deleted on release"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_lock_file_release_is_idempotent(lock_file_path: PathBuf) {
+        let lock_file = LockFileBuilder::new(lock_file_path.clone()).build();
+
+        if lock_file.is_waiting().await.unwrap() {
+            let acquired = wait_new_state(&lock_file).await;
+            assert!(acquired.is_ok(), "Lock file was not acquired in time");
+        }
+
+        lock_file.release().await;
+        lock_file.release().await;
+
+        assert!(
+            !lock_file_path.exists(),
+            "Lock file should remain deleted after repeated release"
         );
     }
 
