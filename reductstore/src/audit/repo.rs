@@ -227,11 +227,7 @@ mod tests {
         serde_json::from_slice(&record).unwrap()
     }
 
-    async fn audit_record_exists(
-        repo: &AuditRepository,
-        token_name: &str,
-        timestamp: u64,
-    ) -> bool {
+    async fn audit_record_exists(repo: &AuditRepository, token_name: &str, timestamp: u64) -> bool {
         let bucket = match repo.storage.get_bucket(AUDIT_BUCKET_NAME).await {
             Ok(bucket) => bucket.upgrade_and_unwrap(),
             Err(_) => return false,
