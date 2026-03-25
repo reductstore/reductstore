@@ -727,6 +727,16 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_remove_lock_file_when_already_removed(lock_file_path: PathBuf) {
+        let _ = fs::remove_file(&lock_file_path);
+
+        ImplLockFile::remove_lock_file(&lock_file_path).await;
+
+        assert!(!lock_file_path.exists());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_drops_lock_file(lock_file_path: PathBuf) {
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
