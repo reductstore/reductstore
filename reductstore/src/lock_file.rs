@@ -6,7 +6,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use async_trait::async_trait;
 use log::{debug, error, info, warn};
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 use std::io::Read;
 use std::io::SeekFrom::Start;
 use std::io::Write;
@@ -270,14 +270,8 @@ impl LockFileBuilder {
 
 impl ImplLockFile {
     async fn remove_lock_file(path: &PathBuf) {
-        match FILE_CACHE.remove(path).await {
-            Ok(_) => {}
-            Err(err) if err.status == ErrorCode::NotFound => {
-                debug!("Lock file already removed: {:?}", path);
-            }
-            Err(err) => {
-                error!("Failed to remove lock file: {:?}", err);
-            }
+        if let Err(err) = FILE_CACHE.remove(path).await {
+            error!("Failed to remove lock file: {:?}", err);
         }
     }
 }
