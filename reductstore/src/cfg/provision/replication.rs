@@ -23,11 +23,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         for (name, settings) in &self.cfg.replications {
             if let Err(e) = repo.create_replication(&name, settings.clone()).await {
                 if e.status() == ErrorCode::Conflict {
-                    let mut settings = settings.clone();
-                    if let Ok(info) = repo.get_info(&name).await {
-                        settings.mode = info.info.mode;
-                    }
-                    repo.update_replication(&name, settings).await?;
+                    // Always enforce mode from provisioning config, even if replication
+                    // metadata already exists in .replication.
+                    repo.update_replication(&name, settings.clone()).await?;
                 } else {
                     error!("Failed to provision replication '{}': {}", name, e);
                     continue;
