@@ -9,7 +9,7 @@ use log::{error, info, warn};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
 use reduct_base::Labels;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
@@ -24,8 +24,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             if let Err(e) = repo.create_replication(&name, settings.clone()).await {
                 if e.status() == ErrorCode::Conflict {
                     let mut settings = settings.clone();
-                    if let Ok(info) = repo.get_info(&name).await {
-                        settings.mode = info.info.mode;
+                    if !self.replications_with_mode_override.contains(name) {
+                        if let Ok(info) = repo.get_info(&name).await {
+                            settings.mode = info.info.mode;
+                        }
                     }
                     repo.update_replication(&name, settings).await?;
                 } else {
@@ -47,8 +49,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
     pub(in crate::cfg) fn parse_replications(
         env: &mut Env<EnvGetter>,
-    ) -> HashMap<String, ReplicationSettings> {
+    ) -> (HashMap<String, ReplicationSettings>, HashSet<String>) {
         let mut replications = HashMap::<String, (String, ReplicationSettings)>::new();
+        let mut replications_with_mode_override = HashSet::<String>::new();
         for (id, name) in env.matches("RS_REPLICATION_(.*)_NAME") {
             let replication = ReplicationSettings {
                 src_bucket: "".to_string(),
@@ -151,6 +154,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             }
 
             if let Some(mode) = env.get_optional::<String>(&format!("RS_REPLICATION_{}_MODE", id)) {
+                replications_with_mode_override.insert(name.clone());
                 match mode.to_lowercase().as_str() {
                     "enabled" => replication.mode = ReplicationMode::Enabled,
                     "paused" => replication.mode = ReplicationMode::Paused,
@@ -166,11 +170,13 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             }
         }
 
-        replications
+        let replications = replications
             .into_iter()
             .filter(|(id, _)| !unfinished_replications.contains(id))
             .map(|(_, (name, replication))| (name, replication))
-            .collect()
+            .collect();
+
+        (replications, replications_with_mode_override)
     }
 }
 
@@ -637,6 +643,95 @@ mod tests {
         let repo = components.replication_repo.read().await.unwrap();
         let info = repo.get_info("replication1").await.unwrap();
         assert_eq!(info.info.mode, ReplicationMode::Disabled);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replications_update_existing_overrides_mode_when_set(
+        mut env_with_replications: MockEnvGetter,
+    ) {
+        let cfg = Cfg {
+            data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
+            ..Default::default()
+        };
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
+        storage
+            .create_bucket("bucket1", Default::default())
+            .await
+            .unwrap();
+        let mut repo = create_replication_repo(
+            storage.clone(),
+            Cfg {
+                replication_conf: ReplicationConfig {
+                    connection_timeout: std::time::Duration::from_secs(10),
+                    replication_log_size: 500,
+                    verify_ssl: true,
+                    ca_path: None,
+                    listening_port: 8080,
+                },
+                ..Default::default()
+            },
+        )
+        .await;
+        repo.create_replication(
+            "replication1",
+            ReplicationSettings {
+                src_bucket: "bucket1".to_string(),
+                dst_bucket: "bucket2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: None,
+                entries: vec![],
+                include: Labels::default(),
+                exclude: Labels::default(),
+                each_n: None,
+                each_s: None,
+                when: None,
+                mode: ReplicationMode::Enabled,
+            },
+        )
+        .await
+        .unwrap();
+        repo.set_mode("replication1", ReplicationMode::Disabled)
+            .await
+            .unwrap();
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("bucket1".to_string()));
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("http://localhost".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_MODE"))
+            .return_const(Ok("paused".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
+            .build()
+            .await
+            .unwrap();
+        let repo = components.replication_repo.read().await.unwrap();
+        let info = repo.get_info("replication1").await.unwrap();
+        assert_eq!(info.info.mode, ReplicationMode::Paused);
     }
 
     #[fixture]

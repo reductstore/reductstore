@@ -39,7 +39,7 @@ use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::server_api::License;
 use reduct_base::msg::token_api::Token;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -163,6 +163,7 @@ pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: ExtCfgBounds = Co
     pub license: Option<License>,
     pub env: Env<EnvGetter>,
     pub ext_cfg: ExtCfg,
+    pub replications_with_mode_override: HashSet<String>,
 }
 
 #[async_trait]
@@ -246,6 +247,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         let ext_cfg = ext_parser.from_env(&mut env, version).await;
 
+        let (replications, replications_with_mode_override) = Self::parse_replications(&mut env);
+
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
             host,
@@ -261,7 +264,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
-            replications: Self::parse_replications(&mut env),
+            replications,
             io_conf: Self::parse_io_config(&mut env),
             replication_conf: Self::parse_replication_config(&mut env, port),
             cs_config: ext_cfg.remote_storage_config(),
@@ -281,6 +284,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             env,
             license,
             ext_cfg,
+            replications_with_mode_override,
         };
 
         Logger::init(&me.cfg.log_level);
