@@ -14,7 +14,6 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::time::sleep;
 
 #[derive(Debug, PartialEq)]
 pub enum State {
@@ -35,13 +34,11 @@ pub trait LockFile {
     async fn is_locked(&self) -> Result<bool, ReductError>;
     async fn is_failed(&self) -> Result<bool, ReductError>;
     async fn is_waiting(&self) -> Result<bool, ReductError>;
-    async fn release(&self);
 }
 pub type BoxedLockFile = Box<dyn LockFile + Sync + Send>;
 struct ImplLockFile {
     path: PathBuf,
     stop_on_drop: Arc<AtomicBool>,
-    released: Arc<AtomicBool>,
     handle: tokio::task::JoinHandle<()>,
     state: Arc<AsyncRwLock<State>>,
 }
@@ -78,7 +75,6 @@ impl LockFileBuilder {
         // Atomic flag to signal the background task to stop
         let stop_on_drop = Arc::new(AtomicBool::new(false));
         let stop_flag = Arc::clone(&stop_on_drop);
-        let released = Arc::new(AtomicBool::new(false));
         let file_path = path.clone();
         let state = Arc::new(AsyncRwLock::new(State::Waiting));
         let state_clone = Arc::clone(&state);
@@ -86,7 +82,6 @@ impl LockFileBuilder {
         let mut this = Box::new(ImplLockFile {
             path,
             stop_on_drop,
-            released,
             handle: tokio::spawn(async {}),
             state,
         });
@@ -274,12 +269,7 @@ impl LockFileBuilder {
 }
 
 impl ImplLockFile {
-    async fn remove_lock_file_once(path: &PathBuf, released: &AtomicBool) {
-        if released.swap(true, std::sync::atomic::Ordering::SeqCst) {
-            debug!("Lock file already released: {:?}", path);
-            return;
-        }
-
+    async fn remove_lock_file(path: &PathBuf) {
         match FILE_CACHE.remove(path).await {
             Ok(_) => {}
             Err(err) if err.status == ErrorCode::NotFound => {
@@ -305,20 +295,6 @@ impl LockFile for ImplLockFile {
     async fn is_waiting(&self) -> Result<bool, ReductError> {
         Ok(*self.state.read().await? == State::Waiting)
     }
-
-    async fn release(&self) {
-        self.stop_on_drop
-            .store(true, std::sync::atomic::Ordering::SeqCst);
-
-        let start_time = std::time::Instant::now();
-        while !self.handle.is_finished() && start_time.elapsed() < Duration::from_secs(5) {
-            sleep(Duration::from_millis(100)).await;
-        }
-
-        debug!("Releasing lock file: {:?}", self.path);
-        let path = self.path.clone();
-        ImplLockFile::remove_lock_file_once(&path, self.released.as_ref()).await;
-    }
 }
 
 impl Drop for ImplLockFile {
@@ -327,14 +303,13 @@ impl Drop for ImplLockFile {
             .store(true, std::sync::atomic::Ordering::SeqCst);
 
         let path = self.path.clone();
-        let released = Arc::clone(&self.released);
         // Use block_in_place to handle async cleanup in drop
         let handle =
             tokio::runtime::Handle::try_current().expect("Failed to get current Tokio handle");
         let _ = std::thread::spawn(move || {
             handle.block_on(async {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                ImplLockFile::remove_lock_file_once(&path, released.as_ref()).await;
+                ImplLockFile::remove_lock_file(&path).await;
             });
         })
         .join();
@@ -356,8 +331,6 @@ impl LockFile for NoopLockFile {
     async fn is_waiting(&self) -> Result<bool, ReductError> {
         Ok(false)
     }
-
-    async fn release(&self) {}
 }
 
 #[cfg(test)]
@@ -374,47 +347,30 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_lock_file_acquire_and_release(lock_file_path: PathBuf) {
-        let lock_file = LockFileBuilder::new(lock_file_path.clone()).build();
+    async fn test_lock_file_acquire_and_drop(lock_file_path: PathBuf) {
+        {
+            let lock_file = LockFileBuilder::new(lock_file_path.clone()).build();
 
-        // The lock may be acquired quickly; only wait if we observe it waiting.
-        if lock_file.is_waiting().await.unwrap() {
-            let acquired = wait_new_state(&lock_file).await;
-            assert!(acquired.is_ok(), "Lock file was not acquired in time");
-        }
-        assert!(lock_file.is_locked().await.unwrap());
-        assert!(!lock_file.is_failed().await.unwrap());
-        assert!(!lock_file.is_waiting().await.unwrap());
+            // The lock may be acquired quickly; only wait if we observe it waiting.
+            if lock_file.is_waiting().await.unwrap() {
+                let acquired = wait_new_state(&lock_file).await;
+                assert!(acquired.is_ok(), "Lock file was not acquired in time");
+            }
+            assert!(lock_file.is_locked().await.unwrap());
+            assert!(!lock_file.is_failed().await.unwrap());
+            assert!(!lock_file.is_waiting().await.unwrap());
 
-        assert_ne!(
-            fs::read_to_string(&lock_file_path).unwrap(),
-            "dummy",
-            "Lock file must be overwritten"
-        );
-
-        lock_file.release().await;
-        assert!(
-            !lock_file_path.exists(),
-            "Lock file must be deleted on release"
-        );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_lock_file_release_is_idempotent(lock_file_path: PathBuf) {
-        let lock_file = LockFileBuilder::new(lock_file_path.clone()).build();
-
-        if lock_file.is_waiting().await.unwrap() {
-            let acquired = wait_new_state(&lock_file).await;
-            assert!(acquired.is_ok(), "Lock file was not acquired in time");
+            assert_ne!(
+                fs::read_to_string(&lock_file_path).unwrap(),
+                "dummy",
+                "Lock file must be overwritten"
+            );
         }
 
-        lock_file.release().await;
-        lock_file.release().await;
-
+        wait_for_lock_file_cleanup(&lock_file_path).await;
         assert!(
             !lock_file_path.exists(),
-            "Lock file should remain deleted after repeated release"
+            "Lock file must be deleted on drop"
         );
     }
 
@@ -486,16 +442,6 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_secondary_instance_waits(lock_file_path: PathBuf) {
-        let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(test_cfg(
-                LockFileConfig {
-                    polling_interval: Duration::from_millis(500),
-                    ..Default::default()
-                },
-                InstanceRole::Primary,
-            ))
-            .build();
-
         let secondary_lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -506,32 +452,42 @@ mod tests {
             ))
             .build();
 
-        // Wait for the primary to acquire the lock
-        let primary_acquired = wait_new_state(&primary_lock_file).await;
-        assert!(
-            primary_acquired.is_ok(),
-            "Primary lock file was acquired in time"
-        );
-        assert!(primary_lock_file.is_locked().await.unwrap());
+        {
+            let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
+                .with_config(test_cfg(
+                    LockFileConfig {
+                        polling_interval: Duration::from_millis(500),
+                        ..Default::default()
+                    },
+                    InstanceRole::Primary,
+                ))
+                .build();
 
-        // Wait for the secondary to acquire the lock
-        let secondary_acquired = wait_new_state(&secondary_lock_file).await;
-        assert!(
-            secondary_acquired.is_err(),
-            "Secondary lock file was not acquired in time"
-        );
-        assert!(secondary_lock_file.is_waiting().await.unwrap());
+            // Wait for the primary to acquire the lock
+            let primary_acquired = wait_new_state(&primary_lock_file).await;
+            assert!(
+                primary_acquired.is_ok(),
+                "Primary lock file was acquired in time"
+            );
+            assert!(primary_lock_file.is_locked().await.unwrap());
 
-        // Release primary lock
-        primary_lock_file.release().await;
+            // Secondary should wait while primary lock exists.
+            let secondary_acquired = wait_new_state(&secondary_lock_file).await;
+            assert!(
+                secondary_acquired.is_err(),
+                "Secondary lock file was not acquired in time"
+            );
+            assert!(secondary_lock_file.is_waiting().await.unwrap());
+        }
+
+        wait_for_lock_file_cleanup(&lock_file_path).await;
+
         let secondary_acquired = wait_new_state(&secondary_lock_file).await;
         assert!(
             secondary_acquired.is_ok(),
             "Secondary lock file was acquired in time"
         );
         assert!(secondary_lock_file.is_locked().await.unwrap());
-
-        secondary_lock_file.release().await;
     }
 
     #[rstest]
@@ -759,6 +715,16 @@ mod tests {
         acquired
     }
 
+    async fn wait_for_lock_file_cleanup(lock_file_path: &PathBuf) {
+        timeout(Duration::from_secs(3), async {
+            while lock_file_path.exists() {
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        })
+        .await
+        .expect("Lock file must be cleaned up in time");
+    }
+
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_drops_lock_file(lock_file_path: PathBuf) {
@@ -778,11 +744,9 @@ mod tests {
         assert!(acquired.is_ok(), "Lock file was not acquired in time");
         assert!(lock_file.is_locked().await.unwrap());
 
-        // Drop the lock file, which should trigger release
+        // Drop the lock file and wait for cleanup.
         drop(lock_file);
-
-        // Wait a moment to ensure the lock file is released
-        tokio::time::sleep(Duration::from_secs(1)).await;
+        wait_for_lock_file_cleanup(&lock_file_path).await;
 
         assert!(
             !lock_file_path.exists(),
