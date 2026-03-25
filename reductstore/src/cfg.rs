@@ -39,7 +39,7 @@ use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::server_api::License;
 use reduct_base::msg::token_api::Token;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -61,6 +61,12 @@ pub enum InstanceRole {
     Replica,
 }
 
+#[derive(Clone, Default)]
+pub struct ProvisionedReplication {
+    pub settings: ReplicationSettings,
+    pub mode_override: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct Cfg {
     pub log_level: String,
@@ -78,7 +84,7 @@ pub struct Cfg {
 
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
-    pub replications: HashMap<String, ReplicationSettings>,
+    pub replications: HashMap<String, ProvisionedReplication>,
     pub io_conf: IoConfig,
     pub replication_conf: ReplicationConfig,
     pub cs_config: RemoteStorageConfig,
@@ -163,7 +169,6 @@ pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: ExtCfgBounds = Co
     pub license: Option<License>,
     pub env: Env<EnvGetter>,
     pub ext_cfg: ExtCfg,
-    pub replications_with_mode_override: HashSet<String>,
 }
 
 #[async_trait]
@@ -247,7 +252,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         let ext_cfg = ext_parser.from_env(&mut env, version).await;
 
-        let (replications, replications_with_mode_override) = Self::parse_replications(&mut env);
+        let replications = Self::parse_replications(&mut env);
 
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
@@ -284,7 +289,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             env,
             license,
             ext_cfg,
-            replications_with_mode_override,
         };
 
         Logger::init(&me.cfg.log_level);
