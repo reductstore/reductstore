@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Support `RS_REPLICATION_<ID>_MODE` in provisioning to set replication mode (`enabled|paused|disabled`) declaratively from environment variables, [PR-1243](https://github.com/reductstore/reductstore/pull/1243)
 - Support hierarchical entry paths and preserve nested tree recovery, [PR-1185](https://github.com/reductstore/reductstore/pull/1185)
 - Store attachments in system `$meta` entries with strategy-based behavior and replication coverage, [PR-1186](https://github.com/reductstore/reductstore/pull/1186)
 - Zenoh API for ingestion and query, [PR-1157](https://github.com/reductstore/reductstore/pull/1157)
@@ -25,6 +26,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Accept computed (`@`) labels in v1 batched header parsing so query-extension responses can be consumed without 422 parse errors, [PR-1241](https://github.com/reductstore/reductstore/pull/1241)
+- Treat transient read-only replica block descriptor races (missing files and CRC mismatch during sync) as retryable by reloading index and retrying historical queries, [PR-1237](https://github.com/reductstore/reductstore/pull/1237)
 - Preserve empty entries after FIFO quota eviction so read-only replicas do not retain undeletable zombie entries, [PR-1236](https://github.com/reductstore/reductstore/pull/1236)
 - Require `$$` escaping for conditional-query string literals that start with `$` while preserving `$timestamp` as an operator, [PR-1222](https://github.com/reductstore/reductstore/pull/1222)
 - Ignore empty entries when reporting oldest record timestamps in bucket and server info, [PR-1218](https://github.com/reductstore/reductstore/pull/1218)
