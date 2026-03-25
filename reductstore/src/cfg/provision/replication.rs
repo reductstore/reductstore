@@ -149,6 +149,21 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             {
                 replication.when = Some(when);
             }
+
+            if let Some(mode) = env.get_optional::<String>(&format!("RS_REPLICATION_{}_MODE", id)) {
+                match mode.to_lowercase().as_str() {
+                    "enabled" => replication.mode = ReplicationMode::Enabled,
+                    "paused" => replication.mode = ReplicationMode::Paused,
+                    "disabled" => replication.mode = ReplicationMode::Disabled,
+                    _ => {
+                        error!(
+                            "Replication '{}' has invalid mode '{}'. Drop it.",
+                            name, mode
+                        );
+                        unfinished_replications.push(id.clone());
+                    }
+                }
+            }
         }
 
         replications
@@ -226,6 +241,81 @@ mod tests {
             Some(serde_json::json!({"$and": [true, false]}))
         );
         assert!(repl_info.info.is_provisioned);
+    }
+
+    #[log_test(rstest)]
+    #[tokio::test]
+    async fn test_replications_with_mode(mut env_with_replications: MockEnvGetter) {
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("bucket1".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("http://localhost".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_MODE"))
+            .return_const(Ok("paused".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
+            .build()
+            .await
+            .unwrap();
+        let repo = components.replication_repo.read().await.unwrap();
+        let repl_info = repo.get_info("replication1").await.unwrap();
+
+        assert_eq!(repl_info.info.mode, ReplicationMode::Paused);
+    }
+
+    #[log_test(rstest)]
+    #[tokio::test]
+    async fn test_replications_drop_invalid_mode(mut env_with_replications: MockEnvGetter) {
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("bucket1".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("http://localhost".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_MODE"))
+            .return_const(Ok("bogus".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
+            .build()
+            .await
+            .unwrap();
+        let repo = components.replication_repo.read().await.unwrap();
+
+        assert_eq!(repo.replications().await.unwrap().len(), 0);
     }
 
     #[log_test(rstest)]

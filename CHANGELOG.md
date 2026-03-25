@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Support `RS_REPLICATION_<ID>_MODE` in provisioning to set replication mode (`enabled|paused|disabled`) declaratively from environment variables, [PR-1243](https://github.com/reductstore/reductstore/pull/1243)
 - Support hierarchical entry paths and preserve nested tree recovery, [PR-1185](https://github.com/reductstore/reductstore/pull/1185)
 - Store attachments in system `$meta` entries with strategy-based behavior and replication coverage, [PR-1186](https://github.com/reductstore/reductstore/pull/1186)
 - Zenoh API for ingestion and query, [PR-1157](https://github.com/reductstore/reductstore/pull/1157)
