@@ -727,6 +727,16 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_remove_lock_file_when_path_exists(lock_file_path: PathBuf) {
+        fs::write(&lock_file_path, "lock").unwrap();
+
+        ImplLockFile::remove_lock_file(&lock_file_path).await;
+
+        assert!(!lock_file_path.exists());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_remove_lock_file_when_already_removed(lock_file_path: PathBuf) {
         let _ = fs::remove_file(&lock_file_path);
 
