@@ -61,6 +61,12 @@ pub enum InstanceRole {
     Replica,
 }
 
+#[derive(Clone, Default)]
+pub struct ProvisionedReplication {
+    pub settings: ReplicationSettings,
+    pub mode_override: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct Cfg {
     pub log_level: String,
@@ -78,7 +84,7 @@ pub struct Cfg {
 
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
-    pub replications: HashMap<String, ReplicationSettings>,
+    pub replications: HashMap<String, ProvisionedReplication>,
     pub io_conf: IoConfig,
     pub replication_conf: ReplicationConfig,
     pub cs_config: RemoteStorageConfig,
@@ -246,6 +252,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         let ext_cfg = ext_parser.from_env(&mut env, version).await;
 
+        let replications = Self::parse_replications(&mut env);
+
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
             host,
@@ -261,7 +269,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
-            replications: Self::parse_replications(&mut env),
+            replications,
             io_conf: Self::parse_io_config(&mut env),
             replication_conf: Self::parse_replication_config(&mut env, port),
             cs_config: ext_cfg.remote_storage_config(),

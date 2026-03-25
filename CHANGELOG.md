@@ -26,6 +26,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Override replication mode during reprovisioning only when `RS_REPLICATION_<ID>_MODE` is explicitly set; otherwise keep the current persisted mode, [PR-1245](https://github.com/reductstore/reductstore/pull/1245)
 - Accept computed (`@`) labels in v1 batched header parsing so query-extension responses can be consumed without 422 parse errors, [PR-1241](https://github.com/reductstore/reductstore/pull/1241)
 - Treat transient read-only replica block descriptor races (missing files and CRC mismatch during sync) as retryable by reloading index and retrying historical queries, [PR-1237](https://github.com/reductstore/reductstore/pull/1237)
 - Preserve empty entries after FIFO quota eviction so read-only replicas do not retain undeletable zombie entries, [PR-1236](https://github.com/reductstore/reductstore/pull/1236)

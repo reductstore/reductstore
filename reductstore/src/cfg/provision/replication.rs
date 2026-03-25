@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::cfg::{CfgParser, ExtCfgBounds};
+use crate::cfg::{CfgParser, ExtCfgBounds, ProvisionedReplication};
 use crate::core::env::{Env, GetEnv};
 use crate::replication::{ManageReplications, ReplicationRepoBuilder};
 use crate::storage::engine::StorageEngine;
@@ -20,12 +20,17 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let mut repo = ReplicationRepoBuilder::new(self.cfg.clone())
             .build(Arc::clone(&storage))
             .await;
-        for (name, settings) in &self.cfg.replications {
-            if let Err(e) = repo.create_replication(&name, settings.clone()).await {
+        for (name, replication) in &self.cfg.replications {
+            if let Err(e) = repo
+                .create_replication(&name, replication.settings.clone())
+                .await
+            {
                 if e.status() == ErrorCode::Conflict {
-                    let mut settings = settings.clone();
-                    if let Ok(info) = repo.get_info(&name).await {
-                        settings.mode = info.info.mode;
+                    let mut settings = replication.settings.clone();
+                    if replication.mode_override.is_none() {
+                        if let Ok(info) = repo.get_info(&name).await {
+                            settings.mode = info.info.mode;
+                        }
                     }
                     repo.update_replication(&name, settings).await?;
                 } else {
@@ -47,21 +52,24 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
     pub(in crate::cfg) fn parse_replications(
         env: &mut Env<EnvGetter>,
-    ) -> HashMap<String, ReplicationSettings> {
-        let mut replications = HashMap::<String, (String, ReplicationSettings)>::new();
+    ) -> HashMap<String, ProvisionedReplication> {
+        let mut replications = HashMap::<String, (String, ProvisionedReplication)>::new();
         for (id, name) in env.matches("RS_REPLICATION_(.*)_NAME") {
-            let replication = ReplicationSettings {
-                src_bucket: "".to_string(),
-                dst_bucket: "".to_string(),
-                dst_host: "http://localhost".to_string(),
-                dst_token: None,
-                entries: vec![],
-                include: Labels::default(),
-                exclude: Labels::default(),
-                each_n: None,
-                each_s: None,
-                when: None,
-                mode: ReplicationMode::Enabled,
+            let replication = ProvisionedReplication {
+                settings: ReplicationSettings {
+                    src_bucket: "".to_string(),
+                    dst_bucket: "".to_string(),
+                    dst_host: "http://localhost".to_string(),
+                    dst_token: None,
+                    entries: vec![],
+                    include: Labels::default(),
+                    exclude: Labels::default(),
+                    each_n: None,
+                    each_s: None,
+                    when: None,
+                    mode: ReplicationMode::Enabled,
+                },
+                mode_override: None,
             };
             replications.insert(id, (name, replication));
         }
@@ -71,7 +79,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             if let Some(src_bucket) =
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_SRC_BUCKET", id))
             {
-                replication.src_bucket = src_bucket;
+                replication.settings.src_bucket = src_bucket;
             } else {
                 error!("Replication '{}' has no source bucket. Drop it.", name);
                 unfinished_replications.push(id.clone());
@@ -81,7 +89,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             if let Some(remote_bucket) =
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_DST_BUCKET", id))
             {
-                replication.dst_bucket = remote_bucket;
+                replication.settings.dst_bucket = remote_bucket;
             } else {
                 error!("Replication '{}' has no destination bucket. Drop it.", name);
                 unfinished_replications.push(id.clone());
@@ -92,7 +100,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_DST_HOST", id))
             {
                 match url::Url::parse(&remote_host) {
-                    Ok(url) => replication.dst_host = url.to_string(),
+                    Ok(url) => replication.settings.dst_host = url.to_string(),
                     Err(err) => {
                         error!(
                             "Replication '{}' has invalid remote host: {}. Drop it.",
@@ -110,12 +118,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
             let token = env
                 .get_masked::<String>(&format!("RS_REPLICATION_{}_DST_TOKEN", id), "".to_string());
-            replication.dst_token = if token.is_empty() { None } else { Some(token) };
+            replication.settings.dst_token = if token.is_empty() { None } else { Some(token) };
 
             if let Some(entries) =
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_ENTRIES", id))
             {
-                replication.entries = entries.split(",").map(|s| s.to_string()).collect();
+                replication.settings.entries = entries.split(",").map(|s| s.to_string()).collect();
             }
 
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_INCLUDE_(.*)", id)) {
@@ -123,7 +131,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     "The include parameter is deprecated. Use 'RS_REPLICATION_{}_WHEN' instead.",
                     id
                 );
-                replication.include.insert(key, value);
+                replication.settings.include.insert(key, value);
             }
 
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id)) {
@@ -131,30 +139,31 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     "The exclude parameter is deprecated. Use 'RS_REPLICATION_{}_WHEN' instead.",
                     id
                 );
-                replication.exclude.insert(key, value);
+                replication.settings.exclude.insert(key, value);
             }
 
             if let Some(each_n) = env.get_optional::<u64>(&format!("RS_REPLICATION_{}_EACH_N", id))
             {
-                replication.each_n = Some(each_n);
+                replication.settings.each_n = Some(each_n);
             }
 
             if let Some(each_s) = env.get_optional::<f64>(&format!("RS_REPLICATION_{}_EACH_S", id))
             {
-                replication.each_s = Some(each_s);
+                replication.settings.each_s = Some(each_s);
             }
 
             if let Some(when) =
                 env.get_optional::<serde_json::Value>(&format!("RS_REPLICATION_{}_WHEN", id))
             {
-                replication.when = Some(when);
+                replication.settings.when = Some(when);
             }
 
             if let Some(mode) = env.get_optional::<String>(&format!("RS_REPLICATION_{}_MODE", id)) {
+                replication.mode_override = Some(mode.clone());
                 match mode.to_lowercase().as_str() {
-                    "enabled" => replication.mode = ReplicationMode::Enabled,
-                    "paused" => replication.mode = ReplicationMode::Paused,
-                    "disabled" => replication.mode = ReplicationMode::Disabled,
+                    "enabled" => replication.settings.mode = ReplicationMode::Enabled,
+                    "paused" => replication.settings.mode = ReplicationMode::Paused,
+                    "disabled" => replication.settings.mode = ReplicationMode::Disabled,
                     _ => {
                         error!(
                             "Replication '{}' has invalid mode '{}'. Drop it.",
@@ -166,11 +175,13 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             }
         }
 
-        replications
+        let replications = replications
             .into_iter()
             .filter(|(id, _)| !unfinished_replications.contains(id))
             .map(|(_, (name, replication))| (name, replication))
-            .collect()
+            .collect();
+
+        replications
     }
 }
 
@@ -637,6 +648,95 @@ mod tests {
         let repo = components.replication_repo.read().await.unwrap();
         let info = repo.get_info("replication1").await.unwrap();
         assert_eq!(info.info.mode, ReplicationMode::Disabled);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replications_update_existing_overrides_mode_when_set(
+        mut env_with_replications: MockEnvGetter,
+    ) {
+        let cfg = Cfg {
+            data_path: env_with_replications.get("RS_DATA_PATH").unwrap().into(),
+            ..Default::default()
+        };
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
+        storage
+            .create_bucket("bucket1", Default::default())
+            .await
+            .unwrap();
+        let mut repo = create_replication_repo(
+            storage.clone(),
+            Cfg {
+                replication_conf: ReplicationConfig {
+                    connection_timeout: std::time::Duration::from_secs(10),
+                    replication_log_size: 500,
+                    verify_ssl: true,
+                    ca_path: None,
+                    listening_port: 8080,
+                },
+                ..Default::default()
+            },
+        )
+        .await;
+        repo.create_replication(
+            "replication1",
+            ReplicationSettings {
+                src_bucket: "bucket1".to_string(),
+                dst_bucket: "bucket2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: None,
+                entries: vec![],
+                include: Labels::default(),
+                exclude: Labels::default(),
+                each_n: None,
+                each_s: None,
+                when: None,
+                mode: ReplicationMode::Enabled,
+            },
+        )
+        .await
+        .unwrap();
+        repo.set_mode("replication1", ReplicationMode::Disabled)
+            .await
+            .unwrap();
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("bucket1".to_string()));
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("http://localhost".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_MODE"))
+            .return_const(Ok("paused".to_string()));
+
+        env_with_replications
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let components = CfgParser::from_env(env_with_replications, "0.0.0")
+            .await
+            .build()
+            .await
+            .unwrap();
+        let repo = components.replication_repo.read().await.unwrap();
+        let info = repo.get_info("replication1").await.unwrap();
+        assert_eq!(info.info.mode, ReplicationMode::Paused);
     }
 
     #[fixture]
