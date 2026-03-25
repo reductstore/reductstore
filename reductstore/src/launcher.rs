@@ -146,7 +146,7 @@ where
         .sync_fs()
         .await
         .expect("Failed to shutdown storage");
-    lock_file.release().await;
+    drop(lock_file);
     info!("Server has been shut down.");
 }
 

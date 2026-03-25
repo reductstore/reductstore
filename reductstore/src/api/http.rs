@@ -704,7 +704,6 @@ pub(crate) mod tests {
                 async fn is_waiting(&self) -> Result<bool, ReductError> {
                     Err(ReductError::internal_server_error("boom"))
                 }
-                async fn release(&self) {}
             }
 
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
@@ -765,7 +764,6 @@ pub(crate) mod tests {
                 async fn is_waiting(&self) -> Result<bool, ReductError> {
                     Ok(true)
                 }
-                async fn release(&self) {}
             }
 
             let (_tx, rx) = tokio::sync::mpsc::channel(1);
@@ -996,8 +994,6 @@ pub(crate) mod tests {
         async fn is_waiting(&self) -> Result<bool, ReductError> {
             Ok(true)
         }
-
-        async fn release(&self) {}
     }
 
     struct NotReadyLockFile {}
@@ -1015,8 +1011,6 @@ pub(crate) mod tests {
         async fn is_waiting(&self) -> Result<bool, ReductError> {
             Ok(true)
         }
-
-        async fn release(&self) {}
     }
 
     mod lock_file_helpers {
@@ -1029,7 +1023,6 @@ pub(crate) mod tests {
             let lf = WaitingLockFile {};
             assert!(!lf.is_failed().await.unwrap());
             assert!(lf.is_waiting().await.unwrap());
-            lf.release().await;
         }
 
         #[rstest]
@@ -1038,7 +1031,6 @@ pub(crate) mod tests {
             let lf = NotReadyLockFile {};
             assert!(!lf.is_failed().await.unwrap());
             assert!(lf.is_waiting().await.unwrap());
-            lf.release().await;
         }
     }
 }
