@@ -21,7 +21,10 @@ use crate::lock_file::BoxedLockFile;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::{middleware::{from_fn, from_fn_with_state}, Router};
+use axum::{
+    middleware::{from_fn, from_fn_with_state},
+    Router,
+};
 use bucket::create_bucket_api_routes;
 use entry::create_entry_api_routes;
 use hyper::http::HeaderValue;
@@ -278,6 +281,7 @@ pub(crate) mod tests {
     use super::*;
     use crate::api::components::ComponentError;
     use crate::asset::asset_manager::create_asset_manager;
+    use crate::audit::AuditRepositoryBuilder;
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::core::cache::Cache;
@@ -793,6 +797,9 @@ pub(crate) mod tests {
         let token_repo = TokenRepositoryBuilder::new(cfg.clone())
             .build(cfg.data_path.clone())
             .await;
+        let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -808,6 +815,7 @@ pub(crate) mod tests {
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
+            audit_repo: AsyncRwLock::new(audit_repo),
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -882,6 +890,9 @@ pub(crate) mod tests {
             .unwrap();
 
         let storage = Arc::new(storage);
+        let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
         let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -916,6 +927,7 @@ pub(crate) mod tests {
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
+            audit_repo: AsyncRwLock::new(audit_repo),
             ext_repo: create_ext_repository(
                 None,
                 vec![],
