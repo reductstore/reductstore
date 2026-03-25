@@ -474,6 +474,7 @@ mod tests {
                 role: crate::cfg::InstanceRole::Primary,
                 data_path: data_path.clone(),
             },
+            replications_with_mode_override: Default::default(),
         }
     }
 
