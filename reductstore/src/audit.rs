@@ -41,21 +41,6 @@ pub(crate) struct AuditQuery {
     pub end: Option<u64>,
     pub endpoint: Option<String>,
 }
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct AuditAggregateKey {
-    token_name: String,
-    endpoint: String,
-    status: u16,
-}
-
-#[derive(Debug, Clone)]
-struct AuditAggregate {
-    first_timestamp: u64,
-    last_timestamp: u64,
-    call_count: u64,
-    total_duration: u64,
-}
 pub(crate) struct AuditRepositoryBuilder {
     cfg: Cfg,
 }

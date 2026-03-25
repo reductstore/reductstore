@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 mod read_only;
+use crate::audit::AUDIT_BUCKET_NAME;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
@@ -372,6 +373,9 @@ impl StorageEngine {
 
 pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
     let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
+    if name == AUDIT_BUCKET_NAME {
+        return Ok(());
+    }
     if !regex.is_match(name) {
         return Err(unprocessable_entity!(
             "Bucket or entry name can contain only letters, digests and [-,_] symbols",
