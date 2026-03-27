@@ -636,6 +636,8 @@ mod tests {
 
     mod parse_operators {
         use super::*;
+        use crate::storage::query::condition::Node;
+
         #[rstest]
         // Aggregation operators
         #[case("$each_n", "[1]", Value::Bool(true))]
@@ -733,6 +735,17 @@ mod tests {
                     operator
                 )
             );
+        }
+
+        #[rstest]
+        fn test_print_date_operators() {
+            assert!(Day::new(vec![]).print().contains("Day"));
+            assert!(Hour::new(vec![]).print().contains("Hour"));
+            assert!(Minute::new(vec![]).print().contains("Minute"));
+            assert!(Month::new(vec![]).print().contains("Month"));
+            assert!(Second::new(vec![]).print().contains("Second"));
+            assert!(Weekday::new(vec![]).print().contains("Weekday"));
+            assert!(Year::new(vec![]).print().contains("Year"));
         }
     }
 
