@@ -73,8 +73,9 @@ runs:
       shell: bash
       run: |
         set -euo pipefail
+        SYFT_VERSION=v1.42.3
         mkdir -p "$HOME/.local/bin"
-        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$HOME/.local/bin"
+        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$HOME/.local/bin" "$SYFT_VERSION"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         "$HOME/.local/bin/syft" version
 
