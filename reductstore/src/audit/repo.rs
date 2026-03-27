@@ -8,7 +8,11 @@ use crate::storage::bucket::Bucket;
 use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use bytes::Bytes;
+use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
+use reduct_base::io::ReadRecord;
+use reduct_base::msg::entry_api::{QueryEntry, QueryType};
 use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -168,11 +172,61 @@ impl ManageAudit for AuditRepository {
 
     async fn query_token_events(
         &mut self,
-        _token_name: &str,
-        _filter: AuditQuery,
+        token_name: &str,
+        filter: AuditQuery,
     ) -> Result<Vec<AuditEvent>, ReductError> {
-        // TODO: query audit records from the $audit bucket.
-        Ok(vec![])
+        let bucket = match self.storage.get_bucket(AUDIT_BUCKET_NAME).await {
+            Ok(bucket) => bucket.upgrade()?,
+            Err(_) => return Ok(vec![]),
+        };
+
+        let entry = match bucket.get_entry(token_name).await {
+            Ok(entry) => entry.upgrade()?,
+            Err(err) if err.status == ErrorCode::NotFound => return Ok(vec![]),
+            Err(err) => return Err(err),
+        };
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            start: filter.start,
+            stop: filter.end,
+            include: filter
+                .endpoint
+                .map(|endpoint| HashMap::from([("endpoint".to_string(), endpoint)])),
+            ttl: Some(1),
+            continuous: Some(false),
+            ..Default::default()
+        };
+
+        let id = entry.query(query).await?;
+        let (rx, _) = entry.get_query_receiver(id).await?;
+        let rx = rx.upgrade()?;
+        let mut rx_guard = rx.write().await?;
+
+        let mut results = Vec::new();
+        while let Some(result) = rx_guard.recv().await {
+            match result {
+                Ok(mut reader) => {
+                    let mut payload = Vec::new();
+                    while let Some(chunk) = reader.read_chunk() {
+                        let chunk = chunk?;
+                        payload.extend_from_slice(chunk.as_ref());
+                    }
+
+                    let event = serde_json::from_slice::<AuditEvent>(&payload).map_err(|err| {
+                        ReductError::internal_server_error(&format!(
+                            "Failed to deserialize audit event: {}",
+                            err
+                        ))
+                    })?;
+                    results.push(event);
+                }
+                Err(err) if err.status == ErrorCode::NoContent => break,
+                Err(err) => return Err(err),
+            }
+        }
+
+        Ok(results)
     }
 }
 

@@ -5,6 +5,8 @@ use reduct_base::error::ReductError;
 use reduct_base::forbidden;
 use reduct_base::msg::token_api::Token;
 
+use crate::audit::AUDIT_BUCKET_NAME;
+
 /// Policy is a trait that defines the interface for a policy.
 /// A policy is a set of rules that are applied to a token to determine
 /// if the token is allowed to perform an action.
@@ -113,11 +115,17 @@ impl Policy for WriteAccessPolicy<'_> {
 
 fn check_bucket_permissions(token_list: &Vec<String>, bucket: &str) -> bool {
     for token_bucket in token_list {
+        if token_bucket == bucket {
+            return true;
+        }
+
+        if bucket == AUDIT_BUCKET_NAME {
+            continue;
+        }
+
         // Check if the token has access for the specified bucket with wildcard support
         let wildcard_bucket = token_bucket.ends_with('*');
-        if token_bucket == bucket
-            || (wildcard_bucket && bucket.starts_with(&token_bucket[..token_bucket.len() - 1]))
-        {
+        if wildcard_bucket && bucket.starts_with(&token_bucket[..token_bucket.len() - 1]) {
             return true;
         }
     }
@@ -211,6 +219,47 @@ mod tests {
     }
 
     #[test]
+    fn test_read_access_policy_excludes_audit_bucket_from_wildcard() {
+        let policy = ReadAccessPolicy {
+            bucket: AUDIT_BUCKET_NAME,
+        };
+        let token = Token {
+            name: "test_token".to_string(),
+            permissions: Some(Permissions {
+                full_access: false,
+                read: vec!["*".to_string()],
+                write: vec![],
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            policy.validate(Ok(token)),
+            Err(forbidden!(
+                "Token 'test_token' doesn't have read access to bucket '$audit'"
+            ))
+        );
+    }
+
+    #[test]
+    fn test_read_access_policy_allows_explicit_audit_bucket_permission() {
+        let policy = ReadAccessPolicy {
+            bucket: AUDIT_BUCKET_NAME,
+        };
+        let token = Token {
+            name: "test_token".to_string(),
+            permissions: Some(Permissions {
+                full_access: false,
+                read: vec![AUDIT_BUCKET_NAME.to_string()],
+                write: vec![],
+            }),
+            ..Default::default()
+        };
+
+        assert!(policy.validate(Ok(token)).is_ok());
+    }
+
+    #[test]
     fn test_write_access_policy() {
         let policy = WriteAccessPolicy { bucket: "bucket" };
         let mut token = Token {
@@ -246,5 +295,46 @@ mod tests {
             policy.validate(Err(forbidden!("Invalid token"))),
             Err(forbidden!("Invalid token"))
         );
+    }
+
+    #[test]
+    fn test_write_access_policy_excludes_audit_bucket_from_wildcard() {
+        let policy = WriteAccessPolicy {
+            bucket: AUDIT_BUCKET_NAME,
+        };
+        let token = Token {
+            name: "test_token".to_string(),
+            permissions: Some(Permissions {
+                full_access: false,
+                read: vec![],
+                write: vec!["*".to_string()],
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            policy.validate(Ok(token)),
+            Err(forbidden!(
+                "Token 'test_token' doesn't have write access to bucket '$audit'"
+            ))
+        );
+    }
+
+    #[test]
+    fn test_write_access_policy_allows_explicit_audit_bucket_permission() {
+        let policy = WriteAccessPolicy {
+            bucket: AUDIT_BUCKET_NAME,
+        };
+        let token = Token {
+            name: "test_token".to_string(),
+            permissions: Some(Permissions {
+                full_access: false,
+                read: vec![],
+                write: vec![AUDIT_BUCKET_NAME.to_string()],
+            }),
+            ..Default::default()
+        };
+
+        assert!(policy.validate(Ok(token)).is_ok());
     }
 }

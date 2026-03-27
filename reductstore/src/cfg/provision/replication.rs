@@ -494,6 +494,7 @@ mod tests {
                     replication_log_size: 500,
                     verify_ssl: true,
                     ca_path: None,
+                    primary_url: None,
                     listening_port: 8080,
                 },
                 ..Default::default()
@@ -583,6 +584,7 @@ mod tests {
                     replication_log_size: 500,
                     verify_ssl: true,
                     ca_path: None,
+                    primary_url: None,
                     listening_port: 8080,
                 },
                 ..Default::default()

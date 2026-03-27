@@ -23,6 +23,7 @@ use crate::api::http::entry::remove_entry::remove_entry;
 
 use crate::api::http::entry::write_batched::write_batched_records;
 use crate::api::http::entry::write_single::write_record;
+use crate::api::http::utils::ensure_public_bucket;
 use crate::api::http::HttpError;
 use crate::api::http::StateKeeper;
 use axum::extract::{FromRequest, Path, Query, State};
@@ -50,6 +51,10 @@ use reduct_base::msg::entry_api::{QueryEntry, QueryInfo, QueryType, RemoveQueryI
 use reduct_macros::{IntoResponse, Twin};
 use std::collections::HashMap;
 use std::sync::Arc;
+
+fn ensure_path_bucket_is_public(path: &HashMap<String, String>) -> Result<(), HttpError> {
+    ensure_public_bucket(path.get("bucket_name").unwrap())
+}
 
 pub(super) struct MethodExtractor {
     name: String,
@@ -114,6 +119,7 @@ async fn remove_entry_router(
     path: Path<HashMap<String, String>>,
     Query(params): Query<HashMap<String, String>>,
 ) -> Result<(), HttpError> {
+    ensure_path_bucket_is_public(&path)?;
     if params.is_empty() {
         remove_entry(keeper, path, headers).await
     } else {
@@ -127,6 +133,9 @@ async fn query_entry_router(
     path: Path<HashMap<String, String>>,
     request: QueryEntryAxum,
 ) -> Response<Body> {
+    if let Err(err) = ensure_path_bucket_is_public(&path) {
+        return err.into_response();
+    }
     let request = request.0;
     match request.query_type {
         QueryType::Query => read_query_json(keeper, path, request, headers)
@@ -167,6 +176,9 @@ async fn read_entry_router(
     headers: HeaderMap,
     method: MethodExtractor,
 ) -> Response<Body> {
+    if let Err(err) = ensure_path_bucket_is_public(&path) {
+        return err.into_response();
+    }
     if let Some(path) = strip_route_suffix(&path, "/batch") {
         return read_batched_records(keeper, path, Query(params), headers, method)
             .await
@@ -191,6 +203,9 @@ async fn write_entry_router(
     Query(params): Query<HashMap<String, String>>,
     body: Body,
 ) -> Response<Body> {
+    if let Err(err) = ensure_path_bucket_is_public(&path) {
+        return err.into_response();
+    }
     if let Some(path) = strip_route_suffix(&path, "/batch") {
         return write_batched_records(keeper, headers, path, body)
             .await
@@ -222,6 +237,9 @@ async fn update_entry_router(
     Query(params): Query<HashMap<String, String>>,
     body: Body,
 ) -> Response<Body> {
+    if let Err(err) = ensure_path_bucket_is_public(&path) {
+        return err.into_response();
+    }
     if let Some(path) = strip_route_suffix(&path, "/batch") {
         return update_batched_records(keeper, headers, path, body)
             .await
@@ -240,6 +258,9 @@ async fn remove_entry_dispatcher(
     Query(params): Query<HashMap<String, String>>,
     body: Body,
 ) -> Response<Body> {
+    if let Err(err) = ensure_path_bucket_is_public(&path) {
+        return err.into_response();
+    }
     if let Some(path) = strip_route_suffix(&path, "/batch") {
         return remove_batched_records(keeper, headers, path, body)
             .await
@@ -263,6 +284,9 @@ async fn rename_entry_dispatcher(
     Path(path): Path<HashMap<String, String>>,
     body: Body,
 ) -> Response<Body> {
+    if let Err(err) = ensure_path_bucket_is_public(&path) {
+        return err.into_response();
+    }
     if let Some(path) = strip_route_suffix(&path, "/rename") {
         let body = match to_bytes(body, usize::MAX).await {
             Ok(body) => body,

@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::http::entry::MethodExtractor;
-use crate::api::http::utils::ReadersWrapper;
+use crate::api::http::utils::{ensure_public_bucket, ReadersWrapper};
 use crate::api::http::{ErrorCode, HttpError, StateKeeper};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::ext::ext_repository::BoxedManageExtensions;
@@ -35,6 +35,7 @@ pub(super) async fn read_batched_records(
     method: MethodExtractor,
 ) -> Result<impl IntoResponse, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
+    ensure_public_bucket(bucket_name)?;
     let components = keeper
         .get_with_permissions(
             &headers,

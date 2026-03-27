@@ -318,8 +318,9 @@ impl StorageEngine {
         let infos = {
             let buckets = self.buckets.read().await?;
             buckets
-                .values()
-                .map(|bucket| bucket.clone().info())
+                .iter()
+                .filter(|(name, _)| name.as_str() != AUDIT_BUCKET_NAME)
+                .map(|(_, bucket)| bucket.clone().info())
                 .collect::<Vec<_>>()
         };
 

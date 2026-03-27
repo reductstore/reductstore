@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::http::utils::ensure_public_bucket;
 use crate::api::http::HttpError;
 use crate::api::http::StateKeeper;
 use crate::auth::policy::FullAccessPolicy;
@@ -17,6 +18,8 @@ pub(super) async fn rename_bucket(
     headers: HeaderMap,
     request: Json<RenameBucket>,
 ) -> Result<(), HttpError> {
+    ensure_public_bucket(&bucket_name)?;
+    ensure_public_bucket(&request.new_name)?;
     let components = keeper
         .get_with_permissions(&headers, FullAccessPolicy {})
         .await?;

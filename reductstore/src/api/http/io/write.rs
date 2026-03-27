@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::http::entry::common::parse_content_length_from_header;
+use crate::api::http::utils::ensure_public_bucket;
 use crate::api::http::Components;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::WriteAccessPolicy;
@@ -55,6 +56,7 @@ pub(super) async fn write_batched_records(
     body: Body,
 ) -> Result<impl IntoResponse, HttpError> {
     let bucket = path.get("bucket_name").unwrap();
+    ensure_public_bucket(bucket)?;
     let components = keeper
         .get_with_permissions(&headers.clone(), WriteAccessPolicy { bucket })
         .await?;
