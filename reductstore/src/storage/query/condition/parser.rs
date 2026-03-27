@@ -728,7 +728,10 @@ mod tests {
             let result = parser.parse(json);
             assert_eq!(
                 result.err().unwrap().to_string(),
-                format!("[UnprocessableEntity] {} requires one or two operands", operator)
+                format!(
+                    "[UnprocessableEntity] {} requires one or two operands",
+                    operator
+                )
             );
         }
     }
