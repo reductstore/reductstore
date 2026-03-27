@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add instance-level rate limits for API requests plus HTTP/Zenoh ingress and egress traffic, including `RS_RATE_LIMIT_*` parsing with per-window units (`/s`, `/m`, `/h`, `/d`) and 429 limit errors, [PR-1255](https://github.com/reductstore/reductstore/pull/1255)
 - Add `$gate` query operator for edge-triggered time-window conditions: opens on `false->true`, mirrors input while window is active, then forces `false` until input resets to `false` and re-triggers, [PR-1249](https://github.com/reductstore/reductstore/pull/1249)
 - Add UTC date-part query operators (`$second`, `$minute`, `$hour`, `$day`, `$month`, `$year`, `$weekday`) with optional IANA timezone argument and Monday-based weekday mapping (`0..6`), [PR-1248](https://github.com/reductstore/reductstore/pull/1248)
 - Support `RS_REPLICATION_<ID>_MODE` in provisioning to set replication mode (`enabled|paused|disabled`) declaratively from environment variables, [PR-1243](https://github.com/reductstore/reductstore/pull/1243)
