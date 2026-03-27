@@ -46,6 +46,14 @@ The quickest way to get up and running is with our Docker image:
 docker run -p 8383:8383 -v reduct-data:/data reduct/store:latest
 ```
 
+If you prefer a bind mount instead of a Docker volume:
+
+```bash
+mkdir -p ./data
+sudo chown -R 10001:10001 ./data
+docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
+```
+
 Alternatively, you can opt for Cargo:
 
 ```
