@@ -3,14 +3,13 @@
 
 use crate::core::sync::RwLock;
 use async_trait::async_trait;
+use bytesize::ByteSize;
 use reduct_base::error::{ErrorCode, ReductError};
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 pub(crate) type BoxedLimits = Arc<dyn ManageLimits + Send + Sync>;
-
-const DEFAULT_WINDOW: Duration = Duration::from_secs(3600);
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum LimitKind {
@@ -49,14 +48,25 @@ pub(crate) struct LimitExceeded {
 
 impl Display for LimitExceeded {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let used = format_amount(self.kind, self.used);
+        let limit = format_amount(self.kind, self.limit);
         write!(
             f,
             "instance-level rate limit for {} exceeded: used={} limit={} retry_after={}s",
             self.kind,
-            self.used,
-            self.limit,
+            used,
+            limit,
             self.retry_after.as_secs()
         )
+    }
+}
+
+fn format_amount(kind: LimitKind, amount: u64) -> String {
+    match kind {
+        LimitKind::ApiRequests(_) => amount.to_string(),
+        LimitKind::IngressBytes(_) | LimitKind::EgressBytes(_) => {
+            format!("{} ({})", ByteSize::b(amount), amount)
+        }
     }
 }
 
@@ -68,9 +78,28 @@ impl From<LimitExceeded> for ReductError {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
 pub(crate) struct LimitsConfig {
-    pub api_requests_per_window: Option<u64>,
-    pub ingress_bytes_per_window: Option<u64>,
-    pub egress_bytes_per_window: Option<u64>,
+    pub api_requests_per_window: Option<WindowLimit>,
+    pub ingress_bytes_per_window: Option<WindowLimit>,
+    pub egress_bytes_per_window: Option<WindowLimit>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct WindowLimit {
+    pub amount: u64,
+    pub window: Duration,
+}
+
+impl WindowLimit {
+    pub fn new(amount: u64, window: Duration) -> Self {
+        Self {
+            amount,
+            window: if window.is_zero() {
+                Duration::from_secs(1)
+            } else {
+                window
+            },
+        }
+    }
 }
 
 #[async_trait]
@@ -92,7 +121,7 @@ pub(crate) trait ManageLimits {
 
 pub(crate) struct LimitsBuilder {
     config: LimitsConfig,
-    window: Duration,
+    window: Option<Duration>,
 }
 
 impl Default for LimitsBuilder {
@@ -105,7 +134,7 @@ impl LimitsBuilder {
     pub fn new() -> Self {
         Self {
             config: LimitsConfig::default(),
-            window: DEFAULT_WINDOW,
+            window: None,
         }
     }
 
@@ -115,7 +144,7 @@ impl LimitsBuilder {
     }
 
     pub fn with_window(mut self, window: Duration) -> Self {
-        self.window = window;
+        self.window = Some(window);
         self
     }
 
@@ -141,20 +170,29 @@ struct RateLimits {
     api: RwLock<WindowCounter>,
     ingress: RwLock<WindowCounter>,
     egress: RwLock<WindowCounter>,
-    window: Duration,
 }
 
 impl RateLimits {
-    fn new(config: LimitsConfig, window: Duration) -> Self {
+    fn new(config: LimitsConfig, window_override: Option<Duration>) -> Self {
+        let resolve_window = |limit: Option<WindowLimit>| {
+            limit.map(|limit| {
+                WindowLimit::new(
+                    limit.amount,
+                    window_override.unwrap_or(limit.window.max(Duration::from_secs(1))),
+                )
+            })
+        };
+
         Self {
-            api: RwLock::new(WindowCounter::new(config.api_requests_per_window)),
-            ingress: RwLock::new(WindowCounter::new(config.ingress_bytes_per_window)),
-            egress: RwLock::new(WindowCounter::new(config.egress_bytes_per_window)),
-            window: if window.is_zero() {
-                Duration::from_secs(1)
-            } else {
-                window
-            },
+            api: RwLock::new(WindowCounter::new(resolve_window(
+                config.api_requests_per_window,
+            ))),
+            ingress: RwLock::new(WindowCounter::new(resolve_window(
+                config.ingress_bytes_per_window,
+            ))),
+            egress: RwLock::new(WindowCounter::new(resolve_window(
+                config.egress_bytes_per_window,
+            ))),
         }
     }
 }
@@ -167,17 +205,17 @@ impl ManageLimits for RateLimits {
             LimitKind::ApiRequests(_) => self
                 .api
                 .write()?
-                .consume(kind, now_secs, self.window)
+                .consume(kind, now_secs)
                 .map_err(ReductError::from),
             LimitKind::IngressBytes(_) => self
                 .ingress
                 .write()?
-                .consume(kind, now_secs, self.window)
+                .consume(kind, now_secs)
                 .map_err(ReductError::from),
             LimitKind::EgressBytes(_) => self
                 .egress
                 .write()?
-                .consume(kind, now_secs, self.window)
+                .consume(kind, now_secs)
                 .map_err(ReductError::from),
         }
     }
@@ -185,13 +223,13 @@ impl ManageLimits for RateLimits {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 struct WindowCounter {
-    limit: Option<u64>,
+    limit: Option<WindowLimit>,
     used: u64,
     window_start_secs: Option<u64>,
 }
 
 impl WindowCounter {
-    fn new(limit: Option<u64>) -> Self {
+    fn new(limit: Option<WindowLimit>) -> Self {
         Self {
             limit,
             used: 0,
@@ -199,18 +237,13 @@ impl WindowCounter {
         }
     }
 
-    fn consume(
-        &mut self,
-        kind: LimitKind,
-        now_secs: u64,
-        window: Duration,
-    ) -> Result<(), LimitExceeded> {
+    fn consume(&mut self, kind: LimitKind, now_secs: u64) -> Result<(), LimitExceeded> {
         let amount = kind.amount();
         let Some(limit) = self.limit else {
             return Ok(());
         };
 
-        let window_secs = window.as_secs().max(1);
+        let window_secs = limit.window.as_secs().max(1);
         let window_start = match self.window_start_secs {
             Some(start) => {
                 if now_secs.saturating_sub(start) >= window_secs {
@@ -228,12 +261,12 @@ impl WindowCounter {
         };
 
         let used_after = self.used.saturating_add(amount);
-        if used_after > limit {
+        if used_after > limit.amount {
             let elapsed = now_secs.saturating_sub(window_start);
             let retry_after_secs = window_secs.saturating_sub(elapsed).max(1);
             return Err(LimitExceeded {
                 kind,
-                limit,
+                limit: limit.amount,
                 used: used_after,
                 retry_after: Duration::from_secs(retry_after_secs),
             });
@@ -292,16 +325,36 @@ mod tests {
     }
 
     #[rstest]
-    fn window_counter_allows_unlimited(window: Duration, now: u64) {
+    fn limit_exceeded_formats_human_readable_bytes() {
+        let err = LimitExceeded {
+            kind: LimitKind::IngressBytes(1),
+            limit: 10_000_000,
+            used: 10_005_949,
+            retry_after: Duration::from_secs(38),
+        };
+
+        let msg = err.to_string();
+        assert!(msg.contains("ingress bytes"));
+        assert!(msg.contains("limit="));
+        assert!(msg.contains("used="));
+        assert!(msg.contains("(10000000)"));
+        assert!(msg.contains("10005949"));
+        assert!(!msg.contains("limit=10000000"));
+        assert!(!msg.contains("used=10005949 "));
+        assert!(msg.contains("retry_after=38s"));
+    }
+
+    #[rstest]
+    fn window_counter_allows_unlimited(now: u64) {
         let mut counter = WindowCounter::new(None);
         assert!(counter
-            .consume(LimitKind::ApiRequests(u64::MAX), now, window)
+            .consume(LimitKind::ApiRequests(u64::MAX), now)
             .is_ok());
         assert!(counter
-            .consume(LimitKind::IngressBytes(u64::MAX), now, window)
+            .consume(LimitKind::IngressBytes(u64::MAX), now)
             .is_ok());
         assert!(counter
-            .consume(LimitKind::EgressBytes(u64::MAX), now, window)
+            .consume(LimitKind::EgressBytes(u64::MAX), now)
             .is_ok());
     }
 
@@ -310,12 +363,12 @@ mod tests {
     #[case(LimitKind::IngressBytes(2))]
     #[case(LimitKind::EgressBytes(2))]
     fn window_counter_rejects_when_exceeded(window: Duration, now: u64, #[case] kind: LimitKind) {
-        let mut counter = WindowCounter::new(Some(2));
+        let mut counter = WindowCounter::new(Some(WindowLimit::new(2, window)));
         counter
-            .consume(LimitKind::ApiRequests(1), now, window)
+            .consume(LimitKind::ApiRequests(1), now)
             .expect("first consume must pass");
 
-        let err = counter.consume(kind, now, window).err().unwrap();
+        let err = counter.consume(kind, now).err().unwrap();
         assert_eq!(err.limit, 2);
         assert_eq!(err.used, 3);
         assert!(err.retry_after.as_secs() >= 1);
@@ -323,18 +376,12 @@ mod tests {
 
     #[rstest]
     fn window_counter_resets_after_window(window: Duration, now: u64) {
-        let mut counter = WindowCounter::new(Some(2));
-        assert!(counter
-            .consume(LimitKind::IngressBytes(2), now, window)
-            .is_ok());
-        assert!(counter
-            .consume(LimitKind::IngressBytes(1), now, window)
-            .is_err());
+        let mut counter = WindowCounter::new(Some(WindowLimit::new(2, window)));
+        assert!(counter.consume(LimitKind::IngressBytes(2), now).is_ok());
+        assert!(counter.consume(LimitKind::IngressBytes(1), now).is_err());
 
         let later = now + window.as_secs() + 1;
-        assert!(counter
-            .consume(LimitKind::IngressBytes(2), later, window)
-            .is_ok());
+        assert!(counter.consume(LimitKind::IngressBytes(2), later).is_ok());
     }
 
     #[tokio::test]
@@ -350,7 +397,7 @@ mod tests {
     async fn api_limit_blocks_when_exceeded() {
         let limits = LimitsBuilder::new()
             .with_config(LimitsConfig {
-                api_requests_per_window: Some(2),
+                api_requests_per_window: Some(WindowLimit::new(2, Duration::from_secs(3600))),
                 ..LimitsConfig::default()
             })
             .build();
@@ -368,9 +415,9 @@ mod tests {
     async fn limits_builder_applies_independent_counters() {
         let limits = LimitsBuilder::new()
             .with_config(LimitsConfig {
-                api_requests_per_window: Some(1),
-                ingress_bytes_per_window: Some(3),
-                egress_bytes_per_window: Some(5),
+                api_requests_per_window: Some(WindowLimit::new(1, Duration::from_secs(3600))),
+                ingress_bytes_per_window: Some(WindowLimit::new(3, Duration::from_secs(3600))),
+                egress_bytes_per_window: Some(WindowLimit::new(5, Duration::from_secs(3600))),
             })
             .build();
 
