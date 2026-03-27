@@ -3,7 +3,7 @@
 
 use crate::storage::query::condition::computed_reference::ComputedReference;
 use crate::storage::query::condition::constant::Constant;
-use crate::storage::query::condition::operators::aggregation::{EachN, EachT, Limit};
+use crate::storage::query::condition::operators::aggregation::{EachN, EachT, Gate, Limit};
 use crate::storage::query::condition::operators::arithmetic::{
     Abs, Add, Div, DivNum, Mult, Rem, Sub,
 };
@@ -230,6 +230,7 @@ impl Parser {
             // Aggregation operators
             "$each_n" => EachN::boxed(operands),
             "$each_t" => EachT::boxed(operands),
+            "$gate" => Gate::boxed(operands),
             "$limit" => Limit::boxed(operands),
             // Arithmetic operators
             "$add" => Add::boxed(operands),
@@ -642,6 +643,7 @@ mod tests {
         // Aggregation operators
         #[case("$each_n", "[1]", Value::Bool(true))]
         #[case("$each_t", "[1]", Value::Bool(false))]
+        #[case("$gate", "[\"10s\", true]", Value::Bool(true))]
         #[case("$limit", "[1]", Value::Bool(true))]
         // Arithmetic operators
         #[case("$add", "[1, 2.0]", Value::Float(3.0))]
