@@ -8,6 +8,9 @@ use crate::storage::query::condition::operators::arithmetic::{
     Abs, Add, Div, DivNum, Mult, Rem, Sub,
 };
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
+use crate::storage::query::condition::operators::date::{
+    Day, Hour, Minute, Month, Second, Weekday, Year,
+};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, In, Nin, NoneOf, OneOf};
 use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref, Timestamp};
 use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
@@ -252,6 +255,15 @@ impl Parser {
             "$lt" => Lt::boxed(operands),
             "$lte" => Lte::boxed(operands),
             "$ne" => Ne::boxed(operands),
+
+            // Date operators
+            "$second" => Second::boxed(operands),
+            "$minute" => Minute::boxed(operands),
+            "$hour" => Hour::boxed(operands),
+            "$day" => Day::boxed(operands),
+            "$month" => Month::boxed(operands),
+            "$year" => Year::boxed(operands),
+            "$weekday" => Weekday::boxed(operands),
 
             // String operators
             "$contains" => Contains::boxed(operands),
@@ -655,6 +667,15 @@ mod tests {
         #[case("$lt", "[20, 10]", Value::Bool(false))]
         #[case("$lte", "[20, 10]", Value::Bool(false))]
         #[case("$ne", "[-10, 10]", Value::Bool(true))]
+        // Date operators
+        #[case("$second", "[1704067200123456]", Value::Int(0))]
+        #[case("$minute", "[1704067200123456]", Value::Int(0))]
+        #[case("$hour", "[1704067200123456]", Value::Int(0))]
+        #[case("$hour", "[1704067200123456, \"Europe/Berlin\"]", Value::Int(1))]
+        #[case("$day", "[1704067200123456]", Value::Int(1))]
+        #[case("$month", "[1704067200123456]", Value::Int(1))]
+        #[case("$year", "[1704067200123456]", Value::Int(2024))]
+        #[case("$weekday", "[1704067200123456]", Value::Int(0))]
         // String operators
         #[case("$contains", "[\"abc\", \"b\"]", Value::Bool(true))]
         #[case("$starts_with", "[\"abc\", \"ab\"]", Value::Bool(true))]
