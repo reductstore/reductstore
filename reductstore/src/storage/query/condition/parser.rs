@@ -669,13 +669,19 @@ mod tests {
         #[case("$ne", "[-10, 10]", Value::Bool(true))]
         // Date operators
         #[case("$second", "[1704067200123456]", Value::Int(0))]
+        #[case("$second", "[1704067200123456, \"Europe/Berlin\"]", Value::Int(0))]
         #[case("$minute", "[1704067200123456]", Value::Int(0))]
+        #[case("$minute", "[1704067200123456, \"Europe/Berlin\"]", Value::Int(0))]
         #[case("$hour", "[1704067200123456]", Value::Int(0))]
         #[case("$hour", "[1704067200123456, \"Europe/Berlin\"]", Value::Int(1))]
         #[case("$day", "[1704067200123456]", Value::Int(1))]
+        #[case("$day", "[1704067200123456, \"America/New_York\"]", Value::Int(31))]
         #[case("$month", "[1704067200123456]", Value::Int(1))]
+        #[case("$month", "[1704067200123456, \"America/New_York\"]", Value::Int(12))]
         #[case("$year", "[1704067200123456]", Value::Int(2024))]
+        #[case("$year", "[1704067200123456, \"America/New_York\"]", Value::Int(2023))]
         #[case("$weekday", "[1704067200123456]", Value::Int(0))]
+        #[case("$weekday", "[1704067200123456, \"America/New_York\"]", Value::Int(6))]
         // String operators
         #[case("$contains", "[\"abc\", \"b\"]", Value::Bool(true))]
         #[case("$starts_with", "[\"abc\", \"ab\"]", Value::Bool(true))]
@@ -706,6 +712,23 @@ mod tests {
                 node.apply(&context).unwrap().as_bool().unwrap(),
                 "{}",
                 node.print()
+            );
+        }
+
+        #[rstest]
+        #[case("$second")]
+        #[case("$minute")]
+        #[case("$hour")]
+        #[case("$day")]
+        #[case("$month")]
+        #[case("$year")]
+        #[case("$weekday")]
+        fn test_parse_date_operator_invalid_operands(parser: Parser, #[case] operator: &str) {
+            let json = serde_json::from_str(&format!(r#"{{"{}": []}}"#, operator)).unwrap();
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                format!("[UnprocessableEntity] {} requires one or two operands", operator)
             );
         }
     }

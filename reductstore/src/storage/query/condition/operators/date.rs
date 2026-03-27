@@ -128,4 +128,17 @@ mod tests {
             unprocessable_entity!("$hour requires timezone to be a string")
         );
     }
+
+    #[rstest]
+    fn test_parse_timestamp_invalid_timestamp() {
+        let mut operands = vec![Constant::boxed(Value::Int(i64::MAX))];
+        let result = parse_timestamp_and_timezone("$hour", &mut operands, &Context::default());
+        assert_eq!(
+            result.err().unwrap(),
+            unprocessable_entity!(
+                "$hour requires a valid timestamp in microseconds, got {}",
+                i64::MAX
+            )
+        );
+    }
 }
