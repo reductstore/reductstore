@@ -8,6 +8,9 @@ use crate::storage::query::condition::operators::arithmetic::{
     Abs, Add, Div, DivNum, Mult, Rem, Sub,
 };
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
+use crate::storage::query::condition::operators::date::{
+    Day, Hour, Minute, Month, Second, Weekday, Year,
+};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, In, Nin, NoneOf, OneOf};
 use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref, Timestamp};
 use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
@@ -252,6 +255,15 @@ impl Parser {
             "$lt" => Lt::boxed(operands),
             "$lte" => Lte::boxed(operands),
             "$ne" => Ne::boxed(operands),
+
+            // Date operators
+            "$second" => Second::boxed(operands),
+            "$minute" => Minute::boxed(operands),
+            "$hour" => Hour::boxed(operands),
+            "$day" => Day::boxed(operands),
+            "$month" => Month::boxed(operands),
+            "$year" => Year::boxed(operands),
+            "$weekday" => Weekday::boxed(operands),
 
             // String operators
             "$contains" => Contains::boxed(operands),
@@ -624,6 +636,8 @@ mod tests {
 
     mod parse_operators {
         use super::*;
+        use crate::storage::query::condition::Node;
+
         #[rstest]
         // Aggregation operators
         #[case("$each_n", "[1]", Value::Bool(true))]
@@ -655,6 +669,21 @@ mod tests {
         #[case("$lt", "[20, 10]", Value::Bool(false))]
         #[case("$lte", "[20, 10]", Value::Bool(false))]
         #[case("$ne", "[-10, 10]", Value::Bool(true))]
+        // Date operators
+        #[case("$second", "[1704067200123456]", Value::Int(0))]
+        #[case("$second", "[1704067200123456, \"Europe/Berlin\"]", Value::Int(0))]
+        #[case("$minute", "[1704067200123456]", Value::Int(0))]
+        #[case("$minute", "[1704067200123456, \"Europe/Berlin\"]", Value::Int(0))]
+        #[case("$hour", "[1704067200123456]", Value::Int(0))]
+        #[case("$hour", "[1704067200123456, \"Europe/Berlin\"]", Value::Int(1))]
+        #[case("$day", "[1704067200123456]", Value::Int(1))]
+        #[case("$day", "[1704067200123456, \"America/New_York\"]", Value::Int(31))]
+        #[case("$month", "[1704067200123456]", Value::Int(1))]
+        #[case("$month", "[1704067200123456, \"America/New_York\"]", Value::Int(12))]
+        #[case("$year", "[1704067200123456]", Value::Int(2024))]
+        #[case("$year", "[1704067200123456, \"America/New_York\"]", Value::Int(2023))]
+        #[case("$weekday", "[1704067200123456]", Value::Int(0))]
+        #[case("$weekday", "[1704067200123456, \"America/New_York\"]", Value::Int(6))]
         // String operators
         #[case("$contains", "[\"abc\", \"b\"]", Value::Bool(true))]
         #[case("$starts_with", "[\"abc\", \"ab\"]", Value::Bool(true))]
@@ -686,6 +715,37 @@ mod tests {
                 "{}",
                 node.print()
             );
+        }
+
+        #[rstest]
+        #[case("$second")]
+        #[case("$minute")]
+        #[case("$hour")]
+        #[case("$day")]
+        #[case("$month")]
+        #[case("$year")]
+        #[case("$weekday")]
+        fn test_parse_date_operator_invalid_operands(parser: Parser, #[case] operator: &str) {
+            let json = serde_json::from_str(&format!(r#"{{"{}": []}}"#, operator)).unwrap();
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                format!(
+                    "[UnprocessableEntity] {} requires one or two operands",
+                    operator
+                )
+            );
+        }
+
+        #[rstest]
+        fn test_print_date_operators() {
+            assert!(Day::new(vec![]).print().contains("Day"));
+            assert!(Hour::new(vec![]).print().contains("Hour"));
+            assert!(Minute::new(vec![]).print().contains("Minute"));
+            assert!(Month::new(vec![]).print().contains("Month"));
+            assert!(Second::new(vec![]).print().contains("Second"));
+            assert!(Weekday::new(vec![]).print().contains("Weekday"));
+            assert!(Year::new(vec![]).print().contains("Year"));
         }
     }
 

@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add UTC date-part query operators (`$second`, `$minute`, `$hour`, `$day`, `$month`, `$year`, `$weekday`) with optional IANA timezone argument and Monday-based weekday mapping (`0..6`), [PR-1248](https://github.com/reductstore/reductstore/pull/1248)
 - Support `RS_REPLICATION_<ID>_MODE` in provisioning to set replication mode (`enabled|paused|disabled`) declaratively from environment variables, [PR-1243](https://github.com/reductstore/reductstore/pull/1243)
 - Support hierarchical entry paths and preserve nested tree recovery, [PR-1185](https://github.com/reductstore/reductstore/pull/1185)
 - Store attachments in system `$meta` entries with strategy-based behavior and replication coverage, [PR-1186](https://github.com/reductstore/reductstore/pull/1186)
