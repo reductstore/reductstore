@@ -42,19 +42,9 @@ It guarantees that your data will not overflow your hard disk and batches record
 
 The quickest way to get up and running is with our Docker image:
 
-```bash
+```
 docker run -p 8383:8383 -v reduct-data:/data reduct/store:latest
 ```
-
-If you prefer a bind mount instead of a Docker volume:
-
-```bash
-mkdir -p ./data
-sudo chown -R 10001:10001 ./data
-docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
-```
-
-> Since v1.19, the container runs as a non-root user. Make sure the mounted data directory exists and is writable by UID/GID `10001:10001`.
 
 Alternatively, you can opt for Cargo:
 
