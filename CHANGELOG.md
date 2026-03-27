@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.18.10 - 2026-03-27
+
+### Changed
+
+- Update `Cargo.lock` dependencies on `stable` using Dependabot bumps (`aws-credential-types`, `futures-util`, `quote`, `chrono`) plus `cargo audit` remediations (`aws-lc-rs/aws-lc-sys`, `rustls-webpki`, `quinn-proto`, `time`), [PR-1251](https://github.com/reductstore/reductstore/pull/1251)
+
 ## 1.18.9 - 2026-03-20
 
 ### Fixed
