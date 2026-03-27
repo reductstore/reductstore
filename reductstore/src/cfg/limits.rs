@@ -321,4 +321,66 @@ mod tests {
             LimitsConfig::default()
         );
     }
+
+    #[rstest]
+    fn api_requests_rate_limit_trimmed_roundtrip_display() {
+        let parsed = ApiRequestsRateLimit::from_str(" 100req/s ").unwrap();
+        assert_eq!(parsed.limit.amount, 100);
+        assert_eq!(parsed.limit.window, std::time::Duration::from_secs(1));
+        assert_eq!(parsed.to_string(), "100req/s");
+    }
+
+    #[rstest]
+    fn byte_rate_limit_trimmed_roundtrip_display() {
+        let parsed = ByteRateLimit::from_str(" 10MB/m ").unwrap();
+        assert_eq!(parsed.limit.amount, 10_000_000);
+        assert_eq!(parsed.limit.window, std::time::Duration::from_secs(60));
+        assert_eq!(parsed.to_string(), "10MB/m");
+    }
+
+    #[rstest]
+    fn parse_rate_limit_rejects_empty_literal() {
+        let err = parse_rate_limit("", parse_request_amount).err().unwrap();
+        assert!(err.contains("cannot be empty"));
+    }
+
+    #[rstest]
+    fn parse_rate_limit_rejects_empty_period() {
+        let err = parse_rate_limit("10req/", parse_request_amount)
+            .err()
+            .unwrap();
+        assert!(err.contains("Rate period cannot be empty"));
+    }
+
+    #[rstest]
+    fn parse_request_amount_supports_req_suffix() {
+        assert_eq!(parse_request_amount("42req").unwrap(), 42);
+    }
+
+    #[rstest]
+    fn parse_request_amount_rejects_invalid_value() {
+        let err = parse_request_amount("oops").err().unwrap();
+        assert!(err.contains("Invalid request rate limit"));
+    }
+
+    #[rstest]
+    fn parse_byte_amount_rejects_invalid_value() {
+        let err = parse_byte_amount("oops").err().unwrap();
+        assert!(err.contains("Invalid byte rate limit"));
+    }
+
+    #[rstest]
+    fn parse_period_to_micros_rejects_non_positive_values() {
+        let zero = parse_period_to_micros("0s").err().unwrap();
+        assert!(zero.contains("must be a positive duration"));
+
+        let negative = parse_period_to_micros("-1s").err().unwrap();
+        assert!(negative.contains("must be a positive duration"));
+    }
+
+    #[rstest]
+    fn parse_period_to_micros_rejects_invalid_format() {
+        let err = parse_period_to_micros("??").err().unwrap();
+        assert!(err.contains("Invalid rate period"));
+    }
 }

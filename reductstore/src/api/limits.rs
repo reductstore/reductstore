@@ -288,6 +288,7 @@ fn now_secs() -> u64 {
 mod tests {
     use super::*;
     use rstest::{fixture, rstest};
+    use tokio::time::sleep;
 
     #[fixture]
     fn window() -> Duration {
@@ -325,6 +326,14 @@ mod tests {
     }
 
     #[rstest]
+    #[case(LimitKind::ApiRequests(1), "api requests")]
+    #[case(LimitKind::IngressBytes(1), "ingress bytes")]
+    #[case(LimitKind::EgressBytes(1), "egress bytes")]
+    fn limit_kind_display_formats_name(#[case] kind: LimitKind, #[case] expected: &str) {
+        assert_eq!(kind.to_string(), expected);
+    }
+
+    #[rstest]
     fn limit_exceeded_formats_human_readable_bytes() {
         let err = LimitExceeded {
             kind: LimitKind::IngressBytes(1),
@@ -342,6 +351,22 @@ mod tests {
         assert!(!msg.contains("limit=10000000"));
         assert!(!msg.contains("used=10005949 "));
         assert!(msg.contains("retry_after=38s"));
+    }
+
+    #[rstest]
+    fn limit_exceeded_formats_plain_api_amount() {
+        let err = LimitExceeded {
+            kind: LimitKind::ApiRequests(1),
+            limit: 10,
+            used: 11,
+            retry_after: Duration::from_secs(1),
+        };
+
+        let msg = err.to_string();
+        assert!(msg.contains("api requests"));
+        assert!(msg.contains("used=11"));
+        assert!(msg.contains("limit=10"));
+        assert!(!msg.contains('('));
     }
 
     #[rstest]
@@ -382,6 +407,12 @@ mod tests {
 
         let later = now + window.as_secs() + 1;
         assert!(counter.consume(LimitKind::IngressBytes(2), later).is_ok());
+    }
+
+    #[rstest]
+    fn window_limit_enforces_minimum_one_second() {
+        let limit = WindowLimit::new(1, Duration::ZERO);
+        assert_eq!(limit.window, Duration::from_secs(1));
     }
 
     #[tokio::test]
@@ -428,5 +459,23 @@ mod tests {
         assert!(limits.check_api_request().await.is_err());
         assert!(limits.check_ingress(1).await.is_err());
         assert!(limits.check_egress(1).await.is_err());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn limits_builder_window_override_is_used() {
+        let limits = LimitsBuilder::new()
+            .with_config(LimitsConfig {
+                api_requests_per_window: Some(WindowLimit::new(1, Duration::from_secs(3600))),
+                ..LimitsConfig::default()
+            })
+            .with_window(Duration::from_secs(1))
+            .build();
+
+        assert!(limits.check_api_request().await.is_ok());
+        assert!(limits.check_api_request().await.is_err());
+
+        sleep(Duration::from_millis(1_100)).await;
+        assert!(limits.check_api_request().await.is_ok());
     }
 }

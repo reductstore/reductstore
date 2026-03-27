@@ -119,7 +119,7 @@ mod tests {
     use super::*;
 
     use crate::api::http::entry::tests::query;
-    use crate::api::http::tests::{headers, keeper, path_to_entry_1};
+    use crate::api::http::tests::{egress_limited_keeper, headers, keeper, path_to_entry_1};
     use axum::body::to_bytes;
     use bytes::Bytes;
 
@@ -346,5 +346,30 @@ mod tests {
                 RecordStream::new(Arc::new(Mutex::new(Box::new(MockRecord::new()))), false);
             assert_eq!(wrapper.size_hint(), (0, None));
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_single_read_egress_rate_limit(
+        #[future] egress_limited_keeper: Arc<StateKeeper>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let err = read_record(
+            State(egress_limited_keeper.await),
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "0".to_string(),
+            )])),
+            headers,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::TooManyRequests);
+        assert!(err.message().contains("egress bytes"));
     }
 }

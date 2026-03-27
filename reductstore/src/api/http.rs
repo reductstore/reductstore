@@ -283,6 +283,7 @@ impl AxumAppBuilder {
 pub(crate) mod tests {
     use super::*;
     use crate::api::components::ComponentError;
+    use crate::api::limits::{LimitsBuilder, LimitsConfig, WindowLimit};
     use crate::asset::asset_manager::create_asset_manager;
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::TokenRepositoryBuilder;
@@ -828,8 +829,7 @@ pub(crate) mod tests {
         }
     }
 
-    #[fixture]
-    pub(crate) async fn keeper() -> Arc<StateKeeper> {
+    pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
         let cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
             api_token: "init-token".to_string(),
@@ -933,13 +933,45 @@ pub(crate) mod tests {
             .expect("Failed to create extension repo"),
             cfg: Cfg::default(),
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
-            limits: crate::api::limits::LimitsBuilder::new().build(),
+            limits: LimitsBuilder::new().with_config(limits_config).build(),
         };
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);
         tx.send(components).await.unwrap();
 
         Arc::new(StateKeeper::new(Arc::new(LockFileBuilder::noop()), rx))
+    }
+
+    #[fixture]
+    pub(crate) async fn keeper() -> Arc<StateKeeper> {
+        keeper_with_limits(LimitsConfig::default()).await
+    }
+
+    #[fixture]
+    pub(crate) async fn api_limited_keeper() -> Arc<StateKeeper> {
+        keeper_with_limits(LimitsConfig {
+            api_requests_per_window: Some(WindowLimit::new(1, Duration::from_secs(3600))),
+            ..Default::default()
+        })
+        .await
+    }
+
+    #[fixture]
+    pub(crate) async fn ingress_limited_keeper() -> Arc<StateKeeper> {
+        keeper_with_limits(LimitsConfig {
+            ingress_bytes_per_window: Some(WindowLimit::new(1, Duration::from_secs(3600))),
+            ..Default::default()
+        })
+        .await
+    }
+
+    #[fixture]
+    pub(crate) async fn egress_limited_keeper() -> Arc<StateKeeper> {
+        keeper_with_limits(LimitsConfig {
+            egress_bytes_per_window: Some(WindowLimit::new(5, Duration::from_secs(3600))),
+            ..Default::default()
+        })
+        .await
     }
 
     #[fixture]

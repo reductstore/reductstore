@@ -312,7 +312,7 @@ async fn start_writing(
 mod tests {
     use super::*;
     use crate::api::http::entry::write_batched::write_batched_records;
-    use crate::api::http::tests::{headers, keeper, path_to_entry_1};
+    use crate::api::http::tests::{headers, ingress_limited_keeper, keeper, path_to_entry_1};
     use axum_extra::headers::HeaderValue;
     use futures_util::stream;
     use reduct_base::error::ErrorCode;
@@ -745,6 +745,30 @@ mod tests {
             err,
             bad_request!("Error while receiving data chunk: [BadRequest] Simulated chunk error")
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_batched_records_ingress_rate_limit(
+        #[future] ingress_limited_keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", "2".parse().unwrap());
+        headers.insert("x-reduct-time-1", "2,text/plain".parse().unwrap());
+
+        let err = write_batched_records(
+            State(ingress_limited_keeper.await),
+            headers,
+            path_to_entry_1,
+            Body::from("ab"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::TooManyRequests);
+        assert!(err.message().contains("ingress bytes"));
     }
 
     #[fixture]

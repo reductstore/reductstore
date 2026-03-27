@@ -138,9 +138,10 @@ pub(super) async fn write_record(
 mod tests {
     use super::*;
 
-    use crate::api::http::tests::{empty_body, keeper, path_to_entry_1};
+    use crate::api::http::tests::{empty_body, ingress_limited_keeper, keeper, path_to_entry_1};
 
     use axum_extra::headers::{Authorization, HeaderMapExt};
+    use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use reduct_base::not_found;
     use rstest::*;
@@ -257,6 +258,34 @@ mod tests {
             err,
             unprocessable_entity!("'ts' must be an unix timestamp in microseconds").into()
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_ingress_rate_limit(
+        #[future] ingress_limited_keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", "2".parse().unwrap());
+
+        let err = write_record(
+            State(ingress_limited_keeper.await),
+            headers,
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "2".to_string(),
+            )])),
+            Body::from("ab"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        let err: ReductError = err.into();
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert!(err.message.contains("ingress bytes"));
     }
 
     #[fixture]

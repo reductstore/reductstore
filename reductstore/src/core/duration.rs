@@ -72,4 +72,9 @@ mod tests {
     fn rejects_invalid_duration(#[case] literal: &str) {
         assert!(parse_duration_to_micros(literal).is_err());
     }
+
+    #[rstest]
+    fn rejects_empty_single_duration_literal() {
+        assert!(parse_single_duration_to_micros("").is_err());
+    }
 }

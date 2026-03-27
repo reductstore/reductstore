@@ -315,7 +315,7 @@ mod tests {
     use super::*;
     use crate::api::http::entry::QueryEntryAxum;
     use crate::api::http::io::query::query;
-    use crate::api::http::tests::{headers, keeper, path_to_bucket_1};
+    use crate::api::http::tests::{egress_limited_keeper, headers, keeper, path_to_bucket_1};
     use axum::body::to_bytes;
     use axum::extract::Path;
     use axum::http::StatusCode;
@@ -657,6 +657,17 @@ mod tests {
         assert_eq!(err.message(), "Query id header must be valid UTF-8");
     }
 
+    #[test]
+    fn rejects_invalid_query_id_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(QUERY_ID_HEADER, http::HeaderValue::from_static("abc"));
+
+        let err = parse_query_id(&headers).err().unwrap();
+
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+        assert_eq!(err.message(), "Invalid query id");
+    }
+
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn continuous_query_returns_after_timeout(
@@ -778,5 +789,52 @@ mod tests {
         .into_response();
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_too_many_requests_on_egress_limit(
+        #[future] egress_limited_keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = egress_limited_keeper.await;
+
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["entry-1".into()]),
+            start: Some(0),
+            ..Default::default()
+        };
+        let path = Path(path_to_bucket_1.0.clone());
+        let response = query(
+            State(keeper.clone()),
+            headers.clone(),
+            path,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
+        );
+
+        let err = read_batched_records(
+            State(keeper),
+            headers,
+            path_to_bucket_1,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::TooManyRequests);
+        assert!(err.message().contains("egress bytes"));
     }
 }

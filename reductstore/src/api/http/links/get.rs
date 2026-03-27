@@ -258,11 +258,12 @@ async fn prepare_response(
 mod tests {
     use super::*;
     use crate::api::http::links::tests::create_query_link;
-    use crate::api::http::tests::{headers, keeper};
+    use crate::api::http::tests::{egress_limited_keeper, headers, keeper};
     use crate::storage::entry::io::record_reader::tests::MockRecord;
     use axum::body::to_bytes;
     use chrono::Utc;
     use mockall::predicate::eq;
+    use reduct_base::error::ErrorCode;
     use reduct_base::io::RecordMeta;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use rstest::rstest;
@@ -492,6 +493,87 @@ mod tests {
 
         let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
         assert_eq!(String::from_utf8_lossy(body_bytes.iter().as_slice()), "Hey");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_query_link_egress_rate_limit(
+        #[future] egress_limited_keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = egress_limited_keeper.await;
+        let link = create_query_link(
+            headers,
+            keeper.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let err = get(
+            State(Arc::clone(&keeper)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .err()
+        .unwrap();
+        let err: ReductError = err.into();
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert!(err.message.contains("egress bytes"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_query_link_range_egress_rate_limit(
+        #[future] egress_limited_keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = egress_limited_keeper.await;
+        let link = create_query_link(
+            headers,
+            keeper.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+
+        let mut request_headers = HeaderMap::new();
+        request_headers.typed_insert(Range::bytes(0..6).unwrap());
+        let err = get(
+            State(Arc::clone(&keeper)),
+            request_headers,
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .err()
+        .unwrap();
+        let err: ReductError = err.into();
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert!(err.message.contains("egress bytes"));
     }
 
     #[rstest]

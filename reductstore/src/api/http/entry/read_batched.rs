@@ -244,7 +244,7 @@ async fn next_record_readers(
 mod tests {
     use super::*;
     use crate::api::http::entry::tests::query;
-    use crate::api::http::tests::{headers, keeper, path_to_entry_1};
+    use crate::api::http::tests::{egress_limited_keeper, headers, keeper, path_to_entry_1};
     use crate::cfg::io::IoConfig;
     use crate::ext::ext_repository::create_ext_repository;
     use crate::storage::entry::io::record_reader::tests::MockRecord;
@@ -468,6 +468,34 @@ mod tests {
         .into_response();
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_too_many_requests_on_egress_limit(
+        #[future] egress_limited_keeper: Arc<StateKeeper>,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        headers: HeaderMap,
+    ) {
+        let keeper = egress_limited_keeper.await;
+        let query_id = query(&path_to_entry_1, keeper.clone(), None).await;
+
+        let err = read_batched_records(
+            State(keeper),
+            Path(path_to_entry_1.0.clone()),
+            Query(HashMap::from_iter(vec![(
+                "q".to_string(),
+                query_id.to_string(),
+            )])),
+            headers,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::TooManyRequests);
+        assert!(err.message().contains("egress bytes"));
     }
 
     mod next_record_reader {

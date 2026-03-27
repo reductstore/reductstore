@@ -358,7 +358,7 @@ async fn start_writing(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::http::tests::{headers, keeper, path_to_bucket_1};
+    use crate::api::http::tests::{headers, ingress_limited_keeper, keeper, path_to_bucket_1};
     use axum::extract::Path;
     use axum::http::HeaderName;
     use axum_extra::headers::HeaderValue;
@@ -513,6 +513,35 @@ mod tests {
                 "content-length header does not match the sum of the content-lengths in the headers",
             )
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_batched_records_ingress_rate_limit(
+        #[future] ingress_limited_keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", HeaderValue::from_static("2"));
+        headers.insert("x-reduct-entries", HeaderValue::from_static("entry-1"));
+        headers.insert("x-reduct-start-ts", HeaderValue::from_static("0"));
+        headers.insert(
+            HeaderName::from_static("x-reduct-0-0"),
+            HeaderValue::from_static("2,text/plain"),
+        );
+
+        let err = write_batched_records(
+            State(Arc::clone(&ingress_limited_keeper.await)),
+            headers,
+            path_to_bucket_1,
+            Body::from("ab"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::TooManyRequests);
+        assert!(err.message().contains("ingress bytes"));
     }
 
     #[rstest]

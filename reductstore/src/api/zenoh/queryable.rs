@@ -216,6 +216,12 @@ fn parse_time_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::components::StateKeeper;
+    use crate::api::http::tests::{api_limited_keeper, egress_limited_keeper};
+    use crate::cfg::zenoh::ZenohApiConfig;
+    use reduct_base::error::ErrorCode;
+    use rstest::rstest;
+    use std::sync::Arc;
 
     #[test]
     fn parses_timestamp_param() {
@@ -288,5 +294,40 @@ mod tests {
         assert_eq!(query.when, None);
         assert_eq!(query.strict, None);
         assert_eq!(query.ext, None);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn check_api_request_applies_rate_limit(#[future] api_limited_keeper: Arc<StateKeeper>) {
+        let components = api_limited_keeper.await.get_anonymous().await.unwrap();
+        let pipeline = QueryablePipeline::new(
+            ZenohApiConfig {
+                bucket: "bucket-1".to_string(),
+                ..Default::default()
+            },
+            components,
+        );
+
+        assert!(pipeline.check_api_request().await.is_ok());
+        let err = pipeline.check_api_request().await.err().unwrap();
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert!(err.message.contains("api requests"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn check_egress_applies_rate_limit(#[future] egress_limited_keeper: Arc<StateKeeper>) {
+        let components = egress_limited_keeper.await.get_anonymous().await.unwrap();
+        let pipeline = QueryablePipeline::new(
+            ZenohApiConfig {
+                bucket: "bucket-1".to_string(),
+                ..Default::default()
+            },
+            components,
+        );
+
+        let err = pipeline.check_egress(6).await.err().unwrap();
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert!(err.message.contains("egress bytes"));
     }
 }

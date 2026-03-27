@@ -103,8 +103,15 @@ fn log_level_for_response(status: StatusCode, skip_error_log: bool) -> Level {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::components::StateKeeper;
+    use crate::api::http::tests::api_limited_keeper;
+    use axum::http::Request;
     use axum::http::{HeaderMap, HeaderValue};
+    use axum::routing::get;
+    use axum::{middleware::from_fn_with_state, Router};
     use log::Level;
+    use std::sync::Arc;
+    use tower::ServiceExt;
 
     #[test_log::test]
     fn selects_error_for_server_error_without_hint() {
@@ -131,5 +138,37 @@ mod tests {
         assert!(!headers
             .get("x-reduct-log-hint")
             .is_some_and(|v| v == "skip-error-log"));
+    }
+
+    #[rstest::rstest]
+    #[tokio::test]
+    async fn enforces_api_rate_limit(#[future] api_limited_keeper: Arc<StateKeeper>) {
+        let keeper = api_limited_keeper.await;
+        let app = Router::new()
+            .route("/test", get(|| async { StatusCode::OK }))
+            .layer(from_fn_with_state(
+                Arc::clone(&keeper),
+                check_api_rate_limit,
+            ));
+
+        let first = app
+            .clone()
+            .oneshot(Request::get("/test").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(first.status(), StatusCode::OK);
+
+        let second = app
+            .oneshot(Request::get("/test").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(second.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert!(second
+            .headers()
+            .get("x-reduct-error")
+            .unwrap()
+            .to_str()
+            .unwrap()
+            .contains("api requests"));
     }
 }
