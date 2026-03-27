@@ -14,9 +14,16 @@ use reduct_base::unprocessable_entity;
 /// and triggers again.
 pub(crate) struct Gate {
     operands: Vec<BoxedNode>,
+    /// Absolute timestamp (in microseconds) when the current gate window closes.
+    /// `None` means there is no active gate window.
     gate_deadline: Option<u64>,
+    /// Last seen input value, used for false->true edge detection.
     previous_input: bool,
+    /// Latch set after timeout. While true, output is forced to false until input
+    /// is observed as false once (reset phase), preventing immediate retrigger if
+    /// the input remains true.
     reset_required: bool,
+    /// Last timestamp used to detect non-monotonic time and reset internal state.
     last_timestamp: Option<u64>,
 }
 
@@ -31,6 +38,10 @@ impl Gate {
         }
     }
 
+    /// Convert configured gate duration to microseconds.
+    ///
+    /// Accepts either a parsed duration literal (`"10s"` -> `Value::Duration`) or
+    /// a float/integer in seconds. Negative values are clamped to 0.
     fn duration_us(value: &Value) -> Result<u64, ReductError> {
         let duration = if value.is_duration() {
             value.as_int()?
@@ -41,6 +52,7 @@ impl Gate {
         Ok(std::cmp::max(0, duration) as u64)
     }
 
+    /// Drop all runtime state (used when time goes backwards).
     fn reset_state(&mut self) {
         self.gate_deadline = None;
         self.previous_input = false;
@@ -74,6 +86,7 @@ impl Node for Gate {
         let duration = Self::duration_us(&self.operands[0].apply(context)?)?;
         let input = self.operands[1].apply(context)?.as_bool()?;
 
+        // 1) Expire active window and arm reset latch.
         if let Some(deadline) = self.gate_deadline {
             if context.timestamp >= deadline {
                 self.gate_deadline = None;
@@ -81,6 +94,8 @@ impl Node for Gate {
             }
         }
 
+        // 2) After timeout, force false until input is seen false once.
+        //    This guarantees a full reset cycle before the next trigger.
         if self.reset_required {
             if !input {
                 self.reset_required = false;
@@ -89,10 +104,12 @@ impl Node for Gate {
             return Ok(Value::Bool(false));
         }
 
+        // 3) Open a new window only on a rising edge.
         if self.gate_deadline.is_none() && !self.previous_input && input {
             self.gate_deadline = Some(context.timestamp.saturating_add(duration));
         }
 
+        // 4) While the gate is open, mirror input; otherwise force false.
         let output = match self.gate_deadline {
             Some(deadline) if context.timestamp < deadline => input,
             _ => false,
