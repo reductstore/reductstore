@@ -10,7 +10,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::{QueryEntry, QueryType};
 use reduct_base::Labels;
@@ -43,15 +42,13 @@ struct AuditState {
 
 // The local audit repository writes audit events into the internal $audit bucket.
 pub(crate) struct AuditRepository {
-    cfg: Cfg,
     storage: Arc<StorageEngine>,
     state: Arc<AsyncRwLock<AuditState>>,
 }
 
 impl AuditRepository {
-    pub async fn new(cfg: Cfg, storage: Arc<StorageEngine>) -> Self {
+    pub async fn new(_cfg: Cfg, storage: Arc<StorageEngine>) -> Self {
         Self {
-            cfg,
             storage,
             state: Arc::new(AsyncRwLock::new(AuditState::default())),
         }
