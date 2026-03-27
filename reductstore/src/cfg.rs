@@ -12,6 +12,7 @@ pub mod storage_engine;
 pub mod zenoh;
 
 use crate::api::components::Components;
+use crate::api::limits::LimitsBuilder;
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType};
@@ -383,6 +384,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),
+            limits: LimitsBuilder::new().build(),
             cfg: self.cfg.clone(),
         })
     }

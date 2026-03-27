@@ -58,6 +58,7 @@ pub(super) async fn write_batched_records(
         }
 
         let content_length = check_and_get_content_length(&headers, &timed_headers)?;
+        components.limits.check_ingress(content_length).await?;
         let (rx_writer, spawn_handler) =
             spawn_getting_writers(&components, &bucket, &entry_name, timed_headers).await?;
         receive_body_and_write_records(

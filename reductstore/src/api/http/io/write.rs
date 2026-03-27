@@ -66,6 +66,7 @@ pub(super) async fn write_batched_records(
     let mut stream = body.into_data_stream();
 
     let process_stream = async {
+        components.limits.check_ingress(content_length).await?;
         let (rx_writer, spawn_handler) =
             spawn_getting_writers(&components, bucket, parsed_headers).await?;
 

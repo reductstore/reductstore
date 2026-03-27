@@ -1,15 +1,18 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::components::StateKeeper;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 
+use axum::extract::State;
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error, Level};
 use reduct_base::error::ErrorCode;
 
 use crate::api::http::HttpError;
+use std::sync::Arc;
 
 pub(super) async fn default_headers(
     request: Request<Body>,
@@ -28,6 +31,19 @@ pub(super) async fn default_headers(
         format!("{}.{}", tokens[0], tokens[1]).parse().unwrap(),
     );
     Ok(response)
+}
+
+pub(super) async fn check_api_rate_limit(
+    State(keeper): State<Arc<StateKeeper>>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<impl IntoResponse, HttpError> {
+    let components = keeper.get_anonymous().await?;
+    if let Err(err) = components.limits.check_api_request().await {
+        return Err(HttpError::from(err));
+    }
+
+    Ok(next.run(request).await)
 }
 
 pub async fn print_statuses(

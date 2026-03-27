@@ -29,6 +29,7 @@
 ## Testing Guidelines
 
 - Add unit tests near code; use `rstest`, `serial_test`, and `test-log`.
+- Prefer `rstest` fixtures and `#[case]` parameterization where applicable to reduce duplication.
 - Name tests after behavior (`writes_entry_when_token_valid`).
 - Integration runs: set `STORAGE_URL` to a live instance; use `misc/certificate.crt` only for local TLS checks.
 - When adding endpoints/storage behaviors, update Rust unit tests and pytest suites; avoid coverage regressions.

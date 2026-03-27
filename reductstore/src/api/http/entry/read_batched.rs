@@ -4,6 +4,7 @@
 use crate::api::http::entry::MethodExtractor;
 use crate::api::http::utils::ReadersWrapper;
 use crate::api::http::{ErrorCode, HttpError};
+use crate::api::limits::BoxedLimits;
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::Bucket;
 
@@ -65,6 +66,7 @@ pub(super) async fn read_batched_records(
         entry_name,
         query_id,
         method.name == "HEAD",
+        &components.limits,
         &components.ext_repo,
     )
     .await
@@ -107,6 +109,7 @@ async fn fetch_and_response_batched_records(
     entry_name: &str,
     query_id: u64,
     empty_body: bool,
+    limits: &BoxedLimits,
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
     let (rx, io_settings) = bucket
@@ -198,6 +201,10 @@ async fn fetch_and_response_batched_records(
             }
             _ => { /* query is still alive */ }
         }
+    }
+
+    if !empty_body {
+        limits.check_egress(body_size).await?;
     }
 
     headers.insert("content-length", body_size.to_string().parse().unwrap());
@@ -664,6 +671,7 @@ mod tests {
                 "entry-1",
                 query_id,
                 only_metadata,
+                &components.limits,
                 &components.ext_repo,
             )
             .await

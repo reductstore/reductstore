@@ -21,12 +21,15 @@ use crate::lock_file::BoxedLockFile;
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use axum::{middleware::from_fn, Router};
+use axum::{
+    middleware::{from_fn, from_fn_with_state},
+    Router,
+};
 use bucket::create_bucket_api_routes;
 use entry::create_entry_api_routes;
 use hyper::http::HeaderValue;
 use log::{error, warn};
-use middleware::{default_headers, print_statuses};
+use middleware::{check_api_rate_limit, default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use replication::create_replication_api_routes;
@@ -248,6 +251,10 @@ impl AxumAppBuilder {
                 .fallback(get(show_ui))
                 .layer(from_fn(default_headers))
                 .layer(from_fn(print_statuses))
+                .layer(from_fn_with_state(
+                    state_keeper.clone(),
+                    check_api_rate_limit,
+                ))
                 .layer(cors)
                 .with_state(state_keeper.clone()),
             state_keeper,
@@ -817,6 +824,7 @@ pub(crate) mod tests {
             .expect("Failed to create extension repo"),
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
+            limits: crate::api::limits::LimitsBuilder::new().build(),
         }
     }
 
@@ -925,6 +933,7 @@ pub(crate) mod tests {
             .expect("Failed to create extension repo"),
             cfg: Cfg::default(),
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
+            limits: crate::api::limits::LimitsBuilder::new().build(),
         };
 
         let (tx, rx) = tokio::sync::mpsc::channel(1);

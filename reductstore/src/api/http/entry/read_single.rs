@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::http::entry::MethodExtractor;
+use crate::api::http::Components;
 use crate::api::http::HttpError;
 use crate::auth::policy::ReadAccessPolicy;
 use reduct_base::error::ReductError;
@@ -54,7 +55,7 @@ pub(super) async fn read_record(
 
     let (query_id, ts) = check_and_extract_ts_or_query_id(params, last_record)?;
 
-    fetch_and_response_single_record(entry, ts, query_id, method.name() == "HEAD").await
+    fetch_and_response_single_record(components, entry, ts, query_id, method.name() == "HEAD").await
 }
 
 /// Fetches a single record either by timestamp or from a query, and prepares the HTTP response.
@@ -64,6 +65,7 @@ pub(super) async fn read_record(
 /// - `query_id`: An optional query ID to fetch the next record from an ongoing query.
 /// - `empty_body`: If true, the response body will be empty (used for HEAD requests
 async fn fetch_and_response_single_record(
+    components: Arc<Components>,
     entry: Weak<Entry>,
     ts: Option<u64>,
     query_id: Option<u64>,
@@ -78,6 +80,13 @@ async fn fetch_and_response_single_record(
         let query_path = format!("{}/{}/{}", entry.bucket_name(), entry.name(), query_id);
         next_record_reader(rx, &query_path).await?
     };
+
+    if !empty_body {
+        components
+            .limits
+            .check_egress(reader.meta().content_length())
+            .await?;
+    }
 
     let headers = make_headers_from_reader(reader.meta());
 

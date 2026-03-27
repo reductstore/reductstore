@@ -40,6 +40,7 @@ pub(super) async fn write_record(
     let check_request_and_get_sender = async {
         let ts = parse_timestamp_from_query(&params)?;
         let content_size = parse_content_length_from_header(&headers)?;
+        components.limits.check_ingress(content_size).await?;
         let content_type = headers
             .get("content-type")
             .map_or("application/octet-stream", |v| v.to_str().unwrap())

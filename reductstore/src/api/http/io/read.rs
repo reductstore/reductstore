@@ -4,6 +4,7 @@
 use crate::api::http::entry::MethodExtractor;
 use crate::api::http::utils::ReadersWrapper;
 use crate::api::http::{ErrorCode, HttpError, StateKeeper};
+use crate::api::limits::BoxedLimits;
 use crate::auth::policy::ReadAccessPolicy;
 use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::bucket::Bucket;
@@ -54,6 +55,7 @@ pub(super) async fn read_batched_records(
             .upgrade()?,
         query_id,
         method.name() == "HEAD",
+        &components.limits,
         &components.ext_repo,
     )
     .await
@@ -106,6 +108,7 @@ async fn fetch_and_response_batched_records(
     bucket: Arc<Bucket>,
     query_id: u64,
     empty_body: bool,
+    limits: &BoxedLimits,
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
     // Acquire the query receiver + IO limits for this bucket.
@@ -221,6 +224,10 @@ async fn fetch_and_response_batched_records(
             }
             _ => { /* query is still alive */ }
         }
+    }
+
+    if !empty_body {
+        limits.check_egress(body_size).await?;
     }
 
     // Align entry indices with the chronological order of the first record per entry

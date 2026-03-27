@@ -3,6 +3,7 @@
 
 pub mod components;
 pub mod http;
+pub mod limits;
 #[cfg(feature = "zenoh-api")]
 pub mod zenoh;
 
