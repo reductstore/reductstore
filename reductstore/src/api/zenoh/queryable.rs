@@ -49,6 +49,14 @@ impl QueryablePipeline {
         Ok(())
     }
 
+    pub(crate) async fn check_api_request(&self) -> Result<(), ReductError> {
+        self.components.limits.check_api_request().await
+    }
+
+    pub(crate) async fn check_egress(&self, bytes: u64) -> Result<(), ReductError> {
+        self.components.limits.check_egress(bytes).await
+    }
+
     /// Resolves a Zenoh selector and query parameters into ReductStore records.
     ///
     /// The full key expression is used as the entry name within the configured bucket.

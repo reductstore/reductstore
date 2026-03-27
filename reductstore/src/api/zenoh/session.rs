@@ -496,13 +496,32 @@ async fn spawn_queryables(
                         query_attachments.when.is_some(),
                     );
 
+                    if let Err(e) = pipeline.check_api_request().await {
+                        warn!("Query request limit exceeded for '{}': {}", key_expr, e);
+                        if let Err(reply_err) = query
+                            .reply_err(zenoh::bytes::ZBytes::from(e.to_string().into_bytes()))
+                            .await
+                        {
+                            warn!("Failed to send error reply: {}", reply_err);
+                        }
+                        continue;
+                    }
+
                     match pipeline
                         .handle_query(&key_expr, &params, &query_attachments)
                         .await
                     {
                         Ok(result) => {
-                            if let Err(e) = send_query_reply(&query, result).await {
+                            if let Err(e) = send_query_reply(&query, result, &pipeline).await {
                                 warn!("Failed to send query reply: {}", e);
+                                if let Err(reply_err) = query
+                                    .reply_err(zenoh::bytes::ZBytes::from(
+                                        e.to_string().into_bytes(),
+                                    ))
+                                    .await
+                                {
+                                    warn!("Failed to send error reply: {}", reply_err);
+                                }
                             }
                         }
                         Err(e) => {
@@ -561,6 +580,7 @@ fn parse_query_attachments(attachment: Option<&zenoh::bytes::ZBytes>) -> QueryAt
 async fn send_query_reply(
     query: &zenoh::query::Query,
     result: crate::api::zenoh::queryable::QueryResult,
+    pipeline: &QueryablePipeline,
 ) -> Result<(), Box<dyn Error + Send + Sync>> {
     use crate::api::zenoh::queryable::QueryResult;
 
@@ -573,6 +593,8 @@ async fn send_query_reply(
                     Err(e) => return Err(Box::new(e)),
                 }
             }
+
+            pipeline.check_egress(data.len() as u64).await?;
 
             let meta = reader.meta();
             let labels = meta.labels().clone();
@@ -646,6 +668,8 @@ async fn send_query_reply(
                         Err(e) => return Err(Box::new(e)),
                     }
                 }
+
+                pipeline.check_egress(data.len() as u64).await?;
 
                 let meta = record.meta();
                 let labels = meta.labels().clone();

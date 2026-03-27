@@ -65,6 +65,9 @@ impl SubscriberPipeline {
         let ts = timestamp.unwrap_or_else(|| current_time_us());
         let content_size = payload.len() as u64;
 
+        self.components.limits.check_api_request().await?;
+        self.components.limits.check_ingress(content_size).await?;
+
         debug!(
             "Ingesting Zenoh sample bucket={} entry={} timestamp={} bytes={} content_type={}",
             self.bucket, entry_name, ts, content_size, content_type
