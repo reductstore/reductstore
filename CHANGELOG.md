@@ -11,10 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add global storage size cap via `RS_ENGINE_MAX_STORAGE_SIZE` (SI units) with write-path enforcement across all buckets, [PR-1263](https://github.com/reductstore/reductstore/pull/1263)
-- Add instance-level rate limits for API requests plus HTTP/Zenoh ingress and egress traffic, including `RS_RATE_LIMIT_*` parsing with per-window units (`/s`, `/m`, `/h`, `/d`) and 429 limit errors, [PR-1255](https://github.com/reductstore/reductstore/pull/1255)
+- Add instance-level rate limits `RS_RATE_LIMIT_*` for API requests plus HTTP/Zenoh ingress and egress traffic, [PR-1255](https://github.com/reductstore/reductstore/pull/1255)
 - Publish per-target release binary SBOM artifacts and enable Docker image SBOM/provenance attestations in CI, [PR-1254](https://github.com/reductstore/reductstore/pull/1254)
-- Add `$gate` query operator for edge-triggered time-window conditions: opens on `false->true`, mirrors input while window is active, then forces `false` until input resets to `false` and re-triggers, [PR-1249](https://github.com/reductstore/reductstore/pull/1249)
-- Add UTC date-part query operators (`$second`, `$minute`, `$hour`, `$day`, `$month`, `$year`, `$weekday`) with optional IANA timezone argument and Monday-based weekday mapping (`0..6`), [PR-1248](https://github.com/reductstore/reductstore/pull/1248)
+- Add `$gate` query operator for edge-triggered time-window conditions, [PR-1249](https://github.com/reductstore/reductstore/pull/1249)
+- Add UTC date-part query operators (`$second`, `$minute`, `$hour`, `$day`, `$month`, `$year`, `$weekday`), [PR-1248](https://github.com/reductstore/reductstore/pull/1248)
 - Support `RS_REPLICATION_<ID>_MODE` in provisioning to set replication mode (`enabled|paused|disabled`) declaratively from environment variables, [PR-1243](https://github.com/reductstore/reductstore/pull/1243)
 - Support hierarchical entry paths and preserve nested tree recovery, [PR-1185](https://github.com/reductstore/reductstore/pull/1185)
 - Store attachments in system `$meta` entries with strategy-based behavior and replication coverage, [PR-1186](https://github.com/reductstore/reductstore/pull/1186)
