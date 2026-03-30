@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 mod read_only;
-use crate::audit::AUDIT_BUCKET_NAME;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
@@ -180,6 +179,23 @@ impl StorageEngine {
         self.check_mode()?;
 
         check_name_convention(name)?;
+        self.create_bucket_internal(name, settings).await
+    }
+
+    pub(crate) async fn create_system_bucket(
+        &self,
+        name: &str,
+        settings: BucketSettings,
+    ) -> Result<Weak<Bucket>, ReductError> {
+        self.check_mode()?;
+        self.create_bucket_internal(name, settings).await
+    }
+
+    async fn create_bucket_internal(
+        &self,
+        name: &str,
+        settings: BucketSettings,
+    ) -> Result<Weak<Bucket>, ReductError> {
         let mut buckets = self.buckets.write().await?;
         if buckets.contains_key(name) {
             return Err(conflict!("Bucket '{}' already exists", name));
@@ -319,7 +335,6 @@ impl StorageEngine {
             let buckets = self.buckets.read().await?;
             buckets
                 .iter()
-                .filter(|(name, _)| name.as_str() != AUDIT_BUCKET_NAME)
                 .map(|(_, bucket)| bucket.clone().info())
                 .collect::<Vec<_>>()
         };
@@ -374,9 +389,6 @@ impl StorageEngine {
 
 pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
     let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
-    if name == AUDIT_BUCKET_NAME {
-        return Ok(());
-    }
     if !regex.is_match(name) {
         return Err(unprocessable_entity!(
             "Bucket or entry name can contain only letters, digests and [-,_] symbols",

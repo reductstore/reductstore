@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::http::bucket::BucketSettingsAxum;
-use crate::api::http::utils::ensure_public_bucket;
 use crate::api::http::HttpError;
 use crate::api::http::StateKeeper;
 use crate::auth::policy::FullAccessPolicy;
@@ -17,7 +16,6 @@ pub(super) async fn update_bucket(
     headers: HeaderMap,
     settings: BucketSettingsAxum,
 ) -> Result<(), HttpError> {
-    ensure_public_bucket(&bucket_name)?;
     let components = keeper
         .get_with_permissions(&headers, FullAccessPolicy {})
         .await?;

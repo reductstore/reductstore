@@ -19,8 +19,6 @@ pub struct ReplicationConfig {
     pub verify_ssl: bool,
     /// Optional custom CA certificate path for replication destinations
     pub ca_path: Option<PathBuf>,
-    /// Primary service URL for replica-side internal HTTP fetches
-    pub primary_url: Option<String>,
     /// Listening port (to check if we replicate to ourselves)
     pub listening_port: u16,
 }
@@ -32,7 +30,6 @@ impl Default for ReplicationConfig {
             replication_log_size: DEFAULT_REPLICATION_LOG_SIZE,
             verify_ssl: true,
             ca_path: None,
-            primary_url: None,
             listening_port: DEFAULT_PORT,
         }
     }
@@ -63,9 +60,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                         Some(PathBuf::from(p))
                     }
                 }),
-            primary_url: env
-                .get_optional::<String>("RS_PRIMARY_URL")
-                .and_then(|url| if url.is_empty() { None } else { Some(url) }),
             listening_port,
         }
     }
@@ -100,17 +94,11 @@ mod tests {
             .expect_get()
             .with(eq("RS_REPLICATION_CA_PATH"))
             .return_const(Ok("/tmp/ca.pem".to_string()));
-        env_getter
-            .expect_get()
-            .with(eq("RS_PRIMARY_URL"))
-            .return_const(Ok("http://primary:8383".to_string()));
-
         let replication_settings = ReplicationConfig {
             connection_timeout: Duration::from_secs(10),
             replication_log_size: 500,
             verify_ssl: false,
             ca_path: Some(PathBuf::from("/tmp/ca.pem")),
-            primary_url: Some("http://primary:8383".to_string()),
             listening_port: 8000,
         };
 
@@ -158,11 +146,6 @@ mod tests {
             .expect_get()
             .with(eq("RS_REPLICATION_CA_PATH"))
             .return_const(Ok("".to_string()));
-        env_getter
-            .expect_get()
-            .with(eq("RS_PRIMARY_URL"))
-            .return_const(Err(VarError::NotPresent));
-
         let config =
             CfgParser::<MockEnvGetter>::parse_replication_config(&mut Env::new(env_getter), 8000);
 

@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::http::utils::ensure_public_bucket;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::replication::{Transaction, TransactionNotification};
@@ -26,7 +25,6 @@ pub(super) async fn update_batched_records(
     Path(path): Path<HashMap<String, String>>,
 ) -> Result<HeaderMap, HttpError> {
     let bucket_name = path.get("bucket_name").unwrap();
-    ensure_public_bucket(bucket_name)?;
     let components = keeper
         .get_with_permissions(
             &headers,

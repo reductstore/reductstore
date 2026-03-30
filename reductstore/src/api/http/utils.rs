@@ -1,8 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::http::{ErrorCode, HttpError};
-use crate::audit::AUDIT_BUCKET_NAME;
+use crate::api::http::HttpError;
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use axum::http::header::CONTENT_DISPOSITION;
 use axum::http::{HeaderMap, HeaderName, HeaderValue};
@@ -22,20 +21,6 @@ use std::pin::Pin;
 use std::sync::Arc;
 use std::task::{Context, Poll};
 use tokio::sync::Mutex;
-
-pub(super) fn ensure_public_bucket(bucket_name: &str) -> Result<(), HttpError> {
-    if bucket_name == AUDIT_BUCKET_NAME {
-        Err(HttpError::new(
-            ErrorCode::Forbidden,
-            &format!(
-                "Bucket '{}' is internal and cannot be accessed through normal APIs",
-                bucket_name
-            ),
-        ))
-    } else {
-        Ok(())
-    }
-}
 
 pub(super) fn make_headers_from_reader(meta: &RecordMeta) -> HeaderMap {
     let mut headers = HeaderMap::new();

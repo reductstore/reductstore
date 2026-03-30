@@ -5,8 +5,6 @@ use reduct_base::error::ReductError;
 use reduct_base::forbidden;
 use reduct_base::msg::token_api::Token;
 
-use crate::audit::AUDIT_BUCKET_NAME;
-
 /// Policy is a trait that defines the interface for a policy.
 /// A policy is a set of rules that are applied to a token to determine
 /// if the token is allowed to perform an action.
@@ -119,7 +117,7 @@ fn check_bucket_permissions(token_list: &Vec<String>, bucket: &str) -> bool {
             return true;
         }
 
-        if bucket == AUDIT_BUCKET_NAME {
+        if bucket.starts_with('$') {
             continue;
         }
 
@@ -220,9 +218,7 @@ mod tests {
 
     #[test]
     fn test_read_access_policy_excludes_audit_bucket_from_wildcard() {
-        let policy = ReadAccessPolicy {
-            bucket: AUDIT_BUCKET_NAME,
-        };
+        let policy = ReadAccessPolicy { bucket: "$audit" };
         let token = Token {
             name: "test_token".to_string(),
             permissions: Some(Permissions {
@@ -243,20 +239,39 @@ mod tests {
 
     #[test]
     fn test_read_access_policy_allows_explicit_audit_bucket_permission() {
-        let policy = ReadAccessPolicy {
-            bucket: AUDIT_BUCKET_NAME,
-        };
+        let policy = ReadAccessPolicy { bucket: "$audit" };
         let token = Token {
             name: "test_token".to_string(),
             permissions: Some(Permissions {
                 full_access: false,
-                read: vec![AUDIT_BUCKET_NAME.to_string()],
+                read: vec!["$audit".to_string()],
                 write: vec![],
             }),
             ..Default::default()
         };
 
         assert!(policy.validate(Ok(token)).is_ok());
+    }
+
+    #[test]
+    fn test_read_access_policy_excludes_any_system_bucket_from_wildcard() {
+        let policy = ReadAccessPolicy { bucket: "$system" };
+        let token = Token {
+            name: "test_token".to_string(),
+            permissions: Some(Permissions {
+                full_access: false,
+                read: vec!["*".to_string()],
+                write: vec![],
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            policy.validate(Ok(token)),
+            Err(forbidden!(
+                "Token 'test_token' doesn't have read access to bucket '$system'"
+            ))
+        );
     }
 
     #[test]
@@ -299,9 +314,7 @@ mod tests {
 
     #[test]
     fn test_write_access_policy_excludes_audit_bucket_from_wildcard() {
-        let policy = WriteAccessPolicy {
-            bucket: AUDIT_BUCKET_NAME,
-        };
+        let policy = WriteAccessPolicy { bucket: "$audit" };
         let token = Token {
             name: "test_token".to_string(),
             permissions: Some(Permissions {
@@ -322,19 +335,38 @@ mod tests {
 
     #[test]
     fn test_write_access_policy_allows_explicit_audit_bucket_permission() {
-        let policy = WriteAccessPolicy {
-            bucket: AUDIT_BUCKET_NAME,
-        };
+        let policy = WriteAccessPolicy { bucket: "$audit" };
         let token = Token {
             name: "test_token".to_string(),
             permissions: Some(Permissions {
                 full_access: false,
                 read: vec![],
-                write: vec![AUDIT_BUCKET_NAME.to_string()],
+                write: vec!["$audit".to_string()],
             }),
             ..Default::default()
         };
 
         assert!(policy.validate(Ok(token)).is_ok());
+    }
+
+    #[test]
+    fn test_write_access_policy_excludes_any_system_bucket_from_wildcard() {
+        let policy = WriteAccessPolicy { bucket: "$system" };
+        let token = Token {
+            name: "test_token".to_string(),
+            permissions: Some(Permissions {
+                full_access: false,
+                read: vec![],
+                write: vec!["*".to_string()],
+            }),
+            ..Default::default()
+        };
+
+        assert_eq!(
+            policy.validate(Ok(token)),
+            Err(forbidden!(
+                "Token 'test_token' doesn't have write access to bucket '$system'"
+            ))
+        );
     }
 }

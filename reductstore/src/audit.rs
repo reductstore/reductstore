@@ -18,11 +18,6 @@ pub(crate) const AUDIT_BUCKET_NAME: &str = "$audit";
 #[async_trait]
 pub(crate) trait ManageAudit {
     async fn log_event(&mut self, event: AuditEvent) -> Result<(), ReductError>;
-    async fn query_token_events(
-        &mut self,
-        token_name: &str,
-        filter: AuditQuery,
-    ) -> Result<Vec<AuditEvent>, ReductError>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -35,12 +30,6 @@ pub(crate) struct AuditEvent {
     pub duration: u64,
 }
 
-#[derive(Clone, Debug, Default)]
-pub(crate) struct AuditQuery {
-    pub start: Option<u64>,
-    pub end: Option<u64>,
-    pub endpoint: Option<String>,
-}
 pub(crate) struct AuditRepositoryBuilder {
     cfg: Cfg,
 }

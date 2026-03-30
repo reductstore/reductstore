@@ -82,6 +82,8 @@ pub struct Cfg {
     pub ext_path: Option<PathBuf>,
     pub cors_allow_origin: Vec<String>,
     pub role: InstanceRole,
+    pub primary_url: Option<String>,
+    pub secondary_url: Option<String>,
 
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
@@ -111,6 +113,8 @@ impl Default for Cfg {
             ext_path: None,
             cors_allow_origin: vec![],
             role: InstanceRole::Primary,
+            primary_url: None,
+            secondary_url: None,
             buckets: HashMap::new(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
@@ -266,6 +270,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             cert_path,
             cert_key_path,
             role: ext_cfg.role(),
+            primary_url: env
+                .get_optional::<String>("RS_PRIMARY_URL")
+                .and_then(|url| if url.is_empty() { None } else { Some(url) }),
+            secondary_url: env
+                .get_optional::<String>("RS_SECONDARY_URL")
+                .and_then(|url| if url.is_empty() { None } else { Some(url) }),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),

@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 //
-mod audit;
 mod bucket;
 mod entry;
 mod io;
@@ -246,10 +245,6 @@ impl AxumAppBuilder {
                 .nest(
                     &format!("{}api/v1/links", cfg.api_base_path),
                     links::create_query_link_api_routes(),
-                )
-                .nest(
-                    &format!("{}api/v1/audit", cfg.api_base_path),
-                    audit::create_audit_api_routes(),
                 )
                 // UI
                 .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))

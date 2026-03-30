@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::audit::AUDIT_BUCKET_NAME;
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
@@ -154,7 +153,7 @@ impl ManageTokens for TokenRepository {
         }
 
         for entry in permissions.read.iter().chain(&permissions.write) {
-            if entry != AUDIT_BUCKET_NAME && !self.permission_regex.is_match(entry) {
+            if !entry.starts_with('$') && !self.permission_regex.is_match(entry) {
                 return Err(unprocessable_entity!(
                     "Permission can contain only bucket names or wildcard '*', got '{}'",
                     entry
@@ -470,7 +469,8 @@ mod tests {
         #[rstest]
         #[tokio::test]
         #[case("*", None)]
-        #[case(AUDIT_BUCKET_NAME, None)]
+        #[case("$audit", None)]
+        #[case("$system", None)]
         #[case("bucket_1", None)]
         #[case("bucket_2", None)]
         #[case("bucket-*", None)]
@@ -506,7 +506,8 @@ mod tests {
         #[rstest]
         #[tokio::test]
         #[case("*", None)]
-        #[case(AUDIT_BUCKET_NAME, None)]
+        #[case("$audit", None)]
+        #[case("$system", None)]
         #[case("bucket_1", None)]
         #[case("bucket_2", None)]
         #[case("bucket-*", None)]

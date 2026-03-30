@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::http::entry::{QueryEntryAxum, QueryInfoAxum, RemoveQueryInfoAxum};
-use crate::api::http::utils::ensure_public_bucket;
 use crate::api::http::HttpError;
 use crate::api::http::StateKeeper;
 use crate::auth::policy::{ReadAccessPolicy, WriteAccessPolicy};
@@ -25,7 +24,6 @@ pub(super) async fn query(
 ) -> Result<axum::response::Response, HttpError> {
     let request = request.0;
     let bucket_name = path.get("bucket_name").unwrap();
-    ensure_public_bucket(bucket_name)?;
 
     match request.query_type {
         QueryType::Query => {
