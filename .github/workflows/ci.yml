@@ -435,6 +435,11 @@ jobs:
         with:
           name: reductstore-${{ matrix.target }}
           path: /tmp/
+      - name: Download ${{ matrix.target }} SBOM artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: reductstore-sbom-${{ matrix.target }}
+          path: /tmp/
       - name: Archive binary for UNIX
         if: ${{ matrix.target != 'x86_64-pc-windows-gnu' }}
         run: |
@@ -469,6 +474,16 @@ jobs:
           asset_path: /tmp/reductstore.${{ matrix.target }}.zip
           asset_name: reductstore.${{ matrix.target }}.zip
           asset_content_type: application/zip
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-release-asset@v1
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          upload_url: ${{ needs.make_release.outputs.upload_url }}
+          asset_path: /tmp/reductstore.${{ matrix.target }}.sbom.spdx.json
+          asset_name: reductstore.${{ matrix.target }}.sbom.spdx.json
+          asset_content_type: application/json
 
   benchmark:
     name: Run benchmarks
@@ -543,6 +558,8 @@ jobs:
           docker_labels: ${{ steps.meta.outputs.labels }}
           upload_artifact: 'false'
           build_outputs: type=image,name=${{ env.REGISTRY_IMAGE }},push-by-digest=true,name-canonical=true,push=true
+          sbom: 'true'
+          provenance: mode=max
 
       - name: Export digest
         run: |

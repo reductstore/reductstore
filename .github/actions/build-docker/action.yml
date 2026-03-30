@@ -26,6 +26,14 @@ inputs:
     description: 'Upload /tmp/image.tar as artifact.'
     required: false
     default: 'true'
+  sbom:
+    description: 'Generate SBOM attestation.'
+    required: false
+    default: 'false'
+  provenance:
+    description: 'Generate provenance attestation.'
+    required: false
+    default: 'false'
 outputs:
   digest:
     description: 'Image digest from docker/build-push-action.'
@@ -109,6 +117,8 @@ runs:
         platforms: ${{ inputs.platform }}
         labels: ${{ inputs.docker_labels }}
         outputs: ${{ inputs.build_outputs }}
+        sbom: ${{ inputs.sbom }}
+        provenance: ${{ inputs.provenance }}
 
     - name: Upload artifact
       if: ${{ inputs.upload_artifact == 'true' }}
