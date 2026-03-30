@@ -143,6 +143,12 @@ impl LimitsBuilder {
         self
     }
 
+    #[cfg(test)]
+    pub fn with_window(mut self, window: Duration) -> Self {
+        self.window = Some(window);
+        self
+    }
+
     pub fn build(self) -> BoxedLimits {
         if self.config == LimitsConfig::default() {
             Arc::new(NoopLimits)
