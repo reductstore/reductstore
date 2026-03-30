@@ -65,9 +65,10 @@ pub(super) async fn write_record(
         }
 
         let sender = {
-            let bucket = components.storage.get_bucket(&bucket).await?.upgrade()?;
-            bucket
+            components
+                .storage
                 .begin_write(
+                    &bucket,
                     path.get("entry_name").unwrap(),
                     ts,
                     content_size,
@@ -138,7 +139,9 @@ pub(super) async fn write_record(
 mod tests {
     use super::*;
 
-    use crate::api::http::tests::{empty_body, ingress_limited_keeper, keeper, path_to_entry_1};
+    use crate::api::http::tests::{
+        empty_body, ingress_limited_keeper, keeper, path_to_entry_1, storage_limited_keeper,
+    };
 
     use axum_extra::headers::{Authorization, HeaderMapExt};
     use reduct_base::error::ErrorCode;
@@ -286,6 +289,34 @@ mod tests {
         let err: ReductError = err.into();
         assert_eq!(err.status, ErrorCode::TooManyRequests);
         assert!(err.message.contains("ingress bytes"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_storage_limit_exceeded(
+        #[future] storage_limited_keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", "1".parse().unwrap());
+
+        let err = write_record(
+            State(storage_limited_keeper.await),
+            headers,
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "2".to_string(),
+            )])),
+            Body::from("a"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        let err: ReductError = err.into();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
+        assert_eq!(err.message, "storage limit exceeded");
     }
 
     #[fixture]

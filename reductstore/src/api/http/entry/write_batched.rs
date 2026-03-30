@@ -13,7 +13,6 @@ use futures_util::StreamExt;
 use crate::api::http::entry::common::err_to_batched_header;
 use crate::api::http::StateKeeper;
 use crate::replication::{Transaction, TransactionNotification};
-use crate::storage::bucket::Bucket;
 use crate::storage::entry::RecordDrainer;
 use log::{debug, error};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
@@ -202,19 +201,22 @@ async fn spawn_getting_writers(
 ) -> Result<(Receiver<WriteContext>, JoinHandle<ErrorMap>), ReductError> {
     let (tx_writer, rx_writer) = tokio::sync::mpsc::channel(64);
 
-    let bucket = components
-        .storage
-        .get_bucket(&bucket_name)
-        .await?
-        .upgrade_and_unwrap();
-
+    let storage = Arc::clone(&components.storage);
+    let bucket_name = bucket_name.to_string();
     let entry_name = entry_name.to_string();
     let spawn_handler = tokio::spawn(async move {
         let mut error_map = BTreeMap::new();
 
         for (time, header) in timed_headers.into_iter() {
-            let writer =
-                start_writing(&entry_name, bucket.clone(), time, &header, &mut error_map).await;
+            let writer = start_writing(
+                &entry_name,
+                &bucket_name,
+                storage.clone(),
+                time,
+                &header,
+                &mut error_map,
+            )
+            .await;
 
             tx_writer
                 .send(WriteContext {
@@ -281,17 +283,19 @@ fn check_and_get_content_length(
 
 async fn start_writing(
     entry_name: &str,
-    bucket: Arc<Bucket>,
+    bucket_name: &str,
+    storage: Arc<crate::storage::engine::StorageEngine>,
     time: u64,
     record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
 ) -> Box<dyn WriteRecord + Sync + Send> {
     let get_writer = async {
-        bucket
+        storage
             .begin_write(
+                bucket_name,
                 entry_name,
                 time,
-                record_header.content_length.clone(),
+                record_header.content_length,
                 record_header.content_type.clone(),
                 record_header.labels.clone(),
             )

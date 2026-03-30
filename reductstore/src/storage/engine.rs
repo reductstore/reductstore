@@ -11,9 +11,12 @@ use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use async_trait::async_trait;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
+use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
-use reduct_base::{conflict, forbidden, not_found, unprocessable_entity};
+use reduct_base::{
+    conflict, forbidden, internal_server_error, not_found, unprocessable_entity, Labels,
+};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -168,6 +171,53 @@ impl StorageEngine {
             },
             license: self.license.clone(),
         })
+    }
+
+    pub(crate) async fn begin_write(
+        &self,
+        bucket_name: &str,
+        entry_name: &str,
+        time: u64,
+        content_size: u64,
+        content_type: String,
+        labels: Labels,
+    ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        self.ensure_storage_limit(content_size).await?;
+        let bucket = self.get_bucket(bucket_name).await?.upgrade()?;
+        bucket
+            .begin_write(entry_name, time, content_size, content_type, labels)
+            .await
+    }
+
+    async fn total_usage(&self) -> Result<u64, ReductError> {
+        let buckets = self.buckets.read().await?;
+        let infos = buckets
+            .values()
+            .map(|bucket| bucket.clone().info())
+            .collect::<Vec<_>>();
+
+        let mut usage = 0u64;
+        for task in infos {
+            usage += task.await?.info.size;
+        }
+
+        Ok(usage)
+    }
+
+    pub(crate) async fn ensure_storage_limit(
+        &self,
+        incoming_bytes: u64,
+    ) -> Result<(), ReductError> {
+        let Some(limit) = self.cfg.engine_config.max_storage_size else {
+            return Ok(());
+        };
+
+        let usage = self.total_usage().await?;
+        if usage.saturating_add(incoming_bytes) > limit {
+            return Err(internal_server_error!("storage limit exceeded"));
+        }
+
+        Ok(())
     }
 
     /// Creat a new bucket.
@@ -424,6 +474,7 @@ mod tests {
     use super::*;
 
     use bytes::Bytes;
+    use reduct_base::io::ReadRecord;
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
@@ -482,6 +533,65 @@ mod tests {
                 license: None,
             }
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_storage_limit_exceeded(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        let bucket = storage
+            .create_bucket("test-limit", BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        let mut writer = bucket
+            .begin_write("entry", 1, 10, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+        writer
+            .send(Ok(Some(Bytes::from("0123456789"))))
+            .await
+            .unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let mut cfg = storage.cfg.clone();
+        cfg.engine_config.max_storage_size = Some(1);
+        let limited = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(storage.data_path.clone())
+                .with_cfg(cfg)
+                .build()
+                .await,
+        );
+
+        let err = limited
+            .begin_write(
+                "test-limit",
+                "entry-2",
+                2,
+                1,
+                "text/plain".to_string(),
+                Labels::new(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        assert_eq!(err.message, "storage limit exceeded");
+
+        let record = limited
+            .get_bucket("test-limit")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap()
+            .begin_read("entry", 1)
+            .await
+            .unwrap();
+        assert_eq!(record.meta().content_length(), 10);
     }
 
     #[rstest]

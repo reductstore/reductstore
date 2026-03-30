@@ -942,6 +942,86 @@ pub(crate) mod tests {
         Arc::new(StateKeeper::new(Arc::new(LockFileBuilder::noop()), rx))
     }
 
+    pub(crate) async fn keeper_with_engine_limit(max_storage_size: u64) -> Arc<StateKeeper> {
+        let mut cfg = Cfg {
+            data_path: tempfile::tempdir().unwrap().keep(),
+            api_token: "init-token".to_string(),
+            ..Cfg::default()
+        };
+        cfg.engine_config.max_storage_size = Some(max_storage_size);
+
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg.clone())
+            .build()
+            .await;
+        let mut token_repo = TokenRepositoryBuilder::new(cfg.clone())
+            .build(cfg.data_path.clone())
+            .await;
+
+        storage
+            .create_bucket("bucket-1", BucketSettings::default())
+            .await
+            .unwrap();
+        storage
+            .create_bucket("bucket-2", BucketSettings::default())
+            .await
+            .unwrap();
+
+        let permissions = Permissions {
+            read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
+            write: vec!["bucket-1".to_string(), "bucket-2".to_string()],
+            ..Default::default()
+        };
+
+        token_repo
+            .generate_token(
+                "test",
+                TokenCreateRequest {
+                    permissions,
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let storage = Arc::new(storage);
+        let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
+
+        #[cfg(feature = "web-console")]
+        let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
+        #[cfg(not(feature = "web-console"))]
+        let console_bytes: &[u8] = &[];
+
+        let components = Components {
+            storage: Arc::clone(&storage),
+            auth: TokenAuthorization::new("inti-token"),
+            token_repo: AsyncRwLock::new(token_repo),
+            console: create_asset_manager(console_bytes),
+            replication_repo: AsyncRwLock::new(replication_repo),
+            ext_repo: create_ext_repository(
+                None,
+                vec![],
+                ExtSettings::builder()
+                    .server_info(ServerInfo::default())
+                    .build(),
+                cfg.io_conf.clone(),
+                Some(Arc::clone(&storage)),
+            )
+            .expect("Failed to create extension repo"),
+            cfg,
+            query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
+            limits: crate::api::limits::LimitsBuilder::new().build(),
+        };
+
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.send(components).await.unwrap();
+
+        Arc::new(StateKeeper::new(Arc::new(LockFileBuilder::noop()), rx))
+    }
+
     #[fixture]
     pub(crate) async fn keeper() -> Arc<StateKeeper> {
         keeper_with_limits(LimitsConfig::default()).await
@@ -972,6 +1052,11 @@ pub(crate) mod tests {
             ..Default::default()
         })
         .await
+    }
+
+    #[fixture]
+    pub(crate) async fn storage_limited_keeper() -> Arc<StateKeeper> {
+        keeper_with_engine_limit(0).await
     }
 
     #[fixture]
