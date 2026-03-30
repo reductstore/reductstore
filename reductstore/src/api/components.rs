@@ -3,6 +3,7 @@
 
 //! Server-wide shared state used by all API layers (HTTP, Zenoh).
 
+use crate::api::limits::BoxedLimits;
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::audit::ManageAudit;
 use crate::auth::policy::Policy;
@@ -35,6 +36,7 @@ pub struct Components {
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
     pub(crate) audit_repo: AsyncRwLock<Box<dyn ManageAudit + Send + Sync>>,
+    pub(crate) limits: BoxedLimits,
 
     pub(crate) cfg: Cfg,
 }

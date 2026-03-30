@@ -10,6 +10,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add instance-level rate limits for API requests plus HTTP/Zenoh ingress and egress traffic, including `RS_RATE_LIMIT_*` parsing with per-window units (`/s`, `/m`, `/h`, `/d`) and 429 limit errors, [PR-1255](https://github.com/reductstore/reductstore/pull/1255)
+- Publish per-target release binary SBOM artifacts and enable Docker image SBOM/provenance attestations in CI, [PR-1254](https://github.com/reductstore/reductstore/pull/1254)
+- Add `$gate` query operator for edge-triggered time-window conditions: opens on `false->true`, mirrors input while window is active, then forces `false` until input resets to `false` and re-triggers, [PR-1249](https://github.com/reductstore/reductstore/pull/1249)
+- Add UTC date-part query operators (`$second`, `$minute`, `$hour`, `$day`, `$month`, `$year`, `$weekday`) with optional IANA timezone argument and Monday-based weekday mapping (`0..6`), [PR-1248](https://github.com/reductstore/reductstore/pull/1248)
 - Support `RS_REPLICATION_<ID>_MODE` in provisioning to set replication mode (`enabled|paused|disabled`) declaratively from environment variables, [PR-1243](https://github.com/reductstore/reductstore/pull/1243)
 - Support hierarchical entry paths and preserve nested tree recovery, [PR-1185](https://github.com/reductstore/reductstore/pull/1185)
 - Store attachments in system `$meta` entries with strategy-based behavior and replication coverage, [PR-1186](https://github.com/reductstore/reductstore/pull/1186)
@@ -17,6 +21,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Update transitive Rust dependencies in `Cargo.lock` (`aws-lc-rs/aws-lc-sys`, `rustls-webpki`, `lz4_flex`) to address current `cargo audit` advisories, [PR-1250](https://github.com/reductstore/reductstore/pull/1250)
 - Move licensing and remote connectors to enterprise-only runtime and align CI pipelines for core-only backend coverage, [PR-1176](https://github.com/reductstore/reductstore/pull/1176)
 - Relicense ReductStore Core to Apache-2.0, update Rust source headers and package license files, add `NOTICE`, and refresh README project/license positioning, [PR-1204](https://github.com/reductstore/reductstore/pull/1204)
 - Keep Docker runtime non-root when `/data` is auto-created as `root:root` and ensure UID/GID 10001 user metadata is available in the final image, [PR-1178](https://github.com/reductstore/reductstore/pull/1178)

@@ -40,6 +40,7 @@ pub(super) async fn write_record(
     let check_request_and_get_sender = async {
         let ts = parse_timestamp_from_query(&params)?;
         let content_size = parse_content_length_from_header(&headers)?;
+        components.limits.check_ingress(content_size).await?;
         let content_type = headers
             .get("content-type")
             .map_or("application/octet-stream", |v| v.to_str().unwrap())
@@ -64,9 +65,10 @@ pub(super) async fn write_record(
         }
 
         let sender = {
-            let bucket = components.storage.get_bucket(&bucket).await?.upgrade()?;
-            bucket
+            components
+                .storage
                 .begin_write(
+                    &bucket,
                     path.get("entry_name").unwrap(),
                     ts,
                     content_size,
@@ -137,9 +139,12 @@ pub(super) async fn write_record(
 mod tests {
     use super::*;
 
-    use crate::api::http::tests::{empty_body, keeper, path_to_entry_1};
+    use crate::api::http::tests::{
+        empty_body, ingress_limited_keeper, keeper, path_to_entry_1, storage_limited_keeper,
+    };
 
     use axum_extra::headers::{Authorization, HeaderMapExt};
+    use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use reduct_base::not_found;
     use rstest::*;
@@ -256,6 +261,62 @@ mod tests {
             err,
             unprocessable_entity!("'ts' must be an unix timestamp in microseconds").into()
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_ingress_rate_limit(
+        #[future] ingress_limited_keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", "2".parse().unwrap());
+
+        let err = write_record(
+            State(ingress_limited_keeper.await),
+            headers,
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "2".to_string(),
+            )])),
+            Body::from("ab"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        let err: ReductError = err.into();
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert!(err.message.contains("ingress bytes"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_storage_limit_exceeded(
+        #[future] storage_limited_keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", "1".parse().unwrap());
+
+        let err = write_record(
+            State(storage_limited_keeper.await),
+            headers,
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "2".to_string(),
+            )])),
+            Body::from("a"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        let err: ReductError = err.into();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
+        assert_eq!(err.message, "storage limit exceeded");
     }
 
     #[fixture]

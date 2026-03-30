@@ -4,6 +4,7 @@
 pub(crate) mod aggregation;
 pub(crate) mod arithmetic;
 pub(crate) mod comparison;
+pub(crate) mod date;
 pub(crate) mod logical;
 pub(crate) mod misc;
 pub(crate) mod string;

@@ -65,20 +65,25 @@ impl SubscriberPipeline {
         let ts = timestamp.unwrap_or_else(|| current_time_us());
         let content_size = payload.len() as u64;
 
+        self.components.limits.check_api_request().await?;
+        self.components.limits.check_ingress(content_size).await?;
+
         debug!(
             "Ingesting Zenoh sample bucket={} entry={} timestamp={} bytes={} content_type={}",
             self.bucket, entry_name, ts, content_size, content_type
         );
 
-        let bucket = self
+        let mut writer = self
             .components
             .storage
-            .get_bucket(&self.bucket)
-            .await?
-            .upgrade()?;
-
-        let mut writer = bucket
-            .begin_write(&entry_name, ts, content_size, content_type, labels.clone())
+            .begin_write(
+                &self.bucket,
+                &entry_name,
+                ts,
+                content_size,
+                content_type,
+                labels.clone(),
+            )
             .await?;
 
         writer.send(Ok(Some(payload))).await?;
@@ -156,4 +161,85 @@ fn current_time_us() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_micros() as u64)
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::components::StateKeeper;
+    use crate::api::http::tests::{api_limited_keeper, ingress_limited_keeper};
+    use reduct_base::error::ErrorCode;
+    use rstest::rstest;
+    use std::sync::Arc;
+
+    fn config() -> ZenohApiConfig {
+        ZenohApiConfig {
+            bucket: "bucket-1".to_string(),
+            ..Default::default()
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn handle_sample_rejects_ingress_over_limit(
+        #[future] ingress_limited_keeper: Arc<StateKeeper>,
+    ) {
+        let components = ingress_limited_keeper.await.get_anonymous().await.unwrap();
+        let pipeline = SubscriberPipeline::new(config(), components);
+
+        let err = pipeline
+            .handle_sample(
+                "/entry-zenoh",
+                Bytes::from("ab"),
+                None,
+                Some(100),
+                "text/plain".to_string(),
+                Labels::new(),
+            )
+            .await
+            .err()
+            .unwrap();
+
+        let IngestError::Storage(err) = err;
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert!(err.message.contains("ingress bytes"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn handle_sample_rejects_api_request_over_limit(
+        #[future] api_limited_keeper: Arc<StateKeeper>,
+    ) {
+        let components = api_limited_keeper.await.get_anonymous().await.unwrap();
+        let pipeline = SubscriberPipeline::new(config(), components);
+
+        assert!(pipeline
+            .handle_sample(
+                "/entry-zenoh-api-limit",
+                Bytes::from("a"),
+                None,
+                Some(101),
+                "text/plain".to_string(),
+                Labels::new(),
+            )
+            .await
+            .is_ok());
+
+        let err = pipeline
+            .handle_sample(
+                "/entry-zenoh-api-limit",
+                Bytes::from("a"),
+                None,
+                Some(102),
+                "text/plain".to_string(),
+                Labels::new(),
+            )
+            .await
+            .err()
+            .unwrap();
+
+        let IngestError::Storage(err) = err;
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert!(err.message.contains("api requests"));
+    }
 }

@@ -68,6 +68,17 @@ runs:
       shell: bash
       run: cargo install cargo-export --force
 
+    - name: Install Syft (Release)
+      if: github.event_name != 'pull_request'
+      shell: bash
+      run: |
+        set -euo pipefail
+        SYFT_VERSION=v1.42.3
+        mkdir -p "$HOME/.local/bin"
+        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$HOME/.local/bin" "$SYFT_VERSION"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        "$HOME/.local/bin/syft" version
+
     - name: Build binary (PR)
       if: github.event_name == 'pull_request'
       run: cargo build --profile ci -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api"
@@ -96,6 +107,23 @@ runs:
         path: target/${{inputs.target}}/release/reductstore${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
         if-no-files-found: 'error'
 
+    - name: Generate SBOM (Release)
+      if: github.event_name != 'pull_request'
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p /tmp/sbom
+        bin_path="target/${{ inputs.target }}/release/reductstore${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}"
+        sbom_path="/tmp/sbom/reductstore.${{ inputs.target }}.sbom.spdx.json"
+        syft "$bin_path" -o spdx-json="$sbom_path"
+
+    - name: Upload SBOM (Release)
+      uses: actions/upload-artifact@v4
+      if: github.event_name != 'pull_request'
+      with:
+        name: reductstore-sbom-${{ inputs.target }}
+        path: /tmp/sbom/reductstore.${{ inputs.target }}.sbom.spdx.json
+        if-no-files-found: 'error'
 
     - name: Build and export tests (PR)
       if: github.event_name == 'pull_request'

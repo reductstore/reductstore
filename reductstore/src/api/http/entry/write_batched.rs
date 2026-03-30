@@ -13,7 +13,6 @@ use futures_util::StreamExt;
 use crate::api::http::entry::common::err_to_batched_header;
 use crate::api::http::StateKeeper;
 use crate::replication::{Transaction, TransactionNotification};
-use crate::storage::bucket::Bucket;
 use crate::storage::entry::RecordDrainer;
 use log::{debug, error};
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
@@ -58,6 +57,7 @@ pub(super) async fn write_batched_records(
         }
 
         let content_length = check_and_get_content_length(&headers, &timed_headers)?;
+        components.limits.check_ingress(content_length).await?;
         let (rx_writer, spawn_handler) =
             spawn_getting_writers(&components, &bucket, &entry_name, timed_headers).await?;
         receive_body_and_write_records(
@@ -201,19 +201,22 @@ async fn spawn_getting_writers(
 ) -> Result<(Receiver<WriteContext>, JoinHandle<ErrorMap>), ReductError> {
     let (tx_writer, rx_writer) = tokio::sync::mpsc::channel(64);
 
-    let bucket = components
-        .storage
-        .get_bucket(&bucket_name)
-        .await?
-        .upgrade_and_unwrap();
-
+    let storage = Arc::clone(&components.storage);
+    let bucket_name = bucket_name.to_string();
     let entry_name = entry_name.to_string();
     let spawn_handler = tokio::spawn(async move {
         let mut error_map = BTreeMap::new();
 
         for (time, header) in timed_headers.into_iter() {
-            let writer =
-                start_writing(&entry_name, bucket.clone(), time, &header, &mut error_map).await;
+            let writer = start_writing(
+                &entry_name,
+                &bucket_name,
+                storage.clone(),
+                time,
+                &header,
+                &mut error_map,
+            )
+            .await;
 
             tx_writer
                 .send(WriteContext {
@@ -280,17 +283,19 @@ fn check_and_get_content_length(
 
 async fn start_writing(
     entry_name: &str,
-    bucket: Arc<Bucket>,
+    bucket_name: &str,
+    storage: Arc<crate::storage::engine::StorageEngine>,
     time: u64,
     record_header: &RecordHeader,
     error_map: &mut BTreeMap<u64, ReductError>,
 ) -> Box<dyn WriteRecord + Sync + Send> {
     let get_writer = async {
-        bucket
+        storage
             .begin_write(
+                bucket_name,
                 entry_name,
                 time,
-                record_header.content_length.clone(),
+                record_header.content_length,
                 record_header.content_type.clone(),
                 record_header.labels.clone(),
             )
@@ -311,7 +316,7 @@ async fn start_writing(
 mod tests {
     use super::*;
     use crate::api::http::entry::write_batched::write_batched_records;
-    use crate::api::http::tests::{headers, keeper, path_to_entry_1};
+    use crate::api::http::tests::{headers, ingress_limited_keeper, keeper, path_to_entry_1};
     use axum_extra::headers::HeaderValue;
     use futures_util::stream;
     use reduct_base::error::ErrorCode;
@@ -744,6 +749,30 @@ mod tests {
             err,
             bad_request!("Error while receiving data chunk: [BadRequest] Simulated chunk error")
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_batched_records_ingress_rate_limit(
+        #[future] ingress_limited_keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+    ) {
+        headers.insert("content-length", "2".parse().unwrap());
+        headers.insert("x-reduct-time-1", "2,text/plain".parse().unwrap());
+
+        let err = write_batched_records(
+            State(ingress_limited_keeper.await),
+            headers,
+            path_to_entry_1,
+            Body::from("ab"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::TooManyRequests);
+        assert!(err.message().contains("ingress bytes"));
     }
 
     #[fixture]
