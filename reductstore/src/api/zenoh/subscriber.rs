@@ -73,15 +73,17 @@ impl SubscriberPipeline {
             self.bucket, entry_name, ts, content_size, content_type
         );
 
-        let bucket = self
+        let mut writer = self
             .components
             .storage
-            .get_bucket(&self.bucket)
-            .await?
-            .upgrade()?;
-
-        let mut writer = bucket
-            .begin_write(&entry_name, ts, content_size, content_type, labels.clone())
+            .begin_write(
+                &self.bucket,
+                &entry_name,
+                ts,
+                content_size,
+                content_type,
+                labels.clone(),
+            )
             .await?;
 
         writer.send(Ok(Some(payload))).await?;

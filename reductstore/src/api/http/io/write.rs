@@ -6,7 +6,6 @@ use crate::api::http::Components;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::WriteAccessPolicy;
 use crate::replication::{Transaction, TransactionNotification};
-use crate::storage::bucket::Bucket;
 use crate::storage::entry::RecordDrainer;
 use axum::body::Body;
 use axum::body::BodyDataStream;
@@ -266,19 +265,17 @@ async fn spawn_getting_writers(
 ) -> Result<(Receiver<WriteContext>, JoinHandle<ErrorMap>), ReductError> {
     let (tx_writer, rx_writer) = tokio::sync::mpsc::channel(64);
 
-    let bucket = components
-        .storage
-        .get_bucket(&bucket_name)
-        .await?
-        .upgrade_and_unwrap();
+    let storage = Arc::clone(&components.storage);
+    let bucket_name = bucket_name.to_string();
 
     let spawn_handler = tokio::spawn(async move {
         let mut error_map: ErrorMap = ErrorMap::new();
 
         for record in records.into_iter() {
             let writer = start_writing(
+                &bucket_name,
                 &record.record.entry,
-                bucket.clone(),
+                storage.clone(),
                 record.record.timestamp,
                 &record.record.header,
                 &mut error_map,
@@ -325,8 +322,9 @@ async fn write_chunk(
 }
 
 async fn start_writing(
+    bucket_name: &str,
     entry_name: &str,
-    bucket: Arc<Bucket>,
+    storage: Arc<crate::storage::engine::StorageEngine>,
     time: u64,
     record_header: &reduct_base::batch::RecordHeader,
     error_map: &mut ErrorMap,
@@ -334,11 +332,12 @@ async fn start_writing(
     delta: u64,
 ) -> Box<dyn WriteRecord + Sync + Send> {
     let get_writer = async {
-        bucket
+        storage
             .begin_write(
+                bucket_name,
                 entry_name,
                 time,
-                record_header.content_length.clone(),
+                record_header.content_length,
                 record_header.content_type.clone(),
                 record_header.labels.clone(),
             )

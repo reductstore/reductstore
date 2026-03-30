@@ -255,7 +255,33 @@ impl Bucket {
     ///
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub async fn begin_write(
+    #[cfg(not(test))]
+    pub(in crate::storage) async fn begin_write(
+        self: &Arc<Self>,
+        name: &str,
+        time: u64,
+        content_size: u64,
+        content_type: String,
+        labels: Labels,
+    ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        self.begin_write_impl(name, time, content_size, content_type, labels)
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn begin_write(
+        self: &Arc<Self>,
+        name: &str,
+        time: u64,
+        content_size: u64,
+        content_type: String,
+        labels: Labels,
+    ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        self.begin_write_impl(name, time, content_size, content_type, labels)
+            .await
+    }
+
+    async fn begin_write_impl(
         self: &Arc<Self>,
         name: &str,
         time: u64,
