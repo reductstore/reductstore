@@ -4,6 +4,7 @@
 use crate::api::http::entry::MethodExtractor;
 use crate::api::http::utils::ReadersWrapper;
 use crate::api::http::{ErrorCode, HttpError, StateKeeper};
+use crate::api::limits::BoxedLimits;
 use crate::auth::policy::ReadAccessPolicy;
 use crate::ext::ext_repository::BoxedManageExtensions;
 use crate::storage::bucket::Bucket;
@@ -54,6 +55,7 @@ pub(super) async fn read_batched_records(
             .upgrade()?,
         query_id,
         method.name() == "HEAD",
+        &components.limits,
         &components.ext_repo,
     )
     .await
@@ -106,6 +108,7 @@ async fn fetch_and_response_batched_records(
     bucket: Arc<Bucket>,
     query_id: u64,
     empty_body: bool,
+    limits: &BoxedLimits,
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
     // Acquire the query receiver + IO limits for this bucket.
@@ -223,6 +226,10 @@ async fn fetch_and_response_batched_records(
         }
     }
 
+    if !empty_body {
+        limits.check_egress(body_size).await?;
+    }
+
     // Align entry indices with the chronological order of the first record per entry
     let mut first_ts_by_entry: HashMap<usize, u64> = HashMap::new();
     for record in &records {
@@ -308,7 +315,7 @@ mod tests {
     use super::*;
     use crate::api::http::entry::QueryEntryAxum;
     use crate::api::http::io::query::query;
-    use crate::api::http::tests::{headers, keeper, path_to_bucket_1};
+    use crate::api::http::tests::{egress_limited_keeper, headers, keeper, path_to_bucket_1};
     use axum::body::to_bytes;
     use axum::extract::Path;
     use axum::http::StatusCode;
@@ -650,6 +657,17 @@ mod tests {
         assert_eq!(err.message(), "Query id header must be valid UTF-8");
     }
 
+    #[test]
+    fn rejects_invalid_query_id_header() {
+        let mut headers = HeaderMap::new();
+        headers.insert(QUERY_ID_HEADER, http::HeaderValue::from_static("abc"));
+
+        let err = parse_query_id(&headers).err().unwrap();
+
+        assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+        assert_eq!(err.message(), "Invalid query id");
+    }
+
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn continuous_query_returns_after_timeout(
@@ -771,5 +789,104 @@ mod tests {
         .into_response();
 
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_too_many_requests_on_egress_limit(
+        #[future] egress_limited_keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = egress_limited_keeper.await;
+
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["entry-1".into()]),
+            start: Some(0),
+            ..Default::default()
+        };
+        let path = Path(path_to_bucket_1.0.clone());
+        let response = query(
+            State(keeper.clone()),
+            headers.clone(),
+            path,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
+        );
+
+        let err = read_batched_records(
+            State(keeper),
+            headers,
+            path_to_bucket_1,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::TooManyRequests);
+        assert!(err.message().contains("egress bytes"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn head_read_skips_egress_limit_check(
+        #[future] egress_limited_keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = egress_limited_keeper.await;
+
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["entry-1".into()]),
+            start: Some(0),
+            ..Default::default()
+        };
+        let path = Path(path_to_bucket_1.0.clone());
+        let response = query(
+            State(keeper.clone()),
+            headers.clone(),
+            path,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
+        );
+
+        let response = read_batched_records(
+            State(keeper),
+            headers,
+            path_to_bucket_1,
+            MethodExtractor::new("HEAD"),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_length = response.headers()["content-length"]
+            .to_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        assert!(content_length > 0);
     }
 }

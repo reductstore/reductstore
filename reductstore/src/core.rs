@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 pub mod cache;
+pub mod duration;
 pub mod env;
 pub mod file_cache;
 pub mod sync;

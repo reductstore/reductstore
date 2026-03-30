@@ -1,48 +1,8 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
+use crate::core::duration::parse_duration_to_micros;
 use crate::storage::query::condition::value::Value;
 use reduct_base::error::ReductError;
-use reduct_base::unprocessable_entity;
-
-/// Parses a duration string into a `Value::Duration`.
-///
-/// # Arguments
-///
-/// * `duration_string` - The string representing the duration, e.g., "100ms", "2.5m", "1h".
-///
-/// # Returns
-///
-/// A `Result` containing the parsed duration as i64 (in microseconds) or an error if the string is invalid.
-fn parse_single_duration(duration_string: &str) -> Result<i64, ReductError> {
-    if duration_string.trim().is_empty() {
-        return Err(unprocessable_entity!("Duration literal cannot be empty"));
-    }
-
-    let duration_string = duration_string.trim();
-    let (num_part, unit_part) = duration_string
-        .chars()
-        .partition::<String, _>(|c| c.is_digit(10) || *c == '.' || *c == '-');
-    let value: i64 = num_part
-        .parse()
-        .map_err(|_| unprocessable_entity!("Invalid duration value: {}", duration_string))?;
-
-    let unit = unit_part.as_str();
-    let seconds = match unit {
-        "us" => value,
-        "ms" => value * 1000,
-        "s" => value * 1_000_000,
-        "m" => value * 60_000_000,
-        "h" => value * 3_600_000_000,
-        "d" => value * 86_400_000_000,
-        _ => {
-            return Err(unprocessable_entity!(
-                "Invalid duration unit: {}",
-                unit_part
-            ))
-        }
-    };
-    Ok(seconds)
-}
 
 /// Parses a duration string containing multiple parts (e.g., "100ms 500us") into a `Value::Duration`.
 /// # Arguments
@@ -53,16 +13,7 @@ fn parse_single_duration(duration_string: &str) -> Result<i64, ReductError> {
 ///
 /// A `Result` containing the total duration as `Value::Duration` or an error if the string is invalid.
 pub(crate) fn parse_duration(duration_string: &str) -> Result<Value, ReductError> {
-    if duration_string.trim().is_empty() {
-        return Err(unprocessable_entity!("Duration literal cannot be empty"));
-    }
-
-    let mut total_seconds = 0;
-    for part in duration_string.split_whitespace() {
-        let seconds = parse_single_duration(part)?;
-        total_seconds += seconds;
-    }
-    Ok(Value::Duration(total_seconds))
+    Ok(Value::Duration(parse_duration_to_micros(duration_string)?))
 }
 
 /// Formats a duration in microseconds into a human-readable string.
@@ -124,23 +75,10 @@ mod tests {
 
     #[rstest]
     fn test_parse_invalid_duration() {
-        assert_eq!(
-            parse_single_duration("").err().unwrap(),
-            unprocessable_entity!("Duration literal cannot be empty")
-        );
-        assert_eq!(
-            parse_single_duration("100xyz").err().unwrap(),
-            unprocessable_entity!("Invalid duration unit: xyz")
-        );
-        assert_eq!(
-            parse_single_duration("abc").err().unwrap(),
-            unprocessable_entity!("Invalid duration value: abc")
-        );
-
-        assert_eq!(
-            parse_single_duration("2.5m").err().unwrap(),
-            unprocessable_entity!("Invalid duration value: 2.5m")
-        );
+        assert!(parse_duration("").is_err());
+        assert!(parse_duration("100xyz").is_err());
+        assert!(parse_duration("abc").is_err());
+        assert!(parse_duration("2.5m").is_err());
     }
 
     #[rstest]
@@ -161,17 +99,8 @@ mod tests {
 
     #[rstest]
     fn test_invalid_duration() {
-        assert_eq!(
-            parse_duration("").err().unwrap(),
-            unprocessable_entity!("Duration literal cannot be empty")
-        );
-        assert_eq!(
-            parse_duration("1h 100xyz").err().unwrap(),
-            unprocessable_entity!("Invalid duration unit: xyz")
-        );
-        assert_eq!(
-            parse_duration("1h,2m").err().unwrap(),
-            unprocessable_entity!("Invalid duration unit: h,m")
-        );
+        assert!(parse_duration("").is_err());
+        assert!(parse_duration("1h 100xyz").is_err());
+        assert!(parse_duration("1h,2m").is_err());
     }
 }

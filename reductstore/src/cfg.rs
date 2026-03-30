@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 pub mod io;
+pub mod limits;
 pub mod lock_file;
 mod provision;
 pub mod remote_storage;
@@ -12,6 +13,7 @@ pub mod storage_engine;
 pub mod zenoh;
 
 use crate::api::components::Components;
+use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType};
@@ -91,6 +93,7 @@ pub struct Cfg {
     pub lock_file_config: LockFileConfig,
     pub rw_lock_config: RwLockConfig,
     pub engine_config: StorageEngineConfig,
+    pub(crate) limits_config: LimitsConfig,
     #[cfg(feature = "zenoh-api")]
     pub zenoh_api: ZenohApiConfig,
 }
@@ -119,6 +122,7 @@ impl Default for Cfg {
             lock_file_config: LockFileConfig::default(),
             rw_lock_config: RwLockConfig::default(),
             engine_config: StorageEngineConfig::default(),
+            limits_config: LimitsConfig::default(),
             #[cfg(feature = "zenoh-api")]
             zenoh_api: ZenohApiConfig::default(),
         }
@@ -276,6 +280,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
+            limits_config: Self::parse_limits_config(&mut env),
             #[cfg(feature = "zenoh-api")]
             zenoh_api: Self::parse_zenoh_api_config(&mut env),
         };
@@ -383,6 +388,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),
+            limits: LimitsBuilder::new()
+                .with_config(self.cfg.limits_config)
+                .build(),
             cfg: self.cfg.clone(),
         })
     }
@@ -480,9 +488,52 @@ mod tests {
         assert_eq!(parser.cfg.cert_path, None);
         assert_eq!(parser.cfg.cert_key_path, None);
         assert_eq!(parser.cfg.cors_allow_origin.len(), 0);
+        assert_eq!(parser.cfg.limits_config, LimitsConfig::default());
 
         assert_eq!(parser.cfg.buckets.len(), 0);
         assert_eq!(parser.cfg.tokens.len(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_rate_limits(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_RATE_LIMIT_API"))
+            .times(1)
+            .return_const(Ok("100000req/h".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_RATE_LIMIT_INGRESS"))
+            .times(1)
+            .return_const(Ok("10GB/h".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_RATE_LIMIT_EGRESS"))
+            .times(1)
+            .return_const(Ok("1GB/h".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
+        assert_eq!(
+            parser.cfg.limits_config,
+            LimitsConfig {
+                api_requests_per_window: Some(crate::api::limits::WindowLimit::new(
+                    100_000,
+                    Duration::from_secs(3600),
+                )),
+                ingress_bytes_per_window: Some(crate::api::limits::WindowLimit::new(
+                    10_000_000_000,
+                    Duration::from_secs(3600),
+                )),
+                egress_bytes_per_window: Some(crate::api::limits::WindowLimit::new(
+                    1_000_000_000,
+                    Duration::from_secs(3600),
+                )),
+            }
+        );
     }
 
     #[rstest]
