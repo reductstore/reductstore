@@ -40,9 +40,11 @@ struct AuditState {
 
 // The local audit repository writes audit events into the internal $audit bucket.
 pub(crate) struct AuditRepository {
-    storage: Arc<StorageEngine>,
-    state: Arc<AsyncRwLock<AuditState>>,
     tx: mpsc::Sender<AuditEvent>,
+    #[cfg(test)]
+    storage: Arc<StorageEngine>,
+    #[cfg(test)]
+    state: Arc<AsyncRwLock<AuditState>>,
 }
 
 impl AuditRepository {
@@ -56,7 +58,13 @@ impl AuditRepository {
             Arc::clone(&storage),
         ));
 
-        Self { storage, state, tx }
+        Self {
+            tx,
+            #[cfg(test)]
+            storage,
+            #[cfg(test)]
+            state,
+        }
     }
 
     async fn aggregate_event(

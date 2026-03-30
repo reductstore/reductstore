@@ -999,6 +999,9 @@ pub(crate) mod tests {
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
+        let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
 
         #[cfg(feature = "web-console")]
         let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
@@ -1021,6 +1024,7 @@ pub(crate) mod tests {
                 Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
+            audit_repo: AsyncRwLock::new(audit_repo),
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: crate::api::limits::LimitsBuilder::new().build(),
