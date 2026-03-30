@@ -4,7 +4,6 @@
 use crate::audit::{AuditEvent, ManageAudit, AUDIT_BUCKET_NAME};
 use crate::cfg::Cfg;
 use crate::core::sync::AsyncRwLock;
-use crate::storage::bucket::Bucket;
 use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -205,27 +204,41 @@ impl AuditRepository {
         storage: Arc<StorageEngine>,
         event: AuditEvent,
     ) -> Result<(), ReductError> {
-        let bucket = match storage.get_bucket(AUDIT_BUCKET_NAME).await {
-            Ok(bucket) => bucket.upgrade()?,
-            Err(_) => storage
-                .create_system_bucket(AUDIT_BUCKET_NAME, Bucket::defaults())
-                .await?
-                .upgrade()?,
-        };
-
         let labels = Labels::from([("status".to_string(), event.status.to_string())]);
         let payload = serde_json::to_vec(&event).map_err(|err| {
             ReductError::internal_server_error(&format!("Failed to serialize audit event: {}", err))
         })?;
-        let mut writer = bucket
+        let mut writer = match storage
             .begin_write(
+                AUDIT_BUCKET_NAME,
                 &event.token_name,
                 event.timestamp,
                 payload.len() as u64,
                 "application/json".to_string(),
-                labels,
+                labels.clone(),
             )
-            .await?;
+            .await
+        {
+            Ok(writer) => writer,
+            Err(_) => {
+                storage
+                    .create_system_bucket(
+                        AUDIT_BUCKET_NAME,
+                        reduct_base::msg::bucket_api::BucketSettings::default(),
+                    )
+                    .await?;
+                storage
+                    .begin_write(
+                        AUDIT_BUCKET_NAME,
+                        &event.token_name,
+                        event.timestamp,
+                        payload.len() as u64,
+                        "application/json".to_string(),
+                        labels,
+                    )
+                    .await?
+            }
+        };
         writer.send(Ok(Some(Bytes::from(payload)))).await?;
         writer.send(Ok(None)).await?;
         Ok(())
