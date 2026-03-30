@@ -5,7 +5,7 @@ use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use async_trait::async_trait;
-use log::{debug, error, info, warn};
+use log::{error, info, warn};
 use reduct_base::error::ReductError;
 use std::io::Read;
 use std::io::SeekFrom::Start;
