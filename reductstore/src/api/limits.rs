@@ -423,6 +423,14 @@ mod tests {
         assert!(limits.check_egress(u64::MAX).await.is_ok());
     }
 
+    #[tokio::test]
+    async fn limits_builder_default_matches_new() {
+        let limits = LimitsBuilder::default().build();
+        assert!(limits.check_api_request().await.is_ok());
+        assert!(limits.check_ingress(1).await.is_ok());
+        assert!(limits.check_egress(1).await.is_ok());
+    }
+
     #[rstest]
     #[tokio::test]
     async fn api_limit_blocks_when_exceeded() {

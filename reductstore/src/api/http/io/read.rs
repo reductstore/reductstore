@@ -837,4 +837,56 @@ mod tests {
         assert_eq!(err.status(), ErrorCode::TooManyRequests);
         assert!(err.message().contains("egress bytes"));
     }
+
+    #[rstest]
+    #[tokio::test]
+    async fn head_read_skips_egress_limit_check(
+        #[future] egress_limited_keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = egress_limited_keeper.await;
+
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["entry-1".into()]),
+            start: Some(0),
+            ..Default::default()
+        };
+        let path = Path(path_to_bucket_1.0.clone());
+        let response = query(
+            State(keeper.clone()),
+            headers.clone(),
+            path,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
+        );
+
+        let response = read_batched_records(
+            State(keeper),
+            headers,
+            path_to_bucket_1,
+            MethodExtractor::new("HEAD"),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let content_length = response.headers()["content-length"]
+            .to_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap();
+        assert!(content_length > 0);
+    }
 }

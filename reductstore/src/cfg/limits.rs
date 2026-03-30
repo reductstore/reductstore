@@ -339,6 +339,22 @@ mod tests {
     }
 
     #[rstest]
+    fn api_requests_rate_limit_default_is_unset() {
+        let default = ApiRequestsRateLimit::default();
+        assert_eq!(default.limit.amount, 0);
+        assert_eq!(default.limit.window, std::time::Duration::from_secs(3600));
+        assert_eq!(default.to_string(), "");
+    }
+
+    #[rstest]
+    fn byte_rate_limit_default_is_unset() {
+        let default = ByteRateLimit::default();
+        assert_eq!(default.limit.amount, 0);
+        assert_eq!(default.limit.window, std::time::Duration::from_secs(3600));
+        assert_eq!(default.to_string(), "");
+    }
+
+    #[rstest]
     fn parse_rate_limit_rejects_empty_literal() {
         let err = parse_rate_limit("", parse_request_amount).err().unwrap();
         assert!(err.contains("cannot be empty"));
