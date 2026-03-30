@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add global storage size cap via `RS_ENGINE_MAX_STORAGE_SIZE` (SI units) with write-path enforcement across all buckets, [PR-1263](https://github.com/reductstore/reductstore/pull/1263)
 - Add instance-level rate limits for API requests plus HTTP/Zenoh ingress and egress traffic, including `RS_RATE_LIMIT_*` parsing with per-window units (`/s`, `/m`, `/h`, `/d`) and 429 limit errors, [PR-1255](https://github.com/reductstore/reductstore/pull/1255)
 - Publish per-target release binary SBOM artifacts and enable Docker image SBOM/provenance attestations in CI, [PR-1254](https://github.com/reductstore/reductstore/pull/1254)
 - Add `$gate` query operator for edge-triggered time-window conditions: opens on `false->true`, mirrors input while window is active, then forces `false` until input resets to `false` and re-triggers, [PR-1249](https://github.com/reductstore/reductstore/pull/1249)
