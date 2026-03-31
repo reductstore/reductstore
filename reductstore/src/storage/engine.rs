@@ -229,6 +229,23 @@ impl StorageEngine {
         self.check_mode()?;
 
         check_name_convention(name)?;
+        self.create_bucket_internal(name, settings).await
+    }
+
+    pub(crate) async fn create_system_bucket(
+        &self,
+        name: &str,
+        settings: BucketSettings,
+    ) -> Result<Weak<Bucket>, ReductError> {
+        self.check_mode()?;
+        self.create_bucket_internal(name, settings).await
+    }
+
+    async fn create_bucket_internal(
+        &self,
+        name: &str,
+        settings: BucketSettings,
+    ) -> Result<Weak<Bucket>, ReductError> {
         let mut buckets = self.buckets.write().await?;
         if buckets.contains_key(name) {
             return Err(conflict!("Bucket '{}' already exists", name));
@@ -367,8 +384,8 @@ impl StorageEngine {
         let infos = {
             let buckets = self.buckets.read().await?;
             buckets
-                .values()
-                .map(|bucket| bucket.clone().info())
+                .iter()
+                .map(|(_, bucket)| bucket.clone().info())
                 .collect::<Vec<_>>()
         };
 
@@ -914,6 +931,39 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_create_system_bucket_allows_system_name(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        let bucket = storage
+            .create_system_bucket("$audit", BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        assert_eq!(bucket.name(), "$audit");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_system_bucket_conflicts_with_existing_name(
+        #[future] storage: Arc<StorageEngine>,
+    ) {
+        let storage = storage.await;
+        storage
+            .create_system_bucket("$audit", BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        let result = storage
+            .create_system_bucket("$audit", BucketSettings::default())
+            .await;
+        assert_eq!(
+            result.err(),
+            Some(conflict!("Bucket '$audit' already exists"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_get_bucket(#[future] storage: Arc<StorageEngine>) {
         let storage = storage.await;
         let bucket = storage
@@ -1188,6 +1238,28 @@ mod tests {
         assert_eq!(bucket_list.buckets.len(), 2);
         assert_eq!(bucket_list.buckets[0].name, "test1");
         assert_eq!(bucket_list.buckets[1].name, "test2");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_bucket_list_includes_system_bucket(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        storage
+            .create_system_bucket("$audit", Bucket::defaults())
+            .await
+            .unwrap();
+        storage
+            .create_bucket("test", Bucket::defaults())
+            .await
+            .unwrap();
+
+        let bucket_list = storage.get_bucket_list().await.unwrap();
+        let bucket_names = bucket_list
+            .buckets
+            .iter()
+            .map(|bucket| bucket.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(bucket_names, vec!["$audit", "test"]);
     }
 
     #[rstest]

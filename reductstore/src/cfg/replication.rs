@@ -94,7 +94,6 @@ mod tests {
             .expect_get()
             .with(eq("RS_REPLICATION_CA_PATH"))
             .return_const(Ok("/tmp/ca.pem".to_string()));
-
         let replication_settings = ReplicationConfig {
             connection_timeout: Duration::from_secs(10),
             replication_log_size: 500,
@@ -147,7 +146,6 @@ mod tests {
             .expect_get()
             .with(eq("RS_REPLICATION_CA_PATH"))
             .return_const(Ok("".to_string()));
-
         let config =
             CfgParser::<MockEnvGetter>::parse_replication_config(&mut Env::new(env_getter), 8000);
 

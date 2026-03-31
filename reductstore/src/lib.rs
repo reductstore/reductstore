@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 pub mod api;
 pub mod asset;
+pub mod audit;
 pub mod auth;
 pub mod backend;
 pub mod cfg;

@@ -29,7 +29,7 @@ use bucket::create_bucket_api_routes;
 use entry::create_entry_api_routes;
 use hyper::http::HeaderValue;
 use log::{error, warn};
-use middleware::{check_api_rate_limit, default_headers, print_statuses};
+use middleware::{audit_requests, check_api_rate_limit, default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use replication::create_replication_api_routes;
@@ -249,6 +249,7 @@ impl AxumAppBuilder {
                 // UI
                 .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
                 .fallback(get(show_ui))
+                .layer(from_fn_with_state(state_keeper.clone(), audit_requests))
                 .layer(from_fn(default_headers))
                 .layer(from_fn(print_statuses))
                 .layer(from_fn_with_state(
@@ -285,6 +286,7 @@ pub(crate) mod tests {
     use crate::api::components::ComponentError;
     use crate::api::limits::{LimitsBuilder, LimitsConfig, WindowLimit};
     use crate::asset::asset_manager::create_asset_manager;
+    use crate::audit::AuditRepositoryBuilder;
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::core::cache::Cache;
@@ -798,6 +800,9 @@ pub(crate) mod tests {
         let token_repo = TokenRepositoryBuilder::new(cfg.clone())
             .build(cfg.data_path.clone())
             .await;
+        let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -813,6 +818,7 @@ pub(crate) mod tests {
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
+            audit_repo: AsyncRwLock::new(audit_repo),
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -887,6 +893,9 @@ pub(crate) mod tests {
             .unwrap();
 
         let storage = Arc::new(storage);
+        let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
         let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -921,6 +930,7 @@ pub(crate) mod tests {
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
+            audit_repo: AsyncRwLock::new(audit_repo),
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -989,6 +999,9 @@ pub(crate) mod tests {
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
+        let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
 
         #[cfg(feature = "web-console")]
         let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
@@ -1011,6 +1024,7 @@ pub(crate) mod tests {
                 Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
+            audit_repo: AsyncRwLock::new(audit_repo),
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: crate::api::limits::LimitsBuilder::new().build(),

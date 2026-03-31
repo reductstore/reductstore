@@ -36,11 +36,22 @@ mod tests {
     use super::*;
 
     use crate::api::http::tests::{headers, keeper};
+    use crate::audit::AUDIT_BUCKET_NAME;
     use axum::http::HeaderValue;
     use reduct_base::error::ErrorCode;
+    use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
     use rstest::rstest;
     use std::sync::Arc;
+
+    fn bearer_headers(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        );
+        headers
+    }
 
     #[rstest]
     #[tokio::test]
@@ -100,5 +111,60 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(err.status(), ErrorCode::Forbidden);
+    }
+
+    #[rstest]
+    #[case(true, None, false)]
+    #[case(false, Some(AUDIT_BUCKET_NAME), false)]
+    #[case(false, Some("*"), true)]
+    #[tokio::test]
+    async fn test_get_system_bucket_permissions(
+        #[future] keeper: Arc<StateKeeper>,
+        #[case] full_access: bool,
+        #[case] read_bucket: Option<&'static str>,
+        #[case] should_forbid: bool,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        components
+            .storage
+            .create_system_bucket(AUDIT_BUCKET_NAME, BucketSettings::default())
+            .await
+            .unwrap();
+
+        let token = components
+            .token_repo
+            .write()
+            .await
+            .unwrap()
+            .generate_token(
+                "system-bucket-reader",
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access,
+                        read: read_bucket
+                            .into_iter()
+                            .map(|bucket| bucket.to_string())
+                            .collect(),
+                        write: vec![],
+                    },
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let result = get_bucket(
+            State(keeper),
+            Path(AUDIT_BUCKET_NAME.to_string()),
+            bearer_headers(&token.value),
+        )
+        .await;
+
+        if should_forbid {
+            assert_eq!(result.err().unwrap().status(), ErrorCode::Forbidden);
+        } else {
+            assert_eq!(result.unwrap().0.info.name, AUDIT_BUCKET_NAME);
+        }
     }
 }

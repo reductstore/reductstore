@@ -153,7 +153,7 @@ impl ManageTokens for TokenRepository {
         }
 
         for entry in permissions.read.iter().chain(&permissions.write) {
-            if !self.permission_regex.is_match(entry) {
+            if !entry.starts_with('$') && !self.permission_regex.is_match(entry) {
                 return Err(unprocessable_entity!(
                     "Permission can contain only bucket names or wildcard '*', got '{}'",
                     entry
@@ -469,6 +469,8 @@ mod tests {
         #[rstest]
         #[tokio::test]
         #[case("*", None)]
+        #[case("$audit", None)]
+        #[case("$system", None)]
         #[case("bucket_1", None)]
         #[case("bucket_2", None)]
         #[case("bucket-*", None)]
@@ -504,6 +506,8 @@ mod tests {
         #[rstest]
         #[tokio::test]
         #[case("*", None)]
+        #[case("$audit", None)]
+        #[case("$system", None)]
         #[case("bucket_1", None)]
         #[case("bucket_2", None)]
         #[case("bucket-*", None)]

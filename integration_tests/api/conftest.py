@@ -2,6 +2,7 @@ import json
 import os
 import random
 import secrets
+import time
 from collections import namedtuple
 from typing import Callable
 
@@ -47,6 +48,16 @@ def _make_bucket_and_return_name(base_url, session, bucket_name) -> str:
     resp = session.post(f"{base_url}/b/{bucket_name}")
     assert resp.status_code == 200
     return bucket_name
+
+
+@pytest.fixture(name="audit_bucket")
+def _ensure_audit_bucket_exists(base_url, session) -> str:
+    resp = session.get(f"{base_url}/info")
+    assert resp.status_code == 200
+
+    # Audit records are flushed after a short aggregation window.
+    time.sleep(6)
+    return "$audit"
 
 
 @pytest.fixture(name="session")
@@ -106,6 +117,34 @@ def _make_token_write_bucket(session, base_url, bucket_name, token_generator):
     permissions = {
         "full_access": False,
         "write": [bucket_name],
+    }
+    name = token_generator()
+    resp = session.post(f"{base_url}/tokens/{name}", json=permissions)
+    assert resp.status_code == 200
+    return namedtuple("Token", ["name", "value"])(
+        name, json.loads(resp.content)["value"]
+    )
+
+
+@pytest.fixture(name="token_read_wildcard")
+def _make_token_read_wildcard(session, base_url, token_generator):
+    permissions = {
+        "full_access": False,
+        "read": ["*"],
+    }
+    name = token_generator()
+    resp = session.post(f"{base_url}/tokens/{name}", json=permissions)
+    assert resp.status_code == 200
+    return namedtuple("Token", ["name", "value"])(
+        name, json.loads(resp.content)["value"]
+    )
+
+
+@pytest.fixture(name="token_read_audit")
+def _make_token_read_audit(session, base_url, token_generator):
+    permissions = {
+        "full_access": False,
+        "read": ["$audit"],
     }
     name = token_generator()
     resp = session.post(f"{base_url}/tokens/{name}", json=permissions)

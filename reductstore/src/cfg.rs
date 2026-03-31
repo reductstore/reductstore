@@ -15,6 +15,7 @@ pub mod zenoh;
 use crate::api::components::Components;
 use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
+use crate::audit::AuditRepositoryBuilder;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType};
 use crate::cfg::io::IoConfig;
@@ -83,6 +84,8 @@ pub struct Cfg {
     pub ext_path: Option<PathBuf>,
     pub cors_allow_origin: Vec<String>,
     pub role: InstanceRole,
+    pub primary_url: Option<String>,
+    pub secondary_url: Option<String>,
 
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
@@ -113,6 +116,8 @@ impl Default for Cfg {
             ext_path: None,
             cors_allow_origin: vec![],
             role: InstanceRole::Primary,
+            primary_url: None,
+            secondary_url: None,
             buckets: HashMap::new(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
@@ -269,6 +274,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             cert_path,
             cert_key_path,
             role: ext_cfg.role(),
+            primary_url: env
+                .get_optional::<String>("RS_PRIMARY_URL")
+                .and_then(|url| if url.is_empty() { None } else { Some(url) }),
+            secondary_url: env
+                .get_optional::<String>("RS_SECONDARY_URL")
+                .and_then(|url| if url.is_empty() { None } else { Some(url) }),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
@@ -370,6 +381,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .server_info(server_info.clone())
             .build();
         let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
+        let audit_repo = AuditRepositoryBuilder::new(self.cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
 
         Ok(Components {
             storage: Arc::clone(&storage),
@@ -388,6 +402,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),
+            audit_repo: AsyncRwLock::new(audit_repo),
             limits: LimitsBuilder::new()
                 .with_config(self.cfg.limits_config)
                 .build(),
@@ -722,6 +737,40 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert_eq!(parser.cfg.api_token, "XXX");
+    }
+
+    #[rstest]
+    #[case(
+        "RS_PRIMARY_URL",
+        "https://primary.example.com",
+        Some("https://primary.example.com".to_string()),
+        None
+    )]
+    #[case(
+        "RS_SECONDARY_URL",
+        "https://secondary.example.com",
+        None,
+        Some("https://secondary.example.com".to_string())
+    )]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_replica_urls(
+        mut env_getter: MockEnvGetter,
+        #[case] env_name: &'static str,
+        #[case] env_value: &'static str,
+        #[case] expected_primary_url: Option<String>,
+        #[case] expected_secondary_url: Option<String>,
+    ) {
+        env_getter
+            .expect_get()
+            .with(eq(env_name))
+            .times(1)
+            .return_const(Ok(env_value.to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
+        assert_eq!(parser.cfg.primary_url, expected_primary_url);
+        assert_eq!(parser.cfg.secondary_url, expected_secondary_url);
     }
 
     #[rstest]

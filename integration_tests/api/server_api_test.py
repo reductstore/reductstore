@@ -46,11 +46,13 @@ def test__get_list_of_buckets(base_url, session):
     data = json.loads(resp.content)
 
     assert len(data["buckets"]) > 0
-    assert "bucket" in data["buckets"][0]["name"]
-    assert int(data["buckets"][0]["size"]) >= 0
-    assert int(data["buckets"][0]["entry_count"]) >= 0
-    assert int(data["buckets"][0]["oldest_record"]) >= 0
-    assert int(data["buckets"][0]["latest_record"]) >= 0
+    assert any("bucket" in bucket["name"] for bucket in data["buckets"])
+
+    for bucket in data["buckets"]:
+        assert int(bucket["size"]) >= 0
+        assert int(bucket["entry_count"]) >= 0
+        assert int(bucket["oldest_record"]) >= 0
+        assert int(bucket["latest_record"]) >= 0
 
     assert resp.headers["Content-Type"] == "application/json"
 
@@ -65,6 +67,67 @@ def test__authorized_list(base_url, session, token_without_permissions):
         f"{base_url}/list", headers=auth_headers(token_without_permissions.value)
     )
     assert resp.status_code == 200
+
+
+@requires_env("API_TOKEN")
+def test__audit_bucket_created_and_accessible(base_url, session, audit_bucket):
+    """Should create the audit bucket lazily and expose it via normal bucket APIs"""
+    resp = session.get(f"{base_url}/list")
+    assert resp.status_code == 200
+    data = json.loads(resp.content)
+    assert any(bucket["name"] == audit_bucket for bucket in data["buckets"])
+
+    resp = session.get(f"{base_url}/b/{audit_bucket}")
+    assert resp.status_code == 200
+    data = json.loads(resp.content)
+    assert data["info"]["name"] == audit_bucket
+    assert data["info"]["entry_count"] >= 1
+    assert int(data["info"]["latest_record"]) >= 0
+
+
+@requires_env("API_TOKEN")
+def test__audit_bucket_requires_exact_permission(
+    base_url,
+    session,
+    audit_bucket,
+    token_without_permissions,
+    token_read_wildcard,
+    token_read_audit,
+):
+    """Should allow $audit only for full-access or exact $audit permission"""
+    resp = session.get(
+        f"{base_url}/b/{audit_bucket}",
+        headers=auth_headers(token_without_permissions.value),
+    )
+    assert resp.status_code == 403
+
+    resp = session.get(
+        f"{base_url}/b/{audit_bucket}",
+        headers=auth_headers(token_read_wildcard.value),
+    )
+    assert resp.status_code == 403
+
+    resp = session.get(
+        f"{base_url}/b/{audit_bucket}",
+        headers=auth_headers(token_read_audit.value),
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(
+        f"{base_url}/list",
+        headers=auth_headers(token_read_wildcard.value),
+    )
+    assert resp.status_code == 200
+    data = json.loads(resp.content)
+    assert all(bucket["name"] != audit_bucket for bucket in data["buckets"])
+
+    resp = session.get(
+        f"{base_url}/list",
+        headers=auth_headers(token_read_audit.value),
+    )
+    assert resp.status_code == 200
+    data = json.loads(resp.content)
+    assert any(bucket["name"] == audit_bucket for bucket in data["buckets"])
 
 
 def test__get_wrong_path(base_url, session):

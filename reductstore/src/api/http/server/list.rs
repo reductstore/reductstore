@@ -46,9 +46,20 @@ pub(super) async fn list(
 mod tests {
     use super::*;
     use crate::api::http::tests::{headers, keeper};
+    use crate::audit::AUDIT_BUCKET_NAME;
     use axum::http::HeaderValue;
+    use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
     use rstest::rstest;
+
+    fn bearer_headers(token: &str) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(
+            "Authorization",
+            HeaderValue::from_str(&format!("Bearer {}", token)).unwrap(),
+        );
+        headers
+    }
 
     #[rstest]
     #[tokio::test]
@@ -87,5 +98,58 @@ mod tests {
         let list = list(State(keeper), headers).await.unwrap();
         assert_eq!(list.0.buckets.len(), 1);
         assert_eq!(list.0.buckets[0].name, "bucket-1");
+    }
+
+    #[rstest]
+    #[case(true, None, true)]
+    #[case(false, Some(AUDIT_BUCKET_NAME), true)]
+    #[case(false, Some("*"), false)]
+    #[tokio::test]
+    async fn test_list_system_bucket_visibility(
+        #[future] keeper: Arc<StateKeeper>,
+        #[case] full_access: bool,
+        #[case] read_bucket: Option<&'static str>,
+        #[case] should_include: bool,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        components
+            .storage
+            .create_system_bucket(AUDIT_BUCKET_NAME, BucketSettings::default())
+            .await
+            .unwrap();
+
+        let token = components
+            .token_repo
+            .write()
+            .await
+            .unwrap()
+            .generate_token(
+                "system-bucket-reader",
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access,
+                        read: read_bucket
+                            .into_iter()
+                            .map(|bucket| bucket.to_string())
+                            .collect(),
+                        write: vec![],
+                    },
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap();
+
+        let list = list(State(keeper), bearer_headers(&token.value))
+            .await
+            .unwrap();
+        let bucket_names = list
+            .0
+            .buckets
+            .iter()
+            .map(|bucket| bucket.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(bucket_names.contains(&AUDIT_BUCKET_NAME), should_include);
     }
 }

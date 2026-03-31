@@ -1,18 +1,18 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::components::StateKeeper;
+use crate::api::components::{Components, StateKeeper};
+use crate::api::http::HttpError;
+use crate::audit::AuditEvent;
 use axum::body::Body;
-use axum::http::{Request, StatusCode};
-
 use axum::extract::State;
+use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error, Level};
 use reduct_base::error::ErrorCode;
-
-use crate::api::http::HttpError;
 use std::sync::Arc;
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 pub(super) async fn default_headers(
     request: Request<Body>,
@@ -31,6 +31,119 @@ pub(super) async fn default_headers(
         format!("{}.{}", tokens[0], tokens[1]).parse().unwrap(),
     );
     Ok(response)
+}
+
+pub(super) async fn audit_requests(
+    State(keeper): State<Arc<StateKeeper>>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<impl IntoResponse, HttpError> {
+    let start = Instant::now();
+
+    let method = request.method().to_string();
+    let path = request.uri().path().to_string();
+    let auth_header = request
+        .headers()
+        .get("Authorization")
+        .and_then(|v| v.to_str().ok())
+        .map(|v| v.to_string());
+
+    let response = next.run(request).await;
+
+    if should_skip_audit(&path) {
+        return Ok(response);
+    }
+
+    let components = get_audit_components(&keeper).await;
+    let token_name = resolve_audit_token_name(
+        response.status(),
+        auth_header.as_deref(),
+        components.as_ref(),
+    )
+    .await;
+
+    if let (Some(token_name), Some(components)) = (token_name, components) {
+        write_audit_event(
+            &components,
+            token_name,
+            format!("{} {}", method, path),
+            response.status().as_u16(),
+            start.elapsed().as_micros() as u64,
+        )
+        .await;
+    }
+
+    Ok(response)
+}
+
+fn should_skip_audit(path: &str) -> bool {
+    // Maybe skip /alive and /ready and /audit endpoints
+    path.ends_with("/alive") || path.ends_with("/ready") || path.contains("/audit")
+}
+
+async fn get_audit_components(keeper: &StateKeeper) -> Option<Arc<Components>> {
+    match keeper.get_anonymous().await {
+        Ok(components) => Some(components),
+        Err(err) => {
+            debug!("Failed to get components for audit: {}", err);
+            None
+        }
+    }
+}
+
+async fn resolve_audit_token_name(
+    status: StatusCode,
+    auth_header: Option<&str>,
+    components: Option<&Arc<Components>>,
+) -> Option<String> {
+    if status == StatusCode::UNAUTHORIZED {
+        Some("unauthorized".to_string())
+    } else if let (Some(header), Some(components)) = (auth_header, components) {
+        match components.token_repo.write().await {
+            Ok(mut token_repo) => match token_repo.validate_token(Some(header)).await {
+                Ok(token) => Some(token.name),
+                Err(err) => {
+                    debug!("Failed to validate token for audit: {}", err);
+                    None
+                }
+            },
+            Err(err) => {
+                debug!("Failed to lock token repository for audit: {}", err);
+                None
+            }
+        }
+    } else {
+        None
+    }
+}
+
+async fn write_audit_event(
+    components: &Arc<Components>,
+    token_name: String,
+    endpoint: String,
+    status: u16,
+    duration: u64,
+) {
+    let event = AuditEvent {
+        timestamp: SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64,
+        token_name,
+        endpoint,
+        status,
+        call_count: 1,
+        duration,
+    };
+
+    match components.audit_repo.write().await {
+        Ok(mut audit_repo) => {
+            if let Err(err) = audit_repo.log_event(event).await {
+                debug!("Failed to persist audit event: {}", err);
+            }
+        }
+        Err(err) => debug!("Failed to lock audit repository: {}", err),
+    }
 }
 
 pub(super) async fn check_api_rate_limit(
@@ -104,13 +217,17 @@ fn log_level_for_response(status: StatusCode, skip_error_log: bool) -> Level {
 mod tests {
     use super::*;
     use crate::api::components::StateKeeper;
-    use crate::api::http::tests::api_limited_keeper;
+    use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
+    use crate::audit::{AuditEvent, AUDIT_BUCKET_NAME};
     use axum::http::Request;
     use axum::http::{HeaderMap, HeaderValue};
     use axum::routing::get;
     use axum::{middleware::from_fn_with_state, Router};
     use log::Level;
+    use reduct_base::io::ReadRecord;
+    use rstest::rstest;
     use std::sync::Arc;
+    use tokio::time::{sleep, Duration};
     use tower::ServiceExt;
 
     #[test_log::test]
@@ -140,7 +257,16 @@ mod tests {
             .is_some_and(|v| v == "skip-error-log"));
     }
 
-    #[rstest::rstest]
+    #[rstest]
+    #[case("/alive", true)]
+    #[case("/ready", true)]
+    #[case("/api/v1/audit/token", true)]
+    #[case("/api/v1/info", false)]
+    fn checks_audit_skip_paths(#[case] path: &str, #[case] expected: bool) {
+        assert_eq!(should_skip_audit(path), expected);
+    }
+
+    #[rstest]
     #[tokio::test]
     async fn enforces_api_rate_limit(#[future] api_limited_keeper: Arc<StateKeeper>) {
         let keeper = api_limited_keeper.await;
@@ -170,5 +296,144 @@ mod tests {
             .to_str()
             .unwrap()
             .contains("api requests"));
+    }
+
+    async fn read_audit_event(keeper: &Arc<StateKeeper>, token_name: &str) -> Option<AuditEvent> {
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket(AUDIT_BUCKET_NAME)
+            .await
+            .ok()?;
+        let bucket = bucket.upgrade_and_unwrap();
+        let info = Arc::clone(&bucket).info().await.unwrap();
+        let entry = info
+            .entries
+            .into_iter()
+            .find(|entry| entry.name == token_name)?;
+        let mut reader = bucket
+            .begin_read(token_name, entry.oldest_record)
+            .await
+            .unwrap();
+        let record = reader.read_chunk().unwrap().unwrap();
+        Some(serde_json::from_slice(&record).unwrap())
+    }
+
+    async fn audit_bucket_exists(keeper: &Arc<StateKeeper>) -> bool {
+        let components = keeper.get_anonymous().await.unwrap();
+        components
+            .storage
+            .get_bucket(AUDIT_BUCKET_NAME)
+            .await
+            .is_ok()
+    }
+
+    async fn wait_for_audit_flush() {
+        sleep(Duration::from_millis(5300)).await;
+    }
+
+    #[rstest]
+    #[case("/alive")]
+    #[case("/ready")]
+    #[case("/some/audit/path")]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn skips_audit_for_internal_paths(
+        #[future] keeper: Arc<StateKeeper>,
+        #[case] path: &'static str,
+    ) {
+        let keeper = keeper.await;
+        let app = Router::new()
+            .route("/{*path}", get(|| async { StatusCode::OK }))
+            .layer(from_fn_with_state(Arc::clone(&keeper), audit_requests));
+
+        let response = app
+            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        wait_for_audit_flush().await;
+        assert!(!audit_bucket_exists(&keeper).await);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn writes_unauthorized_audit_event_for_unauthorized_response(
+        #[future] keeper: Arc<StateKeeper>,
+    ) {
+        let keeper = keeper.await;
+        let app = Router::new()
+            .route("/protected", get(|| async { StatusCode::UNAUTHORIZED }))
+            .layer(from_fn_with_state(Arc::clone(&keeper), audit_requests));
+
+        let response = app
+            .oneshot(Request::get("/protected").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+
+        wait_for_audit_flush().await;
+        let event = read_audit_event(&keeper, "unauthorized").await.unwrap();
+        assert_eq!(event.token_name, "unauthorized");
+        assert_eq!(event.endpoint, "GET /protected");
+        assert_eq!(event.status, StatusCode::UNAUTHORIZED.as_u16());
+        assert_eq!(event.call_count, 1);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn resolves_token_name_for_authenticated_request(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+
+        let token_name =
+            resolve_audit_token_name(StatusCode::OK, Some("Bearer init-token"), Some(&components))
+                .await;
+
+        assert_eq!(token_name, Some("init-token".to_string()));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_none_for_missing_auth_header(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+
+        let token_name = resolve_audit_token_name(StatusCode::OK, None, Some(&components)).await;
+
+        assert_eq!(token_name, None);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_none_when_components_are_unavailable(
+        #[future] waiting_keeper: Arc<StateKeeper>,
+    ) {
+        let keeper = waiting_keeper.await;
+        let components = get_audit_components(&keeper).await;
+        assert!(components.is_none());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn skips_audit_when_token_validation_fails(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let app = Router::new()
+            .route("/info", get(|| async { StatusCode::OK }))
+            .layer(from_fn_with_state(Arc::clone(&keeper), audit_requests));
+
+        let response = app
+            .oneshot(
+                Request::get("/info")
+                    .header("Authorization", "Bearer invalid-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        wait_for_audit_flush().await;
+        assert!(!audit_bucket_exists(&keeper).await);
     }
 }
