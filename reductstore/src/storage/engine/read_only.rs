@@ -62,18 +62,18 @@ impl ReadOnlyMode for StorageEngine {
                     new_buckets.insert(bucket.name().to_string(), bucket);
                 }
                 Err(e) => {
-                    let bucket_name = path
+                    let skip_broken_audit_bucket = path
                         .file_name()
                         .and_then(|name| name.to_str())
-                        .unwrap_or_default();
-                    if bucket_name == AUDIT_BUCKET_NAME
-                        && self.cfg.primary_url.is_none()
-                        && self.cfg.secondary_url.is_none()
-                    {
-                        continue;
-                    }
+                        .is_some_and(|bucket_name| {
+                            bucket_name == AUDIT_BUCKET_NAME
+                                && self.cfg.primary_url.is_none()
+                                && self.cfg.secondary_url.is_none()
+                        });
 
-                    panic!("Failed to load bucket from {:?}: {}", path, e);
+                    if !skip_broken_audit_bucket {
+                        panic!("Failed to load bucket from {:?}: {}", path, e);
+                    }
                 }
             }
         }
