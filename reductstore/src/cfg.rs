@@ -740,6 +740,40 @@ mod tests {
     }
 
     #[rstest]
+    #[case(
+        "RS_PRIMARY_URL",
+        "https://primary.example.com",
+        Some("https://primary.example.com".to_string()),
+        None
+    )]
+    #[case(
+        "RS_SECONDARY_URL",
+        "https://secondary.example.com",
+        None,
+        Some("https://secondary.example.com".to_string())
+    )]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_replica_urls(
+        mut env_getter: MockEnvGetter,
+        #[case] env_name: &'static str,
+        #[case] env_value: &'static str,
+        #[case] expected_primary_url: Option<String>,
+        #[case] expected_secondary_url: Option<String>,
+    ) {
+        env_getter
+            .expect_get()
+            .with(eq(env_name))
+            .times(1)
+            .return_const(Ok(env_value.to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
+        assert_eq!(parser.cfg.primary_url, expected_primary_url);
+        assert_eq!(parser.cfg.secondary_url, expected_secondary_url);
+    }
+
+    #[rstest]
     #[tokio::test(flavor = "current_thread")]
     async fn test_cert_path(mut env_getter: MockEnvGetter) {
         env_getter

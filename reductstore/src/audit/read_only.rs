@@ -222,3 +222,334 @@ impl ManageAudit for ReadOnlyAuditRepository {
         self.aggregator.log_event(event).await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::audit::aggregator::AGGREGATION_WINDOW_SECS;
+    use crate::cfg::Cfg;
+    use crate::storage::engine::StorageEngine;
+    use axum::body::Bytes as AxumBytes;
+    use axum::extract::State;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::routing::any;
+    use axum::Router;
+    use rstest::{fixture, rstest};
+    use std::sync::Arc;
+    use tempfile::tempdir;
+    use tokio::net::TcpListener;
+    use tokio::sync::Mutex;
+    use tokio::time::sleep;
+
+    #[derive(Clone)]
+    struct TestServerState {
+        status: StatusCode,
+        error_header: Option<&'static str>,
+        events: Arc<Mutex<Vec<AuditEvent>>>,
+        auth_headers: Arc<Mutex<Vec<Option<String>>>>,
+        status_labels: Arc<Mutex<Vec<Option<String>>>>,
+    }
+
+    async fn audit_handler(
+        State(state): State<TestServerState>,
+        headers: axum::http::HeaderMap,
+        body: AxumBytes,
+    ) -> impl IntoResponse {
+        let event: AuditEvent = serde_json::from_slice(&body).unwrap();
+        state.events.lock().await.push(event);
+        state.auth_headers.lock().await.push(
+            headers
+                .get(reqwest::header::AUTHORIZATION.as_str())
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.to_string()),
+        );
+        state.status_labels.lock().await.push(
+            headers
+                .get("x-reduct-label-status")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.to_string()),
+        );
+
+        let mut response = state.status.into_response();
+        if let Some(message) = state.error_header {
+            response
+                .headers_mut()
+                .insert("x-reduct-error", HeaderValue::from_static(message));
+        }
+
+        response
+    }
+
+    async fn start_test_server(
+        status: StatusCode,
+        error_header: Option<&'static str>,
+    ) -> (
+        String,
+        Arc<Mutex<Vec<AuditEvent>>>,
+        Arc<Mutex<Vec<Option<String>>>>,
+        Arc<Mutex<Vec<Option<String>>>>,
+    ) {
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let auth_headers = Arc::new(Mutex::new(Vec::new()));
+        let status_labels = Arc::new(Mutex::new(Vec::new()));
+        let state = TestServerState {
+            status,
+            error_header,
+            events: Arc::clone(&events),
+            auth_headers: Arc::clone(&auth_headers),
+            status_labels: Arc::clone(&status_labels),
+        };
+
+        let app = Router::new()
+            .route("/{*path}", any(audit_handler))
+            .with_state(state);
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        (
+            format!("http://{}/", addr),
+            events,
+            auth_headers,
+            status_labels,
+        )
+    }
+
+    #[fixture]
+    async fn storage() -> Arc<StorageEngine> {
+        let tmp_dir = tempdir().unwrap();
+        let cfg = Cfg {
+            data_path: tmp_dir.keep(),
+            ..Cfg::default()
+        };
+        Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg)
+                .build()
+                .await,
+        )
+    }
+
+    fn make_cfg(primary_url: Option<String>, secondary_url: Option<String>) -> Cfg {
+        Cfg {
+            api_token: "admin-token".to_string(),
+            primary_url,
+            secondary_url,
+            ..Cfg::default()
+        }
+    }
+
+    fn make_event(timestamp: u64) -> AuditEvent {
+        AuditEvent {
+            timestamp,
+            token_name: "token-1".to_string(),
+            endpoint: "GET /api/v1/info".to_string(),
+            status: 200,
+            call_count: 1,
+            duration: 100,
+        }
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn uses_primary_url_and_remembers_it() {
+        let (primary_url, primary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let preferred_url = Arc::new(AsyncRwLock::new(None));
+        let cfg = make_cfg(Some(primary_url.clone()), None);
+        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+
+        ReadOnlyAuditRepository::log_event_with_failover(
+            &client,
+            Some(&primary_url),
+            None,
+            Arc::clone(&preferred_url),
+            &make_event(1),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(*preferred_url.read().await.unwrap(), Some(primary_url));
+        assert_eq!(primary_events.lock().await.len(), 1);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn falls_back_to_secondary_on_connection_error() {
+        let (secondary_url, secondary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let preferred_url = Arc::new(AsyncRwLock::new(None));
+        let cfg = make_cfg(
+            Some("http://127.0.0.1:1/".to_string()),
+            Some(secondary_url.clone()),
+        );
+        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+
+        ReadOnlyAuditRepository::log_event_with_failover(
+            &client,
+            Some("http://127.0.0.1:1/"),
+            Some(&secondary_url),
+            Arc::clone(&preferred_url),
+            &make_event(1),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(*preferred_url.read().await.unwrap(), Some(secondary_url));
+        assert_eq!(secondary_events.lock().await.len(), 1);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn prefers_last_successful_url_before_primary() {
+        let (primary_url, primary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let (secondary_url, secondary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let preferred_url = Arc::new(AsyncRwLock::new(Some(secondary_url.clone())));
+        let cfg = make_cfg(Some(primary_url.clone()), Some(secondary_url.clone()));
+        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+
+        ReadOnlyAuditRepository::log_event_with_failover(
+            &client,
+            Some(&primary_url),
+            Some(&secondary_url),
+            Arc::clone(&preferred_url),
+            &make_event(1),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(primary_events.lock().await.len(), 0);
+        assert_eq!(secondary_events.lock().await.len(), 1);
+        assert_eq!(*preferred_url.read().await.unwrap(), Some(secondary_url));
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn does_not_fail_over_on_http_error() {
+        let (primary_url, primary_events, _, _) =
+            start_test_server(StatusCode::FORBIDDEN, Some("denied")).await;
+        let (secondary_url, secondary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let preferred_url = Arc::new(AsyncRwLock::new(None));
+        let cfg = make_cfg(Some(primary_url.clone()), Some(secondary_url.clone()));
+        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+
+        let err = ReadOnlyAuditRepository::log_event_with_failover(
+            &client,
+            Some(&primary_url),
+            Some(&secondary_url),
+            Arc::clone(&preferred_url),
+            &make_event(1),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.status, ErrorCode::Forbidden);
+        assert_eq!(primary_events.lock().await.len(), 1);
+        assert_eq!(secondary_events.lock().await.len(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fails_when_no_replica_urls_are_configured() {
+        let preferred_url = Arc::new(AsyncRwLock::new(None));
+        let cfg = make_cfg(None, None);
+        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+
+        let err = ReadOnlyAuditRepository::log_event_with_failover(
+            &client,
+            None,
+            None,
+            Arc::clone(&preferred_url),
+            &make_event(1),
+        )
+        .await
+        .unwrap_err();
+
+        assert_eq!(err.status, ErrorCode::UnprocessableEntity);
+        assert_eq!(
+            err.message,
+            "Neither primary nor secondary URL is configured for replica audit writes"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn aggregates_before_forwarding(#[future] storage: Arc<StorageEngine>) {
+        let (primary_url, primary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let storage = storage.await;
+        let cfg = make_cfg(Some(primary_url), None);
+        let mut repo = ReadOnlyAuditRepository::new(cfg, storage).await;
+
+        repo.log_event(make_event(1)).await.unwrap();
+        repo.log_event(make_event(2)).await.unwrap();
+
+        sleep(Duration::from_secs(2)).await;
+        assert_eq!(primary_events.lock().await.len(), 0);
+
+        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 500)).await;
+        let events = primary_events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].call_count, 2);
+        assert_eq!(events[0].duration, 200);
+        assert_eq!(events[0].timestamp, 1);
+    }
+
+    #[rstest]
+    #[case(Some("https://example.com/".to_string()), Some("https://example.com/".to_string()))]
+    #[case(Some("https://example.com".to_string()), Some("https://example.com/".to_string()))]
+    #[case(None, None)]
+    fn normalizes_replica_urls(#[case] url: Option<String>, #[case] expected: Option<String>) {
+        assert_eq!(normalize_url(url), expected);
+    }
+
+    #[test]
+    fn builds_write_url_for_audit_bucket() {
+        let event = make_event(42);
+        assert_eq!(
+            build_write_url("https://primary.example.com/", &event),
+            "https://primary.example.com/api/v1/b/$audit/token-1?ts=42"
+        );
+    }
+
+    #[rstest]
+    #[case("admin-token", Some("Bearer admin-token".to_string()))]
+    #[case("", None)]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn forwards_expected_headers(
+        #[case] api_token: &str,
+        #[case] expected_auth_header: Option<String>,
+    ) {
+        let (base_url, events, auth_headers, status_labels) =
+            start_test_server(StatusCode::OK, None).await;
+        let cfg = Cfg {
+            api_token: api_token.to_string(),
+            ..Cfg::default()
+        };
+        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+
+        ReadOnlyAuditRepository::log_event_to_url(&client, &base_url, &make_event(1))
+            .await
+            .unwrap();
+
+        assert_eq!(events.lock().await.len(), 1);
+        assert_eq!(auth_headers.lock().await[0], expected_auth_header);
+        assert_eq!(status_labels.lock().await[0], Some("200".to_string()));
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn uses_unknown_error_message_when_header_is_missing() {
+        let (base_url, _, _, _) = start_test_server(StatusCode::FORBIDDEN, None).await;
+        let client = ReadOnlyAuditRepository::build_client(&Cfg::default()).unwrap();
+
+        let err = ReadOnlyAuditRepository::log_event_to_url(&client, &base_url, &make_event(1))
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status, ErrorCode::Forbidden);
+        assert_eq!(err.message, "Unknown");
+    }
+}

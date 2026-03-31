@@ -206,3 +206,257 @@ impl AuditAggregator {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::{fixture, rstest};
+    use tokio::sync::Mutex;
+
+    fn make_test_event(timestamp: u64) -> AuditEvent {
+        AuditEvent {
+            timestamp,
+            token_name: "token-1".to_string(),
+            endpoint: "GET /api/v1/info".to_string(),
+            status: 200,
+            call_count: 1,
+            duration: 100,
+        }
+    }
+
+    fn make_test_handler(events: Arc<Mutex<Vec<AuditEvent>>>) -> FlushHandler {
+        Arc::new(move |event| {
+            let events = Arc::clone(&events);
+            Box::pin(async move {
+                events.lock().await.push(event);
+                Ok(())
+            })
+        })
+    }
+
+    #[fixture]
+    fn state() -> Arc<AsyncRwLock<AuditState>> {
+        Arc::new(AsyncRwLock::new(AuditState::default()))
+    }
+
+    #[fixture]
+    fn flushed_events() -> Arc<Mutex<Vec<AuditEvent>>> {
+        Arc::new(Mutex::new(Vec::new()))
+    }
+
+    #[rstest]
+    fn make_event_uses_first_timestamp_and_aggregates_duration() {
+        let event = make_event(
+            AuditAggregateKey {
+                token_name: "token-1".to_string(),
+                endpoint: "GET /api/v1/info".to_string(),
+                status: 200,
+            },
+            AuditAggregate {
+                first_timestamp: 10,
+                last_timestamp: 20,
+                call_count: 3,
+                total_duration: 450,
+                flush_at: Instant::now(),
+            },
+        );
+
+        assert_eq!(event.timestamp, 10);
+        assert_eq!(event.token_name, "token-1");
+        assert_eq!(event.endpoint, "GET /api/v1/info");
+        assert_eq!(event.status, 200);
+        assert_eq!(event.call_count, 3);
+        assert_eq!(event.duration, 450);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn next_deadline_returns_none_when_empty(state: Arc<AsyncRwLock<AuditState>>) {
+        assert!(AuditAggregator::next_deadline(&state).await.is_none());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn next_deadline_returns_earliest_flush_at(state: Arc<AsyncRwLock<AuditState>>) {
+        let earlier = Instant::now() + Duration::from_secs(1);
+        let later = Instant::now() + Duration::from_secs(5);
+        let mut guard = state.write().await.unwrap();
+        guard.aggregates.insert(
+            AuditAggregateKey {
+                token_name: "token-1".to_string(),
+                endpoint: "GET /api/v1/info".to_string(),
+                status: 200,
+            },
+            AuditAggregate {
+                first_timestamp: 1,
+                last_timestamp: 1,
+                call_count: 1,
+                total_duration: 10,
+                flush_at: later,
+            },
+        );
+        guard.aggregates.insert(
+            AuditAggregateKey {
+                token_name: "token-2".to_string(),
+                endpoint: "GET /api/v1/info".to_string(),
+                status: 200,
+            },
+            AuditAggregate {
+                first_timestamp: 2,
+                last_timestamp: 2,
+                call_count: 1,
+                total_duration: 20,
+                flush_at: earlier,
+            },
+        );
+        drop(guard);
+
+        assert_eq!(AuditAggregator::next_deadline(&state).await, Some(earlier));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn aggregate_event_updates_existing_entry(state: Arc<AsyncRwLock<AuditState>>) {
+        AuditAggregator::aggregate_event(&state, make_test_event(20))
+            .await
+            .unwrap();
+        AuditAggregator::aggregate_event(&state, make_test_event(10))
+            .await
+            .unwrap();
+
+        let guard = state.read().await.unwrap();
+        let aggregate = guard.aggregates.values().next().unwrap();
+        assert_eq!(aggregate.call_count, 2);
+        assert_eq!(aggregate.total_duration, 200);
+        assert_eq!(aggregate.first_timestamp, 10);
+        assert_eq!(aggregate.last_timestamp, 10);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn flush_expired_flushes_only_expired_entries(
+        state: Arc<AsyncRwLock<AuditState>>,
+        flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
+    ) {
+        let handler = make_test_handler(Arc::clone(&flushed_events));
+        let now = Instant::now();
+
+        let mut guard = state.write().await.unwrap();
+        guard.aggregates.insert(
+            AuditAggregateKey {
+                token_name: "expired".to_string(),
+                endpoint: "GET /expired".to_string(),
+                status: 200,
+            },
+            AuditAggregate {
+                first_timestamp: 1,
+                last_timestamp: 1,
+                call_count: 1,
+                total_duration: 100,
+                flush_at: now - Duration::from_millis(1),
+            },
+        );
+        guard.aggregates.insert(
+            AuditAggregateKey {
+                token_name: "pending".to_string(),
+                endpoint: "GET /pending".to_string(),
+                status: 200,
+            },
+            AuditAggregate {
+                first_timestamp: 2,
+                last_timestamp: 2,
+                call_count: 1,
+                total_duration: 100,
+                flush_at: now + Duration::from_secs(10),
+            },
+        );
+        drop(guard);
+
+        AuditAggregator::flush_expired(&state, &handler)
+            .await
+            .unwrap();
+
+        let events = flushed_events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].token_name, "expired");
+        drop(events);
+
+        let guard = state.read().await.unwrap();
+        assert_eq!(guard.aggregates.len(), 1);
+        assert!(guard
+            .aggregates
+            .keys()
+            .any(|key| key.token_name == "pending"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn flush_all_drains_all_entries(
+        state: Arc<AsyncRwLock<AuditState>>,
+        flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
+    ) {
+        let handler = make_test_handler(Arc::clone(&flushed_events));
+
+        let mut guard = state.write().await.unwrap();
+        for (idx, token_name) in ["token-1", "token-2"].into_iter().enumerate() {
+            guard.aggregates.insert(
+                AuditAggregateKey {
+                    token_name: token_name.to_string(),
+                    endpoint: "GET /api/v1/info".to_string(),
+                    status: 200,
+                },
+                AuditAggregate {
+                    first_timestamp: idx as u64 + 1,
+                    last_timestamp: idx as u64 + 1,
+                    call_count: 1,
+                    total_duration: 100,
+                    flush_at: Instant::now(),
+                },
+            );
+        }
+        drop(guard);
+
+        AuditAggregator::flush_all(&state, &handler).await.unwrap();
+
+        assert_eq!(flushed_events.lock().await.len(), 2);
+        assert!(state.read().await.unwrap().aggregates.is_empty());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn log_event_returns_internal_error_when_worker_channel_is_closed() {
+        let (tx, rx) = mpsc::channel(1);
+        drop(rx);
+        let aggregator = AuditAggregator {
+            tx,
+            state: Arc::new(AsyncRwLock::new(AuditState::default())),
+        };
+
+        let err = aggregator.log_event(make_test_event(1)).await.unwrap_err();
+        assert_eq!(
+            err.status,
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        assert_eq!(err.message, "Audit worker is not available");
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_worker_flushes_all_when_channel_is_closed(
+        flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
+    ) {
+        let handler = make_test_handler(Arc::clone(&flushed_events));
+        let state = Arc::new(AsyncRwLock::new(AuditState::default()));
+        let (tx, rx) = mpsc::channel(4);
+
+        tx.send(make_test_event(1)).await.unwrap();
+        drop(tx);
+
+        AuditAggregator::run_worker(rx, Arc::clone(&state), handler).await;
+
+        let events = flushed_events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].timestamp, 1);
+        assert!(state.read().await.unwrap().aggregates.is_empty());
+    }
+}

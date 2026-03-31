@@ -98,10 +98,12 @@ mod tests {
     use crate::cfg::Cfg;
     use crate::storage::engine::StorageEngine;
     use reduct_base::io::ReadRecord;
+    use rstest::{fixture, rstest};
     use tempfile::tempdir;
     use tokio::time::{sleep, Duration};
 
-    async fn create_repo() -> AuditRepository {
+    #[fixture]
+    async fn repo() -> AuditRepository {
         let tmp_dir = tempdir().unwrap();
         let cfg = Cfg {
             data_path: tmp_dir.keep(),
@@ -143,6 +145,17 @@ mod tests {
         serde_json::from_slice(&record).unwrap()
     }
 
+    async fn read_audit_labels(repo: &AuditRepository, token_name: &str, timestamp: u64) -> Labels {
+        let bucket = repo
+            .storage
+            .get_bucket(AUDIT_BUCKET_NAME)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        let reader = bucket.begin_read(token_name, timestamp).await.unwrap();
+        reader.meta().labels().clone()
+    }
+
     async fn audit_record_exists(repo: &AuditRepository, token_name: &str, timestamp: u64) -> bool {
         let bucket = match repo.storage.get_bucket(AUDIT_BUCKET_NAME).await {
             Ok(bucket) => bucket.upgrade_and_unwrap(),
@@ -166,9 +179,10 @@ mod tests {
         assert_eq!(state.aggregates.len(), expected);
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn aggregates_events_with_same_key() {
-        let mut repo = create_repo().await;
+    async fn aggregates_events_with_same_key(#[future] repo: AuditRepository) {
+        let mut repo = repo.await;
 
         repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
             .await
@@ -187,9 +201,10 @@ mod tests {
         assert_eq!(aggregate.last_timestamp, 2);
     }
 
+    #[rstest]
     #[tokio::test]
-    async fn separates_events_with_different_status() {
-        let mut repo = create_repo().await;
+    async fn separates_events_with_different_status(#[future] repo: AuditRepository) {
+        let mut repo = repo.await;
 
         repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
             .await
@@ -203,9 +218,10 @@ mod tests {
         assert_eq!(state.aggregates.len(), 2);
     }
 
+    #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn flushes_single_event_after_delay() {
-        let mut repo = create_repo().await;
+    async fn flushes_single_event_after_delay(#[future] repo: AuditRepository) {
+        let mut repo = repo.await;
 
         repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
             .await
@@ -222,9 +238,47 @@ mod tests {
         assert_eq!(event.timestamp, 1);
     }
 
+    #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn second_matching_event_delays_flush_and_aggregates_record() {
-        let mut repo = create_repo().await;
+    async fn flushes_status_label_only(#[future] repo: AuditRepository) {
+        let mut repo = repo.await;
+
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
+
+        let labels = read_audit_labels(&repo, "token-1", 1).await;
+        assert_eq!(
+            labels,
+            Labels::from([("status".to_string(), "200".to_string())])
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn creates_system_bucket_when_missing(#[future] repo: AuditRepository) {
+        let repo = repo.await;
+
+        AuditRepository::write_event_to_bucket(
+            Arc::clone(&repo.storage),
+            make_event("token-1", "GET /api/v1/b/test", 200, 1),
+        )
+        .await
+        .unwrap();
+
+        let event = read_audit_event(&repo, "token-1", 1).await;
+        assert_eq!(event.token_name, "token-1");
+        assert_eq!(event.status, 200);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn second_matching_event_delays_flush_and_aggregates_record(
+        #[future] repo: AuditRepository,
+    ) {
+        let mut repo = repo.await;
 
         repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
             .await
@@ -244,9 +298,10 @@ mod tests {
         assert_eq!(event.timestamp, 1);
     }
 
+    #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn stale_timer_does_not_flush_after_version_change() {
-        let mut repo = create_repo().await;
+    async fn stale_timer_does_not_flush_after_version_change(#[future] repo: AuditRepository) {
+        let mut repo = repo.await;
 
         repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
             .await
