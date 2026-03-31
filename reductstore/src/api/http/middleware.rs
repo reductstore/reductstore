@@ -217,7 +217,7 @@ fn log_level_for_response(status: StatusCode, skip_error_log: bool) -> Level {
 mod tests {
     use super::*;
     use crate::api::components::StateKeeper;
-    use crate::api::http::tests::{api_limited_keeper, keeper};
+    use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
     use crate::audit::{AuditEvent, AUDIT_BUCKET_NAME};
     use axum::http::Request;
     use axum::http::{HeaderMap, HeaderValue};
@@ -255,6 +255,15 @@ mod tests {
         assert!(!headers
             .get("x-reduct-log-hint")
             .is_some_and(|v| v == "skip-error-log"));
+    }
+
+    #[rstest]
+    #[case("/alive", true)]
+    #[case("/ready", true)]
+    #[case("/api/v1/audit/token", true)]
+    #[case("/api/v1/info", false)]
+    fn checks_audit_skip_paths(#[case] path: &str, #[case] expected: bool) {
+        assert_eq!(should_skip_audit(path), expected);
     }
 
     #[rstest]
@@ -369,6 +378,40 @@ mod tests {
         assert_eq!(event.endpoint, "GET /protected");
         assert_eq!(event.status, StatusCode::UNAUTHORIZED.as_u16());
         assert_eq!(event.call_count, 1);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn resolves_token_name_for_authenticated_request(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+
+        let token_name =
+            resolve_audit_token_name(StatusCode::OK, Some("Bearer init-token"), Some(&components))
+                .await;
+
+        assert_eq!(token_name, Some("init-token".to_string()));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_none_for_missing_auth_header(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+
+        let token_name = resolve_audit_token_name(StatusCode::OK, None, Some(&components)).await;
+
+        assert_eq!(token_name, None);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_none_when_components_are_unavailable(
+        #[future] waiting_keeper: Arc<StateKeeper>,
+    ) {
+        let keeper = waiting_keeper.await;
+        let components = get_audit_components(&keeper).await;
+        assert!(components.is_none());
     }
 
     #[rstest]
