@@ -143,6 +143,7 @@ impl LimitsBuilder {
         self
     }
 
+    #[cfg(test)]
     pub fn with_window(mut self, window: Duration) -> Self {
         self.window = Some(window);
         self
