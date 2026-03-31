@@ -1,210 +1,41 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::audit::aggregator::{AuditAggregator, FlushHandler};
 use crate::audit::{AuditEvent, ManageAudit, AUDIT_BUCKET_NAME};
 use crate::cfg::Cfg;
-use crate::core::sync::AsyncRwLock;
 use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use bytes::Bytes;
+use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 use reduct_base::Labels;
-use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
-
-const AGGREGATION_WINDOW_SECS: u64 = 5;
-const AUDIT_CHANNEL_SIZE: usize = 1024;
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-struct AuditAggregateKey {
-    token_name: String,
-    endpoint: String,
-    status: u16,
-}
-
-#[derive(Debug, Clone)]
-struct AuditAggregate {
-    first_timestamp: u64,
-    last_timestamp: u64,
-    call_count: u64,
-    total_duration: u64,
-    flush_at: Instant,
-}
-
-#[derive(Default)]
-struct AuditState {
-    aggregates: HashMap<AuditAggregateKey, AuditAggregate>,
-}
 
 // The local audit repository writes audit events into the internal $audit bucket.
 pub(crate) struct AuditRepository {
-    tx: mpsc::Sender<AuditEvent>,
+    aggregator: AuditAggregator,
     #[cfg(test)]
     storage: Arc<StorageEngine>,
-    #[cfg(test)]
-    state: Arc<AsyncRwLock<AuditState>>,
 }
 
 impl AuditRepository {
     pub async fn new(_cfg: Cfg, storage: Arc<StorageEngine>) -> Self {
-        let state = Arc::new(AsyncRwLock::new(AuditState::default()));
-        let (tx, rx) = mpsc::channel(AUDIT_CHANNEL_SIZE);
+        #[cfg(test)]
+        let test_storage = Arc::clone(&storage);
+        let sink_storage = Arc::clone(&storage);
+        let handler: FlushHandler = Arc::new(move |event| {
+            let storage = Arc::clone(&sink_storage);
+            Box::pin(async move { Self::write_event_to_bucket(storage, event).await })
+        });
 
-        tokio::spawn(Self::run_worker(
-            rx,
-            Arc::clone(&state),
-            Arc::clone(&storage),
-        ));
+        let aggregator = AuditAggregator::new(handler);
 
         Self {
-            tx,
+            aggregator,
             #[cfg(test)]
-            storage,
-            #[cfg(test)]
-            state,
-        }
-    }
-
-    async fn aggregate_event(
-        state: &Arc<AsyncRwLock<AuditState>>,
-        event: AuditEvent,
-    ) -> Result<(), ReductError> {
-        let key = AuditAggregateKey {
-            token_name: event.token_name,
-            endpoint: event.endpoint,
-            status: event.status,
-        };
-
-        let mut state = state.write().await?;
-        let aggregate = state
-            .aggregates
-            .entry(key)
-            .and_modify(|aggregate| {
-                aggregate.call_count += event.call_count;
-                aggregate.total_duration += event.duration;
-                aggregate.last_timestamp = event.timestamp;
-                if event.timestamp < aggregate.first_timestamp {
-                    aggregate.first_timestamp = event.timestamp;
-                }
-                aggregate.flush_at = Instant::now() + Duration::from_secs(AGGREGATION_WINDOW_SECS);
-            })
-            .or_insert_with(|| AuditAggregate {
-                first_timestamp: event.timestamp,
-                last_timestamp: event.timestamp,
-                call_count: event.call_count,
-                total_duration: event.duration,
-                flush_at: Instant::now() + Duration::from_secs(AGGREGATION_WINDOW_SECS),
-            });
-
-        let _ = aggregate;
-        Ok(())
-    }
-
-    async fn run_worker(
-        mut rx: mpsc::Receiver<AuditEvent>,
-        state: Arc<AsyncRwLock<AuditState>>,
-        storage: Arc<StorageEngine>,
-    ) {
-        loop {
-            if let Some(deadline) = Self::next_deadline(&state).await {
-                tokio::select! {
-                    maybe_event = rx.recv() => {
-                        match maybe_event {
-                            Some(event) => {
-                                let _ = Self::aggregate_event(&state, event).await;
-                            }
-                            None => {
-                                let _ = Self::flush_all(&state, &storage).await;
-                                break;
-                            }
-                        }
-                    }
-                    _ = tokio::time::sleep_until(deadline) => {
-                        let _ = Self::flush_expired(&state, &storage).await;
-                    }
-                }
-            } else {
-                match rx.recv().await {
-                    Some(event) => {
-                        let _ = Self::aggregate_event(&state, event).await;
-                    }
-                    None => break,
-                }
-            }
-        }
-    }
-
-    async fn next_deadline(state: &Arc<AsyncRwLock<AuditState>>) -> Option<Instant> {
-        let state = state.read().await.ok()?;
-        state
-            .aggregates
-            .values()
-            .map(|aggregate| aggregate.flush_at)
-            .min()
-    }
-
-    async fn flush_expired(
-        state: &Arc<AsyncRwLock<AuditState>>,
-        storage: &Arc<StorageEngine>,
-    ) -> Result<(), ReductError> {
-        let now = Instant::now();
-        let events = {
-            let mut state = state.write().await?;
-            let expired_keys: Vec<_> = state
-                .aggregates
-                .iter()
-                .filter(|(_, aggregate)| aggregate.flush_at <= now)
-                .map(|(key, _)| key.clone())
-                .collect();
-
-            expired_keys
-                .into_iter()
-                .filter_map(|key| {
-                    state
-                        .aggregates
-                        .remove(&key)
-                        .map(|aggregate| Self::into_event(key, aggregate))
-                })
-                .collect::<Vec<_>>()
-        };
-
-        for event in events {
-            Self::write_event_to_bucket(Arc::clone(storage), event).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn flush_all(
-        state: &Arc<AsyncRwLock<AuditState>>,
-        storage: &Arc<StorageEngine>,
-    ) -> Result<(), ReductError> {
-        let events = {
-            let mut state = state.write().await?;
-            state
-                .aggregates
-                .drain()
-                .map(|(key, aggregate)| Self::into_event(key, aggregate))
-                .collect::<Vec<_>>()
-        };
-
-        for event in events {
-            Self::write_event_to_bucket(Arc::clone(storage), event).await?;
-        }
-
-        Ok(())
-    }
-
-    fn into_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> AuditEvent {
-        AuditEvent {
-            timestamp: aggregate.first_timestamp,
-            token_name: key.token_name,
-            endpoint: key.endpoint,
-            status: key.status,
-            call_count: aggregate.call_count,
-            duration: aggregate.total_duration,
+            storage: test_storage,
         }
     }
 
@@ -213,9 +44,8 @@ impl AuditRepository {
         event: AuditEvent,
     ) -> Result<(), ReductError> {
         let labels = Labels::from([("status".to_string(), event.status.to_string())]);
-        let payload = serde_json::to_vec(&event).map_err(|err| {
-            ReductError::internal_server_error(&format!("Failed to serialize audit event: {}", err))
-        })?;
+        let payload = serde_json::to_vec(&event)
+            .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
         let mut writer = match storage
             .begin_write(
                 AUDIT_BUCKET_NAME,
@@ -228,7 +58,7 @@ impl AuditRepository {
             .await
         {
             Ok(writer) => writer,
-            Err(_) => {
+            Err(err) if err.status == ErrorCode::NotFound => {
                 storage
                     .create_system_bucket(
                         AUDIT_BUCKET_NAME,
@@ -246,6 +76,7 @@ impl AuditRepository {
                     )
                     .await?
             }
+            Err(err) => return Err(err),
         };
         writer.send(Ok(Some(Bytes::from(payload)))).await?;
         writer.send(Ok(None)).await?;
@@ -256,21 +87,19 @@ impl AuditRepository {
 #[async_trait]
 impl ManageAudit for AuditRepository {
     async fn log_event(&mut self, event: AuditEvent) -> Result<(), ReductError> {
-        self.tx
-            .send(event)
-            .await
-            .map_err(|_| ReductError::internal_server_error("Audit worker is not available"))
+        self.aggregator.log_event(event).await
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audit::aggregator::AGGREGATION_WINDOW_SECS;
     use crate::cfg::Cfg;
     use crate::storage::engine::StorageEngine;
     use reduct_base::io::ReadRecord;
     use tempfile::tempdir;
-    use tokio::time::sleep;
+    use tokio::time::{sleep, Duration};
 
     async fn create_repo() -> AuditRepository {
         let tmp_dir = tempdir().unwrap();
@@ -325,7 +154,7 @@ mod tests {
 
     async fn wait_for_aggregate_count(repo: &AuditRepository, expected: usize) {
         for _ in 0..50 {
-            let state = repo.state.read().await.unwrap();
+            let state = repo.aggregator.state.read().await.unwrap();
             if state.aggregates.len() == expected {
                 return;
             }
@@ -333,7 +162,7 @@ mod tests {
             sleep(Duration::from_millis(20)).await;
         }
 
-        let state = repo.state.read().await.unwrap();
+        let state = repo.aggregator.state.read().await.unwrap();
         assert_eq!(state.aggregates.len(), expected);
     }
 
@@ -349,7 +178,7 @@ mod tests {
             .unwrap();
 
         wait_for_aggregate_count(&repo, 1).await;
-        let state = repo.state.read().await.unwrap();
+        let state = repo.aggregator.state.read().await.unwrap();
         assert_eq!(state.aggregates.len(), 1);
         let aggregate = state.aggregates.values().next().unwrap();
         assert_eq!(aggregate.call_count, 2);
@@ -370,7 +199,7 @@ mod tests {
             .unwrap();
 
         wait_for_aggregate_count(&repo, 2).await;
-        let state = repo.state.read().await.unwrap();
+        let state = repo.aggregator.state.read().await.unwrap();
         assert_eq!(state.aggregates.len(), 2);
     }
 
