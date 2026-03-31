@@ -8,7 +8,6 @@ use crate::storage::bucket::settings::SETTINGS_NAME;
 use crate::storage::bucket::Bucket;
 use crate::storage::engine::{ReadOnlyMode, StorageEngine};
 use async_trait::async_trait;
-use log::warn;
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -71,10 +70,6 @@ impl ReadOnlyMode for StorageEngine {
                         && self.cfg.primary_url.is_none()
                         && self.cfg.secondary_url.is_none()
                     {
-                        warn!(
-                            "Audit bucket '{}' cannot be loaded in replica mode because RS_PRIMARY_URL and RS_SECONDARY_URL are not set. Audit messages will not be forwarded.",
-                            AUDIT_BUCKET_NAME
-                        );
                         continue;
                     }
 

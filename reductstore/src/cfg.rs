@@ -33,7 +33,7 @@ use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLo
 use crate::ext::ext_repository::create_ext_repository;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use async_trait::async_trait;
-use log::info;
+use log::{info, warn};
 use reduct_base::error::ReductError;
 use reduct_base::ext::{ExtSettings, IoExtension};
 use reduct_base::internal_server_error;
@@ -309,6 +309,14 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         Logger::init(&me.cfg.log_level);
         info!("Configuration: \n {}", me);
+        if me.cfg.role == InstanceRole::Replica
+            && me.cfg.primary_url.is_none()
+            && me.cfg.secondary_url.is_none()
+        {
+            warn!(
+                "RS_PRIMARY_URL and RS_SECONDARY_URL are not set. Audit messages will not be forwarded from replica instances."
+            );
+        }
 
         let git_ref = if version.ends_with("-dev") {
             env!("COMMIT").to_string()
