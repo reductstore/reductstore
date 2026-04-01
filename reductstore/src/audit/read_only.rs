@@ -486,7 +486,7 @@ mod tests {
         repo.log_event(make_event(1)).await.unwrap();
         repo.log_event(make_event(2)).await.unwrap();
 
-        sleep(Duration::from_secs(2)).await;
+        sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
         assert_eq!(primary_events.lock().await.len(), 0);
 
         sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 500)).await;

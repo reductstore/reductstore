@@ -329,7 +329,7 @@ mod tests {
     }
 
     async fn wait_for_audit_flush() {
-        sleep(Duration::from_millis(5300)).await;
+        sleep(Duration::from_millis(2000)).await;
     }
 
     #[rstest]
