@@ -25,5 +25,5 @@ runs:
             continue
           fi
           chmod +x $f
-          $f --nocapture
+          $f --quiet
         done

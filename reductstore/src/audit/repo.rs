@@ -227,7 +227,7 @@ mod tests {
             .await
             .unwrap();
 
-        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
+        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
 
         let event = read_audit_event(&repo, "token-1", 1).await;
         assert_eq!(event.token_name, "token-1");
@@ -247,7 +247,7 @@ mod tests {
             .await
             .unwrap();
 
-        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
+        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
 
         let labels = read_audit_labels(&repo, "token-1", 1).await;
         assert_eq!(
@@ -291,7 +291,7 @@ mod tests {
         sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
         assert!(!audit_record_exists(&repo, "token-1", 1).await);
 
-        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 400)).await;
+        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
         let event = read_audit_event(&repo, "token-1", 1).await;
         assert_eq!(event.call_count, 2);
         assert_eq!(event.duration, 200);
@@ -314,7 +314,7 @@ mod tests {
         sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
         assert!(!audit_record_exists(&repo, "token-1", 1).await);
 
-        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 400)).await;
+        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
         let event = read_audit_event(&repo, "token-1", 1).await;
         assert_eq!(event.call_count, 2);
         assert_eq!(event.duration, 200);

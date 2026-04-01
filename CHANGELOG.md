@@ -29,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use Docker named volumes in CI deployment actions for `/data` to stay compatible with non-root runtime defaults and simplify entrypoint permission checks, [PR-1180](https://github.com/reductstore/reductstore/pull/1180)
 - Merge `v1.18.5` release branch into `main` and recover lock file updates, [PR-1191](https://github.com/reductstore/reductstore/pull/1191)
 - Update Web Console to v1.14.0-beta.0, [PR-1200](https://github.com/reductstore/reductstore/pull/1200)
+- Force flush audit aggregates at 60 seconds under continuous ingestion while preserving short sliding-window coalescing, [PR-1270](https://github.com/reductstore/reductstore/pull/1270)
 
 ### Fixed
 

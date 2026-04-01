@@ -127,12 +127,12 @@ runs:
 
     - name: Build and export tests (PR)
       if: github.event_name == 'pull_request'
-      run: cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --lib
+      run: cargo export target/${{ inputs.target }}/tests -- test --quiet --profile ci --target ${{ inputs.target }} --lib
       shell: bash
 
     - name: Build and export tests (Release)
       if: github.event_name != 'pull_request'
-      run: cargo export target/${{ inputs.target }}/tests -- test --profile release --target ${{ inputs.target }} --lib
+      run: cargo export target/${{ inputs.target }}/tests -- test --quiet --profile release --target ${{ inputs.target }} --lib
       shell: bash
 
     - name: Upload tests
