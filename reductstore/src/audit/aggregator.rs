@@ -13,6 +13,7 @@ use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 pub(super) const AGGREGATION_WINDOW_SECS: u64 = 5;
+pub(super) const FORCE_FLUSH_TIMEOUT_SECS: u64 = 60;
 pub(super) const AUDIT_CHANNEL_SIZE: usize = 1024;
 
 pub(super) type FlushFuture = Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>;
@@ -32,6 +33,7 @@ pub(super) struct AuditAggregate {
     pub call_count: u64,
     pub total_duration: u64,
     pub flush_at: Instant,
+    pub force_flush_at: Instant,
 }
 
 #[derive(Default)]
@@ -115,6 +117,7 @@ impl AuditAggregator {
         state: &Arc<AsyncRwLock<AuditState>>,
         event: AuditEvent,
     ) -> Result<(), ReductError> {
+        let now = Instant::now();
         let key = AuditAggregateKey {
             token_name: event.token_name,
             endpoint: event.endpoint,
@@ -132,14 +135,15 @@ impl AuditAggregator {
                 if event.timestamp < aggregate.first_timestamp {
                     aggregate.first_timestamp = event.timestamp;
                 }
-                aggregate.flush_at = Instant::now() + Duration::from_secs(AGGREGATION_WINDOW_SECS);
+                aggregate.flush_at = now + Duration::from_secs(AGGREGATION_WINDOW_SECS);
             })
             .or_insert_with(|| AuditAggregate {
                 first_timestamp: event.timestamp,
                 last_timestamp: event.timestamp,
                 call_count: event.call_count,
                 total_duration: event.duration,
-                flush_at: Instant::now() + Duration::from_secs(AGGREGATION_WINDOW_SECS),
+                flush_at: now + Duration::from_secs(AGGREGATION_WINDOW_SECS),
+                force_flush_at: now + Duration::from_secs(FORCE_FLUSH_TIMEOUT_SECS),
             });
 
         Ok(())
@@ -150,7 +154,7 @@ impl AuditAggregator {
         state
             .aggregates
             .values()
-            .map(|aggregate| aggregate.flush_at)
+            .map(|aggregate| aggregate.flush_at.min(aggregate.force_flush_at))
             .min()
     }
 
@@ -164,7 +168,9 @@ impl AuditAggregator {
             let expired_keys: Vec<_> = state
                 .aggregates
                 .iter()
-                .filter(|(_, aggregate)| aggregate.flush_at <= now)
+                .filter(|(_, aggregate)| {
+                    aggregate.flush_at <= now || aggregate.force_flush_at <= now
+                })
                 .map(|(key, _)| key.clone())
                 .collect();
 
@@ -258,6 +264,7 @@ mod tests {
                 call_count: 3,
                 total_duration: 450,
                 flush_at: Instant::now(),
+                force_flush_at: Instant::now(),
             },
         );
 
@@ -277,9 +284,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn next_deadline_returns_earliest_flush_at(state: Arc<AsyncRwLock<AuditState>>) {
+    async fn next_deadline_returns_earliest_deadline(state: Arc<AsyncRwLock<AuditState>>) {
         let earlier = Instant::now() + Duration::from_secs(1);
         let later = Instant::now() + Duration::from_secs(5);
+        let much_later = Instant::now() + Duration::from_secs(20);
         let mut guard = state.write().await.unwrap();
         guard.aggregates.insert(
             AuditAggregateKey {
@@ -293,6 +301,7 @@ mod tests {
                 call_count: 1,
                 total_duration: 10,
                 flush_at: later,
+                force_flush_at: much_later,
             },
         );
         guard.aggregates.insert(
@@ -306,7 +315,8 @@ mod tests {
                 last_timestamp: 2,
                 call_count: 1,
                 total_duration: 20,
-                flush_at: earlier,
+                flush_at: much_later,
+                force_flush_at: earlier,
             },
         );
         drop(guard);
@@ -334,6 +344,29 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn aggregate_event_extends_sliding_flush_only(state: Arc<AsyncRwLock<AuditState>>) {
+        AuditAggregator::aggregate_event(&state, make_test_event(1))
+            .await
+            .unwrap();
+        let (initial_flush_at, initial_force_flush_at) = {
+            let guard = state.read().await.unwrap();
+            let aggregate = guard.aggregates.values().next().unwrap();
+            (aggregate.flush_at, aggregate.force_flush_at)
+        };
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
+
+        AuditAggregator::aggregate_event(&state, make_test_event(2))
+            .await
+            .unwrap();
+        let guard = state.read().await.unwrap();
+        let aggregate = guard.aggregates.values().next().unwrap();
+        assert!(aggregate.flush_at > initial_flush_at);
+        assert_eq!(aggregate.force_flush_at, initial_force_flush_at);
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn flush_expired_flushes_only_expired_entries(
         state: Arc<AsyncRwLock<AuditState>>,
         flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
@@ -354,6 +387,7 @@ mod tests {
                 call_count: 1,
                 total_duration: 100,
                 flush_at: now - Duration::from_millis(1),
+                force_flush_at: now + Duration::from_secs(10),
             },
         );
         guard.aggregates.insert(
@@ -368,6 +402,7 @@ mod tests {
                 call_count: 1,
                 total_duration: 100,
                 flush_at: now + Duration::from_secs(10),
+                force_flush_at: now + Duration::from_secs(10),
             },
         );
         drop(guard);
@@ -387,6 +422,42 @@ mod tests {
             .aggregates
             .keys()
             .any(|key| key.token_name == "pending"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn flush_expired_flushes_entry_when_force_deadline_expires(
+        state: Arc<AsyncRwLock<AuditState>>,
+        flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
+    ) {
+        let handler = make_test_handler(Arc::clone(&flushed_events));
+        let now = Instant::now();
+        let mut guard = state.write().await.unwrap();
+        guard.aggregates.insert(
+            AuditAggregateKey {
+                token_name: "forced".to_string(),
+                endpoint: "GET /forced".to_string(),
+                status: 200,
+            },
+            AuditAggregate {
+                first_timestamp: 3,
+                last_timestamp: 3,
+                call_count: 2,
+                total_duration: 200,
+                flush_at: now + Duration::from_secs(10),
+                force_flush_at: now - Duration::from_millis(1),
+            },
+        );
+        drop(guard);
+
+        AuditAggregator::flush_expired(&state, &handler)
+            .await
+            .unwrap();
+
+        let events = flushed_events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].token_name, "forced");
+        assert!(state.read().await.unwrap().aggregates.is_empty());
     }
 
     #[rstest]
@@ -411,6 +482,7 @@ mod tests {
                     call_count: 1,
                     total_duration: 100,
                     flush_at: Instant::now(),
+                    force_flush_at: Instant::now(),
                 },
             );
         }
