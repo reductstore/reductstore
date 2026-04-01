@@ -125,4 +125,32 @@ mod tests {
         let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter));
         assert_eq!(config, AuditConfig::default());
     }
+
+    #[rstest]
+    fn test_empty_ca_path_is_treated_as_none() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_AUDIT_ENABLED"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_AUDIT_QUOTA_SIZE"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_AUDIT_REMOTE_VERIFY_SSL"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_AUDIT_REMOTE_CA_PATH"))
+            .return_const(Ok("".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_AUDIT_REMOTE_TIMEOUT"))
+            .return_const(Err(VarError::NotPresent));
+
+        let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter));
+        assert_eq!(config.remote_ca_path, None);
+    }
 }

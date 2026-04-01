@@ -569,4 +569,41 @@ mod tests {
         assert_eq!(err.status, ErrorCode::Forbidden);
         assert_eq!(err.message, "Unknown");
     }
+
+    #[test]
+    fn build_client_accepts_valid_custom_ca_path() {
+        let mut cfg = Cfg::default();
+        cfg.audit_conf.remote_ca_path = Some("../misc/certificate.crt".into());
+
+        assert!(ReadOnlyAuditRepository::build_client(&cfg).is_ok());
+    }
+
+    #[test]
+    fn build_client_rejects_missing_custom_ca_path() {
+        let mut cfg = Cfg::default();
+        cfg.audit_conf.remote_ca_path = Some("/tmp/does-not-exist-ca.pem".into());
+
+        let err = ReadOnlyAuditRepository::build_client(&cfg).unwrap_err();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
+        assert!(err
+            .message
+            .contains("Failed to read audit remote CA certificate"));
+    }
+
+    #[test]
+    fn build_client_rejects_invalid_custom_ca_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("invalid-ca.pem");
+        std::fs::write(
+            &path,
+            b"-----BEGIN CERTIFICATE-----\ninvalid-base64\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
+
+        let mut cfg = Cfg::default();
+        cfg.audit_conf.remote_ca_path = Some(path);
+
+        let err = ReadOnlyAuditRepository::build_client(&cfg).unwrap_err();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
+    }
 }

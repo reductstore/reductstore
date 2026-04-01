@@ -508,6 +508,15 @@ mod tests {
     }
 
     #[rstest]
+    #[case(Some("true".to_string()), false, true)]
+    #[case(Some("0".to_string()), true, false)]
+    #[case(Some("bogus".to_string()), true, true)]
+    #[case(None, false, false)]
+    fn test_parse_bool(#[case] raw: Option<String>, #[case] default: bool, #[case] expected: bool) {
+        assert_eq!(parse_bool(raw, default), expected);
+    }
+
+    #[rstest]
     #[tokio::test(flavor = "current_thread")]
     async fn test_default_settings(mut env_getter: MockEnvGetter) {
         env_getter
