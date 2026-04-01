@@ -836,11 +836,12 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
-        let cfg = Cfg {
+        let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
             api_token: "init-token".to_string(),
             ..Cfg::default()
         };
+        cfg.audit_conf.enabled = true;
 
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
