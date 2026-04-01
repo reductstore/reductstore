@@ -152,27 +152,7 @@ impl ReadOnlyAuditRepository {
         let payload = serde_json::to_vec(event)
             .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
 
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_str("application/json").unwrap(),
-        );
-        headers.insert(
-            CONTENT_LENGTH,
-            HeaderValue::from_str(&payload.len().to_string()).unwrap(),
-        );
-        headers.insert(
-            "x-reduct-label-status",
-            HeaderValue::from_str(&event.status.to_string()).map_err(|err| {
-                unprocessable_entity!("Invalid audit status label '{}': {}", event.status, err)
-            })?,
-        );
-        headers.insert(
-            "x-reduct-label-instance",
-            HeaderValue::from_str(instance_name).map_err(|err| {
-                unprocessable_entity!("Invalid audit instance label '{}': {}", instance_name, err)
-            })?,
-        );
+        let headers = build_audit_headers(event, instance_name, payload.len())?;
 
         let response = client
             .post(url)
@@ -184,6 +164,36 @@ impl ReadOnlyAuditRepository {
         check_response(response)?;
         Ok(())
     }
+}
+
+fn build_audit_headers(
+    event: &AuditEvent,
+    instance_name: &str,
+    payload_len: usize,
+) -> Result<HeaderMap, ReductError> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_str("application/json").unwrap(),
+    );
+    headers.insert(
+        CONTENT_LENGTH,
+        HeaderValue::from_str(&payload_len.to_string()).unwrap(),
+    );
+    headers.insert(
+        "x-reduct-label-status",
+        HeaderValue::from_str(&event.status.to_string()).map_err(|err| {
+            unprocessable_entity!("Invalid audit status label '{}': {}", event.status, err)
+        })?,
+    );
+    headers.insert(
+        "x-reduct-label-instance",
+        HeaderValue::from_str(instance_name).map_err(|err| {
+            unprocessable_entity!("Invalid audit instance label '{}': {}", instance_name, err)
+        })?,
+    );
+
+    Ok(headers)
 }
 
 fn normalize_url(url: Option<String>) -> Option<String> {

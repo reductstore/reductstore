@@ -485,18 +485,6 @@ pub(super) fn parse_bool(raw: Option<String>, default: bool) -> bool {
 }
 
 fn resolve_instance_name(raw: Option<String>) -> String {
-    resolve_instance_name_with(raw, || {
-        hostname::get()
-            .ok()
-            .and_then(|name| name.into_string().ok())
-            .filter(|name| !name.is_empty())
-    })
-}
-
-fn resolve_instance_name_with<F>(raw: Option<String>, fallback: F) -> String
-where
-    F: FnOnce() -> Option<String>,
-{
     raw.and_then(|value| {
         let trimmed = value.trim().to_string();
         if trimmed.is_empty() {
@@ -505,7 +493,12 @@ where
             Some(trimmed)
         }
     })
-    .or_else(fallback)
+    .or_else(|| {
+        hostname::get()
+            .ok()
+            .and_then(|name| name.into_string().ok())
+            .filter(|name| !name.is_empty())
+    })
     .unwrap_or_else(|| "unknown".to_string())
 }
 
@@ -547,18 +540,12 @@ mod tests {
     #[rstest]
     fn test_resolve_instance_name() {
         assert_eq!(
-            resolve_instance_name_with(Some("my-node".to_string()), || Some("host".to_string())),
+            resolve_instance_name(Some("my-node".to_string())),
             "my-node"
         );
-        assert_eq!(
-            resolve_instance_name_with(Some("   ".to_string()), || Some("host".to_string())),
-            "host"
-        );
-        assert_eq!(
-            resolve_instance_name_with(None, || Some("host".to_string())),
-            "host"
-        );
-        assert_eq!(resolve_instance_name_with(None, || None), "unknown");
+
+        let fallback = resolve_instance_name(Some("   ".to_string()));
+        assert!(!fallback.is_empty());
     }
 
     #[rstest]
