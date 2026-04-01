@@ -15,6 +15,14 @@ pub(crate) fn is_hashed_token_secret(value: &str) -> bool {
     value.starts_with(ARGON2_PREFIX)
 }
 
+pub(super) fn matched_hashed_token_secret<'a>(stored: &'a str, candidate: &str) -> Option<&'a str> {
+    if is_hashed_token_secret(stored) && verify_token_secret(stored, candidate) {
+        Some(stored)
+    } else {
+        None
+    }
+}
+
 pub(crate) fn hash_token_secret(value: &str) -> Result<String, ReductError> {
     let mut salt = [0u8; SALT_LEN];
     OsRng
@@ -90,5 +98,18 @@ mod tests {
     #[test]
     fn test_verify_malformed_hash() {
         assert!(!verify_token_secret("arg2:not-a-valid-hash", "secret"));
+    }
+
+    #[test]
+    fn test_matched_hashed_token_secret() {
+        let secret = "test-secret";
+        let hash = hash_token_secret(secret).unwrap();
+
+        assert_eq!(
+            matched_hashed_token_secret(&hash, secret),
+            Some(hash.as_str())
+        );
+        assert_eq!(matched_hashed_token_secret(&hash, "wrong"), None);
+        assert_eq!(matched_hashed_token_secret("legacy", "legacy"), None);
     }
 }

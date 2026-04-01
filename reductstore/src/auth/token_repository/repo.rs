@@ -3,8 +3,13 @@
 
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
-use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
-use crate::auth::token_secret::{hash_token_secret, is_hashed_token_secret, verify_token_secret};
+use crate::auth::token_repository::{
+    check_token_lifetime, parse_bearer_token, ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME,
+};
+use crate::auth::token_secret::{
+    hash_token_secret, is_hashed_token_secret, matched_hashed_token_secret,
+};
+use crate::core::cache::Cache;
 use crate::core::file_cache::FILE_CACHE;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -19,6 +24,7 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
+use std::time::Duration;
 use std::time::SystemTime;
 
 /// The TokenRepository trait is used to store and retrieve tokens.
@@ -26,7 +32,11 @@ pub(super) struct TokenRepository {
     config_path: PathBuf,
     repo: HashMap<String, Token>,
     permission_regex: Regex,
+    auth_cache: Cache<String, Token>,
 }
+
+const AUTH_CACHE_SIZE: usize = 1024;
+const AUTH_CACHE_TTL: Duration = Duration::MAX;
 
 impl TokenRepository {
     /// Load the token repository from the file system
@@ -50,6 +60,7 @@ impl TokenRepository {
             config_path,
             repo,
             permission_regex,
+            auth_cache: Cache::new(AUTH_CACHE_SIZE, AUTH_CACHE_TTL),
         };
 
         let file = FILE_CACHE
@@ -102,15 +113,8 @@ impl TokenRepository {
         let init_token_value = token_repository
             .repo
             .get(INIT_TOKEN_NAME)
-            .and_then(|token| {
-                if is_hashed_token_secret(&token.value)
-                    && verify_token_secret(&token.value, &api_token)
-                {
-                    Some(token.value.clone())
-                } else {
-                    None
-                }
-            })
+            .and_then(|token| matched_hashed_token_secret(&token.value, &api_token))
+            .map(|secret| secret.to_string())
             .unwrap_or_else(|| {
                 hash_token_secret(&api_token).expect("Failed to hash init token secret")
             });
@@ -168,6 +172,10 @@ impl TokenRepository {
 
         token.value = hash_token_secret(&token.value)?;
         Ok(true)
+    }
+
+    fn clear_auth_cache(&mut self) {
+        self.auth_cache.clear();
     }
 }
 
@@ -242,6 +250,7 @@ impl ManageTokens for TokenRepository {
 
         self.repo.insert(name.to_string(), token);
         self.save_repo().await?;
+        self.clear_auth_cache();
 
         Ok(TokenCreateResponse { value, created_at })
     }
@@ -257,7 +266,9 @@ impl ManageTokens for TokenRepository {
 
         Self::ensure_hashed_token_secret(&mut token)?;
         self.repo.insert(token.name.clone(), token);
-        self.save_repo().await
+        self.save_repo().await?;
+        self.clear_auth_cache();
+        Ok(())
     }
 
     async fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
@@ -265,7 +276,20 @@ impl ManageTokens for TokenRepository {
     }
 
     async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
-        AccessTokens::validate_token(self, header)
+        let value = parse_bearer_token(header.unwrap_or(""))?;
+
+        if let Some(token) = self.auth_cache.get(&value).cloned() {
+            if let Err(err) = check_token_lifetime(&token) {
+                self.auth_cache.remove(&value);
+                return Err(err);
+            }
+            return Ok(token);
+        }
+
+        let header = format!("Bearer {}", value);
+        let token = AccessTokens::validate_token(self, Some(&header))?;
+        self.auth_cache.insert(value, token.clone());
+        Ok(token)
     }
 
     async fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
@@ -278,7 +302,9 @@ impl ManageTokens for TokenRepository {
         if self.repo.remove(name).is_none() {
             Err(not_found!("Token '{}' doesn't exist", name))
         } else {
-            self.save_repo().await
+            self.save_repo().await?;
+            self.clear_auth_cache();
+            Ok(())
         }
     }
 
@@ -290,7 +316,9 @@ impl ManageTokens for TokenRepository {
             }
         }
 
-        self.save_repo().await
+        self.save_repo().await?;
+        self.clear_auth_cache();
+        Ok(())
     }
 
     async fn rename_bucket(&mut self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
@@ -314,7 +342,9 @@ impl ManageTokens for TokenRepository {
             }
         }
 
-        self.save_repo().await
+        self.save_repo().await?;
+        self.clear_auth_cache();
+        Ok(())
     }
 }
 
@@ -800,6 +830,49 @@ mod tests {
                 .err()
                 .unwrap();
             assert_eq!(err, unauthorized!("Token has expired"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_validate_token_cache_invalidation_on_update(path: PathBuf, init_token: &str) {
+            let cfg = Cfg {
+                api_token: init_token.to_string(),
+                ..Default::default()
+            };
+
+            let mut repo = build_repo_at(&path, &cfg).await;
+            let old_value = repo
+                .generate_token(
+                    "cache-token",
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_at: None,
+                    },
+                )
+                .await
+                .unwrap()
+                .value;
+
+            repo.validate_token(Some(&format!("Bearer {}", old_value)))
+                .await
+                .unwrap();
+
+            let mut token = repo.get_token("cache-token").await.unwrap().clone();
+            token.value = "cache-token-new-secret".to_string();
+            repo.update_token(token).await.unwrap();
+
+            let err = repo
+                .validate_token(Some(&format!("Bearer {}", old_value)))
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, unauthorized!("Invalid token"));
+
+            let token = repo
+                .validate_token(Some("Bearer cache-token-new-secret"))
+                .await
+                .unwrap();
+            assert_eq!(token.name, "cache-token");
         }
     }
 
