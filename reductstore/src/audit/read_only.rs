@@ -65,14 +65,14 @@ impl ReadOnlyAuditRepository {
 
         if let Some(path) = &cfg.audit_conf.remote_ca_path {
             let cert_data = std::fs::read(path).map_err(|err| {
-                unprocessable_entity!(
+                internal_server_error!(
                     "Failed to read audit remote CA certificate {}: {}",
                     path.display(),
                     err
                 )
             })?;
             let cert = reqwest::Certificate::from_pem(&cert_data).map_err(|err| {
-                unprocessable_entity!(
+                internal_server_error!(
                     "Failed to parse audit remote CA certificate {}: {}",
                     path.display(),
                     err
@@ -82,7 +82,7 @@ impl ReadOnlyAuditRepository {
         }
 
         builder.build().map_err(|err| {
-            unprocessable_entity!("Failed to build audit replica HTTP client: {}", err)
+            internal_server_error!("Failed to build audit replica HTTP client: {}", err)
         })
     }
 

@@ -472,6 +472,15 @@ fn load_console() -> &'static [u8] {
     b""
 }
 
+pub(super) fn parse_bool(raw: Option<String>, default: bool) -> bool {
+    raw.map(|value| match value.trim().to_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => default,
+    })
+    .unwrap_or(default)
+}
+
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> Display for CfgParser<EnvGetter, ExtCfg> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.env.message())

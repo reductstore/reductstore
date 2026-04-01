@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::cfg::{CfgParser, ExtCfgBounds};
+use crate::cfg::{parse_bool, CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use bytesize::ByteSize;
 use std::path::PathBuf;
@@ -66,15 +66,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             ),
         }
     }
-}
-
-fn parse_bool(raw: Option<String>, default: bool) -> bool {
-    raw.map(|value| match value.trim().to_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => true,
-        "0" | "false" | "no" | "off" => false,
-        _ => default,
-    })
-    .unwrap_or(default)
 }
 
 #[cfg(test)]
