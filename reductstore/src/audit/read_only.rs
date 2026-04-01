@@ -573,7 +573,11 @@ mod tests {
     #[test]
     fn build_client_accepts_valid_custom_ca_path() {
         let mut cfg = Cfg::default();
-        cfg.audit_conf.remote_ca_path = Some("../misc/certificate.crt".into());
+        let cert_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("misc")
+            .join("certificate.crt");
+        cfg.audit_conf.remote_ca_path = Some(cert_path);
 
         assert!(ReadOnlyAuditRepository::build_client(&cfg).is_ok());
     }
