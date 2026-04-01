@@ -20,32 +20,42 @@ pub(crate) struct ReadOnlyAuditRepository {
     aggregator: AuditAggregator,
 }
 
+#[derive(Clone)]
+struct AuditForwardContext {
+    client: Client,
+    primary_url: Option<String>,
+    secondary_url: Option<String>,
+    preferred_url: Arc<AsyncRwLock<Option<String>>>,
+    instance_name: String,
+}
+
+impl AuditForwardContext {
+    async fn log_event(&self, event: &AuditEvent) -> Result<(), ReductError> {
+        ReadOnlyAuditRepository::log_event_with_failover(
+            &self.client,
+            self.primary_url.as_deref(),
+            self.secondary_url.as_deref(),
+            Arc::clone(&self.preferred_url),
+            &self.instance_name,
+            event,
+        )
+        .await
+    }
+}
+
 impl ReadOnlyAuditRepository {
     pub async fn new(cfg: Cfg, _storage: Arc<StorageEngine>) -> Self {
-        let client = Self::build_client(&cfg).expect("audit replica client must build");
-        let primary_url = normalize_url(cfg.primary_url.clone());
-        let secondary_url = normalize_url(cfg.secondary_url.clone());
-        let preferred_url = Arc::new(AsyncRwLock::new(None));
-        let instance_name = cfg.instance_name.clone();
+        let context = AuditForwardContext {
+            client: Self::build_client(&cfg).expect("audit replica client must build"),
+            primary_url: normalize_url(cfg.primary_url.clone()),
+            secondary_url: normalize_url(cfg.secondary_url.clone()),
+            preferred_url: Arc::new(AsyncRwLock::new(None)),
+            instance_name: cfg.instance_name.clone(),
+        };
 
         let handler: FlushHandler = Arc::new(move |event| {
-            let client = client.clone();
-            let primary_url = primary_url.clone();
-            let secondary_url = secondary_url.clone();
-            let preferred_url = Arc::clone(&preferred_url);
-            let instance_name = instance_name.clone();
-
-            Box::pin(async move {
-                Self::log_event_with_failover(
-                    &client,
-                    primary_url.as_deref(),
-                    secondary_url.as_deref(),
-                    preferred_url,
-                    &instance_name,
-                    &event,
-                )
-                .await
-            })
+            let context = context.clone();
+            Box::pin(async move { context.log_event(&event).await })
         });
 
         let aggregator = AuditAggregator::new(handler);
