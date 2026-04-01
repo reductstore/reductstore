@@ -1,13 +1,13 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::audit::AUDIT_BUCKET_NAME;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::bucket::settings::SETTINGS_NAME;
 use crate::storage::bucket::Bucket;
 use crate::storage::engine::{ReadOnlyMode, StorageEngine};
 use async_trait::async_trait;
+use log::error;
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -62,18 +62,7 @@ impl ReadOnlyMode for StorageEngine {
                     new_buckets.insert(bucket.name().to_string(), bucket);
                 }
                 Err(e) => {
-                    let skip_broken_audit_bucket = path
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        .is_some_and(|bucket_name| {
-                            bucket_name == AUDIT_BUCKET_NAME
-                                && self.cfg.primary_url.is_none()
-                                && self.cfg.secondary_url.is_none()
-                        });
-
-                    if !skip_broken_audit_bucket {
-                        panic!("Failed to load bucket from {:?}: {}", path, e);
-                    }
+                    error!("Failed to load bucket from {:?}: {}", path, e);
                 }
             }
         }
