@@ -88,6 +88,7 @@ pub struct Cfg {
     pub role: InstanceRole,
     pub primary_url: Option<String>,
     pub secondary_url: Option<String>,
+    pub instance_name: String,
 
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
@@ -121,6 +122,7 @@ impl Default for Cfg {
             role: InstanceRole::Primary,
             primary_url: None,
             secondary_url: None,
+            instance_name: "unknown".to_string(),
             buckets: HashMap::new(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
@@ -284,6 +286,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             secondary_url: env
                 .get_optional::<String>("RS_SECONDARY_URL")
                 .and_then(|url| if url.is_empty() { None } else { Some(url) }),
+            instance_name: resolve_instance_name(env.get_optional::<String>("RS_INSTANCE_NAME")),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
@@ -481,6 +484,31 @@ pub(super) fn parse_bool(raw: Option<String>, default: bool) -> bool {
     .unwrap_or(default)
 }
 
+fn resolve_instance_name(raw: Option<String>) -> String {
+    resolve_instance_name_with(raw, || {
+        hostname::get()
+            .ok()
+            .and_then(|name| name.into_string().ok())
+            .filter(|name| !name.is_empty())
+    })
+}
+
+fn resolve_instance_name_with<F>(raw: Option<String>, fallback: F) -> String
+where
+    F: FnOnce() -> Option<String>,
+{
+    raw.and_then(|value| {
+        let trimmed = value.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+    .or_else(fallback)
+    .unwrap_or_else(|| "unknown".to_string())
+}
+
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> Display for CfgParser<EnvGetter, ExtCfg> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.env.message())
@@ -514,6 +542,23 @@ mod tests {
     #[case(None, false, false)]
     fn test_parse_bool(#[case] raw: Option<String>, #[case] default: bool, #[case] expected: bool) {
         assert_eq!(parse_bool(raw, default), expected);
+    }
+
+    #[rstest]
+    fn test_resolve_instance_name() {
+        assert_eq!(
+            resolve_instance_name_with(Some("my-node".to_string()), || Some("host".to_string())),
+            "my-node"
+        );
+        assert_eq!(
+            resolve_instance_name_with(Some("   ".to_string()), || Some("host".to_string())),
+            "host"
+        );
+        assert_eq!(
+            resolve_instance_name_with(None, || Some("host".to_string())),
+            "host"
+        );
+        assert_eq!(resolve_instance_name_with(None, || None), "unknown");
     }
 
     #[rstest]
@@ -845,6 +890,22 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert!(parser.license.is_none());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_instance_name_from_env(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_INSTANCE_NAME"))
+            .times(1)
+            .return_const(Ok("my-node".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
+        assert_eq!(parser.cfg.instance_name, "my-node");
     }
 
     #[rstest]

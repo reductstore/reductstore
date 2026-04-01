@@ -21,16 +21,27 @@ pub(crate) struct AuditRepository {
     storage: Arc<StorageEngine>,
 }
 
+#[derive(Clone)]
+struct AuditLabels {
+    instance: String,
+}
+
 impl AuditRepository {
     pub async fn new(cfg: Cfg, storage: Arc<StorageEngine>) -> Self {
         #[cfg(test)]
         let test_storage = Arc::clone(&storage);
         let sink_storage = Arc::clone(&storage);
         let audit_settings = Self::bucket_settings(&cfg);
+        let audit_labels = AuditLabels {
+            instance: cfg.instance_name.clone(),
+        };
         let handler: FlushHandler = Arc::new(move |event| {
             let storage = Arc::clone(&sink_storage);
             let settings = audit_settings.clone();
-            Box::pin(async move { Self::write_event_to_bucket(storage, settings, event).await })
+            let labels = audit_labels.clone();
+            Box::pin(
+                async move { Self::write_event_to_bucket(storage, settings, labels, event).await },
+            )
         });
 
         let aggregator = AuditAggregator::new(handler);
@@ -57,9 +68,13 @@ impl AuditRepository {
     async fn write_event_to_bucket(
         storage: Arc<StorageEngine>,
         bucket_settings: BucketSettings,
+        audit_labels: AuditLabels,
         event: AuditEvent,
     ) -> Result<(), ReductError> {
-        let labels = Labels::from([("status".to_string(), event.status.to_string())]);
+        let labels = Labels::from([
+            ("status".to_string(), event.status.to_string()),
+            ("instance".to_string(), audit_labels.instance),
+        ]);
         let payload = serde_json::to_vec(&event)
             .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
         let mut writer = match storage
@@ -254,7 +269,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn flushes_status_label_only(#[future] repo: AuditRepository) {
+    async fn flushes_status_and_instance_labels(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
         repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
@@ -266,7 +281,10 @@ mod tests {
         let labels = read_audit_labels(&repo, "token-1", 1).await;
         assert_eq!(
             labels,
-            Labels::from([("status".to_string(), "200".to_string())])
+            Labels::from([
+                ("status".to_string(), "200".to_string()),
+                ("instance".to_string(), "unknown".to_string()),
+            ])
         );
     }
 
@@ -278,6 +296,9 @@ mod tests {
         AuditRepository::write_event_to_bucket(
             Arc::clone(&repo.storage),
             BucketSettings::default(),
+            AuditLabels {
+                instance: "test-instance".to_string(),
+            },
             make_event("token-1", "GET /api/v1/b/test", 200, 1),
         )
         .await
