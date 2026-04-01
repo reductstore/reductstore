@@ -619,6 +619,13 @@ mod tests {
         assert_eq!(err.message, "Unknown");
     }
 
+    #[test]
+    fn build_audit_headers_rejects_invalid_instance_label() {
+        let err = build_audit_headers(&make_event(1), "bad\ninstance", 10).unwrap_err();
+        assert_eq!(err.status, ErrorCode::UnprocessableEntity);
+        assert!(err.message.contains("Invalid audit instance label 'bad"));
+    }
+
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn build_client_accepts_valid_custom_ca_path() {
