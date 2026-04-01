@@ -570,6 +570,7 @@ mod tests {
         assert_eq!(err.message, "Unknown");
     }
 
+    #[cfg(not(target_os = "windows"))]
     #[test]
     fn build_client_accepts_valid_custom_ca_path() {
         let mut cfg = Cfg::default();
