@@ -283,15 +283,15 @@ mod tests {
         repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
             .await
             .unwrap();
-        sleep(Duration::from_secs(2)).await;
+        sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
         repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 2))
             .await
             .unwrap();
 
-        sleep(Duration::from_millis(3500)).await;
+        sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
         assert!(!audit_record_exists(&repo, "token-1", 1).await);
 
-        sleep(Duration::from_millis(2200)).await;
+        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 400)).await;
         let event = read_audit_event(&repo, "token-1", 1).await;
         assert_eq!(event.call_count, 2);
         assert_eq!(event.duration, 200);
@@ -306,15 +306,15 @@ mod tests {
         repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
             .await
             .unwrap();
-        sleep(Duration::from_secs(2)).await;
+        sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
         repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 3))
             .await
             .unwrap();
 
-        sleep(Duration::from_millis(3300)).await;
+        sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
         assert!(!audit_record_exists(&repo, "token-1", 1).await);
 
-        sleep(Duration::from_millis(2200)).await;
+        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 400)).await;
         let event = read_audit_event(&repo, "token-1", 1).await;
         assert_eq!(event.call_count, 2);
         assert_eq!(event.duration, 200);

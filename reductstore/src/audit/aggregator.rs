@@ -12,7 +12,10 @@ use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
+#[cfg(not(test))]
 pub(super) const AGGREGATION_WINDOW_SECS: u64 = 5;
+#[cfg(test)]
+pub(super) const AGGREGATION_WINDOW_SECS: u64 = 1;
 pub(super) const FORCE_FLUSH_TIMEOUT_SECS: u64 = 60;
 pub(super) const AUDIT_CHANNEL_SIZE: usize = 1024;
 

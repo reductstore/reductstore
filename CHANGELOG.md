@@ -29,10 +29,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use Docker named volumes in CI deployment actions for `/data` to stay compatible with non-root runtime defaults and simplify entrypoint permission checks, [PR-1180](https://github.com/reductstore/reductstore/pull/1180)
 - Merge `v1.18.5` release branch into `main` and recover lock file updates, [PR-1191](https://github.com/reductstore/reductstore/pull/1191)
 - Update Web Console to v1.14.0-beta.0, [PR-1200](https://github.com/reductstore/reductstore/pull/1200)
+- Force flush audit aggregates at 60 seconds under continuous ingestion while preserving short sliding-window coalescing, [PR-1270](https://github.com/reductstore/reductstore/pull/1270)
 
 ### Fixed
 
-- Force flush audit aggregates at 60 seconds under continuous ingestion while preserving short sliding-window coalescing, [PR-1270](https://github.com/reductstore/reductstore/pull/1270)
+- Avoid read-only replica crashes when `$audit` cannot be loaded and both `RS_PRIMARY_URL` and `RS_SECONDARY_URL` are unset by logging a warning and skipping audit forwarding instead, [PR-1266](https://github.com/reductstore/reductstore/pull/1266)
 - Make primary-mode Ctrl-C shutdown lock-file cleanup idempotent by ignoring already-removed lock files and de-duplicating release/drop cleanup, [PR-1247](https://github.com/reductstore/reductstore/pull/1247)
 - Override replication mode during reprovisioning only when `RS_REPLICATION_<ID>_MODE` is explicitly set; otherwise keep the current persisted mode, [PR-1245](https://github.com/reductstore/reductstore/pull/1245)
 - Accept computed (`@`) labels in v1 batched header parsing so query-extension responses can be consumed without 422 parse errors, [PR-1241](https://github.com/reductstore/reductstore/pull/1241)
