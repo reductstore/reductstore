@@ -10,6 +10,7 @@ use bytes::Bytes;
 use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
 use reduct_base::Labels;
 use std::sync::Arc;
 
@@ -21,13 +22,15 @@ pub(crate) struct AuditRepository {
 }
 
 impl AuditRepository {
-    pub async fn new(_cfg: Cfg, storage: Arc<StorageEngine>) -> Self {
+    pub async fn new(cfg: Cfg, storage: Arc<StorageEngine>) -> Self {
         #[cfg(test)]
         let test_storage = Arc::clone(&storage);
         let sink_storage = Arc::clone(&storage);
+        let audit_settings = Self::bucket_settings(&cfg);
         let handler: FlushHandler = Arc::new(move |event| {
             let storage = Arc::clone(&sink_storage);
-            Box::pin(async move { Self::write_event_to_bucket(storage, event).await })
+            let settings = audit_settings.clone();
+            Box::pin(async move { Self::write_event_to_bucket(storage, settings, event).await })
         });
 
         let aggregator = AuditAggregator::new(handler);
@@ -39,8 +42,21 @@ impl AuditRepository {
         }
     }
 
+    fn bucket_settings(cfg: &Cfg) -> BucketSettings {
+        if let Some(quota_size) = cfg.audit_conf.quota_size {
+            BucketSettings {
+                quota_type: Some(QuotaType::FIFO),
+                quota_size: Some(quota_size),
+                ..BucketSettings::default()
+            }
+        } else {
+            BucketSettings::default()
+        }
+    }
+
     async fn write_event_to_bucket(
         storage: Arc<StorageEngine>,
+        bucket_settings: BucketSettings,
         event: AuditEvent,
     ) -> Result<(), ReductError> {
         let labels = Labels::from([("status".to_string(), event.status.to_string())]);
@@ -60,10 +76,7 @@ impl AuditRepository {
             Ok(writer) => writer,
             Err(err) if err.status == ErrorCode::NotFound => {
                 storage
-                    .create_system_bucket(
-                        AUDIT_BUCKET_NAME,
-                        reduct_base::msg::bucket_api::BucketSettings::default(),
-                    )
+                    .create_system_bucket(AUDIT_BUCKET_NAME, bucket_settings)
                     .await?;
                 storage
                     .begin_write(
@@ -105,10 +118,11 @@ mod tests {
     #[fixture]
     async fn repo() -> AuditRepository {
         let tmp_dir = tempdir().unwrap();
-        let cfg = Cfg {
+        let mut cfg = Cfg {
             data_path: tmp_dir.keep(),
             ..Cfg::default()
         };
+        cfg.audit_conf.enabled = true;
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
             .with_cfg(cfg.clone())
@@ -263,6 +277,7 @@ mod tests {
 
         AuditRepository::write_event_to_bucket(
             Arc::clone(&repo.storage),
+            BucketSettings::default(),
             make_event("token-1", "GET /api/v1/b/test", 200, 1),
         )
         .await
@@ -271,6 +286,42 @@ mod tests {
         let event = read_audit_event(&repo, "token-1", 1).await;
         assert_eq!(event.token_name, "token-1");
         assert_eq!(event.status, 200);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn creates_audit_bucket_with_fifo_quota_when_configured() {
+        let tmp_dir = tempdir().unwrap();
+        let mut cfg = Cfg {
+            data_path: tmp_dir.keep(),
+            ..Cfg::default()
+        };
+        cfg.audit_conf.enabled = true;
+        cfg.audit_conf.quota_size = Some(1024);
+
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
+
+        let mut repo = AuditRepository::new(cfg, Arc::clone(&storage)).await;
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
+
+        let bucket = storage
+            .get_bucket(AUDIT_BUCKET_NAME)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        let settings = bucket.settings().await.unwrap();
+        assert_eq!(settings.quota_type, Some(QuotaType::FIFO));
+        assert_eq!(settings.quota_size, Some(1024));
     }
 
     #[rstest]

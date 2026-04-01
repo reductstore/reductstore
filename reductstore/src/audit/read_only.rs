@@ -14,7 +14,6 @@ use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Response};
 use std::sync::Arc;
-use std::time::Duration;
 use url::form_urlencoded;
 
 pub(crate) struct ReadOnlyAuditRepository {
@@ -58,15 +57,33 @@ impl ReadOnlyAuditRepository {
             headers.insert(reqwest::header::AUTHORIZATION, value);
         }
 
-        Client::builder()
+        let mut builder = Client::builder()
             .default_headers(headers)
-            .connect_timeout(Duration::from_secs(5))
-            .danger_accept_invalid_certs(true)
-            .http1_only()
-            .build()
-            .map_err(|err| {
-                unprocessable_entity!("Failed to build audit replica HTTP client: {}", err)
-            })
+            .connect_timeout(cfg.audit_conf.remote_timeout)
+            .danger_accept_invalid_certs(!cfg.audit_conf.remote_verify_ssl)
+            .http1_only();
+
+        if let Some(path) = &cfg.audit_conf.remote_ca_path {
+            let cert_data = std::fs::read(path).map_err(|err| {
+                unprocessable_entity!(
+                    "Failed to read audit remote CA certificate {}: {}",
+                    path.display(),
+                    err
+                )
+            })?;
+            let cert = reqwest::Certificate::from_pem(&cert_data).map_err(|err| {
+                unprocessable_entity!(
+                    "Failed to parse audit remote CA certificate {}: {}",
+                    path.display(),
+                    err
+                )
+            })?;
+            builder = builder.add_root_certificate(cert);
+        }
+
+        builder.build().map_err(|err| {
+            unprocessable_entity!("Failed to build audit replica HTTP client: {}", err)
+        })
     }
 
     async fn log_event_with_failover(
@@ -240,7 +257,7 @@ mod tests {
     use tempfile::tempdir;
     use tokio::net::TcpListener;
     use tokio::sync::Mutex;
-    use tokio::time::sleep;
+    use tokio::time::{sleep, Duration};
 
     #[derive(Clone)]
     struct TestServerState {
