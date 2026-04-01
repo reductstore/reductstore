@@ -4,6 +4,7 @@
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
+use crate::auth::token_secret::{hash_token_secret, is_hashed_token_secret, verify_token_secret};
 use crate::core::file_cache::FILE_CACHE;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -85,15 +86,43 @@ impl TokenRepository {
             }
         };
 
+        let mut migrated = false;
+        for token in token_repository.repo.values_mut() {
+            if Self::ensure_hashed_token_secret(token).expect("Failed to hash token secret") {
+                migrated = true;
+            }
+        }
+
+        let full_access_permissions = Some(Permissions {
+            full_access: true,
+            read: vec![],
+            write: vec![],
+        });
+        let existing_init_token = token_repository.repo.get(INIT_TOKEN_NAME).cloned();
+        let init_token_value = token_repository
+            .repo
+            .get(INIT_TOKEN_NAME)
+            .and_then(|token| {
+                if is_hashed_token_secret(&token.value)
+                    && verify_token_secret(&token.value, &api_token)
+                {
+                    Some(token.value.clone())
+                } else {
+                    None
+                }
+            })
+            .unwrap_or_else(|| {
+                hash_token_secret(&api_token).expect("Failed to hash init token secret")
+            });
+
         let init_token = Token {
             name: INIT_TOKEN_NAME.to_string(),
-            value: api_token.to_string(),
-            created_at: DateTime::<Utc>::from(SystemTime::now()),
-            permissions: Some(Permissions {
-                full_access: true,
-                read: vec![],
-                write: vec![],
-            }),
+            value: init_token_value,
+            created_at: existing_init_token
+                .as_ref()
+                .map(|token| token.created_at)
+                .unwrap_or_else(|| DateTime::<Utc>::from(SystemTime::now())),
+            permissions: full_access_permissions.clone(),
             is_provisioned: true,
             expires_at: None,
         };
@@ -101,6 +130,12 @@ impl TokenRepository {
         token_repository
             .repo
             .insert(init_token.name.clone(), init_token);
+        if migrated {
+            token_repository
+                .save_repo()
+                .await
+                .expect("Failed to persist token repository");
+        }
         token_repository
     }
 
@@ -124,6 +159,15 @@ impl TokenRepository {
         file.write_all(&buf)?;
         file.sync_all().await?;
         Ok(())
+    }
+
+    fn ensure_hashed_token_secret(token: &mut Token) -> Result<bool, ReductError> {
+        if is_hashed_token_secret(&token.value) {
+            return Ok(false);
+        }
+
+        token.value = hash_token_secret(&token.value)?;
+        Ok(true)
     }
 }
 
@@ -182,11 +226,12 @@ impl ManageTokens for TokenRepository {
                 .map(|_| format!("{:x}", rng.random_range(0..16)))
                 .collect();
             let value = format!("{}-{}", name, value);
+            let secret = hash_token_secret(&value)?;
             (
                 value.clone(),
                 Token {
                     name: name.to_string(),
-                    value,
+                    value: secret,
                     created_at: created_at.clone(),
                     permissions: Some(permissions),
                     is_provisioned: false,
@@ -205,11 +250,12 @@ impl ManageTokens for TokenRepository {
         AccessTokens::get_token(self, name)
     }
 
-    async fn update_token(&mut self, token: Token) -> Result<(), ReductError> {
+    async fn update_token(&mut self, mut token: Token) -> Result<(), ReductError> {
         if !self.repo.contains_key(&token.name) {
             return Err(not_found!("Token '{}' doesn't exist", token.name));
         }
 
+        Self::ensure_hashed_token_secret(&mut token)?;
         self.repo.insert(token.name.clone(), token);
         self.save_repo().await
     }
@@ -276,6 +322,7 @@ impl ManageTokens for TokenRepository {
 mod tests {
     use super::*;
     use crate::auth::token_repository::{BoxedTokenRepository, TokenRepositoryBuilder};
+    use crate::auth::token_secret::{is_hashed_token_secret, verify_token_secret};
 
     use crate::cfg::Cfg;
     use reduct_base::{conflict, unauthorized, unprocessable_entity};
@@ -291,7 +338,8 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(token.name, "init-token");
-        assert_eq!(token.value, "init-token");
+        assert!(is_hashed_token_secret(&token.value));
+        assert!(verify_token_secret(&token.value, "init-token"));
         assert!(token.is_provisioned);
 
         let token_list = repo.get_token_list().await.unwrap();
@@ -441,6 +489,43 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_migrate_plaintext_token_on_startup(path: PathBuf, init_token: &str) {
+            let cfg = Cfg {
+                api_token: init_token.to_string(),
+                ..Default::default()
+            };
+
+            let repo_path = path.join(TOKEN_REPO_FILE_NAME);
+            let legacy_token = Token {
+                name: "legacy".to_string(),
+                value: "legacy-secret".to_string(),
+                created_at: chrono::Utc::now(),
+                permissions: Some(Permissions::default()),
+                is_provisioned: false,
+                expires_at: None,
+            };
+            let mut buf = Vec::new();
+            TokenRepo {
+                tokens: vec![legacy_token.into()],
+            }
+            .encode(&mut buf)
+            .unwrap();
+            std::fs::write(repo_path, buf).unwrap();
+
+            let mut repo = build_repo_at(&path, &cfg).await;
+            let token = repo.get_token("legacy").await.unwrap().clone();
+            assert!(is_hashed_token_secret(&token.value));
+            assert!(verify_token_secret(&token.value, "legacy-secret"));
+
+            let validated = repo
+                .validate_token(Some("Bearer legacy-secret"))
+                .await
+                .unwrap();
+            assert_eq!(validated.name, "legacy");
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_create_token_expiry_persistent(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
                 api_token: init_token.to_string(),
@@ -549,7 +634,7 @@ mod tests {
             let mut repo = repo.await;
             let token = repo.get_token("test").await.unwrap();
             assert_eq!(token.name, "test");
-            assert!(token.value.starts_with("test-"));
+            assert!(is_hashed_token_secret(&token.value));
         }
 
         #[rstest]
@@ -601,7 +686,8 @@ mod tests {
 
             let mut reloaded_repo = build_repo_at(&path, &cfg).await;
             let token = reloaded_repo.get_token("test").await.unwrap();
-            assert_eq!(token.value, "updated-token");
+            assert!(is_hashed_token_secret(&token.value));
+            assert!(verify_token_secret(&token.value, "updated-token"));
             assert!(token.is_provisioned);
             assert_eq!(
                 token.permissions,

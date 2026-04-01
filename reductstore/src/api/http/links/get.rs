@@ -4,7 +4,7 @@
 use crate::api::http::links::derive_key_from_secret;
 use crate::api::http::utils::{make_headers_from_reader, RangeRecordStream, RecordStream};
 use crate::api::http::{Components, HttpError, StateKeeper};
-use crate::auth::policy::ReadAccessPolicy;
+use crate::auth::policy::{Policy, ReadAccessPolicy};
 use crate::core::sync::AsyncRwLock as RwLock;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::storage::query::QueryRx;
@@ -12,7 +12,6 @@ use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::{Aes128SivAead, Nonce};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::header::AUTHORIZATION;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum_extra::headers::{AcceptRanges, ContentLength, HeaderMap, HeaderMapExt, Range};
@@ -23,7 +22,7 @@ use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
-use reduct_base::{not_found, unprocessable_entity};
+use reduct_base::{not_found, unauthorized, unprocessable_entity};
 use std::collections::{Bound, HashMap, VecDeque};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::ops::Bound::Included;
@@ -39,17 +38,8 @@ pub(super) async fn get(
 ) -> Result<impl IntoResponse, HttpError> {
     // first anonymous access to decrypt the query
     let components = keeper.get_anonymous().await?;
-    let (record_num, token, query) = decrypt_query(&components, params.clone()).await?;
-
-    // then check permissions with the real token
-    let components = keeper
-        .get_with_permissions(
-            &HeaderMap::from_iter([(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap())]),
-            ReadAccessPolicy {
-                bucket: &query.bucket,
-            },
-        )
-        .await?;
+    let (record_num, token_name, query) = decrypt_query(&components, params.clone()).await?;
+    check_permissions_from_token_name(&components, &token_name, &query.bucket).await?;
 
     let range = if header_map.contains_key("Range") {
         Some(header_map.typed_get::<Range>().unwrap())
@@ -109,6 +99,27 @@ pub(super) async fn get(
     }
 }
 
+async fn check_permissions_from_token_name(
+    components: &Arc<Components>,
+    token_name: &str,
+    bucket: &str,
+) -> Result<(), ReductError> {
+    let mut token_repo = components.token_repo.write().await?;
+    if token_repo.get_token_list().await?.is_empty() {
+        // Authentication is disabled.
+        return Ok(());
+    }
+
+    let token = token_repo.get_token(token_name).await?.clone();
+    if let Some(expiry) = token.expires_at {
+        if chrono::Utc::now() >= expiry {
+            return Err(unauthorized!("Token has expired"));
+        }
+    }
+
+    ReadAccessPolicy { bucket }.validate(Ok(token))
+}
+
 async fn decrypt_query(
     components: &Arc<Components>,
     params: HashMap<String, String>,
@@ -132,7 +143,7 @@ async fn decrypt_query(
         .map_err(|e| unprocessable_entity!("Invalid 'r' parameter: {}", e))?;
 
     let mut token_repo = components.token_repo.write().await?;
-    let token = if token_repo.get_token_list().await?.is_empty() {
+    let token_secret = if token_repo.get_token_list().await?.is_empty() {
         // Authentication is disabled, use empty token
         ""
     } else {
@@ -147,7 +158,7 @@ async fn decrypt_query(
         .decode(salt_b64)
         .map_err(|e| unprocessable_entity!("Invalid base64 in 's' parameter: {}", e))?;
 
-    let key = derive_key_from_secret(token.as_bytes(), &salt);
+    let key = derive_key_from_secret(token_secret.as_bytes(), &salt);
     let cipher = Aes128SivAead::new_from_slice(&key).unwrap();
 
     let nonce_bytes = URL_SAFE_NO_PAD
@@ -173,7 +184,7 @@ async fn decrypt_query(
     if query.expire_at < chrono::Utc::now() {
         return Err(unprocessable_entity!("Query link has expired").into());
     }
-    Ok((record_num, token.to_string(), query))
+    Ok((record_num, issuer.to_string(), query))
 }
 
 async fn process_query_and_fetch_record(

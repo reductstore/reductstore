@@ -166,6 +166,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 #[cfg(not(windows))] // fixme: Windows paths differ in tests
 mod tests {
     use super::*;
+    use crate::auth::token_secret::{is_hashed_token_secret, verify_token_secret};
 
     use crate::cfg::tests::MockEnvGetter;
     use crate::cfg::Cfg;
@@ -218,7 +219,8 @@ mod tests {
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token1 = repo.get_token("token1").await.unwrap().clone();
-        assert_eq!(token1.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token1.value));
+        assert!(verify_token_secret(&token1.value, "TOKEN"));
         assert!(token1.is_provisioned);
 
         let permissions = token1.permissions.unwrap();
@@ -261,7 +263,8 @@ mod tests {
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token1 = repo.get_token("token1").await.unwrap().clone();
-        assert_eq!(token1.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token1.value));
+        assert!(verify_token_secret(&token1.value, "TOKEN"));
         assert!(token1.is_provisioned);
 
         let permissions = token1.permissions.unwrap();
@@ -327,7 +330,8 @@ mod tests {
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token = repo.get_token("token1").await.unwrap();
-        assert_eq!(token.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token.value));
+        assert!(verify_token_secret(&token.value, "TOKEN"));
 
         drop(repo);
 
@@ -338,7 +342,8 @@ mod tests {
         .build(data_path.into())
         .await;
         let token = repo.get_token("token1").await.unwrap();
-        assert_eq!(token.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token.value));
+        assert!(verify_token_secret(&token.value, "TOKEN"));
         assert!(token.is_provisioned);
     }
 
@@ -395,7 +400,7 @@ mod tests {
         .build(data_path)
         .await;
         let token = repo.get_token("token1").await.unwrap();
-        assert_ne!(token.value, "TOKEN");
+        assert!(!verify_token_secret(&token.value, "TOKEN"));
         assert!(!token.is_provisioned);
     }
 
@@ -423,7 +428,8 @@ mod tests {
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token = repo.get_token("token1").await.unwrap();
-        assert_eq!(token.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token.value));
+        assert!(verify_token_secret(&token.value, "TOKEN"));
         assert!(!token.is_provisioned);
     }
 
@@ -454,7 +460,8 @@ mod tests {
         let mut repo = components.token_repo.write().await.unwrap();
         let init_token = repo.get_token(INIT_TOKEN_NAME).await.unwrap();
         assert!(init_token.is_provisioned);
-        assert_eq!(init_token.value, "XXX");
+        assert!(is_hashed_token_secret(&init_token.value));
+        assert!(verify_token_secret(&init_token.value, "XXX"));
     }
 
     fn cfg_parser_with_tokens(
@@ -499,7 +506,8 @@ mod tests {
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token1 = repo.get_token("token1").await.unwrap().clone();
-        assert_eq!(token1.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token1.value));
+        assert!(verify_token_secret(&token1.value, "TOKEN"));
         assert_eq!(token1.expires_at, None);
     }
 
