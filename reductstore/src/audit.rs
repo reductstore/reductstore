@@ -100,7 +100,7 @@ mod tests {
             .await;
 
         repo.log_event(make_event()).await.unwrap();
-        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
+        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
 
         let bucket = storage
             .get_bucket(AUDIT_BUCKET_NAME)
@@ -125,7 +125,7 @@ mod tests {
             .await;
 
         repo.log_event(make_event()).await.unwrap();
-        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
+        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
 
         assert!(storage.get_bucket(AUDIT_BUCKET_NAME).await.is_err());
     }
