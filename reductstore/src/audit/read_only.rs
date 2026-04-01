@@ -14,7 +14,6 @@ use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Response};
 use std::sync::Arc;
-use std::time::Duration;
 use url::form_urlencoded;
 
 pub(crate) struct ReadOnlyAuditRepository {
@@ -58,15 +57,33 @@ impl ReadOnlyAuditRepository {
             headers.insert(reqwest::header::AUTHORIZATION, value);
         }
 
-        Client::builder()
+        let mut builder = Client::builder()
             .default_headers(headers)
-            .connect_timeout(Duration::from_secs(5))
-            .danger_accept_invalid_certs(true)
-            .http1_only()
-            .build()
-            .map_err(|err| {
-                unprocessable_entity!("Failed to build audit replica HTTP client: {}", err)
-            })
+            .connect_timeout(cfg.audit_conf.remote_timeout)
+            .danger_accept_invalid_certs(!cfg.audit_conf.remote_verify_ssl)
+            .http1_only();
+
+        if let Some(path) = &cfg.audit_conf.remote_ca_path {
+            let cert_data = std::fs::read(path).map_err(|err| {
+                internal_server_error!(
+                    "Failed to read audit remote CA certificate {}: {}",
+                    path.display(),
+                    err
+                )
+            })?;
+            let cert = reqwest::Certificate::from_pem(&cert_data).map_err(|err| {
+                internal_server_error!(
+                    "Failed to parse audit remote CA certificate {}: {}",
+                    path.display(),
+                    err
+                )
+            })?;
+            builder = builder.add_root_certificate(cert);
+        }
+
+        builder.build().map_err(|err| {
+            internal_server_error!("Failed to build audit replica HTTP client: {}", err)
+        })
     }
 
     async fn log_event_with_failover(
@@ -240,7 +257,7 @@ mod tests {
     use tempfile::tempdir;
     use tokio::net::TcpListener;
     use tokio::sync::Mutex;
-    use tokio::time::sleep;
+    use tokio::time::{sleep, Duration};
 
     #[derive(Clone)]
     struct TestServerState {
@@ -551,5 +568,47 @@ mod tests {
 
         assert_eq!(err.status, ErrorCode::Forbidden);
         assert_eq!(err.message, "Unknown");
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn build_client_accepts_valid_custom_ca_path() {
+        let mut cfg = Cfg::default();
+        let cert_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("misc")
+            .join("certificate.crt");
+        cfg.audit_conf.remote_ca_path = Some(cert_path);
+
+        assert!(ReadOnlyAuditRepository::build_client(&cfg).is_ok());
+    }
+
+    #[test]
+    fn build_client_rejects_missing_custom_ca_path() {
+        let mut cfg = Cfg::default();
+        cfg.audit_conf.remote_ca_path = Some("/tmp/does-not-exist-ca.pem".into());
+
+        let err = ReadOnlyAuditRepository::build_client(&cfg).unwrap_err();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
+        assert!(err
+            .message
+            .contains("Failed to read audit remote CA certificate"));
+    }
+
+    #[test]
+    fn build_client_rejects_invalid_custom_ca_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("invalid-ca.pem");
+        std::fs::write(
+            &path,
+            b"-----BEGIN CERTIFICATE-----\ninvalid-base64\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
+
+        let mut cfg = Cfg::default();
+        cfg.audit_conf.remote_ca_path = Some(path);
+
+        let err = ReadOnlyAuditRepository::build_client(&cfg).unwrap_err();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
     }
 }

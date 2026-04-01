@@ -32,6 +32,7 @@ runs:
       run: |
         docker run --network=host -v ${PWD}/misc:/misc \
           --env RS_API_TOKEN=${{ inputs.token }} \
+          --env RS_AUDIT_ENABLED=true \
           --env RS_CERT_PATH=${{ inputs.cert_path }} \
           --env RS_CERT_KEY_PATH=/misc/privateKey.key \
           --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \

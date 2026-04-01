@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+pub mod audit;
 pub mod io;
 pub mod limits;
 pub mod lock_file;
@@ -18,6 +19,7 @@ use crate::asset::asset_manager::create_asset_manager;
 use crate::audit::AuditRepositoryBuilder;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType};
+use crate::cfg::audit::AuditConfig;
 use crate::cfg::io::IoConfig;
 use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
@@ -91,6 +93,7 @@ pub struct Cfg {
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ProvisionedReplication>,
     pub io_conf: IoConfig,
+    pub audit_conf: AuditConfig,
     pub replication_conf: ReplicationConfig,
     pub cs_config: RemoteStorageConfig,
     pub lock_file_config: LockFileConfig,
@@ -122,6 +125,7 @@ impl Default for Cfg {
             tokens: HashMap::new(),
             replications: HashMap::new(),
             io_conf: IoConfig::default(),
+            audit_conf: AuditConfig::default(),
             replication_conf: ReplicationConfig::default(),
             cs_config: RemoteStorageConfig::default(),
             lock_file_config: LockFileConfig::default(),
@@ -286,6 +290,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             tokens: Self::parse_tokens(&mut env),
             replications,
             io_conf: Self::parse_io_config(&mut env),
+            audit_conf: Self::parse_audit_config(&mut env),
             replication_conf: Self::parse_replication_config(&mut env, port),
             cs_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
@@ -467,6 +472,15 @@ fn load_console() -> &'static [u8] {
     b""
 }
 
+pub(super) fn parse_bool(raw: Option<String>, default: bool) -> bool {
+    raw.map(|value| match value.trim().to_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => default,
+    })
+    .unwrap_or(default)
+}
+
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> Display for CfgParser<EnvGetter, ExtCfg> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.env.message())
@@ -491,6 +505,15 @@ mod tests {
             fn get(&self, key: &str) -> Result<String, VarError>;
             fn all(&self) -> BTreeMap<String,String>;
         }
+    }
+
+    #[rstest]
+    #[case(Some("true".to_string()), false, true)]
+    #[case(Some("0".to_string()), true, false)]
+    #[case(Some("bogus".to_string()), true, true)]
+    #[case(None, false, false)]
+    fn test_parse_bool(#[case] raw: Option<String>, #[case] default: bool, #[case] expected: bool) {
+        assert_eq!(parse_bool(raw, default), expected);
     }
 
     #[rstest]
