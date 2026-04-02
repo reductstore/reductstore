@@ -409,6 +409,7 @@ mod tests {
             token_name: "token-1".to_string(),
             endpoint: "GET /api/v1/info".to_string(),
             status: 200,
+            message: "".to_string(),
             call_count: 1,
             duration: 100,
         }

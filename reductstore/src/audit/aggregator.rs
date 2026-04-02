@@ -27,6 +27,7 @@ pub(super) struct AuditAggregateKey {
     pub token_name: String,
     pub endpoint: String,
     pub status: u16,
+    pub message: String,
 }
 
 #[derive(Debug, Clone)]
@@ -50,6 +51,7 @@ pub(super) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> A
         token_name: key.token_name,
         endpoint: key.endpoint,
         status: key.status,
+        message: key.message,
         call_count: aggregate.call_count,
         duration: aggregate.total_duration,
     }
@@ -125,6 +127,7 @@ impl AuditAggregator {
             token_name: event.token_name,
             endpoint: event.endpoint,
             status: event.status,
+            message: event.message,
         };
 
         let mut state = state.write().await?;
@@ -228,6 +231,7 @@ mod tests {
             token_name: "token-1".to_string(),
             endpoint: "GET /api/v1/info".to_string(),
             status: 200,
+            message: "".to_string(),
             call_count: 1,
             duration: 100,
         }
@@ -260,6 +264,7 @@ mod tests {
                 token_name: "token-1".to_string(),
                 endpoint: "GET /api/v1/info".to_string(),
                 status: 200,
+                message: "".to_string(),
             },
             AuditAggregate {
                 first_timestamp: 10,
@@ -297,6 +302,7 @@ mod tests {
                 token_name: "token-1".to_string(),
                 endpoint: "GET /api/v1/info".to_string(),
                 status: 200,
+                message: "".to_string(),
             },
             AuditAggregate {
                 first_timestamp: 1,
@@ -312,6 +318,7 @@ mod tests {
                 token_name: "token-2".to_string(),
                 endpoint: "GET /api/v1/info".to_string(),
                 status: 200,
+                message: "".to_string(),
             },
             AuditAggregate {
                 first_timestamp: 2,
@@ -383,6 +390,7 @@ mod tests {
                 token_name: "expired".to_string(),
                 endpoint: "GET /expired".to_string(),
                 status: 200,
+                message: "".to_string(),
             },
             AuditAggregate {
                 first_timestamp: 1,
@@ -398,6 +406,7 @@ mod tests {
                 token_name: "pending".to_string(),
                 endpoint: "GET /pending".to_string(),
                 status: 200,
+                message: "".to_string(),
             },
             AuditAggregate {
                 first_timestamp: 2,
@@ -441,6 +450,7 @@ mod tests {
                 token_name: "forced".to_string(),
                 endpoint: "GET /forced".to_string(),
                 status: 200,
+                message: "".to_string(),
             },
             AuditAggregate {
                 first_timestamp: 3,
@@ -478,6 +488,7 @@ mod tests {
                     token_name: token_name.to_string(),
                     endpoint: "GET /api/v1/info".to_string(),
                     status: 200,
+                    message: "".to_string(),
                 },
                 AuditAggregate {
                     first_timestamp: idx as u64 + 1,
