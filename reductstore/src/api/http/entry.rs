@@ -438,7 +438,7 @@ mod tests {
             path_to_entry_1: Path<HashMap<String, String>>,
         ) {
             let keeper = keeper.await;
-            let q = super::query(&path_to_entry_1, keeper.clone(), Some(1)).await;
+            let q = super::query(&path_to_entry_1, keeper.clone(), Some(30)).await;
             let response = read_entry_router(
                 State(keeper),
                 path_to("bucket-1", "entry-1/batch"),

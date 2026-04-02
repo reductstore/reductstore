@@ -119,7 +119,7 @@ runs:
         if-no-files-found: 'error'
 
     - name: Build and export tests
-      run: cargo export target/${{ inputs.target }}/tests -- test --quiet --profile release --target ${{ inputs.target }} --lib
+      run: cargo export target/${{ inputs.target }}/tests -- test --quiet --profile release --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api" --lib
       shell: bash
 
     - name: Upload tests
