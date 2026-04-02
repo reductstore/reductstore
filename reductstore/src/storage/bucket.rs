@@ -217,11 +217,12 @@ impl Bucket {
         for entry in entries {
             let info = entry.info().await?;
             size += info.size;
-            if info.record_count > 0 {
-                oldest_record = oldest_record.min(info.oldest_record);
-                latest_record = latest_record.max(info.latest_record);
-            }
+
             if entry.is_visible_in_bucket_info() {
+                if info.record_count > 0 {
+                    oldest_record = oldest_record.min(info.oldest_record);
+                    latest_record = latest_record.max(info.latest_record);
+                }
                 entry_infos.push(info);
             }
         }
@@ -466,6 +467,26 @@ mod tests {
             assert_eq!(info.entries.len(), 1);
             assert_eq!(info.entries[0].name, "entry-1");
             assert!(info.info.size >= 8);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_bucket_info_ignores_meta_entries_for_history(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            write_meta(&bucket, "entry-1/$meta", 1, b"meta")
+                .await
+                .unwrap();
+            write(&bucket, "entry-1", 100, b"data").await.unwrap();
+            write(&bucket, "entry-1", 200, b"more").await.unwrap();
+
+            let info = bucket.info().await.unwrap();
+            assert_eq!(info.info.oldest_record, 100);
+            assert_eq!(info.info.latest_record, 200);
+            assert_eq!(info.info.entry_count, 1);
+            assert_eq!(info.entries.len(), 1);
+            assert_eq!(info.entries[0].name, "entry-1");
+            assert_eq!(info.entries[0].oldest_record, 100);
+            assert_eq!(info.entries[0].latest_record, 200);
         }
 
         #[rstest]
