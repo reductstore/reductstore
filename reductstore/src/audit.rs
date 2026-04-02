@@ -27,6 +27,7 @@ pub(crate) struct AuditEvent {
     pub token_name: String,
     pub endpoint: String,
     pub status: u16,
+    pub message: String,
     pub call_count: u64,
     pub duration: u64,
 }
@@ -96,6 +97,7 @@ mod tests {
             token_name: "token-1".to_string(),
             endpoint: "GET /api/v1/info".to_string(),
             status: 200,
+            message: "".to_string(),
             call_count: 1,
             duration: 100,
         }
