@@ -160,6 +160,7 @@ mod tests {
             endpoint: endpoint.to_string(),
             status,
             message: message.to_string(),
+            client_ip: None,
             call_count: 1,
             duration: 100,
         }

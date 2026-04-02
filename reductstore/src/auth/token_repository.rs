@@ -16,6 +16,7 @@ use prost_wkt_types::Timestamp;
 use reduct_base::error::ReductError;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
 use reduct_base::{not_found, unauthorized};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::UNIX_EPOCH;
 
@@ -40,6 +41,7 @@ impl From<Token> for crate::auth::proto::Token {
                 full_access: perm.full_access,
                 read: perm.read,
                 write: perm.write,
+                ip_allowlist: perm.ip_allowlist,
             })
         } else {
             None
@@ -69,6 +71,7 @@ impl Into<Token> for crate::auth::proto::Token {
                 full_access: perm.full_access,
                 read: perm.read,
                 write: perm.write,
+                ip_allowlist: perm.ip_allowlist,
             })
         } else {
             None
@@ -147,7 +150,11 @@ pub(crate) trait ManageTokens {
     /// # Returns
     ///
     /// Token with given value
-    async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError>;
+    async fn validate_token(
+        &mut self,
+        header: Option<&str>,
+        client_ip: Option<IpAddr>,
+    ) -> Result<Token, ReductError>;
 
     /// Remove a token
     ///
@@ -213,7 +220,11 @@ pub(super) trait AccessTokens {
             .collect())
     }
 
-    fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
+    fn validate_token(
+        &mut self,
+        header: Option<&str>,
+        client_ip: Option<IpAddr>,
+    ) -> Result<Token, ReductError> {
         let value = parse_bearer_token(header.unwrap_or(""))?;
         let token = self
             .repo()
@@ -222,6 +233,7 @@ pub(super) trait AccessTokens {
             .cloned()
             .ok_or_else(|| unauthorized!("Invalid token"))?;
         check_token_lifetime(&token)?;
+        check_token_ip_allowlist(&token, client_ip)?;
         Ok(token)
     }
 }
@@ -233,6 +245,27 @@ fn check_token_lifetime(token: &Token) -> Result<(), ReductError> {
         }
     }
     Ok(())
+}
+
+fn check_token_ip_allowlist(token: &Token, client_ip: Option<IpAddr>) -> Result<(), ReductError> {
+    let Some(permissions) = token.permissions.as_ref() else {
+        return Ok(());
+    };
+
+    if permissions.ip_allowlist.is_empty() {
+        return Ok(());
+    }
+
+    let client_ip = client_ip.ok_or_else(|| unauthorized!("Client IP is required for this token"))?;
+    if permissions
+        .ip_allowlist
+        .iter()
+        .any(|ip| ip.parse::<IpAddr>().ok() == Some(client_ip))
+    {
+        Ok(())
+    } else {
+        Err(unauthorized!("Token is not allowed for client IP {}", client_ip))
+    }
 }
 
 pub(crate) type BoxedTokenRepository = Box<dyn ManageTokens + Send + Sync>;

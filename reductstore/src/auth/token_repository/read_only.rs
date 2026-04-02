@@ -17,6 +17,7 @@ use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenC
 use reduct_base::{forbidden, internal_server_error};
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::SystemTime;
 use tokio::time::Instant;
@@ -92,6 +93,7 @@ impl ReadOnlyTokenRepository {
                     full_access: false,
                     read: vec!["*".to_string()],
                     write: vec![],
+                    ip_allowlist: vec![],
                 }),
                 is_provisioned: true,
                 expires_at: None,
@@ -151,10 +153,14 @@ impl ManageTokens for ReadOnlyTokenRepository {
         AccessTokens::get_token_list(self)
     }
 
-    async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
+    async fn validate_token(
+        &mut self,
+        header: Option<&str>,
+        client_ip: Option<IpAddr>,
+    ) -> Result<Token, ReductError> {
         self.update_repo().await?;
 
-        AccessTokens::validate_token(self, header)
+        AccessTokens::validate_token(self, header, client_ip)
     }
 
     async fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
@@ -231,6 +237,7 @@ mod tests {
                     full_access: true,
                     read: vec![],
                     write: vec![],
+                ip_allowlist: vec![],
                 }),
                 is_provisioned: true,
                 expires_at: None,
@@ -263,6 +270,7 @@ mod tests {
                 full_access: true,
                 read: vec![],
                 write: vec![],
+            ip_allowlist: vec![],
             };
             let res = repo
                 .generate_token(
@@ -297,6 +305,7 @@ mod tests {
                         full_access: false,
                         read: vec!["*".to_string()],
                         write: vec![],
+                    ip_allowlist: vec![],
                     }),
                     is_provisioned: true,
                     expires_at: None
@@ -346,7 +355,10 @@ mod tests {
         ) {
             let (mut repo, _) = repo_fixture.await;
             let header = format!("Bearer {}", cfg.api_token);
-            let res = repo.validate_token(Some(header.as_str())).await.unwrap();
+            let res = repo
+                .validate_token(Some(header.as_str()), None)
+                .await
+                .unwrap();
             assert_eq!(
                 res,
                 Token {
@@ -357,6 +369,7 @@ mod tests {
                         full_access: false,
                         read: vec!["*".to_string()],
                         write: vec![],
+                    ip_allowlist: vec![],
                     }),
                     is_provisioned: true,
                     expires_at: None
@@ -371,7 +384,7 @@ mod tests {
         ) {
             let (mut repo, _) = repo_fixture.await;
             let header = Some("Bearer invalid_token");
-            let res = repo.validate_token(header).await;
+            let res = repo.validate_token(header, None).await;
             assert_eq!(res.err().unwrap(), unauthorized!("Invalid token"));
         }
 
@@ -451,6 +464,7 @@ mod tests {
                 full_access: true,
                 read: vec![],
                 write: vec![],
+            ip_allowlist: vec![],
             }),
             is_provisioned: true,
             expires_at: None,

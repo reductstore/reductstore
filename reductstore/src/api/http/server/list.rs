@@ -134,6 +134,7 @@ mod tests {
                             .map(|bucket| bucket.to_string())
                             .collect(),
                         write: vec![],
+                    ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },

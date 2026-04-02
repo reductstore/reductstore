@@ -1,16 +1,17 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::components::{Components, StateKeeper};
+use crate::api::components::{Components, StateKeeper, CLIENT_IP_HEADER};
 use crate::api::http::HttpError;
 use crate::audit::AuditEvent;
 use axum::body::Body;
-use axum::extract::State;
-use axum::http::{Request, StatusCode};
+use axum::extract::{ConnectInfo, State};
+use axum::http::{HeaderMap, Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error, Level};
 use reduct_base::error::ErrorCode;
+use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -47,6 +48,7 @@ pub(super) async fn audit_requests(
         .get("Authorization")
         .and_then(|v| v.to_str().ok())
         .map(|v| v.to_string());
+    let client_ip = client_ip_from_request(&request);
 
     let response = next.run(request).await;
 
@@ -58,6 +60,7 @@ pub(super) async fn audit_requests(
     let token_name = resolve_audit_token_name(
         response.status(),
         auth_header.as_deref(),
+        client_ip,
         components.as_ref(),
     )
     .await;
@@ -76,6 +79,7 @@ pub(super) async fn audit_requests(
             format!("{} {}", method, path),
             response.status().as_u16(),
             message,
+            client_ip.map(|ip| ip.to_string()),
             start.elapsed().as_micros() as u64,
         )
         .await;
@@ -87,6 +91,72 @@ pub(super) async fn audit_requests(
 fn should_skip_audit(path: &str) -> bool {
     // Maybe skip /alive and /ready and /audit endpoints
     path.ends_with("/alive") || path.ends_with("/ready") || path.contains("/audit")
+}
+
+pub(crate) fn client_ip_from_request(request: &Request<Body>) -> Option<IpAddr> {
+    let peer_ip = request
+        .extensions()
+        .get::<ConnectInfo<SocketAddr>>()
+        .map(|connect_info| connect_info.0.ip())?;
+
+    if is_trusted_proxy(peer_ip) {
+        Some(client_ip_from_forward_headers(request.headers()).unwrap_or(peer_ip))
+    } else {
+        Some(peer_ip)
+    }
+}
+
+fn is_trusted_proxy(ip: IpAddr) -> bool {
+    ip.is_loopback()
+}
+
+fn client_ip_from_forward_headers(headers: &HeaderMap) -> Option<IpAddr> {
+    if let Some(value) = headers.get("forwarded").and_then(|v| v.to_str().ok()) {
+        if let Some(ip) = parse_forwarded_for(value) {
+            return Some(ip);
+        }
+    }
+
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(parse_x_forwarded_for)
+}
+
+fn parse_x_forwarded_for(value: &str) -> Option<IpAddr> {
+    value
+        .split(',')
+        .next()
+        .map(str::trim)
+        .and_then(|ip| ip.parse::<IpAddr>().ok())
+}
+
+fn parse_forwarded_for(value: &str) -> Option<IpAddr> {
+    for part in value.split(';') {
+        let mut kv = part.splitn(2, '=');
+        let key = kv.next()?.trim();
+        let val = kv.next()?.trim();
+        if key.eq_ignore_ascii_case("for") {
+            let token = val.trim_matches('"').trim();
+            let token = token
+                .strip_prefix('[')
+                .and_then(|t| t.strip_suffix(']'))
+                .unwrap_or(token);
+
+            if let Ok(ip) = token.parse::<IpAddr>() {
+                return Some(ip);
+            }
+
+            if token.matches(':').count() == 1 {
+                if let Some((ip, _port)) = token.split_once(':') {
+                    if let Ok(ip) = ip.parse::<IpAddr>() {
+                        return Some(ip);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 async fn get_audit_components(keeper: &StateKeeper) -> Option<Arc<Components>> {
@@ -102,13 +172,14 @@ async fn get_audit_components(keeper: &StateKeeper) -> Option<Arc<Components>> {
 async fn resolve_audit_token_name(
     status: StatusCode,
     auth_header: Option<&str>,
+    client_ip: Option<IpAddr>,
     components: Option<&Arc<Components>>,
 ) -> Option<String> {
     if status == StatusCode::UNAUTHORIZED {
         Some("unauthorized".to_string())
     } else if let (Some(header), Some(components)) = (auth_header, components) {
         match components.token_repo.write().await {
-            Ok(mut token_repo) => match token_repo.validate_token(Some(header)).await {
+            Ok(mut token_repo) => match token_repo.validate_token(Some(header), client_ip).await {
                 Ok(token) => Some(token.name),
                 Err(err) => {
                     debug!("Failed to validate token for audit: {}", err);
@@ -131,6 +202,7 @@ async fn write_audit_event(
     endpoint: String,
     status: u16,
     message: String,
+    client_ip: Option<String>,
     duration: u64,
 ) {
     let event = AuditEvent {
@@ -142,6 +214,7 @@ async fn write_audit_event(
         endpoint,
         status,
         message,
+        client_ip,
         call_count: 1,
         duration,
     };
@@ -154,6 +227,19 @@ async fn write_audit_event(
         }
         Err(err) => debug!("Failed to lock audit repository: {}", err),
     }
+}
+
+pub(super) async fn attach_client_ip(
+    mut request: Request<Body>,
+    next: Next,
+) -> Result<impl IntoResponse, HttpError> {
+    if let Some(client_ip) = client_ip_from_request(&request) {
+        if let Ok(header_value) = client_ip.to_string().parse() {
+            request.headers_mut().insert(CLIENT_IP_HEADER, header_value);
+        }
+    }
+
+    Ok(next.run(request).await)
 }
 
 pub(super) async fn check_api_rate_limit(
@@ -182,7 +268,10 @@ pub async fn print_statuses(
 
     let strat_time = std::time::Instant::now();
     let path_and_query = request.uri().path_and_query().unwrap();
-    let method = format!("{} {}", request.method(), path_and_query);
+    let client_ip = client_ip_from_request(&request)
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let method = format!("{} {} [{}]", request.method(), path_and_query, client_ip);
 
     let response = next.run(request).await;
     let err_msg = match response.headers().get("x-reduct-error") {
@@ -274,6 +363,29 @@ mod tests {
     #[case("/api/v1/info", false)]
     fn checks_audit_skip_paths(#[case] path: &str, #[case] expected: bool) {
         assert_eq!(should_skip_audit(path), expected);
+    }
+
+    #[rstest]
+    #[case("203.0.113.1", Some("203.0.113.1"))]
+    #[case("203.0.113.1, 70.41.3.18", Some("203.0.113.1"))]
+    #[case("unknown", None)]
+    fn parses_x_forwarded_for(#[case] input: &str, #[case] expected: Option<&str>) {
+        assert_eq!(
+            parse_x_forwarded_for(input).map(|ip| ip.to_string()),
+            expected.map(str::to_string)
+        );
+    }
+
+    #[rstest]
+    #[case("for=203.0.113.43", Some("203.0.113.43"))]
+    #[case("for=203.0.113.43:1234", Some("203.0.113.43"))]
+    #[case("for=\"[2001:db8:cafe::17]\"", Some("2001:db8:cafe::17"))]
+    #[case("by=203.0.113.60;proto=http", None)]
+    fn parses_forwarded_header(#[case] input: &str, #[case] expected: Option<&str>) {
+        assert_eq!(
+            parse_forwarded_for(input).map(|ip| ip.to_string()),
+            expected.map(str::to_string)
+        );
     }
 
     #[rstest]
@@ -431,8 +543,13 @@ mod tests {
         let components = keeper.get_anonymous().await.unwrap();
 
         let token_name =
-            resolve_audit_token_name(StatusCode::OK, Some("Bearer init-token"), Some(&components))
-                .await;
+            resolve_audit_token_name(
+                StatusCode::OK,
+                Some("Bearer init-token"),
+                None,
+                Some(&components),
+            )
+            .await;
 
         assert_eq!(token_name, Some("init-token".to_string()));
     }
@@ -443,7 +560,7 @@ mod tests {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
 
-        let token_name = resolve_audit_token_name(StatusCode::OK, None, Some(&components)).await;
+        let token_name = resolve_audit_token_name(StatusCode::OK, None, None, Some(&components)).await;
 
         assert_eq!(token_name, None);
     }

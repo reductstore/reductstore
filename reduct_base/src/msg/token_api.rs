@@ -16,6 +16,10 @@ pub struct Permissions {
     /// Write access to certain buckets
     #[serde(default)]
     pub write: Vec<String>,
+    /// List of allowed client IP addresses for this token.
+    /// Empty list means no IP restriction.
+    #[serde(default)]
+    pub ip_allowlist: Vec<String>,
 }
 
 /// Token
