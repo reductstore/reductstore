@@ -27,6 +27,7 @@ pub(crate) struct AuditEvent {
     pub token_name: String,
     pub endpoint: String,
     pub status: u16,
+    pub message: String,
     pub call_count: u64,
     pub duration: u64,
 }
@@ -41,11 +42,22 @@ impl AuditRepositoryBuilder {
     }
 
     pub async fn build(self, storage: Arc<StorageEngine>) -> BoxedAuditRepository {
-        if self.cfg.role == InstanceRole::Replica {
+        if !self.cfg.audit_conf.enabled {
+            Box::new(DisabledAuditRepository)
+        } else if self.cfg.role == InstanceRole::Replica {
             Box::new(ReadOnlyAuditRepository::new(self.cfg, storage).await)
         } else {
             Box::new(AuditRepository::new(self.cfg, storage).await)
         }
+    }
+}
+
+struct DisabledAuditRepository;
+
+#[async_trait]
+impl ManageAudit for DisabledAuditRepository {
+    async fn log_event(&mut self, _event: AuditEvent) -> Result<(), ReductError> {
+        Ok(())
     }
 }
 
@@ -64,10 +76,11 @@ mod tests {
     #[fixture]
     async fn storage_and_cfg() -> (Arc<StorageEngine>, Cfg) {
         let tmp_dir = tempdir().unwrap();
-        let cfg = Cfg {
+        let mut cfg = Cfg {
             data_path: tmp_dir.keep(),
             ..Cfg::default()
         };
+        cfg.audit_conf.enabled = true;
         let storage = Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())
@@ -84,6 +97,7 @@ mod tests {
             token_name: "token-1".to_string(),
             endpoint: "GET /api/v1/info".to_string(),
             status: 200,
+            message: "".to_string(),
             call_count: 1,
             duration: 100,
         }
@@ -126,6 +140,23 @@ mod tests {
 
         repo.log_event(make_event()).await.unwrap();
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
+
+        assert!(storage.get_bucket(AUDIT_BUCKET_NAME).await.is_err());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn builder_disables_audit_when_not_enabled(
+        #[future] storage_and_cfg: (Arc<StorageEngine>, Cfg),
+    ) {
+        let (storage, mut cfg) = storage_and_cfg.await;
+        cfg.audit_conf.enabled = false;
+        let mut repo = AuditRepositoryBuilder::new(cfg)
+            .build(Arc::clone(&storage))
+            .await;
+
+        repo.log_event(make_event()).await.unwrap();
+        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
 
         assert!(storage.get_bucket(AUDIT_BUCKET_NAME).await.is_err());
     }

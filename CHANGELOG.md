@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `message` field to audit payloads and split audit aggregation groups when either `status` or `message` changes, [PR-1277](https://github.com/reductstore/reductstore/pull/1277)
+- Add `RS_INSTANCE_NAME` for audit record attribution with hostname fallback and include `instance` label on `$audit` writes (local and replica-forwarded), [PR-1272](https://github.com/reductstore/reductstore/pull/1272)
+- Add manageable audit configuration via `RS_AUDIT_ENABLED` and `RS_AUDIT_QUOTA_SIZE`, plus replica audit remote settings (`RS_AUDIT_REMOTE_VERIFY_SSL`, `RS_AUDIT_REMOTE_CA_PATH`, `RS_AUDIT_REMOTE_TIMEOUT`) in `cfg/audit`, [PR-1271](https://github.com/reductstore/reductstore/pull/1271)
 - Add global storage size cap via `RS_ENGINE_MAX_STORAGE_SIZE` (SI units) with write-path enforcement across all buckets, [PR-1263](https://github.com/reductstore/reductstore/pull/1263)
 - Add instance-level rate limits `RS_RATE_LIMIT_*` for API requests plus HTTP/Zenoh ingress and egress traffic, [PR-1255](https://github.com/reductstore/reductstore/pull/1255)
 - Publish per-target release binary SBOM artifacts and enable Docker image SBOM/provenance attestations in CI, [PR-1254](https://github.com/reductstore/reductstore/pull/1254)
@@ -34,6 +37,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Default audit logging to enabled when `RS_API_TOKEN` is set, keep it disabled when empty, and allow explicit override via `RS_AUDIT_ENABLED`, [PR-1275](https://github.com/reductstore/reductstore/pull/1275)
+- Ignore hidden system/meta entries when computing bucket-level oldest/latest history so reported history matches visible entries, [PR-1274](https://github.com/reductstore/reductstore/pull/1274)
 - Avoid read-only replica crashes when `$audit` cannot be loaded and both `RS_PRIMARY_URL` and `RS_SECONDARY_URL` are unset by logging a warning and skipping audit forwarding instead, [PR-1266](https://github.com/reductstore/reductstore/pull/1266)
 - Make primary-mode Ctrl-C shutdown lock-file cleanup idempotent by ignoring already-removed lock files and de-duplicating release/drop cleanup, [PR-1247](https://github.com/reductstore/reductstore/pull/1247)
 - Override replication mode during reprovisioning only when `RS_REPLICATION_<ID>_MODE` is explicitly set; otherwise keep the current persisted mode, [PR-1245](https://github.com/reductstore/reductstore/pull/1245)

@@ -14,36 +14,48 @@ use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Response};
 use std::sync::Arc;
-use std::time::Duration;
 use url::form_urlencoded;
 
 pub(crate) struct ReadOnlyAuditRepository {
     aggregator: AuditAggregator,
 }
 
+#[derive(Clone)]
+struct AuditForwardContext {
+    client: Client,
+    primary_url: Option<String>,
+    secondary_url: Option<String>,
+    preferred_url: Arc<AsyncRwLock<Option<String>>>,
+    instance_name: String,
+}
+
+impl AuditForwardContext {
+    async fn log_event(&self, event: &AuditEvent) -> Result<(), ReductError> {
+        ReadOnlyAuditRepository::log_event_with_failover(
+            &self.client,
+            self.primary_url.as_deref(),
+            self.secondary_url.as_deref(),
+            Arc::clone(&self.preferred_url),
+            &self.instance_name,
+            event,
+        )
+        .await
+    }
+}
+
 impl ReadOnlyAuditRepository {
     pub async fn new(cfg: Cfg, _storage: Arc<StorageEngine>) -> Self {
-        let client = Self::build_client(&cfg).expect("audit replica client must build");
-        let primary_url = normalize_url(cfg.primary_url.clone());
-        let secondary_url = normalize_url(cfg.secondary_url.clone());
-        let preferred_url = Arc::new(AsyncRwLock::new(None));
+        let context = AuditForwardContext {
+            client: Self::build_client(&cfg).expect("audit replica client must build"),
+            primary_url: normalize_url(cfg.primary_url.clone()),
+            secondary_url: normalize_url(cfg.secondary_url.clone()),
+            preferred_url: Arc::new(AsyncRwLock::new(None)),
+            instance_name: cfg.instance_name.clone(),
+        };
 
         let handler: FlushHandler = Arc::new(move |event| {
-            let client = client.clone();
-            let primary_url = primary_url.clone();
-            let secondary_url = secondary_url.clone();
-            let preferred_url = Arc::clone(&preferred_url);
-
-            Box::pin(async move {
-                Self::log_event_with_failover(
-                    &client,
-                    primary_url.as_deref(),
-                    secondary_url.as_deref(),
-                    preferred_url,
-                    &event,
-                )
-                .await
-            })
+            let context = context.clone();
+            Box::pin(async move { context.log_event(&event).await })
         });
 
         let aggregator = AuditAggregator::new(handler);
@@ -58,15 +70,33 @@ impl ReadOnlyAuditRepository {
             headers.insert(reqwest::header::AUTHORIZATION, value);
         }
 
-        Client::builder()
+        let mut builder = Client::builder()
             .default_headers(headers)
-            .connect_timeout(Duration::from_secs(5))
-            .danger_accept_invalid_certs(true)
-            .http1_only()
-            .build()
-            .map_err(|err| {
-                unprocessable_entity!("Failed to build audit replica HTTP client: {}", err)
-            })
+            .connect_timeout(cfg.audit_conf.remote_timeout)
+            .danger_accept_invalid_certs(!cfg.audit_conf.remote_verify_ssl)
+            .http1_only();
+
+        if let Some(path) = &cfg.audit_conf.remote_ca_path {
+            let cert_data = std::fs::read(path).map_err(|err| {
+                internal_server_error!(
+                    "Failed to read audit remote CA certificate {}: {}",
+                    path.display(),
+                    err
+                )
+            })?;
+            let cert = reqwest::Certificate::from_pem(&cert_data).map_err(|err| {
+                internal_server_error!(
+                    "Failed to parse audit remote CA certificate {}: {}",
+                    path.display(),
+                    err
+                )
+            })?;
+            builder = builder.add_root_certificate(cert);
+        }
+
+        builder.build().map_err(|err| {
+            internal_server_error!("Failed to build audit replica HTTP client: {}", err)
+        })
     }
 
     async fn log_event_with_failover(
@@ -74,6 +104,7 @@ impl ReadOnlyAuditRepository {
         primary_url: Option<&str>,
         secondary_url: Option<&str>,
         preferred_url: Arc<AsyncRwLock<Option<String>>>,
+        instance_name: &str,
         event: &AuditEvent,
     ) -> Result<(), ReductError> {
         let mut candidates = Vec::new();
@@ -100,7 +131,7 @@ impl ReadOnlyAuditRepository {
 
         let mut last_err = None;
         for base_url in candidates {
-            match Self::log_event_to_url(client, &base_url, event).await {
+            match Self::log_event_to_url(client, &base_url, instance_name, event).await {
                 Ok(()) => {
                     *preferred_url.write().await? = Some(base_url);
                     return Ok(());
@@ -124,27 +155,14 @@ impl ReadOnlyAuditRepository {
     async fn log_event_to_url(
         client: &Client,
         base_url: &str,
+        instance_name: &str,
         event: &AuditEvent,
     ) -> Result<(), ReductError> {
         let url = build_write_url(base_url, event);
         let payload = serde_json::to_vec(event)
             .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
 
-        let mut headers = HeaderMap::new();
-        headers.insert(
-            CONTENT_TYPE,
-            HeaderValue::from_str("application/json").unwrap(),
-        );
-        headers.insert(
-            CONTENT_LENGTH,
-            HeaderValue::from_str(&payload.len().to_string()).unwrap(),
-        );
-        headers.insert(
-            "x-reduct-label-status",
-            HeaderValue::from_str(&event.status.to_string()).map_err(|err| {
-                unprocessable_entity!("Invalid audit status label '{}': {}", event.status, err)
-            })?,
-        );
+        let headers = build_audit_headers(event, instance_name, payload.len())?;
 
         let response = client
             .post(url)
@@ -156,6 +174,36 @@ impl ReadOnlyAuditRepository {
         check_response(response)?;
         Ok(())
     }
+}
+
+fn build_audit_headers(
+    event: &AuditEvent,
+    instance_name: &str,
+    payload_len: usize,
+) -> Result<HeaderMap, ReductError> {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        CONTENT_TYPE,
+        HeaderValue::from_str("application/json").unwrap(),
+    );
+    headers.insert(
+        CONTENT_LENGTH,
+        HeaderValue::from_str(&payload_len.to_string()).unwrap(),
+    );
+    headers.insert(
+        "x-reduct-label-status",
+        HeaderValue::from_str(&event.status.to_string()).map_err(|err| {
+            unprocessable_entity!("Invalid audit status label '{}': {}", event.status, err)
+        })?,
+    );
+    headers.insert(
+        "x-reduct-label-instance",
+        HeaderValue::from_str(instance_name).map_err(|err| {
+            unprocessable_entity!("Invalid audit instance label '{}': {}", instance_name, err)
+        })?,
+    );
+
+    Ok(headers)
 }
 
 fn normalize_url(url: Option<String>) -> Option<String> {
@@ -240,7 +288,7 @@ mod tests {
     use tempfile::tempdir;
     use tokio::net::TcpListener;
     use tokio::sync::Mutex;
-    use tokio::time::sleep;
+    use tokio::time::{sleep, Duration};
 
     #[derive(Clone)]
     struct TestServerState {
@@ -249,6 +297,7 @@ mod tests {
         events: Arc<Mutex<Vec<AuditEvent>>>,
         auth_headers: Arc<Mutex<Vec<Option<String>>>>,
         status_labels: Arc<Mutex<Vec<Option<String>>>>,
+        instance_labels: Arc<Mutex<Vec<Option<String>>>>,
     }
 
     async fn audit_handler(
@@ -267,6 +316,12 @@ mod tests {
         state.status_labels.lock().await.push(
             headers
                 .get("x-reduct-label-status")
+                .and_then(|value| value.to_str().ok())
+                .map(|value| value.to_string()),
+        );
+        state.instance_labels.lock().await.push(
+            headers
+                .get("x-reduct-label-instance")
                 .and_then(|value| value.to_str().ok())
                 .map(|value| value.to_string()),
         );
@@ -289,16 +344,19 @@ mod tests {
         Arc<Mutex<Vec<AuditEvent>>>,
         Arc<Mutex<Vec<Option<String>>>>,
         Arc<Mutex<Vec<Option<String>>>>,
+        Arc<Mutex<Vec<Option<String>>>>,
     ) {
         let events = Arc::new(Mutex::new(Vec::new()));
         let auth_headers = Arc::new(Mutex::new(Vec::new()));
         let status_labels = Arc::new(Mutex::new(Vec::new()));
+        let instance_labels = Arc::new(Mutex::new(Vec::new()));
         let state = TestServerState {
             status,
             error_header,
             events: Arc::clone(&events),
             auth_headers: Arc::clone(&auth_headers),
             status_labels: Arc::clone(&status_labels),
+            instance_labels: Arc::clone(&instance_labels),
         };
 
         let app = Router::new()
@@ -316,6 +374,7 @@ mod tests {
             events,
             auth_headers,
             status_labels,
+            instance_labels,
         )
     }
 
@@ -350,6 +409,7 @@ mod tests {
             token_name: "token-1".to_string(),
             endpoint: "GET /api/v1/info".to_string(),
             status: 200,
+            message: "".to_string(),
             call_count: 1,
             duration: 100,
         }
@@ -358,7 +418,7 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn uses_primary_url_and_remembers_it() {
-        let (primary_url, primary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let (primary_url, primary_events, _, _, _) = start_test_server(StatusCode::OK, None).await;
         let preferred_url = Arc::new(AsyncRwLock::new(None));
         let cfg = make_cfg(Some(primary_url.clone()), None);
         let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
@@ -368,6 +428,7 @@ mod tests {
             Some(&primary_url),
             None,
             Arc::clone(&preferred_url),
+            "instance-a",
             &make_event(1),
         )
         .await
@@ -380,7 +441,8 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn falls_back_to_secondary_on_connection_error() {
-        let (secondary_url, secondary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let (secondary_url, secondary_events, _, _, _) =
+            start_test_server(StatusCode::OK, None).await;
         let preferred_url = Arc::new(AsyncRwLock::new(None));
         let cfg = make_cfg(
             Some("http://127.0.0.1:1/".to_string()),
@@ -393,6 +455,7 @@ mod tests {
             Some("http://127.0.0.1:1/"),
             Some(&secondary_url),
             Arc::clone(&preferred_url),
+            "instance-a",
             &make_event(1),
         )
         .await
@@ -405,8 +468,9 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn prefers_last_successful_url_before_primary() {
-        let (primary_url, primary_events, _, _) = start_test_server(StatusCode::OK, None).await;
-        let (secondary_url, secondary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let (primary_url, primary_events, _, _, _) = start_test_server(StatusCode::OK, None).await;
+        let (secondary_url, secondary_events, _, _, _) =
+            start_test_server(StatusCode::OK, None).await;
         let preferred_url = Arc::new(AsyncRwLock::new(Some(secondary_url.clone())));
         let cfg = make_cfg(Some(primary_url.clone()), Some(secondary_url.clone()));
         let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
@@ -416,6 +480,7 @@ mod tests {
             Some(&primary_url),
             Some(&secondary_url),
             Arc::clone(&preferred_url),
+            "instance-a",
             &make_event(1),
         )
         .await
@@ -429,9 +494,10 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn does_not_fail_over_on_http_error() {
-        let (primary_url, primary_events, _, _) =
+        let (primary_url, primary_events, _, _, _) =
             start_test_server(StatusCode::FORBIDDEN, Some("denied")).await;
-        let (secondary_url, secondary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let (secondary_url, secondary_events, _, _, _) =
+            start_test_server(StatusCode::OK, None).await;
         let preferred_url = Arc::new(AsyncRwLock::new(None));
         let cfg = make_cfg(Some(primary_url.clone()), Some(secondary_url.clone()));
         let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
@@ -441,6 +507,7 @@ mod tests {
             Some(&primary_url),
             Some(&secondary_url),
             Arc::clone(&preferred_url),
+            "instance-a",
             &make_event(1),
         )
         .await
@@ -463,6 +530,7 @@ mod tests {
             None,
             None,
             Arc::clone(&preferred_url),
+            "instance-a",
             &make_event(1),
         )
         .await
@@ -478,7 +546,7 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn aggregates_before_forwarding(#[future] storage: Arc<StorageEngine>) {
-        let (primary_url, primary_events, _, _) = start_test_server(StatusCode::OK, None).await;
+        let (primary_url, primary_events, _, _, _) = start_test_server(StatusCode::OK, None).await;
         let storage = storage.await;
         let cfg = make_cfg(Some(primary_url), None);
         let mut repo = ReadOnlyAuditRepository::new(cfg, storage).await;
@@ -522,7 +590,7 @@ mod tests {
         #[case] api_token: &str,
         #[case] expected_auth_header: Option<String>,
     ) {
-        let (base_url, events, auth_headers, status_labels) =
+        let (base_url, events, auth_headers, status_labels, instance_labels) =
             start_test_server(StatusCode::OK, None).await;
         let cfg = Cfg {
             api_token: api_token.to_string(),
@@ -530,26 +598,84 @@ mod tests {
         };
         let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
 
-        ReadOnlyAuditRepository::log_event_to_url(&client, &base_url, &make_event(1))
+        ReadOnlyAuditRepository::log_event_to_url(&client, &base_url, "instance-a", &make_event(1))
             .await
             .unwrap();
 
         assert_eq!(events.lock().await.len(), 1);
         assert_eq!(auth_headers.lock().await[0], expected_auth_header);
         assert_eq!(status_labels.lock().await[0], Some("200".to_string()));
+        assert_eq!(
+            instance_labels.lock().await[0],
+            Some("instance-a".to_string())
+        );
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn uses_unknown_error_message_when_header_is_missing() {
-        let (base_url, _, _, _) = start_test_server(StatusCode::FORBIDDEN, None).await;
+        let (base_url, _, _, _, _) = start_test_server(StatusCode::FORBIDDEN, None).await;
         let client = ReadOnlyAuditRepository::build_client(&Cfg::default()).unwrap();
 
-        let err = ReadOnlyAuditRepository::log_event_to_url(&client, &base_url, &make_event(1))
-            .await
-            .unwrap_err();
+        let err = ReadOnlyAuditRepository::log_event_to_url(
+            &client,
+            &base_url,
+            "instance-a",
+            &make_event(1),
+        )
+        .await
+        .unwrap_err();
 
         assert_eq!(err.status, ErrorCode::Forbidden);
         assert_eq!(err.message, "Unknown");
+    }
+
+    #[test]
+    fn build_audit_headers_rejects_invalid_instance_label() {
+        let err = build_audit_headers(&make_event(1), "bad\ninstance", 10).unwrap_err();
+        assert_eq!(err.status, ErrorCode::UnprocessableEntity);
+        assert!(err.message.contains("Invalid audit instance label 'bad"));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    #[test]
+    fn build_client_accepts_valid_custom_ca_path() {
+        let mut cfg = Cfg::default();
+        let cert_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("..")
+            .join("misc")
+            .join("certificate.crt");
+        cfg.audit_conf.remote_ca_path = Some(cert_path);
+
+        assert!(ReadOnlyAuditRepository::build_client(&cfg).is_ok());
+    }
+
+    #[test]
+    fn build_client_rejects_missing_custom_ca_path() {
+        let mut cfg = Cfg::default();
+        cfg.audit_conf.remote_ca_path = Some("/tmp/does-not-exist-ca.pem".into());
+
+        let err = ReadOnlyAuditRepository::build_client(&cfg).unwrap_err();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
+        assert!(err
+            .message
+            .contains("Failed to read audit remote CA certificate"));
+    }
+
+    #[test]
+    fn build_client_rejects_invalid_custom_ca_file() {
+        let dir = tempdir().unwrap();
+        let path = dir.path().join("invalid-ca.pem");
+        std::fs::write(
+            &path,
+            b"-----BEGIN CERTIFICATE-----\ninvalid-base64\n-----END CERTIFICATE-----\n",
+        )
+        .unwrap();
+
+        let mut cfg = Cfg::default();
+        cfg.audit_conf.remote_ca_path = Some(path);
+
+        let err = ReadOnlyAuditRepository::build_client(&cfg).unwrap_err();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
     }
 }

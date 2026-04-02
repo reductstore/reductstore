@@ -63,11 +63,19 @@ pub(super) async fn audit_requests(
     .await;
 
     if let (Some(token_name), Some(components)) = (token_name, components) {
+        let message = response
+            .headers()
+            .get("x-reduct-error")
+            .and_then(|value| value.to_str().ok())
+            .unwrap_or("")
+            .to_string();
+
         write_audit_event(
             &components,
             token_name,
             format!("{} {}", method, path),
             response.status().as_u16(),
+            message,
             start.elapsed().as_micros() as u64,
         )
         .await;
@@ -122,6 +130,7 @@ async fn write_audit_event(
     token_name: String,
     endpoint: String,
     status: u16,
+    message: String,
     duration: u64,
 ) {
     let event = AuditEvent {
@@ -132,6 +141,7 @@ async fn write_audit_event(
         token_name,
         endpoint,
         status,
+        message,
         call_count: 1,
         duration,
     };
@@ -377,7 +387,41 @@ mod tests {
         assert_eq!(event.token_name, "unauthorized");
         assert_eq!(event.endpoint, "GET /protected");
         assert_eq!(event.status, StatusCode::UNAUTHORIZED.as_u16());
+        assert_eq!(event.message, "");
         assert_eq!(event.call_count, 1);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn writes_error_message_to_audit_event(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let app = Router::new()
+            .route(
+                "/broken",
+                get(|| async {
+                    (
+                        StatusCode::INTERNAL_SERVER_ERROR,
+                        [("x-reduct-error", "database unavailable")],
+                    )
+                }),
+            )
+            .layer(from_fn_with_state(Arc::clone(&keeper), audit_requests));
+
+        let response = app
+            .oneshot(
+                Request::get("/broken")
+                    .header("Authorization", "Bearer init-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
+
+        wait_for_audit_flush().await;
+        let event = read_audit_event(&keeper, "init-token").await.unwrap();
+        assert_eq!(event.status, StatusCode::INTERNAL_SERVER_ERROR.as_u16());
+        assert_eq!(event.message, "database unavailable");
     }
 
     #[rstest]

@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+pub mod audit;
 pub mod io;
 pub mod limits;
 pub mod lock_file;
@@ -18,6 +19,7 @@ use crate::asset::asset_manager::create_asset_manager;
 use crate::audit::AuditRepositoryBuilder;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType};
+use crate::cfg::audit::AuditConfig;
 use crate::cfg::io::IoConfig;
 use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
@@ -86,11 +88,13 @@ pub struct Cfg {
     pub role: InstanceRole,
     pub primary_url: Option<String>,
     pub secondary_url: Option<String>,
+    pub instance_name: String,
 
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ProvisionedReplication>,
     pub io_conf: IoConfig,
+    pub audit_conf: AuditConfig,
     pub replication_conf: ReplicationConfig,
     pub cs_config: RemoteStorageConfig,
     pub lock_file_config: LockFileConfig,
@@ -118,10 +122,12 @@ impl Default for Cfg {
             role: InstanceRole::Primary,
             primary_url: None,
             secondary_url: None,
+            instance_name: "unknown".to_string(),
             buckets: HashMap::new(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
             io_conf: IoConfig::default(),
+            audit_conf: AuditConfig::default(),
             replication_conf: ReplicationConfig::default(),
             cs_config: RemoteStorageConfig::default(),
             lock_file_config: LockFileConfig::default(),
@@ -263,6 +269,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         let replications = Self::parse_replications(&mut env);
 
+        let api_token = env.get_masked("RS_API_TOKEN", "".to_string());
+
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
             host,
@@ -270,7 +278,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             port,
             api_base_path,
             data_path: ext_cfg.data_path(),
-            api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
+            api_token: api_token.clone(),
             cert_path,
             cert_key_path,
             role: ext_cfg.role(),
@@ -280,12 +288,14 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             secondary_url: env
                 .get_optional::<String>("RS_SECONDARY_URL")
                 .and_then(|url| if url.is_empty() { None } else { Some(url) }),
+            instance_name: resolve_instance_name(env.get_optional::<String>("RS_INSTANCE_NAME")),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
             replications,
             io_conf: Self::parse_io_config(&mut env),
+            audit_conf: Self::parse_audit_config(&mut env, &api_token),
             replication_conf: Self::parse_replication_config(&mut env, port),
             cs_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
@@ -467,6 +477,33 @@ fn load_console() -> &'static [u8] {
     b""
 }
 
+pub(super) fn parse_bool(raw: Option<String>, default: bool) -> bool {
+    raw.map(|value| match value.trim().to_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => default,
+    })
+    .unwrap_or(default)
+}
+
+fn resolve_instance_name(raw: Option<String>) -> String {
+    raw.and_then(|value| {
+        let trimmed = value.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+    .or_else(|| {
+        hostname::get()
+            .ok()
+            .and_then(|name| name.into_string().ok())
+            .filter(|name| !name.is_empty())
+    })
+    .unwrap_or_else(|| "unknown".to_string())
+}
+
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> Display for CfgParser<EnvGetter, ExtCfg> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.env.message())
@@ -491,6 +528,26 @@ mod tests {
             fn get(&self, key: &str) -> Result<String, VarError>;
             fn all(&self) -> BTreeMap<String,String>;
         }
+    }
+
+    #[rstest]
+    #[case(Some("true".to_string()), false, true)]
+    #[case(Some("0".to_string()), true, false)]
+    #[case(Some("bogus".to_string()), true, true)]
+    #[case(None, false, false)]
+    fn test_parse_bool(#[case] raw: Option<String>, #[case] default: bool, #[case] expected: bool) {
+        assert_eq!(parse_bool(raw, default), expected);
+    }
+
+    #[rstest]
+    fn test_resolve_instance_name() {
+        assert_eq!(
+            resolve_instance_name(Some("my-node".to_string())),
+            "my-node"
+        );
+
+        let fallback = resolve_instance_name(Some("   ".to_string()));
+        assert!(!fallback.is_empty());
     }
 
     #[rstest]
@@ -822,6 +879,22 @@ mod tests {
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter, "0.0.0").await;
         assert!(parser.license.is_none());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_instance_name_from_env(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_INSTANCE_NAME"))
+            .times(1)
+            .return_const(Ok("my-node".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
+        assert_eq!(parser.cfg.instance_name, "my-node");
     }
 
     #[rstest]

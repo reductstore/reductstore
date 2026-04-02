@@ -10,6 +10,7 @@ use bytes::Bytes;
 use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
 use reduct_base::Labels;
 use std::sync::Arc;
 
@@ -20,14 +21,27 @@ pub(crate) struct AuditRepository {
     storage: Arc<StorageEngine>,
 }
 
+#[derive(Clone)]
+struct AuditLabels {
+    instance: String,
+}
+
 impl AuditRepository {
-    pub async fn new(_cfg: Cfg, storage: Arc<StorageEngine>) -> Self {
+    pub async fn new(cfg: Cfg, storage: Arc<StorageEngine>) -> Self {
         #[cfg(test)]
         let test_storage = Arc::clone(&storage);
         let sink_storage = Arc::clone(&storage);
+        let audit_settings = Self::bucket_settings(&cfg);
+        let audit_labels = AuditLabels {
+            instance: cfg.instance_name.clone(),
+        };
         let handler: FlushHandler = Arc::new(move |event| {
             let storage = Arc::clone(&sink_storage);
-            Box::pin(async move { Self::write_event_to_bucket(storage, event).await })
+            let settings = audit_settings.clone();
+            let labels = audit_labels.clone();
+            Box::pin(
+                async move { Self::write_event_to_bucket(storage, settings, labels, event).await },
+            )
         });
 
         let aggregator = AuditAggregator::new(handler);
@@ -39,11 +53,28 @@ impl AuditRepository {
         }
     }
 
+    fn bucket_settings(cfg: &Cfg) -> BucketSettings {
+        if let Some(quota_size) = cfg.audit_conf.quota_size {
+            BucketSettings {
+                quota_type: Some(QuotaType::FIFO),
+                quota_size: Some(quota_size),
+                ..BucketSettings::default()
+            }
+        } else {
+            BucketSettings::default()
+        }
+    }
+
     async fn write_event_to_bucket(
         storage: Arc<StorageEngine>,
+        bucket_settings: BucketSettings,
+        audit_labels: AuditLabels,
         event: AuditEvent,
     ) -> Result<(), ReductError> {
-        let labels = Labels::from([("status".to_string(), event.status.to_string())]);
+        let labels = Labels::from([
+            ("status".to_string(), event.status.to_string()),
+            ("instance".to_string(), audit_labels.instance),
+        ]);
         let payload = serde_json::to_vec(&event)
             .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
         let mut writer = match storage
@@ -60,10 +91,7 @@ impl AuditRepository {
             Ok(writer) => writer,
             Err(err) if err.status == ErrorCode::NotFound => {
                 storage
-                    .create_system_bucket(
-                        AUDIT_BUCKET_NAME,
-                        reduct_base::msg::bucket_api::BucketSettings::default(),
-                    )
+                    .create_system_bucket(AUDIT_BUCKET_NAME, bucket_settings)
                     .await?;
                 storage
                     .begin_write(
@@ -105,10 +133,11 @@ mod tests {
     #[fixture]
     async fn repo() -> AuditRepository {
         let tmp_dir = tempdir().unwrap();
-        let cfg = Cfg {
+        let mut cfg = Cfg {
             data_path: tmp_dir.keep(),
             ..Cfg::default()
         };
+        cfg.audit_conf.enabled = true;
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
             .with_cfg(cfg.clone())
@@ -118,12 +147,19 @@ mod tests {
         AuditRepository::new(cfg, Arc::new(storage)).await
     }
 
-    fn make_event(token_name: &str, endpoint: &str, status: u16, timestamp: u64) -> AuditEvent {
+    fn make_event(
+        token_name: &str,
+        endpoint: &str,
+        status: u16,
+        message: &str,
+        timestamp: u64,
+    ) -> AuditEvent {
         AuditEvent {
             timestamp,
             token_name: token_name.to_string(),
             endpoint: endpoint.to_string(),
             status,
+            message: message.to_string(),
             call_count: 1,
             duration: 100,
         }
@@ -184,10 +220,10 @@ mod tests {
     async fn aggregates_events_with_same_key(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 2))
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 2))
             .await
             .unwrap();
 
@@ -206,12 +242,47 @@ mod tests {
     async fn separates_events_with_different_status(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 403, 2))
-            .await
-            .unwrap();
+        repo.log_event(make_event(
+            "token-1",
+            "GET /api/v1/b/test",
+            403,
+            "forbidden",
+            2,
+        ))
+        .await
+        .unwrap();
+
+        wait_for_aggregate_count(&repo, 2).await;
+        let state = repo.aggregator.state.read().await.unwrap();
+        assert_eq!(state.aggregates.len(), 2);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn separates_events_with_different_message(#[future] repo: AuditRepository) {
+        let mut repo = repo.await;
+
+        repo.log_event(make_event(
+            "token-1",
+            "GET /api/v1/b/test",
+            500,
+            "disk full",
+            1,
+        ))
+        .await
+        .unwrap();
+        repo.log_event(make_event(
+            "token-1",
+            "GET /api/v1/b/test",
+            500,
+            "timeout",
+            2,
+        ))
+        .await
+        .unwrap();
 
         wait_for_aggregate_count(&repo, 2).await;
         let state = repo.aggregator.state.read().await.unwrap();
@@ -223,7 +294,7 @@ mod tests {
     async fn flushes_single_event_after_delay(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
 
@@ -233,6 +304,7 @@ mod tests {
         assert_eq!(event.token_name, "token-1");
         assert_eq!(event.endpoint, "GET /api/v1/b/test");
         assert_eq!(event.status, 200);
+        assert_eq!(event.message, "");
         assert_eq!(event.call_count, 1);
         assert_eq!(event.duration, 100);
         assert_eq!(event.timestamp, 1);
@@ -240,10 +312,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn flushes_status_label_only(#[future] repo: AuditRepository) {
+    async fn flushes_status_and_instance_labels(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
 
@@ -252,7 +324,10 @@ mod tests {
         let labels = read_audit_labels(&repo, "token-1", 1).await;
         assert_eq!(
             labels,
-            Labels::from([("status".to_string(), "200".to_string())])
+            Labels::from([
+                ("status".to_string(), "200".to_string()),
+                ("instance".to_string(), "unknown".to_string()),
+            ])
         );
     }
 
@@ -263,7 +338,11 @@ mod tests {
 
         AuditRepository::write_event_to_bucket(
             Arc::clone(&repo.storage),
-            make_event("token-1", "GET /api/v1/b/test", 200, 1),
+            BucketSettings::default(),
+            AuditLabels {
+                instance: "test-instance".to_string(),
+            },
+            make_event("token-1", "GET /api/v1/b/test", 200, "", 1),
         )
         .await
         .unwrap();
@@ -275,16 +354,52 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn creates_audit_bucket_with_fifo_quota_when_configured() {
+        let tmp_dir = tempdir().unwrap();
+        let mut cfg = Cfg {
+            data_path: tmp_dir.keep(),
+            ..Cfg::default()
+        };
+        cfg.audit_conf.enabled = true;
+        cfg.audit_conf.quota_size = Some(1024);
+
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
+
+        let mut repo = AuditRepository::new(cfg, Arc::clone(&storage)).await;
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
+            .await
+            .unwrap();
+
+        sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
+
+        let bucket = storage
+            .get_bucket(AUDIT_BUCKET_NAME)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        let settings = bucket.settings().await.unwrap();
+        assert_eq!(settings.quota_type, Some(QuotaType::FIFO));
+        assert_eq!(settings.quota_size, Some(1024));
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn second_matching_event_delays_flush_and_aggregates_record(
         #[future] repo: AuditRepository,
     ) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
         sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 2))
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 2))
             .await
             .unwrap();
 
@@ -303,11 +418,11 @@ mod tests {
     async fn stale_timer_does_not_flush_after_version_change(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 1))
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
         sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, 3))
+        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 3))
             .await
             .unwrap();
 

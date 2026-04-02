@@ -839,11 +839,12 @@ pub(crate) mod tests {
         limits_config: LimitsConfig,
         api_token: &str,
     ) -> Arc<StateKeeper> {
-        let cfg = Cfg {
+        let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
             api_token: api_token.to_string(),
             ..Cfg::default()
         };
+        cfg.audit_conf.enabled = true;
 
         let storage = StorageEngine::builder()
             .with_data_path(cfg.data_path.clone())
