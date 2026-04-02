@@ -1,6 +1,9 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::core::internal_client::{
+    ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
+};
 use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucketConfig};
 use async_stream::stream;
 use async_trait::async_trait;
@@ -11,7 +14,7 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
-use reqwest::{Body, Certificate, Client, Error, Method, Response};
+use reqwest::{Body, Client, Error, Method, Response};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
@@ -48,7 +51,7 @@ pub(super) trait ReductBucketApi {
 pub(super) type BoxedBucketApi = Box<dyn ReductBucketApi + Sync + Send>;
 
 struct ReductClient {
-    client: Client,
+    client_api: InternalClientApi,
     server_url: String,
 }
 
@@ -61,48 +64,28 @@ impl ReductClient {
         verify_ssl: bool,
         ca_path: Option<&std::path::PathBuf>,
     ) -> Result<Self, ReductError> {
-        let mut headers = reqwest::header::HeaderMap::new();
-        if !api_token.is_empty() {
-            let mut value = HeaderValue::from_str(&format!("Bearer {}", api_token)).unwrap();
-            value.set_sensitive(true);
-            headers.insert(reqwest::header::AUTHORIZATION, value);
-        }
+        let client = InternalClientBuilder::new(ClientBuildErrorContext {
+            ca_read: "Failed to read replication CA certificate",
+            ca_parse: "Invalid replication CA certificate",
+            client_build: "Failed to build replication HTTP client",
+            kind: ClientBuildErrorKind::UnprocessableEntity,
+        })
+        .api_token(api_token)
+        .verify_ssl(verify_ssl)
+        .ca_path(ca_path)
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .build()?;
 
-        let mut client = Client::builder()
-            .default_headers(headers)
-            .connect_timeout(std::time::Duration::from_secs(10))
-            .danger_accept_invalid_certs(!verify_ssl)
-            .http1_only();
+        let client_api = InternalClientApi::with_single_url(client, url.to_string());
+        let server_url = client_api
+            .primary_url()
+            .expect("normalized URL must exist")
+            .to_string();
 
-        if let Some(ca_path) = ca_path {
-            let cert_bytes = std::fs::read(ca_path).map_err(|err| {
-                unprocessable_entity!(
-                    "Failed to read replication CA certificate '{}': {}",
-                    ca_path.display(),
-                    err
-                )
-            })?;
-            let cert = Certificate::from_pem(&cert_bytes).map_err(|err| {
-                unprocessable_entity!(
-                    "Invalid replication CA certificate '{}': {}",
-                    ca_path.display(),
-                    err
-                )
-            })?;
-            client = client.add_root_certificate(cert);
-        }
-
-        let client = client.build().map_err(|err| {
-            unprocessable_entity!("Failed to build replication HTTP client: {}", err)
-        })?;
-
-        let server_url = if !url.ends_with('/') {
-            format!("{}/", url)
-        } else {
-            url.to_string()
-        };
-
-        Ok(Self { client, server_url })
+        Ok(Self {
+            client_api,
+            server_url,
+        })
     }
 }
 
@@ -227,43 +210,13 @@ impl BucketWrapper {
 }
 
 fn check_response(response: Result<Response, Error>) -> Result<Response, ReductError> {
-    let map_error = |error: reqwest::Error| -> ReductError {
-        let status = if error.is_connect() {
-            ErrorCode::ConnectionError
-        } else if error.is_timeout() {
-            ErrorCode::Timeout
-        } else if error.is_request() {
-            ErrorCode::InvalidRequest
-        } else {
-            ErrorCode::Unknown
-        };
-
-        ReductError::new(status, &error.to_string())
-    };
-
-    let response = response.map_err(map_error)?;
-    if response.status().is_success() {
-        return Ok(response);
-    }
-
-    let status =
-        ErrorCode::try_from(response.status().as_u16() as i16).unwrap_or(ErrorCode::Unknown);
-
-    let error_msg = response
-        .headers()
-        .get("x-reduct-error")
-        .unwrap_or(&HeaderValue::from_str("Unknown").unwrap())
-        .to_str()
-        .unwrap()
-        .to_string();
-
-    Err(ReductError::new(status, &error_msg))
+    crate::core::internal_client::check_response(response)
 }
 
 #[async_trait]
 impl ReductClientApi for ReductClient {
     async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
-        let request = self.client.request(
+        let request = self.client_api.client().request(
             Method::GET,
             &format!("{}{}/b/{}", self.server_url, API_PATH, bucket_name),
         );
@@ -274,7 +227,7 @@ impl ReductClientApi for ReductClient {
         Ok(Box::new(BucketWrapper {
             server_url: self.server_url.clone(),
             bucket_name: bucket_name.to_string(),
-            client: self.client.clone(),
+            client: self.client_api.client().clone(),
         }))
     }
 

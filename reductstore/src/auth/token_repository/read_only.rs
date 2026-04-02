@@ -1,31 +1,44 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::audit::AUDIT_BUCKET_NAME;
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::internal_client::{
+    check_response, map_request_error, ClientBuildErrorContext, ClientBuildErrorKind,
+    InternalClientApi, InternalClientBuilder,
+};
 use crate::core::sync::AsyncRwLock;
+use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::{debug, error};
 use prost::Message;
 use reduct_base::error::ReductError;
+use reduct_base::msg::bucket_api::FullBucketInfo;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
 use reduct_base::{forbidden, internal_server_error};
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::SystemTime;
-use tokio::time::Instant;
+use tokio::time::{Duration, Instant};
+
+const TOKEN_LAST_ACCESS_CACHE_TTL: Duration = Duration::from_secs(10);
 
 pub(super) struct ReadOnlyTokenRepository {
     config_path: PathBuf,
     repo: HashMap<String, Token>,
     cfg: Cfg,
     last_replica_sync: AsyncRwLock<Instant>,
+    audit_client: Option<InternalClientApi>,
+    last_access_cache: HashMap<String, u64>,
+    last_access_cache_updated_at: Option<Instant>,
 }
 
 impl ReadOnlyTokenRepository {
@@ -39,14 +52,18 @@ impl ReadOnlyTokenRepository {
     /// # Returns
     ///
     /// The repository
-    pub async fn new(data_path: PathBuf, cfg: Cfg) -> Self {
+    pub async fn new(data_path: PathBuf, cfg: Cfg, _storage: Option<Arc<StorageEngine>>) -> Self {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
+        let audit_client = Self::build_audit_client(&cfg);
 
         let mut token_repository = Self {
             config_path,
             repo: HashMap::new(),
             last_replica_sync: AsyncRwLock::new(Instant::now()),
             cfg,
+            audit_client,
+            last_access_cache: HashMap::new(),
+            last_access_cache_updated_at: None,
         };
         let repo = token_repository
             .load_repo()
@@ -55,6 +72,39 @@ impl ReadOnlyTokenRepository {
 
         token_repository.repo = repo;
         token_repository
+    }
+
+    fn build_audit_client(cfg: &Cfg) -> Option<InternalClientApi> {
+        if cfg.primary_url.is_none() && cfg.secondary_url.is_none() {
+            return None;
+        }
+
+        let client = InternalClientBuilder::new(ClientBuildErrorContext {
+            ca_read: "Failed to read audit remote CA certificate",
+            ca_parse: "Failed to parse audit remote CA certificate",
+            client_build: "Failed to build audit read-only token client",
+            kind: ClientBuildErrorKind::InternalServerError,
+        })
+        .api_token(&cfg.api_token)
+        .verify_ssl(cfg.audit_conf.remote_verify_ssl)
+        .ca_path(cfg.audit_conf.remote_ca_path.as_ref())
+        .connect_timeout(cfg.audit_conf.remote_timeout)
+        .build();
+
+        match client {
+            Ok(client) => Some(InternalClientApi::new(
+                client,
+                cfg.primary_url.clone(),
+                cfg.secondary_url.clone(),
+            )),
+            Err(err) => {
+                error!(
+                    "Failed to initialize audit client for read-only token repository: {}",
+                    err
+                );
+                None
+            }
+        }
     }
 
     async fn load_repo(&self) -> Result<HashMap<String, Token>, ReductError> {
@@ -95,6 +145,7 @@ impl ReadOnlyTokenRepository {
                 }),
                 is_provisioned: true,
                 expires_at: None,
+                last_access: None,
             };
 
             repo.insert(init_token.name.clone(), init_token);
@@ -117,6 +168,66 @@ impl ReadOnlyTokenRepository {
         self.repo = self.load_repo().await?;
 
         Ok(())
+    }
+
+    async fn refresh_last_access_cache_if_needed(&mut self) {
+        let now = Instant::now();
+        if self
+            .last_access_cache_updated_at
+            .is_some_and(|ts| now.duration_since(ts) < TOKEN_LAST_ACCESS_CACHE_TTL)
+        {
+            return;
+        }
+
+        let Some(audit_client) = self.audit_client.as_ref() else {
+            return;
+        };
+
+        let bucket_info = audit_client
+            .execute_with_failover(
+                "Neither primary nor secondary URL is configured for replica audit reads",
+                |client, base_url| async move {
+                    let response = client
+                        .get(format!("{}api/v1/b/{}", base_url, AUDIT_BUCKET_NAME))
+                        .send()
+                        .await;
+                    let response = check_response(response)?;
+                    response
+                        .json::<FullBucketInfo>()
+                        .await
+                        .map_err(map_request_error)
+                },
+            )
+            .await;
+
+        match bucket_info {
+            Ok(bucket_info) => {
+                self.last_access_cache = bucket_info
+                    .entries
+                    .into_iter()
+                    .filter(|entry| entry.record_count > 0)
+                    .map(|entry| (entry.name, entry.latest_record))
+                    .collect();
+                self.last_access_cache_updated_at = Some(now);
+            }
+            Err(err) => {
+                debug!(
+                    "Failed to fetch remote audit info for token last access: {}",
+                    err
+                );
+            }
+        }
+    }
+
+    fn resolve_last_access(&self, token_name: &str) -> Option<DateTime<Utc>> {
+        self.last_access_cache
+            .get(token_name)
+            .and_then(|timestamp| DateTime::<Utc>::from_timestamp_micros(*timestamp as i64))
+    }
+
+    async fn populate_token_last_access(&mut self, token: &mut Token) {
+        self.refresh_last_access_cache_if_needed().await;
+        token.last_access = self.resolve_last_access(&token.name);
     }
 }
 
@@ -141,6 +252,13 @@ impl ManageTokens for ReadOnlyTokenRepository {
         AccessTokens::get_token(self, name)
     }
 
+    async fn get_token_with_last_access(&mut self, name: &str) -> Result<Token, ReductError> {
+        self.update_repo().await?;
+        let mut token = AccessTokens::get_token(self, name)?.clone();
+        self.populate_token_last_access(&mut token).await;
+        Ok(token)
+    }
+
     async fn update_token(&mut self, _token: Token) -> Result<(), ReductError> {
         Err(forbidden!("Cannot mutate token in read-only mode"))
     }
@@ -151,10 +269,29 @@ impl ManageTokens for ReadOnlyTokenRepository {
         AccessTokens::get_token_list(self)
     }
 
+    async fn get_token_list_with_last_access(&mut self) -> Result<Vec<Token>, ReductError> {
+        self.update_repo().await?;
+        let mut tokens = AccessTokens::get_token_list(self)?;
+        for token in tokens.iter_mut() {
+            self.populate_token_last_access(token).await;
+        }
+        Ok(tokens)
+    }
+
     async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
         self.update_repo().await?;
 
         AccessTokens::validate_token(self, header)
+    }
+
+    async fn validate_token_with_last_access(
+        &mut self,
+        header: Option<&str>,
+    ) -> Result<Token, ReductError> {
+        self.update_repo().await?;
+        let mut token = AccessTokens::validate_token(self, header)?;
+        self.populate_token_last_access(&mut token).await;
+        Ok(token)
     }
 
     async fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
@@ -230,6 +367,7 @@ mod tests {
                 }),
                 is_provisioned: true,
                 expires_at: None,
+                last_access: None,
             };
 
             write_token_to_file(&path, &new_token).await;
@@ -295,7 +433,8 @@ mod tests {
                         write: vec![],
                     }),
                     is_provisioned: true,
-                    expires_at: None
+                    expires_at: None,
+                    last_access: None,
                 }
             );
         }
@@ -355,7 +494,8 @@ mod tests {
                         write: vec![],
                     }),
                     is_provisioned: true,
-                    expires_at: None
+                    expires_at: None,
+                    last_access: None,
                 }
             );
         }
@@ -437,11 +577,12 @@ mod tests {
             }),
             is_provisioned: true,
             expires_at: None,
+            last_access: None,
         };
 
         write_token_to_file(&path, &token).await;
         (
-            Box::new(ReadOnlyTokenRepository::new(path.clone(), cfg).await),
+            Box::new(ReadOnlyTokenRepository::new(path.clone(), cfg, None).await),
             path,
         )
     }

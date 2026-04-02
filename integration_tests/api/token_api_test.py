@@ -55,6 +55,7 @@ def test__create_v2_token(base_url, session, token_name, bucket_name):
         "permissions": permissions,
         "is_provisioned": False,
         "expires_at": json.loads(resp.content)["expires_at"],
+        "last_access": None,
     }
     assert json.loads(resp.content)["expires_at"] is not None
 
@@ -139,6 +140,7 @@ def test__get_token(base_url, session, bucket_name, token_name):
         "permissions": permissions,
         "is_provisioned": False,
         "expires_at": None,
+        "last_access": None,
     }
 
 

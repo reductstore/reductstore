@@ -1,16 +1,19 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::audit::AUDIT_BUCKET_NAME;
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
 use crate::core::file_cache::FILE_CACHE;
+use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::debug;
 use prost::Message;
 use rand::Rng;
+use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
 use reduct_base::{conflict, not_found, unprocessable_entity};
@@ -18,13 +21,20 @@ use regex::Regex;
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::SystemTime;
+use tokio::time::{Duration, Instant};
+
+const TOKEN_LAST_ACCESS_CACHE_TTL: Duration = Duration::from_secs(10);
 
 /// The TokenRepository trait is used to store and retrieve tokens.
 pub(super) struct TokenRepository {
     config_path: PathBuf,
     repo: HashMap<String, Token>,
     permission_regex: Regex,
+    storage: Option<Arc<StorageEngine>>,
+    last_access_cache: HashMap<String, u64>,
+    last_access_cache_updated_at: Option<Instant>,
 }
 
 impl TokenRepository {
@@ -38,7 +48,11 @@ impl TokenRepository {
     /// # Returns
     ///
     /// The repository
-    pub async fn new(data_path: PathBuf, api_token: String) -> TokenRepository {
+    pub async fn new(
+        data_path: PathBuf,
+        api_token: String,
+        storage: Option<Arc<StorageEngine>>,
+    ) -> TokenRepository {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
         let repo = HashMap::new();
 
@@ -49,6 +63,9 @@ impl TokenRepository {
             config_path,
             repo,
             permission_regex,
+            storage,
+            last_access_cache: HashMap::new(),
+            last_access_cache_updated_at: None,
         };
 
         let file = FILE_CACHE
@@ -96,12 +113,69 @@ impl TokenRepository {
             }),
             is_provisioned: true,
             expires_at: None,
+            last_access: None,
         };
 
         token_repository
             .repo
             .insert(init_token.name.clone(), init_token);
         token_repository
+    }
+
+    async fn refresh_last_access_cache_if_needed(&mut self) {
+        let now = Instant::now();
+        if self
+            .last_access_cache_updated_at
+            .is_some_and(|ts| now.duration_since(ts) < TOKEN_LAST_ACCESS_CACHE_TTL)
+        {
+            return;
+        }
+
+        let Some(storage) = self.storage.as_ref() else {
+            return;
+        };
+
+        let bucket = match storage.get_bucket(AUDIT_BUCKET_NAME).await {
+            Ok(bucket) => bucket.upgrade_and_unwrap(),
+            Err(err) if err.status == ErrorCode::NotFound => {
+                self.last_access_cache.clear();
+                self.last_access_cache_updated_at = Some(now);
+                return;
+            }
+            Err(err) => {
+                debug!("Failed to get audit bucket for token last access: {}", err);
+                return;
+            }
+        };
+
+        match bucket.info().await {
+            Ok(bucket_info) => {
+                self.last_access_cache = bucket_info
+                    .entries
+                    .into_iter()
+                    .filter(|entry| entry.record_count > 0)
+                    .map(|entry| (entry.name, entry.latest_record))
+                    .collect();
+                self.last_access_cache_updated_at = Some(now);
+            }
+            Err(err) => {
+                debug!(
+                    "Failed to read audit bucket info for token last access: {}",
+                    err
+                );
+            }
+        }
+    }
+
+    fn resolve_last_access(&self, token_name: &str) -> Option<DateTime<Utc>> {
+        self.last_access_cache
+            .get(token_name)
+            .and_then(|timestamp| DateTime::<Utc>::from_timestamp_micros(*timestamp as i64))
+    }
+
+    async fn populate_token_last_access(&mut self, token: &mut Token) {
+        self.refresh_last_access_cache_if_needed().await;
+        token.last_access = self.resolve_last_access(&token.name);
     }
 
     /// Save the token repository to the file system
@@ -191,6 +265,7 @@ impl ManageTokens for TokenRepository {
                     permissions: Some(permissions),
                     is_provisioned: false,
                     expires_at,
+                    last_access: None,
                 },
             )
         };
@@ -203,6 +278,12 @@ impl ManageTokens for TokenRepository {
 
     async fn get_token(&mut self, name: &str) -> Result<&Token, ReductError> {
         AccessTokens::get_token(self, name)
+    }
+
+    async fn get_token_with_last_access(&mut self, name: &str) -> Result<Token, ReductError> {
+        let mut token = AccessTokens::get_token(self, name)?.clone();
+        self.populate_token_last_access(&mut token).await;
+        Ok(token)
     }
 
     async fn update_token(&mut self, token: Token) -> Result<(), ReductError> {
@@ -218,8 +299,25 @@ impl ManageTokens for TokenRepository {
         AccessTokens::get_token_list(self)
     }
 
+    async fn get_token_list_with_last_access(&mut self) -> Result<Vec<Token>, ReductError> {
+        let mut tokens = AccessTokens::get_token_list(self)?;
+        for token in tokens.iter_mut() {
+            self.populate_token_last_access(token).await;
+        }
+        Ok(tokens)
+    }
+
     async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
         AccessTokens::validate_token(self, header)
+    }
+
+    async fn validate_token_with_last_access(
+        &mut self,
+        header: Option<&str>,
+    ) -> Result<Token, ReductError> {
+        let mut token = AccessTokens::validate_token(self, header)?;
+        self.populate_token_last_access(&mut token).await;
+        Ok(token)
     }
 
     async fn remove_token(&mut self, name: &str) -> Result<(), ReductError> {
@@ -595,6 +693,7 @@ mod tests {
                 }),
                 is_provisioned: true,
                 expires_at: None,
+                last_access: None,
             })
             .await
             .unwrap();
@@ -676,6 +775,7 @@ mod tests {
                     }),
                     is_provisioned: false,
                     expires_at: None,
+                    last_access: None,
                 }
             );
         }

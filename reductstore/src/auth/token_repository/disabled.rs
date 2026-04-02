@@ -32,11 +32,19 @@ impl ManageTokens for NoAuthRepository {
         Err(bad_request!("Authentication is disabled"))
     }
 
+    async fn get_token_with_last_access(&mut self, _name: &str) -> Result<Token, ReductError> {
+        Err(bad_request!("Authentication is disabled"))
+    }
+
     async fn update_token(&mut self, _token: Token) -> Result<(), ReductError> {
         Err(bad_request!("Authentication is disabled"))
     }
 
     async fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError> {
+        Ok(vec![])
+    }
+
+    async fn get_token_list_with_last_access(&mut self) -> Result<Vec<Token>, ReductError> {
         Ok(vec![])
     }
 
@@ -52,7 +60,15 @@ impl ManageTokens for NoAuthRepository {
             }),
             is_provisioned: false,
             expires_at: None,
+            last_access: None,
         })
+    }
+
+    async fn validate_token_with_last_access(
+        &mut self,
+        _header: Option<&str>,
+    ) -> Result<Token, ReductError> {
+        self.validate_token(None).await
     }
 
     async fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {

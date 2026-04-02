@@ -6,20 +6,23 @@ use crate::auth::token_repository::{
 };
 use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
+use crate::storage::engine::StorageEngine;
 use chrono::{DateTime, Utc};
 use log::{error, info, warn};
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_tokens(
         &self,
         data_path: &PathBuf,
+        storage: Arc<StorageEngine>,
     ) -> BoxedTokenRepository {
         let mut token_repo = TokenRepositoryBuilder::new(self.cfg.clone())
-            .build(PathBuf::from(data_path))
+            .build_with_storage(PathBuf::from(data_path), storage)
             .await;
 
         for (name, token) in &self.cfg.tokens {

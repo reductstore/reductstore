@@ -4,15 +4,17 @@
 use crate::audit::aggregator::{AuditAggregator, FlushHandler};
 use crate::audit::{AuditEvent, ManageAudit, AUDIT_BUCKET_NAME};
 use crate::cfg::Cfg;
-use crate::core::sync::AsyncRwLock;
+use crate::core::internal_client::{
+    ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
+};
 use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use bytes::Bytes;
-use reduct_base::error::{ErrorCode, ReductError};
+use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
-use reqwest::{Body, Client, Response};
+use reqwest::{Body, Client};
 use std::sync::Arc;
 use url::form_urlencoded;
 
@@ -22,20 +24,17 @@ pub(crate) struct ReadOnlyAuditRepository {
 
 #[derive(Clone)]
 struct AuditForwardContext {
-    client: Client,
-    primary_url: Option<String>,
-    secondary_url: Option<String>,
-    preferred_url: Arc<AsyncRwLock<Option<String>>>,
+    client_api: InternalClientApi,
     instance_name: String,
 }
 
 impl AuditForwardContext {
     async fn log_event(&self, event: &AuditEvent) -> Result<(), ReductError> {
         ReadOnlyAuditRepository::log_event_with_failover(
-            &self.client,
-            self.primary_url.as_deref(),
-            self.secondary_url.as_deref(),
-            Arc::clone(&self.preferred_url),
+            self.client_api.client(),
+            self.client_api.primary_url(),
+            self.client_api.secondary_url(),
+            self.client_api.preferred_url_handle(),
             &self.instance_name,
             event,
         )
@@ -45,11 +44,14 @@ impl AuditForwardContext {
 
 impl ReadOnlyAuditRepository {
     pub async fn new(cfg: Cfg, _storage: Arc<StorageEngine>) -> Self {
+        let client = Self::build_client(&cfg).expect("audit replica client must build");
+
         let context = AuditForwardContext {
-            client: Self::build_client(&cfg).expect("audit replica client must build"),
-            primary_url: normalize_url(cfg.primary_url.clone()),
-            secondary_url: normalize_url(cfg.secondary_url.clone()),
-            preferred_url: Arc::new(AsyncRwLock::new(None)),
+            client_api: InternalClientApi::new(
+                client,
+                cfg.primary_url.clone(),
+                cfg.secondary_url.clone(),
+            ),
             instance_name: cfg.instance_name.clone(),
         };
 
@@ -63,93 +65,42 @@ impl ReadOnlyAuditRepository {
     }
 
     fn build_client(cfg: &Cfg) -> Result<Client, ReductError> {
-        let mut headers = HeaderMap::new();
-        if !cfg.api_token.is_empty() {
-            let mut value = HeaderValue::from_str(&format!("Bearer {}", cfg.api_token)).unwrap();
-            value.set_sensitive(true);
-            headers.insert(reqwest::header::AUTHORIZATION, value);
-        }
-
-        let mut builder = Client::builder()
-            .default_headers(headers)
-            .connect_timeout(cfg.audit_conf.remote_timeout)
-            .danger_accept_invalid_certs(!cfg.audit_conf.remote_verify_ssl)
-            .http1_only();
-
-        if let Some(path) = &cfg.audit_conf.remote_ca_path {
-            let cert_data = std::fs::read(path).map_err(|err| {
-                internal_server_error!(
-                    "Failed to read audit remote CA certificate {}: {}",
-                    path.display(),
-                    err
-                )
-            })?;
-            let cert = reqwest::Certificate::from_pem(&cert_data).map_err(|err| {
-                internal_server_error!(
-                    "Failed to parse audit remote CA certificate {}: {}",
-                    path.display(),
-                    err
-                )
-            })?;
-            builder = builder.add_root_certificate(cert);
-        }
-
-        builder.build().map_err(|err| {
-            internal_server_error!("Failed to build audit replica HTTP client: {}", err)
+        InternalClientBuilder::new(ClientBuildErrorContext {
+            ca_read: "Failed to read audit remote CA certificate",
+            ca_parse: "Failed to parse audit remote CA certificate",
+            client_build: "Failed to build audit replica HTTP client",
+            kind: ClientBuildErrorKind::InternalServerError,
         })
+        .api_token(&cfg.api_token)
+        .verify_ssl(cfg.audit_conf.remote_verify_ssl)
+        .ca_path(cfg.audit_conf.remote_ca_path.as_ref())
+        .connect_timeout(cfg.audit_conf.remote_timeout)
+        .build()
     }
 
     async fn log_event_with_failover(
         client: &Client,
         primary_url: Option<&str>,
         secondary_url: Option<&str>,
-        preferred_url: Arc<AsyncRwLock<Option<String>>>,
+        preferred_url: Arc<crate::core::sync::AsyncRwLock<Option<String>>>,
         instance_name: &str,
         event: &AuditEvent,
     ) -> Result<(), ReductError> {
-        let mut candidates = Vec::new();
+        let client_api = InternalClientApi::new_with_preferred(
+            client.clone(),
+            primary_url.map(|v| v.to_string()),
+            secondary_url.map(|v| v.to_string()),
+            preferred_url,
+        );
 
-        if let Some(url) = preferred_url.read().await?.clone() {
-            candidates.push(url);
-        }
-        if let Some(url) = primary_url {
-            if !candidates.iter().any(|candidate| candidate == url) {
-                candidates.push(url.to_string());
-            }
-        }
-        if let Some(url) = secondary_url {
-            if !candidates.iter().any(|candidate| candidate == url) {
-                candidates.push(url.to_string());
-            }
-        }
-
-        if candidates.is_empty() {
-            return Err(unprocessable_entity!(
-                "Neither primary nor secondary URL is configured for replica audit writes"
-            ));
-        }
-
-        let mut last_err = None;
-        for base_url in candidates {
-            match Self::log_event_to_url(client, &base_url, instance_name, event).await {
-                Ok(()) => {
-                    *preferred_url.write().await? = Some(base_url);
-                    return Ok(());
-                }
-                Err(err) => {
-                    if !is_failover_candidate(&err) {
-                        return Err(err);
-                    }
-                    last_err = Some(err);
-                }
-            }
-        }
-
-        Err(last_err.unwrap_or_else(|| {
-            unprocessable_entity!(
-                "Neither primary nor secondary URL is configured for replica audit writes"
+        client_api
+            .execute_with_failover(
+                "Neither primary nor secondary URL is configured for replica audit writes",
+                |client, base_url| async move {
+                    Self::log_event_to_url(&client, &base_url, instance_name, event).await
+                },
             )
-        }))
+            .await
     }
 
     async fn log_event_to_url(
@@ -206,14 +157,9 @@ fn build_audit_headers(
     Ok(headers)
 }
 
+#[cfg_attr(not(test), allow(dead_code))]
 fn normalize_url(url: Option<String>) -> Option<String> {
-    url.map(|url| {
-        if url.ends_with('/') {
-            url
-        } else {
-            format!("{}/", url)
-        }
-    })
+    crate::core::internal_client::normalize_url(url)
 }
 
 fn build_write_url(base_url: &str, event: &AuditEvent) -> String {
@@ -226,42 +172,10 @@ fn build_write_url(base_url: &str, event: &AuditEvent) -> String {
     )
 }
 
-fn is_failover_candidate(err: &ReductError) -> bool {
-    matches!(err.status, ErrorCode::ConnectionError | ErrorCode::Timeout)
-}
-
-fn check_response(response: Result<Response, reqwest::Error>) -> Result<Response, ReductError> {
-    let map_error = |error: reqwest::Error| -> ReductError {
-        let status = if error.is_connect() {
-            ErrorCode::ConnectionError
-        } else if error.is_timeout() {
-            ErrorCode::Timeout
-        } else if error.is_request() {
-            ErrorCode::InvalidRequest
-        } else {
-            ErrorCode::Unknown
-        };
-
-        ReductError::new(status, &error.to_string())
-    };
-
-    let response = response.map_err(map_error)?;
-    if response.status().is_success() {
-        return Ok(response);
-    }
-
-    let status =
-        ErrorCode::try_from(response.status().as_u16() as i16).unwrap_or(ErrorCode::Unknown);
-
-    let error_msg = response
-        .headers()
-        .get("x-reduct-error")
-        .unwrap_or(&HeaderValue::from_str("Unknown").unwrap())
-        .to_str()
-        .unwrap()
-        .to_string();
-
-    Err(ReductError::new(status, &error_msg))
+fn check_response(
+    response: Result<reqwest::Response, reqwest::Error>,
+) -> Result<reqwest::Response, ReductError> {
+    crate::core::internal_client::check_response(response)
 }
 
 #[async_trait]
@@ -276,6 +190,7 @@ mod tests {
     use super::*;
     use crate::audit::aggregator::AGGREGATION_WINDOW_SECS;
     use crate::cfg::Cfg;
+    use crate::core::sync::AsyncRwLock;
     use crate::storage::engine::StorageEngine;
     use axum::body::Bytes as AxumBytes;
     use axum::extract::State;
@@ -283,6 +198,7 @@ mod tests {
     use axum::response::IntoResponse;
     use axum::routing::any;
     use axum::Router;
+    use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
     use std::sync::Arc;
     use tempfile::tempdir;
