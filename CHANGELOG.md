@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `message` field to audit payloads and split audit aggregation groups when either `status` or `message` changes, [PR-1277](https://github.com/reductstore/reductstore/pull/1277)
 - Add `RS_INSTANCE_NAME` for audit record attribution with hostname fallback and include `instance` label on `$audit` writes (local and replica-forwarded), [PR-1272](https://github.com/reductstore/reductstore/pull/1272)
 - Add manageable audit configuration via `RS_AUDIT_ENABLED` and `RS_AUDIT_QUOTA_SIZE`, plus replica audit remote settings (`RS_AUDIT_REMOTE_VERIFY_SSL`, `RS_AUDIT_REMOTE_CA_PATH`, `RS_AUDIT_REMOTE_TIMEOUT`) in `cfg/audit`, [PR-1271](https://github.com/reductstore/reductstore/pull/1271)
 - Add global storage size cap via `RS_ENGINE_MAX_STORAGE_SIZE` (SI units) with write-path enforcement across all buckets, [PR-1263](https://github.com/reductstore/reductstore/pull/1263)
