@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Default audit logging to enabled when `RS_API_TOKEN` is set, keep it disabled when empty, and allow explicit override via `RS_AUDIT_ENABLED`, [PR-1275](https://github.com/reductstore/reductstore/pull/1275)
 - Ignore hidden system/meta entries when computing bucket-level oldest/latest history so reported history matches visible entries, [PR-1274](https://github.com/reductstore/reductstore/pull/1274)
 - Avoid read-only replica crashes when `$audit` cannot be loaded and both `RS_PRIMARY_URL` and `RS_SECONDARY_URL` are unset by logging a warning and skipping audit forwarding instead, [PR-1266](https://github.com/reductstore/reductstore/pull/1266)
 - Make primary-mode Ctrl-C shutdown lock-file cleanup idempotent by ignoring already-removed lock files and de-duplicating release/drop cleanup, [PR-1247](https://github.com/reductstore/reductstore/pull/1247)
