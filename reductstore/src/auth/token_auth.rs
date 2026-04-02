@@ -99,7 +99,12 @@ mod tests {
         assert_eq!(result, Err(ReductError::unauthorized("Invalid token")));
 
         let result = auth
-            .check(Some("Bearer test"), None, repo.as_mut(), FullAccessPolicy {})
+            .check(
+                Some("Bearer test"),
+                None,
+                repo.as_mut(),
+                FullAccessPolicy {},
+            )
             .await;
         assert!(result.is_ok());
     }

@@ -256,7 +256,8 @@ fn check_token_ip_allowlist(token: &Token, client_ip: Option<IpAddr>) -> Result<
         return Ok(());
     }
 
-    let client_ip = client_ip.ok_or_else(|| unauthorized!("Client IP is required for this token"))?;
+    let client_ip =
+        client_ip.ok_or_else(|| unauthorized!("Client IP is required for this token"))?;
     if permissions
         .ip_allowlist
         .iter()
@@ -264,7 +265,10 @@ fn check_token_ip_allowlist(token: &Token, client_ip: Option<IpAddr>) -> Result<
     {
         Ok(())
     } else {
-        Err(unauthorized!("Token is not allowed for client IP {}", client_ip))
+        Err(unauthorized!(
+            "Token is not allowed for client IP {}",
+            client_ip
+        ))
     }
 }
 

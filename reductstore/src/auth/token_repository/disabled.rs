@@ -99,7 +99,7 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },

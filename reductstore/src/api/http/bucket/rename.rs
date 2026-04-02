@@ -65,7 +65,7 @@ mod tests {
                         full_access: false,
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-1".to_string()],
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },

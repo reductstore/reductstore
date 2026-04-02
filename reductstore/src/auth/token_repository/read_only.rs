@@ -237,7 +237,7 @@ mod tests {
                     full_access: true,
                     read: vec![],
                     write: vec![],
-                ip_allowlist: vec![],
+                    ip_allowlist: vec![],
                 }),
                 is_provisioned: true,
                 expires_at: None,
@@ -270,7 +270,7 @@ mod tests {
                 full_access: true,
                 read: vec![],
                 write: vec![],
-            ip_allowlist: vec![],
+                ip_allowlist: vec![],
             };
             let res = repo
                 .generate_token(
@@ -305,7 +305,7 @@ mod tests {
                         full_access: false,
                         read: vec!["*".to_string()],
                         write: vec![],
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     }),
                     is_provisioned: true,
                     expires_at: None
@@ -369,7 +369,7 @@ mod tests {
                         full_access: false,
                         read: vec!["*".to_string()],
                         write: vec![],
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     }),
                     is_provisioned: true,
                     expires_at: None
@@ -464,7 +464,7 @@ mod tests {
                 full_access: true,
                 read: vec![],
                 write: vec![],
-            ip_allowlist: vec![],
+                ip_allowlist: vec![],
             }),
             is_provisioned: true,
             expires_at: None,

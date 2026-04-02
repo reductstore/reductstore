@@ -542,14 +542,13 @@ mod tests {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
 
-        let token_name =
-            resolve_audit_token_name(
-                StatusCode::OK,
-                Some("Bearer init-token"),
-                None,
-                Some(&components),
-            )
-            .await;
+        let token_name = resolve_audit_token_name(
+            StatusCode::OK,
+            Some("Bearer init-token"),
+            None,
+            Some(&components),
+        )
+        .await;
 
         assert_eq!(token_name, Some("init-token".to_string()));
     }
@@ -560,7 +559,8 @@ mod tests {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
 
-        let token_name = resolve_audit_token_name(StatusCode::OK, None, None, Some(&components)).await;
+        let token_name =
+            resolve_audit_token_name(StatusCode::OK, None, None, Some(&components)).await;
 
         assert_eq!(token_name, None);
     }
