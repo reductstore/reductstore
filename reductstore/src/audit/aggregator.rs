@@ -247,6 +247,37 @@ mod tests {
         })
     }
 
+    fn make_test_key(
+        token_name: &str,
+        endpoint: &str,
+        status: u16,
+        message: &str,
+    ) -> AuditAggregateKey {
+        AuditAggregateKey {
+            token_name: token_name.to_string(),
+            endpoint: endpoint.to_string(),
+            status,
+            message: message.to_string(),
+        }
+    }
+
+    fn make_test_aggregate(
+        first_timestamp: u64,
+        call_count: u64,
+        total_duration: u64,
+        flush_at: Instant,
+        force_flush_at: Instant,
+    ) -> AuditAggregate {
+        AuditAggregate {
+            first_timestamp,
+            last_timestamp: first_timestamp,
+            call_count,
+            total_duration,
+            flush_at,
+            force_flush_at,
+        }
+    }
+
     #[fixture]
     fn state() -> Arc<AsyncRwLock<AuditState>> {
         Arc::new(AsyncRwLock::new(AuditState::default()))
@@ -260,12 +291,7 @@ mod tests {
     #[rstest]
     fn make_event_uses_first_timestamp_and_aggregates_duration() {
         let event = make_event(
-            AuditAggregateKey {
-                token_name: "token-1".to_string(),
-                endpoint: "GET /api/v1/info".to_string(),
-                status: 200,
-                message: "".to_string(),
-            },
+            make_test_key("token-1", "GET /api/v1/info", 200, ""),
             AuditAggregate {
                 first_timestamp: 10,
                 last_timestamp: 20,
@@ -298,36 +324,12 @@ mod tests {
         let much_later = Instant::now() + Duration::from_secs(20);
         let mut guard = state.write().await.unwrap();
         guard.aggregates.insert(
-            AuditAggregateKey {
-                token_name: "token-1".to_string(),
-                endpoint: "GET /api/v1/info".to_string(),
-                status: 200,
-                message: "".to_string(),
-            },
-            AuditAggregate {
-                first_timestamp: 1,
-                last_timestamp: 1,
-                call_count: 1,
-                total_duration: 10,
-                flush_at: later,
-                force_flush_at: much_later,
-            },
+            make_test_key("token-1", "GET /api/v1/info", 200, ""),
+            make_test_aggregate(1, 1, 10, later, much_later),
         );
         guard.aggregates.insert(
-            AuditAggregateKey {
-                token_name: "token-2".to_string(),
-                endpoint: "GET /api/v1/info".to_string(),
-                status: 200,
-                message: "".to_string(),
-            },
-            AuditAggregate {
-                first_timestamp: 2,
-                last_timestamp: 2,
-                call_count: 1,
-                total_duration: 20,
-                flush_at: much_later,
-                force_flush_at: earlier,
-            },
+            make_test_key("token-2", "GET /api/v1/info", 200, ""),
+            make_test_aggregate(2, 1, 20, much_later, earlier),
         );
         drop(guard);
 
@@ -386,36 +388,24 @@ mod tests {
 
         let mut guard = state.write().await.unwrap();
         guard.aggregates.insert(
-            AuditAggregateKey {
-                token_name: "expired".to_string(),
-                endpoint: "GET /expired".to_string(),
-                status: 200,
-                message: "".to_string(),
-            },
-            AuditAggregate {
-                first_timestamp: 1,
-                last_timestamp: 1,
-                call_count: 1,
-                total_duration: 100,
-                flush_at: now - Duration::from_millis(1),
-                force_flush_at: now + Duration::from_secs(10),
-            },
+            make_test_key("expired", "GET /expired", 200, ""),
+            make_test_aggregate(
+                1,
+                1,
+                100,
+                now - Duration::from_millis(1),
+                now + Duration::from_secs(10),
+            ),
         );
         guard.aggregates.insert(
-            AuditAggregateKey {
-                token_name: "pending".to_string(),
-                endpoint: "GET /pending".to_string(),
-                status: 200,
-                message: "".to_string(),
-            },
-            AuditAggregate {
-                first_timestamp: 2,
-                last_timestamp: 2,
-                call_count: 1,
-                total_duration: 100,
-                flush_at: now + Duration::from_secs(10),
-                force_flush_at: now + Duration::from_secs(10),
-            },
+            make_test_key("pending", "GET /pending", 200, ""),
+            make_test_aggregate(
+                2,
+                1,
+                100,
+                now + Duration::from_secs(10),
+                now + Duration::from_secs(10),
+            ),
         );
         drop(guard);
 
@@ -446,20 +436,14 @@ mod tests {
         let now = Instant::now();
         let mut guard = state.write().await.unwrap();
         guard.aggregates.insert(
-            AuditAggregateKey {
-                token_name: "forced".to_string(),
-                endpoint: "GET /forced".to_string(),
-                status: 200,
-                message: "".to_string(),
-            },
-            AuditAggregate {
-                first_timestamp: 3,
-                last_timestamp: 3,
-                call_count: 2,
-                total_duration: 200,
-                flush_at: now + Duration::from_secs(10),
-                force_flush_at: now - Duration::from_millis(1),
-            },
+            make_test_key("forced", "GET /forced", 200, ""),
+            make_test_aggregate(
+                3,
+                2,
+                200,
+                now + Duration::from_secs(10),
+                now - Duration::from_millis(1),
+            ),
         );
         drop(guard);
 
@@ -484,20 +468,8 @@ mod tests {
         let mut guard = state.write().await.unwrap();
         for (idx, token_name) in ["token-1", "token-2"].into_iter().enumerate() {
             guard.aggregates.insert(
-                AuditAggregateKey {
-                    token_name: token_name.to_string(),
-                    endpoint: "GET /api/v1/info".to_string(),
-                    status: 200,
-                    message: "".to_string(),
-                },
-                AuditAggregate {
-                    first_timestamp: idx as u64 + 1,
-                    last_timestamp: idx as u64 + 1,
-                    call_count: 1,
-                    total_duration: 100,
-                    flush_at: Instant::now(),
-                    force_flush_at: Instant::now(),
-                },
+                make_test_key(token_name, "GET /api/v1/info", 200, ""),
+                make_test_aggregate(idx as u64 + 1, 1, 100, Instant::now(), Instant::now()),
             );
         }
         drop(guard);
