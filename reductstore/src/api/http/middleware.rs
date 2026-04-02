@@ -393,8 +393,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn writes_error_message_to_audit_event(#[future] keeper: Arc<StateKeeper>) {
-        let keeper = keeper.await;
+    async fn writes_error_message_to_audit_event(#[future] auth_keeper: Arc<StateKeeper>) {
+        let keeper = auth_keeper.await;
         let app = Router::new()
             .route(
                 "/broken",
