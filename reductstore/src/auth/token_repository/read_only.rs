@@ -161,6 +161,10 @@ impl ManageTokens for ReadOnlyTokenRepository {
         Err(forbidden!("Cannot remove token in read-only mode"))
     }
 
+    async fn rotate_token(&mut self, _name: &str) -> Result<TokenCreateResponse, ReductError> {
+        Err(forbidden!("Cannot rotate token in read-only mode"))
+    }
+
     async fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
         Err(forbidden!(
             "Cannot remove bucket from token in read-only mode"
