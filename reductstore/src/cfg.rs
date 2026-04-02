@@ -269,6 +269,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         let replications = Self::parse_replications(&mut env);
 
+        let api_token = env.get_masked("RS_API_TOKEN", "".to_string());
+
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
             host,
@@ -276,7 +278,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             port,
             api_base_path,
             data_path: ext_cfg.data_path(),
-            api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
+            api_token: api_token.clone(),
             cert_path,
             cert_key_path,
             role: ext_cfg.role(),
@@ -293,7 +295,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             tokens: Self::parse_tokens(&mut env),
             replications,
             io_conf: Self::parse_io_config(&mut env),
-            audit_conf: Self::parse_audit_config(&mut env),
+            audit_conf: Self::parse_audit_config(&mut env, &api_token),
             replication_conf: Self::parse_replication_config(&mut env, port),
             cs_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),

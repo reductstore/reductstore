@@ -39,11 +39,17 @@ impl Default for AuditConfig {
 }
 
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
-    pub(super) fn parse_audit_config(env: &mut Env<EnvGetter>) -> AuditConfig {
+    pub(super) fn parse_audit_config(env: &mut Env<EnvGetter>, api_token: &str) -> AuditConfig {
+        let default_audit_enabled = if api_token.is_empty() {
+            DEFAULT_AUDIT_ENABLED
+        } else {
+            true
+        };
+
         AuditConfig {
             enabled: parse_bool(
                 env.get_optional::<String>("RS_AUDIT_ENABLED"),
-                DEFAULT_AUDIT_ENABLED,
+                default_audit_enabled,
             ),
             quota_size: env
                 .get_optional::<ByteSize>("RS_AUDIT_QUOTA_SIZE")
@@ -101,7 +107,8 @@ mod tests {
             .with(eq("RS_AUDIT_REMOTE_TIMEOUT"))
             .return_const(Ok("10".to_string()));
 
-        let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter));
+        let config =
+            CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "token");
 
         assert_eq!(
             config,
@@ -116,14 +123,61 @@ mod tests {
     }
 
     #[rstest]
-    fn test_default_audit_config() {
+    fn test_default_audit_config_without_api_token() {
         let mut env_getter = MockEnvGetter::new();
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter));
+        let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "");
         assert_eq!(config, AuditConfig::default());
+    }
+
+    #[rstest]
+    fn test_default_audit_config_with_api_token() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let config =
+            CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "token");
+        assert_eq!(
+            config,
+            AuditConfig {
+                enabled: true,
+                ..AuditConfig::default()
+            }
+        );
+    }
+
+    #[rstest]
+    fn test_audit_enabled_can_be_overridden_when_api_token_is_set() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_AUDIT_ENABLED"))
+            .return_const(Ok("false".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_AUDIT_QUOTA_SIZE"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_AUDIT_REMOTE_VERIFY_SSL"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_AUDIT_REMOTE_CA_PATH"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_AUDIT_REMOTE_TIMEOUT"))
+            .return_const(Err(VarError::NotPresent));
+
+        let config =
+            CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "token");
+        assert!(!config.enabled);
     }
 
     #[rstest]
@@ -150,7 +204,7 @@ mod tests {
             .with(eq("RS_AUDIT_REMOTE_TIMEOUT"))
             .return_const(Err(VarError::NotPresent));
 
-        let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter));
+        let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "");
         assert_eq!(config.remote_ca_path, None);
     }
 }
