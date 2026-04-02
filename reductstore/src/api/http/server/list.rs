@@ -45,7 +45,7 @@ pub(super) async fn list(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::http::tests::{headers, keeper};
+    use crate::api::http::tests::{auth_keeper as keeper, headers};
     use crate::audit::AUDIT_BUCKET_NAME;
     use axum::http::HeaderValue;
     use reduct_base::msg::bucket_api::BucketSettings;

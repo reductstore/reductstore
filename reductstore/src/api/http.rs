@@ -645,8 +645,8 @@ pub(crate) mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_with_permissions_missing_header(#[future] keeper: Arc<StateKeeper>) {
-            let keeper = keeper.await;
+        async fn test_get_with_permissions_missing_header(#[future] auth_keeper: Arc<StateKeeper>) {
+            let keeper = auth_keeper.await;
             let headers = HeaderMap::new();
 
             let err = keeper
@@ -663,11 +663,11 @@ pub(crate) mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_with_permissions_error(#[future] keeper: Arc<StateKeeper>) {
+        async fn test_get_with_permissions_error(#[future] auth_keeper: Arc<StateKeeper>) {
             let mut headers = HeaderMap::new();
             headers.typed_insert(Authorization::bearer("bad-token").unwrap());
 
-            let keeper = keeper.await;
+            let keeper = auth_keeper.await;
             let err = keeper
                 .get_with_permissions(&headers, FullAccessPolicy {})
                 .await
@@ -835,10 +835,13 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
+    async fn keeper_with_limits_impl(
+        limits_config: LimitsConfig,
+        api_token: &str,
+    ) -> Arc<StateKeeper> {
         let cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
-            api_token: "init-token".to_string(),
+            api_token: api_token.to_string(),
             ..Cfg::default()
         };
 
@@ -876,21 +879,23 @@ pub(crate) mod tests {
         sender.send(Ok(Some(Bytes::from("Hey!!!")))).await.unwrap();
         sender.send(Ok(None)).await.unwrap();
 
-        let permissions = Permissions {
-            read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
-            ..Default::default()
-        };
+        if !cfg.api_token.is_empty() {
+            let permissions = Permissions {
+                read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
+                ..Default::default()
+            };
 
-        token_repo
-            .generate_token(
-                "test",
-                TokenCreateRequest {
-                    permissions,
-                    expires_at: None,
-                },
-            )
-            .await
-            .unwrap();
+            token_repo
+                .generate_token(
+                    "test",
+                    TokenCreateRequest {
+                        permissions,
+                        expires_at: None,
+                    },
+                )
+                .await
+                .unwrap();
+        }
 
         let storage = Arc::new(storage);
         let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
@@ -926,7 +931,7 @@ pub(crate) mod tests {
 
         let components = Components {
             storage: Arc::clone(&storage),
-            auth: TokenAuthorization::new("inti-token"),
+            auth: TokenAuthorization::new(api_token),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
@@ -952,10 +957,18 @@ pub(crate) mod tests {
         Arc::new(StateKeeper::new(Arc::new(LockFileBuilder::noop()), rx))
     }
 
+    pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
+        keeper_with_limits_impl(limits_config, "").await
+    }
+
+    pub(crate) async fn auth_keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
+        keeper_with_limits_impl(limits_config, "init-token").await
+    }
+
     pub(crate) async fn keeper_with_engine_limit(max_storage_size: u64) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
-            api_token: "init-token".to_string(),
+            api_token: "".to_string(),
             ..Cfg::default()
         };
         cfg.engine_config.max_storage_size = Some(max_storage_size);
@@ -965,7 +978,7 @@ pub(crate) mod tests {
             .with_cfg(cfg.clone())
             .build()
             .await;
-        let mut token_repo = TokenRepositoryBuilder::new(cfg.clone())
+        let token_repo = TokenRepositoryBuilder::new(cfg.clone())
             .build(cfg.data_path.clone())
             .await;
 
@@ -975,23 +988,6 @@ pub(crate) mod tests {
             .unwrap();
         storage
             .create_bucket("bucket-2", BucketSettings::default())
-            .await
-            .unwrap();
-
-        let permissions = Permissions {
-            read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
-            write: vec!["bucket-1".to_string(), "bucket-2".to_string()],
-            ..Default::default()
-        };
-
-        token_repo
-            .generate_token(
-                "test",
-                TokenCreateRequest {
-                    permissions,
-                    expires_at: None,
-                },
-            )
             .await
             .unwrap();
 
@@ -1010,7 +1006,7 @@ pub(crate) mod tests {
 
         let components = Components {
             storage: Arc::clone(&storage),
-            auth: TokenAuthorization::new("inti-token"),
+            auth: TokenAuthorization::new(""),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
@@ -1039,6 +1035,11 @@ pub(crate) mod tests {
     #[fixture]
     pub(crate) async fn keeper() -> Arc<StateKeeper> {
         keeper_with_limits(LimitsConfig::default()).await
+    }
+
+    #[fixture]
+    pub(crate) async fn auth_keeper() -> Arc<StateKeeper> {
+        auth_keeper_with_limits(LimitsConfig::default()).await
     }
 
     #[fixture]

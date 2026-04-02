@@ -31,7 +31,7 @@ pub(super) async fn create_token(
 mod tests {
     use super::*;
 
-    use crate::api::http::tests::{headers, keeper};
+    use crate::api::http::tests::{auth_keeper as keeper, headers};
 
     use reduct_base::error::ErrorCode;
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};

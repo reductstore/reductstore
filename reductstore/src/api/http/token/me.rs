@@ -34,7 +34,7 @@ pub(in crate::api::http) async fn me(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::http::tests::{headers, keeper};
+    use crate::api::http::tests::{auth_keeper as keeper, headers};
     use rstest::rstest;
 
     #[rstest]

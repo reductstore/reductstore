@@ -36,7 +36,7 @@ pub(super) async fn rename_bucket(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::http::tests::{headers, keeper};
+    use crate::api::http::tests::{auth_keeper as keeper, headers};
     use axum::Json;
     use reduct_base::error::ReductError;
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};

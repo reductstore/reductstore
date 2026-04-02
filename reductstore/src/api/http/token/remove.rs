@@ -28,7 +28,7 @@ pub(super) async fn remove_token(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::http::tests::{headers, keeper};
+    use crate::api::http::tests::{auth_keeper as keeper, headers};
 
     use reduct_base::error::ErrorCode;
     use rstest::rstest;

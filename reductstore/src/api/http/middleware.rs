@@ -217,7 +217,7 @@ fn log_level_for_response(status: StatusCode, skip_error_log: bool) -> Level {
 mod tests {
     use super::*;
     use crate::api::components::StateKeeper;
-    use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
+    use crate::api::http::tests::{api_limited_keeper, auth_keeper, keeper, waiting_keeper};
     use crate::audit::{AuditEvent, AUDIT_BUCKET_NAME};
     use axum::http::Request;
     use axum::http::{HeaderMap, HeaderValue};
@@ -382,8 +382,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn resolves_token_name_for_authenticated_request(#[future] keeper: Arc<StateKeeper>) {
-        let keeper = keeper.await;
+    async fn resolves_token_name_for_authenticated_request(
+        #[future] auth_keeper: Arc<StateKeeper>,
+    ) {
+        let keeper = auth_keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
 
         let token_name =
@@ -416,8 +418,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn skips_audit_when_token_validation_fails(#[future] keeper: Arc<StateKeeper>) {
-        let keeper = keeper.await;
+    async fn skips_audit_when_token_validation_fails(#[future] auth_keeper: Arc<StateKeeper>) {
+        let keeper = auth_keeper.await;
         let app = Router::new()
             .route("/info", get(|| async { StatusCode::OK }))
             .layer(from_fn_with_state(Arc::clone(&keeper), audit_requests));
