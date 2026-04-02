@@ -59,6 +59,10 @@ impl ManageTokens for NoAuthRepository {
         Ok(())
     }
 
+    async fn rotate_token(&mut self, _name: &str) -> Result<TokenCreateResponse, ReductError> {
+        Err(bad_request!("Authentication is disabled"))
+    }
+
     async fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
         Ok(())
     }
