@@ -148,6 +148,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_rotate_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let result = disabled_repo.rotate_token("test").await;
+        assert_eq!(result, Err(bad_request!("Authentication is disabled")));
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_rename_bucket_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
         let mut disabled_repo = disabled_repo.await;
         let result = disabled_repo.rename_bucket("bucket-1", "bucket-2").await;

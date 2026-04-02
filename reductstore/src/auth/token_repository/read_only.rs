@@ -403,6 +403,19 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_rotate_token_forbidden(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, _) = repo_fixture.await;
+            let res = repo.rotate_token("file_token").await;
+            assert_eq!(
+                res.err().unwrap(),
+                forbidden!("Cannot rotate token in read-only mode")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_rename_bucket_forbidden(
             #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
         ) {
