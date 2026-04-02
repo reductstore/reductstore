@@ -29,7 +29,7 @@ use bucket::create_bucket_api_routes;
 use entry::create_entry_api_routes;
 use hyper::http::HeaderValue;
 use log::{error, warn};
-use middleware::{audit_requests, check_api_rate_limit, default_headers, print_statuses};
+use middleware::{attach_client_ip, audit_requests, check_api_rate_limit, default_headers, print_statuses};
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use replication::create_replication_api_routes;
@@ -249,6 +249,7 @@ impl AxumAppBuilder {
                 // UI
                 .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
                 .fallback(get(show_ui))
+                .layer(from_fn(attach_client_ip))
                 .layer(from_fn_with_state(state_keeper.clone(), audit_requests))
                 .layer(from_fn(default_headers))
                 .layer(from_fn(print_statuses))

@@ -28,6 +28,8 @@ pub(crate) struct AuditEvent {
     pub endpoint: String,
     pub status: u16,
     pub message: String,
+    #[serde(default)]
+    pub client_ip: Option<String>,
     pub call_count: u64,
     pub duration: u64,
 }
@@ -98,6 +100,7 @@ mod tests {
             endpoint: "GET /api/v1/info".to_string(),
             status: 200,
             message: "".to_string(),
+            client_ip: None,
             call_count: 1,
             duration: 100,
         }
