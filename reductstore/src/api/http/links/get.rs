@@ -635,6 +635,53 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_query_link_with_empty_entries_falls_back_to_entry(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+
+        let link = create_query_link(
+            headers,
+            keeper.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                entries: Some(vec![]),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let response = get(
+            State(Arc::clone(&keeper)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .unwrap();
+
+        let resp = response.into_response();
+        assert_eq!(resp.headers()["content-type"], "text/plain");
+        assert_eq!(resp.headers()["content-length"], "6");
+
+        let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(body_bytes.iter().as_slice()),
+            "Hey!!!"
+        );
+    }
+
     mod validation {
         use super::*;
         use rstest::rstest;

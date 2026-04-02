@@ -101,6 +101,27 @@ mod tests {
     }
 
     #[test]
+    fn test_verify_malformed_hash_parts() {
+        // invalid salt hex
+        assert!(!verify_token_secret("arg2:zzzz:00", "secret"));
+        // invalid hash hex
+        assert!(!verify_token_secret(
+            "arg2:00000000000000000000000000000000:zzzz",
+            "secret"
+        ));
+        // salt must be 16 bytes (32 hex chars)
+        assert!(!verify_token_secret(
+            "arg2:000000000000000000000000000000:0000000000000000000000000000000000000000000000000000000000000000",
+            "secret"
+        ));
+        // hash must be 32 bytes (64 hex chars)
+        assert!(!verify_token_secret(
+            "arg2:00000000000000000000000000000000:00000000000000000000000000000000000000000000000000000000000000",
+            "secret"
+        ));
+    }
+
+    #[test]
     fn test_matched_hashed_token_secret() {
         let secret = "test-secret";
         let hash = hash_token_secret(secret).unwrap();
