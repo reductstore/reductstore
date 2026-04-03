@@ -62,12 +62,12 @@ impl ManageTokens for NoAuthRepository {
                 full_access: true,
                 read: vec![],
                 write: vec![],
-                ip_allowlist: vec![],
             }),
             is_provisioned: false,
             expires_at: None,
             ttl: None,
             last_access: None,
+            ip_allowlist: vec![],
             is_expired: false,
         })
     }
@@ -118,10 +118,10 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
-                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                     ttl: None,
+                ip_allowlist: vec![],
                 },
             )
             .await;

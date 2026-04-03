@@ -16,10 +16,6 @@ pub struct Permissions {
     /// Write access to certain buckets
     #[serde(default)]
     pub write: Vec<String>,
-    /// List of allowed client IP addresses for this token.
-    /// Empty list means no IP restriction.
-    #[serde(default)]
-    pub ip_allowlist: Vec<String>,
 }
 
 /// Token
@@ -42,6 +38,10 @@ pub struct Token {
     pub ttl: Option<u64>,
     /// Last access time
     pub last_access: Option<DateTime<Utc>>,
+    /// List of allowed client IP addresses for this token.
+    /// Empty list means no IP restriction.
+    #[serde(default)]
+    pub ip_allowlist: Vec<String>,
     /// Computed marker for unusable token (`expires_at` or inactivity TTL)
     #[serde(default)]
     pub is_expired: bool,
@@ -54,6 +54,8 @@ pub struct TokenCreateRequest {
     pub expires_at: Option<DateTime<Utc>>,
     #[serde(default)]
     pub ttl: Option<u64>,
+    #[serde(default)]
+    pub ip_allowlist: Vec<String>,
 }
 
 /// Response for created token

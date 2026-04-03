@@ -161,12 +161,12 @@ impl ReadOnlyTokenRepository {
                     full_access: false,
                     read: vec!["*".to_string()],
                     write: vec![],
-                    ip_allowlist: vec![],
                 }),
                 is_provisioned: true,
                 expires_at: None,
                 ttl: None,
                 last_access: None,
+                ip_allowlist: vec![],
                 is_expired: false,
             };
 
@@ -448,7 +448,6 @@ mod tests {
                 full_access: true,
                 read: vec![],
                 write: vec![],
-                ip_allowlist: vec![],
             };
             let res = repo
                 .generate_token(
@@ -457,6 +456,7 @@ mod tests {
                         permissions: perms,
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -483,7 +483,6 @@ mod tests {
                     full_access: false,
                     read: vec!["*".to_string()],
                     write: vec![],
-                    ip_allowlist: vec![],
                 })
             );
             assert!(token.is_provisioned);
@@ -545,7 +544,6 @@ mod tests {
                     full_access: false,
                     read: vec!["*".to_string()],
                     write: vec![],
-                    ip_allowlist: vec![],
                 })
             );
             assert!(res.is_provisioned);

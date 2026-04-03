@@ -126,7 +126,6 @@ impl TokenRepository {
             full_access: true,
             read: vec![],
             write: vec![],
-            ip_allowlist: vec![],
         });
         let existing_init_token = token_repository.repo.get(INIT_TOKEN_NAME).cloned();
         let init_token_value = token_repository
@@ -150,6 +149,7 @@ impl TokenRepository {
             expires_at: None,
             ttl: None,
             last_access: None,
+            ip_allowlist: vec![],
             is_expired: false,
         };
 
@@ -323,6 +323,7 @@ impl ManageTokens for TokenRepository {
                     expires_at,
                     ttl,
                     last_access: None,
+                    ip_allowlist: vec![],
                     is_expired: false,
                 },
             )
@@ -550,10 +551,10 @@ mod tests {
                             full_access: true,
                             read: vec![],
                             write: vec![],
-                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -576,10 +577,10 @@ mod tests {
                             full_access: true,
                             read: vec![],
                             write: vec![],
-                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -599,10 +600,10 @@ mod tests {
                             full_access: true,
                             read: vec![],
                             write: vec![],
-                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -625,6 +626,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: Some(expires_at),
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -646,6 +648,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: Some(chrono::Utc::now() - chrono::Duration::days(5)),
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -672,10 +675,10 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
-                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                     ttl: None,
+                ip_allowlist: vec![],
                 },
             )
             .await
@@ -703,6 +706,7 @@ mod tests {
                 expires_at: None,
                 ttl: None,
                 last_access: None,
+                ip_allowlist: vec![],
                 is_expired: false,
             };
             let mut buf = Vec::new();
@@ -742,6 +746,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: Some(expires_at),
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -781,10 +786,10 @@ mod tests {
                             full_access: true,
                             read: vec![bucket.to_string()],
                             write: vec![],
-                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -820,10 +825,10 @@ mod tests {
                             full_access: true,
                             read: vec![],
                             write: vec![bucket.to_string()],
-                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -867,10 +872,10 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
-                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                     ttl: None,
+                ip_allowlist: vec![],
                 },
             )
             .await
@@ -885,12 +890,12 @@ mod tests {
                     full_access: false,
                     read: vec!["bucket-1".to_string()],
                     write: vec![],
-                    ip_allowlist: vec![],
                 }),
                 is_provisioned: true,
                 expires_at: None,
                 ttl: None,
                 last_access: None,
+                ip_allowlist: vec![],
                 is_expired: false,
             })
             .await
@@ -907,7 +912,6 @@ mod tests {
                     full_access: false,
                     read: vec!["bucket-1".to_string()],
                     write: vec![],
-                    ip_allowlist: vec![],
                 })
             );
         }
@@ -930,7 +934,6 @@ mod tests {
                     full_access: true,
                     read: vec![],
                     write: vec![],
-                    ip_allowlist: vec![],
                 })
             );
         }
@@ -950,10 +953,10 @@ mod tests {
                             full_access: true,
                             read: vec!["bucket-1".to_string()],
                             write: vec!["bucket-2".to_string()],
-                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -975,12 +978,12 @@ mod tests {
                         full_access: true,
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-2".to_string()],
-                        ip_allowlist: vec![],
                     }),
                     is_provisioned: false,
                     expires_at: None,
                     ttl: None,
                     last_access: None,
+                    ip_allowlist: vec![],
                     is_expired: false,
                 }
             );
@@ -1007,6 +1010,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -1041,6 +1045,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -1110,6 +1115,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -1120,10 +1126,10 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
-                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                     ttl: None,
+                ip_allowlist: vec![],
                 },
             )
             .await
@@ -1212,10 +1218,10 @@ mod tests {
                         full_access: true,
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-1".to_string()],
-                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                     ttl: None,
+                ip_allowlist: vec![],
                 },
             )
             .await
@@ -1254,6 +1260,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: None,
                         ttl: None,
+                    ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -1264,10 +1271,10 @@ mod tests {
                         full_access: true,
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-1".to_string()],
-                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                     ttl: None,
+                ip_allowlist: vec![],
                 },
             )
             .await
@@ -1314,10 +1321,10 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
-                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                     ttl: None,
+                ip_allowlist: vec![],
                 },
             )
             .await;
@@ -1330,10 +1337,10 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
-                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                     ttl: None,
+                ip_allowlist: vec![],
                 },
             )
             .await;
