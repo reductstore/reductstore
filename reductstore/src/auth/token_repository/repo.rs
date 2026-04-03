@@ -554,7 +554,7 @@ mod tests {
                         },
                         expires_at: None,
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -580,7 +580,7 @@ mod tests {
                         },
                         expires_at: None,
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -603,7 +603,7 @@ mod tests {
                         },
                         expires_at: None,
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -626,7 +626,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: Some(expires_at),
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -648,7 +648,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: Some(chrono::Utc::now() - chrono::Duration::days(5)),
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -678,7 +678,7 @@ mod tests {
                     },
                     expires_at: None,
                     ttl: None,
-                ip_allowlist: vec![],
+                    ip_allowlist: vec![],
                 },
             )
             .await
@@ -746,7 +746,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: Some(expires_at),
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -789,7 +789,7 @@ mod tests {
                         },
                         expires_at: None,
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -828,7 +828,7 @@ mod tests {
                         },
                         expires_at: None,
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -875,7 +875,7 @@ mod tests {
                     },
                     expires_at: None,
                     ttl: None,
-                ip_allowlist: vec![],
+                    ip_allowlist: vec![],
                 },
             )
             .await
@@ -956,7 +956,7 @@ mod tests {
                         },
                         expires_at: None,
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -1010,7 +1010,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: None,
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -1045,7 +1045,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: None,
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await
@@ -1115,7 +1115,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: None,
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -1129,7 +1129,7 @@ mod tests {
                     },
                     expires_at: None,
                     ttl: None,
-                ip_allowlist: vec![],
+                    ip_allowlist: vec![],
                 },
             )
             .await
@@ -1221,7 +1221,7 @@ mod tests {
                     },
                     expires_at: None,
                     ttl: None,
-                ip_allowlist: vec![],
+                    ip_allowlist: vec![],
                 },
             )
             .await
@@ -1260,7 +1260,7 @@ mod tests {
                         permissions: Permissions::default(),
                         expires_at: None,
                         ttl: None,
-                    ip_allowlist: vec![],
+                        ip_allowlist: vec![],
                     },
                 )
                 .await;
@@ -1274,7 +1274,7 @@ mod tests {
                     },
                     expires_at: None,
                     ttl: None,
-                ip_allowlist: vec![],
+                    ip_allowlist: vec![],
                 },
             )
             .await
@@ -1324,7 +1324,7 @@ mod tests {
                     },
                     expires_at: None,
                     ttl: None,
-                ip_allowlist: vec![],
+                    ip_allowlist: vec![],
                 },
             )
             .await;
@@ -1340,7 +1340,7 @@ mod tests {
                     },
                     expires_at: None,
                     ttl: None,
-                ip_allowlist: vec![],
+                    ip_allowlist: vec![],
                 },
             )
             .await;

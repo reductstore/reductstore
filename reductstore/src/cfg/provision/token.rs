@@ -318,7 +318,7 @@ mod tests {
                     permissions: Permissions::default(),
                     expires_at: None,
                     ttl: None,
-                ip_allowlist: vec![],
+                    ip_allowlist: vec![],
                 },
             )
             .await
@@ -376,7 +376,7 @@ mod tests {
                     permissions: Permissions::default(),
                     expires_at: None,
                     ttl: None,
-                ip_allowlist: vec![],
+                    ip_allowlist: vec![],
                 },
             )
             .await
