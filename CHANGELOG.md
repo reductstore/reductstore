@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep API request rate limiting active for `/ready` and map startup lock-wait (`503`) to `200` only for `/api/v1/alive` in middleware, avoiding false matches on entry paths ending with `alive`, [PR-1286](https://github.com/reductstore/reductstore/pull/1286)
 - Move token API `ip_allowlist` to token-level settings (alongside `ttl` / `expires_at`) instead of nesting it under `permissions`, and update token API responses/tests accordingly, [PR-1284](https://github.com/reductstore/reductstore/pull/1284)
 - Default audit logging to enabled when `RS_API_TOKEN` is set, keep it disabled when empty, and allow explicit override via `RS_AUDIT_ENABLED`, [PR-1275](https://github.com/reductstore/reductstore/pull/1275)
 - Ignore hidden system/meta entries when computing bucket-level oldest/latest history so reported history matches visible entries, [PR-1274](https://github.com/reductstore/reductstore/pull/1274)
