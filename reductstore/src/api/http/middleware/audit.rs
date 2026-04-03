@@ -143,3 +143,46 @@ async fn write_audit_event(
         Err(err) => debug!("Failed to lock audit repository: {}", err),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::http::tests::{keeper, waiting_keeper};
+    use rstest::rstest;
+
+    #[test]
+    fn should_skip_only_internal_health_paths() {
+        assert!(should_skip_audit("/api/v1/alive"));
+        assert!(should_skip_audit("/api/v1/ready"));
+        assert!(!should_skip_audit("/api/v1/info"));
+    }
+
+    #[tokio::test]
+    async fn resolve_audit_token_name_returns_unauthorized_for_401() {
+        let result = resolve_audit_token_name(StatusCode::UNAUTHORIZED, None, None, None).await;
+        assert_eq!(result, Some("unauthorized".to_string()));
+    }
+
+    #[tokio::test]
+    async fn resolve_audit_token_name_returns_none_for_missing_components() {
+        let result =
+            resolve_audit_token_name(StatusCode::OK, Some("Bearer init-token"), None, None).await;
+        assert_eq!(result, None);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn get_audit_components_returns_some(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        assert!(get_audit_components(&keeper).await.is_some());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn get_audit_components_returns_none_when_unavailable(
+        #[future] waiting_keeper: Arc<StateKeeper>,
+    ) {
+        let keeper = waiting_keeper.await;
+        assert!(get_audit_components(&keeper).await.is_none());
+    }
+}

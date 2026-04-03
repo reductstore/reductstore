@@ -71,3 +71,61 @@ pub(super) fn parse_forwarded_for(value: &str) -> Option<IpAddr> {
     }
     None
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_forwarded_for_handles_common_cases() {
+        assert_eq!(
+            parse_forwarded_for("for=203.0.113.10").map(|ip| ip.to_string()),
+            Some("203.0.113.10".to_string())
+        );
+        assert_eq!(
+            parse_forwarded_for("for=203.0.113.10:443").map(|ip| ip.to_string()),
+            Some("203.0.113.10".to_string())
+        );
+        assert_eq!(
+            parse_forwarded_for("for=\"[2001:db8::1]\"").map(|ip| ip.to_string()),
+            Some("2001:db8::1".to_string())
+        );
+        assert_eq!(parse_forwarded_for("proto=https"), None);
+    }
+
+    #[test]
+    fn parse_x_forwarded_for_handles_common_cases() {
+        assert_eq!(
+            parse_x_forwarded_for("198.51.100.7, 203.0.113.1").map(|ip| ip.to_string()),
+            Some("198.51.100.7".to_string())
+        );
+        assert_eq!(parse_x_forwarded_for("bad-ip"), None);
+    }
+
+    #[test]
+    fn client_ip_resolution_from_request() {
+        let request = Request::get("/x").body(Body::empty()).unwrap();
+        assert_eq!(client_ip_from_request(&request), None);
+
+        let mut request = Request::get("/x").body(Body::empty()).unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "198.51.100.20:80".parse::<SocketAddr>().unwrap(),
+        ));
+        assert_eq!(
+            client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("198.51.100.20".to_string())
+        );
+
+        let mut request = Request::get("/x")
+            .header("x-forwarded-for", "203.0.113.3, 198.51.100.4")
+            .body(Body::empty())
+            .unwrap();
+        request
+            .extensions_mut()
+            .insert(ConnectInfo("127.0.0.1:80".parse::<SocketAddr>().unwrap()));
+        assert_eq!(
+            client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("203.0.113.3".to_string())
+        );
+    }
+}
