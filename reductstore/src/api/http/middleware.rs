@@ -17,13 +17,13 @@ use log::{debug, error, Level};
 use reduct_base::error::ErrorCode;
 use std::sync::Arc;
 
-pub(super) use audit::audit_requests;
-pub(crate) use client_ip::client_ip_from_request;
-
-#[cfg(test)]
-pub(crate) use audit::{get_audit_components, resolve_audit_token_name, should_skip_audit};
-#[cfg(test)]
-pub(crate) use client_ip::{parse_forwarded_for, parse_x_forwarded_for};
+pub(super) async fn audit_requests(
+    state: State<Arc<StateKeeper>>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<impl IntoResponse, HttpError> {
+    audit::audit_requests(state, request, next).await
+}
 
 pub(super) async fn default_headers(
     request: Request<Body>,
@@ -48,7 +48,7 @@ pub(super) async fn attach_client_ip(
     mut request: Request<Body>,
     next: Next,
 ) -> Result<impl IntoResponse, HttpError> {
-    if let Some(client_ip) = client_ip_from_request(&request) {
+    if let Some(client_ip) = client_ip::client_ip_from_request(&request) {
         if let Ok(header_value) = client_ip.to_string().parse() {
             request.headers_mut().insert(CLIENT_IP_HEADER, header_value);
         }
@@ -83,7 +83,7 @@ pub async fn print_statuses(
 
     let strat_time = std::time::Instant::now();
     let path_and_query = request.uri().path_and_query().unwrap();
-    let client_ip = client_ip_from_request(&request)
+    let client_ip = client_ip::client_ip_from_request(&request)
         .map(|ip| ip.to_string())
         .unwrap_or_else(|| "unknown".to_string());
     let method = format!("{} {} [{}]", request.method(), path_and_query, client_ip);
@@ -129,6 +129,8 @@ fn log_level_for_response(status: StatusCode, skip_error_log: bool) -> Level {
 
 #[cfg(test)]
 mod tests {
+    use super::audit::{get_audit_components, resolve_audit_token_name, should_skip_audit};
+    use super::client_ip::{parse_forwarded_for, parse_x_forwarded_for};
     use super::*;
     use crate::api::components::StateKeeper;
     use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
@@ -174,7 +176,7 @@ mod tests {
     #[rstest]
     #[case("/alive", true)]
     #[case("/ready", true)]
-    #[case("/api/v1/audit/token", true)]
+    #[case("/api/v1/audit/token", false)]
     #[case("/api/v1/info", false)]
     fn checks_audit_skip_paths(#[case] path: &str, #[case] expected: bool) {
         assert_eq!(should_skip_audit(path), expected);

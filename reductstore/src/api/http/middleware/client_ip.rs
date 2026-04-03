@@ -1,9 +1,12 @@
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
+
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Request};
 use std::net::{IpAddr, SocketAddr};
 
-pub(crate) fn client_ip_from_request(request: &Request<Body>) -> Option<IpAddr> {
+pub(super) fn client_ip_from_request(request: &Request<Body>) -> Option<IpAddr> {
     let peer_ip = request
         .extensions()
         .get::<ConnectInfo<SocketAddr>>()
@@ -33,7 +36,7 @@ fn client_ip_from_forward_headers(headers: &HeaderMap) -> Option<IpAddr> {
         .and_then(parse_x_forwarded_for)
 }
 
-pub(crate) fn parse_x_forwarded_for(value: &str) -> Option<IpAddr> {
+pub(super) fn parse_x_forwarded_for(value: &str) -> Option<IpAddr> {
     value
         .split(',')
         .next()
@@ -41,7 +44,7 @@ pub(crate) fn parse_x_forwarded_for(value: &str) -> Option<IpAddr> {
         .and_then(|ip| ip.parse::<IpAddr>().ok())
 }
 
-pub(crate) fn parse_forwarded_for(value: &str) -> Option<IpAddr> {
+pub(super) fn parse_forwarded_for(value: &str) -> Option<IpAddr> {
     for part in value.split(';') {
         let mut kv = part.splitn(2, '=');
         let key = kv.next()?.trim();

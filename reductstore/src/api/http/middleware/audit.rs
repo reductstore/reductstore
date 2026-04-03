@@ -1,3 +1,6 @@
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
+
 use crate::api::components::{Components, StateKeeper};
 use crate::api::http::middleware::client_ip::client_ip_from_request;
 use crate::api::http::HttpError;
@@ -12,7 +15,7 @@ use std::net::IpAddr;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-pub(crate) async fn audit_requests(
+pub(super) async fn audit_requests(
     State(keeper): State<Arc<StateKeeper>>,
     request: Request<Body>,
     next: Next,
@@ -66,11 +69,11 @@ pub(crate) async fn audit_requests(
     Ok(response)
 }
 
-pub(crate) fn should_skip_audit(path: &str) -> bool {
-    path.ends_with("/alive") || path.ends_with("/ready") || path.contains("/audit")
+pub(super) fn should_skip_audit(path: &str) -> bool {
+    path.ends_with("/alive") || path.ends_with("/ready")
 }
 
-pub(crate) async fn get_audit_components(keeper: &StateKeeper) -> Option<Arc<Components>> {
+pub(super) async fn get_audit_components(keeper: &StateKeeper) -> Option<Arc<Components>> {
     match keeper.get_anonymous().await {
         Ok(components) => Some(components),
         Err(err) => {
@@ -80,7 +83,7 @@ pub(crate) async fn get_audit_components(keeper: &StateKeeper) -> Option<Arc<Com
     }
 }
 
-pub(crate) async fn resolve_audit_token_name(
+pub(super) async fn resolve_audit_token_name(
     status: StatusCode,
     auth_header: Option<&str>,
     client_ip: Option<IpAddr>,
