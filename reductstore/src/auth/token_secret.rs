@@ -145,4 +145,9 @@ mod tests {
         assert_eq!(matched_hashed_token_secret(&hash, "wrong"), None);
         assert_eq!(matched_hashed_token_secret("legacy", "legacy"), None);
     }
+
+    #[test]
+    fn test_constant_time_eq_with_different_lengths() {
+        assert!(!constant_time_eq(&[1, 2, 3], &[1, 2]));
+    }
 }

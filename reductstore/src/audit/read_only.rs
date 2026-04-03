@@ -567,6 +567,18 @@ mod tests {
         );
     }
 
+    #[test]
+    fn builds_write_url_with_unknown_instance_when_empty() {
+        let event = AuditEvent {
+            instance: "".to_string(),
+            ..make_event(42)
+        };
+        assert_eq!(
+            build_write_url("https://primary.example.com/", &event),
+            "https://primary.example.com/api/v1/b/$audit/unknown/token-1?ts=42"
+        );
+    }
+
     #[rstest]
     #[case("admin-token", Some("Bearer admin-token".to_string()))]
     #[case("", None)]

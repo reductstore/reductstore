@@ -354,6 +354,27 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn stores_event_under_unknown_instance_when_instance_is_empty(
+        #[future] repo: AuditRepository,
+    ) {
+        let repo = repo.await;
+        let mut event = make_event("token-empty", "GET /api/v1/b/test", 200, "", 11);
+        event.instance = "".to_string();
+
+        AuditRepository::write_event_to_bucket(
+            Arc::clone(&repo.storage),
+            BucketSettings::default(),
+            event,
+        )
+        .await
+        .unwrap();
+
+        let event = read_audit_event(&repo, "token-empty", 11).await;
+        assert_eq!(event.token_name, "token-empty");
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn creates_audit_bucket_with_fifo_quota_when_configured() {
         let tmp_dir = tempdir().unwrap();
         let mut cfg = Cfg {

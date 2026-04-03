@@ -168,4 +168,22 @@ mod tests {
 
         assert!(storage.get_bucket(AUDIT_BUCKET_NAME).await.is_err());
     }
+
+    #[test]
+    fn deserializes_missing_instance_as_unknown() {
+        let event: AuditEvent = serde_json::from_str(
+            r#"{
+                "timestamp": 1,
+                "token_name": "token-1",
+                "endpoint": "GET /api/v1/info",
+                "status": 200,
+                "message": "",
+                "call_count": 1,
+                "duration": 0.1
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(event.instance, "unknown");
+    }
 }

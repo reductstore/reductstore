@@ -5,6 +5,7 @@ use crate::api::http::links::derive_key_from_secret;
 use crate::api::http::utils::{make_headers_from_reader, RangeRecordStream, RecordStream};
 use crate::api::http::{Components, HttpError, StateKeeper};
 use crate::auth::policy::{Policy, ReadAccessPolicy};
+use crate::auth::token_repository::ManageTokens;
 use crate::core::sync::AsyncRwLock as RwLock;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::storage::query::QueryRx;
@@ -105,6 +106,14 @@ async fn check_permissions_from_token_name(
     bucket: &str,
 ) -> Result<(), ReductError> {
     let mut token_repo = components.token_repo.write().await?;
+    check_permissions_with_token_repo(token_repo.as_mut(), token_name, bucket).await
+}
+
+async fn check_permissions_with_token_repo(
+    token_repo: &mut (dyn ManageTokens + Send),
+    token_name: &str,
+    bucket: &str,
+) -> Result<(), ReductError> {
     if token_repo.get_token_list().await?.is_empty() {
         // Authentication is disabled.
         return Ok(());
@@ -270,14 +279,18 @@ mod tests {
     use super::*;
     use crate::api::http::links::tests::create_query_link;
     use crate::api::http::tests::{egress_limited_keeper, headers, keeper};
+    use crate::auth::token_repository::TokenRepositoryBuilder;
+    use crate::cfg::Cfg;
     use crate::storage::entry::io::record_reader::tests::MockRecord;
     use axum::body::to_bytes;
-    use chrono::Utc;
+    use chrono::{Duration, Utc};
     use mockall::predicate::eq;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::RecordMeta;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
+    use reduct_base::unauthorized;
     use rstest::rstest;
+    use tempfile::tempdir;
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
@@ -680,6 +693,37 @@ mod tests {
             String::from_utf8_lossy(body_bytes.iter().as_slice()),
             "Hey!!!"
         );
+    }
+
+    #[tokio::test]
+    async fn test_check_permissions_with_token_repo_auth_disabled() {
+        let cfg = Cfg::default();
+        let mut repo = TokenRepositoryBuilder::new(cfg)
+            .build(tempdir().unwrap().keep())
+            .await;
+
+        check_permissions_with_token_repo(repo.as_mut(), "any-token", "bucket-1")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_check_permissions_with_token_repo_expired_token() {
+        let cfg = Cfg {
+            api_token: "init-token".to_string(),
+            ..Cfg::default()
+        };
+        let path = tempdir().unwrap().keep();
+        let mut repo = TokenRepositoryBuilder::new(cfg).build(path).await;
+
+        let mut init_token = repo.get_token("init-token").await.unwrap().clone();
+        init_token.expires_at = Some(Utc::now() - Duration::seconds(1));
+        repo.update_token(init_token).await.unwrap();
+
+        let err = check_permissions_with_token_repo(repo.as_mut(), "init-token", "bucket-1")
+            .await
+            .unwrap_err();
+        assert_eq!(err, unauthorized!("Token has expired"));
     }
 
     mod validation {
