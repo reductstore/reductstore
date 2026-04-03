@@ -26,7 +26,8 @@ pub(super) type FlushHandler = Arc<dyn Fn(AuditEvent) -> FlushFuture + Send + Sy
 pub(super) struct AuditAggregateKey {
     pub instance: String,
     pub token_name: String,
-    pub endpoint: String,
+    pub method: String,
+    pub path: String,
     pub status: u16,
     pub message: String,
     pub client_ip: Option<String>,
@@ -52,7 +53,8 @@ pub(super) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> A
         timestamp: aggregate.first_timestamp,
         instance: key.instance,
         token_name: key.token_name,
-        endpoint: key.endpoint,
+        method: key.method,
+        path: key.path,
         status: key.status,
         message: key.message,
         client_ip: key.client_ip,
@@ -130,7 +132,8 @@ impl AuditAggregator {
         let key = AuditAggregateKey {
             instance: event.instance,
             token_name: event.token_name,
-            endpoint: event.endpoint,
+            method: event.method,
+            path: event.path,
             status: event.status,
             message: event.message,
             client_ip: event.client_ip,
@@ -236,7 +239,8 @@ mod tests {
             timestamp,
             instance: "instance-a".to_string(),
             token_name: "token-1".to_string(),
-            endpoint: "GET /api/v1/info".to_string(),
+            method: "GET".to_string(),
+            path: "/api/v1/info".to_string(),
             status: 200,
             message: "".to_string(),
             client_ip: None,
@@ -258,14 +262,16 @@ mod tests {
     fn make_test_key(
         instance: &str,
         token_name: &str,
-        endpoint: &str,
+        method: &str,
+        path: &str,
         status: u16,
         message: &str,
     ) -> AuditAggregateKey {
         AuditAggregateKey {
             instance: instance.to_string(),
             token_name: token_name.to_string(),
-            endpoint: endpoint.to_string(),
+            method: method.to_string(),
+            path: path.to_string(),
             status,
             message: message.to_string(),
             client_ip: None,
@@ -302,7 +308,7 @@ mod tests {
     #[rstest]
     fn make_event_uses_first_timestamp_and_aggregates_duration() {
         let event = make_event(
-            make_test_key("instance-a", "token-1", "GET /api/v1/info", 200, ""),
+            make_test_key("instance-a", "token-1", "GET", "/api/v1/info", 200, ""),
             AuditAggregate {
                 first_timestamp: 10,
                 last_timestamp: 20,
@@ -316,7 +322,8 @@ mod tests {
         assert_eq!(event.timestamp, 10);
         assert_eq!(event.instance, "instance-a");
         assert_eq!(event.token_name, "token-1");
-        assert_eq!(event.endpoint, "GET /api/v1/info");
+        assert_eq!(event.method, "GET");
+        assert_eq!(event.path, "/api/v1/info");
         assert_eq!(event.status, 200);
         assert_eq!(event.call_count, 3);
         assert!((event.duration - 4.5).abs() < 1e-9);
@@ -336,11 +343,11 @@ mod tests {
         let much_later = Instant::now() + Duration::from_secs(20);
         let mut guard = state.write().await.unwrap();
         guard.aggregates.insert(
-            make_test_key("instance-a", "token-1", "GET /api/v1/info", 200, ""),
+            make_test_key("instance-a", "token-1", "GET", "/api/v1/info", 200, ""),
             make_test_aggregate(1, 1, 1.0, later, much_later),
         );
         guard.aggregates.insert(
-            make_test_key("instance-a", "token-2", "GET /api/v1/info", 200, ""),
+            make_test_key("instance-a", "token-2", "GET", "/api/v1/info", 200, ""),
             make_test_aggregate(2, 1, 2.0, much_later, earlier),
         );
         drop(guard);
@@ -400,7 +407,7 @@ mod tests {
 
         let mut guard = state.write().await.unwrap();
         guard.aggregates.insert(
-            make_test_key("instance-a", "expired", "GET /expired", 200, ""),
+            make_test_key("instance-a", "expired", "GET", "/expired", 200, ""),
             make_test_aggregate(
                 1,
                 1,
@@ -410,7 +417,7 @@ mod tests {
             ),
         );
         guard.aggregates.insert(
-            make_test_key("instance-a", "pending", "GET /pending", 200, ""),
+            make_test_key("instance-a", "pending", "GET", "/pending", 200, ""),
             make_test_aggregate(
                 2,
                 1,
@@ -448,7 +455,7 @@ mod tests {
         let now = Instant::now();
         let mut guard = state.write().await.unwrap();
         guard.aggregates.insert(
-            make_test_key("instance-a", "forced", "GET /forced", 200, ""),
+            make_test_key("instance-a", "forced", "GET", "/forced", 200, ""),
             make_test_aggregate(
                 3,
                 2,
@@ -480,7 +487,7 @@ mod tests {
         let mut guard = state.write().await.unwrap();
         for (idx, token_name) in ["token-1", "token-2"].into_iter().enumerate() {
             guard.aggregates.insert(
-                make_test_key("instance-a", token_name, "GET /api/v1/info", 200, ""),
+                make_test_key("instance-a", token_name, "GET", "/api/v1/info", 200, ""),
                 make_test_aggregate(idx as u64 + 1, 1, 1.0, Instant::now(), Instant::now()),
             );
         }
