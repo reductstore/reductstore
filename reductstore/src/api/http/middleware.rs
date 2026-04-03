@@ -440,7 +440,8 @@ mod tests {
         wait_for_audit_flush().await;
         let event = read_audit_event(&keeper, "unauthorized").await.unwrap();
         assert_eq!(event.token_name, "unauthorized");
-        assert_eq!(event.endpoint, "GET /protected");
+        assert_eq!(event.method, "GET");
+        assert_eq!(event.path, "/protected");
         assert_eq!(event.status, StatusCode::UNAUTHORIZED.as_u16());
         assert_eq!(event.message, "");
         assert_eq!(event.call_count, 1);

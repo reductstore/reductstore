@@ -27,7 +27,10 @@ pub(crate) struct AuditEvent {
     #[serde(default = "default_audit_instance")]
     pub instance: String,
     pub token_name: String,
-    pub endpoint: String,
+    #[serde(default = "default_audit_method")]
+    pub method: String,
+    #[serde(default = "default_audit_path")]
+    pub path: String,
     pub status: u16,
     pub message: String,
     #[serde(default)]
@@ -38,6 +41,14 @@ pub(crate) struct AuditEvent {
 
 fn default_audit_instance() -> String {
     "unknown".to_string()
+}
+
+fn default_audit_method() -> String {
+    "UNKNOWN".to_string()
+}
+
+fn default_audit_path() -> String {
+    "".to_string()
 }
 
 pub(crate) struct AuditRepositoryBuilder {
@@ -104,7 +115,8 @@ mod tests {
             timestamp: 1,
             instance: "test-instance".to_string(),
             token_name: "token-1".to_string(),
-            endpoint: "GET /api/v1/info".to_string(),
+            method: "GET".to_string(),
+            path: "/api/v1/info".to_string(),
             status: 200,
             message: "".to_string(),
             client_ip: None,
@@ -173,7 +185,7 @@ mod tests {
     }
 
     #[test]
-    fn deserializes_missing_instance_as_unknown() {
+    fn deserializes_legacy_event_with_missing_instance_as_unknown() {
         let event: AuditEvent = serde_json::from_str(
             r#"{
                 "timestamp": 1,
@@ -188,5 +200,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(event.instance, "unknown");
+        assert_eq!(event.method, "UNKNOWN");
+        assert_eq!(event.path, "");
     }
 }

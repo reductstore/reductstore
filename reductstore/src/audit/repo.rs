@@ -140,7 +140,8 @@ mod tests {
 
     fn make_event(
         token_name: &str,
-        endpoint: &str,
+        method: &str,
+        path: &str,
         status: u16,
         message: &str,
         timestamp: u64,
@@ -149,7 +150,8 @@ mod tests {
             timestamp,
             instance: "unknown".to_string(),
             token_name: token_name.to_string(),
-            endpoint: endpoint.to_string(),
+            method: method.to_string(),
+            path: path.to_string(),
             status,
             message: message.to_string(),
             client_ip: None,
@@ -226,10 +228,10 @@ mod tests {
     async fn aggregates_events_with_same_key(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
+        repo.log_event(make_event("token-1", "GET", "/api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 2))
+        repo.log_event(make_event("token-1", "GET", "/api/v1/b/test", 200, "", 2))
             .await
             .unwrap();
 
@@ -248,12 +250,13 @@ mod tests {
     async fn separates_events_with_different_status(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
+        repo.log_event(make_event("token-1", "GET", "/api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
         repo.log_event(make_event(
             "token-1",
-            "GET /api/v1/b/test",
+            "GET",
+            "/api/v1/b/test",
             403,
             "forbidden",
             2,
@@ -273,7 +276,8 @@ mod tests {
 
         repo.log_event(make_event(
             "token-1",
-            "GET /api/v1/b/test",
+            "GET",
+            "/api/v1/b/test",
             500,
             "disk full",
             1,
@@ -282,7 +286,8 @@ mod tests {
         .unwrap();
         repo.log_event(make_event(
             "token-1",
-            "GET /api/v1/b/test",
+            "GET",
+            "/api/v1/b/test",
             500,
             "timeout",
             2,
@@ -300,7 +305,7 @@ mod tests {
     async fn flushes_single_event_after_delay(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
+        repo.log_event(make_event("token-1", "GET", "/api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
 
@@ -308,7 +313,8 @@ mod tests {
 
         let event = read_audit_event(&repo, "token-1", 1).await;
         assert_eq!(event.token_name, "token-1");
-        assert_eq!(event.endpoint, "GET /api/v1/b/test");
+        assert_eq!(event.method, "GET");
+        assert_eq!(event.path, "/api/v1/b/test");
         assert_eq!(event.status, 200);
         assert_eq!(event.message, "");
         assert_eq!(event.call_count, 1);
@@ -322,7 +328,7 @@ mod tests {
     async fn flushes_status_label(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
+        repo.log_event(make_event("token-1", "GET", "/api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
 
@@ -343,7 +349,7 @@ mod tests {
         AuditRepository::write_event_to_bucket(
             Arc::clone(&repo.storage),
             BucketSettings::default(),
-            make_event("token-1", "GET /api/v1/b/test", 200, "", 1),
+            make_event("token-1", "GET", "/api/v1/b/test", 200, "", 1),
         )
         .await
         .unwrap();
@@ -359,7 +365,7 @@ mod tests {
         #[future] repo: AuditRepository,
     ) {
         let repo = repo.await;
-        let mut event = make_event("token-empty", "GET /api/v1/b/test", 200, "", 11);
+        let mut event = make_event("token-empty", "GET", "/api/v1/b/test", 200, "", 11);
         event.instance = "".to_string();
 
         AuditRepository::write_event_to_bucket(
@@ -394,7 +400,7 @@ mod tests {
         );
 
         let mut repo = AuditRepository::new(cfg, Arc::clone(&storage)).await;
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
+        repo.log_event(make_event("token-1", "GET", "/api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
 
@@ -417,11 +423,11 @@ mod tests {
     ) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
+        repo.log_event(make_event("token-1", "GET", "/api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
         sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 2))
+        repo.log_event(make_event("token-1", "GET", "/api/v1/b/test", 200, "", 2))
             .await
             .unwrap();
 
@@ -440,11 +446,11 @@ mod tests {
     async fn stale_timer_does_not_flush_after_version_change(#[future] repo: AuditRepository) {
         let mut repo = repo.await;
 
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 1))
+        repo.log_event(make_event("token-1", "GET", "/api/v1/b/test", 200, "", 1))
             .await
             .unwrap();
         sleep(Duration::from_millis((AGGREGATION_WINDOW_SECS * 1000) / 2)).await;
-        repo.log_event(make_event("token-1", "GET /api/v1/b/test", 200, "", 3))
+        repo.log_event(make_event("token-1", "GET", "/api/v1/b/test", 200, "", 3))
             .await
             .unwrap();
 
