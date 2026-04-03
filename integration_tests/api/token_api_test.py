@@ -14,10 +14,12 @@ def test__create_token(base_url, session, token_name, bucket_name):
         "full_access": True,
         "read": [bucket_name],
         "write": [bucket_name],
-        "ip_allowlist": [],
     }
 
-    resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
+    resp = session.post(
+        f"{base_url}/tokens/{token_name}",
+        json={"permissions": permissions, "ip_allowlist": []},
+    )
     assert resp.status_code == 200
     assert resp.headers["content-type"] == "application/json"
     assert "token-" in json.loads(resp.content)["value"]
@@ -33,11 +35,11 @@ def test__create_v2_token(base_url, session, token_name, bucket_name):
         "full_access": True,
         "read": [bucket_name],
         "write": [bucket_name],
-        "ip_allowlist": [],
     }
     expires_at = (datetime.now(timezone.utc) + timedelta(days=1)).replace(microsecond=0)
     payload = {
         "permissions": permissions,
+        "ip_allowlist": [],
         "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
     }
 
@@ -55,6 +57,7 @@ def test__create_v2_token(base_url, session, token_name, bucket_name):
         "created_at": created_at,
         "value": "",
         "permissions": permissions,
+        "ip_allowlist": [],
         "is_provisioned": False,
         "expires_at": json.loads(resp.content)["expires_at"],
         "ttl": None,
@@ -128,10 +131,12 @@ def test__get_token(base_url, session, bucket_name, token_name):
         "full_access": True,
         "read": [bucket_name],
         "write": [bucket_name],
-        "ip_allowlist": [],
     }
 
-    resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
+    resp = session.post(
+        f"{base_url}/tokens/{token_name}",
+        json={"permissions": permissions, "ip_allowlist": []},
+    )
     assert resp.status_code == 200
     created_at = json.loads(resp.content)["created_at"]
 
@@ -143,6 +148,7 @@ def test__get_token(base_url, session, bucket_name, token_name):
         "created_at": created_at,
         "value": "",
         "permissions": permissions,
+        "ip_allowlist": [],
         "is_provisioned": False,
         "expires_at": None,
         "ttl": None,
@@ -158,10 +164,12 @@ def test__token_ip_allowlist_enforced(base_url, session, token_name):
         "full_access": False,
         "read": ["*"],
         "write": [],
-        "ip_allowlist": ["203.0.113.10"],
     }
 
-    resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
+    resp = session.post(
+        f"{base_url}/tokens/{token_name}",
+        json={"permissions": permissions, "ip_allowlist": ["203.0.113.10"]},
+    )
     assert resp.status_code == 200
     token_value = json.loads(resp.content)["value"]
 
