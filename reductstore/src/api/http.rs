@@ -893,6 +893,7 @@ pub(crate) mod tests {
                 TokenCreateRequest {
                     permissions,
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await
@@ -1001,6 +1002,7 @@ pub(crate) mod tests {
                 TokenCreateRequest {
                     permissions,
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await

@@ -98,6 +98,7 @@ mod tests {
                         ip_allowlist: vec![],
                     },
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await
@@ -151,6 +152,7 @@ mod tests {
                         ip_allowlist: vec![],
                     },
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await

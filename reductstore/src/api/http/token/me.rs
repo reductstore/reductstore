@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::components::CLIENT_IP_HEADER;
-use crate::api::http::token::TokenAxum;
+use crate::api::http::token::{populate_token_status, TokenAxum};
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::AuthenticatedPolicy;
 
@@ -33,6 +33,7 @@ pub(in crate::api::http) async fn me(
         .validate_token_with_last_access(header, client_ip)
         .await?;
     token.value.clear();
+    populate_token_status(&mut token);
     Ok(TokenAxum::from(token))
 }
 

@@ -148,7 +148,9 @@ impl TokenRepository {
             permissions: full_access_permissions.clone(),
             is_provisioned: true,
             expires_at: None,
+            ttl: None,
             last_access: None,
+            is_expired: false,
         };
 
         token_repository
@@ -284,6 +286,11 @@ impl ManageTokens for TokenRepository {
         }
 
         let created_at = DateTime::<Utc>::from(SystemTime::now());
+        let ttl = request.ttl;
+        if matches!(ttl, Some(0)) {
+            return Err(unprocessable_entity!("Token TTL must be greater than zero"));
+        }
+
         let expires_at = request
             .expires_at
             .map(|expires_at| {
@@ -314,7 +321,9 @@ impl ManageTokens for TokenRepository {
                     permissions: Some(permissions),
                     is_provisioned: false,
                     expires_at,
+                    ttl,
                     last_access: None,
+                    is_expired: false,
                 },
             )
         };
@@ -367,7 +376,11 @@ impl ManageTokens for TokenRepository {
     ) -> Result<Token, ReductError> {
         let value = parse_bearer_token(header.unwrap_or(""))?;
 
-        if let Some(token) = self.auth_cache.get(&value).cloned() {
+        if let Some(mut token) = self.auth_cache.get(&value).cloned() {
+            if token.ttl.is_some() {
+                self.populate_token_last_access(&mut token).await;
+            }
+
             if let Err(err) = check_token_lifetime(&token) {
                 self.auth_cache.remove(&value);
                 return Err(err);
@@ -379,8 +392,19 @@ impl ManageTokens for TokenRepository {
             return Ok(token);
         }
 
-        let header = format!("Bearer {}", value);
-        let token = AccessTokens::validate_token(self, Some(&header), client_ip)?;
+        let mut token = self
+            .repo
+            .values()
+            .find(|token| crate::auth::token_secret::verify_token_secret(&token.value, &value))
+            .cloned()
+            .ok_or_else(|| reduct_base::unauthorized!("Invalid token"))?;
+
+        if token.ttl.is_some() {
+            self.populate_token_last_access(&mut token).await;
+        }
+
+        check_token_lifetime(&token)?;
+        super::check_token_ip_allowlist(&token, client_ip)?;
         self.auth_cache.insert(value, token.clone());
         Ok(token)
     }
@@ -390,7 +414,7 @@ impl ManageTokens for TokenRepository {
         header: Option<&str>,
         client_ip: Option<IpAddr>,
     ) -> Result<Token, ReductError> {
-        let mut token = AccessTokens::validate_token(self, header, client_ip)?;
+        let mut token = ManageTokens::validate_token(self, header, client_ip).await?;
         self.populate_token_last_access(&mut token).await;
         Ok(token)
     }
@@ -529,6 +553,7 @@ mod tests {
                             ip_allowlist: vec![],
                         },
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await;
@@ -554,6 +579,7 @@ mod tests {
                             ip_allowlist: vec![],
                         },
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await;
@@ -576,6 +602,7 @@ mod tests {
                             ip_allowlist: vec![],
                         },
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await
@@ -597,6 +624,7 @@ mod tests {
                     TokenCreateRequest {
                         permissions: Permissions::default(),
                         expires_at: Some(expires_at),
+                        ttl: None,
                     },
                 )
                 .await
@@ -617,6 +645,7 @@ mod tests {
                     TokenCreateRequest {
                         permissions: Permissions::default(),
                         expires_at: Some(chrono::Utc::now() - chrono::Duration::days(5)),
+                        ttl: None,
                     },
                 )
                 .await;
@@ -646,6 +675,7 @@ mod tests {
                         ip_allowlist: vec![],
                     },
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await
@@ -671,7 +701,9 @@ mod tests {
                 permissions: Some(Permissions::default()),
                 is_provisioned: false,
                 expires_at: None,
+                ttl: None,
                 last_access: None,
+                is_expired: false,
             };
             let mut buf = Vec::new();
             TokenRepo {
@@ -709,6 +741,7 @@ mod tests {
                     TokenCreateRequest {
                         permissions: Permissions::default(),
                         expires_at: Some(expires_at),
+                        ttl: None,
                     },
                 )
                 .await
@@ -751,6 +784,7 @@ mod tests {
                             ip_allowlist: vec![],
                         },
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await;
@@ -789,6 +823,7 @@ mod tests {
                             ip_allowlist: vec![],
                         },
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await;
@@ -835,6 +870,7 @@ mod tests {
                         ip_allowlist: vec![],
                     },
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await
@@ -853,7 +889,9 @@ mod tests {
                 }),
                 is_provisioned: true,
                 expires_at: None,
+                ttl: None,
                 last_access: None,
+                is_expired: false,
             })
             .await
             .unwrap();
@@ -915,6 +953,7 @@ mod tests {
                             ip_allowlist: vec![],
                         },
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await
@@ -940,7 +979,9 @@ mod tests {
                     }),
                     is_provisioned: false,
                     expires_at: None,
+                    ttl: None,
                     last_access: None,
+                    is_expired: false,
                 }
             );
         }
@@ -965,6 +1006,7 @@ mod tests {
                     TokenCreateRequest {
                         permissions: Permissions::default(),
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await
@@ -998,6 +1040,7 @@ mod tests {
                     TokenCreateRequest {
                         permissions: Permissions::default(),
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await
@@ -1066,6 +1109,7 @@ mod tests {
                     TokenCreateRequest {
                         permissions: Permissions::default(),
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await;
@@ -1079,6 +1123,7 @@ mod tests {
                         ip_allowlist: vec![],
                     },
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await
@@ -1170,6 +1215,7 @@ mod tests {
                         ip_allowlist: vec![],
                     },
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await
@@ -1207,6 +1253,7 @@ mod tests {
                     TokenCreateRequest {
                         permissions: Permissions::default(),
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await;
@@ -1220,6 +1267,7 @@ mod tests {
                         ip_allowlist: vec![],
                     },
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await
@@ -1269,6 +1317,7 @@ mod tests {
                         ip_allowlist: vec![],
                     },
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await;
@@ -1284,6 +1333,7 @@ mod tests {
                         ip_allowlist: vec![],
                     },
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await;

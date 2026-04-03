@@ -32,6 +32,9 @@ use reduct_base::msg::token_api::{
 use reduct_macros::{IntoResponse, Twin};
 use serde::Deserialize;
 
+use crate::auth::token_repository::token_is_expired;
+use chrono::Utc;
+
 #[derive(IntoResponse, Twin)]
 pub struct TokenAxum(Token);
 
@@ -68,6 +71,10 @@ pub(super) fn create_token_api_routes() -> axum::Router<Arc<StateKeeper>> {
         .route("/{token_name}/rotate", post(rotate_token))
 }
 
+pub(crate) fn populate_token_status(token: &mut Token) {
+    token.is_expired = token_is_expired(token, Utc::now());
+}
+
 // compatibility with v1, remove in v2
 fn parse_token_create_request(body: Bytes) -> Result<TokenCreateRequest, HttpError> {
     serde_json::from_slice::<CompatTokenCreateRequest>(&body)
@@ -96,6 +103,7 @@ impl From<CompatTokenCreateRequest> for TokenCreateRequest {
             CompatTokenCreateRequest::V1(request) => TokenCreateRequest {
                 permissions: request.permissions,
                 expires_at: None,
+                ttl: None,
             },
         }
     }
@@ -107,6 +115,8 @@ struct V2TokenCreateRequestBody {
     permissions: Permissions,
     #[serde(default)]
     expires_at: Option<chrono::DateTime<chrono::Utc>>,
+    #[serde(default)]
+    ttl: Option<u64>,
 }
 
 impl From<V2TokenCreateRequestBody> for TokenCreateRequest {
@@ -114,6 +124,7 @@ impl From<V2TokenCreateRequestBody> for TokenCreateRequest {
         TokenCreateRequest {
             permissions: value.permissions,
             expires_at: value.expires_at,
+            ttl: value.ttl,
         }
     }
 }
@@ -202,7 +213,7 @@ mod tests {
     #[test]
     fn test_parse_token_create_request_v2_strict() {
         let parsed = parse_token_create_request_v2(Bytes::from(
-            r#"{"permissions":{"full_access":true,"read":["bucket-1"],"write":[]},"expires_at":"2026-03-16T10:00:00Z"}"#,
+            r#"{"permissions":{"full_access":true,"read":["bucket-1"],"write":[]},"expires_at":"2026-03-16T10:00:00Z","ttl":3600}"#,
         ))
         .unwrap();
 
@@ -212,6 +223,7 @@ mod tests {
             parsed.expires_at,
             Some("2026-03-16T10:00:00Z".parse().unwrap())
         );
+        assert_eq!(parsed.ttl, Some(3600));
     }
 
     #[test]
