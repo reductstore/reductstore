@@ -12,7 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Add token `last_access` to token API responses by resolving latest access time from `$audit` (supports both legacy `token` and `instance/token` audit entry naming) for writable and read-only repositories, [PR-1281](https://github.com/reductstore/reductstore/pull/1281)
 - Add token inactivity TTL (`ttl`) and computed `is_expired` flag in token API responses to signal unusable tokens due to inactivity or `expires_at`, [PR-1283](https://github.com/reductstore/reductstore/pull/1283)
-- Add trusted client IP extraction (Axum `ConnectInfo` + guarded `Forwarded`/`X-Forwarded-For`) and optional per-token `permissions.ip_allowlist` enforcement, plus `client_ip` field in audit events, [PR-1280](https://github.com/reductstore/reductstore/pull/1280)
+- Add trusted client IP extraction (Axum `ConnectInfo` + guarded `Forwarded`/`X-Forwarded-For`) and optional per-token IP allowlist enforcement, plus `client_ip` field in audit events, [PR-1280](https://github.com/reductstore/reductstore/pull/1280)
 - Add explicit token rotation endpoint `POST /api/v1/tokens/{token_name}/rotate` that replaces token secret in one call and invalidates the previous value, [PR-1279](https://github.com/reductstore/reductstore/pull/1279)
 - Add `message` field to audit payloads and split audit aggregation groups when either `status` or `message` changes, [PR-1277](https://github.com/reductstore/reductstore/pull/1277)
 - Add `RS_INSTANCE_NAME` for audit record attribution with hostname fallback and include `instance` label on `$audit` writes (local and replica-forwarded), [PR-1272](https://github.com/reductstore/reductstore/pull/1272)
@@ -41,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Move token API `ip_allowlist` to token-level settings (alongside `ttl` / `expires_at`) instead of nesting it under `permissions`, and update token API responses/tests accordingly, [PR-1284](https://github.com/reductstore/reductstore/pull/1284)
 - Default audit logging to enabled when `RS_API_TOKEN` is set, keep it disabled when empty, and allow explicit override via `RS_AUDIT_ENABLED`, [PR-1275](https://github.com/reductstore/reductstore/pull/1275)
 - Ignore hidden system/meta entries when computing bucket-level oldest/latest history so reported history matches visible entries, [PR-1274](https://github.com/reductstore/reductstore/pull/1274)
 - Avoid read-only replica crashes when `$audit` cannot be loaded and both `RS_PRIMARY_URL` and `RS_SECONDARY_URL` are unset by logging a warning and skipping audit forwarding instead, [PR-1266](https://github.com/reductstore/reductstore/pull/1266)

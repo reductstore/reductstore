@@ -192,8 +192,8 @@ def test__me(
         "full_access": True,
         "read": [],
         "write": [],
-        "ip_allowlist": [],
     }
+    assert data["ip_allowlist"] == []
 
     resp = session.get(f"{base_url}/me", headers=auth_headers(""))
     assert resp.status_code == 401

@@ -264,7 +264,12 @@ impl ManageTokens for TokenRepository {
         name: &str,
         request: TokenCreateRequest,
     ) -> Result<TokenCreateResponse, ReductError> {
-        let permissions = request.permissions;
+        let TokenCreateRequest {
+            permissions,
+            expires_at,
+            ttl,
+            ip_allowlist,
+        } = request;
 
         // Check if the token isn't empty
         if name.is_empty() {
@@ -286,13 +291,11 @@ impl ManageTokens for TokenRepository {
         }
 
         let created_at = DateTime::<Utc>::from(SystemTime::now());
-        let ttl = request.ttl;
         if matches!(ttl, Some(0)) {
             return Err(unprocessable_entity!("Token TTL must be greater than zero"));
         }
 
-        let expires_at = request
-            .expires_at
+        let expires_at = expires_at
             .map(|expires_at| {
                 if expires_at < created_at {
                     Err(unprocessable_entity!(
@@ -323,7 +326,7 @@ impl ManageTokens for TokenRepository {
                     expires_at,
                     ttl,
                     last_access: None,
-                    ip_allowlist: vec![],
+                    ip_allowlist,
                     is_expired: false,
                 },
             )
