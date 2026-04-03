@@ -18,6 +18,7 @@ use prost_wkt_types::Timestamp;
 use reduct_base::error::ReductError;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
 use reduct_base::{not_found, unauthorized};
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::UNIX_EPOCH;
@@ -34,6 +35,25 @@ pub(crate) fn parse_bearer_token(authorization_header: &str) -> Result<String, R
 
     let token = authorization_header[7..].to_string();
     Ok(token)
+}
+
+#[inline]
+pub(super) fn resolve_last_access_from_cache(
+    cache: &HashMap<String, u64>,
+    token_name: &str,
+) -> Option<DateTime<Utc>> {
+    let suffix = format!("/{}", token_name);
+    cache
+        .iter()
+        .filter_map(|(entry_name, timestamp)| {
+            if entry_name == token_name || entry_name.ends_with(&suffix) {
+                Some(*timestamp)
+            } else {
+                None
+            }
+        })
+        .max()
+        .and_then(|timestamp| DateTime::<Utc>::from_timestamp_micros(timestamp as i64))
 }
 
 #[inline]

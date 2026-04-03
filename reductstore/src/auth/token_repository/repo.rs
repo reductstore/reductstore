@@ -5,7 +5,8 @@ use crate::audit::AUDIT_BUCKET_NAME;
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{
-    check_token_lifetime, parse_bearer_token, ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME,
+    check_token_lifetime, parse_bearer_token, resolve_last_access_from_cache, ManageTokens,
+    INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME,
 };
 use crate::auth::token_secret::{
     hash_token_secret, is_hashed_token_secret, matched_hashed_token_secret,
@@ -205,15 +206,9 @@ impl TokenRepository {
         }
     }
 
-    fn resolve_last_access(&self, token_name: &str) -> Option<DateTime<Utc>> {
-        self.last_access_cache
-            .get(token_name)
-            .and_then(|timestamp| DateTime::<Utc>::from_timestamp_micros(*timestamp as i64))
-    }
-
     async fn populate_token_last_access(&mut self, token: &mut Token) {
         self.refresh_last_access_cache_if_needed().await;
-        token.last_access = self.resolve_last_access(&token.name);
+        token.last_access = resolve_last_access_from_cache(&self.last_access_cache, &token.name);
     }
 
     /// Save the token repository to the file system
