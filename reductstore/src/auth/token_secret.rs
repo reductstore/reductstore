@@ -1,18 +1,18 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use argon2::Argon2;
 use rand::rngs::OsRng;
 use rand::TryRngCore;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use ring::digest::{digest, SHA256};
 
-const ARGON2_PREFIX: &str = "arg2:";
+const SHA256_PREFIX: &str = "sha256:";
 const SALT_LEN: usize = 16;
 const HASH_LEN: usize = 32;
 
 pub(crate) fn is_hashed_token_secret(value: &str) -> bool {
-    value.starts_with(ARGON2_PREFIX)
+    value.starts_with(SHA256_PREFIX)
 }
 
 pub(super) fn matched_hashed_token_secret<'a>(stored: &'a str, candidate: &str) -> Option<&'a str> {
@@ -29,23 +29,18 @@ pub(crate) fn hash_token_secret(value: &str) -> Result<String, ReductError> {
         .try_fill_bytes(&mut salt)
         .map_err(|err| internal_server_error!("Failed to generate salt for token hash: {}", err))?;
 
-    let mut hash = [0u8; HASH_LEN];
-    Argon2::default()
-        .hash_password_into(value.as_bytes(), &salt, &mut hash)
-        .map_err(|err| {
-            internal_server_error!("Failed to hash token secret with Argon2: {}", err)
-        })?;
+    let hash = salted_sha256(value, &salt);
 
     Ok(format!(
         "{}{}:{}",
-        ARGON2_PREFIX,
+        SHA256_PREFIX,
         hex::encode(salt),
         hex::encode(hash)
     ))
 }
 
 pub(crate) fn verify_token_secret(stored: &str, candidate: &str) -> bool {
-    let Some(encoded) = stored.strip_prefix(ARGON2_PREFIX) else {
+    let Some(encoded) = stored.strip_prefix(SHA256_PREFIX) else {
         // Backward compatibility for legacy plaintext tokens.
         return stored == candidate;
     };
@@ -64,15 +59,32 @@ pub(crate) fn verify_token_secret(stored: &str, candidate: &str) -> bool {
         _ => return false,
     };
 
-    let mut actual_hash = [0u8; HASH_LEN];
-    if Argon2::default()
-        .hash_password_into(candidate.as_bytes(), &salt, &mut actual_hash)
-        .is_err()
-    {
+    let actual_hash = salted_sha256(candidate, &salt);
+    constant_time_eq(expected_hash.as_slice(), &actual_hash)
+}
+
+fn salted_sha256(candidate: &str, salt: &[u8]) -> [u8; HASH_LEN] {
+    let mut data = Vec::with_capacity(salt.len() + candidate.len());
+    data.extend_from_slice(salt);
+    data.extend_from_slice(candidate.as_bytes());
+
+    let digest = digest(&SHA256, &data);
+    let mut hash = [0u8; HASH_LEN];
+    hash.copy_from_slice(digest.as_ref());
+    hash
+}
+
+// Compare hashes without early exit to avoid leaking mismatch position via timing.
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
         return false;
     }
 
-    expected_hash.as_slice() == actual_hash
+    let mut diff = 0u8;
+    for (&a, &b) in left.iter().zip(right.iter()) {
+        diff |= a ^ b;
+    }
+    diff == 0
 }
 
 #[cfg(test)]
@@ -97,26 +109,26 @@ mod tests {
 
     #[test]
     fn test_verify_malformed_hash() {
-        assert!(!verify_token_secret("arg2:not-a-valid-hash", "secret"));
+        assert!(!verify_token_secret("sha256:not-a-valid-hash", "secret"));
     }
 
     #[test]
     fn test_verify_malformed_hash_parts() {
         // invalid salt hex
-        assert!(!verify_token_secret("arg2:zzzz:00", "secret"));
+        assert!(!verify_token_secret("sha256:zzzz:00", "secret"));
         // invalid hash hex
         assert!(!verify_token_secret(
-            "arg2:00000000000000000000000000000000:zzzz",
+            "sha256:00000000000000000000000000000000:zzzz",
             "secret"
         ));
         // salt must be 16 bytes (32 hex chars)
         assert!(!verify_token_secret(
-            "arg2:000000000000000000000000000000:0000000000000000000000000000000000000000000000000000000000000000",
+            "sha256:000000000000000000000000000000:0000000000000000000000000000000000000000000000000000000000000000",
             "secret"
         ));
         // hash must be 32 bytes (64 hex chars)
         assert!(!verify_token_secret(
-            "arg2:00000000000000000000000000000000:00000000000000000000000000000000000000000000000000000000000000",
+            "sha256:00000000000000000000000000000000:00000000000000000000000000000000000000000000000000000000000000",
             "secret"
         ));
     }
