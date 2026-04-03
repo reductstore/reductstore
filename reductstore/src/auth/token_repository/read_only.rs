@@ -3,8 +3,12 @@
 
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
-use crate::auth::token_repository::{ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME};
+use crate::auth::token_repository::{
+    check_token_lifetime, parse_bearer_token, ManageTokens, INIT_TOKEN_NAME, TOKEN_REPO_FILE_NAME,
+};
+use crate::auth::token_secret::{hash_token_secret, matched_hashed_token_secret};
 use crate::cfg::{Cfg, InstanceRole};
+use crate::core::cache::Cache;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use async_trait::async_trait;
@@ -18,15 +22,20 @@ use reduct_base::{forbidden, internal_server_error};
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
+use std::time::Duration;
 use std::time::SystemTime;
 use tokio::time::Instant;
 
 pub(super) struct ReadOnlyTokenRepository {
     config_path: PathBuf,
     repo: HashMap<String, Token>,
+    auth_cache: Cache<String, Token>,
     cfg: Cfg,
     last_replica_sync: AsyncRwLock<Instant>,
 }
+
+const AUTH_CACHE_SIZE: usize = 1024;
+const AUTH_CACHE_TTL: Duration = Duration::MAX;
 
 impl ReadOnlyTokenRepository {
     /// Load the token repository from the given path in read-only mode
@@ -45,6 +54,7 @@ impl ReadOnlyTokenRepository {
         let mut token_repository = Self {
             config_path,
             repo: HashMap::new(),
+            auth_cache: Cache::new(AUTH_CACHE_SIZE, AUTH_CACHE_TTL),
             last_replica_sync: AsyncRwLock::new(Instant::now()),
             cfg,
         };
@@ -61,7 +71,7 @@ impl ReadOnlyTokenRepository {
         let api_token = self.cfg.api_token.clone();
 
         FILE_CACHE.discard_recursive(&self.config_path).await?; // ensure we update it from backend
-        let mut repo = HashMap::new();
+        let mut repo: HashMap<String, Token> = HashMap::new();
         match FILE_CACHE.read(&self.config_path, SeekFrom::Start(0)).await {
             Ok(mut lock) => {
                 debug!(
@@ -84,9 +94,17 @@ impl ReadOnlyTokenRepository {
         };
 
         if !api_token.is_empty() {
+            let init_token_value = repo
+                .get(INIT_TOKEN_NAME)
+                .and_then(|token| matched_hashed_token_secret(&token.value, &api_token))
+                .map(|secret| secret.to_string())
+                .unwrap_or_else(|| {
+                    hash_token_secret(&api_token).expect("Failed to hash init token secret")
+                });
+
             let init_token = Token {
                 name: INIT_TOKEN_NAME.to_string(),
-                value: api_token.to_string(),
+                value: init_token_value,
                 created_at: DateTime::<Utc>::from(SystemTime::now()),
                 permissions: Some(Permissions {
                     full_access: false,
@@ -115,6 +133,7 @@ impl ReadOnlyTokenRepository {
         *last_sync = Instant::now();
 
         self.repo = self.load_repo().await?;
+        self.auth_cache.clear();
 
         Ok(())
     }
@@ -154,7 +173,20 @@ impl ManageTokens for ReadOnlyTokenRepository {
     async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
         self.update_repo().await?;
 
-        AccessTokens::validate_token(self, header)
+        let value = parse_bearer_token(header.unwrap_or(""))?;
+
+        if let Some(token) = self.auth_cache.get(&value).cloned() {
+            if let Err(err) = check_token_lifetime(&token) {
+                self.auth_cache.remove(&value);
+                return Err(err);
+            }
+            return Ok(token);
+        }
+
+        let header = format!("Bearer {}", value);
+        let token = AccessTokens::validate_token(self, Some(&header))?;
+        self.auth_cache.insert(value, token.clone());
+        Ok(token)
     }
 
     async fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
@@ -182,6 +214,7 @@ impl ManageTokens for ReadOnlyTokenRepository {
 mod tests {
     use super::*;
     use crate::auth::token_repository::{BoxedTokenRepository, INIT_TOKEN_NAME};
+    use crate::auth::token_secret::{is_hashed_token_secret, verify_token_secret};
 
     use crate::cfg::{Cfg, InstanceRole};
     use reduct_base::msg::token_api::Permissions;
@@ -211,7 +244,8 @@ mod tests {
         ) {
             let (mut repo, _) = repo_fixture.await;
             let token = repo.get_token(INIT_TOKEN_NAME).await.unwrap();
-            assert_eq!(token.value, cfg.api_token);
+            assert!(is_hashed_token_secret(&token.value));
+            assert!(verify_token_secret(&token.value, &cfg.api_token));
             assert!(token.is_provisioned);
         }
 
@@ -252,6 +286,7 @@ mod tests {
     mod manage_tokens {
         use super::*;
         use reduct_base::{not_found, unauthorized};
+        use std::time::Duration;
 
         #[rstest]
         #[tokio::test]
@@ -287,21 +322,19 @@ mod tests {
         ) {
             let (mut repo, _) = repo_fixture.await;
             let token = repo.get_token(INIT_TOKEN_NAME).await.unwrap().clone();
+            assert_eq!(token.name, INIT_TOKEN_NAME.to_string());
+            assert!(is_hashed_token_secret(&token.value));
+            assert!(verify_token_secret(&token.value, &cfg.api_token));
             assert_eq!(
-                token,
-                Token {
-                    name: INIT_TOKEN_NAME.to_string(),
-                    value: cfg.api_token.clone(),
-                    created_at: token.created_at,
-                    permissions: Some(Permissions {
-                        full_access: false,
-                        read: vec!["*".to_string()],
-                        write: vec![],
-                    }),
-                    is_provisioned: true,
-                    expires_at: None
-                }
+                token.permissions,
+                Some(Permissions {
+                    full_access: false,
+                    read: vec!["*".to_string()],
+                    write: vec![],
+                })
             );
+            assert!(token.is_provisioned);
+            assert!(token.expires_at.is_none());
         }
 
         #[rstest]
@@ -347,21 +380,19 @@ mod tests {
             let (mut repo, _) = repo_fixture.await;
             let header = format!("Bearer {}", cfg.api_token);
             let res = repo.validate_token(Some(header.as_str())).await.unwrap();
+            assert_eq!(res.name, INIT_TOKEN_NAME.to_string());
+            assert!(is_hashed_token_secret(&res.value));
+            assert!(verify_token_secret(&res.value, &cfg.api_token));
             assert_eq!(
-                res,
-                Token {
-                    name: INIT_TOKEN_NAME.to_string(),
-                    value: cfg.api_token.clone(),
-                    created_at: res.created_at,
-                    permissions: Some(Permissions {
-                        full_access: false,
-                        read: vec!["*".to_string()],
-                        write: vec![],
-                    }),
-                    is_provisioned: true,
-                    expires_at: None
-                }
+                res.permissions,
+                Some(Permissions {
+                    full_access: false,
+                    read: vec!["*".to_string()],
+                    write: vec![],
+                })
             );
+            assert!(res.is_provisioned);
+            assert!(res.expires_at.is_none());
         }
 
         #[rstest]
@@ -373,6 +404,46 @@ mod tests {
             let header = Some("Bearer invalid_token");
             let res = repo.validate_token(header).await;
             assert_eq!(res.err().unwrap(), unauthorized!("Invalid token"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_validate_token_cache_invalidation_after_reload(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, path) = repo_fixture.await;
+
+            repo.validate_token(Some("Bearer file_value"))
+                .await
+                .unwrap();
+
+            let updated_token = Token {
+                name: "file_token".to_string(),
+                value: "new_file_value".to_string(),
+                created_at: DateTime::<Utc>::from(SystemTime::now()),
+                permissions: Some(Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                }),
+                is_provisioned: true,
+                expires_at: None,
+            };
+            write_token_to_file(&path, &updated_token).await;
+            tokio::time::sleep(Duration::from_millis(200)).await;
+
+            let err = repo
+                .validate_token(Some("Bearer file_value"))
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, unauthorized!("Invalid token"));
+
+            let token = repo
+                .validate_token(Some("Bearer new_file_value"))
+                .await
+                .unwrap();
+            assert_eq!(token.name, "file_token");
         }
 
         #[rstest]

@@ -24,12 +24,18 @@ pub(crate) trait ManageAudit {
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct AuditEvent {
     pub timestamp: u64,
+    #[serde(default = "default_audit_instance")]
+    pub instance: String,
     pub token_name: String,
     pub endpoint: String,
     pub status: u16,
     pub message: String,
     pub call_count: u64,
-    pub duration: u64,
+    pub duration: f64,
+}
+
+fn default_audit_instance() -> String {
+    "unknown".to_string()
 }
 
 pub(crate) struct AuditRepositoryBuilder {
@@ -94,12 +100,13 @@ mod tests {
     fn make_event() -> AuditEvent {
         AuditEvent {
             timestamp: 1,
+            instance: "test-instance".to_string(),
             token_name: "token-1".to_string(),
             endpoint: "GET /api/v1/info".to_string(),
             status: 200,
             message: "".to_string(),
             call_count: 1,
-            duration: 100,
+            duration: 0.1,
         }
     }
 
@@ -121,10 +128,11 @@ mod tests {
             .await
             .unwrap()
             .upgrade_and_unwrap();
-        let mut reader = bucket.begin_read("token-1", 1).await.unwrap();
+        let mut reader = bucket.begin_read("test-instance/token-1", 1).await.unwrap();
         let record = reader.read_chunk().unwrap().unwrap();
         let event: AuditEvent = serde_json::from_slice(&record).unwrap();
         assert_eq!(event.token_name, "token-1");
+        assert_eq!(event.instance, "test-instance");
     }
 
     #[rstest]
@@ -159,5 +167,23 @@ mod tests {
         sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
 
         assert!(storage.get_bucket(AUDIT_BUCKET_NAME).await.is_err());
+    }
+
+    #[test]
+    fn deserializes_missing_instance_as_unknown() {
+        let event: AuditEvent = serde_json::from_str(
+            r#"{
+                "timestamp": 1,
+                "token_name": "token-1",
+                "endpoint": "GET /api/v1/info",
+                "status": 200,
+                "message": "",
+                "call_count": 1,
+                "duration": 0.1
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(event.instance, "unknown");
     }
 }

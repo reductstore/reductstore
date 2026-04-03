@@ -76,7 +76,7 @@ pub(super) async fn audit_requests(
             format!("{} {}", method, path),
             response.status().as_u16(),
             message,
-            start.elapsed().as_micros() as u64,
+            start.elapsed().as_secs_f64(),
         )
         .await;
     }
@@ -131,13 +131,14 @@ async fn write_audit_event(
     endpoint: String,
     status: u16,
     message: String,
-    duration: u64,
+    duration: f64,
 ) {
     let event = AuditEvent {
         timestamp: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_micros() as u64,
+        instance: components.cfg.instance_name.clone(),
         token_name,
         endpoint,
         status,
@@ -320,9 +321,9 @@ mod tests {
         let entry = info
             .entries
             .into_iter()
-            .find(|entry| entry.name == token_name)?;
+            .find(|entry| entry.name.ends_with(&format!("/{}", token_name)))?;
         let mut reader = bucket
-            .begin_read(token_name, entry.oldest_record)
+            .begin_read(&entry.name, entry.oldest_record)
             .await
             .unwrap();
         let record = reader.read_chunk().unwrap().unwrap();
@@ -389,6 +390,8 @@ mod tests {
         assert_eq!(event.status, StatusCode::UNAUTHORIZED.as_u16());
         assert_eq!(event.message, "");
         assert_eq!(event.call_count, 1);
+        assert_eq!(event.instance, "unknown");
+        assert!(event.duration >= 0.0);
     }
 
     #[rstest]
@@ -422,6 +425,43 @@ mod tests {
         let event = read_audit_event(&keeper, "init-token").await.unwrap();
         assert_eq!(event.status, StatusCode::INTERNAL_SERVER_ERROR.as_u16());
         assert_eq!(event.message, "database unavailable");
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn writes_duration_as_float_seconds_and_includes_instance(
+        #[future] keeper: Arc<StateKeeper>,
+    ) {
+        let keeper = keeper.await;
+        let app = Router::new()
+            .route(
+                "/slow",
+                get(|| async {
+                    sleep(Duration::from_millis(50)).await;
+                    StatusCode::OK
+                }),
+            )
+            .layer(from_fn_with_state(Arc::clone(&keeper), audit_requests));
+
+        let response = app
+            .oneshot(
+                Request::get("/slow")
+                    .header("Authorization", "Bearer init-token")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+
+        wait_for_audit_flush().await;
+        let event = read_audit_event(&keeper, "init-token").await.unwrap();
+        assert_eq!(event.instance, "unknown");
+        assert!(
+            (0.03..1.0).contains(&event.duration),
+            "expected duration in seconds, got {}",
+            event.duration
+        );
     }
 
     #[rstest]

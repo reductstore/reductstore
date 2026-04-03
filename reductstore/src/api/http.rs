@@ -835,7 +835,7 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
+    async fn keeper_with_limits_impl(limits_config: LimitsConfig) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
             api_token: "init-token".to_string(),
@@ -927,7 +927,7 @@ pub(crate) mod tests {
 
         let components = Components {
             storage: Arc::clone(&storage),
-            auth: TokenAuthorization::new("inti-token"),
+            auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
@@ -953,6 +953,10 @@ pub(crate) mod tests {
         Arc::new(StateKeeper::new(Arc::new(LockFileBuilder::noop()), rx))
     }
 
+    pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
+        keeper_with_limits_impl(limits_config).await
+    }
+
     pub(crate) async fn keeper_with_engine_limit(max_storage_size: u64) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
@@ -966,7 +970,7 @@ pub(crate) mod tests {
             .with_cfg(cfg.clone())
             .build()
             .await;
-        let mut token_repo = TokenRepositoryBuilder::new(cfg.clone())
+        let token_repo = TokenRepositoryBuilder::new(cfg.clone())
             .build(cfg.data_path.clone())
             .await;
 
@@ -976,23 +980,6 @@ pub(crate) mod tests {
             .unwrap();
         storage
             .create_bucket("bucket-2", BucketSettings::default())
-            .await
-            .unwrap();
-
-        let permissions = Permissions {
-            read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
-            write: vec!["bucket-1".to_string(), "bucket-2".to_string()],
-            ..Default::default()
-        };
-
-        token_repo
-            .generate_token(
-                "test",
-                TokenCreateRequest {
-                    permissions,
-                    expires_at: None,
-                },
-            )
             .await
             .unwrap();
 
@@ -1011,7 +998,7 @@ pub(crate) mod tests {
 
         let components = Components {
             storage: Arc::clone(&storage),
-            auth: TokenAuthorization::new("inti-token"),
+            auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
