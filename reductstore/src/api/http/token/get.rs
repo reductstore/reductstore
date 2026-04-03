@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::http::token::TokenAxum;
+use crate::api::http::token::{populate_token_status, TokenAxum};
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
@@ -25,6 +25,7 @@ pub(super) async fn get_token(
         .get_token_with_last_access(&token_name)
         .await?;
     token.value.clear();
+    populate_token_status(&mut token);
     Ok(TokenAxum::from(token))
 }
 

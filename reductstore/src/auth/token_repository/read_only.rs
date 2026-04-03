@@ -165,7 +165,9 @@ impl ReadOnlyTokenRepository {
                 }),
                 is_provisioned: true,
                 expires_at: None,
+                ttl: None,
                 last_access: None,
+                is_expired: false,
             };
 
             repo.insert(init_token.name.clone(), init_token);
@@ -418,7 +420,9 @@ mod tests {
                 }),
                 is_provisioned: true,
                 expires_at: None,
+                ttl: None,
                 last_access: None,
+                is_expired: false,
             };
 
             write_token_to_file(&path, &new_token).await;
@@ -457,6 +461,7 @@ mod tests {
                     TokenCreateRequest {
                         permissions: perms,
                         expires_at: None,
+                        ttl: None,
                     },
                 )
                 .await;
@@ -586,7 +591,9 @@ mod tests {
                 }),
                 is_provisioned: true,
                 expires_at: None,
+                ttl: None,
                 last_access: None,
+                is_expired: false,
             };
             write_token_to_file(&path, &updated_token).await;
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -739,7 +746,9 @@ mod tests {
             }),
             is_provisioned: true,
             expires_at: None,
+            ttl: None,
             last_access: None,
+            is_expired: false,
         };
         write_token_to_file(&path, &token).await;
 
@@ -778,7 +787,9 @@ mod tests {
             }),
             is_provisioned: true,
             expires_at: None,
+            ttl: None,
             last_access: None,
+            is_expired: false,
         };
 
         write_token_to_file(&path, &token).await;

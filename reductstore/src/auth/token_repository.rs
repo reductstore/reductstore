@@ -91,6 +91,7 @@ impl From<Token> for crate::auth::proto::Token {
             expires_at: token.expires_at.map(datetime_to_proto_timestamp),
             permissions,
             is_provisioned: token.is_provisioned,
+            ttl: token.ttl.unwrap_or_default(),
         }
     }
 }
@@ -124,7 +125,9 @@ impl Into<Token> for crate::auth::proto::Token {
             permissions,
             is_provisioned: self.is_provisioned,
             expires_at,
+            ttl: if self.ttl == 0 { None } else { Some(self.ttl) },
             last_access: None,
+            is_expired: false,
         }
     }
 }
@@ -279,11 +282,26 @@ pub(super) trait AccessTokens {
     }
 }
 
-pub(super) fn check_token_lifetime(token: &Token) -> Result<(), ReductError> {
+pub(crate) fn token_is_expired(token: &Token, now: DateTime<Utc>) -> bool {
     if let Some(expiry) = token.expires_at {
-        if Utc::now() >= expiry {
-            return Err(unauthorized!("Token has expired"));
+        if now >= expiry {
+            return true;
         }
+    }
+
+    if let Some(ttl) = token.ttl {
+        let last_access = token.last_access.unwrap_or(token.created_at);
+        if (now - last_access).num_seconds() > ttl as i64 {
+            return true;
+        }
+    }
+
+    false
+}
+
+pub(super) fn check_token_lifetime(token: &Token) -> Result<(), ReductError> {
+    if token_is_expired(token, Utc::now()) {
+        return Err(unauthorized!("Token has expired"));
     }
     Ok(())
 }
@@ -422,7 +440,9 @@ mod tests {
             permissions: None,
             is_provisioned: false,
             expires_at: Some(Utc::now() - Duration::seconds(1)),
+            ttl: None,
             last_access: None,
+            is_expired: false,
         };
 
         assert_eq!(
@@ -440,10 +460,30 @@ mod tests {
             permissions: None,
             is_provisioned: false,
             expires_at: None,
+            ttl: None,
             last_access: None,
+            is_expired: false,
         };
 
         assert!(check_token_lifetime(&token).is_ok());
+    }
+
+    #[test]
+    fn test_token_is_expired_by_inactivity_ttl() {
+        let now = Utc::now();
+        let token = Token {
+            name: "ttl-expired".to_string(),
+            value: "ttl-expired".to_string(),
+            created_at: now - Duration::seconds(20),
+            permissions: None,
+            is_provisioned: false,
+            expires_at: None,
+            ttl: Some(5),
+            last_access: Some(now - Duration::seconds(10)),
+            is_expired: false,
+        };
+
+        assert!(token_is_expired(&token, now));
     }
 
     #[test]
@@ -480,7 +520,9 @@ mod tests {
             }),
             is_provisioned: false,
             expires_at: None,
+            ttl: None,
             last_access: None,
+            is_expired: false,
         };
 
         assert!(check_token_ip_allowlist(&token, Some("203.0.113.5".parse().unwrap())).is_ok());
@@ -502,7 +544,9 @@ mod tests {
             }),
             is_provisioned: false,
             expires_at: None,
+            ttl: None,
             last_access: None,
+            is_expired: false,
         };
 
         let err = check_token_ip_allowlist(&token, None).err().unwrap();
@@ -554,6 +598,7 @@ mod tests {
                 TokenCreateRequest {
                     permissions: Permissions::default(),
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await

@@ -66,7 +66,9 @@ impl ManageTokens for NoAuthRepository {
             }),
             is_provisioned: false,
             expires_at: None,
+            ttl: None,
             last_access: None,
+            is_expired: false,
         })
     }
 
@@ -119,6 +121,7 @@ mod tests {
                         ip_allowlist: vec![],
                     },
                     expires_at: None,
+                    ttl: None,
                 },
             )
             .await;
