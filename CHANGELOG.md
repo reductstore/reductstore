@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Add token `last_access` to token API responses by resolving latest access time from `$audit` (supports both legacy `token` and `instance/token` audit entry naming) for writable and read-only repositories, [PR-1281](https://github.com/reductstore/reductstore/pull/1281)
+- Add token inactivity TTL (`ttl`) and computed `is_expired` flag in token API responses to signal unusable tokens due to inactivity or `expires_at`, [PR-1283](https://github.com/reductstore/reductstore/pull/1283)
 - Add trusted client IP extraction (Axum `ConnectInfo` + guarded `Forwarded`/`X-Forwarded-For`) and optional per-token `permissions.ip_allowlist` enforcement, plus `client_ip` field in audit events, [PR-1280](https://github.com/reductstore/reductstore/pull/1280)
 - Add explicit token rotation endpoint `POST /api/v1/tokens/{token_name}/rotate` that replaces token secret in one call and invalidates the previous value, [PR-1279](https://github.com/reductstore/reductstore/pull/1279)
 - Add `message` field to audit payloads and split audit aggregation groups when either `status` or `message` changes, [PR-1277](https://github.com/reductstore/reductstore/pull/1277)
