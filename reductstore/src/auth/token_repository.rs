@@ -10,6 +10,7 @@ use crate::auth::token_repository::read_only::ReadOnlyTokenRepository;
 use crate::auth::token_repository::repo::TokenRepository;
 use crate::auth::token_secret::verify_token_secret;
 use crate::cfg::{Cfg, InstanceRole};
+use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use log::warn;
@@ -17,8 +18,10 @@ use prost_wkt_types::Timestamp;
 use reduct_base::error::ReductError;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
 use reduct_base::{not_found, unauthorized};
+use std::collections::HashMap;
 use std::net::IpAddr;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::UNIX_EPOCH;
 
 const TOKEN_REPO_FILE_NAME: &str = ".auth";
@@ -33,6 +36,39 @@ pub(crate) fn parse_bearer_token(authorization_header: &str) -> Result<String, R
 
     let token = authorization_header[7..].to_string();
     Ok(token)
+}
+
+#[inline]
+pub(super) fn resolve_last_access_from_cache(
+    cache: &HashMap<String, u64>,
+    token_name: &str,
+) -> Option<DateTime<Utc>> {
+    let suffix = format!("/{}", token_name);
+    cache
+        .iter()
+        .filter_map(|(entry_name, timestamp)| {
+            if entry_name == token_name || entry_name.ends_with(&suffix) {
+                Some(*timestamp)
+            } else {
+                None
+            }
+        })
+        .max()
+        .and_then(|timestamp| DateTime::<Utc>::from_timestamp_micros(timestamp as i64))
+}
+
+#[inline]
+fn datetime_to_proto_timestamp(ts: DateTime<Utc>) -> Timestamp {
+    Timestamp {
+        seconds: ts.timestamp(),
+        nanos: ts.timestamp_subsec_nanos() as i32,
+    }
+}
+
+#[inline]
+fn proto_timestamp_to_datetime(ts: Timestamp) -> DateTime<Utc> {
+    let since_epoch = std::time::Duration::new(ts.seconds as u64, ts.nanos as u32);
+    DateTime::<Utc>::from(UNIX_EPOCH + since_epoch)
 }
 
 impl From<Token> for crate::auth::proto::Token {
@@ -51,14 +87,8 @@ impl From<Token> for crate::auth::proto::Token {
         crate::auth::proto::Token {
             name: token.name,
             value: token.value,
-            created_at: Some(Timestamp {
-                seconds: token.created_at.timestamp(),
-                nanos: token.created_at.timestamp_subsec_nanos() as i32,
-            }),
-            expires_at: token.expires_at.map(|ts| Timestamp {
-                seconds: ts.timestamp(),
-                nanos: ts.timestamp_subsec_nanos() as i32,
-            }),
+            created_at: Some(datetime_to_proto_timestamp(token.created_at)),
+            expires_at: token.expires_at.map(datetime_to_proto_timestamp),
             permissions,
             is_provisioned: token.is_provisioned,
         }
@@ -78,18 +108,14 @@ impl Into<Token> for crate::auth::proto::Token {
             None
         };
 
-        let created_at = if let Some(ts) = self.created_at {
-            let since_epoch = std::time::Duration::new(ts.seconds as u64, ts.nanos as u32);
-            DateTime::<Utc>::from(UNIX_EPOCH + since_epoch)
-        } else {
-            warn!("Token has no creation time");
-            Utc::now()
-        };
-
-        let expires_at = self.expires_at.map(|ts| {
-            let since_epoch = std::time::Duration::new(ts.seconds as u64, ts.nanos as u32);
-            DateTime::<Utc>::from(UNIX_EPOCH + since_epoch)
-        });
+        let created_at = self.created_at.map_or_else(
+            || {
+                warn!("Token has no creation time");
+                Utc::now()
+            },
+            proto_timestamp_to_datetime,
+        );
+        let expires_at = self.expires_at.map(proto_timestamp_to_datetime);
 
         Token {
             name: self.name,
@@ -98,6 +124,7 @@ impl Into<Token> for crate::auth::proto::Token {
             permissions,
             is_provisioned: self.is_provisioned,
             expires_at,
+            last_access: None,
         }
     }
 }
@@ -130,6 +157,9 @@ pub(crate) trait ManageTokens {
     /// The token without value
     async fn get_token(&mut self, name: &str) -> Result<&Token, ReductError>;
 
+    /// Get a token by name with the last-access timestamp resolved from audit cache.
+    async fn get_token_with_last_access(&mut self, name: &str) -> Result<Token, ReductError>;
+
     /// Replace an existing token and persist the repository if needed.
     ///
     /// # Arguments
@@ -143,6 +173,9 @@ pub(crate) trait ManageTokens {
     /// The token list, it the authentication is disabled, it returns an empty list
     async fn get_token_list(&mut self) -> Result<Vec<Token>, ReductError>;
 
+    /// Get token list with last-access timestamps resolved from audit cache.
+    async fn get_token_list_with_last_access(&mut self) -> Result<Vec<Token>, ReductError>;
+
     /// Validate a token
     ///
     /// # Arguments
@@ -152,6 +185,13 @@ pub(crate) trait ManageTokens {
     ///
     /// Token with given value
     async fn validate_token(
+        &mut self,
+        header: Option<&str>,
+        client_ip: Option<IpAddr>,
+    ) -> Result<Token, ReductError>;
+
+    /// Validate a token and resolve its last-access timestamp from audit cache.
+    async fn validate_token_with_last_access(
         &mut self,
         header: Option<&str>,
         client_ip: Option<IpAddr>,
@@ -239,7 +279,7 @@ pub(super) trait AccessTokens {
     }
 }
 
-fn check_token_lifetime(token: &Token) -> Result<(), ReductError> {
+pub(super) fn check_token_lifetime(token: &Token) -> Result<(), ReductError> {
     if let Some(expiry) = token.expires_at {
         if Utc::now() >= expiry {
             return Err(unauthorized!("Token has expired"));
@@ -332,14 +372,32 @@ impl TokenRepositoryBuilder {
         Self { cfg }
     }
 
+    #[cfg_attr(not(test), allow(dead_code))]
     pub async fn build(self, config_path: PathBuf) -> BoxedTokenRepository {
+        self.build_internal(config_path, None).await
+    }
+
+    pub async fn build_with_storage(
+        self,
+        config_path: PathBuf,
+        storage: Arc<StorageEngine>,
+    ) -> BoxedTokenRepository {
+        self.build_internal(config_path, Some(storage)).await
+    }
+
+    async fn build_internal(
+        self,
+        config_path: PathBuf,
+        storage: Option<Arc<StorageEngine>>,
+    ) -> BoxedTokenRepository {
         if self.cfg.role == InstanceRole::Replica {
-            return Box::new(ReadOnlyTokenRepository::new(config_path, self.cfg.clone()).await)
-                as BoxedTokenRepository;
+            return Box::new(
+                ReadOnlyTokenRepository::new(config_path, self.cfg.clone(), storage).await,
+            ) as BoxedTokenRepository;
         }
 
         if !self.cfg.api_token.is_empty() {
-            Box::new(TokenRepository::new(config_path, self.cfg.api_token).await)
+            Box::new(TokenRepository::new(config_path, self.cfg.api_token, storage).await)
                 as BoxedTokenRepository
         } else {
             Box::new(NoAuthRepository::new()) as BoxedTokenRepository
@@ -352,6 +410,7 @@ mod tests {
     use super::*;
     use chrono::Duration;
     use reduct_base::{forbidden, unauthorized};
+    use std::collections::HashMap;
     use tempfile::tempdir;
 
     #[test]
@@ -363,6 +422,7 @@ mod tests {
             permissions: None,
             is_provisioned: false,
             expires_at: Some(Utc::now() - Duration::seconds(1)),
+            last_access: None,
         };
 
         assert_eq!(
@@ -380,6 +440,7 @@ mod tests {
             permissions: None,
             is_provisioned: false,
             expires_at: None,
+            last_access: None,
         };
 
         assert!(check_token_lifetime(&token).is_ok());
@@ -419,6 +480,7 @@ mod tests {
             }),
             is_provisioned: false,
             expires_at: None,
+            last_access: None,
         };
 
         assert!(check_token_ip_allowlist(&token, Some("203.0.113.5".parse().unwrap())).is_ok());
@@ -440,6 +502,7 @@ mod tests {
             }),
             is_provisioned: false,
             expires_at: None,
+            last_access: None,
         };
 
         let err = check_token_ip_allowlist(&token, None).err().unwrap();
@@ -497,5 +560,51 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(err, forbidden!("Cannot generate token in read-only mode"));
+    }
+
+    #[test]
+    fn test_resolve_last_access_from_cache_exact_name() {
+        let mut cache = HashMap::new();
+        cache.insert("token-a".to_string(), 1_000_000);
+
+        let ts = resolve_last_access_from_cache(&cache, "token-a").unwrap();
+        assert_eq!(
+            ts,
+            DateTime::<Utc>::from_timestamp_micros(1_000_000).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_resolve_last_access_from_cache_instance_prefixed_name() {
+        let mut cache = HashMap::new();
+        cache.insert("instance-a/token-a".to_string(), 2_000_000);
+
+        let ts = resolve_last_access_from_cache(&cache, "token-a").unwrap();
+        assert_eq!(
+            ts,
+            DateTime::<Utc>::from_timestamp_micros(2_000_000).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_resolve_last_access_from_cache_prefers_latest_match() {
+        let mut cache = HashMap::new();
+        cache.insert("token-a".to_string(), 1_000_000);
+        cache.insert("instance-a/token-a".to_string(), 3_000_000);
+        cache.insert("instance-b/token-a".to_string(), 2_000_000);
+
+        let ts = resolve_last_access_from_cache(&cache, "token-a").unwrap();
+        assert_eq!(
+            ts,
+            DateTime::<Utc>::from_timestamp_micros(3_000_000).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_resolve_last_access_from_cache_no_match() {
+        let mut cache = HashMap::new();
+        cache.insert("instance-a/other-token".to_string(), 1_000_000);
+
+        assert!(resolve_last_access_from_cache(&cache, "token-a").is_none());
     }
 }

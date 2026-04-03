@@ -30,7 +30,7 @@ pub(in crate::api::http) async fn me(
         .token_repo
         .write()
         .await?
-        .validate_token(header, client_ip)
+        .validate_token_with_last_access(header, client_ip)
         .await?;
     token.value.clear();
     Ok(TokenAxum::from(token))

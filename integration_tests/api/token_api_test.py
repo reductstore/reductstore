@@ -57,6 +57,7 @@ def test__create_v2_token(base_url, session, token_name, bucket_name):
         "permissions": permissions,
         "is_provisioned": False,
         "expires_at": json.loads(resp.content)["expires_at"],
+        "last_access": None,
     }
     assert json.loads(resp.content)["expires_at"] is not None
 
@@ -142,6 +143,7 @@ def test__get_token(base_url, session, bucket_name, token_name):
         "permissions": permissions,
         "is_provisioned": False,
         "expires_at": None,
+        "last_access": None,
     }
 
 
@@ -213,7 +215,9 @@ def test__rotate_token(base_url, session, token_name):
 @requires_env("API_TOKEN")
 def test__rotate_token_with_full_access(base_url, session, token_without_permissions):
     """Needs full access to rotate a token"""
-    resp = session.post(f"{base_url}/tokens/token-name/rotate", headers=auth_headers(""))
+    resp = session.post(
+        f"{base_url}/tokens/token-name/rotate", headers=auth_headers("")
+    )
     assert resp.status_code == 401
 
     resp = session.post(

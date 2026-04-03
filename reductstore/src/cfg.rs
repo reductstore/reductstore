@@ -376,7 +376,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
         let storage = Arc::new(self.provision_buckets(&data_path).await);
-        let token_repo = self.provision_tokens(&data_path);
+        let token_repo = self.provision_tokens(&data_path, Arc::clone(&storage));
         let console = create_asset_manager(load_console());
         let replication_engine = self
             .provision_replication_repo(Arc::clone(&storage))

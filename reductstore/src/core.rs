@@ -5,5 +5,6 @@ pub mod cache;
 pub mod duration;
 pub mod env;
 pub mod file_cache;
+pub mod internal_client;
 pub mod sync;
 pub mod weak;

@@ -801,7 +801,7 @@ pub(crate) mod tests {
         );
 
         let token_repo = TokenRepositoryBuilder::new(cfg.clone())
-            .build(cfg.data_path.clone())
+            .build_with_storage(cfg.data_path.clone(), Arc::clone(&storage))
             .await;
         let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
@@ -846,13 +846,15 @@ pub(crate) mod tests {
         };
         cfg.audit_conf.enabled = true;
 
-        let storage = StorageEngine::builder()
-            .with_data_path(cfg.data_path.clone())
-            .with_cfg(cfg.clone())
-            .build()
-            .await;
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
         let mut token_repo = TokenRepositoryBuilder::new(cfg.clone())
-            .build(cfg.data_path.clone())
+            .build_with_storage(cfg.data_path.clone(), Arc::clone(&storage))
             .await;
 
         storage
@@ -896,7 +898,6 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-        let storage = Arc::new(storage);
         let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -968,13 +969,15 @@ pub(crate) mod tests {
         };
         cfg.engine_config.max_storage_size = Some(max_storage_size);
 
-        let storage = StorageEngine::builder()
-            .with_data_path(cfg.data_path.clone())
-            .with_cfg(cfg.clone())
-            .build()
-            .await;
-        let token_repo = TokenRepositoryBuilder::new(cfg.clone())
-            .build(cfg.data_path.clone())
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
+        let mut token_repo = TokenRepositoryBuilder::new(cfg.clone())
+            .build_with_storage(cfg.data_path.clone(), Arc::clone(&storage))
             .await;
 
         storage
@@ -986,7 +989,22 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-        let storage = Arc::new(storage);
+        let permissions = Permissions {
+            read: vec!["bucket-1".to_string(), "bucket-2".to_string()],
+            write: vec!["bucket-1".to_string(), "bucket-2".to_string()],
+            ..Default::default()
+        };
+
+        token_repo
+            .generate_token(
+                "test",
+                TokenCreateRequest {
+                    permissions,
+                    expires_at: None,
+                },
+            )
+            .await
+            .unwrap();
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;

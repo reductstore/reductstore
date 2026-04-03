@@ -37,6 +37,8 @@ pub struct Token {
     pub is_provisioned: bool,
     /// Expiration time
     pub expires_at: Option<DateTime<Utc>>,
+    /// Last access time
+    pub last_access: Option<DateTime<Utc>>,
 }
 /// Request for created token
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
