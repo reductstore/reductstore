@@ -645,8 +645,8 @@ pub(crate) mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_with_permissions_missing_header(#[future] auth_keeper: Arc<StateKeeper>) {
-            let keeper = auth_keeper.await;
+        async fn test_get_with_permissions_missing_header(#[future] keeper: Arc<StateKeeper>) {
+            let keeper = keeper.await;
             let headers = HeaderMap::new();
 
             let err = keeper
@@ -663,11 +663,11 @@ pub(crate) mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_get_with_permissions_error(#[future] auth_keeper: Arc<StateKeeper>) {
+        async fn test_get_with_permissions_error(#[future] keeper: Arc<StateKeeper>) {
             let mut headers = HeaderMap::new();
             headers.typed_insert(Authorization::bearer("bad-token").unwrap());
 
-            let keeper = auth_keeper.await;
+            let keeper = keeper.await;
             let err = keeper
                 .get_with_permissions(&headers, FullAccessPolicy {})
                 .await
@@ -959,17 +959,13 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
-        keeper_with_limits_impl(limits_config, "").await
-    }
-
-    pub(crate) async fn auth_keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
         keeper_with_limits_impl(limits_config, "init-token").await
     }
 
     pub(crate) async fn keeper_with_engine_limit(max_storage_size: u64) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
-            api_token: "".to_string(),
+            api_token: "init-token".to_string(),
             ..Cfg::default()
         };
         cfg.engine_config.max_storage_size = Some(max_storage_size);
@@ -1007,7 +1003,7 @@ pub(crate) mod tests {
 
         let components = Components {
             storage: Arc::clone(&storage),
-            auth: TokenAuthorization::new(""),
+            auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
@@ -1036,11 +1032,6 @@ pub(crate) mod tests {
     #[fixture]
     pub(crate) async fn keeper() -> Arc<StateKeeper> {
         keeper_with_limits(LimitsConfig::default()).await
-    }
-
-    #[fixture]
-    pub(crate) async fn auth_keeper() -> Arc<StateKeeper> {
-        auth_keeper_with_limits(LimitsConfig::default()).await
     }
 
     #[fixture]

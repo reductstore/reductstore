@@ -33,7 +33,7 @@ pub(super) async fn list_tokens(
 mod tests {
     use super::*;
 
-    use crate::api::http::tests::{auth_keeper as keeper, headers};
+    use crate::api::http::tests::{headers, keeper};
 
     use rstest::rstest;
 

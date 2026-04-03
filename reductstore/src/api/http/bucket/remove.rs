@@ -34,7 +34,7 @@ pub(super) async fn remove_bucket(
 mod tests {
     use super::*;
 
-    use crate::api::http::tests::{auth_keeper as keeper, headers};
+    use crate::api::http::tests::{headers, keeper};
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
     use std::sync::Arc;
