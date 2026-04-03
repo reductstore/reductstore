@@ -62,20 +62,23 @@ pub(super) async fn check_api_rate_limit(
     request: Request<Body>,
     next: Next,
 ) -> Result<impl IntoResponse, HttpError> {
-    if should_skip_api_rate_limit(request.uri().path()) {
-        return Ok(next.run(request).await);
-    }
+    let path = request.uri().path();
 
-    let components = keeper.get_anonymous().await?;
+    let components = match keeper.get_anonymous().await {
+        Ok(components) => components,
+        Err(err)
+            if err.status() == ErrorCode::ServiceUnavailable && path.ends_with("/api/v1/alive") =>
+        {
+            return Ok(next.run(request).await);
+        }
+        Err(err) => return Err(err.into()),
+    };
+
     if let Err(err) = components.limits.check_api_request().await {
         return Err(HttpError::from(err));
     }
 
     Ok(next.run(request).await)
-}
-
-fn should_skip_api_rate_limit(path: &str) -> bool {
-    path.ends_with("/alive") || path.ends_with("/ready")
 }
 
 pub async fn print_statuses(
@@ -299,14 +302,9 @@ mod tests {
     }
 
     #[rstest]
-    #[case("/alive")]
-    #[case("/ready")]
-    #[case("/api/v1/alive")]
-    #[case("/api/v1/ready")]
     #[tokio::test]
-    async fn skips_api_rate_limit_for_health_endpoints(
+    async fn maps_service_unavailable_to_ok_for_alive_path(
         #[future] waiting_keeper: Arc<StateKeeper>,
-        #[case] path: &'static str,
     ) {
         let keeper = waiting_keeper.await;
         let app = Router::new()
@@ -317,10 +315,52 @@ mod tests {
             ));
 
         let response = app
-            .oneshot(Request::get(path).body(Body::empty()).unwrap())
+            .oneshot(Request::get("/api/v1/alive").body(Body::empty()).unwrap())
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn keeps_service_unavailable_for_ready_path(#[future] waiting_keeper: Arc<StateKeeper>) {
+        let keeper = waiting_keeper.await;
+        let app = Router::new()
+            .route("/{*path}", get(|| async { StatusCode::OK }))
+            .layer(from_fn_with_state(
+                Arc::clone(&keeper),
+                check_api_rate_limit,
+            ));
+
+        let response = app
+            .oneshot(Request::get("/api/v1/ready").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn keeps_service_unavailable_for_entry_path_suffix_alive(
+        #[future] waiting_keeper: Arc<StateKeeper>,
+    ) {
+        let keeper = waiting_keeper.await;
+        let app = Router::new()
+            .route("/{*path}", get(|| async { StatusCode::OK }))
+            .layer(from_fn_with_state(
+                Arc::clone(&keeper),
+                check_api_rate_limit,
+            ));
+
+        let response = app
+            .oneshot(
+                Request::get("/api/v1/b/bucket/entry/alive")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
     async fn read_audit_event(keeper: &Arc<StateKeeper>, token_name: &str) -> Option<AuditEvent> {
