@@ -7,6 +7,7 @@ use chrono::{DateTime, Utc};
 use reduct_base::bad_request;
 use reduct_base::error::ReductError;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
+use std::net::IpAddr;
 use std::time::SystemTime;
 
 /// A repository that doesn't require authentication
@@ -48,7 +49,11 @@ impl ManageTokens for NoAuthRepository {
         Ok(vec![])
     }
 
-    async fn validate_token(&mut self, _header: Option<&str>) -> Result<Token, ReductError> {
+    async fn validate_token(
+        &mut self,
+        _header: Option<&str>,
+        _client_ip: Option<IpAddr>,
+    ) -> Result<Token, ReductError> {
         Ok(Token {
             name: "AUTHENTICATION-DISABLED".to_string(),
             value: "".to_string(),
@@ -57,6 +62,7 @@ impl ManageTokens for NoAuthRepository {
                 full_access: true,
                 read: vec![],
                 write: vec![],
+                ip_allowlist: vec![],
             }),
             is_provisioned: false,
             expires_at: None,
@@ -67,8 +73,9 @@ impl ManageTokens for NoAuthRepository {
     async fn validate_token_with_last_access(
         &mut self,
         _header: Option<&str>,
+        _client_ip: Option<IpAddr>,
     ) -> Result<Token, ReductError> {
-        self.validate_token(None).await
+        self.validate_token(None, None).await
     }
 
     async fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
@@ -109,6 +116,7 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
+                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },
@@ -159,7 +167,7 @@ mod tests {
     async fn test_validate_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
         let mut disabled_repo = disabled_repo.await;
         let placeholder = disabled_repo
-            .validate_token(Some("invalid-value"))
+            .validate_token(Some("invalid-value"), None)
             .await
             .unwrap();
         assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
@@ -174,7 +182,7 @@ mod tests {
     ) {
         let mut disabled_repo = disabled_repo.await;
         let placeholder = disabled_repo
-            .validate_token_with_last_access(Some("invalid-value"))
+            .validate_token_with_last_access(Some("invalid-value"), None)
             .await
             .unwrap();
         assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");

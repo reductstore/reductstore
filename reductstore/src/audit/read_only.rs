@@ -316,6 +316,7 @@ mod tests {
             endpoint: "GET /api/v1/info".to_string(),
             status: 200,
             message: "".to_string(),
+            client_ip: None,
             call_count: 1,
             duration: 0.1,
         }

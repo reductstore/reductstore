@@ -1,9 +1,13 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::components::{Components, StateKeeper};
+#[path = "middleware/audit.rs"]
+mod audit;
+#[path = "middleware/client_ip.rs"]
+mod client_ip;
+
+use crate::api::components::{StateKeeper, CLIENT_IP_HEADER};
 use crate::api::http::HttpError;
-use crate::audit::AuditEvent;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Request, StatusCode};
@@ -12,7 +16,14 @@ use axum::response::IntoResponse;
 use log::{debug, error, Level};
 use reduct_base::error::ErrorCode;
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+pub(super) async fn audit_requests(
+    state: State<Arc<StateKeeper>>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<impl IntoResponse, HttpError> {
+    audit::audit_requests(state, request, next).await
+}
 
 pub(super) async fn default_headers(
     request: Request<Body>,
@@ -33,128 +44,17 @@ pub(super) async fn default_headers(
     Ok(response)
 }
 
-pub(super) async fn audit_requests(
-    State(keeper): State<Arc<StateKeeper>>,
-    request: Request<Body>,
+pub(super) async fn attach_client_ip(
+    mut request: Request<Body>,
     next: Next,
 ) -> Result<impl IntoResponse, HttpError> {
-    let start = Instant::now();
-
-    let method = request.method().to_string();
-    let path = request.uri().path().to_string();
-    let auth_header = request
-        .headers()
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string());
-
-    let response = next.run(request).await;
-
-    if should_skip_audit(&path) {
-        return Ok(response);
-    }
-
-    let components = get_audit_components(&keeper).await;
-    let token_name = resolve_audit_token_name(
-        response.status(),
-        auth_header.as_deref(),
-        components.as_ref(),
-    )
-    .await;
-
-    if let (Some(token_name), Some(components)) = (token_name, components) {
-        let message = response
-            .headers()
-            .get("x-reduct-error")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-
-        write_audit_event(
-            &components,
-            token_name,
-            format!("{} {}", method, path),
-            response.status().as_u16(),
-            message,
-            start.elapsed().as_secs_f64(),
-        )
-        .await;
-    }
-
-    Ok(response)
-}
-
-fn should_skip_audit(path: &str) -> bool {
-    // Maybe skip /alive and /ready and /audit endpoints
-    path.ends_with("/alive") || path.ends_with("/ready") || path.contains("/audit")
-}
-
-async fn get_audit_components(keeper: &StateKeeper) -> Option<Arc<Components>> {
-    match keeper.get_anonymous().await {
-        Ok(components) => Some(components),
-        Err(err) => {
-            debug!("Failed to get components for audit: {}", err);
-            None
+    if let Some(client_ip) = client_ip::client_ip_from_request(&request) {
+        if let Ok(header_value) = client_ip.to_string().parse() {
+            request.headers_mut().insert(CLIENT_IP_HEADER, header_value);
         }
     }
-}
 
-async fn resolve_audit_token_name(
-    status: StatusCode,
-    auth_header: Option<&str>,
-    components: Option<&Arc<Components>>,
-) -> Option<String> {
-    if status == StatusCode::UNAUTHORIZED {
-        Some("unauthorized".to_string())
-    } else if let (Some(header), Some(components)) = (auth_header, components) {
-        match components.token_repo.write().await {
-            Ok(mut token_repo) => match token_repo.validate_token(Some(header)).await {
-                Ok(token) => Some(token.name),
-                Err(err) => {
-                    debug!("Failed to validate token for audit: {}", err);
-                    None
-                }
-            },
-            Err(err) => {
-                debug!("Failed to lock token repository for audit: {}", err);
-                None
-            }
-        }
-    } else {
-        None
-    }
-}
-
-async fn write_audit_event(
-    components: &Arc<Components>,
-    token_name: String,
-    endpoint: String,
-    status: u16,
-    message: String,
-    duration: f64,
-) {
-    let event = AuditEvent {
-        timestamp: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros() as u64,
-        instance: components.cfg.instance_name.clone(),
-        token_name,
-        endpoint,
-        status,
-        message,
-        call_count: 1,
-        duration,
-    };
-
-    match components.audit_repo.write().await {
-        Ok(mut audit_repo) => {
-            if let Err(err) = audit_repo.log_event(event).await {
-                debug!("Failed to persist audit event: {}", err);
-            }
-        }
-        Err(err) => debug!("Failed to lock audit repository: {}", err),
-    }
+    Ok(next.run(request).await)
 }
 
 pub(super) async fn check_api_rate_limit(
@@ -183,7 +83,10 @@ pub async fn print_statuses(
 
     let strat_time = std::time::Instant::now();
     let path_and_query = request.uri().path_and_query().unwrap();
-    let method = format!("{} {}", request.method(), path_and_query);
+    let client_ip = client_ip::client_ip_from_request(&request)
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|| "unknown".to_string());
+    let method = format!("{} {} [{}]", request.method(), path_and_query, client_ip);
 
     let response = next.run(request).await;
     let err_msg = match response.headers().get("x-reduct-error") {
@@ -226,10 +129,13 @@ fn log_level_for_response(status: StatusCode, skip_error_log: bool) -> Level {
 
 #[cfg(test)]
 mod tests {
+    use super::audit::{get_audit_components, resolve_audit_token_name, should_skip_audit};
+    use super::client_ip::{parse_forwarded_for, parse_x_forwarded_for};
     use super::*;
     use crate::api::components::StateKeeper;
     use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
     use crate::audit::{AuditEvent, AUDIT_BUCKET_NAME};
+    use axum::extract::ConnectInfo;
     use axum::http::Request;
     use axum::http::{HeaderMap, HeaderValue};
     use axum::routing::get;
@@ -271,10 +177,85 @@ mod tests {
     #[rstest]
     #[case("/alive", true)]
     #[case("/ready", true)]
-    #[case("/api/v1/audit/token", true)]
+    #[case("/api/v1/audit/token", false)]
     #[case("/api/v1/info", false)]
     fn checks_audit_skip_paths(#[case] path: &str, #[case] expected: bool) {
         assert_eq!(should_skip_audit(path), expected);
+    }
+
+    #[rstest]
+    #[case("203.0.113.1", Some("203.0.113.1"))]
+    #[case("203.0.113.1, 70.41.3.18", Some("203.0.113.1"))]
+    #[case("unknown", None)]
+    fn parses_x_forwarded_for(#[case] input: &str, #[case] expected: Option<&str>) {
+        assert_eq!(
+            parse_x_forwarded_for(input).map(|ip| ip.to_string()),
+            expected.map(str::to_string)
+        );
+    }
+
+    #[rstest]
+    #[case("for=203.0.113.43", Some("203.0.113.43"))]
+    #[case("for=203.0.113.43:1234", Some("203.0.113.43"))]
+    #[case("for=\"[2001:db8:cafe::17]\"", Some("2001:db8:cafe::17"))]
+    #[case("by=203.0.113.60;proto=http", None)]
+    #[case("for=_hidden", None)]
+    fn parses_forwarded_header(#[case] input: &str, #[case] expected: Option<&str>) {
+        assert_eq!(
+            parse_forwarded_for(input).map(|ip| ip.to_string()),
+            expected.map(str::to_string)
+        );
+    }
+
+    #[test_log::test]
+    fn resolves_client_ip_without_connect_info() {
+        let request = Request::get("/info").body(Body::empty()).unwrap();
+        assert_eq!(client_ip::client_ip_from_request(&request), None);
+    }
+
+    #[test_log::test]
+    fn resolves_client_ip_from_peer_when_not_trusted_proxy() {
+        let mut request = Request::get("/info").body(Body::empty()).unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "198.51.100.4:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+
+        assert_eq!(
+            client_ip::client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("198.51.100.4".to_string())
+        );
+    }
+
+    #[test_log::test]
+    fn resolves_client_ip_from_x_forwarded_for_for_trusted_proxy() {
+        let mut request = Request::get("/info")
+            .header("x-forwarded-for", "203.0.113.77, 198.51.100.1")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+
+        assert_eq!(
+            client_ip::client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("203.0.113.77".to_string())
+        );
+    }
+
+    #[test_log::test]
+    fn trusted_proxy_falls_back_to_peer_when_forward_headers_invalid() {
+        let mut request = Request::get("/info")
+            .header("x-forwarded-for", "invalid-ip")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+
+        assert_eq!(
+            client_ip::client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("127.0.0.1".to_string())
+        );
     }
 
     #[rstest]
@@ -470,9 +451,13 @@ mod tests {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
 
-        let token_name =
-            resolve_audit_token_name(StatusCode::OK, Some("Bearer init-token"), Some(&components))
-                .await;
+        let token_name = resolve_audit_token_name(
+            StatusCode::OK,
+            Some("Bearer init-token"),
+            None,
+            Some(&components),
+        )
+        .await;
 
         assert_eq!(token_name, Some("init-token".to_string()));
     }
@@ -483,8 +468,16 @@ mod tests {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
 
-        let token_name = resolve_audit_token_name(StatusCode::OK, None, Some(&components)).await;
+        let token_name =
+            resolve_audit_token_name(StatusCode::OK, None, None, Some(&components)).await;
 
+        assert_eq!(token_name, None);
+    }
+
+    #[tokio::test]
+    async fn returns_none_when_auth_present_but_components_missing() {
+        let token_name =
+            resolve_audit_token_name(StatusCode::OK, Some("Bearer init-token"), None, None).await;
         assert_eq!(token_name, None);
     }
 

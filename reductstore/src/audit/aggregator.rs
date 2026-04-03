@@ -29,6 +29,7 @@ pub(super) struct AuditAggregateKey {
     pub endpoint: String,
     pub status: u16,
     pub message: String,
+    pub client_ip: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +55,7 @@ pub(super) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> A
         endpoint: key.endpoint,
         status: key.status,
         message: key.message,
+        client_ip: key.client_ip,
         call_count: aggregate.call_count,
         duration: aggregate.total_duration,
     }
@@ -131,6 +133,7 @@ impl AuditAggregator {
             endpoint: event.endpoint,
             status: event.status,
             message: event.message,
+            client_ip: event.client_ip,
         };
 
         let mut state = state.write().await?;
@@ -236,6 +239,7 @@ mod tests {
             endpoint: "GET /api/v1/info".to_string(),
             status: 200,
             message: "".to_string(),
+            client_ip: None,
             call_count: 1,
             duration: 0.1,
         }
@@ -264,6 +268,7 @@ mod tests {
             endpoint: endpoint.to_string(),
             status,
             message: message.to_string(),
+            client_ip: None,
         }
     }
 

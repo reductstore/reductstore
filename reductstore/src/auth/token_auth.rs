@@ -4,6 +4,7 @@
 use crate::auth::policy::Policy;
 use crate::auth::token_repository::ManageTokens;
 use reduct_base::error::ReductError;
+use std::net::IpAddr;
 
 /// Authorization by token
 pub(crate) struct TokenAuthorization {
@@ -12,12 +13,6 @@ pub(crate) struct TokenAuthorization {
 
 impl TokenAuthorization {
     /// Create a new TokenAuthorization
-    ///
-    /// # Arguments
-    /// * `api_token` - The API token to use for authorization. If it is empty, no authorization is required.
-    ///
-    /// # Returns
-    /// * `TokenAuthorization` - The new TokenAuthorization
     pub fn new(api_token: &str) -> Self {
         Self {
             api_token: api_token.to_string(),
@@ -25,14 +20,10 @@ impl TokenAuthorization {
     }
 
     /// Check if the request is authorized.
-    ///
-    /// # Arguments
-    /// * `authorization_header` - The value of the Authorization header.
-    /// * `repo` - The token repository to validate the token value.
-    /// * `policy` - The policy to validate the token permissions.
     pub async fn check<Plc>(
         &self,
         authorization_header: Option<&str>,
+        client_ip: Option<IpAddr>,
         repo: &mut (dyn ManageTokens + Send),
         policy: Plc,
     ) -> Result<(), ReductError>
@@ -40,11 +31,10 @@ impl TokenAuthorization {
         Plc: Policy,
     {
         if self.api_token.is_empty() {
-            // No API token set, so no authorization is required.
             return Ok(());
         }
 
-        let token = repo.validate_token(authorization_header).await;
+        let token = repo.validate_token(authorization_header, client_ip).await;
         policy.validate(token)
     }
 }
@@ -62,19 +52,24 @@ mod tests {
     async fn test_anonymous_policy() {
         let (mut repo, auth) = setup().await;
         let result = auth
-            .check(Some("invalid"), repo.as_mut(), AnonymousPolicy {})
+            .check(Some("invalid"), None, repo.as_mut(), AnonymousPolicy {})
             .await;
 
         assert!(result.is_ok());
 
         let result = auth
-            .check(Some("Bearer invalid"), repo.as_mut(), AnonymousPolicy {})
+            .check(
+                Some("Bearer invalid"),
+                None,
+                repo.as_mut(),
+                AnonymousPolicy {},
+            )
             .await;
 
         assert!(result.is_ok());
 
         let result = auth
-            .check(Some("Bearer test"), repo.as_mut(), AnonymousPolicy {})
+            .check(Some("Bearer test"), None, repo.as_mut(), AnonymousPolicy {})
             .await;
         assert!(result.is_ok());
     }
@@ -83,7 +78,7 @@ mod tests {
     async fn test_full_access_policy() {
         let (mut repo, auth) = setup().await;
         let result = auth
-            .check(Some("invalid"), repo.as_mut(), FullAccessPolicy {})
+            .check(Some("invalid"), None, repo.as_mut(), FullAccessPolicy {})
             .await;
 
         assert_eq!(
@@ -94,12 +89,22 @@ mod tests {
         );
 
         let result = auth
-            .check(Some("Bearer invalid"), repo.as_mut(), FullAccessPolicy {})
+            .check(
+                Some("Bearer invalid"),
+                None,
+                repo.as_mut(),
+                FullAccessPolicy {},
+            )
             .await;
         assert_eq!(result, Err(ReductError::unauthorized("Invalid token")));
 
         let result = auth
-            .check(Some("Bearer test"), repo.as_mut(), FullAccessPolicy {})
+            .check(
+                Some("Bearer test"),
+                None,
+                repo.as_mut(),
+                FullAccessPolicy {},
+            )
             .await;
         assert!(result.is_ok());
     }

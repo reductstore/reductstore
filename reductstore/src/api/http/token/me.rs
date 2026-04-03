@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::components::CLIENT_IP_HEADER;
 use crate::api::http::token::TokenAxum;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::AuthenticatedPolicy;
@@ -21,11 +22,15 @@ pub(in crate::api::http) async fn me(
         Some(header) => header.to_str().ok(),
         None => None,
     };
+    let client_ip = headers
+        .get(CLIENT_IP_HEADER)
+        .and_then(|header| header.to_str().ok())
+        .and_then(|ip| ip.parse().ok());
     let mut token = components
         .token_repo
         .write()
         .await?
-        .validate_token_with_last_access(header)
+        .validate_token_with_last_access(header, client_ip)
         .await?;
     token.value.clear();
     Ok(TokenAxum::from(token))
