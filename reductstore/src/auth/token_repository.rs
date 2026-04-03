@@ -8,6 +8,7 @@ mod repo;
 use crate::auth::token_repository::disabled::NoAuthRepository;
 use crate::auth::token_repository::read_only::ReadOnlyTokenRepository;
 use crate::auth::token_repository::repo::TokenRepository;
+use crate::auth::token_secret::verify_token_secret;
 use crate::cfg::{Cfg, InstanceRole};
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -229,7 +230,7 @@ pub(super) trait AccessTokens {
         let token = self
             .repo()
             .values()
-            .find(|token| token.value == value)
+            .find(|token| verify_token_secret(&token.value, &value))
             .cloned()
             .ok_or_else(|| unauthorized!("Invalid token"))?;
         check_token_lifetime(&token)?;

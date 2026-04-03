@@ -4,7 +4,8 @@
 use crate::api::http::links::derive_key_from_secret;
 use crate::api::http::utils::{make_headers_from_reader, RangeRecordStream, RecordStream};
 use crate::api::http::{Components, HttpError, StateKeeper};
-use crate::auth::policy::ReadAccessPolicy;
+use crate::auth::policy::{Policy, ReadAccessPolicy};
+use crate::auth::token_repository::ManageTokens;
 use crate::core::sync::AsyncRwLock as RwLock;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::storage::query::QueryRx;
@@ -12,7 +13,6 @@ use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::{Aes128SivAead, Nonce};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::header::AUTHORIZATION;
 use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum_extra::headers::{AcceptRanges, ContentLength, HeaderMap, HeaderMapExt, Range};
@@ -23,7 +23,7 @@ use reduct_base::error::ErrorCode::NoContent;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
-use reduct_base::{not_found, unprocessable_entity};
+use reduct_base::{not_found, unauthorized, unprocessable_entity};
 use std::collections::{Bound, HashMap, VecDeque};
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::ops::Bound::Included;
@@ -39,17 +39,8 @@ pub(super) async fn get(
 ) -> Result<impl IntoResponse, HttpError> {
     // first anonymous access to decrypt the query
     let components = keeper.get_anonymous().await?;
-    let (record_num, token, query) = decrypt_query(&components, params.clone()).await?;
-
-    // then check permissions with the real token
-    let components = keeper
-        .get_with_permissions(
-            &HeaderMap::from_iter([(AUTHORIZATION, format!("Bearer {}", token).parse().unwrap())]),
-            ReadAccessPolicy {
-                bucket: &query.bucket,
-            },
-        )
-        .await?;
+    let (record_num, token_name, query) = decrypt_query(&components, params.clone()).await?;
+    check_permissions_from_token_name(&components, &token_name, &query.bucket).await?;
 
     let range = if header_map.contains_key("Range") {
         Some(header_map.typed_get::<Range>().unwrap())
@@ -109,6 +100,35 @@ pub(super) async fn get(
     }
 }
 
+async fn check_permissions_from_token_name(
+    components: &Arc<Components>,
+    token_name: &str,
+    bucket: &str,
+) -> Result<(), ReductError> {
+    let mut token_repo = components.token_repo.write().await?;
+    check_permissions_with_token_repo(token_repo.as_mut(), token_name, bucket).await
+}
+
+async fn check_permissions_with_token_repo(
+    token_repo: &mut (dyn ManageTokens + Send),
+    token_name: &str,
+    bucket: &str,
+) -> Result<(), ReductError> {
+    if token_repo.get_token_list().await?.is_empty() {
+        // Authentication is disabled.
+        return Ok(());
+    }
+
+    let token = token_repo.get_token(token_name).await?.clone();
+    if let Some(expiry) = token.expires_at {
+        if chrono::Utc::now() >= expiry {
+            return Err(unauthorized!("Token has expired"));
+        }
+    }
+
+    ReadAccessPolicy { bucket }.validate(Ok(token))
+}
+
 async fn decrypt_query(
     components: &Arc<Components>,
     params: HashMap<String, String>,
@@ -132,7 +152,7 @@ async fn decrypt_query(
         .map_err(|e| unprocessable_entity!("Invalid 'r' parameter: {}", e))?;
 
     let mut token_repo = components.token_repo.write().await?;
-    let token = if token_repo.get_token_list().await?.is_empty() {
+    let token_secret = if token_repo.get_token_list().await?.is_empty() {
         // Authentication is disabled, use empty token
         ""
     } else {
@@ -147,7 +167,7 @@ async fn decrypt_query(
         .decode(salt_b64)
         .map_err(|e| unprocessable_entity!("Invalid base64 in 's' parameter: {}", e))?;
 
-    let key = derive_key_from_secret(token.as_bytes(), &salt);
+    let key = derive_key_from_secret(token_secret.as_bytes(), &salt);
     let cipher = Aes128SivAead::new_from_slice(&key).unwrap();
 
     let nonce_bytes = URL_SAFE_NO_PAD
@@ -173,7 +193,7 @@ async fn decrypt_query(
     if query.expire_at < chrono::Utc::now() {
         return Err(unprocessable_entity!("Query link has expired").into());
     }
-    Ok((record_num, token.to_string(), query))
+    Ok((record_num, issuer.to_string(), query))
 }
 
 async fn process_query_and_fetch_record(
@@ -259,14 +279,18 @@ mod tests {
     use super::*;
     use crate::api::http::links::tests::create_query_link;
     use crate::api::http::tests::{egress_limited_keeper, headers, keeper};
+    use crate::auth::token_repository::TokenRepositoryBuilder;
+    use crate::cfg::Cfg;
     use crate::storage::entry::io::record_reader::tests::MockRecord;
     use axum::body::to_bytes;
-    use chrono::Utc;
+    use chrono::{Duration, Utc};
     use mockall::predicate::eq;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::RecordMeta;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
+    use reduct_base::unauthorized;
     use rstest::rstest;
+    use tempfile::tempdir;
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
@@ -622,6 +646,84 @@ mod tests {
             String::from_utf8_lossy(body_bytes.iter().as_slice()),
             "Hey!!!"
         );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_query_link_with_empty_entries_falls_back_to_entry(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+
+        let link = create_query_link(
+            headers,
+            keeper.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                entries: Some(vec![]),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let response = get(
+            State(Arc::clone(&keeper)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .unwrap();
+
+        let resp = response.into_response();
+        assert_eq!(resp.headers()["content-type"], "text/plain");
+        assert_eq!(resp.headers()["content-length"], "6");
+
+        let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
+        assert_eq!(
+            String::from_utf8_lossy(body_bytes.iter().as_slice()),
+            "Hey!!!"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_check_permissions_with_token_repo_auth_disabled() {
+        let cfg = Cfg::default();
+        let mut repo = TokenRepositoryBuilder::new(cfg)
+            .build(tempdir().unwrap().keep())
+            .await;
+
+        check_permissions_with_token_repo(repo.as_mut(), "any-token", "bucket-1")
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_check_permissions_with_token_repo_expired_token() {
+        let cfg = Cfg {
+            api_token: "init-token".to_string(),
+            ..Cfg::default()
+        };
+        let path = tempdir().unwrap().keep();
+        let mut repo = TokenRepositoryBuilder::new(cfg).build(path).await;
+
+        let mut init_token = repo.get_token("init-token").await.unwrap().clone();
+        init_token.expires_at = Some(Utc::now() - Duration::seconds(1));
+        repo.update_token(init_token).await.unwrap();
+
+        let err = check_permissions_with_token_repo(repo.as_mut(), "init-token", "bucket-1")
+            .await
+            .unwrap_err();
+        assert_eq!(err, unauthorized!("Token has expired"));
     }
 
     mod validation {
