@@ -1,19 +1,29 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::components::{Components, StateKeeper, CLIENT_IP_HEADER};
+#[path = "middleware/audit.rs"]
+mod audit;
+#[path = "middleware/client_ip.rs"]
+mod client_ip;
+
+use crate::api::components::{StateKeeper, CLIENT_IP_HEADER};
 use crate::api::http::HttpError;
-use crate::audit::AuditEvent;
 use axum::body::Body;
-use axum::extract::{ConnectInfo, State};
-use axum::http::{HeaderMap, Request, StatusCode};
+use axum::extract::State;
+use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
 use log::{debug, error, Level};
 use reduct_base::error::ErrorCode;
-use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
-use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+pub(super) use audit::audit_requests;
+pub(crate) use client_ip::client_ip_from_request;
+
+#[cfg(test)]
+pub(crate) use audit::{get_audit_components, resolve_audit_token_name, should_skip_audit};
+#[cfg(test)]
+pub(crate) use client_ip::{parse_forwarded_for, parse_x_forwarded_for};
 
 pub(super) async fn default_headers(
     request: Request<Body>,
@@ -32,202 +42,6 @@ pub(super) async fn default_headers(
         format!("{}.{}", tokens[0], tokens[1]).parse().unwrap(),
     );
     Ok(response)
-}
-
-pub(super) async fn audit_requests(
-    State(keeper): State<Arc<StateKeeper>>,
-    request: Request<Body>,
-    next: Next,
-) -> Result<impl IntoResponse, HttpError> {
-    let start = Instant::now();
-
-    let method = request.method().to_string();
-    let path = request.uri().path().to_string();
-    let auth_header = request
-        .headers()
-        .get("Authorization")
-        .and_then(|v| v.to_str().ok())
-        .map(|v| v.to_string());
-    let client_ip = client_ip_from_request(&request);
-
-    let response = next.run(request).await;
-
-    if should_skip_audit(&path) {
-        return Ok(response);
-    }
-
-    let components = get_audit_components(&keeper).await;
-    let token_name = resolve_audit_token_name(
-        response.status(),
-        auth_header.as_deref(),
-        client_ip,
-        components.as_ref(),
-    )
-    .await;
-
-    if let (Some(token_name), Some(components)) = (token_name, components) {
-        let message = response
-            .headers()
-            .get("x-reduct-error")
-            .and_then(|value| value.to_str().ok())
-            .unwrap_or("")
-            .to_string();
-
-        write_audit_event(
-            &components,
-            token_name,
-            format!("{} {}", method, path),
-            response.status().as_u16(),
-            message,
-            client_ip.map(|ip| ip.to_string()),
-            start.elapsed().as_secs_f64(),
-        )
-        .await;
-    }
-
-    Ok(response)
-}
-
-fn should_skip_audit(path: &str) -> bool {
-    // Maybe skip /alive and /ready and /audit endpoints
-    path.ends_with("/alive") || path.ends_with("/ready") || path.contains("/audit")
-}
-
-pub(crate) fn client_ip_from_request(request: &Request<Body>) -> Option<IpAddr> {
-    let peer_ip = request
-        .extensions()
-        .get::<ConnectInfo<SocketAddr>>()
-        .map(|connect_info| connect_info.0.ip())?;
-
-    if is_trusted_proxy(peer_ip) {
-        Some(client_ip_from_forward_headers(request.headers()).unwrap_or(peer_ip))
-    } else {
-        Some(peer_ip)
-    }
-}
-
-fn is_trusted_proxy(ip: IpAddr) -> bool {
-    ip.is_loopback()
-}
-
-fn client_ip_from_forward_headers(headers: &HeaderMap) -> Option<IpAddr> {
-    if let Some(value) = headers.get("forwarded").and_then(|v| v.to_str().ok()) {
-        if let Some(ip) = parse_forwarded_for(value) {
-            return Some(ip);
-        }
-    }
-
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(parse_x_forwarded_for)
-}
-
-fn parse_x_forwarded_for(value: &str) -> Option<IpAddr> {
-    value
-        .split(',')
-        .next()
-        .map(str::trim)
-        .and_then(|ip| ip.parse::<IpAddr>().ok())
-}
-
-fn parse_forwarded_for(value: &str) -> Option<IpAddr> {
-    for part in value.split(';') {
-        let mut kv = part.splitn(2, '=');
-        let key = kv.next()?.trim();
-        let val = kv.next()?.trim();
-        if key.eq_ignore_ascii_case("for") {
-            let token = val.trim_matches('"').trim();
-            let token = token
-                .strip_prefix('[')
-                .and_then(|t| t.strip_suffix(']'))
-                .unwrap_or(token);
-
-            if let Ok(ip) = token.parse::<IpAddr>() {
-                return Some(ip);
-            }
-
-            if token.matches(':').count() == 1 {
-                if let Some((ip, _port)) = token.split_once(':') {
-                    if let Ok(ip) = ip.parse::<IpAddr>() {
-                        return Some(ip);
-                    }
-                }
-            }
-        }
-    }
-    None
-}
-
-async fn get_audit_components(keeper: &StateKeeper) -> Option<Arc<Components>> {
-    match keeper.get_anonymous().await {
-        Ok(components) => Some(components),
-        Err(err) => {
-            debug!("Failed to get components for audit: {}", err);
-            None
-        }
-    }
-}
-
-async fn resolve_audit_token_name(
-    status: StatusCode,
-    auth_header: Option<&str>,
-    client_ip: Option<IpAddr>,
-    components: Option<&Arc<Components>>,
-) -> Option<String> {
-    if status == StatusCode::UNAUTHORIZED {
-        Some("unauthorized".to_string())
-    } else if let (Some(header), Some(components)) = (auth_header, components) {
-        match components.token_repo.write().await {
-            Ok(mut token_repo) => match token_repo.validate_token(Some(header), client_ip).await {
-                Ok(token) => Some(token.name),
-                Err(err) => {
-                    debug!("Failed to validate token for audit: {}", err);
-                    None
-                }
-            },
-            Err(err) => {
-                debug!("Failed to lock token repository for audit: {}", err);
-                None
-            }
-        }
-    } else {
-        None
-    }
-}
-
-async fn write_audit_event(
-    components: &Arc<Components>,
-    token_name: String,
-    endpoint: String,
-    status: u16,
-    message: String,
-    client_ip: Option<String>,
-    duration: f64,
-) {
-    let event = AuditEvent {
-        timestamp: SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_micros() as u64,
-        instance: components.cfg.instance_name.clone(),
-        token_name,
-        endpoint,
-        status,
-        message,
-        client_ip,
-        call_count: 1,
-        duration,
-    };
-
-    match components.audit_repo.write().await {
-        Ok(mut audit_repo) => {
-            if let Err(err) = audit_repo.log_event(event).await {
-                debug!("Failed to persist audit event: {}", err);
-            }
-        }
-        Err(err) => debug!("Failed to lock audit repository: {}", err),
-    }
 }
 
 pub(super) async fn attach_client_ip(

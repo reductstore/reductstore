@@ -259,10 +259,11 @@ fn check_token_ip_allowlist(token: &Token, client_ip: Option<IpAddr>) -> Result<
 
     let client_ip =
         client_ip.ok_or_else(|| unauthorized!("Client IP is required for this token"))?;
+
     if permissions
         .ip_allowlist
         .iter()
-        .any(|ip| ip.parse::<IpAddr>().ok() == Some(client_ip))
+        .any(|entry| ip_allowlist_entry_matches(entry, client_ip))
     {
         Ok(())
     } else {
@@ -270,6 +271,53 @@ fn check_token_ip_allowlist(token: &Token, client_ip: Option<IpAddr>) -> Result<
             "Token is not allowed for client IP {}",
             client_ip
         ))
+    }
+}
+
+fn ip_allowlist_entry_matches(entry: &str, client_ip: IpAddr) -> bool {
+    match entry.split_once('/') {
+        Some((network, prefix)) => cidr_matches(network, prefix, client_ip),
+        None => entry.parse::<IpAddr>().ok() == Some(client_ip),
+    }
+}
+
+fn cidr_matches(network: &str, prefix: &str, client_ip: IpAddr) -> bool {
+    let Ok(prefix_len) = prefix.parse::<u8>() else {
+        return false;
+    };
+
+    let Ok(network_ip) = network.parse::<IpAddr>() else {
+        return false;
+    };
+
+    match (network_ip, client_ip) {
+        (IpAddr::V4(net), IpAddr::V4(client)) => {
+            if prefix_len > 32 {
+                return false;
+            }
+            let net = u32::from(net);
+            let client = u32::from(client);
+            let mask = if prefix_len == 0 {
+                0
+            } else {
+                u32::MAX << (32 - prefix_len)
+            };
+            (net & mask) == (client & mask)
+        }
+        (IpAddr::V6(net), IpAddr::V6(client)) => {
+            if prefix_len > 128 {
+                return false;
+            }
+            let net = u128::from(net);
+            let client = u128::from(client);
+            let mask = if prefix_len == 0 {
+                0
+            } else {
+                u128::MAX << (128 - prefix_len)
+            };
+            (net & mask) == (client & mask)
+        }
+        _ => false,
     }
 }
 
@@ -335,6 +383,47 @@ mod tests {
         };
 
         assert!(check_token_lifetime(&token).is_ok());
+    }
+
+    #[test]
+    fn test_cidr_matches_ipv4() {
+        assert!(cidr_matches("10.1.2.0", "24", "10.1.2.42".parse().unwrap()));
+        assert!(!cidr_matches("10.1.2.0", "24", "10.1.3.1".parse().unwrap()));
+    }
+
+    #[test]
+    fn test_cidr_matches_ipv6() {
+        assert!(cidr_matches(
+            "2001:db8::",
+            "32",
+            "2001:db8::1234".parse().unwrap()
+        ));
+        assert!(!cidr_matches(
+            "2001:db8::",
+            "32",
+            "2001:db9::1".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn test_check_token_ip_allowlist_accepts_exact_or_cidr() {
+        let token = Token {
+            name: "t".to_string(),
+            value: "v".to_string(),
+            created_at: Utc::now(),
+            permissions: Some(Permissions {
+                full_access: false,
+                read: vec![],
+                write: vec![],
+                ip_allowlist: vec!["203.0.113.5".to_string(), "10.10.0.0/16".to_string()],
+            }),
+            is_provisioned: false,
+            expires_at: None,
+        };
+
+        assert!(check_token_ip_allowlist(&token, Some("203.0.113.5".parse().unwrap())).is_ok());
+        assert!(check_token_ip_allowlist(&token, Some("10.10.12.34".parse().unwrap())).is_ok());
+        assert!(check_token_ip_allowlist(&token, Some("10.11.0.1".parse().unwrap())).is_err());
     }
 
     #[tokio::test]
