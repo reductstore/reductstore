@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::http::token::TokenListAxum;
+use crate::api::http::token::{populate_token_status, TokenListAxum};
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::State;
@@ -23,6 +23,7 @@ pub(super) async fn list_tokens(
     for token in token_repo.get_token_list().await?.iter() {
         let mut x = token.clone();
         x.value.clear();
+        populate_token_status(&mut x);
         list.0.tokens.push(x);
     }
     list.0.tokens.sort_by(|a, b| a.name.cmp(&b.name));

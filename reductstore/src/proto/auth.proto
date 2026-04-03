@@ -23,6 +23,8 @@ message Token {
   Permissions permissions = 4;                // permissions
   bool is_provisioned = 5;                    // token was provisioned from config
   google.protobuf.Timestamp expires_at = 6;   // expiration time
+  uint64 ttl = 7;                             // inactivity TTL in seconds
+  google.protobuf.Timestamp last_access = 8;  // last successful token access
 }
 
 message TokenRepo {

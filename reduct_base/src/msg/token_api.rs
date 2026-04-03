@@ -37,6 +37,15 @@ pub struct Token {
     pub is_provisioned: bool,
     /// Expiration time
     pub expires_at: Option<DateTime<Utc>>,
+    /// Inactivity TTL in seconds
+    #[serde(default)]
+    pub ttl: Option<u64>,
+    /// Last successful token access
+    #[serde(default)]
+    pub last_access: Option<DateTime<Utc>>,
+    /// Computed flag for API clients to indicate unusable token
+    #[serde(default)]
+    pub is_expired: bool,
 }
 /// Request for created token
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
@@ -44,6 +53,8 @@ pub struct TokenCreateRequest {
     pub permissions: Permissions,
     #[serde(default)]
     pub expires_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub ttl: Option<u64>,
 }
 
 /// Response for created token
