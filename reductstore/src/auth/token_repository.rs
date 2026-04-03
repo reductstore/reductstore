@@ -324,6 +324,7 @@ mod tests {
     use super::*;
     use chrono::Duration;
     use reduct_base::{forbidden, unauthorized};
+    use std::collections::HashMap;
     use tempfile::tempdir;
 
     #[test]
@@ -378,5 +379,51 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(err, forbidden!("Cannot generate token in read-only mode"));
+    }
+
+    #[test]
+    fn test_resolve_last_access_from_cache_exact_name() {
+        let mut cache = HashMap::new();
+        cache.insert("token-a".to_string(), 1_000_000);
+
+        let ts = resolve_last_access_from_cache(&cache, "token-a").unwrap();
+        assert_eq!(
+            ts,
+            DateTime::<Utc>::from_timestamp_micros(1_000_000).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_resolve_last_access_from_cache_instance_prefixed_name() {
+        let mut cache = HashMap::new();
+        cache.insert("instance-a/token-a".to_string(), 2_000_000);
+
+        let ts = resolve_last_access_from_cache(&cache, "token-a").unwrap();
+        assert_eq!(
+            ts,
+            DateTime::<Utc>::from_timestamp_micros(2_000_000).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_resolve_last_access_from_cache_prefers_latest_match() {
+        let mut cache = HashMap::new();
+        cache.insert("token-a".to_string(), 1_000_000);
+        cache.insert("instance-a/token-a".to_string(), 3_000_000);
+        cache.insert("instance-b/token-a".to_string(), 2_000_000);
+
+        let ts = resolve_last_access_from_cache(&cache, "token-a").unwrap();
+        assert_eq!(
+            ts,
+            DateTime::<Utc>::from_timestamp_micros(3_000_000).unwrap()
+        );
+    }
+
+    #[test]
+    fn test_resolve_last_access_from_cache_no_match() {
+        let mut cache = HashMap::new();
+        cache.insert("instance-a/other-token".to_string(), 1_000_000);
+
+        assert!(resolve_last_access_from_cache(&cache, "token-a").is_none());
     }
 }

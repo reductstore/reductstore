@@ -346,13 +346,20 @@ mod tests {
     use super::*;
     use crate::auth::token_repository::{BoxedTokenRepository, INIT_TOKEN_NAME};
     use crate::auth::token_secret::{is_hashed_token_secret, verify_token_secret};
-
     use crate::cfg::{Cfg, InstanceRole};
+    use axum::extract::State;
+    use axum::http::StatusCode;
+    use axum::response::IntoResponse;
+    use axum::routing::get;
+    use axum::Router;
+    use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
+    use reduct_base::msg::entry_api::EntryInfo;
     use reduct_base::msg::token_api::Permissions;
     use rstest::*;
     use std::io::Write;
     use std::path::PathBuf;
     use tempfile::tempdir;
+    use tokio::net::TcpListener;
 
     mod repo_methods {
         use super::*;
@@ -630,6 +637,98 @@ mod tests {
                 forbidden!("Cannot rename bucket in token in read-only mode")
             );
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_token_with_last_access_uses_instance_prefixed_cache(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, _) = repo_fixture.await;
+            let mut token = repo.get_token_with_last_access("file_token").await.unwrap();
+            token.last_access = Some(DateTime::<Utc>::from_timestamp_micros(42).unwrap());
+            assert!(token.last_access.is_some());
+        }
+    }
+
+    #[derive(Clone)]
+    struct BucketInfoState {
+        body: FullBucketInfo,
+    }
+
+    async fn bucket_info_handler(State(state): State<BucketInfoState>) -> impl IntoResponse {
+        (StatusCode::OK, axum::Json(state.body))
+    }
+
+    async fn start_bucket_info_server(body: FullBucketInfo) -> String {
+        let app = Router::new()
+            .route("/api/v1/b/$audit", get(bucket_info_handler))
+            .with_state(BucketInfoState { body });
+
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        format!("http://{}/", addr)
+    }
+
+    #[tokio::test]
+    async fn test_build_audit_client_none_without_urls() {
+        let cfg = Cfg::default();
+        assert!(ReadOnlyTokenRepository::build_audit_client(&cfg).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_build_audit_client_none_with_invalid_ca() {
+        let mut cfg = Cfg::default();
+        cfg.api_token = "secret".to_string();
+        cfg.primary_url = Some("http://127.0.0.1:1/".to_string());
+        cfg.audit_conf.remote_ca_path = Some("/tmp/does-not-exist-ca.pem".into());
+        assert!(ReadOnlyTokenRepository::build_audit_client(&cfg).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_get_token_with_last_access_reads_instance_prefixed_entry_from_remote() {
+        let body = FullBucketInfo {
+            info: BucketInfo::default(),
+            settings: BucketSettings::default(),
+            entries: vec![EntryInfo {
+                name: "instance-a/file_token".to_string(),
+                record_count: 1,
+                latest_record: 5_000_000,
+                ..Default::default()
+            }],
+        };
+        let base_url = start_bucket_info_server(body).await;
+
+        let mut cfg = Cfg::default();
+        cfg.api_token = "test_token".to_string();
+        cfg.role = InstanceRole::Replica;
+        cfg.primary_url = Some(base_url);
+
+        let path = tempdir().unwrap().keep();
+        let token = Token {
+            name: "file_token".to_string(),
+            value: "file_value".to_string(),
+            created_at: DateTime::<Utc>::from(SystemTime::now()),
+            permissions: Some(Permissions {
+                full_access: true,
+                read: vec![],
+                write: vec![],
+            }),
+            is_provisioned: true,
+            expires_at: None,
+            last_access: None,
+        };
+        write_token_to_file(&path, &token).await;
+
+        let mut repo = ReadOnlyTokenRepository::new(path, cfg, None).await;
+        let token = repo.get_token_with_last_access("file_token").await.unwrap();
+        assert_eq!(
+            token.last_access,
+            DateTime::<Utc>::from_timestamp_micros(5_000_000)
+        );
     }
 
     // Fixtures and helpers
