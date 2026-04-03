@@ -414,15 +414,10 @@ mod tests {
                 created_at: DateTime::<Utc>::from(SystemTime::now()),
                 permissions: Some(Permissions {
                     full_access: true,
-                    read: vec![],
-                    write: vec![],
-                    ip_allowlist: vec![],
+                    ..Default::default()
                 }),
                 is_provisioned: true,
-                expires_at: None,
-                ttl: None,
-                last_access: None,
-                is_expired: false,
+                ..Default::default()
             };
 
             write_token_to_file(&path, &new_token).await;
@@ -585,15 +580,10 @@ mod tests {
                 created_at: DateTime::<Utc>::from(SystemTime::now()),
                 permissions: Some(Permissions {
                     full_access: true,
-                    read: vec![],
-                    write: vec![],
-                    ip_allowlist: vec![],
+                    ..Default::default()
                 }),
                 is_provisioned: true,
-                expires_at: None,
-                ttl: None,
-                last_access: None,
-                is_expired: false,
+                ..Default::default()
             };
             write_token_to_file(&path, &updated_token).await;
             tokio::time::sleep(Duration::from_millis(200)).await;
@@ -740,15 +730,10 @@ mod tests {
             created_at: DateTime::<Utc>::from(SystemTime::now()),
             permissions: Some(Permissions {
                 full_access: true,
-                read: vec![],
-                write: vec![],
-                ip_allowlist: vec![],
+                ..Default::default()
             }),
             is_provisioned: true,
-            expires_at: None,
-            ttl: None,
-            last_access: None,
-            is_expired: false,
+            ..Default::default()
         };
         write_token_to_file(&path, &token).await;
 
@@ -781,15 +766,10 @@ mod tests {
             created_at: DateTime::<Utc>::from(SystemTime::now()),
             permissions: Some(Permissions {
                 full_access: true,
-                read: vec![],
-                write: vec![],
-                ip_allowlist: vec![],
+                ..Default::default()
             }),
             is_provisioned: true,
-            expires_at: None,
-            ttl: None,
-            last_access: None,
-            is_expired: false,
+            ..Default::default()
         };
 
         write_token_to_file(&path, &token).await;
