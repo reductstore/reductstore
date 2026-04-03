@@ -21,6 +21,7 @@ use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenC
 use reduct_base::{forbidden, internal_server_error};
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -110,6 +111,7 @@ impl ReadOnlyTokenRepository {
                     full_access: false,
                     read: vec!["*".to_string()],
                     write: vec![],
+                    ip_allowlist: vec![],
                 }),
                 is_provisioned: true,
                 expires_at: None,
@@ -170,7 +172,11 @@ impl ManageTokens for ReadOnlyTokenRepository {
         AccessTokens::get_token_list(self)
     }
 
-    async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
+    async fn validate_token(
+        &mut self,
+        header: Option<&str>,
+        client_ip: Option<IpAddr>,
+    ) -> Result<Token, ReductError> {
         self.update_repo().await?;
 
         let value = parse_bearer_token(header.unwrap_or(""))?;
@@ -180,11 +186,15 @@ impl ManageTokens for ReadOnlyTokenRepository {
                 self.auth_cache.remove(&value);
                 return Err(err);
             }
+            if let Err(err) = super::check_token_ip_allowlist(&token, client_ip) {
+                self.auth_cache.remove(&value);
+                return Err(err);
+            }
             return Ok(token);
         }
 
         let header = format!("Bearer {}", value);
-        let token = AccessTokens::validate_token(self, Some(&header))?;
+        let token = AccessTokens::validate_token(self, Some(&header), client_ip)?;
         self.auth_cache.insert(value, token.clone());
         Ok(token)
     }
@@ -265,6 +275,7 @@ mod tests {
                     full_access: true,
                     read: vec![],
                     write: vec![],
+                    ip_allowlist: vec![],
                 }),
                 is_provisioned: true,
                 expires_at: None,
@@ -298,6 +309,7 @@ mod tests {
                 full_access: true,
                 read: vec![],
                 write: vec![],
+                ip_allowlist: vec![],
             };
             let res = repo
                 .generate_token(
@@ -331,6 +343,7 @@ mod tests {
                     full_access: false,
                     read: vec!["*".to_string()],
                     write: vec![],
+                    ip_allowlist: vec![],
                 })
             );
             assert!(token.is_provisioned);
@@ -379,7 +392,10 @@ mod tests {
         ) {
             let (mut repo, _) = repo_fixture.await;
             let header = format!("Bearer {}", cfg.api_token);
-            let res = repo.validate_token(Some(header.as_str())).await.unwrap();
+            let res = repo
+                .validate_token(Some(header.as_str()), None)
+                .await
+                .unwrap();
             assert_eq!(res.name, INIT_TOKEN_NAME.to_string());
             assert!(is_hashed_token_secret(&res.value));
             assert!(verify_token_secret(&res.value, &cfg.api_token));
@@ -389,6 +405,7 @@ mod tests {
                     full_access: false,
                     read: vec!["*".to_string()],
                     write: vec![],
+                    ip_allowlist: vec![],
                 })
             );
             assert!(res.is_provisioned);
@@ -402,7 +419,7 @@ mod tests {
         ) {
             let (mut repo, _) = repo_fixture.await;
             let header = Some("Bearer invalid_token");
-            let res = repo.validate_token(header).await;
+            let res = repo.validate_token(header, None).await;
             assert_eq!(res.err().unwrap(), unauthorized!("Invalid token"));
         }
 
@@ -413,7 +430,7 @@ mod tests {
         ) {
             let (mut repo, path) = repo_fixture.await;
 
-            repo.validate_token(Some("Bearer file_value"))
+            repo.validate_token(Some("Bearer file_value"), None)
                 .await
                 .unwrap();
 
@@ -425,6 +442,7 @@ mod tests {
                     full_access: true,
                     read: vec![],
                     write: vec![],
+                    ip_allowlist: vec![],
                 }),
                 is_provisioned: true,
                 expires_at: None,
@@ -433,14 +451,14 @@ mod tests {
             tokio::time::sleep(Duration::from_millis(200)).await;
 
             let err = repo
-                .validate_token(Some("Bearer file_value"))
+                .validate_token(Some("Bearer file_value"), None)
                 .await
                 .err()
                 .unwrap();
             assert_eq!(err, unauthorized!("Invalid token"));
 
             let token = repo
-                .validate_token(Some("Bearer new_file_value"))
+                .validate_token(Some("Bearer new_file_value"), None)
                 .await
                 .unwrap();
             assert_eq!(token.name, "file_token");
@@ -522,6 +540,7 @@ mod tests {
                 full_access: true,
                 read: vec![],
                 write: vec![],
+                ip_allowlist: vec![],
             }),
             is_provisioned: true,
             expires_at: None,

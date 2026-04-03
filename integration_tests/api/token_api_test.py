@@ -14,6 +14,7 @@ def test__create_token(base_url, session, token_name, bucket_name):
         "full_access": True,
         "read": [bucket_name],
         "write": [bucket_name],
+        "ip_allowlist": [],
     }
 
     resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
@@ -32,6 +33,7 @@ def test__create_v2_token(base_url, session, token_name, bucket_name):
         "full_access": True,
         "read": [bucket_name],
         "write": [bucket_name],
+        "ip_allowlist": [],
     }
     expires_at = (datetime.now(timezone.utc) + timedelta(days=1)).replace(microsecond=0)
     payload = {
@@ -123,6 +125,7 @@ def test__get_token(base_url, session, bucket_name, token_name):
         "full_access": True,
         "read": [bucket_name],
         "write": [bucket_name],
+        "ip_allowlist": [],
     }
 
     resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
@@ -140,6 +143,33 @@ def test__get_token(base_url, session, bucket_name, token_name):
         "is_provisioned": False,
         "expires_at": None,
     }
+
+
+@requires_env("API_TOKEN")
+def test__token_ip_allowlist_enforced(base_url, session, token_name):
+    """Should allow token usage only from configured client IP"""
+    permissions = {
+        "full_access": False,
+        "read": ["*"],
+        "write": [],
+        "ip_allowlist": ["203.0.113.10"],
+    }
+
+    resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
+    assert resp.status_code == 200
+    token_value = json.loads(resp.content)["value"]
+
+    resp = session.get(
+        f"{base_url}/me",
+        headers={**auth_headers(token_value), "X-Forwarded-For": "203.0.113.10"},
+    )
+    assert resp.status_code == 200
+
+    resp = session.get(
+        f"{base_url}/me",
+        headers={**auth_headers(token_value), "X-Forwarded-For": "203.0.113.11"},
+    )
+    assert resp.status_code == 401
 
 
 @requires_env("API_TOKEN")

@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::components::CLIENT_IP_HEADER;
 use crate::api::http::links::{
     derive_key_from_secret, QueryLinkCreateRequestAxum, QueryLinkCreateResponseAxum,
 };
@@ -47,6 +48,10 @@ pub(super) async fn create(
     let url = check_and_normalize_base_url(&params, components.cfg.public_url.clone())?;
 
     // find current token
+    let client_ip = headers
+        .get(CLIENT_IP_HEADER)
+        .and_then(|header| header.to_str().ok())
+        .and_then(|ip| ip.parse().ok());
     let token = components
         .token_repo
         .write()
@@ -55,6 +60,7 @@ pub(super) async fn create(
             headers
                 .get(AUTHORIZATION.as_str())
                 .map(|header| header.to_str().unwrap_or("invalid-token")),
+            client_ip,
         )
         .await?;
 

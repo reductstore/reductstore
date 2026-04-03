@@ -138,6 +138,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     .unwrap_or_default(),
                 read,
                 write,
+                ip_allowlist: vec![],
             };
 
             token.permissions = Some(permissions);

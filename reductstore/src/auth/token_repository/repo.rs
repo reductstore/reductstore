@@ -23,6 +23,7 @@ use reduct_base::{conflict, not_found, unprocessable_entity};
 use regex::Regex;
 use std::collections::HashMap;
 use std::io::{Read, SeekFrom, Write};
+use std::net::IpAddr;
 use std::path::PathBuf;
 use std::time::Duration;
 use std::time::SystemTime;
@@ -108,6 +109,7 @@ impl TokenRepository {
             full_access: true,
             read: vec![],
             write: vec![],
+            ip_allowlist: vec![],
         });
         let existing_init_token = token_repository.repo.get(INIT_TOKEN_NAME).cloned();
         let init_token_value = token_repository
@@ -275,7 +277,11 @@ impl ManageTokens for TokenRepository {
         AccessTokens::get_token_list(self)
     }
 
-    async fn validate_token(&mut self, header: Option<&str>) -> Result<Token, ReductError> {
+    async fn validate_token(
+        &mut self,
+        header: Option<&str>,
+        client_ip: Option<IpAddr>,
+    ) -> Result<Token, ReductError> {
         let value = parse_bearer_token(header.unwrap_or(""))?;
 
         if let Some(token) = self.auth_cache.get(&value).cloned() {
@@ -283,11 +289,15 @@ impl ManageTokens for TokenRepository {
                 self.auth_cache.remove(&value);
                 return Err(err);
             }
+            if let Err(err) = super::check_token_ip_allowlist(&token, client_ip) {
+                self.auth_cache.remove(&value);
+                return Err(err);
+            }
             return Ok(token);
         }
 
         let header = format!("Bearer {}", value);
-        let token = AccessTokens::validate_token(self, Some(&header))?;
+        let token = AccessTokens::validate_token(self, Some(&header), client_ip)?;
         self.auth_cache.insert(value, token.clone());
         Ok(token)
     }
@@ -395,7 +405,7 @@ mod tests {
     async fn test_init_token(#[future] repo: BoxedTokenRepository) {
         let mut repo = repo.await;
         let token = repo
-            .validate_token(Some("Bearer init-token"))
+            .validate_token(Some("Bearer init-token"), None)
             .await
             .unwrap();
         assert_eq!(token.name, "init-token");
@@ -423,6 +433,7 @@ mod tests {
                             full_access: true,
                             read: vec![],
                             write: vec![],
+                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                     },
@@ -447,6 +458,7 @@ mod tests {
                             full_access: true,
                             read: vec![],
                             write: vec![],
+                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                     },
@@ -468,6 +480,7 @@ mod tests {
                             full_access: true,
                             read: vec![],
                             write: vec![],
+                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                     },
@@ -537,6 +550,7 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
+                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },
@@ -579,7 +593,7 @@ mod tests {
             assert!(verify_token_secret(&token.value, "legacy-secret"));
 
             let validated = repo
-                .validate_token(Some("Bearer legacy-secret"))
+                .validate_token(Some("Bearer legacy-secret"), None)
                 .await
                 .unwrap();
             assert_eq!(validated.name, "legacy");
@@ -640,6 +654,7 @@ mod tests {
                             full_access: true,
                             read: vec![bucket.to_string()],
                             write: vec![],
+                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                     },
@@ -677,6 +692,7 @@ mod tests {
                             full_access: true,
                             read: vec![],
                             write: vec![bucket.to_string()],
+                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                     },
@@ -722,6 +738,7 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
+                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },
@@ -738,6 +755,7 @@ mod tests {
                     full_access: false,
                     read: vec!["bucket-1".to_string()],
                     write: vec![],
+                    ip_allowlist: vec![],
                 }),
                 is_provisioned: true,
                 expires_at: None,
@@ -756,6 +774,7 @@ mod tests {
                     full_access: false,
                     read: vec!["bucket-1".to_string()],
                     write: vec![],
+                    ip_allowlist: vec![],
                 })
             );
         }
@@ -778,6 +797,7 @@ mod tests {
                     full_access: true,
                     read: vec![],
                     write: vec![],
+                    ip_allowlist: vec![],
                 })
             );
         }
@@ -797,6 +817,7 @@ mod tests {
                             full_access: true,
                             read: vec!["bucket-1".to_string()],
                             write: vec!["bucket-2".to_string()],
+                            ip_allowlist: vec![],
                         },
                         expires_at: None,
                     },
@@ -806,7 +827,7 @@ mod tests {
                 .value;
 
             let token = repo
-                .validate_token(Some(&format!("Bearer {}", value)))
+                .validate_token(Some(&format!("Bearer {}", value)), None)
                 .await
                 .unwrap();
 
@@ -820,6 +841,7 @@ mod tests {
                         full_access: true,
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-2".to_string()],
+                        ip_allowlist: vec![],
                     }),
                     is_provisioned: false,
                     expires_at: None,
@@ -831,7 +853,9 @@ mod tests {
         #[tokio::test]
         async fn test_validate_token_not_found(#[future] repo: BoxedTokenRepository) {
             let mut repo = repo.await;
-            let token = repo.validate_token(Some("Bearer invalid-value")).await;
+            let token = repo
+                .validate_token(Some("Bearer invalid-value"), None)
+                .await;
             assert_eq!(token, Err(unauthorized!("Invalid token")));
         }
 
@@ -856,7 +880,7 @@ mod tests {
             repo.update_token(token).await.unwrap();
 
             let err = repo
-                .validate_token(Some(&format!("Bearer {}", value)))
+                .validate_token(Some(&format!("Bearer {}", value)), None)
                 .await
                 .err()
                 .unwrap();
@@ -884,7 +908,7 @@ mod tests {
                 .unwrap()
                 .value;
 
-            repo.validate_token(Some(&format!("Bearer {}", old_value)))
+            repo.validate_token(Some(&format!("Bearer {}", old_value)), None)
                 .await
                 .unwrap();
 
@@ -893,14 +917,14 @@ mod tests {
             repo.update_token(token).await.unwrap();
 
             let err = repo
-                .validate_token(Some(&format!("Bearer {}", old_value)))
+                .validate_token(Some(&format!("Bearer {}", old_value)), None)
                 .await
                 .err()
                 .unwrap();
             assert_eq!(err, unauthorized!("Invalid token"));
 
             let token = repo
-                .validate_token(Some("Bearer cache-token-new-secret"))
+                .validate_token(Some("Bearer cache-token-new-secret"), None)
                 .await
                 .unwrap();
             assert_eq!(token.name, "cache-token");
@@ -956,6 +980,7 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
+                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },
@@ -1046,6 +1071,7 @@ mod tests {
                         full_access: true,
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-1".to_string()],
+                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },
@@ -1095,6 +1121,7 @@ mod tests {
                         full_access: true,
                         read: vec!["bucket-1".to_string()],
                         write: vec!["bucket-1".to_string()],
+                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },
@@ -1143,6 +1170,7 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
+                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },
@@ -1157,6 +1185,7 @@ mod tests {
                         full_access: true,
                         read: vec![],
                         write: vec![],
+                        ip_allowlist: vec![],
                     },
                     expires_at: None,
                 },

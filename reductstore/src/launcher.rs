@@ -114,7 +114,7 @@ where
 
     if cfg.cert_path.is_none() {
         apply_http_settings!(axum_server::bind(addr))
-            .serve(app.into_make_service())
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .unwrap_or_else(|e| error!("Server error: {}", e));
     } else {
@@ -128,7 +128,7 @@ where
         .await
         .expect("Failed to load TLS certificate");
         apply_http_settings!(axum_server::bind_rustls(addr, config))
-            .serve(app.into_make_service())
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .unwrap_or_else(|e| error!("Server error: {}", e));
     };
