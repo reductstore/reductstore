@@ -59,7 +59,7 @@ runs:
       uses: ./.github/actions/aws-cargo-cache
       with:
         target: ${{ inputs.target }}
-        profile: ${{ github.event_name == 'pull_request' && 'ci' || 'release' }}
+        profile: release
         access-key-id: ${{ inputs.access-key-id }}
         secret-access-key: ${{ inputs.secret-access-key }}
 
@@ -79,9 +79,8 @@ runs:
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         "$HOME/.local/bin/syft" version
 
-    - name: Build binary (PR)
-      if: github.event_name == 'pull_request'
-      run: cargo build --profile ci -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api"
+    - name: Build binary
+      run: cargo build --profile release -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api"
       shell: bash
 
     - name: Upload binary (PR)
@@ -90,14 +89,8 @@ runs:
       if: github.event_name == 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
       with:
         name: reductstore-${{ inputs.target }}
-        path: target/${{inputs.target}}/ci/reductstore
+        path: target/${{inputs.target}}/release/reductstore
         if-no-files-found: 'error'
-
-    - name: Build binary (Release)
-      if: github.event_name != 'pull_request'
-      run: cargo build --profile release -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api"
-      shell: bash
-
 
     - name: Upload binary (Release)
       uses: actions/upload-artifact@v4
@@ -125,14 +118,8 @@ runs:
         path: /tmp/sbom/reductstore.${{ inputs.target }}.sbom.spdx.json
         if-no-files-found: 'error'
 
-    - name: Build and export tests (PR)
-      if: github.event_name == 'pull_request'
-      run: cargo export target/${{ inputs.target }}/tests -- test --quiet --profile ci --target ${{ inputs.target }} --lib
-      shell: bash
-
-    - name: Build and export tests (Release)
-      if: github.event_name != 'pull_request'
-      run: cargo export target/${{ inputs.target }}/tests -- test --quiet --profile release --target ${{ inputs.target }} --lib
+    - name: Build and export tests
+      run: cargo export target/${{ inputs.target }}/tests -- test --quiet --profile release --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api" --lib
       shell: bash
 
     - name: Upload tests

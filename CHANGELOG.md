@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add explicit token rotation endpoint `POST /api/v1/tokens/{token_name}/rotate` that replaces token secret in one call and invalidates the previous value, [PR-1279](https://github.com/reductstore/reductstore/pull/1279)
 - Add `message` field to audit payloads and split audit aggregation groups when either `status` or `message` changes, [PR-1277](https://github.com/reductstore/reductstore/pull/1277)
 - Add `RS_INSTANCE_NAME` for audit record attribution with hostname fallback and include `instance` label on `$audit` writes (local and replica-forwarded), [PR-1272](https://github.com/reductstore/reductstore/pull/1272)
 - Add manageable audit configuration via `RS_AUDIT_ENABLED` and `RS_AUDIT_QUOTA_SIZE`, plus replica audit remote settings (`RS_AUDIT_REMOTE_VERIFY_SSL`, `RS_AUDIT_REMOTE_CA_PATH`, `RS_AUDIT_REMOTE_TIMEOUT`) in `cfg/audit`, [PR-1271](https://github.com/reductstore/reductstore/pull/1271)
@@ -26,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Update transitive Rust dependencies in `Cargo.lock` (`aws-lc-rs/aws-lc-sys`, `rustls-webpki`, `lz4_flex`) to address current `cargo audit` advisories, [PR-1250](https://github.com/reductstore/reductstore/pull/1250)
+- Store token secrets as Argon2 hashes at rest with startup migration for legacy plaintext tokens and token validation caching with mutation-based invalidation, [PR-1273](https://github.com/reductstore/reductstore/pull/1273)
 - Move licensing and remote connectors to enterprise-only runtime and align CI pipelines for core-only backend coverage, [PR-1176](https://github.com/reductstore/reductstore/pull/1176)
 - Relicense ReductStore Core to Apache-2.0, update Rust source headers and package license files, add `NOTICE`, and refresh README project/license positioning, [PR-1204](https://github.com/reductstore/reductstore/pull/1204)
 - Keep Docker runtime non-root when `/data` is auto-created as `root:root` and ensure UID/GID 10001 user metadata is available in the final image, [PR-1178](https://github.com/reductstore/reductstore/pull/1178)

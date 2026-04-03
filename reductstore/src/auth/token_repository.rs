@@ -8,6 +8,7 @@ mod repo;
 use crate::auth::token_repository::disabled::NoAuthRepository;
 use crate::auth::token_repository::read_only::ReadOnlyTokenRepository;
 use crate::auth::token_repository::repo::TokenRepository;
+use crate::auth::token_secret::verify_token_secret;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
@@ -66,7 +67,6 @@ impl From<Token> for crate::auth::proto::Token {
             value: token.value,
             created_at: Some(datetime_to_proto_timestamp(token.created_at)),
             expires_at: token.expires_at.map(datetime_to_proto_timestamp),
-            last_access: token.last_access.map(datetime_to_proto_timestamp),
             permissions,
             is_provisioned: token.is_provisioned,
         }
@@ -93,7 +93,6 @@ impl Into<Token> for crate::auth::proto::Token {
             proto_timestamp_to_datetime,
         );
         let expires_at = self.expires_at.map(proto_timestamp_to_datetime);
-        let last_access = self.last_access.map(proto_timestamp_to_datetime);
 
         Token {
             name: self.name,
@@ -102,7 +101,7 @@ impl Into<Token> for crate::auth::proto::Token {
             permissions,
             is_provisioned: self.is_provisioned,
             expires_at,
-            last_access,
+            last_access: None,
         }
     }
 }
@@ -180,6 +179,15 @@ pub(crate) trait ManageTokens {
     /// `Ok(())` if the token was removed successfully
     async fn remove_token(&mut self, name: &str) -> Result<(), ReductError>;
 
+    /// Rotate an existing token and return a new token value.
+    ///
+    /// # Arguments
+    /// `name` - The name of the token
+    ///
+    /// # Returns
+    /// New token value and creation time.
+    async fn rotate_token(&mut self, name: &str) -> Result<TokenCreateResponse, ReductError>;
+
     /// Remove a bucket from all tokens and save the repository
     /// to the file system
     ///
@@ -230,7 +238,7 @@ pub(super) trait AccessTokens {
         let token = self
             .repo()
             .values()
-            .find(|token| token.value == value)
+            .find(|token| verify_token_secret(&token.value, &value))
             .cloned()
             .ok_or_else(|| unauthorized!("Invalid token"))?;
         check_token_lifetime(&token)?;

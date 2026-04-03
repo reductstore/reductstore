@@ -6,6 +6,7 @@ mod get;
 mod list;
 pub mod me;
 mod remove;
+mod rotate;
 
 use axum::extract::FromRequest;
 use axum::http::Request;
@@ -22,6 +23,7 @@ use crate::api::http::token::create::create_token;
 use crate::api::http::token::get::get_token;
 use crate::api::http::token::list::list_tokens;
 use crate::api::http::token::remove::remove_token;
+use crate::api::http::token::rotate::rotate_token;
 use crate::api::http::{HttpError, StateKeeper};
 
 use reduct_base::msg::token_api::{
@@ -63,6 +65,7 @@ pub(super) fn create_token_api_routes() -> axum::Router<Arc<StateKeeper>> {
         .route("/{token_name}", post(create_token))
         .route("/{token_name}", get(get_token))
         .route("/{token_name}", delete(remove_token))
+        .route("/{token_name}/rotate", post(rotate_token))
 }
 
 // compatibility with v1, remove in v2

@@ -25,7 +25,6 @@ pub(crate) struct ReadOnlyAuditRepository {
 #[derive(Clone)]
 struct AuditForwardContext {
     client_api: InternalClientApi,
-    instance_name: String,
 }
 
 impl AuditForwardContext {
@@ -35,7 +34,6 @@ impl AuditForwardContext {
             self.client_api.primary_url(),
             self.client_api.secondary_url(),
             self.client_api.preferred_url_handle(),
-            &self.instance_name,
             event,
         )
         .await
@@ -52,7 +50,6 @@ impl ReadOnlyAuditRepository {
                 cfg.primary_url.clone(),
                 cfg.secondary_url.clone(),
             ),
-            instance_name: cfg.instance_name.clone(),
         };
 
         let handler: FlushHandler = Arc::new(move |event| {
@@ -83,7 +80,6 @@ impl ReadOnlyAuditRepository {
         primary_url: Option<&str>,
         secondary_url: Option<&str>,
         preferred_url: Arc<crate::core::sync::AsyncRwLock<Option<String>>>,
-        instance_name: &str,
         event: &AuditEvent,
     ) -> Result<(), ReductError> {
         let client_api = InternalClientApi::new_with_preferred(
@@ -97,7 +93,7 @@ impl ReadOnlyAuditRepository {
             .execute_with_failover(
                 "Neither primary nor secondary URL is configured for replica audit writes",
                 |client, base_url| async move {
-                    Self::log_event_to_url(&client, &base_url, instance_name, event).await
+                    Self::log_event_to_url(&client, &base_url, event).await
                 },
             )
             .await
@@ -106,14 +102,13 @@ impl ReadOnlyAuditRepository {
     async fn log_event_to_url(
         client: &Client,
         base_url: &str,
-        instance_name: &str,
         event: &AuditEvent,
     ) -> Result<(), ReductError> {
         let url = build_write_url(base_url, event);
         let payload = serde_json::to_vec(event)
             .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
 
-        let headers = build_audit_headers(event, instance_name, payload.len())?;
+        let headers = build_audit_headers(event, payload.len())?;
 
         let response = client
             .post(url)
@@ -127,11 +122,7 @@ impl ReadOnlyAuditRepository {
     }
 }
 
-fn build_audit_headers(
-    event: &AuditEvent,
-    instance_name: &str,
-    payload_len: usize,
-) -> Result<HeaderMap, ReductError> {
+fn build_audit_headers(event: &AuditEvent, payload_len: usize) -> Result<HeaderMap, ReductError> {
     let mut headers = HeaderMap::new();
     headers.insert(
         CONTENT_TYPE,
@@ -147,13 +138,6 @@ fn build_audit_headers(
             unprocessable_entity!("Invalid audit status label '{}': {}", event.status, err)
         })?,
     );
-    headers.insert(
-        "x-reduct-label-instance",
-        HeaderValue::from_str(instance_name).map_err(|err| {
-            unprocessable_entity!("Invalid audit instance label '{}': {}", instance_name, err)
-        })?,
-    );
-
     Ok(headers)
 }
 
@@ -163,12 +147,17 @@ fn normalize_url(url: Option<String>) -> Option<String> {
 }
 
 fn build_write_url(base_url: &str, event: &AuditEvent) -> String {
+    let instance_name = if event.instance.is_empty() {
+        "unknown"
+    } else {
+        &event.instance
+    };
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("ts", &event.timestamp.to_string());
     let query = query.finish();
     format!(
-        "{}api/v1/b/{}/{}?{}",
-        base_url, AUDIT_BUCKET_NAME, event.token_name, query
+        "{}api/v1/b/{}/{}/{}?{}",
+        base_url, AUDIT_BUCKET_NAME, instance_name, event.token_name, query
     )
 }
 
@@ -322,12 +311,13 @@ mod tests {
     fn make_event(timestamp: u64) -> AuditEvent {
         AuditEvent {
             timestamp,
+            instance: "instance-a".to_string(),
             token_name: "token-1".to_string(),
             endpoint: "GET /api/v1/info".to_string(),
             status: 200,
             message: "".to_string(),
             call_count: 1,
-            duration: 100,
+            duration: 0.1,
         }
     }
 
@@ -344,7 +334,6 @@ mod tests {
             Some(&primary_url),
             None,
             Arc::clone(&preferred_url),
-            "instance-a",
             &make_event(1),
         )
         .await
@@ -371,7 +360,6 @@ mod tests {
             Some("http://127.0.0.1:1/"),
             Some(&secondary_url),
             Arc::clone(&preferred_url),
-            "instance-a",
             &make_event(1),
         )
         .await
@@ -396,7 +384,6 @@ mod tests {
             Some(&primary_url),
             Some(&secondary_url),
             Arc::clone(&preferred_url),
-            "instance-a",
             &make_event(1),
         )
         .await
@@ -423,7 +410,6 @@ mod tests {
             Some(&primary_url),
             Some(&secondary_url),
             Arc::clone(&preferred_url),
-            "instance-a",
             &make_event(1),
         )
         .await
@@ -446,7 +432,6 @@ mod tests {
             None,
             None,
             Arc::clone(&preferred_url),
-            "instance-a",
             &make_event(1),
         )
         .await
@@ -477,7 +462,7 @@ mod tests {
         let events = primary_events.lock().await;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].call_count, 2);
-        assert_eq!(events[0].duration, 200);
+        assert!((events[0].duration - 0.2).abs() < 1e-9);
         assert_eq!(events[0].timestamp, 1);
     }
 
@@ -494,7 +479,19 @@ mod tests {
         let event = make_event(42);
         assert_eq!(
             build_write_url("https://primary.example.com/", &event),
-            "https://primary.example.com/api/v1/b/$audit/token-1?ts=42"
+            "https://primary.example.com/api/v1/b/$audit/instance-a/token-1?ts=42"
+        );
+    }
+
+    #[test]
+    fn builds_write_url_with_unknown_instance_when_empty() {
+        let event = AuditEvent {
+            instance: "".to_string(),
+            ..make_event(42)
+        };
+        assert_eq!(
+            build_write_url("https://primary.example.com/", &event),
+            "https://primary.example.com/api/v1/b/$audit/unknown/token-1?ts=42"
         );
     }
 
@@ -514,17 +511,14 @@ mod tests {
         };
         let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
 
-        ReadOnlyAuditRepository::log_event_to_url(&client, &base_url, "instance-a", &make_event(1))
+        ReadOnlyAuditRepository::log_event_to_url(&client, &base_url, &make_event(1))
             .await
             .unwrap();
 
         assert_eq!(events.lock().await.len(), 1);
         assert_eq!(auth_headers.lock().await[0], expected_auth_header);
         assert_eq!(status_labels.lock().await[0], Some("200".to_string()));
-        assert_eq!(
-            instance_labels.lock().await[0],
-            Some("instance-a".to_string())
-        );
+        assert_eq!(instance_labels.lock().await[0], None);
     }
 
     #[rstest]
@@ -533,24 +527,25 @@ mod tests {
         let (base_url, _, _, _, _) = start_test_server(StatusCode::FORBIDDEN, None).await;
         let client = ReadOnlyAuditRepository::build_client(&Cfg::default()).unwrap();
 
-        let err = ReadOnlyAuditRepository::log_event_to_url(
-            &client,
-            &base_url,
-            "instance-a",
-            &make_event(1),
-        )
-        .await
-        .unwrap_err();
+        let err = ReadOnlyAuditRepository::log_event_to_url(&client, &base_url, &make_event(1))
+            .await
+            .unwrap_err();
 
         assert_eq!(err.status, ErrorCode::Forbidden);
         assert_eq!(err.message, "Unknown");
     }
 
     #[test]
-    fn build_audit_headers_rejects_invalid_instance_label() {
-        let err = build_audit_headers(&make_event(1), "bad\ninstance", 10).unwrap_err();
-        assert_eq!(err.status, ErrorCode::UnprocessableEntity);
-        assert!(err.message.contains("Invalid audit instance label 'bad"));
+    fn build_audit_headers_does_not_set_instance_label() {
+        let headers = build_audit_headers(
+            &AuditEvent {
+                instance: "bad\ninstance".to_string(),
+                ..make_event(1)
+            },
+            10,
+        )
+        .unwrap();
+        assert!(headers.get("x-reduct-label-instance").is_none());
     }
 
     #[cfg(not(target_os = "windows"))]

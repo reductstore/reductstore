@@ -835,7 +835,7 @@ pub(crate) mod tests {
         }
     }
 
-    pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
+    async fn keeper_with_limits_impl(limits_config: LimitsConfig) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
             api_token: "init-token".to_string(),
@@ -928,7 +928,7 @@ pub(crate) mod tests {
 
         let components = Components {
             storage: Arc::clone(&storage),
-            auth: TokenAuthorization::new("inti-token"),
+            auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
@@ -952,6 +952,10 @@ pub(crate) mod tests {
         tx.send(components).await.unwrap();
 
         Arc::new(StateKeeper::new(Arc::new(LockFileBuilder::noop()), rx))
+    }
+
+    pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
+        keeper_with_limits_impl(limits_config).await
     }
 
     pub(crate) async fn keeper_with_engine_limit(max_storage_size: u64) -> Arc<StateKeeper> {
@@ -998,7 +1002,6 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
-
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -1013,7 +1016,7 @@ pub(crate) mod tests {
 
         let components = Components {
             storage: Arc::clone(&storage),
-            auth: TokenAuthorization::new("inti-token"),
+            auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
