@@ -161,7 +161,6 @@ mod tests {
                 full_access: true,
                 read: vec![],
                 write: vec![],
-                ip_allowlist: vec![],
             }),
             ..Default::default()
         };
@@ -188,7 +187,6 @@ mod tests {
                 full_access: true,
                 read: vec![],
                 write: vec![],
-                ip_allowlist: vec![],
             }),
             ..Default::default()
         };
@@ -227,7 +225,6 @@ mod tests {
                 full_access: false,
                 read: vec!["*".to_string()],
                 write: vec![],
-                ip_allowlist: vec![],
             }),
             ..Default::default()
         };
@@ -249,7 +246,6 @@ mod tests {
                 full_access: false,
                 read: vec!["$audit".to_string()],
                 write: vec![],
-                ip_allowlist: vec![],
             }),
             ..Default::default()
         };
@@ -266,7 +262,6 @@ mod tests {
                 full_access: false,
                 read: vec!["*".to_string()],
                 write: vec![],
-                ip_allowlist: vec![],
             }),
             ..Default::default()
         };
@@ -288,7 +283,6 @@ mod tests {
                 full_access: true,
                 read: vec![],
                 write: vec![],
-                ip_allowlist: vec![],
             }),
             ..Default::default()
         };
@@ -327,7 +321,6 @@ mod tests {
                 full_access: false,
                 read: vec![],
                 write: vec!["*".to_string()],
-                ip_allowlist: vec![],
             }),
             ..Default::default()
         };
@@ -349,7 +342,6 @@ mod tests {
                 full_access: false,
                 read: vec![],
                 write: vec!["$audit".to_string()],
-                ip_allowlist: vec![],
             }),
             ..Default::default()
         };
@@ -366,7 +358,6 @@ mod tests {
                 full_access: false,
                 read: vec![],
                 write: vec!["*".to_string()],
-                ip_allowlist: vec![],
             }),
             ..Default::default()
         };

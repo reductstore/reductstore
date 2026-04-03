@@ -73,16 +73,13 @@ fn proto_timestamp_to_datetime(ts: Timestamp) -> DateTime<Utc> {
 
 impl From<Token> for crate::auth::proto::Token {
     fn from(token: Token) -> Self {
-        let permissions = if let Some(perm) = token.permissions {
-            Some(crate::auth::proto::token::Permissions {
+        let permissions = token
+            .permissions
+            .map(|perm| crate::auth::proto::token::Permissions {
                 full_access: perm.full_access,
                 read: perm.read,
                 write: perm.write,
-                ip_allowlist: perm.ip_allowlist,
-            })
-        } else {
-            None
-        };
+            });
 
         crate::auth::proto::Token {
             name: token.name,
@@ -92,22 +89,18 @@ impl From<Token> for crate::auth::proto::Token {
             permissions,
             is_provisioned: token.is_provisioned,
             ttl: token.ttl.unwrap_or_default(),
+            ip_allowlist: token.ip_allowlist,
         }
     }
 }
 
 impl Into<Token> for crate::auth::proto::Token {
     fn into(self) -> Token {
-        let permissions = if let Some(perm) = self.permissions {
-            Some(Permissions {
-                full_access: perm.full_access,
-                read: perm.read,
-                write: perm.write,
-                ip_allowlist: perm.ip_allowlist,
-            })
-        } else {
-            None
-        };
+        let permissions = self.permissions.map(|perm| Permissions {
+            full_access: perm.full_access,
+            read: perm.read,
+            write: perm.write,
+        });
 
         let created_at = self.created_at.map_or_else(
             || {
@@ -127,6 +120,7 @@ impl Into<Token> for crate::auth::proto::Token {
             expires_at,
             ttl: if self.ttl == 0 { None } else { Some(self.ttl) },
             last_access: None,
+            ip_allowlist: self.ip_allowlist,
             is_expired: false,
         }
     }
@@ -307,18 +301,14 @@ pub(super) fn check_token_lifetime(token: &Token) -> Result<(), ReductError> {
 }
 
 fn check_token_ip_allowlist(token: &Token, client_ip: Option<IpAddr>) -> Result<(), ReductError> {
-    let Some(permissions) = token.permissions.as_ref() else {
-        return Ok(());
-    };
-
-    if permissions.ip_allowlist.is_empty() {
+    if token.ip_allowlist.is_empty() {
         return Ok(());
     }
 
     let client_ip =
         client_ip.ok_or_else(|| unauthorized!("Client IP is required for this token"))?;
 
-    if permissions
+    if token
         .ip_allowlist
         .iter()
         .any(|entry| ip_allowlist_entry_matches(entry, client_ip))
@@ -442,6 +432,7 @@ mod tests {
             expires_at: Some(Utc::now() - Duration::seconds(1)),
             ttl: None,
             last_access: None,
+            ip_allowlist: vec![],
             is_expired: false,
         };
 
@@ -462,6 +453,7 @@ mod tests {
             expires_at: None,
             ttl: None,
             last_access: None,
+            ip_allowlist: vec![],
             is_expired: false,
         };
 
@@ -480,6 +472,7 @@ mod tests {
             expires_at: None,
             ttl: Some(5),
             last_access: Some(now - Duration::seconds(10)),
+            ip_allowlist: vec![],
             is_expired: false,
         };
 
@@ -516,12 +509,12 @@ mod tests {
                 full_access: false,
                 read: vec![],
                 write: vec![],
-                ip_allowlist: vec!["203.0.113.5".to_string(), "10.10.0.0/16".to_string()],
             }),
             is_provisioned: false,
             expires_at: None,
             ttl: None,
             last_access: None,
+            ip_allowlist: vec!["203.0.113.5".to_string(), "10.10.0.0/16".to_string()],
             is_expired: false,
         };
 
@@ -540,12 +533,12 @@ mod tests {
                 full_access: false,
                 read: vec![],
                 write: vec![],
-                ip_allowlist: vec!["203.0.113.5".to_string()],
             }),
             is_provisioned: false,
             expires_at: None,
             ttl: None,
             last_access: None,
+            ip_allowlist: vec!["203.0.113.5".to_string()],
             is_expired: false,
         };
 
@@ -597,8 +590,7 @@ mod tests {
                 "test",
                 TokenCreateRequest {
                     permissions: Permissions::default(),
-                    expires_at: None,
-                    ttl: None,
+                    ..Default::default()
                 },
             )
             .await

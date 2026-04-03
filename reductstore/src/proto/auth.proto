@@ -14,7 +14,6 @@ message Token {
     bool full_access = 1;        // if true, allows to manage buckets, tokens, write and read all buckets
     repeated string read = 2;    // list of buckets for reading
     repeated string write = 3;   // list of buckets for writing
-    repeated string ip_allowlist = 4;  // optional allowed client IP list
   }
 
   string name = 1;                            // name of topic
@@ -24,6 +23,7 @@ message Token {
   bool is_provisioned = 5;                    // token was provisioned from config
   google.protobuf.Timestamp expires_at = 6;   // expiration time
   uint64 ttl = 7;                             // inactivity TTL in seconds
+  repeated string ip_allowlist = 8;           // optional allowed client IP list
 }
 
 message TokenRepo {

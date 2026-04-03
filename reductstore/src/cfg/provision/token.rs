@@ -35,6 +35,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                         permissions: token.permissions.clone().unwrap_or_default(),
                         expires_at: None,
                         ttl: None,
+                        ip_allowlist: token.ip_allowlist.clone(),
                     },
                 )
                 .await
@@ -142,7 +143,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     .unwrap_or_default(),
                 read,
                 write,
-                ip_allowlist: vec![],
             };
 
             token.permissions = Some(permissions);
@@ -316,8 +316,7 @@ mod tests {
                 "token1",
                 TokenCreateRequest {
                     permissions: Permissions::default(),
-                    expires_at: None,
-                    ttl: None,
+                    ..Default::default()
                 },
             )
             .await
@@ -373,8 +372,7 @@ mod tests {
                 "token1",
                 TokenCreateRequest {
                     permissions: Permissions::default(),
-                    expires_at: None,
-                    ttl: None,
+                    ..Default::default()
                 },
             )
             .await

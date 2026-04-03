@@ -894,6 +894,7 @@ pub(crate) mod tests {
                     permissions,
                     expires_at: None,
                     ttl: None,
+                    ip_allowlist: vec![],
                 },
             )
             .await
@@ -1003,6 +1004,7 @@ pub(crate) mod tests {
                     permissions,
                     expires_at: None,
                     ttl: None,
+                    ip_allowlist: vec![],
                 },
             )
             .await

@@ -104,6 +104,7 @@ impl From<CompatTokenCreateRequest> for TokenCreateRequest {
                 permissions: request.permissions,
                 expires_at: None,
                 ttl: None,
+                ip_allowlist: request.ip_allowlist,
             },
         }
     }
@@ -117,6 +118,8 @@ struct V2TokenCreateRequestBody {
     expires_at: Option<chrono::DateTime<chrono::Utc>>,
     #[serde(default)]
     ttl: Option<u64>,
+    #[serde(default)]
+    ip_allowlist: Vec<String>,
 }
 
 impl From<V2TokenCreateRequestBody> for TokenCreateRequest {
@@ -125,6 +128,7 @@ impl From<V2TokenCreateRequestBody> for TokenCreateRequest {
             permissions: value.permissions,
             expires_at: value.expires_at,
             ttl: value.ttl,
+            ip_allowlist: value.ip_allowlist,
         }
     }
 }
@@ -134,6 +138,8 @@ impl From<V2TokenCreateRequestBody> for TokenCreateRequest {
 struct V1PermissionsRequest {
     #[serde(flatten)]
     permissions: Permissions,
+    #[serde(default)]
+    ip_allowlist: Vec<String>,
 }
 
 #[cfg(test)]
