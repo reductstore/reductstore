@@ -73,16 +73,13 @@ fn proto_timestamp_to_datetime(ts: Timestamp) -> DateTime<Utc> {
 
 impl From<Token> for crate::auth::proto::Token {
     fn from(token: Token) -> Self {
-        let permissions = if let Some(perm) = token.permissions {
-            Some(crate::auth::proto::token::Permissions {
+        let permissions = token
+            .permissions
+            .map(|perm| crate::auth::proto::token::Permissions {
                 full_access: perm.full_access,
                 read: perm.read,
                 write: perm.write,
-                ip_allowlist: vec![],
-            })
-        } else {
-            None
-        };
+            });
 
         crate::auth::proto::Token {
             name: token.name,
@@ -99,18 +96,11 @@ impl From<Token> for crate::auth::proto::Token {
 
 impl Into<Token> for crate::auth::proto::Token {
     fn into(self) -> Token {
-        let (permissions, legacy_ip_allowlist) = if let Some(perm) = self.permissions {
-            (
-                Some(Permissions {
-                    full_access: perm.full_access,
-                    read: perm.read,
-                    write: perm.write,
-                }),
-                perm.ip_allowlist,
-            )
-        } else {
-            (None, vec![])
-        };
+        let permissions = self.permissions.map(|perm| Permissions {
+            full_access: perm.full_access,
+            read: perm.read,
+            write: perm.write,
+        });
 
         let created_at = self.created_at.map_or_else(
             || {
@@ -130,11 +120,7 @@ impl Into<Token> for crate::auth::proto::Token {
             expires_at,
             ttl: if self.ttl == 0 { None } else { Some(self.ttl) },
             last_access: None,
-            ip_allowlist: if self.ip_allowlist.is_empty() {
-                legacy_ip_allowlist
-            } else {
-                self.ip_allowlist
-            },
+            ip_allowlist: self.ip_allowlist,
             is_expired: false,
         }
     }
@@ -604,9 +590,7 @@ mod tests {
                 "test",
                 TokenCreateRequest {
                     permissions: Permissions::default(),
-                    expires_at: None,
-                    ttl: None,
-                    ip_allowlist: vec![],
+                    ..Default::default()
                 },
             )
             .await

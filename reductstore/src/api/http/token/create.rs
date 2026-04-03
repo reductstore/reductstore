@@ -46,9 +46,7 @@ mod tests {
             headers,
             TokenCreateRequestAxum(TokenCreateRequest {
                 permissions: Permissions::default(),
-                expires_at: None,
-                ttl: None,
-                ip_allowlist: vec![],
+                ..Default::default()
             }),
         )
         .await
@@ -69,9 +67,7 @@ mod tests {
             headers,
             TokenCreateRequestAxum(TokenCreateRequest {
                 permissions: Permissions::default(),
-                expires_at: None,
-                ttl: None,
-                ip_allowlist: vec![],
+                ..Default::default()
             }),
         )
         .await

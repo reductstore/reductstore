@@ -454,9 +454,7 @@ mod tests {
                     "test",
                     TokenCreateRequest {
                         permissions: perms,
-                        expires_at: None,
-                        ttl: None,
-                        ip_allowlist: vec![],
+                        ..Default::default()
                     },
                 )
                 .await;

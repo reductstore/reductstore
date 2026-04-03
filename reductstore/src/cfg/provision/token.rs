@@ -316,9 +316,7 @@ mod tests {
                 "token1",
                 TokenCreateRequest {
                     permissions: Permissions::default(),
-                    expires_at: None,
-                    ttl: None,
-                    ip_allowlist: vec![],
+                    ..Default::default()
                 },
             )
             .await
@@ -374,9 +372,7 @@ mod tests {
                 "token1",
                 TokenCreateRequest {
                     permissions: Permissions::default(),
-                    expires_at: None,
-                    ttl: None,
-                    ip_allowlist: vec![],
+                    ..Default::default()
                 },
             )
             .await

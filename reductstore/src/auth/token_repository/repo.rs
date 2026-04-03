@@ -1008,9 +1008,7 @@ mod tests {
                     "test-expired",
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_at: None,
-                        ttl: None,
-                        ip_allowlist: vec![],
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1043,9 +1041,7 @@ mod tests {
                     "cache-token",
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_at: None,
-                        ttl: None,
-                        ip_allowlist: vec![],
+                        ..Default::default()
                     },
                 )
                 .await
@@ -1113,9 +1109,7 @@ mod tests {
                     init_token,
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_at: None,
-                        ttl: None,
-                        ip_allowlist: vec![],
+                        ..Default::default()
                     },
                 )
                 .await;
@@ -1258,9 +1252,7 @@ mod tests {
                     init_token,
                     TokenCreateRequest {
                         permissions: Permissions::default(),
-                        expires_at: None,
-                        ttl: None,
-                        ip_allowlist: vec![],
+                        ..Default::default()
                     },
                 )
                 .await;
