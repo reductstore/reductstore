@@ -175,13 +175,13 @@ def test__token_ip_allowlist_enforced(base_url, session, token_name):
 
     resp = session.get(
         f"{base_url}/me",
-        headers={**auth_headers(token_value), "X-Forwarded-For": "203.0.113.10"},
+        headers={**auth_headers(token_value), "x-reduct-client-ip": "203.0.113.10"},
     )
     assert resp.status_code == 200
 
     resp = session.get(
         f"{base_url}/me",
-        headers={**auth_headers(token_value), "X-Forwarded-For": "203.0.113.11"},
+        headers={**auth_headers(token_value), "x-reduct-client-ip": "203.0.113.11"},
     )
     assert resp.status_code == 401
 
