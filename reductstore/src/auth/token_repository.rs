@@ -426,6 +426,58 @@ mod tests {
         assert!(check_token_ip_allowlist(&token, Some("10.11.0.1".parse().unwrap())).is_err());
     }
 
+    #[test]
+    fn test_check_token_ip_allowlist_requires_client_ip_when_restricted() {
+        let token = Token {
+            name: "t".to_string(),
+            value: "v".to_string(),
+            created_at: Utc::now(),
+            permissions: Some(Permissions {
+                full_access: false,
+                read: vec![],
+                write: vec![],
+                ip_allowlist: vec!["203.0.113.5".to_string()],
+            }),
+            is_provisioned: false,
+            expires_at: None,
+        };
+
+        let err = check_token_ip_allowlist(&token, None).err().unwrap();
+        assert_eq!(err, unauthorized!("Client IP is required for this token"));
+    }
+
+    #[test]
+    fn test_ip_allowlist_entry_matches_invalid_entries() {
+        assert!(!ip_allowlist_entry_matches(
+            "not-an-ip",
+            "203.0.113.5".parse().unwrap()
+        ));
+        assert!(!ip_allowlist_entry_matches(
+            "10.0.0.0/abc",
+            "10.0.0.1".parse().unwrap()
+        ));
+        assert!(!ip_allowlist_entry_matches(
+            "10.0.0.0/33",
+            "10.0.0.1".parse().unwrap()
+        ));
+        assert!(!ip_allowlist_entry_matches(
+            "2001:db8::/129",
+            "2001:db8::1".parse().unwrap()
+        ));
+    }
+
+    #[test]
+    fn test_ip_allowlist_entry_matches_family_mismatch() {
+        assert!(!ip_allowlist_entry_matches(
+            "10.0.0.0/24",
+            "2001:db8::1".parse().unwrap()
+        ));
+        assert!(!ip_allowlist_entry_matches(
+            "2001:db8::/32",
+            "10.0.0.1".parse().unwrap()
+        ));
+    }
+
     #[tokio::test]
     async fn test_token_repository_builder_replica_read_only() {
         let mut cfg = Cfg::default();

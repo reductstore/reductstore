@@ -135,6 +135,7 @@ mod tests {
     use crate::api::components::StateKeeper;
     use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
     use crate::audit::{AuditEvent, AUDIT_BUCKET_NAME};
+    use axum::extract::ConnectInfo;
     use axum::http::Request;
     use axum::http::{HeaderMap, HeaderValue};
     use axum::routing::get;
@@ -198,10 +199,62 @@ mod tests {
     #[case("for=203.0.113.43:1234", Some("203.0.113.43"))]
     #[case("for=\"[2001:db8:cafe::17]\"", Some("2001:db8:cafe::17"))]
     #[case("by=203.0.113.60;proto=http", None)]
+    #[case("for=_hidden", None)]
     fn parses_forwarded_header(#[case] input: &str, #[case] expected: Option<&str>) {
         assert_eq!(
             parse_forwarded_for(input).map(|ip| ip.to_string()),
             expected.map(str::to_string)
+        );
+    }
+
+    #[test_log::test]
+    fn resolves_client_ip_without_connect_info() {
+        let request = Request::get("/info").body(Body::empty()).unwrap();
+        assert_eq!(client_ip::client_ip_from_request(&request), None);
+    }
+
+    #[test_log::test]
+    fn resolves_client_ip_from_peer_when_not_trusted_proxy() {
+        let mut request = Request::get("/info").body(Body::empty()).unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "198.51.100.4:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+
+        assert_eq!(
+            client_ip::client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("198.51.100.4".to_string())
+        );
+    }
+
+    #[test_log::test]
+    fn resolves_client_ip_from_x_forwarded_for_for_trusted_proxy() {
+        let mut request = Request::get("/info")
+            .header("x-forwarded-for", "203.0.113.77, 198.51.100.1")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+
+        assert_eq!(
+            client_ip::client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("203.0.113.77".to_string())
+        );
+    }
+
+    #[test_log::test]
+    fn trusted_proxy_falls_back_to_peer_when_forward_headers_invalid() {
+        let mut request = Request::get("/info")
+            .header("x-forwarded-for", "invalid-ip")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "127.0.0.1:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+
+        assert_eq!(
+            client_ip::client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("127.0.0.1".to_string())
         );
     }
 
@@ -418,6 +471,13 @@ mod tests {
         let token_name =
             resolve_audit_token_name(StatusCode::OK, None, None, Some(&components)).await;
 
+        assert_eq!(token_name, None);
+    }
+
+    #[tokio::test]
+    async fn returns_none_when_auth_present_but_components_missing() {
+        let token_name =
+            resolve_audit_token_name(StatusCode::OK, Some("Bearer init-token"), None, None).await;
         assert_eq!(token_name, None);
     }
 
