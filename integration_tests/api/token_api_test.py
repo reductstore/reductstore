@@ -160,6 +160,44 @@ def test__get_token_with_full_access(base_url, session, token_without_permission
 
 
 @requires_env("API_TOKEN")
+def test__rotate_token(base_url, session, token_name):
+    """Should rotate a token and revoke the old value"""
+    permissions = {"full_access": False, "read": ["*"], "write": []}
+
+    resp = session.post(f"{base_url}/tokens/{token_name}", json=permissions)
+    assert resp.status_code == 200
+    old_value = json.loads(resp.content)["value"]
+
+    resp = session.post(f"{base_url}/tokens/{token_name}/rotate")
+    assert resp.status_code == 200
+    new_value = json.loads(resp.content)["value"]
+    assert new_value != old_value
+
+    resp = session.get(f"{base_url}/me", headers=auth_headers(old_value))
+    assert resp.status_code == 401
+
+    resp = session.get(f"{base_url}/me", headers=auth_headers(new_value))
+    assert resp.status_code == 200
+
+
+@requires_env("API_TOKEN")
+def test__rotate_token_with_full_access(base_url, session, token_without_permissions):
+    """Needs full access to rotate a token"""
+    resp = session.post(f"{base_url}/tokens/token-name/rotate", headers=auth_headers(""))
+    assert resp.status_code == 401
+
+    resp = session.post(
+        f"{base_url}/tokens/token-name/rotate",
+        headers=auth_headers(token_without_permissions.value),
+    )
+    assert resp.status_code == 403
+    assert (
+        resp.headers["x-reduct-error"]
+        == f"Token '{token_without_permissions.name}' doesn't have full access"
+    )
+
+
+@requires_env("API_TOKEN")
 def test__delete_token(base_url, session, token_name):
     """Should delete a token"""
     permissions = {}

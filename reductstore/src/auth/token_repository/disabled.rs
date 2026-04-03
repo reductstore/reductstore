@@ -59,6 +59,10 @@ impl ManageTokens for NoAuthRepository {
         Ok(())
     }
 
+    async fn rotate_token(&mut self, _name: &str) -> Result<TokenCreateResponse, ReductError> {
+        Err(bad_request!("Authentication is disabled"))
+    }
+
     async fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
         Ok(())
     }
@@ -140,6 +144,14 @@ mod tests {
         let mut disabled_repo = disabled_repo.await;
         let token = disabled_repo.remove_token("test").await;
         assert_eq!(token, Ok(()));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_rotate_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let result = disabled_repo.rotate_token("test").await;
+        assert_eq!(result, Err(bad_request!("Authentication is disabled")));
     }
 
     #[rstest]

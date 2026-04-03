@@ -160,6 +160,15 @@ pub(crate) trait ManageTokens {
     /// `Ok(())` if the token was removed successfully
     async fn remove_token(&mut self, name: &str) -> Result<(), ReductError>;
 
+    /// Rotate an existing token and return a new token value.
+    ///
+    /// # Arguments
+    /// `name` - The name of the token
+    ///
+    /// # Returns
+    /// New token value and creation time.
+    async fn rotate_token(&mut self, name: &str) -> Result<TokenCreateResponse, ReductError>;
+
     /// Remove a bucket from all tokens and save the repository
     /// to the file system
     ///

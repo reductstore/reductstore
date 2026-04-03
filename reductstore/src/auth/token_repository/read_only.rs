@@ -193,6 +193,10 @@ impl ManageTokens for ReadOnlyTokenRepository {
         Err(forbidden!("Cannot remove token in read-only mode"))
     }
 
+    async fn rotate_token(&mut self, _name: &str) -> Result<TokenCreateResponse, ReductError> {
+        Err(forbidden!("Cannot rotate token in read-only mode"))
+    }
+
     async fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
         Err(forbidden!(
             "Cannot remove bucket from token in read-only mode"
@@ -465,6 +469,19 @@ mod tests {
             assert_eq!(
                 res.err().unwrap(),
                 forbidden!("Cannot remove bucket from token in read-only mode")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rotate_token_forbidden(
+            #[future] repo_fixture: (BoxedTokenRepository, PathBuf),
+        ) {
+            let (mut repo, _) = repo_fixture.await;
+            let res = repo.rotate_token("file_token").await;
+            assert_eq!(
+                res.err().unwrap(),
+                forbidden!("Cannot rotate token in read-only mode")
             );
         }
 

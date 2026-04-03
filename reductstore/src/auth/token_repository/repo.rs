@@ -308,6 +308,37 @@ impl ManageTokens for TokenRepository {
         }
     }
 
+    async fn rotate_token(&mut self, name: &str) -> Result<TokenCreateResponse, ReductError> {
+        if name == INIT_TOKEN_NAME {
+            return Err(conflict!("Can't rotate init token"));
+        }
+
+        let token = self
+            .repo
+            .get_mut(name)
+            .ok_or_else(|| not_found!("Token '{}' doesn't exist", name))?;
+
+        if token.is_provisioned {
+            return Err(conflict!("Can't rotate provisioned token '{}'", name));
+        }
+
+        let created_at = DateTime::<Utc>::from(SystemTime::now());
+        let value = {
+            let mut rng = rand::rng();
+            let value: String = (0..32)
+                .map(|_| format!("{:x}", rng.random_range(0..16)))
+                .collect();
+            format!("{}-{}", name, value)
+        };
+
+        token.value = value.clone();
+        token.created_at = created_at;
+
+        self.save_repo().await?;
+
+        Ok(TokenCreateResponse { value, created_at })
+    }
+
     async fn remove_bucket_from_tokens(&mut self, bucket: &str) -> Result<(), ReductError> {
         for token in self.repo.values_mut() {
             if let Some(permissions) = &mut token.permissions {
@@ -950,6 +981,54 @@ mod tests {
 
             let err = repo.remove_token("test").await.err().unwrap();
             assert_eq!(err, conflict!("Can't remove provisioned token 'test'"))
+        }
+    }
+
+    mod rotate_token {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rotate_token(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let old_value = repo.get_token("test").await.unwrap().value.clone();
+
+            let rotated = repo.rotate_token("test").await.unwrap();
+
+            assert_ne!(rotated.value, old_value);
+            assert!(rotated.value.starts_with("test-"));
+
+            let token = repo.get_token("test").await.unwrap();
+            assert_eq!(token.value, rotated.value);
+            assert_eq!(token.created_at, rotated.created_at);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rotate_token_not_found(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let err = repo.rotate_token("missing").await.err().unwrap();
+            assert_eq!(err, not_found!("Token 'missing' doesn't exist"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rotate_init_token(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let err = repo.rotate_token(INIT_TOKEN_NAME).await.err().unwrap();
+            assert_eq!(err, conflict!("Can't rotate init token"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rotate_provisioned_token(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let mut token = repo.get_token("test").await.unwrap().clone();
+            token.is_provisioned = true;
+            repo.update_token(token).await.unwrap();
+
+            let err = repo.rotate_token("test").await.err().unwrap();
+            assert_eq!(err, conflict!("Can't rotate provisioned token 'test'"));
         }
     }
 
