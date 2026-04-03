@@ -188,7 +188,12 @@ def test__me(
     assert resp.status_code == 200
     data = json.loads(resp.content)
     assert data["name"] == "init-token"
-    assert data["permissions"] == {"full_access": True, "read": [], "write": []}
+    assert data["permissions"] == {
+        "full_access": True,
+        "read": [],
+        "write": [],
+        "ip_allowlist": [],
+    }
 
     resp = session.get(f"{base_url}/me", headers=auth_headers(""))
     assert resp.status_code == 401
