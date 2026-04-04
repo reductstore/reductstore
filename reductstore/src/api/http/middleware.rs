@@ -285,6 +285,58 @@ mod tests {
         );
     }
 
+    #[test_log::test]
+    fn resolves_client_ip_from_x_forwarded_for_for_link_local_proxy() {
+        let mut request = Request::get("/info")
+            .header("x-forwarded-for", "203.0.113.77")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "169.254.20.5:8080"
+                .parse::<std::net::SocketAddr>()
+                .unwrap(),
+        ));
+
+        assert_eq!(
+            client_ip::client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("203.0.113.77".to_string())
+        );
+    }
+
+    #[test_log::test]
+    fn resolves_client_ip_from_x_forwarded_for_for_ipv6_unique_local_proxy() {
+        let mut request = Request::get("/info")
+            .header("x-forwarded-for", "2001:db8::77")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "[fd00::1]:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+
+        assert_eq!(
+            client_ip::client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("2001:db8::77".to_string())
+        );
+    }
+
+    #[test_log::test]
+    fn resolves_client_ip_from_peer_for_untrusted_ipv6_proxy() {
+        let mut request = Request::get("/info")
+            .header("x-forwarded-for", "2001:db8::77")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "[2001:4860::1]:8080"
+                .parse::<std::net::SocketAddr>()
+                .unwrap(),
+        ));
+
+        assert_eq!(
+            client_ip::client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("2001:4860::1".to_string())
+        );
+    }
+
     #[rstest]
     #[tokio::test]
     async fn enforces_api_rate_limit(#[future] api_limited_keeper: Arc<StateKeeper>) {
