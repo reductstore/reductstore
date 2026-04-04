@@ -254,6 +254,22 @@ mod tests {
     }
 
     #[test_log::test]
+    fn resolves_client_ip_from_x_forwarded_for_for_private_proxy() {
+        let mut request = Request::get("/info")
+            .header("x-forwarded-for", "203.0.113.77, 198.51.100.1")
+            .body(Body::empty())
+            .unwrap();
+        request.extensions_mut().insert(ConnectInfo(
+            "10.0.10.20:8080".parse::<std::net::SocketAddr>().unwrap(),
+        ));
+
+        assert_eq!(
+            client_ip::client_ip_from_request(&request).map(|ip| ip.to_string()),
+            Some("203.0.113.77".to_string())
+        );
+    }
+
+    #[test_log::test]
     fn trusted_proxy_falls_back_to_peer_when_forward_headers_invalid() {
         let mut request = Request::get("/info")
             .header("x-forwarded-for", "invalid-ip")
