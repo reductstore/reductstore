@@ -292,9 +292,7 @@ mod tests {
             .body(Body::empty())
             .unwrap();
         request.extensions_mut().insert(ConnectInfo(
-            "169.254.20.5:8080"
-                .parse::<std::net::SocketAddr>()
-                .unwrap(),
+            "169.254.20.5:8080".parse::<std::net::SocketAddr>().unwrap(),
         ));
 
         assert_eq!(
