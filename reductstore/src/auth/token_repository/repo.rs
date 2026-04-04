@@ -295,6 +295,12 @@ impl ManageTokens for TokenRepository {
             return Err(unprocessable_entity!("Token TTL must be greater than zero"));
         }
 
+        if ttl.is_some() && expires_at.is_some() {
+            return Err(unprocessable_entity!(
+                "Only one lifetime policy is allowed: either 'ttl' or 'expires_at'"
+            ));
+        }
+
         let expires_at = expires_at
             .map(|expires_at| {
                 if expires_at < created_at {
@@ -659,6 +665,32 @@ mod tests {
             assert_eq!(
                 token.err().unwrap(),
                 unprocessable_entity!("Token expiration date must not be in the past")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_create_token_rejects_ttl_and_expires_at_together(
+            #[future] repo: BoxedTokenRepository,
+        ) {
+            let mut repo = repo.await;
+            let token = repo
+                .generate_token(
+                    "test-exp-ttl",
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        expires_at: Some(chrono::Utc::now() + chrono::Duration::days(1)),
+                        ttl: Some(3600),
+                        ip_allowlist: vec![],
+                    },
+                )
+                .await;
+
+            assert_eq!(
+                token.err().unwrap(),
+                unprocessable_entity!(
+                    "Only one lifetime policy is allowed: either 'ttl' or 'expires_at'"
+                )
             );
         }
 

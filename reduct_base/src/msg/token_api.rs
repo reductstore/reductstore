@@ -50,8 +50,10 @@ pub struct Token {
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct TokenCreateRequest {
     pub permissions: Permissions,
+    /// Absolute expiration timestamp (UTC). Mutually exclusive with `ttl`.
     #[serde(default)]
     pub expires_at: Option<DateTime<Utc>>,
+    /// Inactivity TTL in seconds. Mutually exclusive with `expires_at`.
     #[serde(default)]
     pub ttl: Option<u64>,
     #[serde(default)]

@@ -68,6 +68,37 @@ def test__create_v2_token(base_url, session, token_name, bucket_name):
 
 
 @requires_env("API_TOKEN")
+def test__create_v2_token_rejects_ttl_and_expires_at_together(
+    base_url, session, token_name, bucket_name
+):
+    """Should reject ambiguous token lifetime definition"""
+    resp = session.post(f"{base_url}/b/{bucket_name}")
+    assert resp.status_code == 200
+
+    permissions = {
+        "full_access": True,
+        "read": [bucket_name],
+        "write": [bucket_name],
+    }
+    expires_at = (datetime.now(timezone.utc) + timedelta(days=1)).replace(microsecond=0)
+
+    resp = session.post(
+        f"{base_url}/tokens/{token_name}",
+        json={
+            "permissions": permissions,
+            "expires_at": expires_at.isoformat().replace("+00:00", "Z"),
+            "ttl": 3600,
+            "ip_allowlist": [],
+        },
+    )
+    assert resp.status_code == 422
+    assert (
+        resp.headers["x-reduct-error"]
+        == "Only one lifetime policy is allowed: either 'ttl' or 'expires_at'"
+    )
+
+
+@requires_env("API_TOKEN")
 def test__creat_token_with_full_access(
     base_url, session, token_name, token_without_permissions
 ):
