@@ -4,7 +4,7 @@
 use axum::body::Body;
 use axum::extract::ConnectInfo;
 use axum::http::{HeaderMap, Request};
-use std::net::{IpAddr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 
 pub(super) fn client_ip_from_request(request: &Request<Body>) -> Option<IpAddr> {
     let peer_ip = request
@@ -20,7 +20,18 @@ pub(super) fn client_ip_from_request(request: &Request<Body>) -> Option<IpAddr> 
 }
 
 fn is_trusted_proxy(ip: IpAddr) -> bool {
-    ip.is_loopback()
+    match ip {
+        IpAddr::V4(ip) => is_trusted_proxy_v4(ip),
+        IpAddr::V6(ip) => is_trusted_proxy_v6(ip),
+    }
+}
+
+fn is_trusted_proxy_v4(ip: Ipv4Addr) -> bool {
+    ip.is_loopback() || ip.is_private() || ip.is_link_local()
+}
+
+fn is_trusted_proxy_v6(ip: Ipv6Addr) -> bool {
+    ip.is_loopback() || ip.is_unique_local() || ip.is_unicast_link_local()
 }
 
 fn client_ip_from_forward_headers(headers: &HeaderMap) -> Option<IpAddr> {
