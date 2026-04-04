@@ -159,7 +159,7 @@ impl ReadOnlyTokenRepository {
                 created_at: DateTime::<Utc>::from(SystemTime::now()),
                 permissions: Some(Permissions {
                     full_access: false,
-                    read: vec!["*".to_string()],
+                    read: vec!["*".to_string(), AUDIT_BUCKET_NAME.to_string()],
                     write: vec![],
                 }),
                 is_provisioned: true,
@@ -479,7 +479,7 @@ mod tests {
                 token.permissions,
                 Some(Permissions {
                     full_access: false,
-                    read: vec!["*".to_string()],
+                    read: vec!["*".to_string(), AUDIT_BUCKET_NAME.to_string()],
                     write: vec![],
                 })
             );
@@ -540,7 +540,7 @@ mod tests {
                 res.permissions,
                 Some(Permissions {
                     full_access: false,
-                    read: vec!["*".to_string()],
+                    read: vec!["*".to_string(), AUDIT_BUCKET_NAME.to_string()],
                     write: vec![],
                 })
             );
