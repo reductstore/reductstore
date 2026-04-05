@@ -18,6 +18,8 @@ use reqwest::{Body, Client};
 use std::sync::Arc;
 use url::form_urlencoded;
 
+use log::{error, info};
+
 pub(crate) struct ReadOnlyAuditRepository {
     aggregator: AuditAggregator,
 }
@@ -89,14 +91,81 @@ impl ReadOnlyAuditRepository {
             preferred_url,
         );
 
-        client_api
-            .execute_with_failover(
-                "Neither primary nor secondary URL is configured for replica audit writes",
-                |client, base_url| async move {
-                    Self::log_event_to_url(&client, &base_url, event).await
-                },
-            )
-            .await
+        let candidates = collect_candidates(
+            client_api.preferred_url_handle(),
+            client_api.primary_url(),
+            client_api.secondary_url(),
+        )
+        .await?;
+        if candidates.is_empty() {
+            return Err(unprocessable_entity!(
+                "Neither primary nor secondary URL is configured for replica audit writes"
+            ));
+        }
+
+        let mut last_err: Option<ReductError> = None;
+        for (idx, base_url) in candidates.iter().enumerate() {
+            match Self::log_event_to_url(client, base_url, event).await {
+                Ok(_) => {
+                    let preferred_handle = client_api.preferred_url_handle();
+                    let mut preferred = preferred_handle.write().await?;
+                    let previous = preferred.clone();
+                    *preferred = Some(base_url.clone());
+                    drop(preferred);
+
+                    if idx > 0 {
+                        info!(
+                            "Switched replica audit forwarding from '{}' to '{}'",
+                            previous.unwrap_or_else(|| "unknown".to_string()),
+                            base_url
+                        );
+                    }
+
+                    return Ok(());
+                }
+                Err(err) => {
+                    if !Self::is_audit_failover_candidate(&err) {
+                        error!(
+                            "Replica audit forwarding failed on '{}' with non-recoverable error: {}",
+                            base_url, err
+                        );
+                        return Err(err);
+                    }
+
+                    if idx + 1 < candidates.len() {
+                        error!(
+                            "Replica audit forwarding failed on '{}': {}. Trying next target...",
+                            base_url, err
+                        );
+                    }
+                    last_err = Some(err);
+                }
+            }
+        }
+
+        if let Some(err) = last_err {
+            error!(
+                "Replica audit forwarding failed for all configured targets (primary='{:?}', secondary='{:?}'): {}",
+                primary_url, secondary_url, err
+            );
+            return Err(err);
+        }
+
+        Err(unprocessable_entity!(
+            "Neither primary nor secondary URL is configured for replica audit writes"
+        ))
+    }
+
+    fn is_audit_failover_candidate(err: &ReductError) -> bool {
+        if matches!(
+            err.status,
+            reduct_base::error::ErrorCode::ConnectionError | reduct_base::error::ErrorCode::Timeout
+        ) {
+            return true;
+        }
+
+        let status_code = err.status as i16;
+        (500..600).contains(&status_code)
     }
 
     async fn log_event_to_url(
@@ -139,6 +208,34 @@ fn build_audit_headers(event: &AuditEvent, payload_len: usize) -> Result<HeaderM
         })?,
     );
     Ok(headers)
+}
+
+async fn collect_candidates(
+    preferred_url: Arc<crate::core::sync::AsyncRwLock<Option<String>>>,
+    primary_url: Option<&str>,
+    secondary_url: Option<&str>,
+) -> Result<Vec<String>, ReductError> {
+    let mut candidates = Vec::new();
+
+    if let Some(url) = preferred_url.read().await?.clone() {
+        candidates.push(url);
+    }
+
+    if let Some(url) = primary_url {
+        let url = normalize_url(Some(url.to_string())).unwrap();
+        if !candidates.iter().any(|candidate| candidate == &url) {
+            candidates.push(url);
+        }
+    }
+
+    if let Some(url) = secondary_url {
+        let url = normalize_url(Some(url.to_string())).unwrap();
+        if !candidates.iter().any(|candidate| candidate == &url) {
+            candidates.push(url);
+        }
+    }
+
+    Ok(candidates)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
@@ -420,6 +517,32 @@ mod tests {
         assert_eq!(err.status, ErrorCode::Forbidden);
         assert_eq!(primary_events.lock().await.len(), 1);
         assert_eq!(secondary_events.lock().await.len(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fails_over_on_503_http_error() {
+        let (primary_url, primary_events, _, _, _) =
+            start_test_server(StatusCode::SERVICE_UNAVAILABLE, Some("standby")).await;
+        let (secondary_url, secondary_events, _, _, _) =
+            start_test_server(StatusCode::OK, None).await;
+        let preferred_url = Arc::new(AsyncRwLock::new(None));
+        let cfg = make_cfg(Some(primary_url.clone()), Some(secondary_url.clone()));
+        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+
+        ReadOnlyAuditRepository::log_event_with_failover(
+            &client,
+            Some(&primary_url),
+            Some(&secondary_url),
+            Arc::clone(&preferred_url),
+            &make_event(1),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(primary_events.lock().await.len(), 1);
+        assert_eq!(secondary_events.lock().await.len(), 1);
+        assert_eq!(*preferred_url.read().await.unwrap(), Some(secondary_url));
     }
 
     #[rstest]
