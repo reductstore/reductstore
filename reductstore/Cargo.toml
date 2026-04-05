@@ -47,7 +47,7 @@ bytes = "1.11.0"
 axum = { version = "0.8.7", features = ["default", "macros"] }
 axum-extra = { version = "0.12.1", features = ["default", "typed-header"] }
 tokio = { version = "1.48.0", features = ["full"] }
-hyper = { version = "1.7.0", features = ["full"] }
+hyper = { version = "1.9.0", features = ["full"] }
 futures-util = "0.3.31"
 futures = "0.3"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
