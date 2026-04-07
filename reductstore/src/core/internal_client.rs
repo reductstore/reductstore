@@ -166,11 +166,26 @@ impl InternalClientApi {
     pub(crate) async fn execute_with_failover<T, F, Fut>(
         &self,
         missing_url_error: &str,
-        mut request: F,
+        request: F,
     ) -> Result<T, ReductError>
     where
         F: FnMut(Client, String) -> Fut,
         Fut: Future<Output = Result<T, ReductError>>,
+    {
+        self.execute_with_failover_policy(missing_url_error, request, is_failover_candidate)
+            .await
+    }
+
+    pub(crate) async fn execute_with_failover_policy<T, F, Fut, P>(
+        &self,
+        missing_url_error: &str,
+        mut request: F,
+        should_failover: P,
+    ) -> Result<T, ReductError>
+    where
+        F: FnMut(Client, String) -> Fut,
+        Fut: Future<Output = Result<T, ReductError>>,
+        P: Fn(&ReductError) -> bool,
     {
         let candidates = self.candidates().await?;
         if candidates.is_empty() {
@@ -185,7 +200,7 @@ impl InternalClientApi {
                     return Ok(result);
                 }
                 Err(err) => {
-                    if !is_failover_candidate(&err) {
+                    if !should_failover(&err) {
                         return Err(err);
                     }
                     last_err = Some(err);

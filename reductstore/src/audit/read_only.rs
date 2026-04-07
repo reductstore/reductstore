@@ -18,7 +18,7 @@ use reqwest::{Body, Client};
 use std::sync::Arc;
 use url::form_urlencoded;
 
-use log::{error, info};
+use log::error;
 
 pub(crate) struct ReadOnlyAuditRepository {
     aggregator: AuditAggregator,
@@ -91,69 +91,22 @@ impl ReadOnlyAuditRepository {
             preferred_url,
         );
 
-        let candidates = collect_candidates(
-            client_api.preferred_url_handle(),
-            client_api.primary_url(),
-            client_api.secondary_url(),
-        )
-        .await?;
-        if candidates.is_empty() {
-            return Err(unprocessable_entity!(
-                "Neither primary nor secondary URL is configured for replica audit writes"
-            ));
-        }
-
-        let mut last_err: Option<ReductError> = None;
-        for (idx, base_url) in candidates.iter().enumerate() {
-            match Self::log_event_to_url(client, base_url, event).await {
-                Ok(_) => {
-                    let preferred_handle = client_api.preferred_url_handle();
-                    let mut preferred = preferred_handle.write().await?;
-                    let previous = preferred.clone();
-                    *preferred = Some(base_url.clone());
-                    drop(preferred);
-
-                    if idx > 0 {
-                        info!(
-                            "Switched replica audit forwarding from '{}' to '{}'",
-                            previous.unwrap_or_else(|| "unknown".to_string()),
-                            base_url
-                        );
-                    }
-
-                    return Ok(());
-                }
-                Err(err) => {
-                    if !Self::is_audit_failover_candidate(&err) {
-                        error!(
-                            "Replica audit forwarding failed on '{}' with non-recoverable error: {}",
-                            base_url, err
-                        );
-                        return Err(err);
-                    }
-
-                    if idx + 1 < candidates.len() {
-                        error!(
-                            "Replica audit forwarding failed on '{}': {}. Trying next target...",
-                            base_url, err
-                        );
-                    }
-                    last_err = Some(err);
-                }
-            }
-        }
-
-        if let Some(err) = last_err {
-            error!(
-                "Replica audit forwarding failed for all configured targets (primary='{:?}', secondary='{:?}'): {}",
-                primary_url, secondary_url, err
-            );
-            return Err(err);
-        }
-
-        Err(unprocessable_entity!(
-            "Neither primary nor secondary URL is configured for replica audit writes"
-        ))
+        client_api
+            .execute_with_failover_policy(
+                "Neither primary nor secondary URL is configured for replica audit writes",
+                |client, base_url| async move {
+                    Self::log_event_to_url(&client, &base_url, event).await
+                },
+                Self::is_audit_failover_candidate,
+            )
+            .await
+            .map_err(|err| {
+                error!(
+                    "Replica audit forwarding failed (primary='{:?}', secondary='{:?}'): {}",
+                    primary_url, secondary_url, err
+                );
+                err
+            })
     }
 
     fn is_audit_failover_candidate(err: &ReductError) -> bool {
@@ -208,34 +161,6 @@ fn build_audit_headers(event: &AuditEvent, payload_len: usize) -> Result<HeaderM
         })?,
     );
     Ok(headers)
-}
-
-async fn collect_candidates(
-    preferred_url: Arc<crate::core::sync::AsyncRwLock<Option<String>>>,
-    primary_url: Option<&str>,
-    secondary_url: Option<&str>,
-) -> Result<Vec<String>, ReductError> {
-    let mut candidates = Vec::new();
-
-    if let Some(url) = preferred_url.read().await?.clone() {
-        candidates.push(url);
-    }
-
-    if let Some(url) = primary_url {
-        let url = normalize_url(Some(url.to_string())).unwrap();
-        if !candidates.iter().any(|candidate| candidate == &url) {
-            candidates.push(url);
-        }
-    }
-
-    if let Some(url) = secondary_url {
-        let url = normalize_url(Some(url.to_string())).unwrap();
-        if !candidates.iter().any(|candidate| candidate == &url) {
-            candidates.push(url);
-        }
-    }
-
-    Ok(candidates)
 }
 
 #[cfg_attr(not(test), allow(dead_code))]
