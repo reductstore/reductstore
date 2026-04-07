@@ -284,7 +284,10 @@ pub(crate) fn token_is_expired(token: &Token, now: DateTime<Utc>) -> bool {
     }
 
     if let Some(ttl) = token.ttl {
-        let last_access = token.last_access.unwrap_or(token.created_at);
+        let last_access = token
+            .last_access
+            .unwrap_or(token.created_at)
+            .max(token.created_at);
         if (now - last_access).num_seconds() > ttl as i64 {
             return true;
         }
@@ -477,6 +480,44 @@ mod tests {
         };
 
         assert!(token_is_expired(&token, now));
+    }
+
+    #[test]
+    fn test_token_not_expired_when_last_access_older_than_created_at() {
+        let now = Utc::now();
+        let token = Token {
+            name: "rotated".to_string(),
+            value: "rotated".to_string(),
+            created_at: now,
+            permissions: None,
+            is_provisioned: false,
+            expires_at: None,
+            ttl: Some(120),
+            last_access: Some(now - Duration::seconds(300)),
+            ip_allowlist: vec![],
+            is_expired: false,
+        };
+
+        assert!(!token_is_expired(&token, now));
+    }
+
+    #[test]
+    fn test_token_not_expired_when_never_accessed() {
+        let now = Utc::now();
+        let token = Token {
+            name: "fresh".to_string(),
+            value: "fresh".to_string(),
+            created_at: now,
+            permissions: None,
+            is_provisioned: false,
+            expires_at: None,
+            ttl: Some(120),
+            last_access: None,
+            ip_allowlist: vec![],
+            is_expired: false,
+        };
+
+        assert!(!token_is_expired(&token, now));
     }
 
     #[test]

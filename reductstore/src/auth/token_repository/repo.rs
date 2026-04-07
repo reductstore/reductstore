@@ -453,6 +453,15 @@ impl ManageTokens for TokenRepository {
             return Err(conflict!("Can't rotate provisioned token '{}'", name));
         }
 
+        if let Some(expiry) = token.expires_at {
+            if Utc::now() >= expiry {
+                return Err(unprocessable_entity!(
+                    "Can't rotate expired token '{}'",
+                    name
+                ));
+            }
+        }
+
         let created_at = DateTime::<Utc>::from(SystemTime::now());
         let value = {
             let mut rng = rand::rng();
@@ -1203,13 +1212,30 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_rotate_expired_by_expiry_date(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let mut token = repo.get_token("test").await.unwrap().clone();
+            token.expires_at = Some(Utc::now() - chrono::TimeDelta::try_seconds(60).unwrap());
+            repo.update_token(token).await.unwrap();
+
+            let err = repo.rotate_token("test").await.err().unwrap();
+            assert_eq!(
+                err,
+                unprocessable_entity!("Can't rotate expired token 'test'")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_rotate_resets_last_access_for_ttl(#[future] repo: BoxedTokenRepository) {
             use crate::auth::token_repository::token_is_expired;
 
             let mut repo = repo.await;
             let mut token = repo.get_token("test").await.unwrap().clone();
             token.ttl = Some(120);
-            token.last_access = Some(Utc::now() - chrono::TimeDelta::try_seconds(300).unwrap());
+            let old_time = Utc::now() - chrono::TimeDelta::try_seconds(300).unwrap();
+            token.created_at = old_time;
+            token.last_access = Some(old_time);
             repo.update_token(token).await.unwrap();
 
             let token = repo.get_token("test").await.unwrap();
