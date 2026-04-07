@@ -2,6 +2,19 @@
 
 . "$SNAP/bin/management-script"
 
+ENV_FILE_PATH=$(env_file_path)
+
+if [ -n "$ENV_FILE_PATH" ]; then
+    if [ ! -f "$ENV_FILE_PATH" ]; then
+        echo "Configured env-file-path '$ENV_FILE_PATH' does not exist" >&2
+        exit 1
+    fi
+    set -a
+    # shellcheck disable=SC1090
+    . "$ENV_FILE_PATH"
+    set +a
+fi
+
 
 export RS_HOST=$(host)
 export RS_PORT=$(port)

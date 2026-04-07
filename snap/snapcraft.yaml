@@ -1,6 +1,6 @@
 title: ReductStore
 name: reductstore # you probably want to 'snapcraft register <name>'
-base: core22 # the base snap is the execution environment for this snap
+base: core24 # the base snap is the execution environment for this snap
 version: git
 summary: High Performance Data Storage and Streaming for Robotics and Industrial IoT # 79 char long summary
 description: |
@@ -15,11 +15,13 @@ license: Apache-2.0
 confinement: strict # use 'strict' once you have the right plugs and slots
 grade: stable # must be 'stable' to release into candidate/stable channels
 
-architectures:
-  - build-on: amd64
-    build-for: amd64
-  - build-on: amd64
-    build-for: arm64
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+  arm64:
+    build-on: [amd64]
+    build-for: [arm64]
 parts:
   reductstore:
     plugin: dump
