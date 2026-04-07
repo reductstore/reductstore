@@ -464,6 +464,7 @@ impl ManageTokens for TokenRepository {
 
         token.value = value.clone();
         token.created_at = created_at;
+        token.last_access = Some(created_at);
 
         self.save_repo().await?;
 
@@ -1198,6 +1199,26 @@ mod tests {
 
             let err = repo.rotate_token("test").await.err().unwrap();
             assert_eq!(err, conflict!("Can't rotate provisioned token 'test'"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rotate_resets_last_access_for_ttl(#[future] repo: BoxedTokenRepository) {
+            use crate::auth::token_repository::token_is_expired;
+
+            let mut repo = repo.await;
+            let mut token = repo.get_token("test").await.unwrap().clone();
+            token.ttl = Some(120);
+            token.last_access = Some(Utc::now() - chrono::TimeDelta::try_seconds(300).unwrap());
+            repo.update_token(token).await.unwrap();
+
+            let token = repo.get_token("test").await.unwrap();
+            assert!(token_is_expired(token, Utc::now()));
+
+            repo.rotate_token("test").await.unwrap();
+
+            let token = repo.get_token("test").await.unwrap();
+            assert!(!token_is_expired(token, Utc::now()));
         }
     }
 
