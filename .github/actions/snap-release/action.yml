@@ -1,5 +1,5 @@
-name: 'Build and Publish Snap Package'
-description: 'Builds a snap package and publishes it to the Snap Store.'
+name: 'Build Snap Package'
+description: 'Builds a snap package from prebuilt reductstore binary artifacts.'
 inputs:
   arch:
     description: 'Architecture (amd64, arm64, etc.)'
@@ -13,6 +13,37 @@ inputs:
 runs:
   using: 'composite'
   steps:
+    - name: Resolve binary artifact
+      shell: bash
+      run: |
+        set -euo pipefail
+        case "${{ inputs.arch }}" in
+          amd64)
+            target_triple="x86_64-unknown-linux-gnu"
+            ;;
+          arm64)
+            target_triple="aarch64-unknown-linux-gnu"
+            ;;
+          *)
+            echo "Unsupported architecture: ${{ inputs.arch }}"
+            exit 1
+            ;;
+        esac
+        echo "TARGET_TRIPLE=${target_triple}" >> "$GITHUB_ENV"
+        echo "BINARY_ARTIFACT=reductstore-${target_triple}" >> "$GITHUB_ENV"
+
+    - name: Download binary artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ env.BINARY_ARTIFACT }}
+        path: .snap-build/bin
+
+    - name: Prepare snap payload files
+      shell: bash
+      run: |
+        set -euo pipefail
+        chmod +x .snap-build/bin/reductstore
+
     - uses: snapcore/action-build@v1
       id: build-snap
       with:
