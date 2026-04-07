@@ -42,6 +42,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Allow read-only replica audit forwarding to fail over on HTTP 5xx responses (not only connection/timeout errors), and add explicit logs for successful switchovers and forwarding failures, [PR-1301](https://github.com/reductstore/reductstore/pull/1301)
 - Trust private/link-local proxy peer addresses (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`, ULA/link-local IPv6) for forwarded client IP resolution so audit `client_ip` records original callers behind ALB/ingress setups, [PR-1296](https://github.com/reductstore/reductstore/pull/1296)
 - Keep API request rate limiting active for `/ready` and map startup lock-wait (`503`) to `200` only for `/api/v1/alive` in middleware, avoiding false matches on entry paths ending with `alive`, [PR-1286](https://github.com/reductstore/reductstore/pull/1286)
 - Move token API `ip_allowlist` to token-level settings (alongside `ttl` / `expires_at`) instead of nesting it under `permissions`, and update token API responses/tests accordingly, [PR-1284](https://github.com/reductstore/reductstore/pull/1284)

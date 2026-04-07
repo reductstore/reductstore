@@ -18,6 +18,8 @@ use reqwest::{Body, Client};
 use std::sync::Arc;
 use url::form_urlencoded;
 
+use log::error;
+
 pub(crate) struct ReadOnlyAuditRepository {
     aggregator: AuditAggregator,
 }
@@ -90,13 +92,33 @@ impl ReadOnlyAuditRepository {
         );
 
         client_api
-            .execute_with_failover(
+            .execute_with_failover_policy(
                 "Neither primary nor secondary URL is configured for replica audit writes",
                 |client, base_url| async move {
                     Self::log_event_to_url(&client, &base_url, event).await
                 },
+                Self::is_audit_failover_candidate,
             )
             .await
+            .map_err(|err| {
+                error!(
+                    "Replica audit forwarding failed (primary='{:?}', secondary='{:?}'): {}",
+                    primary_url, secondary_url, err
+                );
+                err
+            })
+    }
+
+    fn is_audit_failover_candidate(err: &ReductError) -> bool {
+        if matches!(
+            err.status,
+            reduct_base::error::ErrorCode::ConnectionError | reduct_base::error::ErrorCode::Timeout
+        ) {
+            return true;
+        }
+
+        let status_code = err.status as i16;
+        (500..600).contains(&status_code)
     }
 
     async fn log_event_to_url(
@@ -420,6 +442,32 @@ mod tests {
         assert_eq!(err.status, ErrorCode::Forbidden);
         assert_eq!(primary_events.lock().await.len(), 1);
         assert_eq!(secondary_events.lock().await.len(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fails_over_on_503_http_error() {
+        let (primary_url, primary_events, _, _, _) =
+            start_test_server(StatusCode::SERVICE_UNAVAILABLE, Some("standby")).await;
+        let (secondary_url, secondary_events, _, _, _) =
+            start_test_server(StatusCode::OK, None).await;
+        let preferred_url = Arc::new(AsyncRwLock::new(None));
+        let cfg = make_cfg(Some(primary_url.clone()), Some(secondary_url.clone()));
+        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+
+        ReadOnlyAuditRepository::log_event_with_failover(
+            &client,
+            Some(&primary_url),
+            Some(&secondary_url),
+            Arc::clone(&preferred_url),
+            &make_event(1),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(primary_events.lock().await.len(), 1);
+        assert_eq!(secondary_events.lock().await.len(), 1);
+        assert_eq!(*preferred_url.read().await.unwrap(), Some(secondary_url));
     }
 
     #[rstest]
