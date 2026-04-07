@@ -43,6 +43,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix token lifecycle: ignore stale audit activity for TTL checks and reject rotation of expired tokens, [PR-1304](https://github.com/reductstore/reductstore/pull/1304)
 - Reset `last_access` to current time on token rotation to prevent immediate TTL expiration when the old token was already inactive, [PR-1303](https://github.com/reductstore/reductstore/pull/1303)
 - Allow read-only replica audit forwarding to fail over on HTTP 5xx responses (not only connection/timeout errors), and add explicit logs for successful switchovers and forwarding failures, [PR-1301](https://github.com/reductstore/reductstore/pull/1301)
 - Trust private/link-local proxy peer addresses (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`, ULA/link-local IPv6) for forwarded client IP resolution so audit `client_ip` records original callers behind ALB/ingress setups, [PR-1296](https://github.com/reductstore/reductstore/pull/1296)
