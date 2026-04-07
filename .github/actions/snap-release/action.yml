@@ -47,7 +47,7 @@ runs:
     - uses: snapcore/action-build@v1
       id: build-snap
       with:
-        snapcraft-args: "--enable-experimental-extensions --verbose --target-arch=${{ inputs.arch }}"
+        snapcraft-args: "pack --verbose --target-arch=${{ inputs.arch }}"
 
     - name: Install snap for testing
       shell: bash
