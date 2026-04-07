@@ -9,6 +9,7 @@ DEFAULT_CERT_PATH=""
 DEFAULT_CERT_KEY_PATH=""
 DEFAULT_LICENSE_PATH=""
 DEFAULT_CORS_ALLOW_ORIGIN=""
+DEFAULT_ENV_FILE_PATH=""
 
 data_path()
 {
@@ -159,4 +160,19 @@ cors_allow_origin()
 set_cors_allow_origin()
 {
           snapctl set cors-allow-origin="$1"
+}
+
+env_file_path()
+{
+            env_file_path="$(snapctl get env-file-path)"
+            if [ -z "$env_file_path" ]; then
+                    env_file_path="$DEFAULT_ENV_FILE_PATH"
+                    set_env_file_path "$env_file_path"
+            fi
+            echo "$env_file_path"
+}
+
+set_env_file_path()
+{
+          snapctl set env-file-path="$1"
 }
