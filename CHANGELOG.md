@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.19.1 - 2026-04-08
+
+### Changed
+
+- Remove legacy remote backend configuration scaffolding from stable core config and fold the remaining generic backend settings into `GeneralBackendConfig`, [PR-1310](https://github.com/reductstore/reductstore/pull/1310)
+
 ## 1.19.0 - 2026-04-08
 
 ### Added
@@ -65,6 +71,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Extract extension attachments for wildcard-matched entries and pass per-entry attachment maps to extensions, [PR-1203](https://github.com/reductstore/reductstore/pull/1203)
 - Restore `Unknown extension` validation for queries with `ext` when no extensions are loaded, [PR-1192](https://github.com/reductstore/reductstore/pull/1192)
 - Fix share links for entries with nested paths by matching multi-segment filenames in links routes, [PR-1202](https://github.com/reductstore/reductstore/pull/1202)
+
+## 1.18.10 - 2026-03-27
+
+### Changed
+
+- Update `Cargo.lock` dependencies on `stable` using Dependabot bumps (`aws-credential-types`, `futures-util`, `quote`, `chrono`) plus `cargo audit` remediations (`aws-lc-rs/aws-lc-sys`, `rustls-webpki`, `quinn-proto`, `time`), [PR-1251](https://github.com/reductstore/reductstore/pull/1251)
 
 ## 1.18.9 - 2026-03-20
 

@@ -14,6 +14,7 @@ use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::time::Duration;
 use std::time::SystemTime;
 
 #[derive(Default)]
@@ -57,7 +58,14 @@ pub type BoxedBackend = Box<dyn StorageBackend + Send + Sync>;
 pub enum BackendType {
     #[default]
     Filesystem,
-    S3,
+    Remote,
+}
+
+#[derive(Default, Clone, Debug, PartialEq)]
+pub struct GeneralBackendConfig {
+    pub backend_type: BackendType,
+    pub sync_interval: Duration,
+    pub cache_path: Option<PathBuf>,
 }
 
 #[derive(Default)]
