@@ -106,9 +106,11 @@ runs:
       run: |
         set -euo pipefail
         mkdir -p /tmp/sbom
-        bin_path="target/${{ inputs.target }}/release/reductstore${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}"
         sbom_path="/tmp/sbom/reductstore.${{ inputs.target }}.sbom.spdx.json"
-        syft "$bin_path" -o spdx-json="$sbom_path"
+
+        # Scanning only the final binary usually produces an almost-empty SPDX document.
+        # Catalog Cargo.lock to capture crate dependency and license metadata.
+        syft "file:Cargo.lock" -o spdx-json="$sbom_path"
 
     - name: Upload SBOM (Release)
       uses: actions/upload-artifact@v4
