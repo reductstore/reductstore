@@ -338,9 +338,9 @@ mod tests {
             .await
             .unwrap();
 
-        // Configure for S3 backend (non-filesystem)
+        // Configure for non-filesystem backend
         let mut cfg = Cfg::default();
-        cfg.backend_config.backend_type = BackendType::S3;
+        cfg.backend_config.backend_type = BackendType::Remote;
 
         let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
         let folders = keeper.list_folders().await.unwrap();
@@ -371,9 +371,9 @@ mod tests {
             .await
             .unwrap();
 
-        // Configure for S3 backend (non-filesystem)
+        // Configure for non-filesystem backend
         let mut cfg = Cfg::default();
-        cfg.backend_config.backend_type = BackendType::S3;
+        cfg.backend_config.backend_type = BackendType::Remote;
 
         let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
         let folders = keeper.list_folders().await.unwrap();
