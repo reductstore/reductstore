@@ -68,8 +68,7 @@ runs:
       shell: bash
       run: cargo install cargo-export --force
 
-    - name: Install Syft (Release)
-      if: github.event_name != 'pull_request'
+    - name: Install Syft
       shell: bash
       run: |
         set -euo pipefail
@@ -100,8 +99,7 @@ runs:
         path: target/${{inputs.target}}/release/reductstore${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
         if-no-files-found: 'error'
 
-    - name: Generate SBOM (Release)
-      if: github.event_name != 'pull_request'
+    - name: Generate SBOM
       shell: bash
       run: |
         set -euo pipefail
@@ -112,9 +110,8 @@ runs:
         # Catalog Cargo.lock to capture crate dependency and license metadata.
         syft "file:Cargo.lock" -o spdx-json="$sbom_path"
 
-    - name: Upload SBOM (Release)
+    - name: Upload SBOM
       uses: actions/upload-artifact@v4
-      if: github.event_name != 'pull_request'
       with:
         name: reductstore-sbom-${{ inputs.target }}
         path: /tmp/sbom/reductstore.${{ inputs.target }}.sbom.spdx.json
