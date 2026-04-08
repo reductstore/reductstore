@@ -1,5 +1,5 @@
-// Copyright 2025-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::update_labels::UpdateLabels;
@@ -228,6 +228,40 @@ mod tests {
         assert_eq!(
             err,
             &not_found!("Entry 'missing' not found in bucket 'test'")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn remove_true_updates_meta_record_with_tombstone(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        let meta_entry = bucket
+            .get_or_create_entry("entry-1/$meta")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        write_with_labels(
+            &meta_entry,
+            1000,
+            Labels::from_iter(vec![("key".to_string(), "meta-1".to_string())]),
+        )
+        .await;
+
+        bucket
+            .update_labels(vec![UpdateLabelsMulti {
+                entry_name: "entry-1/$meta".into(),
+                time: 1000,
+                update: Labels::from_iter(vec![("remove".into(), "true".into())]),
+                remove: HashSet::new(),
+            }])
+            .await
+            .unwrap();
+
+        let reader = meta_entry.begin_read(1000).await.unwrap();
+        assert_eq!(
+            reader.meta().labels().get("remove"),
+            Some(&"true".to_string())
         );
     }
 }

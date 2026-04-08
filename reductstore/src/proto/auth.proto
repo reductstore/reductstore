@@ -11,9 +11,9 @@ package reduct.proto.auth;
 message Token {
   // Permissions
   message Permissions {
-    bool full_access = 1;       // if true, allows to manage buckets, tokens, write and read all buckets
-    repeated string read = 2;   // list of buckets for reading
-    repeated string write = 3;  // list of buckets for writing
+    bool full_access = 1;        // if true, allows to manage buckets, tokens, write and read all buckets
+    repeated string read = 2;    // list of buckets for reading
+    repeated string write = 3;   // list of buckets for writing
   }
 
   string name = 1;                            // name of topic
@@ -21,6 +21,9 @@ message Token {
   google.protobuf.Timestamp created_at = 3;   // creating time
   Permissions permissions = 4;                // permissions
   bool is_provisioned = 5;                    // token was provisioned from config
+  google.protobuf.Timestamp expires_at = 6;   // expiration time
+  uint64 ttl = 7;                             // inactivity TTL in seconds
+  repeated string ip_allowlist = 8;           // optional allowed client IP list
 }
 
 message TokenRepo {

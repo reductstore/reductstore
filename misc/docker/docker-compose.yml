@@ -1,0 +1,48 @@
+services:
+  primary:
+    image: reduct/store:main
+    container_name: reduct-primary
+    environment:
+      RS_INSTANCE_ROLE: PRIMARY
+      RS_API_TOKEN: dev-token
+      RS_DATA_PATH: /data
+      RS_PRIMARY_URL: http://primary:8383
+      RS_SECONDARY_URL: http://secondary:8383
+    volumes:
+      - primary_secondary_data:/data
+    ports:
+      - "8383:8383"
+
+  secondary:
+    image: reduct/store:main
+    container_name: reduct-secondary
+    environment:
+      RS_INSTANCE_ROLE: SECONDARY
+      RS_API_TOKEN: dev-token
+      RS_DATA_PATH: /data
+      RS_PRIMARY_URL: http://primary:8383
+      RS_SECONDARY_URL: http://secondary:8383
+    volumes:
+      - primary_secondary_data:/data
+    ports:
+      - "8384:8383"
+
+  replica:
+    image: reduct/store:main
+    container_name: reduct-replica
+    depends_on:
+      - primary
+      - secondary
+    environment:
+      RS_INSTANCE_ROLE: REPLICA
+      RS_API_TOKEN: dev-token
+      RS_DATA_PATH: /data
+      RS_PRIMARY_URL: http://primary:8383
+      RS_SECONDARY_URL: http://secondary:8383
+    volumes:
+      - primary_secondary_data:/data
+    ports:
+      - "8385:8383"
+
+volumes:
+  primary_secondary_data:

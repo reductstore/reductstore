@@ -1,8 +1,9 @@
-// Copyright 2023-2024 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::cfg::io::IoConfig;
 use crate::replication::TransactionNotification;
+use crate::storage::entry::{is_system_meta_entry, meta_entry_parent};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
@@ -121,13 +122,7 @@ impl TransactionFilter {
         if !self.entries.is_empty() {
             let mut found = false;
             for entry in self.entries.iter() {
-                if entry.contains('*') {
-                    let entry = entry.replace("*", "");
-                    if notification.entry.starts_with(&entry) {
-                        found = true;
-                        break;
-                    }
-                } else if notification.entry == *entry {
+                if Self::entry_matches(entry, &notification.entry) {
                     found = true;
                     break;
                 }
@@ -137,7 +132,11 @@ impl TransactionFilter {
             }
         }
 
-        match apply_filters_recursively(
+        if is_system_meta_entry(&notification.entry) {
+            return vec![notification];
+        }
+
+        let notifications = match apply_filters_recursively(
             self.query_filters.as_mut_slice(),
             vec![notification.clone()],
             0,
@@ -145,19 +144,29 @@ impl TransactionFilter {
             Ok(Some(notifications)) => notifications,
             Ok(None) => {
                 warn!(
-                    "Filtering interrupted in replication task '{}'",
-                    self.bucket
+                    "Filtering interrupted in replication task '{}' for entry '{}'",
+                    self.bucket, notification.entry
                 );
                 vec![]
             }
             Err(err) => {
                 warn!(
-                    "Error applying filters in replication task '{}': {}",
-                    self.bucket, err
+                    "Error applying filters in replication task '{}' for entry '{}': {}",
+                    self.bucket, notification.entry, err
                 );
                 vec![]
             }
+        };
+        notifications
+    }
+
+    fn entry_matches(entry_filter: &str, entry_name: &str) -> bool {
+        if entry_filter.contains('*') {
+            let prefix = entry_filter.replace('*', "");
+            return entry_name.starts_with(&prefix);
         }
+
+        entry_name == entry_filter || meta_entry_parent(entry_name) == Some(entry_filter)
     }
 }
 
@@ -222,6 +231,26 @@ mod tests {
 
         let filtered = filter.filter(notification);
         assert_eq!(filtered.is_empty(), !expected);
+    }
+
+    #[rstest]
+    fn test_transaction_filter_includes_meta_for_exact_entry(
+        mut notification: TransactionNotification,
+    ) {
+        notification.entry = "entry/$meta".to_string();
+
+        let mut filter = TransactionFilter::try_new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                entries: vec!["entry".to_string()],
+                ..ReplicationSettings::default()
+            },
+            IoConfig::default(),
+        )
+        .unwrap();
+
+        assert_eq!(filter.filter(notification).len(), 1);
     }
 
     #[rstest]
@@ -347,7 +376,9 @@ mod tests {
     }
 
     #[rstest]
-    fn test_transaction_filter_when_non_strict(notification: TransactionNotification) {
+    fn test_transaction_filter_when_missing_label_skips_record(
+        notification: TransactionNotification,
+    ) {
         let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
@@ -361,8 +392,32 @@ mod tests {
 
         assert!(
             filter.filter(notification).is_empty(),
-            "label doesn't exist but we consider it as false"
+            "missing labels should not replicate the record"
         );
+    }
+
+    #[rstest]
+    fn test_transaction_filter_skips_all_filters_for_system_entries(
+        mut notification: TransactionNotification,
+    ) {
+        notification.entry = "entry/$meta".to_string();
+
+        let mut filter = TransactionFilter::try_new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                entries: vec!["entry".to_string()],
+                include: HashMap::from([("must".to_string(), "match".to_string())]),
+                exclude: HashMap::from([("x".to_string(), "y".to_string())]),
+                each_n: Some(100),
+                when: Some(serde_json::json!({"$eq": ["&NOT_EXIST", "y"]})),
+                ..ReplicationSettings::default()
+            },
+            IoConfig::default(),
+        )
+        .unwrap();
+
+        assert_eq!(filter.filter(notification).len(), 1);
     }
 
     #[rstest]
@@ -380,7 +435,7 @@ mod tests {
 
         assert!(
             filter.filter(notification).is_empty(),
-            "label doesn't exist but we consider it as false"
+            "interrupted filters should not replicate the record"
         );
     }
 

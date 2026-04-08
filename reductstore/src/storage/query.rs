@@ -1,5 +1,5 @@
-// Copyright 2023-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 pub mod base;
 pub(crate) mod condition;
@@ -460,6 +460,8 @@ mod tests {
         let mut block_manager = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join("index")),
+            "bucket".to_string(),
+            "entry".to_string(),
             Cfg::default().into(),
         )
         .await;

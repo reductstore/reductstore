@@ -1,5 +1,5 @@
-// Copyright 2024-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::storage::entry::Entry;
 use crate::storage::proto::record::Label;
@@ -39,51 +39,56 @@ impl Entry {
     ) -> Result<UpdateResult, ReductError> {
         let mut result = UpdateResult::new();
         let mut records_per_block = BTreeMap::new();
-
+        for UpdateLabels {
+            time,
+            update,
+            remove,
+        } in updates
         {
-            let mut bm = self.block_manager.write().await?;
-            for UpdateLabels {
-                time,
-                update,
-                remove,
-            } in updates
-            {
-                // Find the block that contains the record
-                // TODO: Try to avoid the lookup for each record
+            // Find the block/record first, then apply a label update.
+            let located = {
+                let mut bm = self.block_manager.write().await?;
                 match bm.find_block(time).await {
                     Ok(block_ref) => {
                         let block = block_ref.read().await?;
-                        if let Some(record) = block.get_record(time) {
-                            let record = Self::update_single_label(record.clone(), update, remove);
-                            records_per_block
-                                .entry(block.block_id())
-                                .or_insert_with(Vec::new)
-                                .push(record.clone());
-                            result.insert(
-                                time,
-                                Ok(record
-                                    .labels
-                                    .iter()
-                                    .map(|label| (label.name.clone(), label.value.clone()))
-                                    .collect()),
-                            );
-                        } else {
-                            result.insert(
-                                time,
-                                Err(not_found!(
-                                    "Record {} not found in entry {}/{}",
-                                    time,
-                                    self.bucket_name,
-                                    self.name
-                                )),
-                            );
-                        }
+                        block
+                            .get_record(time)
+                            .cloned()
+                            .map(|record| (block.block_id(), record))
                     }
                     Err(err) => {
                         result.insert(time, Err(err));
+                        continue;
                     }
                 }
-            }
+            };
+
+            let Some((block_id, record)) = located else {
+                result.insert(
+                    time,
+                    Err(not_found!(
+                        "Record {} not found in entry {}/{}",
+                        time,
+                        self.bucket_name,
+                        self.name
+                    )),
+                );
+                continue;
+            };
+
+            let record = Entry::update_single_label(record, update, remove);
+            records_per_block
+                .entry(block_id)
+                .or_insert_with(Vec::new)
+                .push(record.clone());
+            result.insert(
+                time,
+                Ok(record
+                    .labels
+                    .iter()
+                    .map(|label| (label.name.clone(), label.value.clone()))
+                    .collect()),
+            );
         }
 
         // Update blocks
@@ -103,10 +108,11 @@ impl Entry {
         for handler in handlers {
             handler.await.unwrap()?;
         }
+
         Ok(result)
     }
 
-    fn update_single_label(
+    pub(in crate::storage::entry) fn update_single_label(
         mut record: Record,
         mut update: Labels,
         remove: HashSet<String>,

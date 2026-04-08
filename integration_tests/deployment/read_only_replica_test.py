@@ -128,3 +128,59 @@ async def test_read_only_replica_syncs_data():
             _bucket_removed,
             label="bucket removal to appear on replica",
         )
+
+
+@requires_env("PRIMARY_STORAGE_URL")
+@requires_env("REPLICA_STORAGE_URL")
+@pytest.mark.asyncio
+async def test_read_only_replica_syncs_meta_attachments():
+    primary_url = os.environ["PRIMARY_STORAGE_URL"]
+    replica_url = os.environ["REPLICA_STORAGE_URL"]
+    token = os.getenv("API_TOKEN")
+    bucket_name = _bucket_name()
+    entry_name = "entry/a"
+    meta_entry = f"{entry_name}/$meta"
+    entry_ts = 1000
+    meta_ts = 1001
+
+    async with Client(primary_url, api_token=token) as primary_client, Client(
+        replica_url, api_token=token
+    ) as replica_client:
+        primary_bucket = await primary_client.create_bucket(bucket_name)
+
+        await _wait_until(
+            lambda: _bucket_exists(replica_client, bucket_name),
+            label="bucket to appear on replica",
+        )
+        replica_bucket = await replica_client.get_bucket(bucket_name)
+
+        await primary_bucket.write(entry_name, b"entry-data", timestamp=entry_ts)
+        await primary_bucket.write(
+            meta_entry,
+            b'{"schema":"v1"}',
+            timestamp=meta_ts,
+            labels={"key": "$plugin"},
+        )
+
+        async def _meta_present():
+            record = await _read_record(replica_bucket, meta_entry, meta_ts)
+            return record is not None
+
+        await _wait_until(
+            _meta_present,
+            label="$meta record to appear on replica",
+        )
+
+        record, data = await _read_record(replica_bucket, meta_entry, meta_ts)
+        assert data == b'{"schema":"v1"}'
+        assert record.labels["key"] == "$plugin"
+
+        await primary_bucket.remove_entry(entry_name)
+
+        async def _meta_removed_with_parent():
+            return await _read_record(replica_bucket, meta_entry, meta_ts) is None
+
+        await _wait_until(
+            _meta_removed_with_parent,
+            label="$meta removal to appear on replica",
+        )

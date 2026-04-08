@@ -1,10 +1,13 @@
-// Copyright 2025-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::cfg::{Cfg, InstanceRole};
+use crate::core::file_cache::FILE_CACHE;
+use crate::storage::bucket::settings::SETTINGS_NAME;
 use crate::storage::bucket::Bucket;
 use crate::storage::engine::{ReadOnlyMode, StorageEngine};
 use async_trait::async_trait;
+use log::error;
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
@@ -39,6 +42,14 @@ impl ReadOnlyMode for StorageEngine {
         let mut buckets_to_retain = vec![];
         self.folder_keeper.reload().await?;
         for path in self.folder_keeper.list_folders().await? {
+            if !FILE_CACHE
+                .try_exists(&path.join(SETTINGS_NAME))
+                .await
+                .unwrap_or(false)
+            {
+                continue;
+            }
+
             if current_bucket_paths.contains(&path) {
                 buckets_to_retain.push(path);
                 continue;
@@ -51,7 +62,7 @@ impl ReadOnlyMode for StorageEngine {
                     new_buckets.insert(bucket.name().to_string(), bucket);
                 }
                 Err(e) => {
-                    panic!("Failed to load bucket from {:?}: {}", path, e);
+                    error!("Failed to load bucket from {:?}: {}", path, e);
                 }
             }
         }
@@ -74,6 +85,7 @@ mod tests {
     use rstest::{fixture, rstest};
     use serial_test::serial;
     use tempfile::tempdir;
+    use tokio::fs;
 
     #[rstest]
     #[serial]
@@ -159,6 +171,44 @@ mod tests {
         read_only_engine.reload().await.unwrap();
         let buckets = read_only_engine.buckets.read().await.unwrap();
         assert_eq!(buckets.len(), 0);
+    }
+
+    #[rstest]
+    #[serial]
+    #[tokio::test]
+    async fn test_skip_broken_audit_bucket_without_primary_and_secondary_urls(
+        #[future] primary_engine: Arc<StorageEngine>,
+    ) {
+        let primary_engine = primary_engine.await;
+        let mut cfg = primary_engine.cfg().clone();
+        cfg.role = InstanceRole::Replica;
+        cfg.primary_url = None;
+        cfg.secondary_url = None;
+
+        let read_only_engine = Arc::new(
+            StorageEngine::builder()
+                .with_cfg(cfg.clone())
+                .with_data_path(cfg.data_path.clone())
+                .build()
+                .await,
+        );
+
+        let audit_bucket_path = cfg.data_path.join("$audit");
+        fs::create_dir_all(&audit_bucket_path).await.unwrap();
+        fs::write(
+            audit_bucket_path.join(SETTINGS_NAME),
+            serde_json::to_vec(&BucketSettings::default()).unwrap(),
+        )
+        .await
+        .unwrap();
+
+        read_only_engine.reset_last_replica_sync().await;
+        tokio::time::sleep(primary_engine.cfg.engine_config.replica_update_interval).await;
+        read_only_engine.reload().await.unwrap();
+
+        let buckets = read_only_engine.buckets.read().await.unwrap();
+        assert!(!buckets.contains_key("$audit"));
+        assert!(buckets.contains_key("bucket-1"));
     }
 
     mod forbidden {

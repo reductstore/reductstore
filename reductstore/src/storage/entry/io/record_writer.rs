@@ -1,5 +1,5 @@
-// Copyright 2024-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
@@ -489,6 +489,8 @@ mod tests {
             let manager = BlockManager::build(
                 path.clone(),
                 BlockIndex::new(path.clone()),
+                "bucket".to_string(),
+                "entry".to_string(),
                 Cfg::default().into(),
             )
             .await;

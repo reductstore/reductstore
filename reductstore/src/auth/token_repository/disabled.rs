@@ -1,12 +1,13 @@
-// Copyright 2023-2025 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::auth::token_repository::ManageTokens;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use reduct_base::bad_request;
 use reduct_base::error::ReductError;
-use reduct_base::msg::token_api::{Permissions, Token, TokenCreateResponse};
+use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
+use std::net::IpAddr;
 use std::time::SystemTime;
 
 /// A repository that doesn't require authentication
@@ -23,12 +24,16 @@ impl ManageTokens for NoAuthRepository {
     async fn generate_token(
         &mut self,
         _name: &str,
-        _permissions: Permissions,
+        _request: TokenCreateRequest,
     ) -> Result<TokenCreateResponse, ReductError> {
         Err(bad_request!("Authentication is disabled"))
     }
 
     async fn get_token(&mut self, _name: &str) -> Result<&Token, ReductError> {
+        Err(bad_request!("Authentication is disabled"))
+    }
+
+    async fn get_token_with_last_access(&mut self, _name: &str) -> Result<Token, ReductError> {
         Err(bad_request!("Authentication is disabled"))
     }
 
@@ -40,7 +45,15 @@ impl ManageTokens for NoAuthRepository {
         Ok(vec![])
     }
 
-    async fn validate_token(&mut self, _header: Option<&str>) -> Result<Token, ReductError> {
+    async fn get_token_list_with_last_access(&mut self) -> Result<Vec<Token>, ReductError> {
+        Ok(vec![])
+    }
+
+    async fn validate_token(
+        &mut self,
+        _header: Option<&str>,
+        _client_ip: Option<IpAddr>,
+    ) -> Result<Token, ReductError> {
         Ok(Token {
             name: "AUTHENTICATION-DISABLED".to_string(),
             value: "".to_string(),
@@ -51,11 +64,28 @@ impl ManageTokens for NoAuthRepository {
                 write: vec![],
             }),
             is_provisioned: false,
+            expires_at: None,
+            ttl: None,
+            last_access: None,
+            ip_allowlist: vec![],
+            is_expired: false,
         })
+    }
+
+    async fn validate_token_with_last_access(
+        &mut self,
+        _header: Option<&str>,
+        _client_ip: Option<IpAddr>,
+    ) -> Result<Token, ReductError> {
+        self.validate_token(None, None).await
     }
 
     async fn remove_token(&mut self, _name: &str) -> Result<(), ReductError> {
         Ok(())
+    }
+
+    async fn rotate_token(&mut self, _name: &str) -> Result<TokenCreateResponse, ReductError> {
+        Err(bad_request!("Authentication is disabled"))
     }
 
     async fn remove_bucket_from_tokens(&mut self, _bucket: &str) -> Result<(), ReductError> {
@@ -83,10 +113,15 @@ mod tests {
         let token = disabled_repo
             .generate_token(
                 "test",
-                Permissions {
-                    full_access: true,
-                    read: vec![],
-                    write: vec![],
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access: true,
+                        read: vec![],
+                        write: vec![],
+                    },
+                    expires_at: None,
+                    ttl: None,
+                    ip_allowlist: vec![],
                 },
             )
             .await;
@@ -119,10 +154,23 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_get_token_list_with_last_access_no_init_token(
+        #[future] disabled_repo: BoxedTokenRepository,
+    ) {
+        let mut disabled_repo = disabled_repo.await;
+        let token_list = disabled_repo
+            .get_token_list_with_last_access()
+            .await
+            .unwrap();
+        assert_eq!(token_list, vec![]);
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_validate_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
         let mut disabled_repo = disabled_repo.await;
         let placeholder = disabled_repo
-            .validate_token(Some("invalid-value"))
+            .validate_token(Some("invalid-value"), None)
             .await
             .unwrap();
         assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
@@ -132,10 +180,44 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_validate_token_with_last_access_no_init_token(
+        #[future] disabled_repo: BoxedTokenRepository,
+    ) {
+        let mut disabled_repo = disabled_repo.await;
+        let placeholder = disabled_repo
+            .validate_token_with_last_access(Some("invalid-value"), None)
+            .await
+            .unwrap();
+        assert_eq!(placeholder.name, "AUTHENTICATION-DISABLED");
+        assert_eq!(placeholder.value, "");
+        assert!(placeholder.permissions.unwrap().full_access);
+        assert!(placeholder.last_access.is_none());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_find_by_name_with_last_access_no_init_token(
+        #[future] disabled_repo: BoxedTokenRepository,
+    ) {
+        let mut disabled_repo = disabled_repo.await;
+        let token = disabled_repo.get_token_with_last_access("test").await;
+        assert_eq!(token, Err(bad_request!("Authentication is disabled")));
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_remove_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
         let mut disabled_repo = disabled_repo.await;
         let token = disabled_repo.remove_token("test").await;
         assert_eq!(token, Ok(()));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_rotate_token_no_init_token(#[future] disabled_repo: BoxedTokenRepository) {
+        let mut disabled_repo = disabled_repo.await;
+        let result = disabled_repo.rotate_token("test").await;
+        assert_eq!(result, Err(bad_request!("Authentication is disabled")));
     }
 
     #[rstest]

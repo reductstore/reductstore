@@ -1,5 +1,5 @@
-// Copyright 2024-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::storage::entry::{Entry, RecordReader};
 use crate::storage::proto::record;
@@ -103,7 +103,6 @@ mod tests {
     };
     use crate::storage::entry::EntrySettings;
     use bytes::Bytes;
-    use reduct_base::error::ReductError;
     use reduct_base::io::ReadRecord;
     use reduct_base::Labels;
     use rstest::rstest;

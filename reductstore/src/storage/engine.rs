@@ -1,5 +1,5 @@
-// Copyright 2023-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 mod read_only;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
@@ -7,13 +7,16 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
-use crate::storage::folder_keeper::FolderKeeper;
+use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use async_trait::async_trait;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
+use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo};
-use reduct_base::{conflict, forbidden, not_found, unprocessable_entity};
+use reduct_base::{
+    conflict, forbidden, internal_server_error, not_found, unprocessable_entity, Labels,
+};
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -74,14 +77,14 @@ impl StorageEngineBuilder {
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
-        let folder_keeper = FolderKeeper::new(data_path.clone(), &cfg).await;
-
+        let folder_keeper =
+            FolderKeeper::new_with_depth(data_path.clone(), &cfg, DiscoveryDepth::FirstLevel).await;
         for path in folder_keeper
             .list_folders()
             .await
             .expect("Failed to list folders")
         {
-            match Bucket::restore(data_path.join(&path), cfg.clone()).await {
+            match Bucket::restore(path.clone(), cfg.clone()).await {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
                     buckets.insert(bucket.name().to_string(), bucket);
@@ -148,8 +151,10 @@ impl StorageEngine {
         for task in infos {
             let bucket = task.await?.info;
             usage += bucket.size;
-            oldest_record = oldest_record.min(bucket.oldest_record);
-            latest_record = latest_record.max(bucket.latest_record);
+            if bucket.oldest_record != u64::MAX {
+                oldest_record = oldest_record.min(bucket.oldest_record);
+                latest_record = latest_record.max(bucket.latest_record);
+            }
         }
 
         Ok(ServerInfo {
@@ -168,6 +173,53 @@ impl StorageEngine {
         })
     }
 
+    pub(crate) async fn begin_write(
+        &self,
+        bucket_name: &str,
+        entry_name: &str,
+        time: u64,
+        content_size: u64,
+        content_type: String,
+        labels: Labels,
+    ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        self.ensure_storage_limit(content_size).await?;
+        let bucket = self.get_bucket(bucket_name).await?.upgrade()?;
+        bucket
+            .begin_write(entry_name, time, content_size, content_type, labels)
+            .await
+    }
+
+    async fn total_usage(&self) -> Result<u64, ReductError> {
+        let buckets = self.buckets.read().await?;
+        let infos = buckets
+            .values()
+            .map(|bucket| bucket.clone().info())
+            .collect::<Vec<_>>();
+
+        let mut usage = 0u64;
+        for task in infos {
+            usage += task.await?.info.size;
+        }
+
+        Ok(usage)
+    }
+
+    pub(crate) async fn ensure_storage_limit(
+        &self,
+        incoming_bytes: u64,
+    ) -> Result<(), ReductError> {
+        let Some(limit) = self.cfg.engine_config.max_storage_size else {
+            return Ok(());
+        };
+
+        let usage = self.total_usage().await?;
+        if usage.saturating_add(incoming_bytes) > limit {
+            return Err(internal_server_error!("storage limit exceeded"));
+        }
+
+        Ok(())
+    }
+
     /// Creat a new bucket.
     pub(crate) async fn create_bucket(
         &self,
@@ -177,6 +229,23 @@ impl StorageEngine {
         self.check_mode()?;
 
         check_name_convention(name)?;
+        self.create_bucket_internal(name, settings).await
+    }
+
+    pub(crate) async fn create_system_bucket(
+        &self,
+        name: &str,
+        settings: BucketSettings,
+    ) -> Result<Weak<Bucket>, ReductError> {
+        self.check_mode()?;
+        self.create_bucket_internal(name, settings).await
+    }
+
+    async fn create_bucket_internal(
+        &self,
+        name: &str,
+        settings: BucketSettings,
+    ) -> Result<Weak<Bucket>, ReductError> {
         let mut buckets = self.buckets.write().await?;
         if buckets.contains_key(name) {
             return Err(conflict!("Bucket '{}' already exists", name));
@@ -315,8 +384,8 @@ impl StorageEngine {
         let infos = {
             let buckets = self.buckets.read().await?;
             buckets
-                .values()
-                .map(|bucket| bucket.clone().info())
+                .iter()
+                .map(|(_, bucket)| bucket.clone().info())
                 .collect::<Vec<_>>()
         };
 
@@ -378,6 +447,37 @@ pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
     Ok(())
 }
 
+pub(super) fn check_entry_name_convention(name: &str) -> Result<(), ReductError> {
+    if name.is_empty()
+        || name.starts_with('/')
+        || name.ends_with('/')
+        || name.split('/').any(|segment| segment.is_empty())
+    {
+        return Err(unprocessable_entity!(
+            "Entry name must be non-empty and must not contain empty path segments",
+        ));
+    }
+
+    let regex = regex::Regex::new(r"^[A-Za-z0-9_/-]*$").unwrap();
+    if regex.is_match(name) {
+        return Ok(());
+    }
+
+    // Allow system attachment entries that end with `/$meta`.
+    if name == "$meta" {
+        return Ok(());
+    }
+    if let Some(parent) = name.strip_suffix("/$meta") {
+        if regex.is_match(parent) {
+            return Ok(());
+        }
+    }
+
+    Err(unprocessable_entity!(
+        "Entry name can contain only letters, digits and [-,_,/] symbols or end with '/$meta'",
+    ))
+}
+
 #[cfg(test)]
 impl StorageEngine {
     pub async fn reset_last_replica_sync(&self) {
@@ -391,11 +491,24 @@ mod tests {
     use super::*;
 
     use bytes::Bytes;
+    use reduct_base::io::ReadRecord;
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::time::Duration;
     use tempfile::tempdir;
+
+    #[test]
+    fn test_check_entry_name_convention_with_meta() {
+        assert!(check_entry_name_convention("entry").is_ok());
+        assert!(check_entry_name_convention("entry/$meta").is_ok());
+        assert!(check_entry_name_convention("x/y/$meta").is_ok());
+        assert!(check_entry_name_convention("").is_err());
+        assert!(check_entry_name_convention("/entry").is_err());
+        assert!(check_entry_name_convention("entry/").is_err());
+        assert!(check_entry_name_convention("entry//child").is_err());
+        assert!(check_entry_name_convention("entry/$other").is_err());
+    }
 
     #[rstest]
     #[tokio::test]
@@ -441,6 +554,91 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_storage_limit_exceeded(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        let bucket = storage
+            .create_bucket("test-limit", BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        let mut writer = bucket
+            .begin_write("entry", 1, 10, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+        writer
+            .send(Ok(Some(Bytes::from("0123456789"))))
+            .await
+            .unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let mut cfg = storage.cfg.clone();
+        cfg.engine_config.max_storage_size = Some(1);
+        let limited = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(storage.data_path.clone())
+                .with_cfg(cfg)
+                .build()
+                .await,
+        );
+
+        let err = limited
+            .begin_write(
+                "test-limit",
+                "entry-2",
+                2,
+                1,
+                "text/plain".to_string(),
+                Labels::new(),
+            )
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        assert_eq!(err.message, "storage limit exceeded");
+
+        let record = limited
+            .get_bucket("test-limit")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap()
+            .begin_read("entry", 1)
+            .await
+            .unwrap();
+        assert_eq!(record.meta().content_length(), 10);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_info_ignores_empty_parent_entries_for_oldest_record(
+        #[future] storage: Arc<StorageEngine>,
+    ) {
+        let storage = storage.await;
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        bucket.get_or_create_entry("a").await.unwrap();
+
+        let mut writer = bucket
+            .begin_write("a/b", 1000, 4, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+        writer.send(Ok(Some(Bytes::from("data")))).await.unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let info = storage.info().await.unwrap();
+        assert_eq!(info.oldest_record, 1000);
+        assert_eq!(info.latest_record, 1000);
+        assert_eq!(info.bucket_count, 1);
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_license_info(#[future] storage: Arc<StorageEngine>) {
         let storage = storage.await;
         let license = License {
@@ -471,6 +669,7 @@ mod tests {
     mod recovery {
         use super::*;
         use crate::storage::bucket::settings::SETTINGS_NAME;
+        use reduct_base::io::ReadRecord;
         #[rstest]
         #[tokio::test]
         async fn test_recover_from_fs(#[future] storage: Arc<StorageEngine>) {
@@ -547,6 +746,90 @@ mod tests {
                 .upgrade_and_unwrap();
             assert_eq!(bucket.name(), "test");
             assert_eq!(bucket.settings().await.unwrap(), bucket_settings);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_recover_nested_entry_tree(#[future] storage: Arc<StorageEngine>) {
+            let storage = storage.await;
+            let bucket = storage
+                .create_bucket("tree-bucket", Bucket::defaults())
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+
+            for (entry_name, ts, payload) in [
+                ("part-1/a/b/c", 1000u64, "aaaa"),
+                ("part-1/a/b/d", 1010u64, "bbbb"),
+                ("part-2/x/y/z", 1020u64, "cccc"),
+            ] {
+                let entry = bucket
+                    .get_or_create_entry(entry_name)
+                    .await
+                    .unwrap()
+                    .upgrade_and_unwrap();
+                let mut sender = entry
+                    .begin_write(
+                        ts,
+                        payload.len() as u64,
+                        "text/plain".to_string(),
+                        Labels::new(),
+                    )
+                    .await
+                    .unwrap();
+                sender.send(Ok(Some(Bytes::from(payload)))).await.unwrap();
+                sender.send(Ok(None)).await.unwrap();
+            }
+
+            tokio::time::sleep(Duration::from_millis(10)).await;
+            storage.sync_fs().await.unwrap();
+
+            let cfg = Cfg {
+                data_path: storage.data_path.clone(),
+                ..Cfg::default()
+            };
+            let storage = Arc::new(
+                StorageEngine::builder()
+                    .with_data_path(cfg.data_path.clone())
+                    .with_cfg(cfg)
+                    .build()
+                    .await,
+            );
+
+            let bucket = storage
+                .get_bucket("tree-bucket")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+
+            let info = bucket.clone().info().await.unwrap();
+            let mut names = info
+                .entries
+                .iter()
+                .map(|entry| entry.name.clone())
+                .collect::<Vec<_>>();
+            names.sort();
+            assert_eq!(
+                names,
+                vec![
+                    "part-1".to_string(),
+                    "part-1/a".to_string(),
+                    "part-1/a/b".to_string(),
+                    "part-1/a/b/c".to_string(),
+                    "part-1/a/b/d".to_string(),
+                    "part-2".to_string(),
+                    "part-2/x".to_string(),
+                    "part-2/x/y".to_string(),
+                    "part-2/x/y/z".to_string(),
+                ]
+            );
+
+            let rec = bucket.begin_read("part-1/a/b/c", 1000).await.unwrap();
+            assert_eq!(rec.meta().entry_name(), "part-1/a/b/c");
+            let rec = bucket.begin_read("part-1/a/b/d", 1010).await.unwrap();
+            assert_eq!(rec.meta().entry_name(), "part-1/a/b/d");
+            let rec = bucket.begin_read("part-2/x/y/z", 1020).await.unwrap();
+            assert_eq!(rec.meta().entry_name(), "part-2/x/y/z");
         }
 
         #[rstest]
@@ -643,6 +926,39 @@ mod tests {
         assert_eq!(
             result.err(),
             Some(conflict!("Bucket 'test' already exists"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_system_bucket_allows_system_name(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        let bucket = storage
+            .create_system_bucket("$audit", BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        assert_eq!(bucket.name(), "$audit");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_system_bucket_conflicts_with_existing_name(
+        #[future] storage: Arc<StorageEngine>,
+    ) {
+        let storage = storage.await;
+        storage
+            .create_system_bucket("$audit", BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        let result = storage
+            .create_system_bucket("$audit", BucketSettings::default())
+            .await;
+        assert_eq!(
+            result.err(),
+            Some(conflict!("Bucket '$audit' already exists"))
         );
     }
 
@@ -922,6 +1238,28 @@ mod tests {
         assert_eq!(bucket_list.buckets.len(), 2);
         assert_eq!(bucket_list.buckets[0].name, "test1");
         assert_eq!(bucket_list.buckets[1].name, "test2");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_get_bucket_list_includes_system_bucket(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        storage
+            .create_system_bucket("$audit", Bucket::defaults())
+            .await
+            .unwrap();
+        storage
+            .create_bucket("test", Bucket::defaults())
+            .await
+            .unwrap();
+
+        let bucket_list = storage.get_bucket_list().await.unwrap();
+        let bucket_names = bucket_list
+            .buckets
+            .iter()
+            .map(|bucket| bucket.name.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(bucket_names, vec!["$audit", "test"]);
     }
 
     #[rstest]

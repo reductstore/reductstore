@@ -1,7 +1,5 @@
-// Copyright 2023-2025 ReductSoftware UG
-// This Source Code Form is subject to the terms of the Mozilla Public
-//    License, v. 2.0. If a copy of the MPL was not distributed with this
-//    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::error::ReductError;
 use crate::{unprocessable_entity, Labels};
@@ -49,11 +47,6 @@ pub fn parse_batched_header(header: &str) -> Result<RecordHeader, ReductError> {
     while let Some(pair) = rest.split_once('=') {
         let (key, value) = pair;
         let key = key.trim();
-        if key.starts_with("@") {
-            return Err(unprocessable_entity!(
-                "Label names must not start with '@': reserved for computed labels",
-            ));
-        }
 
         rest = if value.starts_with('\"') {
             let value = value[1..].to_string();
@@ -163,15 +156,11 @@ mod tests {
     }
 
     #[rstest]
-    fn test_parse_header_bad_label() {
-        let err = parse_batched_header("123, text/plain, @label1=value1, label2=value2")
-            .err()
-            .unwrap();
-        assert_eq!(
-            err,
-            unprocessable_entity!(
-                "Label names must not start with '@': reserved for computed labels"
-            )
-        );
+    fn test_parse_header_with_computed_label() {
+        let RecordHeader { labels, .. } =
+            parse_batched_header("123, text/plain, @label1=value1, label2=value2").unwrap();
+
+        assert_eq!(labels.get("@label1"), Some(&"value1".to_string()));
+        assert_eq!(labels.get("label2"), Some(&"value2".to_string()));
     }
 }

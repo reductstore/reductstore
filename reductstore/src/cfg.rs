@@ -1,34 +1,43 @@
-// Copyright 2023-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
+pub mod audit;
 pub mod io;
+pub mod limits;
 pub mod lock_file;
 mod provision;
 pub mod remote_storage;
 pub mod replication;
 pub mod rw_lock;
 pub mod storage_engine;
+#[cfg(feature = "zenoh-api")]
+pub mod zenoh;
 
-use crate::api::Components;
+use crate::api::components::Components;
+use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
+use crate::audit::AuditRepositoryBuilder;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType};
+use crate::cfg::audit::AuditConfig;
 use crate::cfg::io::IoConfig;
 use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
+#[cfg(feature = "zenoh-api")]
+use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::cache::Cache;
-use crate::core::env::{Env, GetEnv};
+use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
-use crate::license::parse_license;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
-use log::info;
+use async_trait::async_trait;
+use log::{info, warn};
 use reduct_base::error::ReductError;
-use reduct_base::ext::ExtSettings;
+use reduct_base::ext::{ExtSettings, IoExtension};
 use reduct_base::internal_server_error;
 use reduct_base::logger::Logger;
 use reduct_base::msg::bucket_api::BucketSettings;
@@ -57,6 +66,12 @@ pub enum InstanceRole {
     Replica,
 }
 
+#[derive(Clone, Default)]
+pub struct ProvisionedReplication {
+    pub settings: ReplicationSettings,
+    pub mode_override: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct Cfg {
     pub log_level: String,
@@ -68,20 +83,26 @@ pub struct Cfg {
     pub api_token: String,
     pub cert_path: Option<PathBuf>,
     pub cert_key_path: Option<PathBuf>,
-    pub license_path: Option<String>,
     pub ext_path: Option<PathBuf>,
     pub cors_allow_origin: Vec<String>,
     pub role: InstanceRole,
+    pub primary_url: Option<String>,
+    pub secondary_url: Option<String>,
+    pub instance_name: String,
 
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
-    pub replications: HashMap<String, ReplicationSettings>,
+    pub replications: HashMap<String, ProvisionedReplication>,
     pub io_conf: IoConfig,
+    pub audit_conf: AuditConfig,
     pub replication_conf: ReplicationConfig,
     pub cs_config: RemoteStorageConfig,
     pub lock_file_config: LockFileConfig,
     pub rw_lock_config: RwLockConfig,
     pub engine_config: StorageEngineConfig,
+    pub(crate) limits_config: LimitsConfig,
+    #[cfg(feature = "zenoh-api")]
+    pub zenoh_api: ZenohApiConfig,
 }
 
 impl Default for Cfg {
@@ -96,32 +117,125 @@ impl Default for Cfg {
             api_token: "".to_string(),
             cert_path: None,
             cert_key_path: None,
-            license_path: None,
             ext_path: None,
             cors_allow_origin: vec![],
             role: InstanceRole::Primary,
+            primary_url: None,
+            secondary_url: None,
+            instance_name: "unknown".to_string(),
             buckets: HashMap::new(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
             io_conf: IoConfig::default(),
+            audit_conf: AuditConfig::default(),
             replication_conf: ReplicationConfig::default(),
             cs_config: RemoteStorageConfig::default(),
             lock_file_config: LockFileConfig::default(),
             rw_lock_config: RwLockConfig::default(),
             engine_config: StorageEngineConfig::default(),
+            limits_config: LimitsConfig::default(),
+            #[cfg(feature = "zenoh-api")]
+            zenoh_api: ZenohApiConfig::default(),
         }
     }
 }
 
+#[derive(Clone)]
+pub struct CoreExtCfg {
+    pub role: InstanceRole,
+    pub data_path: PathBuf,
+}
+
+#[async_trait]
+pub trait ExtCfgBounds: Clone + Send + Sync {
+    fn role(&self) -> InstanceRole;
+    fn data_path(&self) -> PathBuf;
+    fn license(&self) -> Option<License> {
+        None
+    }
+    fn remote_storage_config(&self) -> RemoteStorageConfig {
+        RemoteStorageConfig::default()
+    }
+    async fn init_backend(&self) -> Result<Backend, ReductError> {
+        let builder = Backend::builder()
+            .backend_type(self.remote_storage_config().backend_type.clone())
+            .local_data_path(self.data_path());
+        builder.try_build().await
+    }
+    fn static_extensions(&self, _settings: ExtSettings) -> Vec<Box<dyn IoExtension + Send + Sync>> {
+        vec![]
+    }
+}
+
+#[async_trait]
+impl ExtCfgBounds for CoreExtCfg {
+    fn role(&self) -> InstanceRole {
+        self.role.clone()
+    }
+
+    fn data_path(&self) -> PathBuf {
+        self.data_path.clone()
+    }
+}
+
 /// Database configuration
-pub struct CfgParser<EnvGetter: GetEnv> {
+pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: ExtCfgBounds = CoreExtCfg> {
     pub cfg: Cfg,
     pub license: Option<License>,
     pub env: Env<EnvGetter>,
+    pub ext_cfg: ExtCfg,
 }
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+#[async_trait]
+pub trait ExtCfgParser<EnvGetter: GetEnv> {
+    type Cfg: ExtCfgBounds;
+    async fn from_env(&self, env: &mut Env<EnvGetter>, version: &str) -> Self::Cfg;
+}
+
+#[derive(Default)]
+pub struct CoreExtCfgParser;
+
+#[async_trait]
+impl<EnvGetter: GetEnv + Send> ExtCfgParser<EnvGetter> for CoreExtCfgParser {
+    type Cfg = CoreExtCfg;
+
+    async fn from_env(&self, env: &mut Env<EnvGetter>, _version: &str) -> Self::Cfg {
+        let role = match env
+            .get::<String>("RS_INSTANCE_ROLE", "STANDALONE".to_string())
+            .to_lowercase()
+            .as_str()
+        {
+            "standalone" => InstanceRole::Standalone,
+            "primary" => InstanceRole::Primary,
+            "secondary" => InstanceRole::Secondary,
+            "replica" => InstanceRole::Replica,
+            _ => {
+                panic!("Invalid value for RS_INSTANCE_ROLE: must be one of STANDALONE, PRIMARY, SECONDARY, REPLICA")
+            }
+        };
+
+        CoreExtCfg {
+            role,
+            data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string())),
+        }
+    }
+}
+
+impl<EnvGetter: GetEnv + Send> CfgParser<EnvGetter, CoreExtCfg> {
     pub async fn from_env(env_getter: EnvGetter, version: &str) -> Self {
+        Self::from_env_with_ext(env_getter, &CoreExtCfgParser, version).await
+    }
+}
+
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
+    pub async fn from_env_with_ext<ExtParser>(
+        env_getter: EnvGetter,
+        ext_parser: &ExtParser,
+        version: &str,
+    ) -> Self
+    where
+        ExtParser: ExtCfgParser<EnvGetter, Cfg = ExtCfg>,
+    {
         let mut env = Env::new(env_getter);
 
         let mut api_base_path = env.get("RS_API_BASE_PATH", "/".to_string());
@@ -151,19 +265,11 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             public_url.push('/');
         }
 
-        let role = match env
-            .get::<String>("RS_INSTANCE_ROLE", "STANDALONE".to_string())
-            .to_lowercase()
-            .as_str()
-        {
-            "standalone" => InstanceRole::Standalone,
-            "primary" => InstanceRole::Primary,
-            "secondary" => InstanceRole::Secondary,
-            "replica" => InstanceRole::Replica,
-            _ => {
-                panic!("Invalid value for RS_INSTANCE_ROLE: must be one of STANDALONE, PRIMARY, SECONDARY, REPLICA")
-            }
-        };
+        let ext_cfg = ext_parser.from_env(&mut env, version).await;
+
+        let replications = Self::parse_replications(&mut env);
+
+        let api_token = env.get_masked("RS_API_TOKEN", "".to_string());
 
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
@@ -171,33 +277,56 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             public_url,
             port,
             api_base_path,
-            data_path: PathBuf::from(env.get("RS_DATA_PATH", "/data".to_string())),
-            api_token: env.get_masked("RS_API_TOKEN", "".to_string()),
+            data_path: ext_cfg.data_path(),
+            api_token: api_token.clone(),
             cert_path,
             cert_key_path,
-            role,
-            license_path: env.get_optional("RS_LICENSE_PATH"),
+            role: ext_cfg.role(),
+            primary_url: env
+                .get_optional::<String>("RS_PRIMARY_URL")
+                .and_then(|url| if url.is_empty() { None } else { Some(url) }),
+            secondary_url: env
+                .get_optional::<String>("RS_SECONDARY_URL")
+                .and_then(|url| if url.is_empty() { None } else { Some(url) }),
+            instance_name: resolve_instance_name(env.get_optional::<String>("RS_INSTANCE_NAME")),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
-            replications: Self::parse_replications(&mut env),
+            replications,
             io_conf: Self::parse_io_config(&mut env),
+            audit_conf: Self::parse_audit_config(&mut env, &api_token),
             replication_conf: Self::parse_replication_config(&mut env, port),
-            cs_config: Self::parse_remote_storage_cfg(&mut env),
+            cs_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
+            limits_config: Self::parse_limits_config(&mut env),
+            #[cfg(feature = "zenoh-api")]
+            zenoh_api: Self::parse_zenoh_api_config(&mut env),
         };
 
         set_rwlock_timeout(cfg.rw_lock_config.timeout);
         set_rwlock_failure_action(cfg.rw_lock_config.failure_action);
 
-        let license = parse_license(cfg.license_path.clone());
-        let me = Self { cfg, env, license };
+        let license = ext_cfg.license();
+        let me = Self {
+            cfg,
+            env,
+            license,
+            ext_cfg,
+        };
 
         Logger::init(&me.cfg.log_level);
         info!("Configuration: \n {}", me);
+        if me.cfg.role == InstanceRole::Replica
+            && me.cfg.primary_url.is_none()
+            && me.cfg.secondary_url.is_none()
+        {
+            warn!(
+                "RS_PRIMARY_URL and RS_SECONDARY_URL are not set. Audit messages will not be forwarded from replica instances."
+            );
+        }
 
         let git_ref = if version.ends_with("-dev") {
             env!("COMMIT").to_string()
@@ -209,7 +338,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             info!("License Information: {}", license);
         } else {
             info!(
-                "License: BUSL-1.1 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
+                "License: Apache-2.0 [https://github.com/reductstore/reductstore/blob/{}/LICENSE]",
                 git_ref
             );
         }
@@ -247,10 +376,8 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
         let storage = Arc::new(self.provision_buckets(&data_path).await);
-        let token_repo = self.provision_tokens(&data_path);
+        let token_repo = self.provision_tokens(&data_path, Arc::clone(&storage));
         let console = create_asset_manager(load_console());
-        let select_ext = create_asset_manager(load_select_ext());
-        let ros_ext = create_asset_manager(load_ros_ext());
         let replication_engine = self
             .provision_replication_repo(Arc::clone(&storage))
             .await?;
@@ -267,26 +394,36 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
         };
 
         let server_info = storage.info().await?;
+        let ext_settings = ExtSettings::builder()
+            .log_level(&self.cfg.log_level)
+            .server_info(server_info.clone())
+            .build();
+        let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
+        let audit_repo = AuditRepositoryBuilder::new(self.cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
 
         Ok(Components {
-            storage,
+            storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(&self.cfg.api_token),
             console,
             replication_repo: AsyncRwLock::new(replication_engine),
             ext_repo: create_ext_repository(
                 ext_path,
-                vec![select_ext, ros_ext],
-                ExtSettings::builder()
-                    .log_level(&self.cfg.log_level)
-                    .server_info(server_info)
-                    .build(),
+                static_extensions,
+                ext_settings,
                 self.cfg.io_conf.clone(),
+                Some(Arc::clone(&storage)),
             )?,
             query_link_cache: AsyncRwLock::new(Cache::new(
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),
+            audit_repo: AsyncRwLock::new(audit_repo),
+            limits: LimitsBuilder::new()
+                .with_config(self.cfg.limits_config)
+                .build(),
             cfg: self.cfg.clone(),
         })
     }
@@ -307,46 +444,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
     }
 
     async fn init_storage_backend(&self) -> Result<(), ReductError> {
-        // Initialize storage backend
-        let mut backend_builder = Backend::builder()
-            .backend_type(self.cfg.cs_config.backend_type.clone())
-            .local_data_path(self.cfg.data_path.clone())
-            .cache_size(self.cfg.cs_config.cache_size)
-            .remote_default_storage_class(self.cfg.cs_config.default_storage_class.clone());
-
-        if let Some(bucket) = &self.cfg.cs_config.bucket {
-            backend_builder = backend_builder.remote_bucket(bucket);
-        }
-
-        if let Some(region) = &self.cfg.cs_config.region {
-            backend_builder = backend_builder.remote_region(region);
-        }
-
-        if let Some(endpoint) = &self.cfg.cs_config.endpoint {
-            backend_builder = backend_builder.remote_endpoint(endpoint);
-        }
-
-        if let Some(access_key) = &self.cfg.cs_config.access_key {
-            backend_builder = backend_builder.remote_access_key(access_key);
-        }
-
-        if let Some(secret_key) = &self.cfg.cs_config.secret_key {
-            backend_builder = backend_builder.remote_secret_key(secret_key);
-        }
-
-        if let Some(session_token) = &self.cfg.cs_config.session_token {
-            backend_builder = backend_builder.remote_session_token(session_token);
-        }
-
-        if let Some(cache_path) = &self.cfg.cs_config.cache_path {
-            backend_builder = backend_builder.remote_cache_path(cache_path.clone());
-        }
-
-        if let Some(license) = &self.license {
-            backend_builder = backend_builder.license(license.clone());
-        }
-
-        let backend = backend_builder.try_build().await.map_err(|e| {
+        let backend = self.ext_cfg.init_backend().await.map_err(|e| {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?;
 
@@ -379,31 +477,34 @@ fn load_console() -> &'static [u8] {
     b""
 }
 
-#[cfg(feature = "select-ext")]
-fn load_select_ext() -> &'static [u8] {
-    info!("Load Reduct Select Extension");
-    include_bytes!(concat!(env!("OUT_DIR"), "/select-ext.zip"))
+pub(super) fn parse_bool(raw: Option<String>, default: bool) -> bool {
+    raw.map(|value| match value.trim().to_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => true,
+        "0" | "false" | "no" | "off" => false,
+        _ => default,
+    })
+    .unwrap_or(default)
 }
 
-#[cfg(not(feature = "select-ext"))]
-fn load_select_ext() -> &'static [u8] {
-    info!("Reduct Select Extension is disabled");
-    b""
+fn resolve_instance_name(raw: Option<String>) -> String {
+    raw.and_then(|value| {
+        let trimmed = value.trim().to_string();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed)
+        }
+    })
+    .or_else(|| {
+        hostname::get()
+            .ok()
+            .and_then(|name| name.into_string().ok())
+            .filter(|name| !name.is_empty())
+    })
+    .unwrap_or_else(|| "unknown".to_string())
 }
 
-#[cfg(feature = "ros-ext")]
-fn load_ros_ext() -> &'static [u8] {
-    info!("Load Reduct ROS Extension");
-    include_bytes!(concat!(env!("OUT_DIR"), "/ros-ext.zip"))
-}
-
-#[cfg(not(feature = "ros-ext"))]
-fn load_ros_ext() -> &'static [u8] {
-    info!("Reduct ROS Extension is disabled");
-    b""
-}
-
-impl<EnvGetter: GetEnv> Display for CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> Display for CfgParser<EnvGetter, ExtCfg> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.env.message())
     }
@@ -430,6 +531,26 @@ mod tests {
     }
 
     #[rstest]
+    #[case(Some("true".to_string()), false, true)]
+    #[case(Some("0".to_string()), true, false)]
+    #[case(Some("bogus".to_string()), true, true)]
+    #[case(None, false, false)]
+    fn test_parse_bool(#[case] raw: Option<String>, #[case] default: bool, #[case] expected: bool) {
+        assert_eq!(parse_bool(raw, default), expected);
+    }
+
+    #[rstest]
+    fn test_resolve_instance_name() {
+        assert_eq!(
+            resolve_instance_name(Some("my-node".to_string())),
+            "my-node"
+        );
+
+        let fallback = resolve_instance_name(Some("   ".to_string()));
+        assert!(!fallback.is_empty());
+    }
+
+    #[rstest]
     #[tokio::test(flavor = "current_thread")]
     async fn test_default_settings(mut env_getter: MockEnvGetter) {
         env_getter
@@ -447,9 +568,52 @@ mod tests {
         assert_eq!(parser.cfg.cert_path, None);
         assert_eq!(parser.cfg.cert_key_path, None);
         assert_eq!(parser.cfg.cors_allow_origin.len(), 0);
+        assert_eq!(parser.cfg.limits_config, LimitsConfig::default());
 
         assert_eq!(parser.cfg.buckets.len(), 0);
         assert_eq!(parser.cfg.tokens.len(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_rate_limits(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_RATE_LIMIT_API"))
+            .times(1)
+            .return_const(Ok("100000req/h".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_RATE_LIMIT_INGRESS"))
+            .times(1)
+            .return_const(Ok("10GB/h".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_RATE_LIMIT_EGRESS"))
+            .times(1)
+            .return_const(Ok("1GB/h".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
+        assert_eq!(
+            parser.cfg.limits_config,
+            LimitsConfig {
+                api_requests_per_window: Some(crate::api::limits::WindowLimit::new(
+                    100_000,
+                    Duration::from_secs(3600),
+                )),
+                ingress_bytes_per_window: Some(crate::api::limits::WindowLimit::new(
+                    10_000_000_000,
+                    Duration::from_secs(3600),
+                )),
+                egress_bytes_per_window: Some(crate::api::limits::WindowLimit::new(
+                    1_000_000_000,
+                    Duration::from_secs(3600),
+                )),
+            }
+        );
     }
 
     #[rstest]
@@ -641,6 +805,40 @@ mod tests {
     }
 
     #[rstest]
+    #[case(
+        "RS_PRIMARY_URL",
+        "https://primary.example.com",
+        Some("https://primary.example.com".to_string()),
+        None
+    )]
+    #[case(
+        "RS_SECONDARY_URL",
+        "https://secondary.example.com",
+        None,
+        Some("https://secondary.example.com".to_string())
+    )]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_replica_urls(
+        mut env_getter: MockEnvGetter,
+        #[case] env_name: &'static str,
+        #[case] env_value: &'static str,
+        #[case] expected_primary_url: Option<String>,
+        #[case] expected_secondary_url: Option<String>,
+    ) {
+        env_getter
+            .expect_get()
+            .with(eq(env_name))
+            .times(1)
+            .return_const(Ok(env_value.to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
+        assert_eq!(parser.cfg.primary_url, expected_primary_url);
+        assert_eq!(parser.cfg.secondary_url, expected_secondary_url);
+    }
+
+    #[rstest]
     #[tokio::test(flavor = "current_thread")]
     async fn test_cert_path(mut env_getter: MockEnvGetter) {
         env_getter
@@ -675,20 +873,28 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "current_thread")]
-    async fn test_license_path(mut env_getter: MockEnvGetter) {
-        env_getter
-            .expect_get()
-            .with(eq("RS_LICENSE_PATH"))
-            .times(1)
-            .return_const(Ok("/tmp/license.lic".to_string())); // must be created from CI
+    async fn test_no_license_by_default(mut env_getter: MockEnvGetter) {
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
         let parser = CfgParser::from_env(env_getter, "0.0.0").await;
-        assert_eq!(
-            parser.cfg.license_path,
-            Some("/tmp/license.lic".to_string())
-        );
+        assert!(parser.license.is_none());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_instance_name_from_env(mut env_getter: MockEnvGetter) {
+        env_getter
+            .expect_get()
+            .with(eq("RS_INSTANCE_NAME"))
+            .times(1)
+            .return_const(Ok("my-node".to_string()));
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
+        assert_eq!(parser.cfg.instance_name, "my-node");
     }
 
     #[rstest]

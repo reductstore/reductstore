@@ -1,11 +1,13 @@
-// Copyright 2023-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
+mod get_entry;
 mod query;
 mod quotas;
 mod read_only;
 mod remove_entry;
 mod remove_records;
+mod rename_entry;
 pub(super) mod settings;
 pub(crate) mod update_records;
 
@@ -19,8 +21,10 @@ use crate::storage::bucket::query::MultiEntryQuery;
 use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
-use crate::storage::engine::{check_name_convention, ReadOnlyMode};
-use crate::storage::entry::{Entry, EntrySettings};
+use crate::storage::engine::ReadOnlyMode;
+use crate::storage::entry::{
+    is_system_meta_entry, Entry, EntrySettings, META_ENTRY_MAX_BLOCK_SIZE,
+};
 use crate::storage::folder_keeper::FolderKeeper;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::{debug, error};
@@ -30,13 +34,28 @@ use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::status::ResourceStatus;
-use reduct_base::{conflict, internal_server_error, not_found, Labels};
+use reduct_base::{conflict, internal_server_error, Labels};
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+
+fn normalize_entry_name(path: &std::path::Path) -> String {
+    path.to_string_lossy().replace('\\', "/")
+}
+
+fn settings_for_entry(entry_name: &str, settings: &BucketSettings) -> EntrySettings {
+    EntrySettings {
+        max_block_size: if is_system_meta_entry(entry_name) {
+            META_ENTRY_MAX_BLOCK_SIZE
+        } else {
+            settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE)
+        },
+        max_block_records: settings.max_block_records.unwrap_or(DEFAULT_MAX_RECORDS),
+    }
+}
 
 /// Bucket is a single storage bucket.
 pub(crate) struct Bucket {
@@ -121,13 +140,17 @@ impl Bucket {
         let mut task_set = Vec::new();
         let folder_keeper = FolderKeeper::new(path.clone(), cfg.as_ref()).await;
 
-        for path in folder_keeper.list_folders().await? {
+        for entry_path in folder_keeper.list_folders().await? {
+            let entry_name = normalize_entry_name(
+                entry_path
+                    .strip_prefix(&path)
+                    .unwrap_or(entry_path.as_path()),
+            );
             let handler = Entry::restore(
-                path,
-                EntrySettings {
-                    max_block_size: settings.max_block_size.unwrap(),
-                    max_block_records: settings.max_block_records.unwrap(),
-                },
+                entry_path,
+                entry_name.clone(),
+                bucket_name.clone(),
+                settings_for_entry(&entry_name, &settings),
                 cfg.clone(),
             );
 
@@ -154,52 +177,6 @@ impl Bucket {
             folder_keeper: Arc::new(folder_keeper),
             queries: AsyncRwLock::new(HashMap::new()),
         })
-    }
-
-    /// Get or create an entry in the bucket
-    ///
-    /// # Arguments
-    ///
-    /// * `key` - The key of the entry
-    ///
-    /// # Returns
-    ///
-    /// * `&mut Entry` - The entry or an HTTPError
-    pub async fn get_or_create_entry(&self, key: &str) -> Result<Weak<Entry>, ReductError> {
-        check_name_convention(key)?;
-        self.ensure_not_deleting().await?;
-
-        let entry = {
-            let entries = self.entries.read().await?;
-            entries.get(key).cloned()
-        };
-
-        let entry = if let Some(entry) = entry {
-            entry
-        } else {
-            self.check_mode()?;
-            let settings = self.settings.read().await?;
-            self.folder_keeper.add_folder(key).await?;
-            let entry = Arc::new(
-                Entry::try_build(
-                    &key,
-                    self.path.clone(),
-                    EntrySettings {
-                        max_block_size: settings.max_block_size.unwrap(),
-                        max_block_records: settings.max_block_records.unwrap(),
-                    },
-                    self.cfg.clone(),
-                )
-                .await?,
-            );
-            let mut entries = self.entries.write().await?;
-            entries
-                .entry(key.to_string())
-                .or_insert_with(|| Arc::clone(&entry))
-                .clone()
-        };
-        entry.ensure_not_deleting().await?;
-        Ok(entry.into())
     }
 
     /// Get an entry in the bucket
@@ -233,19 +210,21 @@ impl Bucket {
         let mut latest_record = 0u64;
         let mut entry_infos = Vec::new();
 
-        let entries = self.entries.read().await?;
-        let infos = entries
-            .values()
-            .into_iter()
-            .map(|entry| entry.info())
-            .collect::<Vec<_>>();
+        let entries_guard = self.entries.read().await?;
+        let entries = entries_guard.values().cloned().collect::<Vec<_>>();
+        drop(entries_guard);
 
-        for info in infos {
-            let info = info.await?;
+        for entry in entries {
+            let info = entry.info().await?;
             size += info.size;
-            oldest_record = oldest_record.min(info.oldest_record);
-            latest_record = latest_record.max(info.latest_record);
-            entry_infos.push(info);
+
+            if entry.is_visible_in_bucket_info() {
+                if info.record_count > 0 {
+                    oldest_record = oldest_record.min(info.oldest_record);
+                    latest_record = latest_record.max(info.latest_record);
+                }
+                entry_infos.push(info);
+            }
         }
 
         Ok(FullBucketInfo {
@@ -277,7 +256,33 @@ impl Bucket {
     ///
     /// * `Sender<Result<Bytes, ReductError>>` - The sender to send the record content in chunks.
     /// * `HTTPError` - The error if any.
-    pub async fn begin_write(
+    #[cfg(not(test))]
+    pub(in crate::storage) async fn begin_write(
+        self: &Arc<Self>,
+        name: &str,
+        time: u64,
+        content_size: u64,
+        content_type: String,
+        labels: Labels,
+    ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        self.begin_write_impl(name, time, content_size, content_type, labels)
+            .await
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn begin_write(
+        self: &Arc<Self>,
+        name: &str,
+        time: u64,
+        content_size: u64,
+        content_type: String,
+        labels: Labels,
+    ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        self.begin_write_impl(name, time, content_size, content_type, labels)
+            .await
+    }
+
+    async fn begin_write_impl(
         self: &Arc<Self>,
         name: &str,
         time: u64,
@@ -315,57 +320,6 @@ impl Bucket {
             Ok(entry) => entry.begin_read(time).await,
             Err(e) => Err(e).into(),
         }
-    }
-
-    pub async fn rename_entry(&self, old_name: &str, new_name: &str) -> Result<(), ReductError> {
-        self.check_mode()?;
-
-        let new_path = self.path.join(new_name);
-        let bucket_name = self.name.clone();
-        let entries = self.entries.clone();
-        let settings = self.settings().await?;
-        let cfg = self.cfg.clone();
-        let folder_keeper = self.folder_keeper.clone();
-
-        check_name_convention(&new_name)?;
-        if new_path.exists() {
-            return Err(conflict!(
-                "Entry '{}' already exists in bucket '{}'",
-                new_name,
-                bucket_name
-            ));
-        }
-
-        if let Some(entry) = entries.read().await?.get(old_name) {
-            entry.ensure_not_deleting().await?;
-            entry.compact().await?;
-        } else {
-            return Err(not_found!(
-                "Entry '{}' not found in bucket '{}'",
-                old_name,
-                bucket_name
-            ));
-        }
-
-        folder_keeper.rename_folder(old_name, new_name).await?;
-        entries.write().await?.remove(old_name);
-
-        if let Some(entry) = Entry::restore(
-            new_path,
-            EntrySettings {
-                max_block_size: settings.max_block_size.unwrap_or(DEFAULT_MAX_BLOCK_SIZE),
-                max_block_records: settings.max_block_records.unwrap_or(DEFAULT_MAX_RECORDS),
-            },
-            cfg.clone(),
-        )
-        .await?
-        {
-            entries
-                .write()
-                .await?
-                .insert(new_name.to_string(), Arc::new(entry));
-        }
-        Ok(())
     }
 
     /// Sync all entries to the file system
@@ -443,6 +397,26 @@ impl Bucket {
             Ok(())
         }
     }
+
+    fn parent_prefixes(key: &str) -> Vec<String> {
+        let mut prefixes = Vec::new();
+        let mut current = String::new();
+        for segment in key.split('/') {
+            if !current.is_empty() {
+                current.push('/');
+            }
+            current.push_str(segment);
+            prefixes.push(current.clone());
+        }
+        prefixes
+    }
+
+    fn entry_with_descendants<'a>(entry_name: &'a str, candidate: &'a str) -> bool {
+        candidate == entry_name
+            || candidate
+                .strip_prefix(entry_name)
+                .is_some_and(|suffix| suffix.starts_with('/'))
+    }
 }
 
 #[cfg(test)]
@@ -464,118 +438,6 @@ mod tests {
     use std::sync::Arc;
     use tempfile::tempdir;
 
-    mod get_or_create {
-        use super::*;
-        use reduct_base::unprocessable_entity;
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_get_or_create_entry(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            let entry = bucket.get_or_create_entry("test-1").await.unwrap();
-            assert_eq!(entry.upgrade().unwrap().name(), "test-1");
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_get_or_create_entry_invalid_name(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            assert_eq!(
-                bucket.get_or_create_entry("test-1/").await.err(),
-                Some(unprocessable_entity!(
-                    "Bucket or entry name can contain only letters, digests and [-,_] symbols"
-                ))
-            );
-        }
-    }
-
-    mod rename_entry {
-        use super::*;
-        use reduct_base::unprocessable_entity;
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_rename_entry(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            write(&bucket, "test-1", 1, b"test").await.unwrap();
-
-            bucket.rename_entry("test-1", "test-2").await.unwrap();
-            assert_eq!(
-                bucket.get_entry("test-1").await.err(),
-                Some(ReductError::not_found(
-                    "Entry 'test-1' not found in bucket 'test'"
-                ))
-            );
-            assert_eq!(
-                bucket
-                    .get_entry("test-2")
-                    .await
-                    .unwrap()
-                    .upgrade()
-                    .unwrap()
-                    .name(),
-                "test-2"
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_rename_entry_not_found(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            assert_eq!(
-                bucket.rename_entry("test-1", "test-2").await.err(),
-                Some(not_found!("Entry 'test-1' not found in bucket 'test'"))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_rename_entry_already_exists(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            write(&bucket, "test-1", 1, b"test").await.unwrap();
-            write(&bucket, "test-2", 1, b"test").await.unwrap();
-
-            assert_eq!(
-                bucket.rename_entry("test-1", "test-2").await.err(),
-                Some(conflict!("Entry 'test-2' already exists in bucket 'test'"))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_rename_invalid_name(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            assert_eq!(
-                bucket.rename_entry("test-1", "test-2/").await.err(),
-                Some(unprocessable_entity!(
-                    "Bucket or entry name can contain only letters, digests and [-,_] symbols"
-                ))
-            );
-        }
-
-        #[rstest]
-        #[tokio::test(flavor = "multi_thread")]
-        async fn test_rename_entry_persisted(#[future] bucket: Arc<Bucket>) {
-            let bucket = bucket.await;
-            write(&bucket, "test-1", 1, b"test").await.unwrap();
-            bucket.sync_fs().await.unwrap();
-            bucket.rename_entry("test-1", "test-2").await.unwrap();
-
-            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
-                .await
-                .unwrap();
-            assert_eq!(
-                bucket.get_entry("test-1").await.err(),
-                Some(ReductError::not_found(
-                    "Entry 'test-1' not found in bucket 'test'"
-                ))
-            );
-
-            let mut reader = bucket.begin_read("test-2", 1).await.unwrap();
-            assert_eq!(reader.read_chunk().unwrap().unwrap(), Bytes::from("test"));
-        }
-    }
-
     mod status {
         use super::*;
 
@@ -589,6 +451,84 @@ mod tests {
                 .entries
                 .iter()
                 .all(|entry| entry.status == ResourceStatus::Ready));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_bucket_info_hides_meta_entries_from_count(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            write(&bucket, "entry-1", 1, b"data").await.unwrap();
+            write_meta(&bucket, "entry-1/$meta", 1, b"meta")
+                .await
+                .unwrap();
+
+            let info = bucket.info().await.unwrap();
+            assert_eq!(info.info.entry_count, 1);
+            assert_eq!(info.entries.len(), 1);
+            assert_eq!(info.entries[0].name, "entry-1");
+            assert!(info.info.size >= 8);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_bucket_info_ignores_meta_entries_for_history(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            write_meta(&bucket, "entry-1/$meta", 1, b"meta")
+                .await
+                .unwrap();
+            write(&bucket, "entry-1", 100, b"data").await.unwrap();
+            write(&bucket, "entry-1", 200, b"more").await.unwrap();
+
+            let info = bucket.info().await.unwrap();
+            assert_eq!(info.info.oldest_record, 100);
+            assert_eq!(info.info.latest_record, 200);
+            assert_eq!(info.info.entry_count, 1);
+            assert_eq!(info.entries.len(), 1);
+            assert_eq!(info.entries[0].name, "entry-1");
+            assert_eq!(info.entries[0].oldest_record, 100);
+            assert_eq!(info.entries[0].latest_record, 200);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_bucket_info_ignores_empty_parent_entries_for_oldest_record(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            let settings = bucket.settings().await.unwrap();
+            let empty_entry = Arc::new(
+                Entry::try_build(
+                    "empty",
+                    bucket.path.clone(),
+                    settings_for_entry("empty", &settings),
+                    bucket.cfg.clone(),
+                )
+                .await
+                .unwrap(),
+            );
+            bucket
+                .entries
+                .write()
+                .await
+                .unwrap()
+                .insert("empty".to_string(), empty_entry);
+
+            write(&bucket, "filled", 1, b"data").await.unwrap();
+            write(&bucket, "filled", 2, b"more").await.unwrap();
+
+            let info = bucket.info().await.unwrap();
+            assert_eq!(info.info.oldest_record, 1);
+            assert_eq!(info.info.latest_record, 2);
+            assert_eq!(info.info.entry_count, 2);
+
+            let entries = info
+                .entries
+                .into_iter()
+                .map(|entry| (entry.name.clone(), entry))
+                .collect::<HashMap<_, _>>();
+            assert_eq!(entries["filled"].record_count, 2);
+            assert_eq!(entries["filled"].oldest_record, 1);
+            assert_eq!(entries["filled"].latest_record, 2);
         }
 
         #[rstest]
@@ -646,6 +586,46 @@ mod tests {
         }
     }
 
+    mod restore {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_restore_nested_entry_path(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            write(&bucket, "entry/a", 1, b"test").await.unwrap();
+            bucket.sync_fs().await.unwrap();
+
+            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+                .await
+                .unwrap();
+            let mut reader = bucket.begin_read("entry/a", 1).await.unwrap();
+            assert_eq!(reader.read_chunk().unwrap().unwrap(), Bytes::from("test"));
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_restore_meta_entry_uses_small_block_size(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            write_meta(&bucket, "entry/a/$meta", 1, b"meta")
+                .await
+                .unwrap();
+            bucket.sync_fs().await.unwrap();
+
+            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+                .await
+                .unwrap();
+            let entry = bucket
+                .get_entry("entry/a/$meta")
+                .await
+                .unwrap()
+                .upgrade()
+                .unwrap();
+            let settings = entry.settings().await.unwrap();
+            assert_eq!(settings.max_block_size, META_ENTRY_MAX_BLOCK_SIZE);
+        }
+    }
+
     #[rstest]
     #[tokio::test]
     async fn test_provisioned_info(#[future] provisioned_bucket: Arc<Bucket>) {
@@ -682,6 +662,32 @@ mod tests {
                 content.len() as u64,
                 "".to_string(),
                 Labels::new(),
+            )
+            .await?;
+        sender
+            .send(Ok(Some(Bytes::from(content))))
+            .await
+            .map_err(|e| internal_server_error!("Failed to send data: {}", e))?;
+        sender
+            .send(Ok(None))
+            .await
+            .map_err(|e| internal_server_error!("Failed to sync channel: {}", e))?;
+        Ok(())
+    }
+
+    pub async fn write_meta(
+        bucket: &Arc<Bucket>,
+        entry_name: &str,
+        time: u64,
+        content: &'static [u8],
+    ) -> Result<(), ReductError> {
+        let mut sender = bucket
+            .begin_write(
+                entry_name,
+                time,
+                content.len() as u64,
+                "".to_string(),
+                Labels::from_iter([("key".to_string(), "default".to_string())]),
             )
             .await?;
         sender
