@@ -122,6 +122,21 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_missing_spa_route_falls_back_to_index(#[future] keeper: Arc<StateKeeper>) {
+        let request = Request::get("/ui/settings").body(Body::empty()).unwrap();
+        let response = show_ui(State(keeper.await), request)
+            .await
+            .unwrap()
+            .into_response();
+        assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "text/html");
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let body = String::from_utf8(body.to_vec()).unwrap();
+        assert!(body.contains("<!doctype html>"));
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_redirect(#[future] keeper: Arc<StateKeeper>) {
         let response = redirect_to_index(State(keeper.await)).await.into_response();
         assert_eq!(response.status(), StatusCode::FOUND);
