@@ -49,7 +49,8 @@ runs:
       with:
         snapcraft-args: "pack --verbose --build-for=${{ inputs.arch }}"
 
-    - name: Install snap for testing
+    - name: Install snap for testing (amd64 only)
+      if: ${{ inputs.arch == 'amd64' }}
       shell: bash
       run: |
         sudo snap install --dangerous ${{ steps.build-snap.outputs.snap }}
