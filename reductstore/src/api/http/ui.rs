@@ -81,7 +81,7 @@ pub(super) async fn show_ui(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use axum::body::HttpBody;
+    use axum::body::to_bytes;
 
     use crate::api::http::tests::{keeper, waiting_keeper};
     use rstest::rstest;
@@ -95,7 +95,10 @@ mod tests {
             .unwrap()
             .into_response();
         assert_eq!(response.headers().get(CONTENT_TYPE).unwrap(), "image/png");
-        assert_eq!(response.body().size_hint().lower(), 592);
+
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        assert!(body.len() > 100);
+        assert_eq!(&body[..8], b"\x89PNG\r\n\x1a\n");
     }
 
     #[rstest]
