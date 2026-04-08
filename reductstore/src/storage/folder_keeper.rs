@@ -42,7 +42,7 @@ impl FolderKeeper {
         let full_access = cfg.role != InstanceRole::Replica;
 
         // for Filesystem backend, always rebuild from FS since it is cheap and reliable
-        let proto = if cfg.cs_config.backend_type == BackendType::Filesystem {
+        let proto = if cfg.backend_config.backend_type == BackendType::Filesystem {
             let proto = Self::build_from_fs(&path, depth).await;
             if full_access {
                 if let Err(err) =
@@ -340,7 +340,7 @@ mod tests {
 
         // Configure for S3 backend (non-filesystem)
         let mut cfg = Cfg::default();
-        cfg.cs_config.backend_type = BackendType::S3;
+        cfg.backend_config.backend_type = BackendType::S3;
 
         let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
         let folders = keeper.list_folders().await.unwrap();
@@ -373,7 +373,7 @@ mod tests {
 
         // Configure for S3 backend (non-filesystem)
         let mut cfg = Cfg::default();
-        cfg.cs_config.backend_type = BackendType::S3;
+        cfg.backend_config.backend_type = BackendType::S3;
 
         let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
         let folders = keeper.list_folders().await.unwrap();
@@ -411,7 +411,7 @@ mod tests {
             .unwrap();
 
         let mut cfg = Cfg::default();
-        cfg.cs_config.backend_type = BackendType::Filesystem;
+        cfg.backend_config.backend_type = BackendType::Filesystem;
 
         let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
         let folders = keeper.list_folders().await.unwrap();
@@ -440,7 +440,7 @@ mod tests {
             .unwrap();
 
         let mut cfg = Cfg::default();
-        cfg.cs_config.backend_type = BackendType::Filesystem;
+        cfg.backend_config.backend_type = BackendType::Filesystem;
 
         let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
         let folders = keeper.list_folders().await.unwrap();
@@ -485,7 +485,7 @@ mod tests {
             .unwrap();
 
         let mut cfg = Cfg::default();
-        cfg.cs_config.backend_type = BackendType::Filesystem;
+        cfg.backend_config.backend_type = BackendType::Filesystem;
         let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
         let folders = keeper.list_folders().await.unwrap();
 
@@ -505,7 +505,7 @@ mod tests {
             .unwrap();
 
         let mut cfg = Cfg::default();
-        cfg.cs_config.backend_type = BackendType::Filesystem;
+        cfg.backend_config.backend_type = BackendType::Filesystem;
 
         let keeper = FolderKeeper::new(base_path.clone(), &cfg).await;
         let folders = keeper.list_folders().await.unwrap();
@@ -532,7 +532,7 @@ mod tests {
             .unwrap();
 
         let mut cfg = Cfg::default();
-        cfg.cs_config.backend_type = BackendType::Filesystem;
+        cfg.backend_config.backend_type = BackendType::Filesystem;
         let keeper =
             FolderKeeper::new_with_depth(base_path.clone(), &cfg, DiscoveryDepth::FirstLevel).await;
         let folders = keeper.list_folders().await.unwrap();

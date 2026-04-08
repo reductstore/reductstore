@@ -6,7 +6,6 @@ pub mod io;
 pub mod limits;
 pub mod lock_file;
 mod provision;
-pub mod remote_storage;
 pub mod replication;
 pub mod rw_lock;
 pub mod storage_engine;
@@ -18,11 +17,10 @@ use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
 use crate::audit::AuditRepositoryBuilder;
 use crate::auth::token_auth::TokenAuthorization;
-use crate::backend::{Backend, BackendType};
+use crate::backend::{Backend, BackendType, GeneralBackendConfig};
 use crate::cfg::audit::AuditConfig;
 use crate::cfg::io::IoConfig;
 use crate::cfg::lock_file::LockFileConfig;
-use crate::cfg::remote_storage::RemoteStorageConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
@@ -96,7 +94,7 @@ pub struct Cfg {
     pub io_conf: IoConfig,
     pub audit_conf: AuditConfig,
     pub replication_conf: ReplicationConfig,
-    pub cs_config: RemoteStorageConfig,
+    pub backend_config: GeneralBackendConfig,
     pub lock_file_config: LockFileConfig,
     pub rw_lock_config: RwLockConfig,
     pub engine_config: StorageEngineConfig,
@@ -129,7 +127,7 @@ impl Default for Cfg {
             io_conf: IoConfig::default(),
             audit_conf: AuditConfig::default(),
             replication_conf: ReplicationConfig::default(),
-            cs_config: RemoteStorageConfig::default(),
+            backend_config: GeneralBackendConfig::default(),
             lock_file_config: LockFileConfig::default(),
             rw_lock_config: RwLockConfig::default(),
             engine_config: StorageEngineConfig::default(),
@@ -153,9 +151,11 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
     fn license(&self) -> Option<License> {
         None
     }
-    fn remote_storage_config(&self) -> RemoteStorageConfig {
-        RemoteStorageConfig::default()
+
+    fn remote_storage_config(&self) -> GeneralBackendConfig {
+        GeneralBackendConfig::default()
     }
+
     async fn init_backend(&self) -> Result<Backend, ReductError> {
         let builder = Backend::builder()
             .backend_type(self.remote_storage_config().backend_type.clone())
@@ -297,7 +297,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             io_conf: Self::parse_io_config(&mut env),
             audit_conf: Self::parse_audit_config(&mut env, &api_token),
             replication_conf: Self::parse_replication_config(&mut env, port),
-            cs_config: ext_cfg.remote_storage_config(),
+            backend_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
@@ -429,11 +429,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     }
 
     fn get_data_path(&self) -> Result<PathBuf, ReductError> {
-        let data_path = if self.cfg.cs_config.backend_type == BackendType::Filesystem {
+        let data_path = if self.cfg.backend_config.backend_type == BackendType::Filesystem {
             self.cfg.data_path.clone()
         } else {
             self.cfg
-                .cs_config
+                .backend_config
                 .cache_path
                 .clone()
                 .ok_or(internal_server_error!(
@@ -449,7 +449,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         })?;
 
         FILE_CACHE.set_storage_backend(backend).await;
-        FILE_CACHE.set_sync_interval(self.cfg.cs_config.sync_interval);
+        FILE_CACHE.set_sync_interval(self.cfg.backend_config.sync_interval);
         FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::Replica);
         Ok(())
     }
