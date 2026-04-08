@@ -6,7 +6,7 @@ authors.workspace = true
 edition.workspace = true
 rust-version.workspace = true
 
-license = "BUSL-1.1"
+license = "Apache-2.0"
 description = "ReductStore is a time series database designed specifically for storing and managing large amounts of blob data."
 homepage = "https://reduct.store"
 documentation = "https://reduct.store/docs"
@@ -19,13 +19,10 @@ include = ["src/**/*", "Cargo.toml", "Cargo.lock", "build.rs", "README.md", "LIC
 [features]
 default = ["web-console", "fs-backend"]
 web-console = []
-select-ext = []
-ros-ext = []
 ci = [] # features enables CI-specific tests
 
-
 fs-backend = []
-s3-backend = ["dep:aws-sdk-s3", "dep:aws-config", "dep:aws-credential-types"]
+zenoh-api = ["dep:zenoh"]
 
 [lib]
 crate-type = ["lib"]
@@ -37,8 +34,9 @@ reduct-base = { path = "../reduct_base", version = "1.18.0", features = ["ext"] 
 reduct-macros = { path = "../reduct_macros", version = "1.18.0" }
 
 chrono = { version = "0.4.41", features = ["serde"] }
-zip = "7.0.0"
-tempfile = "3.23.0"
+chrono-tz = "0.10.4"
+zip = "8.1.0"
+tempfile = "3.27.0"
 hex = "0.4.3"
 prost-wkt-types = "0.7.0"
 rand = "0.9.2"
@@ -57,7 +55,7 @@ mime_guess = "2.0.5"
 bytesize = "2.3.1"
 async-trait = "0.1.89"
 url = { version = "2.5.4", features = ["serde"] }
-jsonwebtoken = { version = "10.2.0", features = ["aws_lc_rs"] }
+hostname = "0.4.1"
 base64 = "0.22.1"
 ring = "0.17.12"
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
@@ -73,14 +71,10 @@ prost = "0.14.1"
 flate2 = "1.1.5"
 argon2 = "0.6.0-rc.1"
 aes-siv = "0.8.0-rc.1"
-uuid = { version = "1.20.0", features = ["v4"] }
+uuid = { version = "1.21.0", features = ["v4"] }
 parking_lot="0.12.5"
+zenoh = { version = "1.8.0", optional = true }
 
-# optional dependencies for remote backend
-aws-sdk-s3 = { version = "1.121.0", optional = true, features = ["rustls"] }
-aws-config = { version = "1.8.8", optional = true, features = ["rustls"] }
-aws-credential-types = { version = "1.2.8", optional = true, features = ["hardcoded-credentials"]}
-rstest = "0.26.1"
 
 [build-dependencies]
 prost-build = "0.14.1"

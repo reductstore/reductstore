@@ -1,5 +1,5 @@
-// Copyright 2023-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 pub(in crate::storage) mod block;
 mod block_cache;
@@ -22,6 +22,7 @@ use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use reduct_base::too_early;
 use std::fs::OpenOptions;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
@@ -62,15 +63,16 @@ impl BlockManager {
     ///
     /// * `path` - Path to the block manager directory.
     /// * `index` - Block index to use.
+    /// * `bucket` - Bucket name.
+    /// * `entry` - Full entry name.
     /// * `cfg` - Configuration.
-    pub(crate) async fn build(path: PathBuf, index: BlockIndex, cfg: Arc<Cfg>) -> Self {
-        let (bucket, entry) = {
-            let mut parts = path.iter().rev();
-            let entry = parts.next().unwrap().to_str().unwrap().to_string();
-            let bucket = parts.next().unwrap().to_str().unwrap().to_string();
-            (bucket, entry)
-        };
-
+    pub(crate) async fn build(
+        path: PathBuf,
+        index: BlockIndex,
+        bucket: String,
+        entry: String,
+        cfg: Arc<Cfg>,
+    ) -> Self {
         Self {
             path: path.clone(),
             bucket,
@@ -153,6 +155,19 @@ impl BlockManager {
                     buf
                 }
                 Err(err) => {
+                    // Re-check existence to distinguish a transient TOCTOU race
+                    // (descriptor removed after the first check) from a real read failure.
+                    if self.cfg.role == InstanceRole::Replica
+                        && !FILE_CACHE.try_exists(&path).await?
+                    {
+                        self.block_index.remove_block(block_id);
+                        return Err(too_early!(
+                            "Block descriptor {:?} can't be read on replica yet: {}. Reload index and retry",
+                            path,
+                            err
+                        ));
+                    }
+
                     // here we can't read the block descriptor, it might be corrupted or not exist
                     // we should remove it from the index
                     let err_msg = format!("Block descriptor {:?} can't be read: {}", path, err);
@@ -176,6 +191,20 @@ impl BlockManager {
                 if let Some(block_crc) = block.crc64 {
                     // we check crc if the crc is stored in the index for backward compatibility
                     if block_crc != crc.sum64() {
+                        if self.cfg.role == InstanceRole::Replica {
+                            warn!(
+                                "Block descriptor {:?} CRC mismatch on replica: index CRC {} mismatch with calculated CRC {}. Treat as transient and reload index",
+                                path,
+                                block_crc,
+                                crc.sum64()
+                            );
+                            self.block_index.remove_block(block_id);
+                            return Err(too_early!(
+                                "Block descriptor {:?} CRC mismatch on replica. Reload index and retry",
+                                path
+                            ));
+                        }
+
                         error!("Block descriptor {:?} is corrupted: index CRC {} mismatch with calculated CRC {}.\
                      Remove it and its data block, then restart the database", path, block_crc, crc.sum64());
 
@@ -626,6 +655,10 @@ impl BlockManager {
         Ok(&self.block_index)
     }
 
+    pub async fn force_reload_index_on_replica(&mut self) -> Result<(), ReductError> {
+        self.reload_if_readonly_with(true).await
+    }
+
     pub fn bucket_name(&self) -> &String {
         &self.bucket
     }
@@ -730,9 +763,14 @@ mod tests {
             let path = tempdir().unwrap().keep().join("bucket").join("entry");
             let mut cfg = Cfg::default();
             cfg.role = InstanceRole::Replica;
-            let block_manager =
-                BlockManager::build(path.clone(), BlockIndex::new(path.clone()), Arc::new(cfg))
-                    .await;
+            let block_manager = BlockManager::build(
+                path.clone(),
+                BlockIndex::new(path.clone()),
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(cfg),
+            )
+            .await;
             block_manager.sync_data_block(1).await.unwrap();
         }
 
@@ -741,9 +779,14 @@ mod tests {
         async fn test_sync_data_block_ok_for_missing_path() {
             let path = tempdir().unwrap().keep().join("bucket").join("entry");
             let cfg = Cfg::default();
-            let block_manager =
-                BlockManager::build(path.clone(), BlockIndex::new(path.clone()), Arc::new(cfg))
-                    .await;
+            let block_manager = BlockManager::build(
+                path.clone(),
+                BlockIndex::new(path.clone()),
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(cfg),
+            )
+            .await;
             block_manager.sync_data_block(999).await.unwrap();
         }
 
@@ -1303,6 +1346,8 @@ mod tests {
         let mut bm = BlockManager::build(
             path.clone(),
             BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            "bucket".to_string(),
+            "entry".to_string(),
             Cfg::default().into(),
         )
         .await;

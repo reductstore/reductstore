@@ -35,7 +35,6 @@ It guarantees that your data will not overflow your hard disk and batches record
 - JSON-based query language for filtering data
 - Data replication
 - Real-time FIFO bucket quota based on size to avoid disk space shortage
-- Native support for S3-compatible storage backends (MinIO, AWS S3, etc.)
 - Readonly replicas for horizontal scaling of read operations
 - Primary\Secondary mode for high availability
 
@@ -44,6 +43,14 @@ It guarantees that your data will not overflow your hard disk and batches record
 The quickest way to get up and running is with our Docker image:
 
 ```
+docker run -p 8383:8383 -v reduct-data:/data reduct/store:latest
+```
+
+If you prefer a bind mount instead of a Docker volume:
+
+```bash
+mkdir -p ./data
+sudo chown -R 10001:10001 ./data
 docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
 ```
 
@@ -74,16 +81,17 @@ async def main():
         )
 
         # 3. Write some data with timestamps and labels to the 'entry-1' entry
-        await bucket.write("sensor-1", b"<Blob data>", timestamp="2024-01-01T10:00:00Z",
+        await bucket.write("/telemetry/sensor-1", b"<Blob data>", timestamp="2024-01-01T10:00:00Z",
                            labels={"score": 10})
-        await bucket.write("sensor-1", b"<Blob data>", timestamp="2024-01-01T10:00:01Z",
+        await bucket.write("/telemetry/sensor-2", b"<Blob data>", timestamp="2024-01-01T10:00:01Z",
                            labels={"score": 20})
 
         # 4. Query the data by time range and condition
-        async for record in bucket.query("sensor-1",
+        async for record in bucket.query("/telemetry/*",
                                          start="2024-01-01T10:00:00Z",
                                          stop="2024-01-01T10:00:02Z",
                                          when={"&score": {"$gt": 20}}):
+            print(f"Entry name: {record.entry}")
             print(f"Record timestamp: {record.timestamp}")
             print(f"Record size: {record.size}")
             print(await record.read_all())
@@ -113,6 +121,7 @@ ReductStore is not just about data storage; it's about simplifying and enhancing
 
 - [CLI Client](https://github.com/reductstore/reduct-cli) - a command-line interface for direct interactions with ReductStore
 - [Web Console](https://github.com/reductstore/web-console) - a web interface to administrate a ReductStore instance
+- [ReductBridge](https://github.com/reductstore/reduct-bridge) - a data collector to get data from various sources and write it to ReductStore
 
 ## **Feedback & Contribution**
 

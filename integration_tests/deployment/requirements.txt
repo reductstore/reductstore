@@ -1,4 +1,4 @@
-pytest~=9.0
-pytest-asyncio~=0.23
+pytest>=8,<9
+pytest-asyncio~=0.24
 reduct-py~=1.16
 aiohttp~=3.13

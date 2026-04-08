@@ -1,0 +1,65 @@
+name: 'Run HTTP API Tests'
+description: 'Runs HTTP API integration tests for ReductStore.'
+inputs:
+  token:
+    description: 'API token.'
+    required: true
+  cert_path:
+    description: 'Certificate path.'
+    required: true
+  url:
+    description: 'ReductStore URL.'
+    required: true
+runs:
+  using: 'composite'
+  steps:
+    - name: Download Docker image artifact
+      uses: actions/download-artifact@v4
+      with:
+        name: image
+        path: /tmp/
+
+    - name: Load Docker image
+      shell: bash
+      run: docker load --input /tmp/image.tar
+
+    - name: Check dir
+      run: ls -la ./misc
+      shell: bash
+
+    - name: Run ReductStore
+      shell: bash
+      run: |
+        docker run --network=host -v ${PWD}/misc:/misc \
+          --env RS_API_TOKEN=${{ inputs.token }} \
+          --env RS_AUDIT_ENABLED=true \
+          --env RS_CERT_PATH=${{ inputs.cert_path }} \
+          --env RS_CERT_KEY_PATH=/misc/privateKey.key \
+          --env RS_CORS_ALLOW_ORIGIN="https://first-allowed-origin.com, https://second-allowed-origin.com" \
+          --name reduct -d ${{ github.repository }}
+
+        for _ in {1..20}; do
+          if curl -kfsS "${{ inputs.url }}/api/v1/ready" >/dev/null 2>&1; then
+            break
+          fi
+          sleep 1
+        done
+        docker logs reduct
+
+    - name: Build HTTP API tests
+      shell: bash
+      run: |
+        docker build -t api ./integration_tests/api
+
+    - name: Run HTTP API tests
+      shell: bash
+      run: |
+        docker run --network=host \
+          --env API_TOKEN=${{ inputs.token }} \
+          --env LICENSE_PATH=${{ inputs.license_path }} \
+          --env STORAGE_URL=${{ inputs.url }} api
+
+    - name: Print docker logs
+      if: always()
+      shell: bash
+      run: docker logs reduct

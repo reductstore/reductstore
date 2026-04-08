@@ -1,9 +1,10 @@
-// Copyright 2024 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 pub(crate) mod aggregation;
 pub(crate) mod arithmetic;
 pub(crate) mod comparison;
+pub(crate) mod date;
 pub(crate) mod logical;
 pub(crate) mod misc;
 pub(crate) mod string;

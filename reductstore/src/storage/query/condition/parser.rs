@@ -1,13 +1,16 @@
-// Copyright 2024-2025 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::storage::query::condition::computed_reference::ComputedReference;
 use crate::storage::query::condition::constant::Constant;
-use crate::storage::query::condition::operators::aggregation::{EachN, EachT, Limit};
+use crate::storage::query::condition::operators::aggregation::{EachN, EachT, Gate, Limit};
 use crate::storage::query::condition::operators::arithmetic::{
     Abs, Add, Div, DivNum, Mult, Rem, Sub,
 };
 use crate::storage::query::condition::operators::comparison::{Eq, Gt, Gte, Lt, Lte, Ne};
+use crate::storage::query::condition::operators::date::{
+    Day, Hour, Minute, Month, Second, Weekday, Year,
+};
 use crate::storage::query::condition::operators::logical::{AllOf, AnyOf, In, Nin, NoneOf, OneOf};
 use crate::storage::query::condition::operators::misc::{Cast, Exists, Ref, Timestamp};
 use crate::storage::query::condition::operators::string::{Contains, EndsWith, StartsWith};
@@ -119,7 +122,7 @@ impl Parser {
             JsonValue::Object(map) => Self::parse_object(map),
             JsonValue::Bool(value) => Self::parse_bool(value),
             JsonValue::Number(value) => Self::parse_number(value),
-            JsonValue::String(value) => Self::parse_string(value),
+            JsonValue::String(value) => Self::parse_literal(value),
             JsonValue::Array(_) => Err(unprocessable_entity!(
                 "Array type is not supported: {}",
                 json
@@ -164,13 +167,21 @@ impl Parser {
         }
     }
 
-    fn parse_string(value: &str) -> Result<Vec<BoxedNode>, ReductError> {
+    fn parse_literal(value: &str) -> Result<Vec<BoxedNode>, ReductError> {
         if value.starts_with("&") {
             Ok(vec![Reference::boxed(value[1..].to_string())])
         } else if value.starts_with("@") {
             Ok(vec![ComputedReference::boxed(value[1..].to_string())])
+        } else if let Some(value) = value.strip_prefix("$$") {
+            Ok(vec![Constant::boxed(Value::String(format!("${value}")))])
         } else if value.starts_with("$") {
-            Ok(vec![Self::parse_operator(value, vec![])?])
+            match Self::parse_operator(value, vec![]) {
+                Ok(operator) => Ok(vec![operator]),
+                Err(_) => Err(unprocessable_entity!(
+                    "Unknown '$' literal '{}'; use '$$' to escape a string value",
+                    value
+                )),
+            }
         } else if let Ok(duration) = parse_duration(value) {
             Ok(vec![Constant::boxed(duration)])
         } else {
@@ -219,6 +230,7 @@ impl Parser {
             // Aggregation operators
             "$each_n" => EachN::boxed(operands),
             "$each_t" => EachT::boxed(operands),
+            "$gate" => Gate::boxed(operands),
             "$limit" => Limit::boxed(operands),
             // Arithmetic operators
             "$add" => Add::boxed(operands),
@@ -244,6 +256,15 @@ impl Parser {
             "$lt" => Lt::boxed(operands),
             "$lte" => Lte::boxed(operands),
             "$ne" => Ne::boxed(operands),
+
+            // Date operators
+            "$second" => Second::boxed(operands),
+            "$minute" => Minute::boxed(operands),
+            "$hour" => Hour::boxed(operands),
+            "$day" => Day::boxed(operands),
+            "$month" => Month::boxed(operands),
+            "$year" => Year::boxed(operands),
+            "$weekday" => Weekday::boxed(operands),
 
             // String operators
             "$contains" => Contains::boxed(operands),
@@ -322,6 +343,80 @@ mod tests {
         });
         let (mut node, _) = parser.parse(json).unwrap();
         assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_escaped_dollar_string_literal(parser: Parser, context: Context) {
+        let json = json!({
+            "$eq": ["$$plugin", "$$plugin"]
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_computed_reference_literal(parser: Parser) {
+        let json = json!({
+            "$eq": ["@value", 10]
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        let mut context = Context::default();
+        context.computed_labels.insert("value", "10");
+        assert!(node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_object_syntax_with_escaped_dollar_string_literal(
+        parser: Parser,
+        context: Context,
+    ) {
+        let json = json!({
+            "&label": {"$eq": "$$x"}
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(!node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_in_operator_with_escaped_dollar_string_literal(parser: Parser, context: Context) {
+        let json = json!({
+            "$in": ["&label", "$$x"]
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(!node.apply(&context).unwrap().as_bool().unwrap());
+    }
+
+    #[rstest]
+    fn test_parse_unknown_dollar_key_is_rejected(parser: Parser) {
+        let json = json!({
+            "$plugin": {"$eq": "value"}
+        });
+        let result = parser.parse(json);
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "[UnprocessableEntity] Unknown '$' literal '$plugin'; use '$$' to escape a string value"
+        );
+    }
+
+    #[rstest]
+    fn test_parse_unknown_dollar_string_literal_is_rejected(parser: Parser) {
+        let json = json!({
+            "$eq": ["$plugin", "$plugin"]
+        });
+        let result = parser.parse(json);
+        assert_eq!(
+            result.err().unwrap().to_string(),
+            "[UnprocessableEntity] Unknown '$' literal '$plugin'; use '$$' to escape a string value"
+        );
+    }
+
+    #[rstest]
+    fn test_parse_object_syntax_with_escaped_dollar_key_literal(parser: Parser) {
+        let json = json!({
+            "$$plugin": {"$eq": "$$plugin"}
+        });
+        let (mut node, _) = parser.parse(json).unwrap();
+        assert!(node.apply(&Context::default()).unwrap().as_bool().unwrap());
     }
 
     #[rstest]
@@ -542,10 +637,13 @@ mod tests {
 
     mod parse_operators {
         use super::*;
+        use crate::storage::query::condition::Node;
+
         #[rstest]
         // Aggregation operators
         #[case("$each_n", "[1]", Value::Bool(true))]
         #[case("$each_t", "[1]", Value::Bool(false))]
+        #[case("$gate", "[\"10s\", true]", Value::Bool(true))]
         #[case("$limit", "[1]", Value::Bool(true))]
         // Arithmetic operators
         #[case("$add", "[1, 2.0]", Value::Float(3.0))]
@@ -573,6 +671,21 @@ mod tests {
         #[case("$lt", "[20, 10]", Value::Bool(false))]
         #[case("$lte", "[20, 10]", Value::Bool(false))]
         #[case("$ne", "[-10, 10]", Value::Bool(true))]
+        // Date operators
+        #[case("$second", "[1704067200123456]", Value::Int(0))]
+        #[case("$second", "[1704067200123456, \"Europe/Berlin\"]", Value::Int(0))]
+        #[case("$minute", "[1704067200123456]", Value::Int(0))]
+        #[case("$minute", "[1704067200123456, \"Europe/Berlin\"]", Value::Int(0))]
+        #[case("$hour", "[1704067200123456]", Value::Int(0))]
+        #[case("$hour", "[1704067200123456, \"Europe/Berlin\"]", Value::Int(1))]
+        #[case("$day", "[1704067200123456]", Value::Int(1))]
+        #[case("$day", "[1704067200123456, \"America/New_York\"]", Value::Int(31))]
+        #[case("$month", "[1704067200123456]", Value::Int(1))]
+        #[case("$month", "[1704067200123456, \"America/New_York\"]", Value::Int(12))]
+        #[case("$year", "[1704067200123456]", Value::Int(2024))]
+        #[case("$year", "[1704067200123456, \"America/New_York\"]", Value::Int(2023))]
+        #[case("$weekday", "[1704067200123456]", Value::Int(0))]
+        #[case("$weekday", "[1704067200123456, \"America/New_York\"]", Value::Int(6))]
         // String operators
         #[case("$contains", "[\"abc\", \"b\"]", Value::Bool(true))]
         #[case("$starts_with", "[\"abc\", \"ab\"]", Value::Bool(true))]
@@ -604,6 +717,37 @@ mod tests {
                 "{}",
                 node.print()
             );
+        }
+
+        #[rstest]
+        #[case("$second")]
+        #[case("$minute")]
+        #[case("$hour")]
+        #[case("$day")]
+        #[case("$month")]
+        #[case("$year")]
+        #[case("$weekday")]
+        fn test_parse_date_operator_invalid_operands(parser: Parser, #[case] operator: &str) {
+            let json = serde_json::from_str(&format!(r#"{{"{}": []}}"#, operator)).unwrap();
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                format!(
+                    "[UnprocessableEntity] {} requires one or two operands",
+                    operator
+                )
+            );
+        }
+
+        #[rstest]
+        fn test_print_date_operators() {
+            assert!(Day::new(vec![]).print().contains("Day"));
+            assert!(Hour::new(vec![]).print().contains("Hour"));
+            assert!(Minute::new(vec![]).print().contains("Minute"));
+            assert!(Month::new(vec![]).print().contains("Month"));
+            assert!(Second::new(vec![]).print().contains("Second"));
+            assert!(Weekday::new(vec![]).print().contains("Weekday"));
+            assert!(Year::new(vec![]).print().contains("Year"));
         }
     }
 

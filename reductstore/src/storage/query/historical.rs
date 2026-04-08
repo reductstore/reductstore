@@ -1,5 +1,5 @@
-// Copyright 2023-2025 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
@@ -14,6 +14,8 @@ use crate::storage::query::filters::{
     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
 use async_trait::async_trait;
+use log::debug;
+use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
@@ -147,12 +149,20 @@ impl Query for HistoricalQuery {
 
             let block_range = {
                 let mut bm = block_manager.write().await?;
-                let first_block = {
-                    if let Ok(block) = bm.find_block(start).await {
-                        block.read().await?.block_id()
-                    } else {
-                        0
+                let first_block = match bm.find_block(start).await {
+                    Ok(block) => block.read().await?.block_id(),
+                    Err(err) if err.status() == ErrorCode::TooEarly => {
+                        bm.force_reload_index_on_replica().await?;
+                        debug!(
+                            "Reloaded index after transient find_block miss for query '{}': {}",
+                            self.entry_name, err
+                        );
+                        match bm.find_block(start).await {
+                            Ok(block) => block.read().await?.block_id(),
+                            Err(_) => 0,
+                        }
                     }
+                    Err(_) => 0,
                 };
                 bm.index()
                     .tree()
@@ -163,7 +173,42 @@ impl Query for HistoricalQuery {
 
             for block_id in block_range {
                 let mut bm = block_manager.write().await?;
-                let block_ref = bm.load_block(block_id).await?;
+                let block_ref = match bm.load_block(block_id).await {
+                    Ok(block_ref) => block_ref,
+                    Err(err) if err.status() == ErrorCode::TooEarly => {
+                        bm.force_reload_index_on_replica().await?;
+                        debug!(
+                            "Reloaded index after transient block {} miss for query '{}': {}",
+                            block_id, self.entry_name, err
+                        );
+                        match bm.load_block(block_id).await {
+                            Ok(block_ref) => block_ref,
+                            Err(retry_err) if retry_err.status() == ErrorCode::TooEarly => {
+                                debug!(
+                                    "Block {} is still transiently unavailable for query '{}' after reload: {}",
+                                    block_id, self.entry_name, retry_err
+                                );
+                                continue;
+                            }
+                            Err(retry_err) if retry_err.status() == ErrorCode::NotFound => {
+                                debug!(
+                                    "Skip stale block {} for query '{}' after reload: {}",
+                                    block_id, self.entry_name, retry_err
+                                );
+                                continue;
+                            }
+                            Err(retry_err) => return Err(retry_err),
+                        }
+                    }
+                    Err(err) if err.status() == ErrorCode::NotFound => {
+                        debug!(
+                            "Skip stale block {} for query '{}': {}",
+                            block_id, self.entry_name, err
+                        );
+                        continue;
+                    }
+                    Err(err) => return Err(err),
+                };
 
                 self.current_block = Some(block_ref);
                 let mut found_records = self.filter_records_from_current_block().await?;
@@ -231,6 +276,10 @@ mod tests {
     use super::*;
 
     use crate::cfg::io::IoConfig;
+    use crate::cfg::{Cfg, InstanceRole};
+    use crate::core::file_cache::FILE_CACHE;
+    use crate::storage::block_manager::block::Block;
+    use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::record;
     use crate::storage::proto::{us_to_ts, Record};
     use crate::storage::query::base::tests::block_manager;
@@ -373,6 +422,87 @@ mod tests {
         assert_eq!(records[1].1, "0123456789");
         assert_eq!(records[2].0.meta().timestamp(), 1000);
         assert_eq!(records[2].1, "0123456789");
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_skips_missing_block_descriptor_on_replica(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let source_block_manager = block_manager.await;
+        let (path, bucket, entry) = {
+            let mut bm = source_block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            (
+                bm.path().clone(),
+                bm.bucket_name().to_string(),
+                bm.entry_name().to_string(),
+            )
+        };
+
+        FILE_CACHE.remove(&path.join("1000.meta")).await.unwrap();
+
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            ..Default::default()
+        };
+
+        let index = BlockIndex::try_load(path.join("index")).await.unwrap();
+        let block_manager = Arc::new(AsyncRwLock::new(
+            BlockManager::build(path, index, bucket, entry, Arc::new(cfg)).await,
+        ));
+
+        let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
+        let records = read_to_vector(&mut query, block_manager).await;
+
+        assert_eq!(records.len(), 2);
+        assert_eq!(records[0].0.meta().timestamp(), 0);
+        assert_eq!(records[1].0.meta().timestamp(), 5);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_reloads_index_and_retries_on_crc_mismatch_replica(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let source_block_manager = block_manager.await;
+        let (path, bucket, entry) = {
+            let mut bm = source_block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            (
+                bm.path().clone(),
+                bm.bucket_name().to_string(),
+                bm.entry_name().to_string(),
+            )
+        };
+
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            ..Default::default()
+        };
+
+        let index = BlockIndex::try_load(path.join("index")).await.unwrap();
+        let replica_block_manager = Arc::new(AsyncRwLock::new(
+            BlockManager::build(path, index, bucket, entry, Arc::new(cfg)).await,
+        ));
+
+        // Simulate stale in-memory CRC while index on disk is already updated.
+        {
+            let mut bm = replica_block_manager.write().await.unwrap();
+            bm.index_mut()
+                .insert_or_update_with_crc(Block::new(1000), 1);
+        }
+
+        let mut query = build_query(1000, 1001, QueryOptions::default()).unwrap();
+        let mut reader = query.next(replica_block_manager).await.unwrap();
+
+        assert_eq!(reader.meta().timestamp(), 1000);
+
+        let mut content = String::new();
+        while let Some(chunk) = reader.read_chunk() {
+            content.push_str(String::from_utf8(chunk.unwrap().to_vec()).unwrap().as_str());
+        }
+        assert_eq!(content, "0123456789");
     }
 
     #[rstest]

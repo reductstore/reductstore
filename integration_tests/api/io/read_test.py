@@ -1,9 +1,15 @@
+import pytest
+from urllib.parse import quote
+
 from ..conftest import auth_headers, requires_env
 
 
-def test_read_batched_records_v2(base_url, session, bucket):
+@pytest.mark.parametrize("entry_root", ["x", "x/y", "x/y/z"])
+def test_read_batched_records_v2(base_url, session, bucket, entry_root):
+    entry_0 = f"{entry_root}-0"
+    entry_1 = f"{entry_root}-1"
     headers = {
-        "x-reduct-entries": "entry-0,entry-1",
+        "x-reduct-entries": f"{entry_0},{entry_1}",
         "x-reduct-start-ts": "1000",
         "x-reduct-0-10": "2,text/plain",
         "x-reduct-1-0": "3,text/plain",
@@ -17,7 +23,7 @@ def test_read_batched_records_v2(base_url, session, bucket):
         f"{base_url}/io/{bucket}/q",
         json={
             "query_type": "QUERY",
-            "entries": ["entry-0", "entry-1"],
+            "entries": [entry_0, entry_1],
             "start": 0,
             "stop": 2000,
         },
@@ -32,7 +38,9 @@ def test_read_batched_records_v2(base_url, session, bucket):
     print(resp.headers)
 
     assert resp.status_code == 200
-    assert resp.headers["x-reduct-entries"] == "entry-1,entry-0"
+    assert resp.headers["x-reduct-entries"] == (
+        f"{quote(entry_1, safe='')},{quote(entry_0, safe='')}"
+    )
     assert resp.headers["x-reduct-start-ts"] == "1000"
     assert resp.headers["x-reduct-0-0"].startswith("3,text/plain")
     assert resp.headers["x-reduct-1-10"].startswith("2,text/plain")
@@ -42,6 +50,7 @@ def test_read_batched_records_v2(base_url, session, bucket):
 
 
 @requires_env("API_TOKEN")
+@pytest.mark.parametrize("entry_path", ["x", "x/y", "x/y/z"])
 def test_read_requires_bucket_read_permissions(
     base_url,
     session,
@@ -49,9 +58,10 @@ def test_read_requires_bucket_read_permissions(
     token_without_permissions,
     token_read_bucket,
     token_write_bucket,
+    entry_path,
 ):
     headers = {
-        "x-reduct-entries": "entry-0",
+        "x-reduct-entries": entry_path,
         "x-reduct-start-ts": "1000",
         "x-reduct-0-0": "2,text/plain",
         "content-length": "2",
@@ -60,7 +70,7 @@ def test_read_requires_bucket_read_permissions(
     assert resp.status_code == 200
 
     query_body = {
-        "entries": ["entry-0"],
+        "entries": [entry_path],
         "start": 0,
         "stop": 2000,
         "query_type": "QUERY",

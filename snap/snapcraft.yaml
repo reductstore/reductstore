@@ -1,50 +1,33 @@
 title: ReductStore
 name: reductstore # you probably want to 'snapcraft register <name>'
-base: core22 # the base snap is the execution environment for this snap
-adopt-info:  reductstore  # use the upstream version number for the snap version
-summary: A time series database for storing and managing large amounts of blob data # 79 char long summary
+base: core24 # the base snap is the execution environment for this snap
+version: git
+summary: High Performance Data Storage and Streaming for Robotics and Industrial IoT # 79 char long summary
 description: |
-  ReductStore is a time series database designed specifically for storing and managing
-  large amounts of blob data. It has high performance for writing and real-time querying,
-  making it suitable for edge computing, computer vision, and IoT applications.
-  ReductStore is 100% open source under Mozilla Public License v2.0.
+  ReductStore is a high-performance, time-series object storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT).
+  It's designed to handle large volumes of unstructured data - images, sensor readings, logs, files, ROS bags - captured in raw form and stored with a precise time index (timestamp) and optional labels (e.g. device status, AI inference). This enables fast, efficient retrieval based on when the data was collected and how it's categorized, while also allowing control over data reduction strategies by replicating (streaming) only selected data from the edge to the cloud.
+
 contact: info@reduct.store
 issues: https://github.com/reductstore/reductstore/issues
 source-code: https://github.com/reductstore/reductstore.git
 website: https://wwww.reduct.store
-license: BUSL-1.1
+license: Apache-2.0
 confinement: strict # use 'strict' once you have the right plugs and slots
 grade: stable # must be 'stable' to release into candidate/stable channels
 
-architectures:
-  - build-on: amd64
-    build-for: amd64
-  - build-on: amd64
-    build-for: arm64
+platforms:
+  amd64:
+    build-on: [amd64]
+    build-for: [amd64]
+  arm64:
+    build-on: [amd64]
+    build-for: [arm64]
 parts:
   reductstore:
-    # See 'snapcraft plugins'
-    plugin: rust
-    source: .
-    source-type: local
-    rust-path: ["reductstore"]
-
-    override-pull: |
-      curl https://sh.rustup.rs -sSf | sh -s -- -y
-      source "$HOME/.cargo/env"
-      craftctl default
-      cargo install cargo-get
-      VERSION="$(~/.cargo/bin/cargo-get get package.version --entry reductstore/)-git$(git rev-parse --short HEAD)"
-      echo "ReductStore v${VERSION}"
-      craftctl set version="${VERSION}"
-    override-build: |
-      snapcraftctl build
-
-    build-packages:
-      - cargo
-      - protobuf-compiler
-      - libprotobuf-dev
-      - cmake
+    plugin: dump
+    source: .snap-build/bin
+    organize:
+      reductstore: bin/reductstore
   hooks:
     plugin: dump
     source: snap/local/hooks

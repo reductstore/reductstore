@@ -1,5 +1,5 @@
-// Copyright 2025-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::storage::bucket::Bucket;
 use reduct_base::error::ReductError;
@@ -75,6 +75,10 @@ impl Bucket {
                 continue;
             }
 
+            if !entry.is_removable_by_query() {
+                continue;
+            }
+
             let removed_records = entry.query_remove_records(options.clone()).await?;
             total_removed += removed_records;
         }
@@ -86,7 +90,7 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::bucket::tests::{bucket, write};
+    use crate::storage::bucket::tests::{bucket, write, write_meta};
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use reduct_base::not_found;
     use rstest::rstest;
@@ -193,6 +197,30 @@ mod tests {
         );
         assert!(bucket.begin_read("entry-one", 2).await.is_ok());
         assert!(bucket.begin_read("other", 1).await.is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_remove_records_wildcard_excludes_meta_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "entry-one", 1, b"one-1").await.unwrap();
+        write_meta(&bucket, "entry-one/$meta", 1, b"meta-1")
+            .await
+            .unwrap();
+
+        let request = QueryEntry {
+            query_type: QueryType::Remove,
+            entries: Some(vec!["entry-one*".into()]),
+            start: Some(1),
+            stop: Some(2),
+            ..Default::default()
+        };
+
+        let removed = bucket.clone().query_remove_records(request).await.unwrap();
+        assert_eq!(removed, 1);
+
+        assert!(bucket.begin_read("entry-one", 1).await.is_err());
+        assert!(bucket.begin_read("entry-one/$meta", 1).await.is_ok());
     }
 
     #[rstest]

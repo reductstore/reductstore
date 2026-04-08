@@ -1,5 +1,5 @@
-// Copyright 2025 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
@@ -119,11 +119,17 @@ impl Bucket {
 
         let results: Vec<(String, Arc<Entry>)> = entries
             .iter()
-            .filter(|(name, _)| {
-                requested_entries
-                    .as_ref()
-                    .map(|patterns| matches_pattern(name, patterns))
-                    .unwrap_or(true)
+            .filter(|(name, entry)| {
+                if requested_entries.is_none() {
+                    return entry.is_queryable_by_wildcard();
+                }
+
+                let patterns = requested_entries.as_ref().unwrap();
+                if patterns.iter().any(|pattern| pattern == *name) {
+                    return true;
+                }
+
+                matches_pattern(name, patterns) && entry.is_queryable_by_wildcard()
             })
             .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
             .collect();
@@ -278,12 +284,14 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::storage::bucket::tests::{bucket, write};
+    use crate::storage::bucket::tests::{bucket, write, write_meta};
+    use crate::storage::bucket::update_records::UpdateLabelsMulti;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
     use reduct_base::not_found;
     use rstest::rstest;
+    use std::collections::HashSet;
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::timeout;
@@ -388,6 +396,84 @@ mod tests {
             records,
             vec![("acc-a".to_string(), 10), ("acc-b".to_string(), 20)]
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn wildcard_query_excludes_meta_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "acc-a", 10, b"a1").await.unwrap();
+        write_meta(&bucket, "acc-a/$meta", 11, b"meta")
+            .await
+            .unwrap();
+        write(&bucket, "other", 15, b"c1").await.unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["acc-a*".into()]),
+            ..Default::default()
+        };
+
+        let id = bucket.query(query).await.unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        let records = collect_records(rx).await;
+        assert_eq!(records, vec![("acc-a".to_string(), 10)]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn direct_meta_query_is_allowed(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write_meta(&bucket, "acc-a/$meta", 11, b"meta")
+            .await
+            .unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["acc-a/$meta".into()]),
+            ..Default::default()
+        };
+
+        let id = bucket.query(query).await.unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        let records = collect_records(rx).await;
+        assert_eq!(records, vec![("acc-a/$meta".to_string(), 11)]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn wildcard_query_excludes_meta_tombstones_by_default(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "acc-a", 10, b"a1").await.unwrap();
+        write_meta(&bucket, "acc-a/$meta", 11, b"meta")
+            .await
+            .unwrap();
+
+        bucket
+            .clone()
+            .update_labels(vec![UpdateLabelsMulti {
+                entry_name: "acc-a/$meta".to_string(),
+                time: 11,
+                update: [("remove".to_string(), "true".to_string())]
+                    .into_iter()
+                    .collect(),
+                remove: HashSet::new(),
+            }])
+            .await
+            .unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["acc-a*".into()]),
+            ..Default::default()
+        };
+        let id = bucket.query(query).await.unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        let records = collect_records(rx).await;
+        assert_eq!(records, vec![("acc-a".to_string(), 10)]);
     }
 
     #[rstest]

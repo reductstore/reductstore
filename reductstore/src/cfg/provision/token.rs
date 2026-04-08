@@ -1,31 +1,43 @@
-// Copyright 2025-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::auth::token_repository::{
     BoxedTokenRepository, TokenRepositoryBuilder, INIT_TOKEN_NAME,
 };
-use crate::cfg::CfgParser;
+use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
+use crate::storage::engine::StorageEngine;
+use chrono::{DateTime, Utc};
 use log::{error, info, warn};
 use reduct_base::error::ErrorCode;
-use reduct_base::msg::token_api::{Permissions, Token};
+use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest};
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
-impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
+impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_tokens(
         &self,
         data_path: &PathBuf,
+        storage: Arc<StorageEngine>,
     ) -> BoxedTokenRepository {
         let mut token_repo = TokenRepositoryBuilder::new(self.cfg.clone())
-            .build(PathBuf::from(data_path))
+            .build_with_storage(PathBuf::from(data_path), storage)
             .await;
 
         for (name, token) in &self.cfg.tokens {
             // Try to generate token, just for name check and to create the token file if it doesn't exist.
             // If the token already exists, we will update it with the provided value and permissions.
             let is_generated = match token_repo
-                .generate_token(&name, token.permissions.clone().unwrap_or_default())
+                .generate_token(
+                    &name,
+                    TokenCreateRequest {
+                        permissions: token.permissions.clone().unwrap_or_default(),
+                        expires_at: None,
+                        ttl: None,
+                        ip_allowlist: token.ip_allowlist.clone(),
+                    },
+                )
                 .await
             {
                 Ok(_) => Ok(()),
@@ -134,6 +146,18 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
             };
 
             token.permissions = Some(permissions);
+
+            if let Some(expires_at) =
+                env.get_optional::<String>(&format!("RS_TOKEN_{}_EXPIRES_AT", id))
+            {
+                match DateTime::parse_from_rfc3339(&expires_at) {
+                    Ok(value) => token.expires_at = Some(value.with_timezone(&Utc)),
+                    Err(_) => warn!(
+                        "Token '{}' has invalid expiry date '{}'. Ignore it.",
+                        token.name, expires_at
+                    ),
+                }
+            }
         }
 
         tokens
@@ -147,6 +171,7 @@ impl<EnvGetter: GetEnv> CfgParser<EnvGetter> {
 #[cfg(not(windows))] // fixme: Windows paths differ in tests
 mod tests {
     use super::*;
+    use crate::auth::token_secret::{is_hashed_token_secret, verify_token_secret};
 
     use crate::cfg::tests::MockEnvGetter;
     use crate::cfg::Cfg;
@@ -188,6 +213,10 @@ mod tests {
             .return_const(Ok("bucket1".to_string()));
         env_with_tokens
             .expect_get()
+            .with(eq("RS_TOKEN_1_EXPIRES_AT"))
+            .return_const(Ok("2030-01-01T00:00:00Z".to_string()));
+        env_with_tokens
+            .expect_get()
             .return_const(Err(VarError::NotPresent));
 
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
@@ -195,13 +224,22 @@ mod tests {
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token1 = repo.get_token("token1").await.unwrap().clone();
-        assert_eq!(token1.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token1.value));
+        assert!(verify_token_secret(&token1.value, "TOKEN"));
         assert!(token1.is_provisioned);
 
         let permissions = token1.permissions.unwrap();
         assert_eq!(permissions.full_access, true);
         assert_eq!(permissions.read, vec!["bucket1", "bucket2"]);
         assert_eq!(permissions.write, vec!["bucket1"]);
+        assert_eq!(
+            token1.expires_at,
+            Some(
+                DateTime::parse_from_rfc3339("2030-01-01T00:00:00Z")
+                    .unwrap()
+                    .with_timezone(&Utc)
+            )
+        );
     }
 
     #[rstest]
@@ -230,7 +268,8 @@ mod tests {
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token1 = repo.get_token("token1").await.unwrap().clone();
-        assert_eq!(token1.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token1.value));
+        assert!(verify_token_secret(&token1.value, "TOKEN"));
         assert!(token1.is_provisioned);
 
         let permissions = token1.permissions.unwrap();
@@ -273,7 +312,13 @@ mod tests {
         .build(data_path.clone().into())
         .await;
         let _ = auth_repo
-            .generate_token("token1", Permissions::default())
+            .generate_token(
+                "token1",
+                TokenCreateRequest {
+                    permissions: Permissions::default(),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
 
@@ -290,7 +335,8 @@ mod tests {
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token = repo.get_token("token1").await.unwrap();
-        assert_eq!(token.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token.value));
+        assert!(verify_token_secret(&token.value, "TOKEN"));
 
         drop(repo);
 
@@ -301,7 +347,8 @@ mod tests {
         .build(data_path.into())
         .await;
         let token = repo.get_token("token1").await.unwrap();
-        assert_eq!(token.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token.value));
+        assert!(verify_token_secret(&token.value, "TOKEN"));
         assert!(token.is_provisioned);
     }
 
@@ -321,7 +368,13 @@ mod tests {
         .build(data_path.clone())
         .await;
         auth_repo
-            .generate_token("token1", Permissions::default())
+            .generate_token(
+                "token1",
+                TokenCreateRequest {
+                    permissions: Permissions::default(),
+                    ..Default::default()
+                },
+            )
             .await
             .unwrap();
         drop(auth_repo);
@@ -352,7 +405,7 @@ mod tests {
         .build(data_path)
         .await;
         let token = repo.get_token("token1").await.unwrap();
-        assert_ne!(token.value, "TOKEN");
+        assert!(!verify_token_secret(&token.value, "TOKEN"));
         assert!(!token.is_provisioned);
     }
 
@@ -380,7 +433,8 @@ mod tests {
 
         let mut repo = components.token_repo.write().await.unwrap();
         let token = repo.get_token("token1").await.unwrap();
-        assert_eq!(token.value, "TOKEN");
+        assert!(is_hashed_token_secret(&token.value));
+        assert!(verify_token_secret(&token.value, "TOKEN"));
         assert!(!token.is_provisioned);
     }
 
@@ -411,7 +465,8 @@ mod tests {
         let mut repo = components.token_repo.write().await.unwrap();
         let init_token = repo.get_token(INIT_TOKEN_NAME).await.unwrap();
         assert!(init_token.is_provisioned);
-        assert_eq!(init_token.value, "XXX");
+        assert!(is_hashed_token_secret(&init_token.value));
+        assert!(verify_token_secret(&init_token.value, "XXX"));
     }
 
     fn cfg_parser_with_tokens(
@@ -427,7 +482,38 @@ mod tests {
             },
             license: None,
             env: Env::new(MockEnvGetter::new()),
+            ext_cfg: crate::cfg::CoreExtCfg {
+                role: crate::cfg::InstanceRole::Primary,
+                data_path: data_path.clone(),
+            },
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_tokens_invalid_expiry(#[future] env_with_tokens: MockEnvGetter) {
+        let mut env_with_tokens = env_with_tokens.await;
+        env_with_tokens
+            .expect_get()
+            .with(eq("RS_TOKEN_1_VALUE"))
+            .return_const(Ok("TOKEN".to_string()));
+        env_with_tokens
+            .expect_get()
+            .with(eq("RS_TOKEN_1_EXPIRES_AT"))
+            .return_const(Ok("invalid-date".to_string()));
+        env_with_tokens
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
+        let components = cfg.build().await.unwrap();
+
+        let mut repo = components.token_repo.write().await.unwrap();
+        let token1 = repo.get_token("token1").await.unwrap().clone();
+        assert!(is_hashed_token_secret(&token1.value));
+        assert!(verify_token_secret(&token1.value, "TOKEN"));
+        assert_eq!(token1.expires_at, None);
     }
 
     #[fixture]

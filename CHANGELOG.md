@@ -7,6 +7,65 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.19.0 - 2026-04-08
+
+### Added
+
+- Add token `last_access` to token API responses by resolving latest access time from `$audit` (supports both legacy `token` and `instance/token` audit entry naming) for writable and read-only repositories, [PR-1281](https://github.com/reductstore/reductstore/pull/1281)
+- Add token inactivity TTL (`ttl`) and computed `is_expired` flag in token API responses to signal unusable tokens due to inactivity or `expires_at`, [PR-1283](https://github.com/reductstore/reductstore/pull/1283)
+- Add trusted client IP extraction (Axum `ConnectInfo` + guarded `Forwarded`/`X-Forwarded-For`) and optional per-token IP allowlist enforcement, plus `client_ip` field in audit events, [PR-1280](https://github.com/reductstore/reductstore/pull/1280)
+- Add explicit token rotation endpoint `POST /api/v1/tokens/{token_name}/rotate` that replaces token secret in one call and invalidates the previous value, [PR-1279](https://github.com/reductstore/reductstore/pull/1279)
+- Add `message` field to audit payloads and split audit aggregation groups when either `status` or `message` changes, [PR-1277](https://github.com/reductstore/reductstore/pull/1277)
+- Replace audit payload `endpoint` with separate `method` and `path` fields for more flexible querying, [PR-1287](https://github.com/reductstore/reductstore/pull/1287)
+- Add `RS_INSTANCE_NAME` for audit record attribution with hostname fallback and include `instance` label on `$audit` writes (local and replica-forwarded), [PR-1272](https://github.com/reductstore/reductstore/pull/1272)
+- Add manageable audit configuration via `RS_AUDIT_ENABLED` and `RS_AUDIT_QUOTA_SIZE`, plus replica audit remote settings (`RS_AUDIT_REMOTE_VERIFY_SSL`, `RS_AUDIT_REMOTE_CA_PATH`, `RS_AUDIT_REMOTE_TIMEOUT`) in `cfg/audit`, [PR-1271](https://github.com/reductstore/reductstore/pull/1271)
+- Add global storage size cap via `RS_ENGINE_MAX_STORAGE_SIZE` (SI units) with write-path enforcement across all buckets, [PR-1263](https://github.com/reductstore/reductstore/pull/1263)
+- Add instance-level rate limits `RS_RATE_LIMIT_*` for API requests plus HTTP/Zenoh ingress and egress traffic, [PR-1255](https://github.com/reductstore/reductstore/pull/1255)
+- Publish per-target release binary SBOM artifacts and enable Docker image SBOM/provenance attestations in CI, [PR-1254](https://github.com/reductstore/reductstore/pull/1254)
+- Add `$gate` query operator for edge-triggered time-window conditions, [PR-1249](https://github.com/reductstore/reductstore/pull/1249)
+- Add UTC date-part query operators (`$second`, `$minute`, `$hour`, `$day`, `$month`, `$year`, `$weekday`), [PR-1248](https://github.com/reductstore/reductstore/pull/1248)
+- Support `RS_REPLICATION_<ID>_MODE` in provisioning to set replication mode (`enabled|paused|disabled`) declaratively from environment variables, [PR-1243](https://github.com/reductstore/reductstore/pull/1243)
+- Support hierarchical entry paths and preserve nested tree recovery, [PR-1185](https://github.com/reductstore/reductstore/pull/1185)
+- Store attachments in system `$meta` entries with strategy-based behavior and replication coverage, [PR-1186](https://github.com/reductstore/reductstore/pull/1186)
+- Zenoh API for ingestion and query, [PR-1157](https://github.com/reductstore/reductstore/pull/1157)
+
+### Changed
+
+- Build Snap packages from prebuilt release binaries in CI, migrate Snap base to `core24` with `platforms`, and add `env-file-path` Snap config support to load additional runtime settings from a `.env` file, [PR-1302](https://github.com/reductstore/reductstore/pull/1302)
+- Update transitive Rust dependencies in `Cargo.lock` (`aws-lc-rs/aws-lc-sys`, `rustls-webpki`, `lz4_flex`) to address current `cargo audit` advisories, [PR-1250](https://github.com/reductstore/reductstore/pull/1250)
+- Store token secrets as Argon2 hashes at rest with startup migration for legacy plaintext tokens and token validation caching with mutation-based invalidation, [PR-1273](https://github.com/reductstore/reductstore/pull/1273)
+- Move licensing and remote connectors to enterprise-only runtime and align CI pipelines for core-only backend coverage, [PR-1176](https://github.com/reductstore/reductstore/pull/1176)
+- Relicense ReductStore Core to Apache-2.0, update Rust source headers and package license files, add `NOTICE`, and refresh README project/license positioning, [PR-1204](https://github.com/reductstore/reductstore/pull/1204)
+- Keep Docker runtime non-root when `/data` is auto-created as `root:root` and ensure UID/GID 10001 user metadata is available in the final image, [PR-1178](https://github.com/reductstore/reductstore/pull/1178)
+- Use Docker named volumes in CI deployment actions for `/data` to stay compatible with non-root runtime defaults and simplify entrypoint permission checks, [PR-1180](https://github.com/reductstore/reductstore/pull/1180)
+- Merge `v1.18.5` release branch into `main` and recover lock file updates, [PR-1191](https://github.com/reductstore/reductstore/pull/1191)
+- Update Web Console to v1.14.0-beta.0, [PR-1200](https://github.com/reductstore/reductstore/pull/1200)
+- Force flush audit aggregates at 60 seconds under continuous ingestion while preserving short sliding-window coalescing, [PR-1270](https://github.com/reductstore/reductstore/pull/1270)
+
+### Fixed
+
+- Fix token lifecycle: ignore stale audit activity for TTL checks and reject rotation of expired tokens, [PR-1304](https://github.com/reductstore/reductstore/pull/1304)
+- Reset `last_access` to current time on token rotation to prevent immediate TTL expiration when the old token was already inactive, [PR-1303](https://github.com/reductstore/reductstore/pull/1303)
+- Allow read-only replica audit forwarding to fail over on HTTP 5xx responses (not only connection/timeout errors), and add explicit logs for successful switchovers and forwarding failures, [PR-1301](https://github.com/reductstore/reductstore/pull/1301)
+- Trust private/link-local proxy peer addresses (`10/8`, `172.16/12`, `192.168/16`, `169.254/16`, ULA/link-local IPv6) for forwarded client IP resolution so audit `client_ip` records original callers behind ALB/ingress setups, [PR-1296](https://github.com/reductstore/reductstore/pull/1296)
+- Keep API request rate limiting active for `/ready` and map startup lock-wait (`503`) to `200` only for `/api/v1/alive` in middleware, avoiding false matches on entry paths ending with `alive`, [PR-1286](https://github.com/reductstore/reductstore/pull/1286)
+- Move token API `ip_allowlist` to token-level settings (alongside `ttl` / `expires_at`) instead of nesting it under `permissions`, and update token API responses/tests accordingly, [PR-1284](https://github.com/reductstore/reductstore/pull/1284)
+- Default audit logging to enabled when `RS_API_TOKEN` is set, keep it disabled when empty, and allow explicit override via `RS_AUDIT_ENABLED`, [PR-1275](https://github.com/reductstore/reductstore/pull/1275)
+- Ignore hidden system/meta entries when computing bucket-level oldest/latest history so reported history matches visible entries, [PR-1274](https://github.com/reductstore/reductstore/pull/1274)
+- Avoid read-only replica crashes when `$audit` cannot be loaded and both `RS_PRIMARY_URL` and `RS_SECONDARY_URL` are unset by logging a warning and skipping audit forwarding instead, [PR-1266](https://github.com/reductstore/reductstore/pull/1266)
+- Make primary-mode Ctrl-C shutdown lock-file cleanup idempotent by ignoring already-removed lock files and de-duplicating release/drop cleanup, [PR-1247](https://github.com/reductstore/reductstore/pull/1247)
+- Override replication mode during reprovisioning only when `RS_REPLICATION_<ID>_MODE` is explicitly set; otherwise keep the current persisted mode, [PR-1245](https://github.com/reductstore/reductstore/pull/1245)
+- Accept computed (`@`) labels in v1 batched header parsing so query-extension responses can be consumed without 422 parse errors, [PR-1241](https://github.com/reductstore/reductstore/pull/1241)
+- Treat transient read-only replica block descriptor races (missing files and CRC mismatch during sync) as retryable by reloading index and retrying historical queries, [PR-1237](https://github.com/reductstore/reductstore/pull/1237)
+- Preserve empty entries after FIFO quota eviction so read-only replicas do not retain undeletable zombie entries, [PR-1236](https://github.com/reductstore/reductstore/pull/1236)
+- Require `$$` escaping for conditional-query string literals that start with `$` while preserving `$timestamp` as an operator, [PR-1222](https://github.com/reductstore/reductstore/pull/1222)
+- Ignore empty entries when reporting oldest record timestamps in bucket and server info, [PR-1218](https://github.com/reductstore/reductstore/pull/1218)
+- Skip replication filters for system `$meta` attachment entries and improve strict filter warnings with entry names; fix the default license print to Apache-2.0, [PR-1217](https://github.com/reductstore/reductstore/pull/1217)
+- Reject empty entry path segments earlier to avoid crashes during bucket entry resolution, [PR-1211](https://github.com/reductstore/reductstore/pull/1211)
+- Extract extension attachments for wildcard-matched entries and pass per-entry attachment maps to extensions, [PR-1203](https://github.com/reductstore/reductstore/pull/1203)
+- Restore `Unknown extension` validation for queries with `ext` when no extensions are loaded, [PR-1192](https://github.com/reductstore/reductstore/pull/1192)
+- Fix share links for entries with nested paths by matching multi-segment filenames in links routes, [PR-1202](https://github.com/reductstore/reductstore/pull/1202)
+
 ## 1.18.10 - 2026-03-27
 
 ### Changed

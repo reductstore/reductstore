@@ -1,7 +1,5 @@
-// Copyright 2023 ReductSoftware UG
-// This Source Code Form is subject to the terms of the Mozilla Public
-//    License, v. 2.0. If a copy of the MPL was not distributed with this
-//    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
@@ -33,6 +31,31 @@ pub struct Token {
     pub permissions: Option<Permissions>,
     /// Provisioned
     pub is_provisioned: bool,
+    /// Expiration time
+    pub expires_at: Option<DateTime<Utc>>,
+    /// Inactivity TTL in seconds
+    #[serde(default)]
+    pub ttl: Option<u64>,
+    /// Last access time
+    pub last_access: Option<DateTime<Utc>>,
+    /// List of allowed client IP addresses for this token.
+    /// Empty list means no IP restriction.
+    #[serde(default)]
+    pub ip_allowlist: Vec<String>,
+    /// Computed marker for unusable token (`expires_at` or inactivity TTL)
+    #[serde(default)]
+    pub is_expired: bool,
+}
+/// Request for created token
+#[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
+pub struct TokenCreateRequest {
+    pub permissions: Permissions,
+    #[serde(default)]
+    pub expires_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub ttl: Option<u64>,
+    #[serde(default)]
+    pub ip_allowlist: Vec<String>,
 }
 
 /// Response for created token

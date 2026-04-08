@@ -1,5 +1,5 @@
-// Copyright 2023-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::Entry;
@@ -65,6 +65,9 @@ impl Bucket {
                 let mut candidates: Vec<(u64, &Entry)> = vec![];
                 let entries = self.entries.read().await?;
                 for (_, entry) in entries.iter() {
+                    if !entry.is_eligible_for_fifo_eviction() {
+                        continue;
+                    }
                     let info = entry.info().await?;
                     candidates.push((info.oldest_record, entry));
                 }
@@ -99,26 +102,13 @@ impl Bucket {
             size = get_bucket_size().await? + content_size;
         }
 
-        // Remove empty entries
-        let mut entries = self.entries.write().await?;
-        let mut names_to_remove = vec![];
-        for (name, entry) in entries.iter() {
-            if entry.info().await?.record_count != 0 {
-                continue;
-            }
-            names_to_remove.push(name.clone());
-        }
-
-        for name in names_to_remove {
-            entries.remove(&name);
-        }
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::bucket::tests::{bucket, path, write};
+    use crate::storage::bucket::tests::{bucket, path, write, write_meta};
     use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
     use rstest::rstest;
@@ -154,9 +144,41 @@ mod tests {
                 .await
                 .err(),
             Some(ReductError::not_found(
-                "Entry 'test-1' not found in bucket 'test'"
+                "Record 0 not found in entry test/test-1"
             ))
         );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_fifo_quota_ignores_meta_entries_for_eviction(path: PathBuf) {
+        let bucket = bucket(
+            BucketSettings {
+                max_block_size: Some(20),
+                quota_type: Some(QuotaType::FIFO),
+                quota_size: Some(120),
+                max_block_records: Some(100),
+            },
+            path,
+        )
+        .await;
+
+        let blob: &[u8] = &[0u8; 40];
+        write_meta(&bucket, "data-1/$meta", 0, blob).await.unwrap();
+        write(&bucket, "data-1", 1, blob).await.unwrap();
+        write(&bucket, "data-2", 2, blob).await.unwrap();
+
+        assert!(crate::storage::bucket::tests::read(&bucket, "data-1", 1)
+            .await
+            .is_err());
+        assert!(
+            crate::storage::bucket::tests::read(&bucket, "data-1/$meta", 0)
+                .await
+                .is_ok()
+        );
+        assert!(crate::storage::bucket::tests::read(&bucket, "data-2", 2)
+            .await
+            .is_ok());
     }
 
     #[rstest]

@@ -26,8 +26,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v4
-
     - uses: arduino/setup-protoc@v3
       with:
         version: '26.x'
@@ -61,7 +59,7 @@ runs:
       uses: ./.github/actions/aws-cargo-cache
       with:
         target: ${{ inputs.target }}
-        profile: ${{ github.event_name == 'pull_request' && 'ci' || 'release' }}
+        profile: release
         access-key-id: ${{ inputs.access-key-id }}
         secret-access-key: ${{ inputs.secret-access-key }}
 
@@ -70,9 +68,19 @@ runs:
       shell: bash
       run: cargo install cargo-export --force
 
-    - name: Build binary (PR)
-      if: github.event_name == 'pull_request'
-      run: cargo build --profile ci -p reductstore --target ${{ inputs.target }} --all-features
+    - name: Install Syft (Release)
+      if: github.event_name != 'pull_request'
+      shell: bash
+      run: |
+        set -euo pipefail
+        SYFT_VERSION=v1.42.3
+        mkdir -p "$HOME/.local/bin"
+        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$HOME/.local/bin" "$SYFT_VERSION"
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        "$HOME/.local/bin/syft" version
+
+    - name: Build binary
+      run: cargo build --profile release -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api"
       shell: bash
 
     - name: Upload binary (PR)
@@ -81,14 +89,8 @@ runs:
       if: github.event_name == 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
       with:
         name: reductstore-${{ inputs.target }}
-        path: target/${{inputs.target}}/ci/reductstore
+        path: target/${{inputs.target}}/release/reductstore
         if-no-files-found: 'error'
-
-    - name: Build binary (Release)
-      if: github.event_name != 'pull_request'
-      run: cargo build --profile release -p reductstore --target ${{ inputs.target }} --all-features
-      shell: bash
-
 
     - name: Upload binary (Release)
       uses: actions/upload-artifact@v4
@@ -98,15 +100,26 @@ runs:
         path: target/${{inputs.target}}/release/reductstore${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}
         if-no-files-found: 'error'
 
-
-    - name: Build and export tests (PR)
-      if: github.event_name == 'pull_request'
-      run: cargo export target/${{ inputs.target }}/tests -- test --profile ci --target ${{ inputs.target }} --lib
-      shell: bash
-
-    - name: Build and export tests (Release)
+    - name: Generate SBOM (Release)
       if: github.event_name != 'pull_request'
-      run: cargo export target/${{ inputs.target }}/tests -- test --profile release --target ${{ inputs.target }} --lib
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p /tmp/sbom
+        bin_path="target/${{ inputs.target }}/release/reductstore${{ inputs.target == 'x86_64-pc-windows-gnu' && '.exe' || '' }}"
+        sbom_path="/tmp/sbom/reductstore.${{ inputs.target }}.sbom.spdx.json"
+        syft "$bin_path" -o spdx-json="$sbom_path"
+
+    - name: Upload SBOM (Release)
+      uses: actions/upload-artifact@v4
+      if: github.event_name != 'pull_request'
+      with:
+        name: reductstore-sbom-${{ inputs.target }}
+        path: /tmp/sbom/reductstore.${{ inputs.target }}.sbom.spdx.json
+        if-no-files-found: 'error'
+
+    - name: Build and export tests
+      run: cargo export target/${{ inputs.target }}/tests -- test --quiet --profile release --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api" --lib
       shell: bash
 
     - name: Upload tests

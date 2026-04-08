@@ -1,5 +1,5 @@
-// Copyright 2023-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
@@ -930,18 +930,17 @@ mod tests {
         {
             let _lock = replication.log_map.write().await.unwrap();
             tokio_sleep(rwlock_timeout() + Duration::from_millis(100)).await;
+            assert!(
+                !replication.is_active.load(Ordering::Relaxed),
+                "Replication must be marked inactive while sender can't acquire the log lock"
+            );
         }
 
-        assert_eq!(
-            replication.info().await.unwrap(),
-            ReplicationInfo {
-                name: "test".to_string(),
-                mode: ReplicationMode::Enabled,
-                is_active: false,
-                is_provisioned: false,
-                pending_records: 1,
-            }
-        );
+        let info = replication.info().await.unwrap();
+        assert_eq!(info.name, "test");
+        assert_eq!(info.mode, ReplicationMode::Enabled);
+        assert!(!info.is_provisioned);
+        assert_eq!(info.pending_records, 1);
     }
 
     #[rstest]

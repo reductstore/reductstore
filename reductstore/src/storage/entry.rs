@@ -1,15 +1,17 @@
-// Copyright 2023-2026 ReductSoftware UG
-// Licensed under the Business Source License 1.1
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 mod entry_loader;
 pub(crate) mod io;
 mod read_record;
 mod remove_records;
+mod system;
 pub(crate) mod update_labels;
 mod write_record;
 
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
+use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndex;
@@ -29,6 +31,10 @@ use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
+pub(crate) use system::{
+    is_system_meta_entry, meta_entry_name, meta_entry_parent, strategy_for_entry,
+    validate_remove_entry, validate_remove_records, SystemEntryBehavior, META_ENTRY_MAX_BLOCK_SIZE,
+};
 use tokio::task::JoinHandle;
 
 struct QueryHandle {
@@ -49,6 +55,7 @@ pub(crate) struct Entry {
     bucket_name: String,
     settings: AsyncRwLock<EntrySettings>,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
+    system_behavior: Box<dyn SystemEntryBehavior + Send + Sync>,
     queries: QueryHandleMapRef,
     status: AsyncRwLock<ResourceStatus>,
     path: PathBuf,
@@ -76,26 +83,32 @@ impl Entry {
         settings: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Self, ReductError> {
+        let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let path = path.join(name);
+        let block_index_path = path.join(BLOCK_INDEX_FILE);
+        let block_index = BlockIndex::new(block_index_path.clone());
+
+        // create block index file if it doesn't exist.
+        if !FILE_CACHE.try_exists(&block_index_path).await? {
+            FILE_CACHE.create_dir_all(&path).await?;
+            block_index.save().await?;
+        }
+
         Ok(Self {
             name: name.to_string(),
-            bucket_name: path
-                .parent()
-                .unwrap()
-                .file_name()
-                .unwrap()
-                .to_str()
-                .unwrap()
-                .to_string(),
+            bucket_name: bucket_name.clone(),
             settings: AsyncRwLock::new(settings),
             block_manager: Arc::new(AsyncRwLock::new(
                 BlockManager::build(
                     path.clone(),
-                    BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                    block_index,
+                    bucket_name.clone(),
+                    name.to_string(),
                     cfg.clone(),
                 )
                 .await,
             )),
+            system_behavior: strategy_for_entry(name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
@@ -105,10 +118,14 @@ impl Entry {
 
     pub(crate) async fn restore(
         path: PathBuf,
+        entry_name: String,
+        bucket_name: String,
         options: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Option<Entry>, ReductError> {
-        let entry = EntryLoader::restore_entry(path, options, cfg).await?;
+        let entry =
+            EntryLoader::restore_entry_with_names(path, entry_name, bucket_name, options, cfg)
+                .await?;
         Ok(entry)
     }
 
@@ -122,7 +139,9 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub async fn query(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
+    pub async fn query(&self, mut query_parameters: QueryEntry) -> Result<u64, ReductError> {
+        self.system_behavior
+            .apply_default_query_filters(&mut query_parameters);
         let (start, stop) = self.get_query_time_range(&query_parameters).await?;
         let id = next_query_id();
         let block_manager = Arc::clone(&self.block_manager);
@@ -191,16 +210,24 @@ impl Entry {
 
         let mut bm = self.block_manager.write().await?;
         let index = bm.update_and_get_index().await?;
-        let (oldest_record, latest_record) = if index.tree().is_empty() {
-            (0, 0)
-        } else {
-            let latest_block_id = index.tree().last().unwrap();
-            let latest_record = match index.get_block(*latest_block_id) {
-                Some(block) => ts_to_us(&block.latest_record_time.as_ref().unwrap()),
-                None => 0,
-            };
-            (*index.tree().first().unwrap(), latest_record)
-        };
+        let oldest_record = index
+            .tree()
+            .iter()
+            .find_map(|block_id| {
+                let block = index.get_block(*block_id)?;
+                (block.record_count > 0).then_some(*block_id)
+            })
+            .unwrap_or(0);
+        let latest_record = index
+            .tree()
+            .iter()
+            .rev()
+            .find_map(|block_id| {
+                let block = index.get_block(*block_id)?;
+                (block.record_count > 0)
+                    .then(|| ts_to_us(block.latest_record_time.as_ref().unwrap()))
+            })
+            .unwrap_or(0);
 
         let status = status_result.await?;
 
@@ -222,6 +249,11 @@ impl Entry {
     pub(crate) async fn mark_deleting(&self) -> Result<(), ReductError> {
         self.ensure_not_deleting().await?;
         *self.status.write().await? = ResourceStatus::Deleting;
+        Ok(())
+    }
+
+    pub(crate) async fn mark_ready(&self) -> Result<(), ReductError> {
+        *self.status.write().await? = ResourceStatus::Ready;
         Ok(())
     }
 
@@ -309,6 +341,22 @@ impl Entry {
 
     pub fn name(&self) -> &str {
         &self.name
+    }
+
+    pub(crate) fn is_visible_in_bucket_info(&self) -> bool {
+        self.system_behavior.is_visible_in_bucket_info()
+    }
+
+    pub(crate) fn is_eligible_for_fifo_eviction(&self) -> bool {
+        self.system_behavior.is_eligible_for_fifo_eviction()
+    }
+
+    pub(crate) fn is_removable_by_query(&self) -> bool {
+        self.system_behavior.is_removable_by_query()
+    }
+
+    pub(crate) fn is_queryable_by_wildcard(&self) -> bool {
+        self.system_behavior.is_queryable_by_wildcard()
     }
 
     pub async fn settings(&self) -> Result<EntrySettings, ReductError> {
@@ -443,6 +491,8 @@ mod tests {
             bm.save_cache_on_disk().await.unwrap();
             let entry = Entry::restore(
                 path.join(entry.name()),
+                "entry".to_string(),
+                "bucket".to_string(),
                 entry_settings,
                 Cfg::default().into(),
             )
@@ -652,6 +702,30 @@ mod tests {
         assert_eq!(info.block_count, 1);
         assert_eq!(info.oldest_record, 1000000);
         assert_eq!(info.latest_record, 3000000);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_nested_entry_name_in_record_metadata(path: PathBuf) {
+        use reduct_base::io::ReadRecord;
+
+        let entry = Arc::new(
+            Entry::try_build(
+                "x/y/z",
+                path.clone(),
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 10000,
+                },
+                Cfg::default().into(),
+            )
+            .await
+            .unwrap(),
+        );
+
+        write_stub_record(&entry, 1000000).await;
+        let reader = entry.begin_read(1000000).await.unwrap();
+        assert_eq!(reader.meta().entry_name(), "x/y/z");
     }
 
     mod try_remove_oldest_block {

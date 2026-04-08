@@ -1,7 +1,5 @@
-// Copyright 2023 ReductSoftware UG
-// This Source Code Form is subject to the terms of the Mozilla Public
-//    License, v. 2.0. If a copy of the MPL was not distributed with this
-//    file, You can obtain one at https://mozilla.org/MPL/2.0/.
+// Copyright 2021-2026 ReductSoftware UG
+// Licensed under the Apache License, Version 2.0
 
 use crate::msg::bucket_api::{BucketInfo, BucketSettings};
 use chrono::{DateTime, Utc};
@@ -56,7 +54,7 @@ pub struct ServerInfo {
     pub latest_record: u64,
     /// Default settings
     pub defaults: Defaults,
-    /// License information if it is None, then it is BUSL-1.1
+    /// License information if it is `None`, then the instance uses Apache-2.0
     pub license: Option<License>,
 }
 
