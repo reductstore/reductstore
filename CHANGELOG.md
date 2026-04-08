@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.19.1 - 2026-04-08
+
+### Changed
+
+- Remove legacy remote backend configuration scaffolding from stable core config and fold the remaining generic backend settings into `GeneralBackendConfig`, [PR-1310](https://github.com/reductstore/reductstore/pull/1310)
+
 ## 1.19.0 - 2026-04-08
 
 ### Added
