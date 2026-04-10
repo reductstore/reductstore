@@ -11,6 +11,7 @@
   <a href="https://github.com/reductstore/reductstore/releases/latest"><img alt="GitHub all releases" src="https://img.shields.io/github/downloads/reductstore/reductstore/total" /></a>
   <a href="https://codecov.io/gh/reductstore/reductstore"><img alt="codecov" src="https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ" /></a>
   <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
+  <a href="https://discord.gg/7Qtg7kfHx9"><img alt="Discord" src="https://img.shields.io/discord/939475547065561088" /></a>
 </p>
 
 ## High Performance Data Backbone for Robotics and Industrial IoT
