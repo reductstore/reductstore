@@ -133,7 +133,7 @@ ReductStore is not just about data storage; it's about simplifying and enhancing
 
 Your input is invaluable to us! 🌟 If you've found a bug, have suggestions for improvements, or want to contribute directly to the codebase, here's how you can help:
 
-- **Questions and Ideas**: Join our [**Discourse community**](https://community.reduct.store) to ask questions, share ideas, and collaborate with fellow ReductStore users.
+- **Questions and Ideas**: Join our [**Discourse community**](https://community.reduct.store) or [**Discord server**](https://discord.gg/7Qtg7kfHx9) to ask questions, share ideas, and collaborate with fellow ReductStore users.
 - **Bug Reports**: Open an issue on our **[GitHub repository](https://github.com/reductstore/reductstore/issues)**. Please provide as much detail as possible so we can address it effectively.
 
 ## **Get Involved**
