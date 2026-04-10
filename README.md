@@ -11,7 +11,6 @@
   <a href="https://github.com/reductstore/reductstore/releases/latest"><img alt="GitHub all releases" src="https://img.shields.io/github/downloads/reductstore/reductstore/total" /></a>
   <a href="https://codecov.io/gh/reductstore/reductstore"><img alt="codecov" src="https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ" /></a>
   <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
-  <a href="https://discord.gg/7Qtg7kfHx9"><img alt="Discord" src="https://img.shields.io/discord/939475547065561088" /></a>
 </p>
 
 ## High Performance Data Backbone for Robotics and Industrial IoT
@@ -133,7 +132,7 @@ ReductStore is not just about data storage; it's about simplifying and enhancing
 
 Your input is invaluable to us! 🌟 If you've found a bug, have suggestions for improvements, or want to contribute directly to the codebase, here's how you can help:
 
-- **Questions and Ideas**: Join our [**Discourse community**](https://community.reduct.store) or [**Discord server**](https://discord.gg/7Qtg7kfHx9) to ask questions, share ideas, and collaborate with fellow ReductStore users.
+- **Questions and Ideas**: Join our [**Discourse community**](https://community.reduct.store) to ask questions, share ideas, and collaborate with fellow ReductStore users.
 - **Bug Reports**: Open an issue on our **[GitHub repository](https://github.com/reductstore/reductstore/issues)**. Please provide as much detail as possible so we can address it effectively.
 
 ## **Get Involved**
