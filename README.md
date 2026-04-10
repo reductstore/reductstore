@@ -1,12 +1,15 @@
-![ReductStore banner](./docs/images/reductstore-header.jpg)
+<p align="center">
+  <img src="./docs/images/reductstore-header.jpg" alt="ReductStore banner" />
+</p>
 
-[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reductstore/reductstore)](https://github.com/reductstore/reductstore/releases/latest)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main)](https://github.com/reductstore/reductstore/actions)
-[![Docker Pulls](https://img.shields.io/docker/pulls/reduct/store)](https://hub.docker.com/r/reduct/store)
-[![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reductstore/total)](https://github.com/reductstore/reductstore/releases/latest)
-[![codecov](https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ)](https://codecov.io/gh/reductstore/reductstore)
-[![Community](https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store
-)](https://community.reduct.store/signup)
+<p align="center">
+  <a href="https://github.com/reductstore/reductstore/releases/latest"><img alt="GitHub release (latest SemVer)" src="https://img.shields.io/github/v/release/reductstore/reductstore" /></a>
+  <a href="https://github.com/reductstore/reductstore/actions"><img alt="GitHub Workflow Status" src="https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main" /></a>
+  <a href="https://hub.docker.com/r/reduct/store"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/reduct/store" /></a>
+  <a href="https://github.com/reductstore/reductstore/releases/latest"><img alt="GitHub all releases" src="https://img.shields.io/github/downloads/reductstore/reductstore/total" /></a>
+  <a href="https://codecov.io/gh/reductstore/reductstore"><img alt="codecov" src="https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ" /></a>
+  <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
+</p>
 
 ## High Performance Data Backbone for Robotics and Industrial IoT
 
