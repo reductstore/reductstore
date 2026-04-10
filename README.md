@@ -1,5 +1,7 @@
 <p align="center">
-  <img src="./docs/images/reductstore-header.jpg" alt="ReductStore banner" />
+  <a href="https://www.reduct.store">
+    <img src="./docs/images/reductstore-header.jpg" alt="ReductStore banner" />
+  </a>
 </p>
 
 <p align="center">
