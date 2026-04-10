@@ -1,6 +1,8 @@
 # ReductStore
 
-## High Performance Storage and Streaming Solution for Data Acquisition Systems
+![ReductStore header](./docs/images/reductstore-header.jpg)
+
+## High Performance Data Backbone for Robotics and Industrial IoT
 
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reductstore/reductstore)](https://github.com/reductstore/reductstore/releases/latest)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main)](https://github.com/reductstore/reductstore/actions)
