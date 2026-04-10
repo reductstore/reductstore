@@ -146,24 +146,3 @@ Your support fuels our passion and drives us to keep improving.
 
 Together, let's redefine the future of blob data storage! 🚀
 
-## **Frequently Asked Questions (FAQ)**
-
-**Q1: What sets ReductStore apart from other time-series databases?**
-
-A1: ReductStore is specially designed for storing and managing large amounts of blob data, optimized for both high performance and real-time querying. Unlike other databases that focus primarily on numeric data, ReductStore excels in handling unstructured data, making it ideal for various applications like edge computing and IoT.
-
-**Q2: How do I get started with ReductStore?**
-
-A2: You can easily set up ReductStore using our Docker image or by using cargo. Detailed instructions are provided in the **[Getting Started](https://reduct.store/docs/)** section.
-
-**Q3: Is there any size limitation for the blob data?**
-
-A3: While ReductStore is optimized for small objects (less than 1 MB), there's no hard limit for the maximum size of a blob.
-
-**Q4: Can I integrate ReductStore with my current infrastructure?**
-
-A4: Absolutely! With our variety of client SDKs and its adaptable HTTP API, ReductStore can be integrated into almost any environment.
-
-**Q5: I'm facing issues with the installation. Where can I get help?**
-
-A5: We recommend checking out our **[documentation](https://reduct.store/docs/)**. If you still face issues, feel free to join our Discord community or raise an issue on our GitHub repository.
