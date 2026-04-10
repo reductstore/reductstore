@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Add README header image and update the project subtitle to "High Performance Data Backbone for Robotics and Industrial IoT", [PR-1315](https://github.com/reductstore/reductstore/pull/1315)
 - Generate SPDX SBOMs from `Cargo.lock` metadata (instead of scanning only final binaries), upload SBOM artifacts on every CI run, and continue attaching per-target SBOM files to releases, [PR-1314](https://github.com/reductstore/reductstore/pull/1314)
 
 ## 1.19.1 - 2026-04-08
