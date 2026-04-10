@@ -13,8 +13,6 @@
   <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
 </p>
 
-## High Performance Data Backbone for Robotics and Industrial IoT
-
 ReductStore is a high-performance, time-series object storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT). It's designed to handle large volumes of unstructured data - images, sensor readings, logs, files, ROS bags - captured in raw form and stored with a precise time index (timestamp) and optional labels (e.g. device status, AI inference). This enables fast, efficient retrieval based on when the data was collected and how it's categorized, while also allowing control over data reduction strategies by replicating (streaming) only selected data from the edge to the cloud.
 
 For more information, please visit https://www.reduct.store/.
