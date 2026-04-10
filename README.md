@@ -1,9 +1,5 @@
 # ReductStore
 
-![ReductStore header](./docs/images/reductstore-header.jpg)
-
-## High Performance Data Backbone for Robotics and Industrial IoT
-
 [![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reductstore/reductstore)](https://github.com/reductstore/reductstore/releases/latest)
 [![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main)](https://github.com/reductstore/reductstore/actions)
 [![Docker Pulls](https://img.shields.io/docker/pulls/reduct/store)](https://hub.docker.com/r/reduct/store)
@@ -11,6 +7,10 @@
 [![codecov](https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ)](https://codecov.io/gh/reductstore/reductstore)
 [![Community](https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store
 )](https://community.reduct.store/signup)
+
+## High Performance Data Backbone for Robotics and Industrial IoT
+
+![ReductStore banner](./docs/images/reductstore-header.jpg)
 
 ReductStore is a high-performance, time-series object storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT). It's designed to handle large volumes of unstructured data - images, sensor readings, logs, files, ROS bags - captured in raw form and stored with a precise time index (timestamp) and optional labels (e.g. device status, AI inference). This enables fast, efficient retrieval based on when the data was collected and how it's categorized, while also allowing control over data reduction strategies by replicating (streaming) only selected data from the edge to the cloud.
 
