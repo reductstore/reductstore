@@ -6,6 +6,7 @@ use crate::api::http::AxumAppBuilder;
 use crate::api::zenoh;
 use crate::cfg::{CfgParser, ExtCfgBounds, ExtCfgParser};
 use crate::core::env::StdEnvGetter;
+use crate::core::sync::set_rwlock_timeout;
 use crate::storage::engine::StorageEngine;
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
@@ -140,6 +141,10 @@ where
     if let Some(handle) = zenoh_runtime {
         handle.shutdown().await;
     }
+
+    // remote synchronization can lock resources for a long time,
+    // so we set rwlock timeout to 1 hour to avoid panics during shutdown
+    set_rwlock_timeout(Duration::from_hours(1));
     state_keeper
         .get_anonymous()
         .await
