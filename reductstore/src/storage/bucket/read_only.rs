@@ -223,6 +223,24 @@ mod tests {
             let compact_result = read_only_bucket.rename_entry("test-1", "new-name").await;
             assert_eq!(compact_result.err().unwrap(), err);
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_maintenance_operations_are_noop_on_replica(
+            #[future] primary_bucket: Arc<Bucket>,
+        ) {
+            let primary_bucket = primary_bucket.await;
+            let mut cfg = primary_bucket.cfg().clone();
+            cfg.role = InstanceRole::Replica;
+            let read_only_bucket = Arc::new(
+                Bucket::restore(primary_bucket.path().clone(), cfg.clone())
+                    .await
+                    .unwrap(),
+            );
+
+            read_only_bucket.compact().await.unwrap();
+            read_only_bucket.sync_fs().await.unwrap();
+        }
     }
 
     mod reload_before {
