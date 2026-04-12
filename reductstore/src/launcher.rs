@@ -17,6 +17,8 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
 
+static SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+
 pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pareser: Parser)
 where
     Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
@@ -153,7 +155,7 @@ where
 async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Received Ctrl-C, shutting down server...");
-    server_handle.shutdown();
+    server_handle.graceful_shutdown(Some(SHUTDOWN_TIMEOUT));
 }
 
 #[cfg(unix)]
@@ -163,7 +165,7 @@ async fn shutdown_signal(server_handle: Handle<SocketAddr>) {
         .recv()
         .await;
     info!("Received termination signal, shutting down server...");
-    server_handle.shutdown();
+    server_handle.graceful_shutdown(Some(SHUTDOWN_TIMEOUT));
 }
 
 #[cfg(test)]
