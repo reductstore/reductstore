@@ -73,7 +73,7 @@ argon2 = "0.6.0-rc.1"
 aes-siv = "0.8.0-rc.1"
 uuid = { version = "1.21.0", features = ["v4"] }
 parking_lot="0.12.5"
-zenoh = { version = "1.8.0", optional = true }
+zenoh = { version = "1.9.0", optional = true }
 
 
 [build-dependencies]
