@@ -79,6 +79,7 @@ impl BlockManager {
             entry,
             block_index: index,
             block_cache: BlockCache::new(
+                path.to_string_lossy().into_owned(),
                 WRITE_BLOCK_CACHE_SIZE,
                 READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
