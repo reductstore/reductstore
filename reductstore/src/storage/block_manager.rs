@@ -53,9 +53,11 @@ pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
 pub const DATA_FILE_EXT: &str = ".blk";
 pub const BLOCK_INDEX_FILE: &str = "blocks.idx";
 
-const WRITE_BLOCK_CACHE_SIZE: usize = 2; // we need 2 to avoid double sync when start a new one but not yet saved the old one when the record is written
-const READ_BLOCK_CACHE_SIZE: usize = 16;
+// we need 2 to avoid double sync when start a new one but not yet saved the old one when the record is written
+const WRITE_BLOCK_CACHE_SIZE: usize = 2;
 
+// global read cache size, shared by all entries, should be large enough to hold hot blocks of all entries but not too large to cause memory pressure
+const READ_BLOCK_CACHE_SIZE: usize = 128;
 impl BlockManager {
     /// Create a new block manager.
     ///
@@ -670,6 +672,11 @@ impl BlockManager {
 
     pub fn path(&self) -> &PathBuf {
         &self.path
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clear_cache_for_test(&self) {
+        self.block_cache.clear();
     }
 
     fn path_to_desc(&self, block_id: u64) -> PathBuf {
