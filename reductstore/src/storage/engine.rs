@@ -120,6 +120,12 @@ pub struct StorageEngine {
     folder_keeper: Arc<FolderKeeper>,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum BucketMaintenanceMode {
+    Compact,
+    SyncFs,
+}
+
 impl StorageEngine {
     pub fn builder() -> StorageEngineBuilder {
         StorageEngineBuilder {
@@ -398,13 +404,19 @@ impl StorageEngine {
     }
 
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
-        self.compact().await?;
+        self.run_bucket_maintenance(BucketMaintenanceMode::SyncFs)
+            .await?;
         FILE_CACHE.force_sync_all().await?;
         Ok(())
     }
 
     /// Update index from WALs and remove them
     pub async fn compact(&self) -> Result<(), ReductError> {
+        self.run_bucket_maintenance(BucketMaintenanceMode::Compact)
+            .await
+    }
+
+    async fn run_bucket_maintenance(&self, mode: BucketMaintenanceMode) -> Result<(), ReductError> {
         if self.cfg.role == InstanceRole::Replica {
             return Ok(());
         }
@@ -418,14 +430,23 @@ impl StorageEngine {
             .map(|bucket| Arc::clone(bucket))
             .collect::<Vec<_>>();
         for bucket in buckets {
-            handlers.push(tokio::spawn(async move { bucket.sync_fs().await }));
+            handlers.push(tokio::spawn(async move {
+                match mode {
+                    BucketMaintenanceMode::Compact => bucket.compact().await,
+                    BucketMaintenanceMode::SyncFs => bucket.sync_fs().await,
+                }
+            }));
         }
 
         for handler in handlers {
             match handler.await.unwrap() {
                 Ok(_) => {}
                 Err(e) => {
-                    error!("Failed to sync bucket: {}", e);
+                    let action = match mode {
+                        BucketMaintenanceMode::Compact => "compact",
+                        BucketMaintenanceMode::SyncFs => "sync",
+                    };
+                    error!("Failed to {} bucket: {}", action, e);
                 }
             }
         }

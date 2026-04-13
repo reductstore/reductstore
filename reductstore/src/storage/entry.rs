@@ -339,6 +339,15 @@ impl Entry {
         }
     }
 
+    /// Flushes entry metadata and block index to the storage backend.
+    ///
+    /// Unlike [`Self::compact`], this method waits for the block manager lock and
+    /// must be used for strict sync points (e.g. graceful shutdown).
+    pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        let mut bm = self.block_manager.write().await?;
+        bm.save_cache_metadata_on_disk().await
+    }
+
     pub fn name(&self) -> &str {
         &self.name
     }
@@ -503,6 +512,42 @@ mod tests {
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
             assert_eq!(info.size, 88);
+        }
+    }
+
+    mod compact {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compact_skips_when_block_manager_busy(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            let _guard = entry.block_manager.write().await.unwrap();
+
+            tokio::time::timeout(Duration::from_millis(200), entry.compact())
+                .await
+                .expect("compact should not block while block manager is busy")
+                .unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_sync_fs_waits_for_block_manager(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+
+            let guard = entry.block_manager.write().await.unwrap();
+            let entry_to_sync = entry.clone();
+            let sync_task = tokio::spawn(async move { entry_to_sync.sync_fs().await });
+
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            assert!(
+                !sync_task.is_finished(),
+                "sync_fs must wait for block manager lock"
+            );
+
+            drop(guard);
+            sync_task.await.unwrap().unwrap();
         }
     }
 

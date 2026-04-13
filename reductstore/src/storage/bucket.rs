@@ -72,6 +72,12 @@ pub(crate) struct Bucket {
     queries: AsyncRwLock<HashMap<u64, MultiEntryQuery>>,
 }
 
+#[derive(Copy, Clone, Eq, PartialEq)]
+enum EntryMaintenanceMode {
+    Compact,
+    SyncFs,
+}
+
 impl Bucket {
     /// Create a new Bucket
     ///
@@ -322,14 +328,29 @@ impl Bucket {
         }
     }
 
-    /// Sync all entries to the file system
+    /// Compact all entries in the bucket without blocking active writers.
+    pub async fn compact(&self) -> Result<(), ReductError> {
+        debug!("Compact metainformation in bucket '{}'", self.name);
+        self.run_entry_maintenance(EntryMaintenanceMode::Compact)
+            .await
+    }
+
+    /// Sync all entries to the file system.
+    ///
+    /// This method waits for active writers and should be used only for strict
+    /// durability points (for example graceful shutdown).
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        debug!("Sync bucket '{}'with backend", self.name);
+        self.run_entry_maintenance(EntryMaintenanceMode::SyncFs)
+            .await
+    }
+
+    async fn run_entry_maintenance(&self, mode: EntryMaintenanceMode) -> Result<(), ReductError> {
         if self.cfg.role == InstanceRole::Replica {
             return Ok(());
         }
 
         let bucket_name = self.name.clone();
-        debug!("Syncing bucket '{}'", bucket_name);
         let time_start = Instant::now();
 
         self.save_settings().await?;
@@ -337,9 +358,13 @@ impl Bucket {
         let entries = self.entries.clone();
         let mut count = 0usize;
         for entry in entries.read().await?.values() {
-            if let Err(err) = entry.compact().await {
+            let result = match mode {
+                EntryMaintenanceMode::Compact => entry.compact().await,
+                EntryMaintenanceMode::SyncFs => entry.sync_fs().await,
+            };
+            if let Err(err) = result {
                 error!(
-                    "Failed to compact entry '{}' in bucket '{}': {}",
+                    "Failed to compact/sync entry '{}' in bucket '{}': {}",
                     entry.name(),
                     bucket_name,
                     err
@@ -348,7 +373,7 @@ impl Bucket {
             count += 1;
         }
         debug!(
-            "Bucket '{}' synced {} entries in {:?}",
+            "Bucket '{}' processed {} entries in {:?}",
             bucket_name,
             count,
             Instant::now().duration_since(time_start)
