@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Make multi-entry query aggregation deterministic for records with equal timestamps by adding a stable tie-breaker and regression coverage, [PR-1326](https://github.com/reductstore/reductstore/pull/1326)
 - Graceful HTTP shutdown during active writes, split non-blocking compaction from strict shutdown sync, and ensure entry/block metadata sync waits for lock release when required, [PR-1323](https://github.com/reductstore/reductstore/pull/1323)
 - Reduce stale block metadata retention under high entry cardinality by introducing a shared global read cache with namespace-scoped invalidation and lock-read optimizations, [PR-1325](https://github.com/reductstore/reductstore/pull/1325)
 

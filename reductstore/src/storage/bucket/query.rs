@@ -253,16 +253,19 @@ impl Bucket {
                 break;
             }
 
-            let next = pending_readers
+            let next_entry = pending_readers
                 .iter()
                 .filter_map(|(name, reader)| {
                     reader
                         .as_ref()
-                        .map(|r| (name.clone(), r.meta().timestamp()))
+                        .map(|r| (name.as_str(), r.meta().timestamp()))
                 })
-                .min_by_key(|(_, ts)| *ts);
+                .min_by(|(name_a, ts_a), (name_b, ts_b)| {
+                    ts_a.cmp(ts_b).then_with(|| name_a.cmp(name_b))
+                })
+                .map(|(name, _)| name.to_string());
 
-            if let Some((entry_name, _)) = next {
+            if let Some(entry_name) = next_entry {
                 if let Some(reader) = pending_readers
                     .get_mut(&entry_name)
                     .and_then(|opt| opt.take())
@@ -345,6 +348,30 @@ mod tests {
                 ("entry-b".to_string(), 25),
                 ("entry-a".to_string(), 30),
             ]
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn deterministic_order_for_equal_timestamps(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "entry-b", 10, b"b").await.unwrap();
+        write(&bucket, "entry-a", 10, b"a").await.unwrap();
+
+        let query = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["entry-b".into(), "entry-a".into()]),
+            ..Default::default()
+        };
+
+        let id = bucket.query(query).await.unwrap();
+        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
+
+        let records = collect_records(rx).await;
+
+        assert_eq!(
+            records,
+            vec![("entry-a".to_string(), 10), ("entry-b".to_string(), 10),]
         );
     }
 
