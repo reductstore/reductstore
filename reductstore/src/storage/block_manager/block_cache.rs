@@ -63,13 +63,13 @@ impl BlockCache {
     }
 
     pub fn get_read(&self, block_id: &u64) -> Option<BlockRef> {
-        if let Some(block) = self.write_cache.write().unwrap().get(block_id) {
+        if let Some(block) = self.write_cache.read().unwrap().get(block_id) {
             return Some(block.clone());
         }
 
         if let Some(block) = self
             .read_cache
-            .write()
+            .read()
             .unwrap()
             .get(&self.read_key(*block_id))
         {
@@ -81,7 +81,7 @@ impl BlockCache {
 
     pub fn get_write(&self, block_id: &u64) -> Option<BlockRef> {
         self.write_cache
-            .write()
+            .read()
             .unwrap()
             .get(block_id)
             .map(|v| v.clone())
@@ -89,7 +89,7 @@ impl BlockCache {
 
     pub fn write_values(&self) -> Vec<BlockRef> {
         let mut values = Vec::new();
-        for value in self.write_cache.write().unwrap().values() {
+        for value in self.write_cache.read().unwrap().values() {
             values.push(value.clone());
         }
         values
@@ -97,7 +97,7 @@ impl BlockCache {
 
     #[allow(dead_code)]
     pub fn write_len(&self) -> usize {
-        self.write_cache.write().unwrap().len()
+        self.write_cache.read().unwrap().len()
     }
 
     pub fn remove(&self, block_id: &u64) {
