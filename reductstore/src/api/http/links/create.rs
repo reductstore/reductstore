@@ -16,8 +16,8 @@ use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine;
 use flate2::write::ZlibEncoder;
 use flate2::Compression;
-use rand::rngs::OsRng;
-use rand::TryRngCore;
+use rand::rngs::SysRng;
+use rand::TryRng;
 use reduct_base::error::ReductError;
 use reduct_base::msg::query_link_api::QueryLinkCreateResponse;
 use reduct_base::{internal_server_error, unprocessable_entity};
@@ -73,7 +73,7 @@ pub(super) async fn create(
 
     // use token to encrypt the query
     let mut salt = [0u8; 16];
-    OsRng
+    SysRng
         .try_fill_bytes(&mut salt)
         .map_err(|e| internal_server_error!("Failed to generate salt for query link: {}", e))?;
 
@@ -81,7 +81,7 @@ pub(super) async fn create(
     let cipher = Aes128SivAead::new_from_slice(&key).unwrap();
 
     let mut nonce_bytes = [0u8; 16];
-    OsRng
+    SysRng
         .try_fill_bytes(&mut nonce_bytes)
         .map_err(|e| internal_server_error!("Failed to generate nonce for query link: {}", e))?;
 

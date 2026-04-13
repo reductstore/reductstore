@@ -756,7 +756,7 @@ mod tests {
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::RecordWriter;
     use rand::distr::Alphanumeric;
-    use rand::{rng, Rng};
+    use rand::{rng, RngExt};
     use reduct_base::io::WriteRecord;
     use std::time::Duration;
     use tempfile::tempdir;

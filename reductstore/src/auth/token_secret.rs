@@ -1,8 +1,8 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use rand::rngs::OsRng;
-use rand::TryRngCore;
+use rand::rngs::SysRng;
+use rand::TryRng;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use ring::digest::{digest, SHA256};
@@ -25,7 +25,7 @@ pub(super) fn matched_hashed_token_secret<'a>(stored: &'a str, candidate: &str) 
 
 pub(crate) fn hash_token_secret(value: &str) -> Result<String, ReductError> {
     let mut salt = [0u8; SALT_LEN];
-    OsRng
+    SysRng
         .try_fill_bytes(&mut salt)
         .map_err(|err| internal_server_error!("Failed to generate salt for token hash: {}", err))?;
 

@@ -19,7 +19,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::debug;
 use prost::Message;
-use rand::Rng;
+use rand::RngExt;
 use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
