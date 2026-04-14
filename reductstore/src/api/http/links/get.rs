@@ -365,8 +365,10 @@ mod tests {
         .unwrap();
 
         let resp = response.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(resp.headers()["content-type"], "text/plain");
         assert_eq!(resp.headers()["content-length"], "6");
+        assert!(!resp.headers().contains_key("content-range"));
         assert_eq!(resp.headers()["x-reduct-label-x"], "y");
 
         let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
@@ -612,6 +614,11 @@ mod tests {
         assert_eq!(
             resolve_content_range(&(Bound::Unbounded, Included(2)), 6),
             Some((0, 2))
+        );
+        assert_eq!(resolve_content_range(&(Included(3), Included(2)), 6), None);
+        assert_eq!(
+            resolve_content_range(&(Included(6), Bound::Unbounded), 6),
+            None
         );
         assert_eq!(
             resolve_content_range(&(Bound::Excluded(1), Included(2)), 6),
