@@ -13,7 +13,7 @@ use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::{Aes128SivAead, Nonce};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header::CONTENT_RANGE, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum_extra::headers::{AcceptRanges, ContentLength, HeaderMap, HeaderMapExt, Range};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -238,24 +238,49 @@ async fn prepare_response(
     if let Some(range) = range {
         let initial_content_length = reader.lock().await.meta().content_length();
 
-        let ranges = range
+        let mut ranges = range
             .satisfiable_ranges(initial_content_length)
             .collect::<VecDeque<_>>();
 
+        if ranges.is_empty() {
+            headers.insert(
+                CONTENT_RANGE,
+                HeaderValue::from_str(&format!("bytes */{}", initial_content_length)).unwrap(),
+            );
+            return Ok((StatusCode::RANGE_NOT_SATISFIABLE, headers, Body::empty()));
+        }
+
+        ranges.retain(|range| resolve_content_range(range, initial_content_length).is_some());
+        if ranges.is_empty() {
+            headers.insert(
+                CONTENT_RANGE,
+                HeaderValue::from_str(&format!("bytes */{}", initial_content_length)).unwrap(),
+            );
+            return Ok((StatusCode::RANGE_NOT_SATISFIABLE, headers, Body::empty()));
+        }
+
         let content_length = ranges
             .iter()
-            .map(|(start, end)| match (start, end) {
-                (Included(s), Included(e)) => e - s + 1,
-                (Included(s), Bound::Unbounded) => initial_content_length - s,
-                (Bound::Unbounded, Included(e)) => e + 1,
-                _ => 0,
-            })
+            .filter_map(|range| resolve_content_range(range, initial_content_length))
+            .map(|(start, end)| end - start + 1)
             .sum();
 
         components.limits.check_egress(content_length).await?;
 
+        if let Some((start, end)) =
+            resolve_content_range(ranges.front().unwrap(), initial_content_length)
+        {
+            headers.insert(
+                CONTENT_RANGE,
+                HeaderValue::from_str(&format!(
+                    "bytes {}-{}/{}",
+                    start, end, initial_content_length
+                ))
+                .unwrap(),
+            );
+        }
+
         headers.typed_insert(ContentLength(content_length));
-        headers.typed_insert(range.clone());
 
         Ok((
             StatusCode::PARTIAL_CONTENT,
@@ -271,6 +296,20 @@ async fn prepare_response(
             headers,
             Body::from_stream(RecordStream::new(reader, false)),
         ))
+    }
+}
+
+fn resolve_content_range(
+    range: &(Bound<u64>, Bound<u64>),
+    initial_content_length: u64,
+) -> Option<(u64, u64)> {
+    match range {
+        (Included(s), Included(e)) if e >= s => Some((*s, *e)),
+        (Included(s), Bound::Unbounded) if *s < initial_content_length => {
+            Some((*s, initial_content_length.saturating_sub(1)))
+        }
+        (Bound::Unbounded, Included(e)) => Some((0, *e)),
+        _ => None,
     }
 }
 
@@ -326,8 +365,10 @@ mod tests {
         .unwrap();
 
         let resp = response.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(resp.headers()["content-type"], "text/plain");
         assert_eq!(resp.headers()["content-length"], "6");
+        assert!(!resp.headers().contains_key("content-range"));
         assert_eq!(resp.headers()["x-reduct-label-x"], "y");
 
         let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
@@ -513,10 +554,76 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(resp.headers()["content-type"], "text/plain");
         assert_eq!(resp.headers()["content-length"], "3");
+        assert_eq!(resp.headers()["content-range"], "bytes 0-2/6");
         assert_eq!(resp.headers()["x-reduct-label-x"], "y");
 
         let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
         assert_eq!(String::from_utf8_lossy(body_bytes.iter().as_slice()), "Hey");
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_query_link_range_not_satisfiable(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let link = create_query_link(
+            headers.clone(),
+            keeper.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+
+        headers.insert("range", HeaderValue::from_static("bytes=6-5"));
+        let response = get(
+            State(Arc::clone(&keeper)),
+            headers,
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .unwrap();
+
+        let resp = response.into_response();
+        assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(resp.headers()["content-range"], "bytes */6");
+
+        let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
+        assert_eq!(body_bytes.len(), 0);
+    }
+
+    #[test]
+    fn test_resolve_content_range_variants() {
+        assert_eq!(
+            resolve_content_range(&(Included(1), Bound::Unbounded), 6),
+            Some((1, 5))
+        );
+        assert_eq!(
+            resolve_content_range(&(Bound::Unbounded, Included(2)), 6),
+            Some((0, 2))
+        );
+        assert_eq!(resolve_content_range(&(Included(3), Included(2)), 6), None);
+        assert_eq!(
+            resolve_content_range(&(Included(6), Bound::Unbounded), 6),
+            None
+        );
+        assert_eq!(
+            resolve_content_range(&(Bound::Excluded(1), Included(2)), 6),
+            None
+        );
     }
 
     #[rstest]
