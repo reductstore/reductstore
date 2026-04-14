@@ -49,9 +49,9 @@ pub(super) async fn get(
     };
 
     let mut cache_lock = components.query_link_cache.write().await?;
-    let key = params.get("ct").unwrap();
+    let key = cache_key(&params, &query, record_num)?;
 
-    if let Some(cached) = cache_lock.get(key) {
+    if let Some(cached) = cache_lock.get(&key) {
         // reset reader to the beginning if was used before from cache
         cached
             .lock()
@@ -74,14 +74,22 @@ pub(super) async fn get(
             if !entries.is_empty() {
                 entries.first().cloned().unwrap_or_default()
             } else {
-                // entries is empty, use the entry from CreateLink request
-                query_request.entries = Some(vec![query.entry.clone()]);
-                query.entry.clone()
+                // entries is empty, prefer explicit record identity and fallback to link entry
+                let fallback = query
+                    .record_entry
+                    .clone()
+                    .unwrap_or_else(|| query.entry.clone());
+                query_request.entries = Some(vec![fallback.clone()]);
+                fallback
             }
         } else {
-            // entries is None, use the entry from CreateLink request
-            query_request.entries = Some(vec![query.entry.clone()]);
-            query.entry.clone()
+            // entries is None, prefer explicit record identity and fallback to link entry
+            let fallback = query
+                .record_entry
+                .clone()
+                .unwrap_or_else(|| query.entry.clone());
+            query_request.entries = Some(vec![fallback.clone()]);
+            fallback
         };
 
         // Execute the query at bucket level with multi-entry API
@@ -90,13 +98,42 @@ pub(super) async fn get(
             .register_query(id, &query.bucket, &entry_name, query_request)
             .await?;
 
-        let (rx, _): (_, _) = bucket.get_query_receiver(id.clone()).await?;
-        let record =
-            process_query_and_fetch_record(record_num, repo_ext, id, rx.upgrade()?).await?;
+        let (rx, _): (_, _) = bucket.get_query_receiver(id).await?;
+        let record = if let (Some(record_entry), Some(record_timestamp)) =
+            (query.record_entry.as_deref(), query.record_timestamp)
+        {
+            process_query_and_fetch_record_by_identity(
+                record_entry,
+                record_timestamp,
+                repo_ext,
+                id,
+                rx.upgrade()?,
+            )
+            .await?
+        } else {
+            process_query_and_fetch_record(record_num, repo_ext, id, rx.upgrade()?).await?
+        };
 
         let record = Arc::new(Mutex::new(record));
-        cache_lock.insert(key.clone(), Arc::clone(&record));
+        cache_lock.insert(key, Arc::clone(&record));
         prepare_response(&components, range, record).await
+    }
+}
+
+fn cache_key(
+    params: &HashMap<String, String>,
+    query: &QueryLinkCreateRequest,
+    record_num: u64,
+) -> Result<String, ReductError> {
+    let ct = params
+        .get("ct")
+        .ok_or_else(|| unprocessable_entity!("Missing 'ct' parameter"))?;
+    if let (Some(record_entry), Some(record_timestamp)) =
+        (query.record_entry.as_ref(), query.record_timestamp)
+    {
+        Ok(format!("{ct}:{record_entry}:{record_timestamp}"))
+    } else {
+        Ok(format!("{ct}:{record_num}"))
     }
 }
 
@@ -221,9 +258,47 @@ async fn process_query_and_fetch_record(
             if count == record_num {
                 return Ok(reader);
             }
+            count += 1;
         }
+    }
+}
 
-        count += 1;
+async fn process_query_and_fetch_record_by_identity(
+    record_entry: &str,
+    record_timestamp: u64,
+    repo_ext: &Box<dyn ManageExtensions + Send + Sync>,
+    id: u64,
+    rx: Arc<RwLock<QueryRx>>,
+) -> Result<BoxedReadRecord, ReductError> {
+    loop {
+        let Some(readers) = repo_ext.fetch_and_process_record(id, rx.clone()).await else {
+            continue;
+        };
+
+        for reader in readers {
+            let reader = match reader {
+                Ok(r) => r,
+                Err(ReductError {
+                    status: NoContent, ..
+                }) => {
+                    return Err(not_found!(
+                        "Record {}/{} not found in query result",
+                        record_entry,
+                        record_timestamp
+                    )
+                    .into())
+                }
+                Err(e) => return Err(e.into()),
+            };
+
+            let is_match = {
+                let meta = reader.meta();
+                meta.entry_name() == record_entry && meta.timestamp() == record_timestamp
+            };
+            if is_match {
+                return Ok(reader);
+            }
+        }
     }
 }
 
@@ -316,7 +391,9 @@ fn resolve_content_range(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::http::links::create::create;
     use crate::api::http::links::tests::create_query_link;
+    use crate::api::http::links::QueryLinkCreateRequestAxum;
     use crate::api::http::tests::{egress_limited_keeper, headers, keeper};
     use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::cfg::Cfg;
@@ -327,6 +404,7 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use reduct_base::io::RecordMeta;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
+    use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
     use reduct_base::unauthorized;
     use rstest::rstest;
     use tempfile::tempdir;
@@ -383,13 +461,11 @@ mod tests {
                 .write()
                 .await
                 .unwrap()
-                .get(
-                    url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .get(&get_cache_key_from_params(
+                    &url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
                         .into_owned()
-                        .collect::<HashMap<String, String>>()
-                        .get("ct")
-                        .unwrap()
-                )
+                        .collect::<HashMap<String, String>>(),
+                ))
                 .is_some(),
             "Query link should be cached"
         );
@@ -429,7 +505,7 @@ mod tests {
             .into_owned()
             .collect();
         components.query_link_cache.write().await.unwrap().insert(
-            get_ct_from_params(params),
+            get_cache_key_from_params(params),
             Arc::new(Mutex::new(Box::new(mock))),
         );
 
@@ -445,6 +521,166 @@ mod tests {
         let resp = response.into_response();
         assert_eq!(resp.headers()["content-type"], "text/plain");
         assert_eq!(resp.headers()["content-length"], "0");
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_query_link_cache_is_scoped_by_record_index(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        let mut writer = bucket
+            .begin_write(
+                "entry-1",
+                1,
+                5,
+                "text/plain".to_string(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        writer
+            .send(Ok(Some(bytes::Bytes::from("Later"))))
+            .await
+            .unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let link = create_query_link(
+            headers,
+            keeper.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                entries: Some(vec!["entry-1".to_string()]),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+
+        let first = get(
+            State(Arc::clone(&keeper)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(params.clone()),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let first_body = to_bytes(first.into_body(), 1000).await.unwrap();
+        assert_eq!(first_body, bytes::Bytes::from("Hey!!!"));
+
+        let mut second_params = params;
+        second_params.insert("r".to_string(), "1".to_string());
+        let second = get(
+            State(Arc::clone(&keeper)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(second_params),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let second_body = to_bytes(second.into_body(), 1000).await.unwrap();
+        assert_eq!(second_body, bytes::Bytes::from("Later"));
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_query_link_prefers_record_identity_over_index(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        for (entry, ts, data) in [
+            ("entry-a", 10u64, "A1"),
+            ("entry-a", 30u64, "A3"),
+            ("entry-b", 20u64, "B2"),
+        ] {
+            let mut writer = bucket
+                .begin_write(
+                    entry,
+                    ts,
+                    data.len() as u64,
+                    "text/plain".to_string(),
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(bytes::Bytes::from(data.to_string()))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
+        let response = create(
+            State(Arc::clone(&keeper)),
+            headers,
+            Path("file.txt".to_string()),
+            QueryLinkCreateRequestAxum(QueryLinkCreateRequest {
+                expire_at: Utc::now() + chrono::Duration::hours(1),
+                bucket: "bucket-1".to_string(),
+                entry: "entry-a".to_string(),
+                // Raw query stream index 1 points to "B2", while the UI-visible
+                // multi-entry order can point to another record.
+                index: Some(1),
+                record_entry: Some("entry-a".to_string()),
+                record_timestamp: Some(30),
+                query: QueryEntry {
+                    query_type: QueryType::Query,
+                    entries: Some(vec!["entry-a".to_string(), "entry-b".to_string()]),
+                    start: Some(0),
+                    stop: Some(100),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(response.link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let resp = get(
+            State(Arc::clone(&keeper)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        let body = to_bytes(resp.into_body(), 1000).await.unwrap();
+        assert_eq!(body, bytes::Bytes::from("A3"));
     }
 
     #[rstest]
@@ -930,8 +1166,10 @@ mod tests {
         }
     }
 
-    fn get_ct_from_params(params: &HashMap<String, String>) -> String {
-        params.get("ct").unwrap().to_string()
+    fn get_cache_key_from_params(params: &HashMap<String, String>) -> String {
+        let ct = params.get("ct").unwrap();
+        let record_num = params.get("r").map(String::as_str).unwrap_or("0");
+        format!("{ct}:{record_num}")
     }
 
     mod fetching {
