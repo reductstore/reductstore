@@ -240,11 +240,10 @@ async fn fetch_and_response_batched_records(
     }
 
     let mut ordered_entries: Vec<(usize, String)> = entries.into_iter().enumerate().collect();
-    ordered_entries.sort_by_key(|(idx, _)| {
-        (
-            first_ts_by_entry.get(idx).copied().unwrap_or(u64::MAX),
-            *idx,
-        )
+    ordered_entries.sort_by(|(idx_a, entry_a), (idx_b, entry_b)| {
+        let ts_a = first_ts_by_entry.get(idx_a).copied().unwrap_or(u64::MAX);
+        let ts_b = first_ts_by_entry.get(idx_b).copied().unwrap_or(u64::MAX);
+        ts_a.cmp(&ts_b).then_with(|| entry_a.cmp(entry_b))
     });
 
     let mut remapped_indices = HashMap::new();
@@ -489,6 +488,91 @@ mod tests {
         assert_eq!(resp_headers["x-reduct-start-ts"], "1000");
         assert_eq!(resp_headers["x-reduct-last"], "true");
         assert_eq!(body, Bytes::from("bbbaa"));
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn sorts_same_timestamp_entries_by_name(
+        #[future] keeper: Arc<StateKeeper>,
+        path_to_bucket_1: Path<HashMap<String, String>>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        for (entry, ts, data) in [("z-entry", 1000u64, "zz"), ("a-entry", 1000u64, "aa")] {
+            let mut writer = bucket
+                .begin_write(
+                    entry,
+                    ts,
+                    data.len() as u64,
+                    "text/plain".to_string(),
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(Bytes::from(data.to_string()))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
+        let request = QueryEntry {
+            query_type: QueryType::Query,
+            entries: Some(vec!["z-entry".into(), "a-entry".into()]),
+            start: Some(1000),
+            ..Default::default()
+        };
+        let path = Path(path_to_bucket_1.0.clone());
+        let response = query(
+            State(keeper.clone()),
+            headers.clone(),
+            path,
+            QueryEntryAxum(request),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let QueryInfo { id } =
+            from_slice(&to_bytes(response.into_body(), usize::MAX).await.unwrap()).unwrap();
+
+        headers.insert(
+            QUERY_ID_HEADER,
+            http::HeaderValue::from_str(&id.to_string()).unwrap(),
+        );
+
+        let response = read_batched_records(
+            State(keeper.clone()),
+            headers,
+            path_to_bucket_1,
+            MethodExtractor::new("GET"),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        let resp_headers = response.headers().clone();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+
+        assert_eq!(resp_headers["x-reduct-entries"], "a-entry,z-entry");
+        assert!(resp_headers["x-reduct-0-0"]
+            .to_str()
+            .unwrap()
+            .starts_with("2,"));
+        assert!(resp_headers["x-reduct-1-0"]
+            .to_str()
+            .unwrap()
+            .starts_with("2,"));
+        assert_eq!(resp_headers["x-reduct-start-ts"], "1000");
+        assert_eq!(resp_headers["x-reduct-last"], "true");
+        assert_eq!(body, Bytes::from("aazz"));
     }
 
     #[rstest]
