@@ -6,7 +6,8 @@ inputs:
     required: true
   action_github_token:
     description: 'GitHub token for setup-protoc.'
-    required: true
+    required: false
+    default: ''
   target:
     description: 'Target triple.'
     required: true
@@ -18,10 +19,12 @@ inputs:
     required: true
   access-key-id:
     description: 'AWS Access Key ID'
-    required: true
+    required: false
+    default: ''
   secret-access-key:
     description: 'AWS Secret Access Key'
-    required: true
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -41,17 +44,19 @@ runs:
       run: rustup target add ${{ inputs.target }}
 
     - name: Install gcc
-      if: ${{ startsWith(matrix.os, 'ubuntu-') }}
+      if: ${{ startsWith(inputs.os, 'ubuntu-') }}
       shell: bash
       run: |
-        sudo apt-get update
-        sudo apt-get install -y ${{ matrix.compiler }}
+        if [ -n "${{ inputs.compiler }}" ]; then
+          sudo apt-get update
+          sudo apt-get install -y ${{ inputs.compiler }}
+        fi
 
     - name: Install gcc
-      if: ${{ startsWith(matrix.os, 'macos-') && matrix.compiler != '' }}
+      if: ${{ startsWith(inputs.os, 'macos-') && inputs.compiler != '' }}
       shell: bash
       run: |
-        brew install ${{ matrix.compiler }}
+        brew install ${{ inputs.compiler }}
 
     - uses: ilammy/setup-nasm@v1
 

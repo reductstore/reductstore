@@ -10,10 +10,12 @@ inputs:
     default: 'ci'
   access-key-id:
     description: 'AWS Access Key ID'
-    required: true
+    required: false
+    default: ''
   secret-access-key:
     description: 'AWS Secret Access Key'
-    required: true
+    required: false
+    default: ''
 
 runs:
   using: 'composite'
@@ -36,6 +38,7 @@ runs:
     #        aws-region: eu-central
 
     - name: Use cache for Cargo
+      if: ${{ inputs.access-key-id != '' && inputs.secret-access-key != '' }}
       uses: runs-on/cache@v4
       with:
         path: |
