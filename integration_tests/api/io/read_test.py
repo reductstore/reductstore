@@ -49,6 +49,49 @@ def test_read_batched_records_v2(base_url, session, bucket, entry_root):
     assert resp.content == b"BBBAA"
 
 
+def test_read_batched_records_v2_stable_order_for_equal_timestamps(
+    base_url, session, bucket
+):
+    entry_z = "z-entry"
+    entry_a = "a-entry"
+    headers = {
+        "x-reduct-entries": f"{entry_z},{entry_a}",
+        "x-reduct-start-ts": "1000",
+        "x-reduct-0-0": "2,text/plain",
+        "x-reduct-1-0": "2,text/plain",
+        "content-length": "4",
+    }
+    body = b"ZZ" + b"AA"
+    resp = session.post(f"{base_url}/io/{bucket}/write", data=body, headers=headers)
+    assert resp.status_code == 200
+
+    resp = session.post(
+        f"{base_url}/io/{bucket}/q",
+        json={
+            "query_type": "QUERY",
+            "entries": [entry_z, entry_a],
+            "start": 0,
+            "stop": 2000,
+        },
+    )
+    assert resp.status_code == 200
+    query_id = resp.json()["id"]
+
+    resp = session.get(
+        f"{base_url}/io/{bucket}/read", headers={"x-reduct-query-id": str(query_id)}
+    )
+
+    assert resp.status_code == 200
+    assert resp.headers["x-reduct-entries"] == (
+        f"{quote(entry_a, safe='')},{quote(entry_z, safe='')}"
+    )
+    assert resp.headers["x-reduct-start-ts"] == "1000"
+    assert resp.headers["x-reduct-0-0"].startswith("2,text/plain")
+    assert resp.headers["x-reduct-1-0"].startswith("2,text/plain")
+    assert resp.headers["x-reduct-last"] == "true"
+    assert resp.content == b"AAZZ"
+
+
 @requires_env("API_TOKEN")
 @pytest.mark.parametrize("entry_path", ["x", "x/y", "x/y/z"])
 def test_read_requires_bucket_read_permissions(

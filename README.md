@@ -1,14 +1,17 @@
-# ReductStore
+<p align="center">
+  <a href="https://www.reduct.store">
+    <img src="./docs/images/reductstore-header.jpg" alt="ReductStore banner" />
+  </a>
+</p>
 
-## High Performance Storage and Streaming Solution for Data Acquisition Systems
-
-[![GitHub release (latest SemVer)](https://img.shields.io/github/v/release/reductstore/reductstore)](https://github.com/reductstore/reductstore/releases/latest)
-[![GitHub Workflow Status](https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main)](https://github.com/reductstore/reductstore/actions)
-[![Docker Pulls](https://img.shields.io/docker/pulls/reduct/store)](https://hub.docker.com/r/reduct/store)
-[![GitHub all releases](https://img.shields.io/github/downloads/reductstore/reductstore/total)](https://github.com/reductstore/reductstore/releases/latest)
-[![codecov](https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ)](https://codecov.io/gh/reductstore/reductstore)
-[![Community](https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store
-)](https://community.reduct.store/signup)
+<p align="center">
+  <a href="https://github.com/reductstore/reductstore/releases/latest"><img alt="GitHub release (latest SemVer)" src="https://img.shields.io/github/v/release/reductstore/reductstore" /></a>
+  <a href="https://github.com/reductstore/reductstore/actions"><img alt="GitHub Workflow Status" src="https://img.shields.io/github/actions/workflow/status/reductstore/reductstore/ci.yml?branch=main" /></a>
+  <a href="https://hub.docker.com/r/reduct/store"><img alt="Docker Pulls" src="https://img.shields.io/docker/pulls/reduct/store" /></a>
+  <a href="https://github.com/reductstore/reductstore/releases/latest"><img alt="GitHub all releases" src="https://img.shields.io/github/downloads/reductstore/reductstore/total" /></a>
+  <a href="https://codecov.io/gh/reductstore/reductstore"><img alt="codecov" src="https://codecov.io/gh/reductstore/reductstore/branch/main/graph/badge.svg?token=8FCWEX9VSQ" /></a>
+  <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
+</p>
 
 ReductStore is a high-performance, time-series object storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT). It's designed to handle large volumes of unstructured data - images, sensor readings, logs, files, ROS bags - captured in raw form and stored with a precise time index (timestamp) and optional labels (e.g. device status, AI inference). This enables fast, efficient retrieval based on when the data was collected and how it's categorized, while also allowing control over data reduction strategies by replicating (streaming) only selected data from the edge to the cloud.
 
@@ -140,24 +143,3 @@ Your support fuels our passion and drives us to keep improving.
 
 Together, let's redefine the future of blob data storage! 🚀
 
-## **Frequently Asked Questions (FAQ)**
-
-**Q1: What sets ReductStore apart from other time-series databases?**
-
-A1: ReductStore is specially designed for storing and managing large amounts of blob data, optimized for both high performance and real-time querying. Unlike other databases that focus primarily on numeric data, ReductStore excels in handling unstructured data, making it ideal for various applications like edge computing and IoT.
-
-**Q2: How do I get started with ReductStore?**
-
-A2: You can easily set up ReductStore using our Docker image or by using cargo. Detailed instructions are provided in the **[Getting Started](https://reduct.store/docs/)** section.
-
-**Q3: Is there any size limitation for the blob data?**
-
-A3: While ReductStore is optimized for small objects (less than 1 MB), there's no hard limit for the maximum size of a blob.
-
-**Q4: Can I integrate ReductStore with my current infrastructure?**
-
-A4: Absolutely! With our variety of client SDKs and its adaptable HTTP API, ReductStore can be integrated into almost any environment.
-
-**Q5: I'm facing issues with the installation. Where can I get help?**
-
-A5: We recommend checking out our **[documentation](https://reduct.store/docs/)**. If you still face issues, feel free to join our Discord community or raise an issue on our GitHub repository.

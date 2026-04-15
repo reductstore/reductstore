@@ -13,7 +13,7 @@ use aes_siv::aead::{Aead, KeyInit};
 use aes_siv::{Aes128SivAead, Nonce};
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
-use axum::http::StatusCode;
+use axum::http::{header::CONTENT_RANGE, HeaderValue, StatusCode};
 use axum::response::IntoResponse;
 use axum_extra::headers::{AcceptRanges, ContentLength, HeaderMap, HeaderMapExt, Range};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
@@ -30,7 +30,7 @@ use std::ops::Bound::Included;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-// GET /api/v1/links/:file_name&ct=...&s=...&i=...&r=...
+// GET /api/v1/links/:file_name&ct=...&s=...&i=...&n=...&ts=...&e=...
 pub(super) async fn get(
     State(keeper): State<Arc<StateKeeper>>,
     header_map: HeaderMap,
@@ -39,7 +39,7 @@ pub(super) async fn get(
 ) -> Result<impl IntoResponse, HttpError> {
     // first anonymous access to decrypt the query
     let components = keeper.get_anonymous().await?;
-    let (record_num, token_name, query) = decrypt_query(&components, params.clone()).await?;
+    let (token_name, query) = decrypt_query(&components, params.clone()).await?;
     check_permissions_from_token_name(&components, &token_name, &query.bucket).await?;
 
     let range = if header_map.contains_key("Range") {
@@ -49,9 +49,9 @@ pub(super) async fn get(
     };
 
     let mut cache_lock = components.query_link_cache.write().await?;
-    let key = params.get("ct").unwrap();
+    let key = cache_key(&params, &query)?;
 
-    if let Some(cached) = cache_lock.get(key) {
+    if let Some(cached) = cache_lock.get(&key) {
         // reset reader to the beginning if was used before from cache
         cached
             .lock()
@@ -70,6 +70,7 @@ pub(super) async fn get(
 
         // Get entries from query.entries first, fallback to query.entry from CreateLink request
         let mut query_request = query.query.clone();
+        // We need for compatibility with v1.18 -> remove at some point
         let entry_name = if let Some(ref entries) = query_request.entries {
             if !entries.is_empty() {
                 entries.first().cloned().unwrap_or_default()
@@ -90,13 +91,44 @@ pub(super) async fn get(
             .register_query(id, &query.bucket, &entry_name, query_request)
             .await?;
 
-        let (rx, _): (_, _) = bucket.get_query_receiver(id.clone()).await?;
-        let record =
-            process_query_and_fetch_record(record_num, repo_ext, id, rx.upgrade()?).await?;
+        let record_entry = query
+            .record_entry
+            .as_deref()
+            .expect("record_entry should be validated in decrypt_query");
+        let record_timestamp = query
+            .record_timestamp
+            .expect("record_timestamp should be validated in decrypt_query");
+        let (rx, _): (_, _) = bucket.get_query_receiver(id).await?;
+        let record = process_query_and_fetch_record_by_identity(
+            record_entry,
+            record_timestamp,
+            repo_ext,
+            id,
+            rx.upgrade()?,
+        )
+        .await?;
 
         let record = Arc::new(Mutex::new(record));
-        cache_lock.insert(key.clone(), Arc::clone(&record));
+        cache_lock.insert(key, Arc::clone(&record));
         prepare_response(&components, range, record).await
+    }
+}
+
+fn cache_key(
+    params: &HashMap<String, String>,
+    query: &QueryLinkCreateRequest,
+) -> Result<String, ReductError> {
+    let ct = params
+        .get("ct")
+        .ok_or_else(|| unprocessable_entity!("Missing 'ct' parameter"))?;
+    if let (Some(record_entry), Some(record_timestamp)) =
+        (query.record_entry.as_ref(), query.record_timestamp)
+    {
+        Ok(format!("{ct}:{record_entry}:{record_timestamp}"))
+    } else {
+        Err(unprocessable_entity!(
+            "Both 'record_entry' and 'record_timestamp' must be provided in payload or URL parameters"
+        ))
     }
 }
 
@@ -132,7 +164,7 @@ async fn check_permissions_with_token_repo(
 async fn decrypt_query(
     components: &Arc<Components>,
     params: HashMap<String, String>,
-) -> Result<(u64, String, QueryLinkCreateRequest), ReductError> {
+) -> Result<(String, QueryLinkCreateRequest), ReductError> {
     let ciphertxt_b64 = params
         .get("ct")
         .ok_or_else(|| unprocessable_entity!("Missing 'ct' parameter"))?;
@@ -145,11 +177,6 @@ async fn decrypt_query(
     let issuer = params
         .get("i")
         .ok_or_else(|| unprocessable_entity!("Missing 'i' parameter"))?;
-    let record_num = params
-        .get("r")
-        .unwrap_or(&"0".to_string())
-        .parse::<u64>()
-        .map_err(|e| unprocessable_entity!("Invalid 'r' parameter: {}", e))?;
 
     let mut token_repo = components.token_repo.write().await?;
     let token_secret = if token_repo.get_token_list().await?.is_empty() {
@@ -186,24 +213,48 @@ async fn decrypt_query(
         .map_err(|e| unprocessable_entity!("Failed to decompress query: {}", e))?;
 
     // parse the query
-    let query: QueryLinkCreateRequest = serde_json::from_slice(&query)
+    let mut query: QueryLinkCreateRequest = serde_json::from_slice(&query)
         .map_err(|e| unprocessable_entity!("Failed to parse query: {}", e))?;
 
     // Check expiration
     if query.expire_at < chrono::Utc::now() {
         return Err(unprocessable_entity!("Query link has expired").into());
     }
-    Ok((record_num, issuer.to_string(), query))
+
+    let query_entry = params.get("e");
+    let query_timestamp = params.get("ts");
+    match (query_entry, query_timestamp) {
+        (Some(entry), Some(ts)) => {
+            let ts = ts
+                .parse::<u64>()
+                .map_err(|e| unprocessable_entity!("Invalid 'ts' parameter: {}", e))?;
+            query.record_entry = Some(entry.clone());
+            query.record_timestamp = Some(ts);
+        }
+        (None, None) => {}
+        _ => {
+            return Err(unprocessable_entity!(
+                "Both 'e' and 'ts' parameters must be provided together"
+            ))
+        }
+    }
+
+    if query.record_entry.is_none() || query.record_timestamp.is_none() {
+        return Err(unprocessable_entity!(
+            "Both 'record_entry' and 'record_timestamp' must be provided in payload or URL parameters"
+        ));
+    }
+
+    Ok((issuer.to_string(), query))
 }
 
-async fn process_query_and_fetch_record(
-    record_num: u64,
+async fn process_query_and_fetch_record_by_identity(
+    record_entry: &str,
+    record_timestamp: u64,
     repo_ext: &Box<dyn ManageExtensions + Send + Sync>,
     id: u64,
     rx: Arc<RwLock<QueryRx>>,
 ) -> Result<BoxedReadRecord, ReductError> {
-    let mut count = 0;
-
     loop {
         let Some(readers) = repo_ext.fetch_and_process_record(id, rx.clone()).await else {
             continue;
@@ -214,16 +265,25 @@ async fn process_query_and_fetch_record(
                 Ok(r) => r,
                 Err(ReductError {
                     status: NoContent, ..
-                }) => return Err(not_found!("Record number out of range").into()),
+                }) => {
+                    return Err(not_found!(
+                        "Record {}/{} not found in query result",
+                        record_entry,
+                        record_timestamp
+                    )
+                    .into())
+                }
                 Err(e) => return Err(e.into()),
             };
 
-            if count == record_num {
+            let is_match = {
+                let meta = reader.meta();
+                meta.entry_name() == record_entry && meta.timestamp() == record_timestamp
+            };
+            if is_match {
                 return Ok(reader);
             }
         }
-
-        count += 1;
     }
 }
 
@@ -238,24 +298,49 @@ async fn prepare_response(
     if let Some(range) = range {
         let initial_content_length = reader.lock().await.meta().content_length();
 
-        let ranges = range
+        let mut ranges = range
             .satisfiable_ranges(initial_content_length)
             .collect::<VecDeque<_>>();
 
+        if ranges.is_empty() {
+            headers.insert(
+                CONTENT_RANGE,
+                HeaderValue::from_str(&format!("bytes */{}", initial_content_length)).unwrap(),
+            );
+            return Ok((StatusCode::RANGE_NOT_SATISFIABLE, headers, Body::empty()));
+        }
+
+        ranges.retain(|range| resolve_content_range(range, initial_content_length).is_some());
+        if ranges.is_empty() {
+            headers.insert(
+                CONTENT_RANGE,
+                HeaderValue::from_str(&format!("bytes */{}", initial_content_length)).unwrap(),
+            );
+            return Ok((StatusCode::RANGE_NOT_SATISFIABLE, headers, Body::empty()));
+        }
+
         let content_length = ranges
             .iter()
-            .map(|(start, end)| match (start, end) {
-                (Included(s), Included(e)) => e - s + 1,
-                (Included(s), Bound::Unbounded) => initial_content_length - s,
-                (Bound::Unbounded, Included(e)) => e + 1,
-                _ => 0,
-            })
+            .filter_map(|range| resolve_content_range(range, initial_content_length))
+            .map(|(start, end)| end - start + 1)
             .sum();
 
         components.limits.check_egress(content_length).await?;
 
+        if let Some((start, end)) =
+            resolve_content_range(ranges.front().unwrap(), initial_content_length)
+        {
+            headers.insert(
+                CONTENT_RANGE,
+                HeaderValue::from_str(&format!(
+                    "bytes {}-{}/{}",
+                    start, end, initial_content_length
+                ))
+                .unwrap(),
+            );
+        }
+
         headers.typed_insert(ContentLength(content_length));
-        headers.typed_insert(range.clone());
 
         Ok((
             StatusCode::PARTIAL_CONTENT,
@@ -274,10 +359,26 @@ async fn prepare_response(
     }
 }
 
+fn resolve_content_range(
+    range: &(Bound<u64>, Bound<u64>),
+    initial_content_length: u64,
+) -> Option<(u64, u64)> {
+    match range {
+        (Included(s), Included(e)) if e >= s => Some((*s, *e)),
+        (Included(s), Bound::Unbounded) if *s < initial_content_length => {
+            Some((*s, initial_content_length.saturating_sub(1)))
+        }
+        (Bound::Unbounded, Included(e)) => Some((0, *e)),
+        _ => None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::http::links::create::create;
     use crate::api::http::links::tests::create_query_link;
+    use crate::api::http::links::QueryLinkCreateRequestAxum;
     use crate::api::http::tests::{egress_limited_keeper, headers, keeper};
     use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::cfg::Cfg;
@@ -288,6 +389,7 @@ mod tests {
     use reduct_base::error::ErrorCode;
     use reduct_base::io::RecordMeta;
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
+    use reduct_base::msg::query_link_api::QueryLinkCreateRequest;
     use reduct_base::unauthorized;
     use rstest::rstest;
     use tempfile::tempdir;
@@ -326,8 +428,10 @@ mod tests {
         .unwrap();
 
         let resp = response.into_response();
+        assert_eq!(resp.status(), StatusCode::OK);
         assert_eq!(resp.headers()["content-type"], "text/plain");
         assert_eq!(resp.headers()["content-length"], "6");
+        assert!(!resp.headers().contains_key("content-range"));
         assert_eq!(resp.headers()["x-reduct-label-x"], "y");
 
         let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
@@ -342,13 +446,11 @@ mod tests {
                 .write()
                 .await
                 .unwrap()
-                .get(
-                    url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .get(&get_cache_key_from_params(
+                    &url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
                         .into_owned()
-                        .collect::<HashMap<String, String>>()
-                        .get("ct")
-                        .unwrap()
-                )
+                        .collect::<HashMap<String, String>>(),
+                ))
                 .is_some(),
             "Query link should be cached"
         );
@@ -388,7 +490,7 @@ mod tests {
             .into_owned()
             .collect();
         components.query_link_cache.write().await.unwrap().insert(
-            get_ct_from_params(params),
+            get_cache_key_from_params(params),
             Arc::new(Mutex::new(Box::new(mock))),
         );
 
@@ -407,8 +509,166 @@ mod tests {
     }
 
     #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_query_link_cache_is_scoped_by_record_identity(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        let mut writer = bucket
+            .begin_write(
+                "entry-1",
+                1,
+                5,
+                "text/plain".to_string(),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+        writer
+            .send(Ok(Some(bytes::Bytes::from("Later"))))
+            .await
+            .unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let link = create_query_link(
+            headers,
+            keeper.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                entries: Some(vec!["entry-1".to_string()]),
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+
+        let first = get(
+            State(Arc::clone(&keeper)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(params.clone()),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let first_body = to_bytes(first.into_body(), 1000).await.unwrap();
+        assert_eq!(first_body, bytes::Bytes::from("Hey!!!"));
+
+        let mut second_params = params;
+        second_params.insert("e".to_string(), "entry-1".to_string());
+        second_params.insert("ts".to_string(), "1".to_string());
+        let second = get(
+            State(Arc::clone(&keeper)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(second_params),
+        )
+        .await
+        .unwrap()
+        .into_response();
+        let second_body = to_bytes(second.into_body(), 1000).await.unwrap();
+        assert_eq!(second_body, bytes::Bytes::from("Later"));
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_query_link_uses_record_identity_for_preview(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        for (entry, ts, data) in [
+            ("entry-a", 10u64, "A1"),
+            ("entry-a", 30u64, "A3"),
+            ("entry-b", 20u64, "B2"),
+        ] {
+            let mut writer = bucket
+                .begin_write(
+                    entry,
+                    ts,
+                    data.len() as u64,
+                    "text/plain".to_string(),
+                    Default::default(),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(bytes::Bytes::from(data.to_string()))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
+        let response = create(
+            State(Arc::clone(&keeper)),
+            headers,
+            Path("file.txt".to_string()),
+            QueryLinkCreateRequestAxum(QueryLinkCreateRequest {
+                expire_at: Utc::now() + chrono::Duration::hours(1),
+                bucket: "bucket-1".to_string(),
+                entry: "entry-a".to_string(),
+                record_entry: Some("entry-a".to_string()),
+                record_timestamp: Some(30),
+                query: QueryEntry {
+                    query_type: QueryType::Query,
+                    entries: Some(vec!["entry-a".to_string(), "entry-b".to_string()]),
+                    start: Some(0),
+                    stop: Some(100),
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(response.link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+        let resp = get(
+            State(Arc::clone(&keeper)),
+            HeaderMap::new(),
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .unwrap()
+        .into_response();
+
+        let body = to_bytes(resp.into_body(), 1000).await.unwrap();
+        assert_eq!(body, bytes::Bytes::from("A3"));
+    }
+
+    #[rstest]
     #[tokio::test]
-    async fn test_get_query_link_record_out_of_range(
+    async fn test_get_query_link_record_not_found_by_identity(
         #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
@@ -431,7 +691,8 @@ mod tests {
             url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
                 .into_owned()
                 .collect();
-        params.insert("r".to_string(), "10".to_string()); // out of range
+        params.insert("e".to_string(), "entry-1".to_string());
+        params.insert("ts".to_string(), "10".to_string());
         let result = get(
             State(Arc::clone(&keeper)),
             HeaderMap::new(),
@@ -440,7 +701,10 @@ mod tests {
         )
         .await;
         let err: ReductError = result.err().unwrap().into();
-        assert_eq!(err, not_found!("Record number out of range"));
+        assert_eq!(
+            err,
+            not_found!("Record entry-1/10 not found in query result")
+        );
     }
 
     #[rstest]
@@ -513,10 +777,76 @@ mod tests {
         assert_eq!(resp.status(), StatusCode::PARTIAL_CONTENT);
         assert_eq!(resp.headers()["content-type"], "text/plain");
         assert_eq!(resp.headers()["content-length"], "3");
+        assert_eq!(resp.headers()["content-range"], "bytes 0-2/6");
         assert_eq!(resp.headers()["x-reduct-label-x"], "y");
 
         let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
         assert_eq!(String::from_utf8_lossy(body_bytes.iter().as_slice()), "Hey");
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_query_link_range_not_satisfiable(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let link = create_query_link(
+            headers.clone(),
+            keeper.clone(),
+            QueryEntry {
+                query_type: QueryType::Query,
+                ..Default::default()
+            },
+            None,
+        )
+        .await
+        .unwrap()
+        .0
+        .link;
+
+        let params: HashMap<String, String> =
+            url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                .into_owned()
+                .collect();
+
+        headers.insert("range", HeaderValue::from_static("bytes=6-5"));
+        let response = get(
+            State(Arc::clone(&keeper)),
+            headers,
+            Path("file.txt".to_string()),
+            Query(params),
+        )
+        .await
+        .unwrap();
+
+        let resp = response.into_response();
+        assert_eq!(resp.status(), StatusCode::RANGE_NOT_SATISFIABLE);
+        assert_eq!(resp.headers()["content-range"], "bytes */6");
+
+        let body_bytes = to_bytes(resp.into_body(), 1000).await.unwrap();
+        assert_eq!(body_bytes.len(), 0);
+    }
+
+    #[test]
+    fn test_resolve_content_range_variants() {
+        assert_eq!(
+            resolve_content_range(&(Included(1), Bound::Unbounded), 6),
+            Some((1, 5))
+        );
+        assert_eq!(
+            resolve_content_range(&(Bound::Unbounded, Included(2)), 6),
+            Some((0, 2))
+        );
+        assert_eq!(resolve_content_range(&(Included(3), Included(2)), 6), None);
+        assert_eq!(
+            resolve_content_range(&(Included(6), Bound::Unbounded), 6),
+            None
+        );
+        assert_eq!(
+            resolve_content_range(&(Bound::Excluded(1), Included(2)), 6),
+            None
+        );
     }
 
     #[rstest]
@@ -729,6 +1059,34 @@ mod tests {
     mod validation {
         use super::*;
         use rstest::rstest;
+
+        #[test]
+        fn test_cache_key_missing_ct_param() {
+            let params = HashMap::new();
+            let query = QueryLinkCreateRequest {
+                record_entry: Some("entry-1".to_string()),
+                record_timestamp: Some(0),
+                ..Default::default()
+            };
+
+            let err = cache_key(&params, &query).unwrap_err();
+            assert_eq!(err, unprocessable_entity!("Missing 'ct' parameter"));
+        }
+
+        #[test]
+        fn test_cache_key_missing_record_identity() {
+            let params = HashMap::from([("ct".to_string(), "cipher".to_string())]);
+            let query = QueryLinkCreateRequest::default();
+
+            let err = cache_key(&params, &query).unwrap_err();
+            assert_eq!(
+                err,
+                unprocessable_entity!(
+                    "Both 'record_entry' and 'record_timestamp' must be provided in payload or URL parameters"
+                )
+            );
+        }
+
         #[rstest]
         #[case("ct", "XXX", "Invalid base64 in 'ct' parameter")]
         #[case("s", "XXX", "Invalid base64 in 's' parameter")]
@@ -780,6 +1138,84 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_get_query_link_invalid_ts_param(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let keeper = keeper.await;
+            let link = create_query_link(
+                headers,
+                keeper.clone(),
+                QueryEntry {
+                    query_type: QueryType::Query,
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap()
+            .0
+            .link;
+
+            let mut params: HashMap<String, String> =
+                url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                    .into_owned()
+                    .collect();
+            params.insert("e".to_string(), "entry-1".to_string());
+            params.insert("ts".to_string(), "invalid".to_string());
+            let result = get(
+                State(Arc::clone(&keeper)),
+                HeaderMap::new(),
+                Path("file.txt".to_string()),
+                Query(params),
+            )
+            .await;
+            let err: ReductError = result.err().unwrap().into();
+            assert!(err.message.contains("Invalid 'ts' parameter"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_query_link_partial_identity_params(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let keeper = keeper.await;
+            let link = create_query_link(
+                headers,
+                keeper.clone(),
+                QueryEntry {
+                    query_type: QueryType::Query,
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap()
+            .0
+            .link;
+
+            let mut params: HashMap<String, String> =
+                url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                    .into_owned()
+                    .collect();
+            params.insert("ts".to_string(), "0".to_string());
+            let result = get(
+                State(Arc::clone(&keeper)),
+                HeaderMap::new(),
+                Path("file.txt".to_string()),
+                Query(params),
+            )
+            .await;
+            let err: ReductError = result.err().unwrap().into();
+            assert_eq!(
+                err,
+                unprocessable_entity!("Both 'e' and 'ts' parameters must be provided together")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
         #[case("ct")]
         #[case("s")]
         #[case("n")]
@@ -823,8 +1259,11 @@ mod tests {
         }
     }
 
-    fn get_ct_from_params(params: &HashMap<String, String>) -> String {
-        params.get("ct").unwrap().to_string()
+    fn get_cache_key_from_params(params: &HashMap<String, String>) -> String {
+        let ct = params.get("ct").unwrap();
+        let entry = params.get("e").map(String::as_str).unwrap_or("entry-1");
+        let ts = params.get("ts").map(String::as_str).unwrap_or("0");
+        format!("{ct}:{entry}:{ts}")
     }
 
     mod fetching {
@@ -842,7 +1281,7 @@ mod tests {
             let rx = Arc::new(RwLock::new(rx));
             let id = 1;
 
-            let err = process_query_and_fetch_record(0, ext_repo, id, rx)
+            let err = process_query_and_fetch_record_by_identity("entry-1", 0, ext_repo, id, rx)
                 .await
                 .err()
                 .unwrap();

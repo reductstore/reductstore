@@ -127,7 +127,7 @@ impl Bucket {
 
         for (_, _, entry) in &renamed_children {
             entry.ensure_not_deleting().await?;
-            entry.compact().await?;
+            entry.sync_fs().await?;
         }
 
         folder_keeper.rename_folder(old_name, new_name).await?;

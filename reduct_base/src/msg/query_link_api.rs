@@ -14,8 +14,10 @@ pub struct QueryLinkCreateRequest {
     pub bucket: String,
     /// Entry name (since v1.18 used for backward compatibility)
     pub entry: String,
-    /// Record index
-    pub index: Option<u64>,
+    /// Exact record entry name for stable preview resolution (optional)
+    pub record_entry: Option<String>,
+    /// Exact record timestamp for stable preview resolution (optional)
+    pub record_timestamp: Option<u64>,
     /// Query to share
     pub query: QueryEntry,
     /// Expiration time

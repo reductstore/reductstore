@@ -214,6 +214,7 @@ mod tests {
     mod forbidden {
         use super::*;
         use reduct_base::forbidden;
+
         #[rstest]
         #[serial]
         #[tokio::test]
@@ -244,6 +245,27 @@ mod tests {
                 .rename_bucket("bucket-1".to_string(), "bucket-renamed".to_string())
                 .await;
             assert_eq!(result.err().unwrap(), err);
+        }
+
+        #[rstest]
+        #[serial]
+        #[tokio::test]
+        async fn test_maintenance_operations_are_noop_on_replica(
+            #[future] primary_engine: Arc<StorageEngine>,
+        ) {
+            let primary_engine = primary_engine.await;
+            let mut cfg = primary_engine.cfg().clone();
+            cfg.role = InstanceRole::Replica;
+            let read_only_engine = Arc::new(
+                StorageEngine::builder()
+                    .with_cfg(cfg.clone())
+                    .with_data_path(cfg.data_path.clone())
+                    .build()
+                    .await,
+            );
+
+            read_only_engine.compact().await.unwrap();
+            read_only_engine.sync_fs().await.unwrap();
         }
     }
 

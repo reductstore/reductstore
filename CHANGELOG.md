@@ -7,6 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.19.2 - 2026-04-15
+
+### Breaking Changes
+
+- Enforce strict query-link record identity (`record_entry` + `record_timestamp`) in payload/URL, remove index-based link selection, and scope query-link cache by record identity, [PR-1334](https://github.com/reductstore/reductstore/pull/1334)
+
+### Changed
+
+- Generate SPDX SBOMs from `Cargo.lock` metadata (instead of scanning only final binaries), upload SBOM artifacts on every CI run, and continue attaching per-target SBOM files to releases, [PR-1314](https://github.com/reductstore/reductstore/pull/1314)
+- Update Web-Console up to v1.14.2, [PR-1335](https://github.com/reductstore/reductstore/pull/1335)
+
+### Fixed
+
+- Return RFC-compliant `Content-Range` headers on partial (`206`) replica query-link responses so MCAP seek/backfill clients can parse byte ranges correctly, [PR-1329](https://github.com/reductstore/reductstore/pull/1329)
+- Make multi-entry query aggregation deterministic for records with equal timestamps by adding a stable tie-breaker, [PR-1326](https://github.com/reductstore/reductstore/pull/1326)
+- Graceful HTTP shutdown during active writes, split non-blocking compaction from strict shutdown sync, and ensure entry/block metadata sync waits for lock release when required, [PR-1323](https://github.com/reductstore/reductstore/pull/1323)
+- Reduce stale block metadata retention under high entry cardinality by introducing a shared global read cache with namespace-scoped invalidation and lock-read optimizations, [PR-1325](https://github.com/reductstore/reductstore/pull/1325)
+- Make batch-v2 `/io/{bucket}/read` output deterministic for equal timestamps by ordering entries by name, [PR-1330](https://github.com/reductstore/reductstore/pull/1330)
+
 ## 1.19.1 - 2026-04-08
 
 ### Changed

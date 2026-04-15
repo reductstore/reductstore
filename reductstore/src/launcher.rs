@@ -6,6 +6,7 @@ use crate::api::http::AxumAppBuilder;
 use crate::api::zenoh;
 use crate::cfg::{CfgParser, ExtCfgBounds, ExtCfgParser};
 use crate::core::env::StdEnvGetter;
+use crate::core::sync::set_rwlock_timeout;
 use crate::storage::engine::StorageEngine;
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
@@ -16,6 +17,8 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+
+static SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
 pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pareser: Parser)
 where
@@ -138,6 +141,10 @@ where
     if let Some(handle) = zenoh_runtime {
         handle.shutdown().await;
     }
+
+    // remote synchronization can lock resources for a long time,
+    // so we set rwlock timeout to 1 hour to avoid panics during shutdown
+    set_rwlock_timeout(Duration::from_hours(1));
     state_keeper
         .get_anonymous()
         .await
@@ -153,7 +160,7 @@ where
 async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Received Ctrl-C, shutting down server...");
-    server_handle.shutdown();
+    server_handle.graceful_shutdown(Some(SHUTDOWN_TIMEOUT));
 }
 
 #[cfg(unix)]
@@ -163,7 +170,7 @@ async fn shutdown_signal(server_handle: Handle<SocketAddr>) {
         .recv()
         .await;
     info!("Received termination signal, shutting down server...");
-    server_handle.shutdown();
+    server_handle.graceful_shutdown(Some(SHUTDOWN_TIMEOUT));
 }
 
 #[cfg(test)]

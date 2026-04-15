@@ -605,6 +605,7 @@ mod tests {
 
             lock.write_all(&block_proto.encode_to_vec()).unwrap();
         }
+        block_manager.clear_cache_for_test();
 
         // repack the block
         let entry = EntryLoader::restore_entry(path.clone(), entry_settings, Cfg::default().into())
