@@ -1136,6 +1136,7 @@ mod tests {
                 url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
                     .into_owned()
                     .collect();
+            params.insert("e".to_string(), "entry-1".to_string());
             params.insert("ts".to_string(), "invalid".to_string());
             let result = get(
                 State(Arc::clone(&keeper)),
@@ -1173,7 +1174,7 @@ mod tests {
                 url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
                     .into_owned()
                     .collect();
-            params.remove("e");
+            params.insert("ts".to_string(), "0".to_string());
             let result = get(
                 State(Arc::clone(&keeper)),
                 HeaderMap::new(),
@@ -1235,11 +1236,9 @@ mod tests {
 
     fn get_cache_key_from_params(params: &HashMap<String, String>) -> String {
         let ct = params.get("ct").unwrap();
-        if let (Some(entry), Some(ts)) = (params.get("e"), params.get("ts")) {
-            format!("{ct}:{entry}:{ts}")
-        } else {
-            ct.to_string()
-        }
+        let entry = params.get("e").map(String::as_str).unwrap_or("entry-1");
+        let ts = params.get("ts").map(String::as_str).unwrap_or("0");
+        format!("{ct}:{entry}:{ts}")
     }
 
     mod fetching {

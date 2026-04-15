@@ -104,7 +104,7 @@ pub(super) async fn create(
     let salt_b64 = URL_SAFE_NO_PAD.encode(&salt);
     let nonce_b64 = URL_SAFE_NO_PAD.encode(&nonce_bytes);
 
-    let mut link = format!(
+    let link = format!(
         "{}api/v1/links/{}?ct={}&s={}&i={}&n={}",
         url,
         file_name,
@@ -113,15 +113,6 @@ pub(super) async fn create(
         token.name.as_str(),
         nonce_b64
     );
-
-    let ts = params.0.record_timestamp.ok_or_else(|| {
-        internal_server_error!("record_timestamp should be validated before link generation")
-    })?;
-    let entry = params.0.record_entry.as_ref().ok_or_else(|| {
-        internal_server_error!("record_entry should be validated before link generation")
-    })?;
-    let encoded_entry: String = url::form_urlencoded::byte_serialize(entry.as_bytes()).collect();
-    link = format!("{}&ts={}&e={}", link, ts, encoded_entry);
 
     Ok(QueryLinkCreateResponse { link }.into())
 }
@@ -184,8 +175,8 @@ mod tests {
         assert!(params.contains_key("s"));
         assert!(params.contains_key("i"));
         assert!(params.contains_key("n"));
-        assert_eq!(params.get("e"), Some(&"entry-1".to_string()));
-        assert_eq!(params.get("ts"), Some(&"0".to_string()));
+        assert!(!params.contains_key("e"));
+        assert!(!params.contains_key("ts"));
         assert!(!params.contains_key("r"));
     }
 
@@ -253,8 +244,8 @@ mod tests {
 
         let url = Url::parse(&response.link).unwrap();
         let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
-        assert_eq!(params.get("ts"), Some(&"123".to_string()));
-        assert_eq!(params.get("e"), Some(&"entry/a b".to_string()));
+        assert!(!params.contains_key("e"));
+        assert!(!params.contains_key("ts"));
     }
 
     #[rstest]
