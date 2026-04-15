@@ -30,7 +30,7 @@ use std::ops::Bound::Included;
 use std::sync::Arc;
 use tokio::sync::Mutex;
 
-// GET /api/v1/links/:file_name&ct=...&s=...&i=...&r=...
+// GET /api/v1/links/:file_name&ct=...&s=...&i=...&n=...&ts=...&e=...
 pub(super) async fn get(
     State(keeper): State<Arc<StateKeeper>>,
     header_map: HeaderMap,
@@ -39,7 +39,7 @@ pub(super) async fn get(
 ) -> Result<impl IntoResponse, HttpError> {
     // first anonymous access to decrypt the query
     let components = keeper.get_anonymous().await?;
-    let (record_num, token_name, query) = decrypt_query(&components, params.clone()).await?;
+    let (token_name, query) = decrypt_query(&components, params.clone()).await?;
     check_permissions_from_token_name(&components, &token_name, &query.bucket).await?;
 
     let range = if header_map.contains_key("Range") {
@@ -49,7 +49,7 @@ pub(super) async fn get(
     };
 
     let mut cache_lock = components.query_link_cache.write().await?;
-    let key = cache_key(&params, &query, record_num)?;
+    let key = cache_key(&params, &query)?;
 
     if let Some(cached) = cache_lock.get(&key) {
         // reset reader to the beginning if was used before from cache
@@ -70,26 +70,19 @@ pub(super) async fn get(
 
         // Get entries from query.entries first, fallback to query.entry from CreateLink request
         let mut query_request = query.query.clone();
+        // We need for compatibility with v1.18 -> remove at some point
         let entry_name = if let Some(ref entries) = query_request.entries {
             if !entries.is_empty() {
                 entries.first().cloned().unwrap_or_default()
             } else {
-                // entries is empty, prefer explicit record identity and fallback to link entry
-                let fallback = query
-                    .record_entry
-                    .clone()
-                    .unwrap_or_else(|| query.entry.clone());
-                query_request.entries = Some(vec![fallback.clone()]);
-                fallback
+                // entries is empty, use the entry from CreateLink request
+                query_request.entries = Some(vec![query.entry.clone()]);
+                query.entry.clone()
             }
         } else {
-            // entries is None, prefer explicit record identity and fallback to link entry
-            let fallback = query
-                .record_entry
-                .clone()
-                .unwrap_or_else(|| query.entry.clone());
-            query_request.entries = Some(vec![fallback.clone()]);
-            fallback
+            // entries is None, use the entry from CreateLink request
+            query_request.entries = Some(vec![query.entry.clone()]);
+            query.entry.clone()
         };
 
         // Execute the query at bucket level with multi-entry API
@@ -98,21 +91,25 @@ pub(super) async fn get(
             .register_query(id, &query.bucket, &entry_name, query_request)
             .await?;
 
-        let (rx, _): (_, _) = bucket.get_query_receiver(id).await?;
-        let record = if let (Some(record_entry), Some(record_timestamp)) =
-            (query.record_entry.as_deref(), query.record_timestamp)
-        {
-            process_query_and_fetch_record_by_identity(
-                record_entry,
-                record_timestamp,
-                repo_ext,
-                id,
-                rx.upgrade()?,
+        let record_entry = query.record_entry.as_deref().ok_or_else(|| {
+            unprocessable_entity!(
+                "Both 'record_entry' and 'record_timestamp' must be provided in payload or URL parameters"
             )
-            .await?
-        } else {
-            process_query_and_fetch_record(record_num, repo_ext, id, rx.upgrade()?).await?
-        };
+        })?;
+        let record_timestamp = query.record_timestamp.ok_or_else(|| {
+            unprocessable_entity!(
+                "Both 'record_entry' and 'record_timestamp' must be provided in payload or URL parameters"
+            )
+        })?;
+        let (rx, _): (_, _) = bucket.get_query_receiver(id).await?;
+        let record = process_query_and_fetch_record_by_identity(
+            record_entry,
+            record_timestamp,
+            repo_ext,
+            id,
+            rx.upgrade()?,
+        )
+        .await?;
 
         let record = Arc::new(Mutex::new(record));
         cache_lock.insert(key, Arc::clone(&record));
@@ -123,7 +120,6 @@ pub(super) async fn get(
 fn cache_key(
     params: &HashMap<String, String>,
     query: &QueryLinkCreateRequest,
-    record_num: u64,
 ) -> Result<String, ReductError> {
     let ct = params
         .get("ct")
@@ -133,7 +129,9 @@ fn cache_key(
     {
         Ok(format!("{ct}:{record_entry}:{record_timestamp}"))
     } else {
-        Ok(format!("{ct}:{record_num}"))
+        Err(unprocessable_entity!(
+            "Both 'record_entry' and 'record_timestamp' must be provided in payload or URL parameters"
+        ))
     }
 }
 
@@ -169,7 +167,7 @@ async fn check_permissions_with_token_repo(
 async fn decrypt_query(
     components: &Arc<Components>,
     params: HashMap<String, String>,
-) -> Result<(u64, String, QueryLinkCreateRequest), ReductError> {
+) -> Result<(String, QueryLinkCreateRequest), ReductError> {
     let ciphertxt_b64 = params
         .get("ct")
         .ok_or_else(|| unprocessable_entity!("Missing 'ct' parameter"))?;
@@ -182,11 +180,6 @@ async fn decrypt_query(
     let issuer = params
         .get("i")
         .ok_or_else(|| unprocessable_entity!("Missing 'i' parameter"))?;
-    let record_num = params
-        .get("r")
-        .unwrap_or(&"0".to_string())
-        .parse::<u64>()
-        .map_err(|e| unprocessable_entity!("Invalid 'r' parameter: {}", e))?;
 
     let mut token_repo = components.token_repo.write().await?;
     let token_secret = if token_repo.get_token_list().await?.is_empty() {
@@ -223,44 +216,39 @@ async fn decrypt_query(
         .map_err(|e| unprocessable_entity!("Failed to decompress query: {}", e))?;
 
     // parse the query
-    let query: QueryLinkCreateRequest = serde_json::from_slice(&query)
+    let mut query: QueryLinkCreateRequest = serde_json::from_slice(&query)
         .map_err(|e| unprocessable_entity!("Failed to parse query: {}", e))?;
 
     // Check expiration
     if query.expire_at < chrono::Utc::now() {
         return Err(unprocessable_entity!("Query link has expired").into());
     }
-    Ok((record_num, issuer.to_string(), query))
-}
 
-async fn process_query_and_fetch_record(
-    record_num: u64,
-    repo_ext: &Box<dyn ManageExtensions + Send + Sync>,
-    id: u64,
-    rx: Arc<RwLock<QueryRx>>,
-) -> Result<BoxedReadRecord, ReductError> {
-    let mut count = 0;
-
-    loop {
-        let Some(readers) = repo_ext.fetch_and_process_record(id, rx.clone()).await else {
-            continue;
-        };
-
-        for reader in readers {
-            let reader = match reader {
-                Ok(r) => r,
-                Err(ReductError {
-                    status: NoContent, ..
-                }) => return Err(not_found!("Record number out of range").into()),
-                Err(e) => return Err(e.into()),
-            };
-
-            if count == record_num {
-                return Ok(reader);
-            }
-            count += 1;
+    let query_entry = params.get("e");
+    let query_timestamp = params.get("ts");
+    match (query_entry, query_timestamp) {
+        (Some(entry), Some(ts)) => {
+            let ts = ts
+                .parse::<u64>()
+                .map_err(|e| unprocessable_entity!("Invalid 'ts' parameter: {}", e))?;
+            query.record_entry = Some(entry.clone());
+            query.record_timestamp = Some(ts);
+        }
+        (None, None) => {}
+        _ => {
+            return Err(unprocessable_entity!(
+                "Both 'e' and 'ts' parameters must be provided together"
+            ))
         }
     }
+
+    if query.record_entry.is_none() || query.record_timestamp.is_none() {
+        return Err(unprocessable_entity!(
+            "Both 'record_entry' and 'record_timestamp' must be provided in payload or URL parameters"
+        ));
+    }
+
+    Ok((issuer.to_string(), query))
 }
 
 async fn process_query_and_fetch_record_by_identity(
@@ -525,7 +513,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_get_query_link_cache_is_scoped_by_record_index(
+    async fn test_get_query_link_cache_is_scoped_by_record_identity(
         #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
@@ -587,7 +575,8 @@ mod tests {
         assert_eq!(first_body, bytes::Bytes::from("Hey!!!"));
 
         let mut second_params = params;
-        second_params.insert("r".to_string(), "1".to_string());
+        second_params.insert("e".to_string(), "entry-1".to_string());
+        second_params.insert("ts".to_string(), "1".to_string());
         let second = get(
             State(Arc::clone(&keeper)),
             HeaderMap::new(),
@@ -603,7 +592,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_get_query_link_prefers_record_identity_over_index(
+    async fn test_get_query_link_uses_record_identity_for_preview(
         #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
@@ -646,9 +635,6 @@ mod tests {
                 expire_at: Utc::now() + chrono::Duration::hours(1),
                 bucket: "bucket-1".to_string(),
                 entry: "entry-a".to_string(),
-                // Raw query stream index 1 points to "B2", while the UI-visible
-                // multi-entry order can point to another record.
-                index: Some(1),
                 record_entry: Some("entry-a".to_string()),
                 record_timestamp: Some(30),
                 query: QueryEntry {
@@ -685,7 +671,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_query_link_record_out_of_range(
+    async fn test_get_query_link_record_not_found_by_identity(
         #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
     ) {
@@ -708,7 +694,8 @@ mod tests {
             url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
                 .into_owned()
                 .collect();
-        params.insert("r".to_string(), "10".to_string()); // out of range
+        params.insert("e".to_string(), "entry-1".to_string());
+        params.insert("ts".to_string(), "10".to_string());
         let result = get(
             State(Arc::clone(&keeper)),
             HeaderMap::new(),
@@ -717,7 +704,10 @@ mod tests {
         )
         .await;
         let err: ReductError = result.err().unwrap().into();
-        assert_eq!(err, not_found!("Record number out of range"));
+        assert_eq!(
+            err,
+            not_found!("Record entry-1/10 not found in query result")
+        );
     }
 
     #[rstest]
@@ -1123,6 +1113,83 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_get_query_link_invalid_ts_param(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let keeper = keeper.await;
+            let link = create_query_link(
+                headers,
+                keeper.clone(),
+                QueryEntry {
+                    query_type: QueryType::Query,
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap()
+            .0
+            .link;
+
+            let mut params: HashMap<String, String> =
+                url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                    .into_owned()
+                    .collect();
+            params.insert("ts".to_string(), "invalid".to_string());
+            let result = get(
+                State(Arc::clone(&keeper)),
+                HeaderMap::new(),
+                Path("file.txt".to_string()),
+                Query(params),
+            )
+            .await;
+            let err: ReductError = result.err().unwrap().into();
+            assert!(err.message.contains("Invalid 'ts' parameter"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_query_link_partial_identity_params(
+            #[future] keeper: Arc<StateKeeper>,
+            headers: HeaderMap,
+        ) {
+            let keeper = keeper.await;
+            let link = create_query_link(
+                headers,
+                keeper.clone(),
+                QueryEntry {
+                    query_type: QueryType::Query,
+                    ..Default::default()
+                },
+                None,
+            )
+            .await
+            .unwrap()
+            .0
+            .link;
+
+            let mut params: HashMap<String, String> =
+                url::form_urlencoded::parse(link.split('?').nth(1).unwrap().as_bytes())
+                    .into_owned()
+                    .collect();
+            params.remove("e");
+            let result = get(
+                State(Arc::clone(&keeper)),
+                HeaderMap::new(),
+                Path("file.txt".to_string()),
+                Query(params),
+            )
+            .await;
+            let err: ReductError = result.err().unwrap().into();
+            assert_eq!(
+                err,
+                unprocessable_entity!("Both 'e' and 'ts' parameters must be provided together")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
         #[case("ct")]
         #[case("s")]
         #[case("n")]
@@ -1168,8 +1235,11 @@ mod tests {
 
     fn get_cache_key_from_params(params: &HashMap<String, String>) -> String {
         let ct = params.get("ct").unwrap();
-        let record_num = params.get("r").map(String::as_str).unwrap_or("0");
-        format!("{ct}:{record_num}")
+        if let (Some(entry), Some(ts)) = (params.get("e"), params.get("ts")) {
+            format!("{ct}:{entry}:{ts}")
+        } else {
+            ct.to_string()
+        }
     }
 
     mod fetching {
@@ -1187,7 +1257,7 @@ mod tests {
             let rx = Arc::new(RwLock::new(rx));
             let id = 1;
 
-            let err = process_query_and_fetch_record(0, ext_repo, id, rx)
+            let err = process_query_and_fetch_record_by_identity("entry-1", 0, ext_repo, id, rx)
                 .await
                 .err()
                 .unwrap();

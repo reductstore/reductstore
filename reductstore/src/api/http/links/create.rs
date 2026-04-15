@@ -43,6 +43,12 @@ pub(super) async fn create(
     if params.0.query.query_type != reduct_base::msg::entry_api::QueryType::Query {
         return Err(unprocessable_entity!("Only 'Query' type is supported for query links").into());
     }
+    if params.0.record_entry.is_none() || params.0.record_timestamp.is_none() {
+        return Err(unprocessable_entity!(
+            "Both 'record_entry' and 'record_timestamp' must be provided in payload"
+        )
+        .into());
+    }
 
     // check and normalize base URL if provided
     let url = check_and_normalize_base_url(&params, components.cfg.public_url.clone())?;
@@ -98,16 +104,25 @@ pub(super) async fn create(
     let salt_b64 = URL_SAFE_NO_PAD.encode(&salt);
     let nonce_b64 = URL_SAFE_NO_PAD.encode(&nonce_bytes);
 
-    let link = format!(
-        "{}api/v1/links/{}?ct={}&s={}&i={}&n={}&r={}",
+    let mut link = format!(
+        "{}api/v1/links/{}?ct={}&s={}&i={}&n={}",
         url,
         file_name,
         ct_b64,
         salt_b64,
         token.name.as_str(),
-        nonce_b64,
-        params.0.index.unwrap_or(0)
+        nonce_b64
     );
+
+    let ts = params.0.record_timestamp.ok_or_else(|| {
+        internal_server_error!("record_timestamp should be validated before link generation")
+    })?;
+    let entry = params.0.record_entry.as_ref().ok_or_else(|| {
+        internal_server_error!("record_entry should be validated before link generation")
+    })?;
+    let encoded_entry: String = url::form_urlencoded::byte_serialize(entry.as_bytes()).collect();
+    link = format!("{}&ts={}&e={}", link, ts, encoded_entry);
+
     Ok(QueryLinkCreateResponse { link }.into())
 }
 
@@ -169,7 +184,77 @@ mod tests {
         assert!(params.contains_key("s"));
         assert!(params.contains_key("i"));
         assert!(params.contains_key("n"));
-        assert_eq!(params.get("r").unwrap(), "0");
+        assert_eq!(params.get("e"), Some(&"entry-1".to_string()));
+        assert_eq!(params.get("ts"), Some(&"0".to_string()));
+        assert!(!params.contains_key("r"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_query_link_missing_record_identity(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let err = create(
+            State(keeper),
+            headers,
+            Path("file.txt".to_string()),
+            QueryLinkCreateRequestAxum(reduct_base::msg::query_link_api::QueryLinkCreateRequest {
+                expire_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                query: QueryEntry {
+                    query_type: QueryType::Query,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        )
+        .await
+        .err()
+        .unwrap();
+        let err: ReductError = err.into();
+        assert_eq!(
+            err,
+            unprocessable_entity!(
+                "Both 'record_entry' and 'record_timestamp' must be provided in payload"
+            )
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_query_link_with_record_identity(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+    ) {
+        let keeper = keeper.await;
+        let response = create(
+            State(keeper),
+            headers,
+            Path("file.txt".to_string()),
+            QueryLinkCreateRequestAxum(reduct_base::msg::query_link_api::QueryLinkCreateRequest {
+                expire_at: chrono::Utc::now() + chrono::Duration::hours(1),
+                bucket: "bucket-1".to_string(),
+                entry: "entry-1".to_string(),
+                record_entry: Some("entry/a b".to_string()),
+                record_timestamp: Some(123),
+                query: QueryEntry {
+                    query_type: QueryType::Query,
+                    ..Default::default()
+                },
+                ..Default::default()
+            }),
+        )
+        .await
+        .unwrap()
+        .0;
+
+        let url = Url::parse(&response.link).unwrap();
+        let params: std::collections::HashMap<_, _> = url.query_pairs().into_owned().collect();
+        assert_eq!(params.get("ts"), Some(&"123".to_string()));
+        assert_eq!(params.get("e"), Some(&"entry/a b".to_string()));
     }
 
     #[rstest]
