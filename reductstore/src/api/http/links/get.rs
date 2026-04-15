@@ -91,16 +91,13 @@ pub(super) async fn get(
             .register_query(id, &query.bucket, &entry_name, query_request)
             .await?;
 
-        let record_entry = query.record_entry.as_deref().ok_or_else(|| {
-            unprocessable_entity!(
-                "Both 'record_entry' and 'record_timestamp' must be provided in payload or URL parameters"
-            )
-        })?;
-        let record_timestamp = query.record_timestamp.ok_or_else(|| {
-            unprocessable_entity!(
-                "Both 'record_entry' and 'record_timestamp' must be provided in payload or URL parameters"
-            )
-        })?;
+        let record_entry = query
+            .record_entry
+            .as_deref()
+            .expect("record_entry should be validated in decrypt_query");
+        let record_timestamp = query
+            .record_timestamp
+            .expect("record_timestamp should be validated in decrypt_query");
         let (rx, _): (_, _) = bucket.get_query_receiver(id).await?;
         let record = process_query_and_fetch_record_by_identity(
             record_entry,
@@ -1062,6 +1059,34 @@ mod tests {
     mod validation {
         use super::*;
         use rstest::rstest;
+
+        #[test]
+        fn test_cache_key_missing_ct_param() {
+            let params = HashMap::new();
+            let query = QueryLinkCreateRequest {
+                record_entry: Some("entry-1".to_string()),
+                record_timestamp: Some(0),
+                ..Default::default()
+            };
+
+            let err = cache_key(&params, &query).unwrap_err();
+            assert_eq!(err, unprocessable_entity!("Missing 'ct' parameter"));
+        }
+
+        #[test]
+        fn test_cache_key_missing_record_identity() {
+            let params = HashMap::from([("ct".to_string(), "cipher".to_string())]);
+            let query = QueryLinkCreateRequest::default();
+
+            let err = cache_key(&params, &query).unwrap_err();
+            assert_eq!(
+                err,
+                unprocessable_entity!(
+                    "Both 'record_entry' and 'record_timestamp' must be provided in payload or URL parameters"
+                )
+            );
+        }
+
         #[rstest]
         #[case("ct", "XXX", "Invalid base64 in 'ct' parameter")]
         #[case("s", "XXX", "Invalid base64 in 's' parameter")]
