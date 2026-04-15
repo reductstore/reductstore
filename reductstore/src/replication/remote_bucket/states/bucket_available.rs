@@ -35,7 +35,7 @@ impl BucketAvailableState {
         // if it is a network error, we can retry got to unavailable state and wait
 
         match err.status {
-            ErrorCode::Timeout | ErrorCode::ConnectionError => {
+            ErrorCode::Timeout | ErrorCode::ConnectionError | ErrorCode::ServiceUnavailable => {
                 debug!(
                     "Failed to write record to remote bucket {}{}: {}",
                     self.bucket.server_url(),
@@ -236,6 +236,7 @@ mod tests {
     #[test_log::test(rstest)]
     #[case(ErrorCode::Timeout)]
     #[case(ErrorCode::ConnectionError)]
+    #[case(ErrorCode::ServiceUnavailable)]
     #[tokio::test]
     async fn test_write_record_conn_err(
         #[case] err: ErrorCode,
@@ -262,6 +263,7 @@ mod tests {
     #[test_log::test(rstest)]
     #[case(ErrorCode::Timeout)]
     #[case(ErrorCode::ConnectionError)]
+    #[case(ErrorCode::ServiceUnavailable)]
     #[tokio::test]
     async fn test_update_record_conn_err(
         #[case] err: ErrorCode,
