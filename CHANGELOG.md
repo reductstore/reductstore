@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.19.2 - 2026-04-15
 
 ### Breaking Changes
 
@@ -15,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Generate SPDX SBOMs from `Cargo.lock` metadata (instead of scanning only final binaries), upload SBOM artifacts on every CI run, and continue attaching per-target SBOM files to releases, [PR-1314](https://github.com/reductstore/reductstore/pull/1314)
+- Update Web-Console up to v1.14.2, [PR-1335](https://github.com/reductstore/reductstore/pull/1335)
 
 ### Fixed
 
