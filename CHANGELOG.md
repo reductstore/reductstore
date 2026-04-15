@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Treat replication destination `503 Service Unavailable` as a transient remote-unavailable error so replication keeps queued transactions buffered instead of dropping them, [PR-1337](https://github.com/reductstore/reductstore/pull/1337)
+
 ## 1.19.2 - 2026-04-15
 
 ### Breaking Changes
