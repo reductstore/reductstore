@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Enforce strict query-link record identity (`record_entry` + `record_timestamp`) in payload/URL, remove index-based link selection, and scope query-link cache by record identity, [PR-1334](https://github.com/reductstore/reductstore/pull/1334)
 - Return RFC-compliant `Content-Range` headers on partial (`206`) replica query-link responses so MCAP seek/backfill clients can parse byte ranges correctly, [PR-1329](https://github.com/reductstore/reductstore/pull/1329)
 - Make multi-entry query aggregation deterministic for records with equal timestamps by adding a stable tie-breaker, [PR-1326](https://github.com/reductstore/reductstore/pull/1326)
 - Graceful HTTP shutdown during active writes, split non-blocking compaction from strict shutdown sync, and ensure entry/block metadata sync waits for lock release when required, [PR-1323](https://github.com/reductstore/reductstore/pull/1323)
