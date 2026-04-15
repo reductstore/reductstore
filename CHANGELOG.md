@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Breaking Changes
+
+- Enforce strict query-link record identity (`record_entry` + `record_timestamp`) in payload/URL, remove index-based link selection, and scope query-link cache by record identity, [PR-1334](https://github.com/reductstore/reductstore/pull/1334)
+
 ### Changed
 
 - Generate SPDX SBOMs from `Cargo.lock` metadata (instead of scanning only final binaries), upload SBOM artifacts on every CI run, and continue attaching per-target SBOM files to releases, [PR-1314](https://github.com/reductstore/reductstore/pull/1314)

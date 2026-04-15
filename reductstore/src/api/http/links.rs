@@ -156,6 +156,8 @@ pub(super) mod tests {
                             "expire_at": 4102444800,
                             "bucket": "bucket-1",
                             "entry": "entry-1",
+                            "record_entry": "entry-1",
+                            "record_timestamp": 0,
                             "query": {
                                 "query_type": "QUERY"
                             }
@@ -220,6 +222,8 @@ pub(super) mod tests {
                 expire_at: expire_at.unwrap_or_else(|| Utc::now() + chrono::Duration::hours(1)),
                 bucket: "bucket-1".to_string(),
                 entry: "entry-1".to_string(),
+                record_entry: Some("entry-1".to_string()),
+                record_timestamp: Some(0),
                 query,
                 ..Default::default()
             }),

@@ -19,6 +19,8 @@ def test__create_and_download_link(base_url, session, token_name, bucket_name):
     query_link = {
         "bucket": bucket_name,
         "entry": "test",
+        "record_entry": "test",
+        "record_timestamp": 19999,
         "query": {
             "query_type": "QUERY",
         },
@@ -48,6 +50,8 @@ def test__create_link_with_permissions(
     query_link = {
         "bucket": bucket_name,
         "entry": "test",
+        "record_entry": "test",
+        "record_timestamp": 0,
         "query": {
             "query_type": "QUERY",
         },
