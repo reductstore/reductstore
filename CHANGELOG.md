@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add `--version` CLI option for the `reductstore` server binary to print the version and exit, [#1338](https://github.com/reductstore/reductstore/issues/1338)
+
 ### Fixed
 
 - Count usage limits per connection to avoid starvation of health checks, [PR-1341](https://github.com/reductstore/reductstore/pull/1341)

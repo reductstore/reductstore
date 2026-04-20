@@ -20,11 +20,24 @@ use tokio::sync::mpsc;
 
 static SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
+fn is_version_flag_requested<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter().any(|arg| arg.as_ref() == "--version")
+}
+
 pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pareser: Parser)
 where
     Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
 {
     let version: &str = env!("CARGO_PKG_VERSION");
+
+    if is_version_flag_requested(std::env::args().skip(1)) {
+        println!("{version}");
+        return;
+    }
 
     Logger::init("INFO");
     info!(
@@ -228,6 +241,16 @@ mod tests {
         }
         warn!("Shutting down server");
         handle.shutdown();
+    }
+
+    #[rstest]
+    #[case(vec!["--version"], true)]
+    #[case(vec!["--version", "--foo"], true)]
+    #[case(vec!["--foo", "--version"], true)]
+    #[case(vec!["-V"], false)]
+    #[case(vec![], false)]
+    fn test_is_version_flag_requested(#[case] args: Vec<&str>, #[case] expected: bool) {
+        assert_eq!(is_version_flag_requested(args), expected);
     }
 
     #[rstest]
