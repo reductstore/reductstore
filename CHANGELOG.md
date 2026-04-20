@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add `--version` (`-V`) CLI option to the `reductstore` server binary to print the version and exit successfully from shared launcher code, [PR-1343](https://github.com/reductstore/reductstore/pull/1343)
+
 ## 1.19.5- 2026-04-21
 
 ### Fixed
