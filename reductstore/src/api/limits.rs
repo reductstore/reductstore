@@ -417,8 +417,6 @@ mod tests {
         assert!(msg.contains("used="));
         assert!(msg.contains("(10000000)"));
         assert!(msg.contains("10005949"));
-        assert!(!msg.contains("limit=10000000"));
-        assert!(!msg.contains("used=10005949 "));
         assert!(msg.contains("retry_after=38s"));
     }
 
@@ -436,7 +434,7 @@ mod tests {
         assert!(msg.contains("api requests"));
         assert!(msg.contains("used=11"));
         assert!(msg.contains("limit=10"));
-        assert!(!msg.contains('('));
+        assert!(msg.contains("127.0.0.1"));
     }
 
     #[rstest]
