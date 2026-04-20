@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::components::CLIENT_IP_HEADER;
 use crate::api::http::entry::MethodExtractor;
 use crate::api::http::Components;
 use crate::api::http::HttpError;
@@ -15,6 +16,7 @@ use axum_extra::headers::HeaderMap;
 use crate::api::http::entry::common::check_and_extract_ts_or_query_id;
 use crate::api::http::utils::{make_headers_from_reader, RecordStream};
 use crate::api::http::StateKeeper;
+use crate::api::limits::{limit_scope_from_client_ip, LimitScope};
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::entry::{Entry, RecordReader};
@@ -54,8 +56,21 @@ pub(super) async fn read_record(
     let last_record = entry.upgrade()?.info().await?.latest_record;
 
     let (query_id, ts) = check_and_extract_ts_or_query_id(params, last_record)?;
+    let scope = limit_scope_from_client_ip(
+        headers
+            .get(CLIENT_IP_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    );
 
-    fetch_and_response_single_record(components, entry, ts, query_id, method.name() == "HEAD").await
+    fetch_and_response_single_record(
+        components,
+        entry,
+        ts,
+        query_id,
+        method.name() == "HEAD",
+        scope,
+    )
+    .await
 }
 
 /// Fetches a single record either by timestamp or from a query, and prepares the HTTP response.
@@ -70,6 +85,7 @@ async fn fetch_and_response_single_record(
     ts: Option<u64>,
     query_id: Option<u64>,
     empty_body: bool,
+    scope: LimitScope,
 ) -> Result<impl IntoResponse, HttpError> {
     let entry = entry.upgrade()?;
     let reader = if let Some(ts) = ts {
@@ -84,7 +100,7 @@ async fn fetch_and_response_single_record(
     if !empty_body {
         components
             .limits
-            .check_egress(reader.meta().content_length())
+            .check_egress_for(scope, reader.meta().content_length())
             .await?;
     }
 

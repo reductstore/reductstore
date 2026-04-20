@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::limits::LimitScope;
 use crate::api::zenoh::attachments::QueryAttachments;
 use crate::api::Components;
 use crate::cfg::io::IoConfig;
@@ -50,11 +51,17 @@ impl QueryablePipeline {
     }
 
     pub(crate) async fn check_api_request(&self) -> Result<(), ReductError> {
-        self.components.limits.check_api_request().await
+        self.components
+            .limits
+            .check_api_request_for(LimitScope::GlobalFallback)
+            .await
     }
 
     pub(crate) async fn check_egress(&self, bytes: u64) -> Result<(), ReductError> {
-        self.components.limits.check_egress(bytes).await
+        self.components
+            .limits
+            .check_egress_for(LimitScope::GlobalFallback, bytes)
+            .await
     }
 
     /// Resolves a Zenoh selector and query parameters into ReductStore records.

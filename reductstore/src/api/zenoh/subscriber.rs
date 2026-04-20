@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::limits::LimitScope;
 use crate::api::zenoh::attachments;
 use crate::api::Components;
 use crate::cfg::zenoh::ZenohApiConfig;
@@ -65,8 +66,14 @@ impl SubscriberPipeline {
         let ts = timestamp.unwrap_or_else(|| current_time_us());
         let content_size = payload.len() as u64;
 
-        self.components.limits.check_api_request().await?;
-        self.components.limits.check_ingress(content_size).await?;
+        self.components
+            .limits
+            .check_api_request_for(LimitScope::GlobalFallback)
+            .await?;
+        self.components
+            .limits
+            .check_ingress_for(LimitScope::GlobalFallback, content_size)
+            .await?;
 
         debug!(
             "Ingesting Zenoh sample bucket={} entry={} timestamp={} bytes={} content_type={}",

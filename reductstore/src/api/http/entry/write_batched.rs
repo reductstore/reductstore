@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::components::CLIENT_IP_HEADER;
 use crate::api::http::{Components, HttpError};
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::{Body, BodyDataStream};
@@ -12,6 +13,7 @@ use futures_util::StreamExt;
 
 use crate::api::http::entry::common::err_to_batched_header;
 use crate::api::http::StateKeeper;
+use crate::api::limits::limit_scope_from_client_ip;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::RecordDrainer;
 use log::{debug, error};
@@ -57,7 +59,15 @@ pub(super) async fn write_batched_records(
         }
 
         let content_length = check_and_get_content_length(&headers, &timed_headers)?;
-        components.limits.check_ingress(content_length).await?;
+        let scope = limit_scope_from_client_ip(
+            headers
+                .get(CLIENT_IP_HEADER)
+                .and_then(|value| value.to_str().ok()),
+        );
+        components
+            .limits
+            .check_ingress_for(scope, content_length)
+            .await?;
         let (rx_writer, spawn_handler) =
             spawn_getting_writers(&components, &bucket, &entry_name, timed_headers).await?;
         receive_body_and_write_records(

@@ -8,6 +8,7 @@ mod client_ip;
 
 use crate::api::components::{StateKeeper, CLIENT_IP_HEADER};
 use crate::api::http::HttpError;
+use crate::api::limits::limit_scope_from_client_ip;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Request, StatusCode};
@@ -74,7 +75,13 @@ pub(super) async fn check_api_rate_limit(
         Err(err) => return Err(err.into()),
     };
 
-    if let Err(err) = components.limits.check_api_request().await {
+    let scope = limit_scope_from_client_ip(
+        client_ip::client_ip_from_request(&request)
+            .map(|ip| ip.to_string())
+            .as_deref(),
+    );
+
+    if let Err(err) = components.limits.check_api_request_for(scope).await {
         return Err(HttpError::from(err));
     }
 
