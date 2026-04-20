@@ -1,10 +1,12 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::components::CLIENT_IP_HEADER;
 use crate::api::http::entry::MethodExtractor;
 use crate::api::http::utils::ReadersWrapper;
 use crate::api::http::{ErrorCode, HttpError};
 use crate::api::limits::BoxedLimits;
+use crate::api::limits::{limit_scope_from_client_ip, LimitScope};
 use crate::auth::policy::ReadAccessPolicy;
 use crate::storage::bucket::Bucket;
 
@@ -56,6 +58,11 @@ pub(super) async fn read_batched_records(
             );
         }
     };
+    let scope = limit_scope_from_client_ip(
+        headers
+            .get(CLIENT_IP_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    );
 
     fetch_and_response_batched_records(
         components
@@ -66,6 +73,7 @@ pub(super) async fn read_batched_records(
         entry_name,
         query_id,
         method.name == "HEAD",
+        scope,
         &components.limits,
         &components.ext_repo,
     )
@@ -109,6 +117,7 @@ async fn fetch_and_response_batched_records(
     entry_name: &str,
     query_id: u64,
     empty_body: bool,
+    scope: LimitScope,
     limits: &BoxedLimits,
     ext_repository: &BoxedManageExtensions,
 ) -> Result<impl IntoResponse, HttpError> {
@@ -204,7 +213,7 @@ async fn fetch_and_response_batched_records(
     }
 
     if !empty_body {
-        limits.check_egress(body_size).await?;
+        limits.check_egress_for(scope, body_size).await?;
     }
 
     headers.insert("content-length", body_size.to_string().parse().unwrap());
@@ -699,6 +708,7 @@ mod tests {
                 "entry-1",
                 query_id,
                 only_metadata,
+                LimitScope::GlobalFallback,
                 &components.limits,
                 &components.ext_repo,
             )

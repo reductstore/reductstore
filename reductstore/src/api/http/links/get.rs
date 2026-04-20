@@ -1,9 +1,11 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::components::CLIENT_IP_HEADER;
 use crate::api::http::links::derive_key_from_secret;
 use crate::api::http::utils::{make_headers_from_reader, RangeRecordStream, RecordStream};
 use crate::api::http::{Components, HttpError, StateKeeper};
+use crate::api::limits::{limit_scope_from_client_ip, LimitScope};
 use crate::auth::policy::{Policy, ReadAccessPolicy};
 use crate::auth::token_repository::ManageTokens;
 use crate::core::sync::AsyncRwLock as RwLock;
@@ -47,6 +49,11 @@ pub(super) async fn get(
     } else {
         None
     };
+    let scope = limit_scope_from_client_ip(
+        header_map
+            .get(CLIENT_IP_HEADER)
+            .and_then(|value| value.to_str().ok()),
+    );
 
     let mut cache_lock = components.query_link_cache.write().await?;
     let key = cache_key(&params, &query)?;
@@ -58,7 +65,7 @@ pub(super) async fn get(
             .await
             .seek(SeekFrom::Start(0))
             .map_err(|e| ReductError::from(e))?;
-        prepare_response(&components, range, Arc::clone(cached)).await
+        prepare_response(&components, range, Arc::clone(cached), scope.clone()).await
     } else {
         let bucket = components
             .storage
@@ -110,7 +117,7 @@ pub(super) async fn get(
 
         let record = Arc::new(Mutex::new(record));
         cache_lock.insert(key, Arc::clone(&record));
-        prepare_response(&components, range, record).await
+        prepare_response(&components, range, record, scope).await
     }
 }
 
@@ -291,6 +298,7 @@ async fn prepare_response(
     components: &Arc<Components>,
     range: Option<Range>,
     reader: Arc<Mutex<BoxedReadRecord>>,
+    scope: LimitScope,
 ) -> Result<impl IntoResponse, HttpError> {
     let mut headers = make_headers_from_reader(reader.lock().await.meta());
     headers.typed_insert(AcceptRanges::bytes());
@@ -325,7 +333,10 @@ async fn prepare_response(
             .map(|(start, end)| end - start + 1)
             .sum();
 
-        components.limits.check_egress(content_length).await?;
+        components
+            .limits
+            .check_egress_for(scope.clone(), content_length)
+            .await?;
 
         if let Some((start, end)) =
             resolve_content_range(ranges.front().unwrap(), initial_content_length)
@@ -349,7 +360,10 @@ async fn prepare_response(
         ))
     } else {
         let content_length = reader.lock().await.meta().content_length();
-        components.limits.check_egress(content_length).await?;
+        components
+            .limits
+            .check_egress_for(scope, content_length)
+            .await?;
 
         Ok((
             StatusCode::OK,

@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::components::CLIENT_IP_HEADER;
 use crate::api::http::HttpError;
 use crate::auth::policy::WriteAccessPolicy;
 use axum::body::Body;
@@ -11,6 +12,7 @@ use crate::api::http::entry::common::{
     parse_content_length_from_header, parse_timestamp_from_query,
 };
 use crate::api::http::StateKeeper;
+use crate::api::limits::limit_scope_from_client_ip;
 use crate::replication::Transaction::WriteRecord;
 use crate::replication::TransactionNotification;
 use futures_util::StreamExt;
@@ -40,7 +42,15 @@ pub(super) async fn write_record(
     let check_request_and_get_sender = async {
         let ts = parse_timestamp_from_query(&params)?;
         let content_size = parse_content_length_from_header(&headers)?;
-        components.limits.check_ingress(content_size).await?;
+        let scope = limit_scope_from_client_ip(
+            headers
+                .get(CLIENT_IP_HEADER)
+                .and_then(|value| value.to_str().ok()),
+        );
+        components
+            .limits
+            .check_ingress_for(scope, content_size)
+            .await?;
         let content_type = headers
             .get("content-type")
             .map_or("application/octet-stream", |v| v.to_str().unwrap())
