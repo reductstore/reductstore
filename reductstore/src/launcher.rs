@@ -20,11 +20,26 @@ use tokio::sync::mpsc;
 
 static SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
+fn has_version_flag<I, S>(args: I) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+{
+    args.into_iter()
+        .skip(1)
+        .any(|arg| matches!(arg.as_ref(), "--version" | "-V"))
+}
+
 pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pareser: Parser)
 where
     Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
 {
     let version: &str = env!("CARGO_PKG_VERSION");
+
+    if has_version_flag(std::env::args()) {
+        println!("{}", version);
+        return;
+    }
 
     Logger::init("INFO");
     info!(
@@ -222,6 +237,15 @@ mod tests {
     use tokio::time::sleep;
 
     static STOP_SERVER: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
+
+    #[test]
+    fn test_has_version_flag() {
+        assert!(has_version_flag(vec!["reductstore", "--version"]));
+        assert!(has_version_flag(vec!["reductstore", "-V"]));
+        assert!(!has_version_flag(vec!["reductstore"]));
+        assert!(!has_version_flag(vec!["reductstore", "--verbose"]));
+    }
+
     pub(super) async fn shutdown_server(handle: Handle<SocketAddr>) {
         while !*STOP_SERVER.lock().await {
             sleep(Duration::from_millis(10)).await;
