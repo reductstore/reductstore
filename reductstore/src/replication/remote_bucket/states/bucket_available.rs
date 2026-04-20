@@ -39,7 +39,8 @@ impl BucketAvailableState {
             | ErrorCode::ConnectionError
             | ErrorCode::BadGateway
             | ErrorCode::ServiceUnavailable
-            | ErrorCode::GatewayTimeout => {
+            | ErrorCode::GatewayTimeout
+            | ErrorCode::TooManyRequests => {
                 debug!(
                     "Failed to write record to remote bucket {}{}: {}",
                     self.bucket.server_url(),
@@ -243,6 +244,7 @@ mod tests {
     #[case(ErrorCode::BadGateway)]
     #[case(ErrorCode::ServiceUnavailable)]
     #[case(ErrorCode::GatewayTimeout)]
+    #[case(ErrorCode::TooManyRequests)]
     #[tokio::test]
     async fn test_write_record_conn_err(
         #[case] err: ErrorCode,
@@ -272,6 +274,7 @@ mod tests {
     #[case(ErrorCode::BadGateway)]
     #[case(ErrorCode::ServiceUnavailable)]
     #[case(ErrorCode::GatewayTimeout)]
+    #[case(ErrorCode::TooManyRequests)]
     #[tokio::test]
     async fn test_update_record_conn_err(
         #[case] err: ErrorCode,

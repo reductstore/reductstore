@@ -331,6 +331,43 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_replication_429_keeps_transactions(mut remote_bucket: MockRmBucket) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Err(ReductError::new(ErrorCode::TooManyRequests, "slow down")));
+        remote_bucket.expect_is_active().return_const(false);
+        let mut sender = build_sender(remote_bucket, settings()).await;
+
+        let transaction = Transaction::WriteRecord(10);
+        imitate_write_record(&sender, &transaction, 5).await;
+
+        assert_eq!(
+            sender.run().await.unwrap(),
+            SyncState::NotAvailable(vec![(
+                Err(ReductError::new(ErrorCode::TooManyRequests, "slow down")),
+                1,
+            )])
+        );
+
+        assert_eq!(
+            sender
+                .log_map
+                .read()
+                .await
+                .unwrap()
+                .get("test")
+                .unwrap()
+                .read()
+                .await
+                .unwrap()
+                .front(1)
+                .await,
+            Ok(vec![transaction]),
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_replication_not_found(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
