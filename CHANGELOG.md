@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Count usage limits per connection to avoid starvation of health checks, [PR-1341](https://github.com/reductstore/reductstore/pull/1341)
+- Treat replication HTTP 429 (Too Many Requests) as transient remote-unavailable so throttled batches stay queued for retry instead of being dropped, [PR-1342](https://github.com/reductstore/reductstore/pull/1342)
 
 ## 1.19.3 - 2026-04-16
 
