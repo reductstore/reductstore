@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.19.4 - 2026-04-21
+
 ### Fixed
 
 - Count usage limits per connection to avoid starvation of health checks, [PR-1341](https://github.com/reductstore/reductstore/pull/1341)
