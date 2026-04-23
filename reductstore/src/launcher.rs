@@ -12,6 +12,7 @@ use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use log::{error, info};
 use reduct_base::logger::Logger;
+use std::io::Write;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
 use std::sync::Arc;
@@ -30,14 +31,27 @@ where
         .any(|arg| matches!(arg.as_ref(), "--version" | "-V"))
 }
 
+fn maybe_print_version<I, S, W>(args: I, version: &str, mut writer: W) -> bool
+where
+    I: IntoIterator<Item = S>,
+    S: AsRef<str>,
+    W: Write,
+{
+    if has_version_flag(args) {
+        let _ = writeln!(writer, "{version}");
+        true
+    } else {
+        false
+    }
+}
+
 pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pareser: Parser)
 where
     Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
 {
     let version: &str = env!("CARGO_PKG_VERSION");
 
-    if has_version_flag(std::env::args()) {
-        println!("{}", version);
+    if maybe_print_version(std::env::args(), version, std::io::stdout()) {
         return;
     }
 
@@ -253,6 +267,25 @@ mod tests {
         assert!(!has_version_flag(vec!["reductstore", "--verbose"]));
         assert!(!has_version_flag(vec!["--version"])); // first arg is binary name and must be ignored
         assert!(!has_version_flag(Vec::<&str>::new()));
+    }
+
+    #[test]
+    fn test_maybe_print_version() {
+        let mut output = Vec::new();
+        assert!(maybe_print_version(
+            vec!["reductstore", "--version"],
+            "1.2.3",
+            &mut output
+        ));
+        assert_eq!(String::from_utf8(output).unwrap(), "1.2.3\n");
+
+        let mut output = Vec::new();
+        assert!(!maybe_print_version(
+            vec!["reductstore"],
+            "1.2.3",
+            &mut output
+        ));
+        assert!(output.is_empty());
     }
 
     pub(super) async fn shutdown_server(handle: Handle<SocketAddr>) {
