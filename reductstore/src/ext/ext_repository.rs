@@ -16,15 +16,12 @@ use futures_util::StreamExt;
 use log::warn;
 use reduct_base::error::ErrorCode::{NoContent, NotFound};
 use reduct_base::error::ReductError;
-use reduct_base::ext::{
-    BoxedCommiter, BoxedProcessor, BoxedRecordStream, ExtSettings, IoExtension,
-};
+use reduct_base::ext::{BoxedCommiter, BoxedProcessor, ExtSettings, IoExtension};
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{no_content, unprocessable_entity};
 use serde_json::Map;
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -71,8 +68,10 @@ pub(crate) struct QueryContext {
     query: QueryOptions,
     condition_filter: Box<dyn RecordFilter<BoxedReadRecord> + Send + Sync>,
     last_access: Instant,
-    current_stream: Option<Pin<BoxedRecordStream>>,
+    steps: Vec<PipelineStep>,
+}
 
+pub(crate) struct PipelineStep {
     processor: BoxedProcessor,
     commiter: BoxedCommiter,
 }
@@ -114,14 +113,7 @@ impl ManageExtensions for ExtRepository {
             if let Some(when) = &query_request.when {
                 let (_, directives) = Parser::new().parse(when.clone())?;
                 if let Some(ext) = directives.get("#ext") {
-                    Some(
-                        serde_json::from_str(
-                            &ext.get(0)
-                                .unwrap_or(&Value::String("null".to_string()))
-                                .to_string(),
-                        )
-                        .unwrap(), // The parser already checked the syntax
-                    )
+                    Some(Self::decode_ext_directive(ext, query_id)?)
                 } else {
                     None
                 }
@@ -135,56 +127,101 @@ impl ManageExtensions for ExtRepository {
 
         let controllers = {
             if let Some(ext_params) = &mut ext_params {
-                let Some(ext_query) = ext_params.as_object_mut() else {
-                    return Err(unprocessable_entity!(
-                        "Extension parameters must be a JSON object in query id={}",
-                        query_id
-                    ));
-                };
-
-                // check if the query has references to computed labels and no extension is found
-                let condition = if let Some(condition) = ext_query.remove("when") {
-                    let node = Parser::new().parse(condition)?;
-                    Some(node)
-                } else {
-                    None
-                };
-
-                if ext_query.iter().count() > 1 {
-                    return Err(unprocessable_entity!(
-                        "Multiple extensions are not supported in query id={}",
-                        query_id
-                    ));
-                }
-
-                let Some(name) = ext_query.keys().next().cloned() else {
+                let Some(mut ext_steps) = Self::decode_ext_steps(ext_params, query_id)? else {
                     return Err(unprocessable_entity!(
                         "Extension name is not found in query id={}",
                         query_id
                     ));
                 };
 
-                if let Some(attachments) = self
-                    .get_ext_attachments(bucket_name, entry_name, &query_request, &name)
-                    .await?
+                let condition = if let Some(condition) =
+                    ext_steps.first_mut().and_then(|step| step.remove("when"))
                 {
-                    Self::attach_ext_attachments(ext_query, &name, attachments);
-                }
+                    let node = Parser::new().parse(condition)?;
+                    Some(node)
+                } else {
+                    None
+                };
 
-                if let Some(ext) = self.extension_map.get(&name) {
-                    query_request.ext = Some(serde_json::Value::Object(ext_query.clone()));
+                let mut pipeline = Vec::with_capacity(ext_steps.len());
+                for (idx, ext_query) in ext_steps.iter_mut().enumerate() {
+                    if ext_query.is_empty() {
+                        return Err(unprocessable_entity!(
+                            "Extension name is not found in query id={}",
+                            query_id
+                        ));
+                    }
+
+                    if ext_query.iter().count() > 1 {
+                        if ext_steps.len() == 1 {
+                            return Err(unprocessable_entity!(
+                                "Multiple extensions are not supported in query id={}",
+                                query_id
+                            ));
+                        }
+
+                        return Err(unprocessable_entity!(
+                            "Each '#ext' pipeline step must contain exactly one extension in query id={}",
+                            query_id
+                        ));
+                    }
+
+                    let Some(name) = ext_query.keys().next().cloned() else {
+                        return Err(unprocessable_entity!(
+                            "Extension name is not found in query id={}",
+                            query_id
+                        ));
+                    };
+
+                    if let Some(attachments) = self
+                        .get_ext_attachments(bucket_name, entry_name, &query_request, &name)
+                        .await?
+                    {
+                        Self::attach_ext_attachments(ext_query, &name, attachments);
+                    }
+
+                    let Some(ext) = self.extension_map.get(&name) else {
+                        if ext_steps.len() == 1 {
+                            return Err(unprocessable_entity!(
+                                "Unknown extension '{}' in query id={}",
+                                name,
+                                query_id
+                            ));
+                        }
+
+                        return Err(unprocessable_entity!(
+                            "Unknown extension '{}' in query id={} at step {}",
+                            name,
+                            query_id,
+                            idx
+                        ));
+                    };
+
+                    let mut ext_query_request = query_request.clone();
+                    ext_query_request.ext = Some(serde_json::Value::Object(ext_query.clone()));
                     let (processor, commiter) =
                         ext.write()
                             .await?
-                            .query(bucket_name, entry_name, &query_request)?;
-                    Some((processor, commiter, condition))
-                } else {
-                    return Err(unprocessable_entity!(
-                        "Unknown extension '{}' in query id={}",
-                        name,
-                        query_id
-                    ));
+                            .query(bucket_name, entry_name, &ext_query_request)?;
+                    pipeline.push(PipelineStep {
+                        processor,
+                        commiter,
+                    });
                 }
+
+                query_request.ext = Some(if ext_steps.len() == 1 {
+                    serde_json::Value::Object(ext_steps[0].clone())
+                } else {
+                    serde_json::Value::Array(
+                        ext_steps
+                            .iter()
+                            .cloned()
+                            .map(serde_json::Value::Object)
+                            .collect(),
+                    )
+                });
+
+                Some((pipeline, condition))
             } else {
                 None
             }
@@ -204,7 +241,7 @@ impl ManageExtensions for ExtRepository {
             query_map.remove(&key);
         }
 
-        if let Some((processor, commiter, condition)) = controllers {
+        if let Some((steps, condition)) = controllers {
             let condition_filter = if let Some(condition) = condition {
                 let (node, directives) = condition;
                 Box::new(WhenFilter::try_new(
@@ -222,9 +259,7 @@ impl ManageExtensions for ExtRepository {
                     query: query_options,
                     condition_filter,
                     last_access: Instant::now(),
-                    current_stream: None,
-                    processor,
-                    commiter,
+                    steps,
                 }
             });
         }
@@ -237,8 +272,6 @@ impl ManageExtensions for ExtRepository {
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
     ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
-        // TODO: The code is awkward, we need to refactor it
-        // unfortunately stream! macro does not work here and crashes compiler
         let mut lock = match self.query_map.write().await {
             Ok(lock) => lock,
             Err(err) => return Some(vec![Err(err)]),
@@ -270,51 +303,6 @@ impl ManageExtensions for ExtRepository {
 
         query.last_access = Instant::now();
 
-        if let Some(mut current_stream) = query.current_stream.take() {
-            let item = current_stream.next().await;
-            query.current_stream = Some(current_stream);
-
-            if let Some(result) = item {
-                if let Err(e) = result {
-                    return Some(vec![Err(e)]);
-                }
-
-                let record = result.unwrap();
-
-                return match query.condition_filter.filter(record) {
-                    Ok(Some(records)) => {
-                        let mut commited_records = vec![];
-                        for record in records {
-                            if let Some(rec) = query.commiter.commit_record(record).await {
-                                if rec
-                                    .as_ref()
-                                    .is_ok_and(|rec| rec.meta().entry_name().is_empty())
-                                {
-                                    warn!("Extension commiter returned an invalid record with empty entry name, skipping it");
-                                    continue;
-                                }
-                                commited_records.push(rec);
-                            }
-                        }
-
-                        if commited_records.is_empty() {
-                            None
-                        } else {
-                            Some(commited_records)
-                        }
-                    }
-                    Ok(None) => {
-                        query.current_stream = None;
-                        None
-                    }
-                    Err(e) => Some(vec![Err(e)]),
-                };
-            } else {
-                // stream is empty, we need to process the next record
-                query.current_stream = None;
-            }
-        }
-
         let Some(record) = (match query_rx.write().await {
             Ok(mut rx) => rx.recv().await,
             Err(err) => return Some(vec![Err(err)]),
@@ -326,13 +314,9 @@ impl ManageExtensions for ExtRepository {
             Ok(record) => record,
             Err(e) => {
                 return if e.status == NoContent {
-                    if let Some(last_record) = query.commiter.flush().await {
-                        match last_record {
-                            Ok(rec) => {
-                                Some(vec![Ok(rec), Err(e)]) // return the last record if available and the error
-                            }
-                            Err(e) => Some(vec![Err(e)]),
-                        }
+                    if let Some(mut flushed_records) = self.flush_pipeline(query).await {
+                        flushed_records.push(Err(e));
+                        Some(flushed_records)
                     } else {
                         Some(vec![Err(e)])
                     }
@@ -342,19 +326,200 @@ impl ManageExtensions for ExtRepository {
             }
         };
 
-        assert!(query.current_stream.is_none(), "Must be None");
-
-        let stream = match query.processor.process_record(Box::new(record)).await {
-            Ok(stream) => stream,
-            Err(e) => return Some(vec![Err(e)]),
-        };
-
-        query.current_stream = Some(Box::into_pin(stream));
-        None
+        self.process_pipeline_record(query, Box::new(record)).await
     }
 }
 
 impl ExtRepository {
+    fn parse_directive_value(
+        value: &Value,
+        query_id: u64,
+    ) -> Result<serde_json::Value, ReductError> {
+        serde_json::from_str(&value.to_string()).map_err(|err| {
+            unprocessable_entity!(
+                "Directive '#ext' must be a JSON object or an array of JSON objects in query id={}: {}",
+                query_id,
+                err
+            )
+        })
+    }
+
+    fn decode_ext_directive(
+        ext: &[Value],
+        query_id: u64,
+    ) -> Result<serde_json::Value, ReductError> {
+        if ext.is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+
+        if ext.len() == 1 {
+            return Self::parse_directive_value(&ext[0], query_id);
+        }
+
+        let mut steps = Vec::with_capacity(ext.len());
+        for step in ext {
+            steps.push(Self::parse_directive_value(step, query_id)?);
+        }
+
+        Ok(serde_json::Value::Array(steps))
+    }
+
+    fn decode_ext_steps(
+        ext_params: &serde_json::Value,
+        query_id: u64,
+    ) -> Result<Option<Vec<Map<String, serde_json::Value>>>, ReductError> {
+        match ext_params {
+            serde_json::Value::Object(ext_query) => Ok(Some(vec![ext_query.clone()])),
+            serde_json::Value::Array(steps) => {
+                if steps.is_empty() {
+                    return Ok(None);
+                }
+
+                let mut ext_steps = Vec::with_capacity(steps.len());
+                for step in steps {
+                    let Some(ext_query) = step.as_object() else {
+                        return Err(unprocessable_entity!(
+                            "Each '#ext' pipeline step must be a JSON object in query id={}",
+                            query_id
+                        ));
+                    };
+                    ext_steps.push(ext_query.clone());
+                }
+                Ok(Some(ext_steps))
+            }
+            _ => Err(unprocessable_entity!(
+                "Extension parameters must be a JSON object or an array of JSON objects in query id={}",
+                query_id
+            )),
+        }
+    }
+
+    async fn process_pipeline_step(
+        &self,
+        query: &mut QueryContext,
+        step_index: usize,
+        inputs: Vec<BoxedReadRecord>,
+    ) -> Result<Vec<BoxedReadRecord>, ReductError> {
+        if inputs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let last_step = query.steps.len() - 1;
+        let mut outputs = Vec::new();
+        for input in inputs {
+            let stream = {
+                let step = &mut query.steps[step_index];
+                match step.processor.process_record(input).await {
+                    Ok(stream) => stream,
+                    Err(err) => return Err(err),
+                }
+            };
+
+            let mut stream = Box::into_pin(stream);
+            while let Some(item) = stream.next().await {
+                let record = match item {
+                    Ok(record) => record,
+                    Err(err) => return Err(err),
+                };
+
+                let filtered = if step_index == last_step {
+                    match query.condition_filter.filter(record) {
+                        Ok(Some(records)) => records,
+                        Ok(None) => continue,
+                        Err(err) => return Err(err),
+                    }
+                } else {
+                    vec![record]
+                };
+
+                for record in filtered {
+                    let committed = {
+                        let step = &mut query.steps[step_index];
+                        step.commiter.commit_record(record).await
+                    };
+                    if let Some(committed) = committed {
+                        match committed {
+                            Ok(rec) => {
+                                if rec.meta().entry_name().is_empty() {
+                                    warn!("Extension commiter returned an invalid record with empty entry name, skipping it");
+                                    continue;
+                                }
+                                outputs.push(rec);
+                            }
+                            Err(err) => return Err(err),
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(outputs)
+    }
+
+    async fn process_pipeline_record(
+        &self,
+        query: &mut QueryContext,
+        record: BoxedReadRecord,
+    ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
+        let mut inputs = vec![record];
+        for idx in 0..query.steps.len() {
+            let outputs = match self.process_pipeline_step(query, idx, inputs).await {
+                Ok(outputs) => outputs,
+                Err(err) => return Some(vec![Err(err)]),
+            };
+            inputs = outputs;
+        }
+
+        if inputs.is_empty() {
+            None
+        } else {
+            Some(inputs.into_iter().map(Ok).collect())
+        }
+    }
+
+    async fn flush_pipeline(
+        &self,
+        query: &mut QueryContext,
+    ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
+        let mut flushed_records = Vec::new();
+
+        for idx in 0..query.steps.len() {
+            let flushed = {
+                let step = &mut query.steps[idx];
+                step.commiter.flush().await
+            };
+
+            let Some(flushed) = flushed else {
+                continue;
+            };
+
+            let mut inputs = match flushed {
+                Ok(rec) => vec![rec],
+                Err(err) => return Some(vec![Err(err)]),
+            };
+
+            for downstream_idx in (idx + 1)..query.steps.len() {
+                inputs = match self
+                    .process_pipeline_step(query, downstream_idx, inputs)
+                    .await
+                {
+                    Ok(outputs) => outputs,
+                    Err(err) => return Some(vec![Err(err)]),
+                };
+            }
+
+            for rec in inputs {
+                flushed_records.push(Ok(rec));
+            }
+        }
+
+        if flushed_records.is_empty() {
+            None
+        } else {
+            Some(flushed_records)
+        }
+    }
+
     async fn get_ext_attachments(
         &self,
         bucket_name: &str,

@@ -100,7 +100,18 @@ impl Parser {
                     parsed_values.push(Value::String(value.to_string()));
                 } else if value.is_array() {
                     for item in value.as_array().unwrap() {
-                        parsed_values.push(parse_primitive(item));
+                        if item.is_object() {
+                            if key == "#ext" {
+                                parsed_values.push(Value::String(item.to_string()));
+                            } else {
+                                return Err(unprocessable_entity!(
+                                    "Directive '{}' does not support object items in arrays",
+                                    key
+                                ));
+                            }
+                        } else {
+                            parsed_values.push(parse_primitive(item));
+                        }
                     }
                 } else {
                     parsed_values.push(parse_primitive(value))
