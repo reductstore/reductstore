@@ -16,7 +16,6 @@ on:
       - CHANGELOG.md
 
 permissions:
-  id-token: write
   contents: read
 
 
@@ -508,6 +507,9 @@ jobs:
   push_image_dockerhub:
     runs-on: ubuntu-latest
     name: Build image and push it to DockerHub Registry
+    permissions:
+      contents: read
+      id-token: write
     needs:
       - check_tag
       - http_api_tests
