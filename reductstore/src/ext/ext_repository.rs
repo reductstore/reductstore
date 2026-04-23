@@ -662,7 +662,7 @@ pub(super) mod tests {
     use mockall::predicate::eq;
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
-    use reduct_base::ext::{Commiter, IoExtensionInfo, Processor};
+    use reduct_base::ext::{BoxedRecordStream, Commiter, IoExtensionInfo, Processor};
     use reduct_base::io::records::OneShotRecord;
     use reduct_base::io::RecordMeta;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -670,12 +670,14 @@ pub(super) mod tests {
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use serde_json::json;
+    use std::pin::Pin;
     use std::task::{Context, Poll};
     use tempfile::tempdir;
 
     mod register_query {
         use super::*;
         use mockall::predicate::always;
+        use mockall::Sequence;
 
         use reduct_base::not_found;
         use std::time::Duration;
@@ -840,7 +842,7 @@ pub(super) mod tests {
             assert_eq!(query_map.len(), 1, "Query should be registered");
             let query_context = query_map.get_mut(&1).unwrap();
             assert_eq!(
-                query_context
+                query_context.steps[0]
                     .condition_filter
                     .filter(record_with_labels("not-in-when", "val"))
                     .err()
@@ -848,6 +850,64 @@ pub(super) mod tests {
                 not_found!("Reference '@label' not found"),
                 "Condition should be parsed and applied"
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_with_pipeline_from_ext_directive_in_when(mut mock_ext: MockIoExtension) {
+            let mut sequence = Sequence::new();
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| {
+                    q.ext == Some(json!({"test-ext": {"extract": {"as_label": {"z": "vector.z"}}}}))
+                })
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| {
+                    Ok((
+                        Box::new(MockProcessor::new()),
+                        Box::new(MockCommiter::new()),
+                    ))
+                });
+
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| {
+                    q.ext
+                        == Some(
+                            json!({"test-ext": {"select": {"json": {}, "columns": [{"name": "vector"}]}}}),
+                        )
+                })
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| {
+                    Ok((Box::new(MockProcessor::new()), Box::new(MockCommiter::new())))
+                });
+
+            let query = QueryEntry {
+                when: Some(json!({
+                    "#ext": [
+                        {
+                            "test-ext": {"extract": {"as_label": {"z": "vector.z"}}},
+                            "when": {"@z": {"$gte": 124}}
+                        },
+                        {
+                            "test-ext": {"select": {"json": {}, "columns": [{"name": "vector"}]}}
+                        }
+                    ]
+                })),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
+            assert!(mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .is_ok());
+
+            let query_map = mocked_ext_repo.query_map.read().await.unwrap();
+            assert_eq!(query_map.len(), 1);
+            assert_eq!(query_map.get(&1).unwrap().steps.len(), 2);
         }
 
         #[rstest]
@@ -1326,6 +1386,7 @@ pub(super) mod tests {
         use crate::storage::entry::RecordReader;
 
         use mockall::predicate;
+        use mockall::Sequence;
         use reduct_base::internal_server_error;
         use tokio::sync::mpsc;
 
@@ -1398,7 +1459,7 @@ pub(super) mod tests {
         ) {
             processor
                 .expect_process_record()
-                .return_once(|_| Ok(MockStream::boxed(Poll::Pending) as BoxedRecordStream));
+                .return_once(|_| Ok(MockStream::boxed(Poll::Ready(None)) as BoxedRecordStream));
             commiter.expect_commit_record().never();
 
             mock_ext
@@ -1428,6 +1489,183 @@ pub(super) mod tests {
                 .fetch_and_process_record(1, query_rx)
                 .await
                 .is_none());
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_pipeline_step_when_applies_before_next_step(
+            record_reader: RecordReader,
+            mut mock_ext: MockIoExtension,
+            mut processor: Box<MockProcessor>,
+            mut commiter: Box<MockCommiter>,
+        ) {
+            let mut sequence = Sequence::new();
+            let mut processor_2 = Box::new(MockProcessor::new());
+            let mut commiter_2 = Box::new(MockCommiter::new());
+
+            processor.expect_process_record().return_once(|_| {
+                Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                    record_with_labels("z", "100"),
+                )))))
+            });
+            commiter.expect_commit_record().never();
+            commiter.expect_flush().return_once(|| None).times(1);
+
+            processor_2.expect_process_record().never();
+            commiter_2.expect_flush().return_once(|| None).times(1);
+
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"test1": {"extract": {}}})))
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor, commiter)));
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| {
+                    q.ext
+                        == Some(
+                            json!({"test1": {"select": {"json": {}, "columns": [{"name": "vector"}]}}}),
+                        )
+                })
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor_2, commiter_2)));
+
+            let query = QueryEntry {
+                ext: Some(json!([
+                    {
+                        "test1": {"extract": {}},
+                        "when": {"@z": {"$gte": 124}}
+                    },
+                    {
+                        "test1": {"select": {"json": {}, "columns": [{"name": "vector"}]}}
+                    }
+                ])),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .unwrap();
+
+            let (tx, rx) = tokio::sync::mpsc::channel(2);
+            tx.send(Ok(record_reader)).await.unwrap();
+            tx.send(Err(no_content!(""))).await.unwrap();
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+
+            assert!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx.clone())
+                    .await
+                    .is_none(),
+                "step-local when should filter out the record before step 2"
+            );
+
+            assert_eq!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx)
+                    .await
+                    .unwrap()[0]
+                    .as_ref()
+                    .err()
+                    .unwrap()
+                    .status(),
+                NoContent
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_pipeline_propagates_computed_labels_to_next_step(
+            record_reader: RecordReader,
+            mut mock_ext: MockIoExtension,
+        ) {
+            let mut sequence = Sequence::new();
+            let mut processor_1 = Box::new(MockProcessor::new());
+            let mut commiter_1 = Box::new(MockCommiter::new());
+            let mut processor_2 = Box::new(MockProcessor::new());
+            let mut commiter_2 = Box::new(MockCommiter::new());
+
+            processor_1.expect_process_record().return_once(|_| {
+                Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                    record_with_computed_labels(&[("z", "130")]),
+                )))))
+            });
+            commiter_1
+                .expect_commit_record()
+                .return_once(|_| Some(Ok(record_with_computed_labels(&[("z", "130")]))));
+
+            processor_2
+                .expect_process_record()
+                .withf(|record| {
+                    record
+                        .meta()
+                        .computed_labels()
+                        .get("z")
+                        .is_some_and(|v| v == "130")
+                })
+                .return_once(|_| {
+                    Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                        record_with_computed_labels(&[("z", "130"), ("y", "1")]),
+                    )))))
+                });
+            commiter_2
+                .expect_commit_record()
+                .return_once(|_| Some(Ok(record_with_computed_labels(&[("y", "1")]))));
+
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"test1": {"extract": {}}})))
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor_1, commiter_1)));
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| {
+                    q.ext
+                        == Some(
+                            json!({"test1": {"select": {"json": {}, "columns": [{"name": "vector"}]}}}),
+                        )
+                })
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor_2, commiter_2)));
+
+            let query = QueryEntry {
+                ext: Some(json!([
+                    {"test1": {"extract": {}}},
+                    {"test1": {"select": {"json": {}, "columns": [{"name": "vector"}]}}}
+                ])),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .unwrap();
+
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            tx.send(Ok(record_reader)).await.unwrap();
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+
+            let mut results = mocked_ext_repo
+                .fetch_and_process_record(1, query_rx)
+                .await
+                .unwrap();
+            let record = results.get_mut(0).unwrap().as_ref().unwrap();
+
+            assert_eq!(
+                record.meta().computed_labels().get("z"),
+                Some(&"130".to_string())
+            );
+            assert_eq!(
+                record.meta().computed_labels().get("y"),
+                Some(&"1".to_string())
+            );
         }
 
         #[rstest]
@@ -1473,14 +1711,6 @@ pub(super) mod tests {
             tx.send(Err(no_content!(""))).await.unwrap();
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
-
-            assert!(
-                mocked_ext_repo
-                    .fetch_and_process_record(1, query_rx.clone())
-                    .await
-                    .is_none(),
-                "First run should be None (stupid implementation)"
-            );
 
             let mut records = mocked_ext_repo
                 .fetch_and_process_record(1, query_rx.clone())
@@ -1556,14 +1786,6 @@ pub(super) mod tests {
                 "Empty entry name should be skipped"
             );
 
-            assert!(
-                mocked_ext_repo
-                    .fetch_and_process_record(1, query_rx.clone())
-                    .await
-                    .is_none(),
-                "Stream should be drained before no content"
-            );
-
             assert_eq!(
                 *mocked_ext_repo
                     .fetch_and_process_record(1, query_rx)
@@ -1627,14 +1849,6 @@ pub(super) mod tests {
                     .await
                     .is_none(),
                 "First run should be None (stupid implementation)"
-            );
-
-            assert!(
-                mocked_ext_repo
-                    .fetch_and_process_record(1, query_rx.clone())
-                    .await
-                    .is_none(),
-                "we don't commit the record waiting for flush"
             );
 
             let results = mocked_ext_repo
@@ -1706,25 +1920,12 @@ pub(super) mod tests {
 
         let query_rx = Arc::new(AsyncRwLock::new(rx));
 
-        assert!(mocked_ext_repo
-            .fetch_and_process_record(1, query_rx.clone())
-            .await
-            .is_none());
-
         mocked_ext_repo
             .fetch_and_process_record(1, query_rx.clone())
             .await
             .unwrap()[0]
             .as_ref()
             .expect("Should return a record");
-
-        assert!(
-            mocked_ext_repo
-                .fetch_and_process_record(1, query_rx.clone())
-                .await
-                .is_none(),
-            "Flush should not return any records"
-        );
 
         assert_eq!(
             *mocked_ext_repo
@@ -1876,6 +2077,17 @@ pub(super) mod tests {
             .timestamp(0)
             .computed_labels(Labels::from_iter(
                 vec![(key.to_string(), val.to_string())].into_iter(),
+            ))
+            .build();
+        OneShotRecord::boxed(Bytes::new(), meta)
+    }
+
+    pub fn record_with_computed_labels(labels: &[(&str, &str)]) -> BoxedReadRecord {
+        let meta = RecordMeta::builder()
+            .entry_name("entry")
+            .timestamp(0)
+            .computed_labels(Labels::from_iter(
+                labels.iter().map(|(k, v)| (k.to_string(), v.to_string())),
             ))
             .build();
         OneShotRecord::boxed(Bytes::new(), meta)

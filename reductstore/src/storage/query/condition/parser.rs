@@ -633,6 +633,33 @@ mod tests {
         }
 
         #[rstest]
+        fn test_parse_ext_array_of_objects_directive(parser: Parser) {
+            let json = json!({
+                "#ext": [{"step": 1}, {"step": 2}]
+            });
+            let (_, directives) = parser.parse(json).unwrap();
+            assert_eq!(
+                directives.get("#ext").unwrap(),
+                &vec![
+                    Value::String(r#"{"step":1}"#.to_string()),
+                    Value::String(r#"{"step":2}"#.to_string())
+                ]
+            );
+        }
+
+        #[rstest]
+        fn test_parse_non_ext_array_of_objects_directive(parser: Parser) {
+            let json = json!({
+                "#select_labels": [{"label": "x"}]
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#select_labels' does not support object items in arrays"
+            );
+        }
+
+        #[rstest]
         fn test_parse_null_directive(parser: Parser) {
             let json = json!({
                 "#ctx_before": null
