@@ -66,12 +66,12 @@ pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
 
 pub(crate) struct QueryContext {
     query: QueryOptions,
-    condition_filter: Box<dyn RecordFilter<BoxedReadRecord> + Send + Sync>,
     last_access: Instant,
     steps: Vec<PipelineStep>,
 }
 
 pub(crate) struct PipelineStep {
+    condition_filter: Box<dyn RecordFilter<BoxedReadRecord> + Send + Sync>,
     processor: BoxedProcessor,
     commiter: BoxedCommiter,
 }
@@ -134,17 +134,20 @@ impl ManageExtensions for ExtRepository {
                     ));
                 };
 
-                let condition = if let Some(condition) =
-                    ext_steps.first_mut().and_then(|step| step.remove("when"))
-                {
-                    let node = Parser::new().parse(condition)?;
-                    Some(node)
-                } else {
-                    None
-                };
-
                 let mut pipeline = Vec::with_capacity(ext_steps.len());
                 for (idx, ext_query) in ext_steps.iter_mut().enumerate() {
+                    let condition_filter = if let Some(condition) = ext_query.remove("when") {
+                        let (node, directives) = Parser::new().parse(condition)?;
+                        Box::new(WhenFilter::try_new(
+                            node,
+                            directives,
+                            self.io_config.clone(),
+                            true,
+                        )?)
+                    } else {
+                        DummyFilter::boxed()
+                    };
+
                     if ext_query.is_empty() {
                         return Err(unprocessable_entity!(
                             "Extension name is not found in query id={}",
@@ -204,6 +207,7 @@ impl ManageExtensions for ExtRepository {
                             .await?
                             .query(bucket_name, entry_name, &ext_query_request)?;
                     pipeline.push(PipelineStep {
+                        condition_filter,
                         processor,
                         commiter,
                     });
@@ -221,7 +225,7 @@ impl ManageExtensions for ExtRepository {
                     )
                 });
 
-                Some((pipeline, condition))
+                Some(pipeline)
             } else {
                 None
             }
@@ -241,23 +245,10 @@ impl ManageExtensions for ExtRepository {
             query_map.remove(&key);
         }
 
-        if let Some((steps, condition)) = controllers {
-            let condition_filter = if let Some(condition) = condition {
-                let (node, directives) = condition;
-                Box::new(WhenFilter::try_new(
-                    node,
-                    directives,
-                    self.io_config.clone(),
-                    true,
-                )?)
-            } else {
-                DummyFilter::boxed()
-            };
-
+        if let Some(steps) = controllers {
             query_map.insert(query_id, {
                 QueryContext {
                     query: query_options,
-                    condition_filter,
                     last_access: Instant::now(),
                     steps,
                 }
@@ -404,7 +395,6 @@ impl ExtRepository {
             return Ok(Vec::new());
         }
 
-        let last_step = query.steps.len() - 1;
         let mut outputs = Vec::new();
         for input in inputs {
             let stream = {
@@ -422,24 +412,31 @@ impl ExtRepository {
                     Err(err) => return Err(err),
                 };
 
-                let filtered = if step_index == last_step {
-                    match query.condition_filter.filter(record) {
+                let filtered = {
+                    let step = &mut query.steps[step_index];
+                    match step.condition_filter.filter(record) {
                         Ok(Some(records)) => records,
                         Ok(None) => continue,
                         Err(err) => return Err(err),
                     }
-                } else {
-                    vec![record]
                 };
 
                 for record in filtered {
+                    let inherited_computed = record.meta().computed_labels().clone();
                     let committed = {
                         let step = &mut query.steps[step_index];
                         step.commiter.commit_record(record).await
                     };
                     if let Some(committed) = committed {
                         match committed {
-                            Ok(rec) => {
+                            Ok(mut rec) => {
+                                for (key, value) in inherited_computed {
+                                    rec.meta_mut()
+                                        .computed_labels_mut()
+                                        .entry(key)
+                                        .or_insert(value);
+                                }
+
                                 if rec.meta().entry_name().is_empty() {
                                     warn!("Extension commiter returned an invalid record with empty entry name, skipping it");
                                     continue;
