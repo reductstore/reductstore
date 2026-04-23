@@ -242,8 +242,17 @@ mod tests {
     fn test_has_version_flag() {
         assert!(has_version_flag(vec!["reductstore", "--version"]));
         assert!(has_version_flag(vec!["reductstore", "-V"]));
+        assert!(has_version_flag(vec![
+            "reductstore",
+            "--config",
+            "cfg.yml",
+            "--version"
+        ]));
+
         assert!(!has_version_flag(vec!["reductstore"]));
         assert!(!has_version_flag(vec!["reductstore", "--verbose"]));
+        assert!(!has_version_flag(vec!["--version"])); // first arg is binary name and must be ignored
+        assert!(!has_version_flag(Vec::<&str>::new()));
     }
 
     pub(super) async fn shutdown_server(handle: Handle<SocketAddr>) {
