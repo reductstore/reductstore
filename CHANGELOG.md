@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Support strict extension pipelines in `#ext` directives with ordered step execution and backward compatibility for legacy `"#ext": { ... }` object format, [PR-1351](https://github.com/reductstore/reductstore/pull/1351)
+
+### Fixed
+
+- Apply step-local `when` conditions inside extension pipelines and preserve computed labels between pipeline steps for downstream processing, [PR-1351](https://github.com/reductstore/reductstore/pull/1351)
+
 ## 1.19.5- 2026-04-21
 
 ### Fixed
