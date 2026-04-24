@@ -49,8 +49,15 @@ pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pares
 where
     Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
 {
-    let version: &str = env!("CARGO_PKG_VERSION");
+    launch_server_with_version(ext_cfg_pareser, env!("CARGO_PKG_VERSION")).await;
+}
 
+pub async fn launch_server_with_version<Parser, ExtCfg: ExtCfgBounds + 'static>(
+    ext_cfg_pareser: Parser,
+    version: &str,
+) where
+    Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
+{
     if maybe_print_version(std::env::args(), version, std::io::stdout()) {
         return;
     }
