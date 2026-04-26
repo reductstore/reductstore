@@ -129,8 +129,6 @@ impl FileCache {
             return Ok(());
         }
 
-        let mut cache = cache.write().await?;
-
         let force = sync_interval.is_none();
         let sync_interval = sync_interval
             .as_ref()
@@ -141,6 +139,7 @@ impl FileCache {
             .invalidate_locally_cached_files()
             .await;
         for path in invalidated_files {
+            let mut cache = cache.write().await?;
             if let Some(file) = cache.remove(&path) {
                 if let Err(err) = file.write_owned().await?.sync_all().await {
                     warn!("Failed to sync invalidated file {:?}: {}", path, err);
@@ -151,7 +150,8 @@ impl FileCache {
             debug!("Removed invalidated file {:?} from cache and storage", path);
         }
 
-        for (path, file) in cache.iter_mut() {
+        let cache = cache.read().await?;
+        for (path, file) in cache.iter() {
             let mut file_lock = if force {
                 file.write().await?
             } else {
