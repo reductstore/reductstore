@@ -40,11 +40,12 @@ impl Bucket {
             } else {
                 self.folder_keeper.add_folder(&prefix).await?;
                 let entry = Arc::new(
-                    Entry::try_build(
+                    Entry::try_build_with_limiter(
                         &prefix,
                         self.path.clone(),
                         settings_for_entry(&prefix, &settings),
                         self.cfg.clone(),
+                        self.io_limiter.clone(),
                     )
                     .await?,
                 );

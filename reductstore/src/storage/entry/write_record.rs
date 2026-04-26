@@ -4,11 +4,45 @@
 use crate::storage::block_manager::BlockRef;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
+use async_trait::async_trait;
 use log::debug;
 use reduct_base::error::ReductError;
-use reduct_base::io::WriteRecord;
+use reduct_base::io::{WriteChunk, WriteRecord};
 use reduct_base::Labels;
 use std::sync::Arc;
+use tokio::sync::OwnedSemaphorePermit;
+
+struct InFlightWriteRecord {
+    inner: Box<dyn WriteRecord + Sync + Send>,
+    _permit: Option<OwnedSemaphorePermit>,
+}
+
+impl InFlightWriteRecord {
+    fn new(
+        inner: Box<dyn WriteRecord + Sync + Send>,
+        permit: Option<OwnedSemaphorePermit>,
+    ) -> Self {
+        Self {
+            inner,
+            _permit: permit,
+        }
+    }
+}
+
+#[async_trait]
+impl WriteRecord for InFlightWriteRecord {
+    async fn send(&mut self, chunk: WriteChunk) -> Result<(), ReductError> {
+        self.inner.send(chunk).await
+    }
+
+    async fn send_timeout(
+        &mut self,
+        chunk: WriteChunk,
+        timeout: std::time::Duration,
+    ) -> Result<(), ReductError> {
+        self.inner.send_timeout(chunk, timeout).await
+    }
+}
 
 impl Entry {
     /// Starts a new record write.
@@ -31,6 +65,7 @@ impl Entry {
         content_type: String,
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        let permit = self.acquire_writer_slot().await?;
         // Strategy validates labels and can perform pre-write maintenance.
         self.system_behavior.prepare_write(self, &labels).await?;
 
@@ -108,7 +143,10 @@ impl Entry {
                             )
                             .await?;
 
-                            return Ok(Box::new(writer));
+                            return Ok(Box::new(InFlightWriteRecord::new(
+                                Box::new(writer),
+                                permit,
+                            )));
                         };
                     }
                     RecordType::Belated
@@ -147,7 +185,7 @@ impl Entry {
 
         let writer =
             RecordWriter::try_new(Arc::clone(&self.block_manager), block_ref, time).await?;
-        Ok(Box::new(writer))
+        Ok(Box::new(InFlightWriteRecord::new(Box::new(writer), permit)))
     }
 
     async fn prepare_block_for_writing(

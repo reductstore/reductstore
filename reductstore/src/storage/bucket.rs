@@ -26,6 +26,7 @@ use crate::storage::entry::{
     is_system_meta_entry, Entry, EntrySettings, META_ENTRY_MAX_BLOCK_SIZE,
 };
 use crate::storage::folder_keeper::FolderKeeper;
+use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
 use log::{debug, error};
 use prost::bytes::Bytes;
@@ -70,6 +71,7 @@ pub(crate) struct Bucket {
     status: AsyncRwLock<ResourceStatus>,
     #[allow(dead_code)]
     queries: AsyncRwLock<HashMap<u64, MultiEntryQuery>>,
+    io_limiter: InFlightIoLimiter,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -91,11 +93,23 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
+    #[allow(dead_code)]
     pub(crate) async fn try_build(
         name: &str,
         path: &PathBuf,
         settings: BucketSettings,
         cfg: Cfg,
+    ) -> Result<Bucket, ReductError> {
+        let io_limiter = InFlightIoLimiter::from_cfg(&cfg);
+        Self::try_build_with_limiter(name, path, settings, cfg, io_limiter).await
+    }
+
+    pub(crate) async fn try_build_with_limiter(
+        name: &str,
+        path: &PathBuf,
+        settings: BucketSettings,
+        cfg: Cfg,
+        io_limiter: InFlightIoLimiter,
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         let settings = Self::fill_settings(settings, Self::defaults());
@@ -112,6 +126,7 @@ impl Bucket {
             last_replica_sync: AsyncRwLock::new(Instant::now()),
             folder_keeper: Arc::new(folder_keeper),
             queries: AsyncRwLock::new(HashMap::new()),
+            io_limiter,
         };
 
         bucket.save_settings().await?;
@@ -128,7 +143,17 @@ impl Bucket {
     /// # Returns
     ///
     /// * `Bucket` - The bucket or an HTTPError
+    #[allow(dead_code)]
     pub async fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
+        let io_limiter = InFlightIoLimiter::from_cfg(&cfg);
+        Self::restore_with_limiter(path, cfg, io_limiter).await
+    }
+
+    pub async fn restore_with_limiter(
+        path: PathBuf,
+        cfg: Cfg,
+        io_limiter: InFlightIoLimiter,
+    ) -> Result<Bucket, ReductError> {
         let mut file = FILE_CACHE
             .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))
             .await?;
@@ -152,12 +177,13 @@ impl Bucket {
                     .strip_prefix(&path)
                     .unwrap_or(entry_path.as_path()),
             );
-            let handler = Entry::restore(
+            let handler = Entry::restore_with_limiter(
                 entry_path,
                 entry_name.clone(),
                 bucket_name.clone(),
                 settings_for_entry(&entry_name, &settings),
                 cfg.clone(),
+                io_limiter.clone(),
             );
 
             task_set.push(handler);
@@ -182,6 +208,7 @@ impl Bucket {
             cfg,
             folder_keeper: Arc::new(folder_keeper),
             queries: AsyncRwLock::new(HashMap::new()),
+            io_limiter,
         })
     }
 

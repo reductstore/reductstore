@@ -236,6 +236,7 @@ impl Query for HistoricalQuery {
                 block.clone(),
                 ts_to_us(&record.timestamp.unwrap()),
                 Some(record),
+                None,
             )
             .await
         }

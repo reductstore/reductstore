@@ -1218,6 +1218,7 @@ mod tests {
                 block_ref.clone(),
                 record_time,
                 None,
+                None,
             )
             .await
             .unwrap();
