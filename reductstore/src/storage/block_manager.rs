@@ -293,22 +293,36 @@ impl BlockManager {
             let block = block.read().await?;
             (block.block_id(), block.size())
         };
-        /* resize data block then sync descriptor and data */
-        let path = self.path_to_data(block_id);
-        {
-            let mut data_block = FILE_CACHE
-                .write_or_create(&path, SeekFrom::Current(0))
-                .await?;
-            data_block.set_len(block_size)?;
-            data_block.sync_all().await?;
-        }
 
-        {
-            let mut descr_block = FILE_CACHE
-                .write_or_create(&self.path_to_desc(block_id), SeekFrom::Current(0))
-                .await?;
-            descr_block.sync_all().await?;
-        }
+        let data_path = self.path_to_data(block_id);
+        let desc_path = self.path_to_desc(block_id);
+
+        let sync_block = async move {
+            /* resize data block then sync descriptor and data */
+            {
+                let mut data_block = FILE_CACHE
+                    .write_or_create(&data_path, SeekFrom::Current(0))
+                    .await?;
+                data_block.set_len(block_size)?;
+                data_block.sync_all().await?;
+            }
+
+            {
+                let mut descr_block = FILE_CACHE
+                    .write_or_create(&desc_path, SeekFrom::Current(0))
+                    .await?;
+                descr_block.sync_all().await?;
+            }
+
+            Ok::<(), ReductError>(())
+        };
+
+        tokio::spawn(async move {
+            // spawn to avoid blocking entry
+            if let Err(err) = sync_block.await {
+                error!("{}", err)
+            }
+        });
 
         Ok(())
     }

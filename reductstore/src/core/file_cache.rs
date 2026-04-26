@@ -150,8 +150,33 @@ impl FileCache {
             debug!("Removed invalidated file {:?} from cache and storage", path);
         }
 
-        let cache = cache.read().await?;
-        for (path, file) in cache.iter() {
+        let mut files_to_sync = vec![];
+        {
+            let cache = cache.read().await?;
+            for (path, file) in cache.iter() {
+                let file_lock = if force {
+                    file.read().await?
+                } else {
+                    let Some(file) = file.try_read() else {
+                        continue;
+                    };
+                    file
+                };
+
+                // Sync only writeable files that are not synced yet
+                // and are not used by other threads
+                if file_lock.mode() != &AccessMode::ReadWrite
+                    || file_lock.is_synced()
+                    || (!force && file_lock.last_synced().elapsed() < sync_interval)
+                {
+                    continue;
+                }
+
+                files_to_sync.push((path.clone(), file.clone()));
+            }
+        }
+
+        for (path, file) in files_to_sync {
             let mut file_lock = if force {
                 file.write().await?
             } else {
@@ -160,15 +185,6 @@ impl FileCache {
                 };
                 file
             };
-
-            // Sync only writeable files that are not synced yet
-            // and are not used by other threads
-            if file_lock.mode() != &AccessMode::ReadWrite
-                || file_lock.is_synced()
-                || (!force && file_lock.last_synced().elapsed() < sync_interval)
-            {
-                continue;
-            }
 
             if let Err(err) = file_lock.sync_all().await {
                 warn!("Failed to sync file {}: {}", path.display(), err);

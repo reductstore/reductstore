@@ -170,6 +170,7 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
         self.store.keys().collect()
     }
 
+    #[allow(dead_code)]
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&K, &mut V)> {
         self.store.iter_mut().map(|(k, v)| (k, &mut v.value))
     }
