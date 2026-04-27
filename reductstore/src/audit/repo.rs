@@ -375,6 +375,57 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn read_event_waits_for_worker_when_audit_bucket_is_missing(
+        #[future] repo: AuditRepository,
+    ) {
+        let mut repo = repo.await;
+
+        repo.log_event(make_event(
+            "token-wait",
+            "GET",
+            "/api/v1/b/test",
+            200,
+            "",
+            7,
+        ))
+        .await
+        .unwrap();
+
+        let event = read_audit_event(&repo, "token-wait", 7).await;
+        assert_eq!(event.token_name, "token-wait");
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn read_labels_waits_for_worker_when_audit_entry_is_missing(
+        #[future] repo: AuditRepository,
+    ) {
+        let mut repo = repo.await;
+        repo.storage
+            .create_system_bucket(AUDIT_BUCKET_NAME, BucketSettings::default())
+            .await
+            .unwrap();
+
+        repo.log_event(make_event(
+            "token-labels",
+            "GET",
+            "/api/v1/b/test",
+            201,
+            "",
+            8,
+        ))
+        .await
+        .unwrap();
+
+        let labels = read_audit_labels(&repo, "token-labels", 8).await;
+        assert_eq!(
+            labels,
+            Labels::from([("status".to_string(), "201".to_string())])
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn creates_system_bucket_when_missing(#[future] repo: AuditRepository) {
         let repo = repo.await;
 

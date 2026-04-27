@@ -68,3 +68,83 @@ impl InFlightIoLimiter {
             .map_err(|_| ReductError::new(ErrorCode::TooManyRequests, message))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cfg::io::IoConfig;
+
+    fn cfg_with_limits(
+        max_writers_in_flight: Option<usize>,
+        max_readers_in_flight: Option<usize>,
+    ) -> Cfg {
+        Cfg {
+            io_conf: IoConfig {
+                max_writers_in_flight,
+                max_readers_in_flight,
+                operation_timeout: Duration::from_millis(1),
+                ..IoConfig::default()
+            },
+            ..Cfg::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn disabled_limits_do_not_require_permits() {
+        let limiter = InFlightIoLimiter::from_cfg(&cfg_with_limits(None, None));
+
+        assert!(limiter.acquire_writer_slot().await.unwrap().is_none());
+        assert!(limiter.acquire_reader_slot().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn writer_limit_rejects_when_all_slots_are_held() {
+        let limiter = InFlightIoLimiter::from_cfg(&cfg_with_limits(Some(1), None));
+        let permit = limiter.acquire_writer_slot().await.unwrap();
+
+        let err = limiter.acquire_writer_slot().await.err().unwrap();
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert_eq!(
+            err.message,
+            "in-flight writers limit exceeded: try again later"
+        );
+
+        drop(permit);
+        assert!(limiter.acquire_writer_slot().await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn reader_limit_rejects_when_all_slots_are_held() {
+        let limiter = InFlightIoLimiter::from_cfg(&cfg_with_limits(None, Some(1)));
+        let permit = limiter.acquire_reader_slot().await.unwrap();
+
+        let err = limiter.acquire_reader_slot().await.err().unwrap();
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert_eq!(
+            err.message,
+            "in-flight readers limit exceeded: try again later"
+        );
+
+        drop(permit);
+        assert!(limiter.acquire_reader_slot().await.unwrap().is_some());
+    }
+
+    #[tokio::test]
+    async fn cloned_limiter_shares_slots() {
+        let limiter = InFlightIoLimiter::from_cfg(&cfg_with_limits(Some(1), None));
+        let clone = limiter.clone();
+        let _permit = limiter.acquire_writer_slot().await.unwrap();
+
+        let err = clone.acquire_writer_slot().await.err().unwrap();
+
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+    }
+
+    #[tokio::test]
+    async fn reader_and_writer_limits_are_independent() {
+        let limiter = InFlightIoLimiter::from_cfg(&cfg_with_limits(Some(1), Some(1)));
+        let _writer_permit = limiter.acquire_writer_slot().await.unwrap();
+
+        assert!(limiter.acquire_reader_slot().await.unwrap().is_some());
+    }
+}

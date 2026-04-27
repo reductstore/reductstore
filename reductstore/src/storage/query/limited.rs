@@ -64,10 +64,12 @@ impl Query for LimitedQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::Cfg;
     use crate::storage::query::base::tests::block_manager;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use rstest::rstest;
+    use std::time::Duration;
 
     #[rstest]
     #[tokio::test]
@@ -96,5 +98,39 @@ mod tests {
                 message: "No content".to_string(),
             })
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn applies_reader_limiter_to_wrapped_query(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let cfg = Cfg {
+            io_conf: IoConfig {
+                max_readers_in_flight: Some(1),
+                operation_timeout: Duration::from_millis(1),
+                ..IoConfig::default()
+            },
+            ..Cfg::default()
+        };
+        let mut query = LimitedQuery::try_new(
+            "entry".to_string(),
+            0,
+            u64::MAX,
+            QueryOptions {
+                limit: Some(2),
+                ..Default::default()
+            },
+            cfg.io_conf.clone(),
+            InFlightIoLimiter::from_cfg(&cfg),
+        )
+        .unwrap();
+
+        let _reader = query.next(block_manager.clone()).await.unwrap();
+        let err = query.next(block_manager).await.err().unwrap();
+
+        assert_eq!(err.status, ErrorCode::TooManyRequests);
+        assert!(err.message.contains("in-flight readers limit exceeded"));
     }
 }

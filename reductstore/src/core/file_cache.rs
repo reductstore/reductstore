@@ -1173,6 +1173,96 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn skips_file_locked_for_write_when_collecting_sync_candidates(tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("test_locked_write_sync_candidate.txt");
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 1);
+                expect_try_exists(mock, &file_path, false, 1);
+                expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(Vec::new)
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            {
+                let mut file_ref = cache
+                    .write_or_create(&file_path, SeekFrom::Start(0))
+                    .await
+                    .unwrap();
+                file_ref.write_all(b"test").unwrap();
+            }
+
+            let file = cache
+                .cache
+                .read()
+                .await
+                .unwrap()
+                .get(&file_path)
+                .unwrap()
+                .clone();
+            let _write_guard = file.write().await.unwrap();
+            let sync_interval = Some(Arc::new(RwLock::new(Duration::from_millis(0))));
+
+            FileCache::sync_rw_and_unused_files(
+                &cache.read_only,
+                &cache.backend,
+                &cache.cache,
+                &sync_interval,
+            )
+            .await
+            .unwrap();
+
+            drop(_write_guard);
+            assert!(!file.read().await.unwrap().is_synced());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn skips_file_locked_for_read_when_syncing_candidates(tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("test_locked_read_sync_candidate.txt");
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 1);
+                expect_try_exists(mock, &file_path, false, 1);
+                expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(Vec::new)
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            {
+                let mut file_ref = cache
+                    .write_or_create(&file_path, SeekFrom::Start(0))
+                    .await
+                    .unwrap();
+                file_ref.write_all(b"test").unwrap();
+            }
+
+            let file = cache
+                .cache
+                .read()
+                .await
+                .unwrap()
+                .get(&file_path)
+                .unwrap()
+                .clone();
+            let _read_guard = file.read().await.unwrap();
+            let sync_interval = Some(Arc::new(RwLock::new(Duration::from_millis(0))));
+
+            FileCache::sync_rw_and_unused_files(
+                &cache.read_only,
+                &cache.backend,
+                &cache.cache,
+                &sync_interval,
+            )
+            .await
+            .unwrap();
+
+            drop(_read_guard);
+            assert!(!file.read().await.unwrap().is_synced());
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_remove_invalidated_files(tmp_dir: PathBuf) {
             let file_path = tmp_dir.join("test_invalidated_file.txt");
             let backend = build_backend(|mock| {
