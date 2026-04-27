@@ -5,6 +5,7 @@ use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
+use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 use async_trait::async_trait;
@@ -25,9 +26,17 @@ impl LimitedQuery {
         stop: u64,
         options: QueryOptions,
         io_config: IoConfig,
+        io_limiter: InFlightIoLimiter,
     ) -> Result<Self, ReductError> {
         Ok(LimitedQuery {
-            query: HistoricalQuery::try_new(entry_name, start, stop, options.clone(), io_config)?,
+            query: HistoricalQuery::try_new(
+                entry_name,
+                start,
+                stop,
+                options.clone(),
+                io_config,
+                io_limiter,
+            )?,
             limit_count: options.limit.unwrap(),
         })
     }
@@ -73,6 +82,7 @@ mod tests {
                 ..Default::default()
             },
             IoConfig::default(),
+            InFlightIoLimiter::default(),
         )
         .unwrap();
 

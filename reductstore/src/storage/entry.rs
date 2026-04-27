@@ -200,6 +200,7 @@ impl Entry {
             stop,
             options.clone(),
             self.cfg.io_conf.clone(),
+            self.io_limiter.clone(),
         )?;
 
         let io_settings = query.as_ref().io_settings().clone();
