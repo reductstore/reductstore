@@ -18,7 +18,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
-const AGGREGATOR_BUFFER_SIZE: usize = 64;
+const DEFAULT_AGGREGATOR_BUFFER_SIZE: usize = 64;
+const LIMITED_AGGREGATOR_BUFFER_SIZE: usize = 1;
+const LIMITED_PENDING_READERS: usize = 1;
 
 #[allow(dead_code)]
 pub(super) struct MultiEntryQuery {
@@ -156,16 +158,15 @@ impl Bucket {
             entry_receivers.insert(entry_name.clone(), rx);
         }
 
-        let (tx, rx_out) = mpsc::channel(AGGREGATOR_BUFFER_SIZE);
+        let io_settings = io_settings.unwrap_or_default();
+        let (tx, rx_out) = mpsc::channel(aggregator_channel_size(&io_settings));
+        let max_pending_readers = aggregator_pending_readers(&io_settings);
 
         tokio::spawn(async move {
-            Self::aggregate(entry_receivers, tx).await;
+            Self::aggregate(entry_receivers, tx, max_pending_readers).await;
         });
 
-        Ok((
-            Arc::new(AsyncRwLock::new(rx_out)),
-            io_settings.unwrap_or_default(),
-        ))
+        Ok((Arc::new(AsyncRwLock::new(rx_out)), io_settings))
     }
 
     async fn remove_expired_query(
@@ -186,6 +187,7 @@ impl Bucket {
     async fn aggregate(
         entry_receivers: HashMap<String, Arc<AsyncRwLock<QueryRx>>>,
         tx: mpsc::Sender<Result<RecordReader, ReductError>>,
+        max_pending_readers: usize,
     ) {
         let mut pending_readers: HashMap<String, Option<RecordReader>> = HashMap::new();
         let mut completed: HashSet<String> = HashSet::new();
@@ -195,10 +197,20 @@ impl Bucket {
                 break;
             }
 
+            if tx.capacity() == 0 {
+                tokio::time::sleep(Duration::from_millis(1)).await;
+                continue;
+            }
+
             let mut last_error: Option<ReductError> = None;
             let mut made_progress = false;
+            let mut pending_count = pending_readers.values().flatten().count();
 
             for (entry_name, rx) in &entry_receivers {
+                if pending_count >= max_pending_readers {
+                    break;
+                }
+
                 if matches!(
                     pending_readers.get(entry_name).and_then(|opt| opt.as_ref()),
                     Some(_)
@@ -221,6 +233,7 @@ impl Bucket {
                 match recv_result {
                     Ok(Ok(reader)) => {
                         pending_readers.insert(entry_name.clone(), Some(reader));
+                        pending_count += 1;
                         made_progress = true;
                     }
                     Ok(Err(err)) => {
@@ -284,6 +297,22 @@ impl Bucket {
     }
 }
 
+fn aggregator_channel_size(io_settings: &IoConfig) -> usize {
+    if io_settings.max_readers_in_flight.is_some() {
+        LIMITED_AGGREGATOR_BUFFER_SIZE
+    } else {
+        DEFAULT_AGGREGATOR_BUFFER_SIZE
+    }
+}
+
+fn aggregator_pending_readers(io_settings: &IoConfig) -> usize {
+    if io_settings.max_readers_in_flight.is_some() {
+        LIMITED_PENDING_READERS
+    } else {
+        usize::MAX
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -298,6 +327,27 @@ mod tests {
     use std::sync::Arc;
     use std::time::Duration;
     use tokio::time::timeout;
+
+    #[test]
+    fn aggregator_limits_are_reduced_when_reader_limit_enabled() {
+        assert_eq!(
+            aggregator_channel_size(&IoConfig::default()),
+            DEFAULT_AGGREGATOR_BUFFER_SIZE
+        );
+        assert_eq!(aggregator_pending_readers(&IoConfig::default()), usize::MAX);
+
+        let mut limited = IoConfig::default();
+        limited.max_readers_in_flight = Some(256);
+
+        assert_eq!(
+            aggregator_channel_size(&limited),
+            LIMITED_AGGREGATOR_BUFFER_SIZE
+        );
+        assert_eq!(
+            aggregator_pending_readers(&limited),
+            LIMITED_PENDING_READERS
+        );
+    }
 
     async fn collect_records(rx: Weak<AsyncRwLock<QueryRx>>) -> Vec<(String, u64)> {
         let rx = rx.upgrade().unwrap();
@@ -567,7 +617,7 @@ mod tests {
         // Should exit immediately because the receiver is gone.
         assert!(timeout(
             Duration::from_millis(100),
-            Bucket::aggregate(HashMap::new(), tx)
+            Bucket::aggregate(HashMap::new(), tx, usize::MAX)
         )
         .await
         .is_ok());

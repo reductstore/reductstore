@@ -28,7 +28,8 @@ use tokio::time::sleep;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
 
-const QUERY_BUFFER_SIZE: usize = 64;
+const DEFAULT_QUERY_BUFFER_SIZE: usize = 64;
+const LIMITED_QUERY_BUFFER_SIZE: usize = 1;
 const MIN_FULL_CHANNEL_SLEEP: Duration = Duration::from_micros(10);
 const MAX_FULL_CHANNEL_SLEEP: Duration = Duration::from_millis(10);
 
@@ -95,7 +96,8 @@ pub(super) fn spawn_query_task(
     options: QueryOptions,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
 ) -> (QueryRx, JoinHandle<()>) {
-    let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
+    let query_buffer_size = query_channel_size(query.io_settings());
+    let (tx, rx) = tokio::sync::mpsc::channel(query_buffer_size);
 
     // we spawn a new task to run the query outside hierarchical task group to avoid deadlocks
     let handle = tokio::spawn(async move {
@@ -121,6 +123,7 @@ pub(super) fn spawn_query_task(
                 // to avoid flooding the channel but still be responsive
                 let timeout = watcher.full_channel();
                 sleep(timeout).await;
+                continue;
             }
 
             let next_result = query.next(block_manager.clone()).await;
@@ -150,6 +153,14 @@ pub(super) fn spawn_query_task(
         }
     });
     (rx, handle)
+}
+
+fn query_channel_size(io_settings: &IoConfig) -> usize {
+    if io_settings.max_readers_in_flight.is_some() {
+        LIMITED_QUERY_BUFFER_SIZE
+    } else {
+        DEFAULT_QUERY_BUFFER_SIZE
+    }
 }
 
 /// A wrapper for timeout and expiry time logic
@@ -202,6 +213,18 @@ mod tests {
     use rstest::*;
     use test_log::test as log_test;
     use tokio::time::timeout;
+
+    #[test]
+    fn query_channel_size_respects_reader_limits() {
+        assert_eq!(
+            query_channel_size(&IoConfig::default()),
+            DEFAULT_QUERY_BUFFER_SIZE
+        );
+
+        let mut limited = IoConfig::default();
+        limited.max_readers_in_flight = Some(256);
+        assert_eq!(query_channel_size(&limited), LIMITED_QUERY_BUFFER_SIZE);
+    }
 
     #[log_test(rstest)]
     fn test_bad_start_stop() {
