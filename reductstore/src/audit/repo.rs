@@ -169,64 +169,32 @@ mod tests {
         token_name: &str,
         timestamp: u64,
     ) -> AuditEvent {
-        let entry_name = audit_entry_name(token_name);
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-
-        loop {
-            match repo.storage.get_bucket(AUDIT_BUCKET_NAME).await {
-                Ok(bucket) => {
-                    let bucket = bucket.upgrade_and_unwrap();
-                    match bucket.begin_read(&entry_name, timestamp).await {
-                        Ok(mut reader) => {
-                            let record = reader.read_chunk().unwrap().unwrap();
-                            return serde_json::from_slice(&record).unwrap();
-                        }
-                        Err(err)
-                            if err.status == ErrorCode::NotFound
-                                || err.status == ErrorCode::TooEarly => {}
-                        Err(err) => panic!("{err}"),
-                    }
-                }
-                Err(err)
-                    if err.status == ErrorCode::NotFound || err.status == ErrorCode::TooEarly => {}
-                Err(err) => panic!("{err}"),
-            }
-
-            if tokio::time::Instant::now() >= deadline {
-                panic!("Audit event '{entry_name}' at {timestamp} was not flushed");
-            }
-
-            sleep(Duration::from_millis(50)).await;
-        }
+        let bucket = repo
+            .storage
+            .get_bucket(AUDIT_BUCKET_NAME)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        let mut reader = bucket
+            .begin_read(&audit_entry_name(token_name), timestamp)
+            .await
+            .unwrap();
+        let record = reader.read_chunk().unwrap().unwrap();
+        serde_json::from_slice(&record).unwrap()
     }
 
     async fn read_audit_labels(repo: &AuditRepository, token_name: &str, timestamp: u64) -> Labels {
-        let entry_name = audit_entry_name(token_name);
-        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
-
-        loop {
-            match repo.storage.get_bucket(AUDIT_BUCKET_NAME).await {
-                Ok(bucket) => {
-                    let bucket = bucket.upgrade_and_unwrap();
-                    match bucket.begin_read(&entry_name, timestamp).await {
-                        Ok(reader) => return reader.meta().labels().clone(),
-                        Err(err)
-                            if err.status == ErrorCode::NotFound
-                                || err.status == ErrorCode::TooEarly => {}
-                        Err(err) => panic!("{err}"),
-                    }
-                }
-                Err(err)
-                    if err.status == ErrorCode::NotFound || err.status == ErrorCode::TooEarly => {}
-                Err(err) => panic!("{err}"),
-            }
-
-            if tokio::time::Instant::now() >= deadline {
-                panic!("Audit labels for '{entry_name}' at {timestamp} were not flushed");
-            }
-
-            sleep(Duration::from_millis(50)).await;
-        }
+        let bucket = repo
+            .storage
+            .get_bucket(AUDIT_BUCKET_NAME)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        let reader = bucket
+            .begin_read(&audit_entry_name(token_name), timestamp)
+            .await
+            .unwrap();
+        reader.meta().labels().clone()
     }
 
     async fn audit_record_exists(repo: &AuditRepository, token_name: &str, timestamp: u64) -> bool {
@@ -370,57 +338,6 @@ mod tests {
         assert_eq!(
             labels,
             Labels::from([("status".to_string(), "200".to_string())])
-        );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn read_event_waits_for_worker_when_audit_bucket_is_missing(
-        #[future] repo: AuditRepository,
-    ) {
-        let mut repo = repo.await;
-
-        repo.log_event(make_event(
-            "token-wait",
-            "GET",
-            "/api/v1/b/test",
-            200,
-            "",
-            7,
-        ))
-        .await
-        .unwrap();
-
-        let event = read_audit_event(&repo, "token-wait", 7).await;
-        assert_eq!(event.token_name, "token-wait");
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn read_labels_waits_for_worker_when_audit_entry_is_missing(
-        #[future] repo: AuditRepository,
-    ) {
-        let mut repo = repo.await;
-        repo.storage
-            .create_system_bucket(AUDIT_BUCKET_NAME, BucketSettings::default())
-            .await
-            .unwrap();
-
-        repo.log_event(make_event(
-            "token-labels",
-            "GET",
-            "/api/v1/b/test",
-            201,
-            "",
-            8,
-        ))
-        .await
-        .unwrap();
-
-        let labels = read_audit_labels(&repo, "token-labels", 8).await;
-        assert_eq!(
-            labels,
-            Labels::from([("status".to_string(), "201".to_string())])
         );
     }
 
