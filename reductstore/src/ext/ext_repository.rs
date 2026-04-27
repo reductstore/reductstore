@@ -1064,6 +1064,44 @@ pub(super) mod tests {
                 unprocessable_entity!("Unknown extension 'unknown-ext' in query id=1 at step 1")
             );
         }
+
+        #[test]
+        fn test_parse_ext_directive_rejects_bad_json_syntax() {
+            let err = ExtRepository::parse_directive_value(&Value::String("{bad".to_string()), 1)
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err.status(),
+                reduct_base::error::ErrorCode::UnprocessableEntity
+            );
+            assert!(
+                err.message().starts_with(
+                    "Directive '#ext' must be a JSON object or an array of JSON objects in query id=1:"
+                ),
+                "{err}"
+            );
+        }
+
+        #[test]
+        fn test_decode_ext_directive_returns_null_for_empty_directive() {
+            assert_eq!(
+                ExtRepository::decode_ext_directive(&[], 1).unwrap(),
+                serde_json::Value::Null
+            );
+        }
+
+        #[test]
+        fn test_decode_ext_directive_parses_single_element() {
+            assert_eq!(
+                ExtRepository::decode_ext_directive(
+                    &[Value::String(r#"{"test-ext":{"scale":100}}"#.to_string())],
+                    1
+                )
+                .unwrap(),
+                json!({"test-ext": {"scale": 100}})
+            );
+        }
     }
 
     mod get_ext_attachments {
