@@ -997,6 +997,73 @@ pub(super) mod tests {
                 expected_error
             );
         }
+
+        #[rstest]
+        #[case(
+            json!([]),
+            unprocessable_entity!("Extension name is not found in query id=1")
+        )]
+        #[case(
+            json!(["test-ext"]),
+            unprocessable_entity!("Each '#ext' pipeline step must be a JSON object in query id=1")
+        )]
+        #[case(
+            json!([{"test-ext": {}, "test-ext2": {}}, {"test-ext": {}}]),
+            unprocessable_entity!("Each '#ext' pipeline step must contain exactly one extension in query id=1")
+        )]
+        #[tokio::test]
+        async fn test_pipeline_error_handling(
+            mock_ext: MockIoExtension,
+            #[case] ext_params: serde_json::Value,
+            #[case] expected_error: ReductError,
+        ) {
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
+            let query = QueryEntry {
+                ext: Some(ext_params),
+                ..Default::default()
+            };
+
+            assert_eq!(
+                mocked_ext_repo
+                    .register_query(1, "bucket", "entry", query)
+                    .await
+                    .err()
+                    .unwrap(),
+                expected_error
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_unknown_extension_in_pipeline_reports_step(
+            mut mock_ext: MockIoExtension,
+            processor: BoxedProcessor,
+            commiter: BoxedCommiter,
+        ) {
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"test-ext": {}})))
+                .times(1)
+                .return_once(|_, _, _| Ok((processor, commiter)));
+
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
+            let query = QueryEntry {
+                ext: Some(json!([
+                    {"test-ext": {}},
+                    {"unknown-ext": {}}
+                ])),
+                ..Default::default()
+            };
+
+            assert_eq!(
+                mocked_ext_repo
+                    .register_query(1, "bucket", "entry", query)
+                    .await
+                    .err()
+                    .unwrap(),
+                unprocessable_entity!("Unknown extension 'unknown-ext' in query id=1 at step 1")
+            );
+        }
     }
 
     mod get_ext_attachments {
@@ -1666,6 +1733,97 @@ pub(super) mod tests {
                 record.meta().computed_labels().get("y"),
                 Some(&"1".to_string())
             );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_pipeline_processes_flushed_record_in_downstream_step(
+            record_reader: RecordReader,
+            mut mock_ext: MockIoExtension,
+        ) {
+            let mut sequence = Sequence::new();
+            let mut processor_1 = Box::new(MockProcessor::new());
+            let mut commiter_1 = Box::new(MockCommiter::new());
+            let mut processor_2 = Box::new(MockProcessor::new());
+            let mut commiter_2 = Box::new(MockCommiter::new());
+
+            processor_1
+                .expect_process_record()
+                .return_once(|_| Ok(MockStream::boxed(Poll::Ready(None))));
+            commiter_1.expect_commit_record().never();
+            commiter_1
+                .expect_flush()
+                .return_once(|| Some(Ok(record_with_labels("z", "130"))))
+                .times(1);
+
+            processor_2
+                .expect_process_record()
+                .withf(|record| {
+                    record
+                        .meta()
+                        .computed_labels()
+                        .get("z")
+                        .is_some_and(|value| value == "130")
+                })
+                .return_once(|_| {
+                    Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                        record_with_labels("projected", "true"),
+                    )))))
+                });
+            commiter_2
+                .expect_commit_record()
+                .return_once(|_| Some(Ok(record_with_labels("projected", "true"))));
+            commiter_2.expect_flush().return_once(|| None).times(1);
+
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"test1": {"extract": {}}})))
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor_1, commiter_1)));
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"test1": {"select": {}}})))
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor_2, commiter_2)));
+
+            let query = QueryEntry {
+                ext: Some(json!([
+                    {"test1": {"extract": {}}},
+                    {"test1": {"select": {}}}
+                ])),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .unwrap();
+
+            let (tx, rx) = tokio::sync::mpsc::channel(2);
+            tx.send(Ok(record_reader)).await.unwrap();
+            tx.send(Err(no_content!(""))).await.unwrap();
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+
+            assert!(mocked_ext_repo
+                .fetch_and_process_record(1, query_rx.clone())
+                .await
+                .is_none());
+
+            let results = mocked_ext_repo
+                .fetch_and_process_record(1, query_rx)
+                .await
+                .unwrap();
+
+            assert_eq!(results.len(), 2);
+            let record = results[0].as_ref().unwrap();
+            assert_eq!(
+                record.meta().computed_labels().get("projected"),
+                Some(&"true".to_string())
+            );
+            assert_eq!(results[1].as_ref().err().unwrap().status(), NoContent);
         }
 
         #[rstest]
