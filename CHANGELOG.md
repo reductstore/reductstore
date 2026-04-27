@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Suppress non-actionable file-cache sync warnings when a file disappears during background sync (`NotFound`), [PR-1360](https://github.com/reductstore/reductstore/pull/1360)
+
 ## 1.19.6 - 2026-04-27
 
 ### Changed
