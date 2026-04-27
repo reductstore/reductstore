@@ -12,7 +12,6 @@ use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
-use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::query::base::{Query, QueryOptions};
 use log::{debug, trace};
 use reduct_base::error::ErrorCode::NoContent;
@@ -28,8 +27,7 @@ use tokio::time::sleep;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
 
-const DEFAULT_QUERY_BUFFER_SIZE: usize = 64;
-const LIMITED_QUERY_BUFFER_SIZE: usize = 1;
+const QUERY_BUFFER_SIZE: usize = 64;
 const MIN_FULL_CHANNEL_SLEEP: Duration = Duration::from_micros(10);
 const MAX_FULL_CHANNEL_SLEEP: Duration = Duration::from_millis(10);
 
@@ -45,7 +43,6 @@ pub(in crate::storage) fn build_query(
     stop: u64,
     options: QueryOptions,
     io_defaults: IoConfig,
-    io_limiter: InFlightIoLimiter,
 ) -> Result<Box<dyn Query + Send + Sync>, ReductError> {
     if start > stop && !options.continuous {
         return Err(unprocessable_entity!("Start time must be before stop time",));
@@ -58,7 +55,6 @@ pub(in crate::storage) fn build_query(
             stop,
             options,
             io_defaults,
-            io_limiter,
         )?)
     } else if options.continuous {
         Box::new(continuous::ContinuousQuery::try_new(
@@ -66,7 +62,6 @@ pub(in crate::storage) fn build_query(
             start,
             options,
             io_defaults,
-            io_limiter,
         )?)
     } else {
         Box::new(historical::HistoricalQuery::try_new(
@@ -75,7 +70,6 @@ pub(in crate::storage) fn build_query(
             stop,
             options,
             io_defaults,
-            io_limiter,
         )?)
     })
 }
@@ -96,8 +90,7 @@ pub(super) fn spawn_query_task(
     options: QueryOptions,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
 ) -> (QueryRx, JoinHandle<()>) {
-    let query_buffer_size = query_channel_size(query.io_settings());
-    let (tx, rx) = tokio::sync::mpsc::channel(query_buffer_size);
+    let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
     // we spawn a new task to run the query outside hierarchical task group to avoid deadlocks
     let handle = tokio::spawn(async move {
@@ -123,7 +116,6 @@ pub(super) fn spawn_query_task(
                 // to avoid flooding the channel but still be responsive
                 let timeout = watcher.full_channel();
                 sleep(timeout).await;
-                continue;
             }
 
             let next_result = query.next(block_manager.clone()).await;
@@ -153,14 +145,6 @@ pub(super) fn spawn_query_task(
         }
     });
     (rx, handle)
-}
-
-fn query_channel_size(io_settings: &IoConfig) -> usize {
-    if io_settings.max_readers_in_flight.is_some() {
-        LIMITED_QUERY_BUFFER_SIZE
-    } else {
-        DEFAULT_QUERY_BUFFER_SIZE
-    }
 }
 
 /// A wrapper for timeout and expiry time logic
@@ -214,18 +198,6 @@ mod tests {
     use test_log::test as log_test;
     use tokio::time::timeout;
 
-    #[test]
-    fn query_channel_size_respects_reader_limits() {
-        assert_eq!(
-            query_channel_size(&IoConfig::default()),
-            DEFAULT_QUERY_BUFFER_SIZE
-        );
-
-        let mut limited = IoConfig::default();
-        limited.max_readers_in_flight = Some(256);
-        assert_eq!(query_channel_size(&limited), LIMITED_QUERY_BUFFER_SIZE);
-    }
-
     #[log_test(rstest)]
     fn test_bad_start_stop() {
         let options = QueryOptions::default();
@@ -236,7 +208,6 @@ mod tests {
                 5,
                 options.clone(),
                 IoConfig::default(),
-                InFlightIoLimiter::default(),
             )
             .err()
             .unwrap(),
@@ -249,7 +220,6 @@ mod tests {
             10,
             options.clone(),
             IoConfig::default(),
-            InFlightIoLimiter::default(),
         )
         .is_ok());
         assert!(build_query(
@@ -258,7 +228,6 @@ mod tests {
             11,
             options.clone(),
             IoConfig::default(),
-            InFlightIoLimiter::default(),
         )
         .is_ok());
     }
@@ -275,7 +244,6 @@ mod tests {
             5,
             options.clone(),
             IoConfig::default(),
-            InFlightIoLimiter::default(),
         )
         .is_ok());
     }
@@ -295,7 +263,6 @@ mod tests {
             5,
             options.clone(),
             IoConfig::default(),
-            InFlightIoLimiter::default(),
         )
         .unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -325,7 +292,6 @@ mod tests {
             5,
             options.clone(),
             IoConfig::default(),
-            InFlightIoLimiter::default(),
         )
         .unwrap();
 
@@ -362,7 +328,6 @@ mod tests {
             5,
             options.clone(),
             IoConfig::default(),
-            InFlightIoLimiter::default(),
         )
         .unwrap();
         let (mut rx, handle) = spawn_query_task(
@@ -417,7 +382,6 @@ mod tests {
             10,
             options.clone(),
             IoConfig::default(),
-            InFlightIoLimiter::default(),
         )
         .unwrap();
 
