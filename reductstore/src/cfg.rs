@@ -612,6 +612,7 @@ mod tests {
                     1_000_000_000,
                     Duration::from_secs(3600),
                 )),
+                ..LimitsConfig::default()
             }
         );
     }

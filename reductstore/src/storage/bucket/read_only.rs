@@ -57,7 +57,7 @@ impl ReadOnlyMode for Bucket {
                     .strip_prefix(self.path())
                     .unwrap_or(entry_path.as_path()),
             );
-            let handler = Entry::restore(
+            let handler = Entry::restore_with_limiter(
                 entry_path,
                 entry_name,
                 self.name().to_string(),
@@ -66,6 +66,7 @@ impl ReadOnlyMode for Bucket {
                     max_block_records: settings.max_block_records.unwrap(),
                 },
                 self.cfg.clone(),
+                self.io_limiter.clone(),
             );
 
             task_set.push(handler);

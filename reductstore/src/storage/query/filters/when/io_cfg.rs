@@ -161,6 +161,7 @@ mod tests {
                 batch_timeout: Duration::from_secs(5),
                 batch_records_timeout: Duration::from_secs(2),
                 operation_timeout: Duration::from_secs(10),
+                ..IoConfig::default()
             };
 
             let merged_cfg = merge_io_config_from_directives(&mut directives, default_cfg).unwrap();
@@ -192,6 +193,7 @@ mod tests {
                 batch_timeout: Duration::from_secs(5),
                 batch_records_timeout: Duration::from_secs(2),
                 operation_timeout: Duration::from_secs(10),
+                ..IoConfig::default()
             };
             let merged_cfg = merge_io_config_from_directives(&mut directives, default_cfg).unwrap();
             assert_eq!(merged_cfg.batch_max_size, 2048);

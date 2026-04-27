@@ -28,6 +28,10 @@ pub struct IoConfig {
     pub batch_records_timeout: Duration,
     /// Maximum time to wait for an IO operation to complete
     pub operation_timeout: Duration,
+    /// Maximum number of in-flight writers for storage engine.
+    pub max_writers_in_flight: Option<usize>,
+    /// Maximum number of in-flight readers for storage engine.
+    pub max_readers_in_flight: Option<usize>,
 }
 
 impl Default for IoConfig {
@@ -39,6 +43,8 @@ impl Default for IoConfig {
             batch_timeout: Duration::from_secs(DEFAULT_BATCH_TIMEOUT_S),
             batch_records_timeout: Duration::from_secs(DEFAULT_BATCH_RECORDS_TIMEOUT_S),
             operation_timeout: Duration::from_secs(DEFAULT_OPERATION_TIMEOUT_S),
+            max_writers_in_flight: None,
+            max_readers_in_flight: None,
         }
     }
 }
@@ -69,6 +75,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 env.get_optional("RS_IO_OPERATION_TIMEOUT")
                     .unwrap_or(DEFAULT_OPERATION_TIMEOUT_S),
             ),
+            max_writers_in_flight: env
+                .get_optional::<usize>("RS_IO_MAX_WRITERS_IN_FLIGHT")
+                .filter(|value| *value > 0),
+            max_readers_in_flight: env
+                .get_optional::<usize>("RS_IO_MAX_READERS_IN_FLIGHT")
+                .filter(|value| *value > 0),
         }
     }
 }
@@ -109,6 +121,14 @@ mod tests {
             .expect_get()
             .with(eq("RS_IO_OPERATION_TIMEOUT"))
             .return_const(Ok("60".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_IO_MAX_WRITERS_IN_FLIGHT"))
+            .return_const(Ok("2".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_IO_MAX_READERS_IN_FLIGHT"))
+            .return_const(Ok("3".to_string()));
 
         let io_settings = IoConfig {
             batch_max_size: 1000000,
@@ -117,6 +137,8 @@ mod tests {
             batch_timeout: Duration::from_secs(10),
             batch_records_timeout: Duration::from_secs(5),
             operation_timeout: Duration::from_secs(60),
+            max_writers_in_flight: Some(2),
+            max_readers_in_flight: Some(3),
         };
 
         assert_eq!(

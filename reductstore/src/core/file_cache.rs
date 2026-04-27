@@ -129,8 +129,6 @@ impl FileCache {
             return Ok(());
         }
 
-        let mut cache = cache.write().await?;
-
         let force = sync_interval.is_none();
         let sync_interval = sync_interval
             .as_ref()
@@ -141,6 +139,7 @@ impl FileCache {
             .invalidate_locally_cached_files()
             .await;
         for path in invalidated_files {
+            let mut cache = cache.write().await?;
             if let Some(file) = cache.remove(&path) {
                 if let Err(err) = file.write_owned().await?.sync_all().await {
                     warn!("Failed to sync invalidated file {:?}: {}", path, err);
@@ -151,7 +150,33 @@ impl FileCache {
             debug!("Removed invalidated file {:?} from cache and storage", path);
         }
 
-        for (path, file) in cache.iter_mut() {
+        let mut files_to_sync = vec![];
+        {
+            let cache = cache.read().await?;
+            for (path, file) in cache.iter() {
+                let file_lock = if force {
+                    file.read().await?
+                } else {
+                    let Some(file) = file.try_read() else {
+                        continue;
+                    };
+                    file
+                };
+
+                // Sync only writeable files that are not synced yet
+                // and are not used by other threads
+                if file_lock.mode() != &AccessMode::ReadWrite
+                    || file_lock.is_synced()
+                    || (!force && file_lock.last_synced().elapsed() < sync_interval)
+                {
+                    continue;
+                }
+
+                files_to_sync.push((path.clone(), file.clone()));
+            }
+        }
+
+        for (path, file) in files_to_sync {
             let mut file_lock = if force {
                 file.write().await?
             } else {
@@ -160,15 +185,6 @@ impl FileCache {
                 };
                 file
             };
-
-            // Sync only writeable files that are not synced yet
-            // and are not used by other threads
-            if file_lock.mode() != &AccessMode::ReadWrite
-                || file_lock.is_synced()
-                || (!force && file_lock.last_synced().elapsed() < sync_interval)
-            {
-                continue;
-            }
 
             if let Err(err) = file_lock.sync_all().await {
                 warn!("Failed to sync file {}: {}", path.display(), err);
@@ -369,26 +385,31 @@ impl FileCache {
             return Ok(());
         }
 
+        let remove_from_backend = async |path| {
+            let backend = self.backend.read().await?.clone();
+            backend.remove(path).await?;
+            Ok::<(), ReductError>(())
+        };
+
         // We hold the lock to ensure that no other operations are being performed on the file
-        let _lock = {
-            let mut cache = self.cache.write().await?;
-            if let Some(file) = cache.remove(path) {
-                if let Some(lock) = file.try_write_owned() {
-                    Some(lock)
-                } else {
-                    cache.insert(path.clone(), file);
+        let cache = self.cache.read().await?;
+        if let Some(file) = cache.get(path).cloned() {
+            drop(cache);
+            match file.write().await {
+                Ok(_) => {
+                    self.cache.write().await?.remove(path);
+                    remove_from_backend(path).await?;
+                }
+                Err(_) => {
                     return Err(internal_server_error!(
                         "Cannot remove file {} because it is in use",
                         path.display()
-                    ));
+                    ))
                 }
-            } else {
-                None
             }
-        };
-
-        let backend = self.backend.read().await?.clone();
-        backend.remove(path).await?;
+        } else {
+            remove_from_backend(path).await?;
+        }
 
         Ok(())
     }
@@ -1153,6 +1174,96 @@ mod tests {
                 .await
                 .unwrap()
                 .is_synced());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn skips_file_locked_for_write_when_collecting_sync_candidates(tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("test_locked_write_sync_candidate.txt");
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 1);
+                expect_try_exists(mock, &file_path, false, 1);
+                expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(Vec::new)
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            {
+                let mut file_ref = cache
+                    .write_or_create(&file_path, SeekFrom::Start(0))
+                    .await
+                    .unwrap();
+                file_ref.write_all(b"test").unwrap();
+            }
+
+            let file = cache
+                .cache
+                .read()
+                .await
+                .unwrap()
+                .get(&file_path)
+                .unwrap()
+                .clone();
+            let _write_guard = file.write().await.unwrap();
+            let sync_interval = Some(Arc::new(RwLock::new(Duration::from_millis(0))));
+
+            FileCache::sync_rw_and_unused_files(
+                &cache.read_only,
+                &cache.backend,
+                &cache.cache,
+                &sync_interval,
+            )
+            .await
+            .unwrap();
+
+            drop(_write_guard);
+            assert!(!file.read().await.unwrap().is_synced());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn skips_file_locked_for_read_when_syncing_candidates(tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("test_locked_read_sync_candidate.txt");
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 1);
+                expect_try_exists(mock, &file_path, false, 1);
+                expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(Vec::new)
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            {
+                let mut file_ref = cache
+                    .write_or_create(&file_path, SeekFrom::Start(0))
+                    .await
+                    .unwrap();
+                file_ref.write_all(b"test").unwrap();
+            }
+
+            let file = cache
+                .cache
+                .read()
+                .await
+                .unwrap()
+                .get(&file_path)
+                .unwrap()
+                .clone();
+            let _read_guard = file.read().await.unwrap();
+            let sync_interval = Some(Arc::new(RwLock::new(Duration::from_millis(0))));
+
+            FileCache::sync_rw_and_unused_files(
+                &cache.read_only,
+                &cache.backend,
+                &cache.cache,
+                &sync_interval,
+            )
+            .await
+            .unwrap();
+
+            drop(_read_guard);
+            assert!(!file.read().await.unwrap().is_synced());
         }
 
         #[rstest]

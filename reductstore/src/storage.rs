@@ -8,3 +8,5 @@ pub mod proto;
 mod block_manager;
 mod folder_keeper;
 pub mod query;
+
+pub(crate) mod in_flight;

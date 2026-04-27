@@ -293,22 +293,43 @@ impl BlockManager {
             let block = block.read().await?;
             (block.block_id(), block.size())
         };
-        /* resize data block then sync descriptor and data */
-        let path = self.path_to_data(block_id);
-        {
-            let mut data_block = FILE_CACHE
-                .write_or_create(&path, SeekFrom::Current(0))
-                .await?;
-            data_block.set_len(block_size)?;
-            data_block.sync_all().await?;
-        }
+
+        let data_path = self.path_to_data(block_id);
+        let desc_path = self.path_to_desc(block_id);
 
         {
-            let mut descr_block = FILE_CACHE
-                .write_or_create(&self.path_to_desc(block_id), SeekFrom::Current(0))
+            // resize imminently for better testing.
+            let mut data_block = FILE_CACHE
+                .write_or_create(&data_path, SeekFrom::Current(0))
                 .await?;
-            descr_block.sync_all().await?;
+            data_block.set_len(block_size)?;
         }
+
+        let sync_block = async move {
+            /* sync descriptor and data */
+            {
+                let mut data_block = FILE_CACHE
+                    .write_or_create(&data_path, SeekFrom::Current(0))
+                    .await?;
+                data_block.sync_all().await?;
+            }
+
+            {
+                let mut descr_block = FILE_CACHE
+                    .write_or_create(&desc_path, SeekFrom::Current(0))
+                    .await?;
+                descr_block.sync_all().await?;
+            }
+
+            Ok::<(), ReductError>(())
+        };
+
+        tokio::spawn(async move {
+            // spawn to avoid blocking entry
+            if let Err(err) = sync_block.await {
+                error!("{}", err)
+            }
+        });
 
         Ok(())
     }
@@ -906,13 +927,17 @@ mod tests {
 
             block_manager.finish_block(loaded_block).await.unwrap();
 
-            let file = std::fs::File::open(
-                block_manager
-                    .path
-                    .join(format!("{}{}", block_id, DATA_FILE_EXT)),
-            )
-            .unwrap();
-            assert_eq!(file.metadata().unwrap().len(), 0);
+            let path = block_manager
+                .path
+                .join(format!("{}{}", block_id, DATA_FILE_EXT));
+            for _ in 0..100 {
+                if std::fs::metadata(&path).unwrap().len() == 0 {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+
+            assert_eq!(std::fs::metadata(path).unwrap().len(), 0);
         }
 
         #[rstest]
@@ -1217,6 +1242,7 @@ mod tests {
                 Arc::clone(&block_manager),
                 block_ref.clone(),
                 record_time,
+                None,
                 None,
             )
             .await
