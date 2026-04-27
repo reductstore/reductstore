@@ -102,10 +102,17 @@ async fn fetch_and_response_single_record(
             .limits
             .check_egress_for(scope, reader.meta().content_length())
             .await?;
+        let headers = make_headers_from_reader(reader.meta());
+        return Ok((
+            headers,
+            Body::from_stream(RecordStream::new(
+                Arc::new(Mutex::new(Box::new(reader))),
+                empty_body,
+            )),
+        ));
     }
 
     let headers = make_headers_from_reader(reader.meta());
-
     Ok((
         headers,
         Body::from_stream(RecordStream::new(

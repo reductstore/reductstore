@@ -170,8 +170,13 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
         self.store.keys().collect()
     }
 
+    #[allow(dead_code)]
     pub fn iter_mut(&mut self) -> impl Iterator<Item = (&K, &mut V)> {
         self.store.iter_mut().map(|(k, v)| (k, &mut v.value))
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = (&K, &V)> {
+        self.store.iter().map(|(k, v)| (k, &v.value))
     }
 
     fn discard_old_descriptors(&mut self) -> Vec<(K, V)> {

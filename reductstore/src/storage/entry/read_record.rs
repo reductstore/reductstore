@@ -88,7 +88,8 @@ impl Entry {
             ));
         }
 
-        RecordReader::try_new(self.block_manager.clone(), block_ref, time, None).await
+        let permit = self.acquire_reader_slot().await?;
+        RecordReader::try_new(self.block_manager.clone(), block_ref, time, None, permit).await
     }
 }
 

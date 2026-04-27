@@ -56,7 +56,13 @@ impl ReadOnlyMode for StorageEngine {
             }
 
             // Restore new bucket
-            match Bucket::restore(path.clone(), self.cfg.clone()).await {
+            match Bucket::restore_with_limiter(
+                path.clone(),
+                self.cfg.clone(),
+                self.io_limiter.clone(),
+            )
+            .await
+            {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
                     new_buckets.insert(bucket.name().to_string(), bucket);
