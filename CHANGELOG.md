@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.19.6 - 2026-04-27
+
 ### Changed
 
 - Add optional in-flight IO limits (`RS_IO_MAX_WRITERS_IN_FLIGHT`, `RS_IO_MAX_READERS_IN_FLIGHT`) to bound concurrent storage read/write operations, plus lock-contention and sync-path optimizations in storage/file cache internals, [PR-1357](https://github.com/reductstore/reductstore/pull/1357)
