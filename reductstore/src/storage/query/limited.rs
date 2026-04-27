@@ -5,7 +5,6 @@ use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
-use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 use async_trait::async_trait;
@@ -26,17 +25,9 @@ impl LimitedQuery {
         stop: u64,
         options: QueryOptions,
         io_config: IoConfig,
-        io_limiter: InFlightIoLimiter,
     ) -> Result<Self, ReductError> {
         Ok(LimitedQuery {
-            query: HistoricalQuery::try_new(
-                entry_name,
-                start,
-                stop,
-                options.clone(),
-                io_config,
-                io_limiter,
-            )?,
+            query: HistoricalQuery::try_new(entry_name, start, stop, options.clone(), io_config)?,
             limit_count: options.limit.unwrap(),
         })
     }
@@ -64,12 +55,10 @@ impl Query for LimitedQuery {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cfg::Cfg;
     use crate::storage::query::base::tests::block_manager;
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use rstest::rstest;
-    use std::time::Duration;
 
     #[rstest]
     #[tokio::test]
@@ -84,7 +73,6 @@ mod tests {
                 ..Default::default()
             },
             IoConfig::default(),
-            InFlightIoLimiter::default(),
         )
         .unwrap();
 
@@ -98,39 +86,5 @@ mod tests {
                 message: "No content".to_string(),
             })
         );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn applies_reader_limiter_to_wrapped_query(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        let cfg = Cfg {
-            io_conf: IoConfig {
-                max_readers_in_flight: Some(1),
-                operation_timeout: Duration::from_millis(1),
-                ..IoConfig::default()
-            },
-            ..Cfg::default()
-        };
-        let mut query = LimitedQuery::try_new(
-            "entry".to_string(),
-            0,
-            u64::MAX,
-            QueryOptions {
-                limit: Some(2),
-                ..Default::default()
-            },
-            cfg.io_conf.clone(),
-            InFlightIoLimiter::from_cfg(&cfg),
-        )
-        .unwrap();
-
-        let _reader = query.next(block_manager.clone()).await.unwrap();
-        let err = query.next(block_manager).await.err().unwrap();
-
-        assert_eq!(err.status, ErrorCode::TooManyRequests);
-        assert!(err.message.contains("in-flight readers limit exceeded"));
     }
 }
