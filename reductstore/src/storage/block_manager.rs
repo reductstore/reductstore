@@ -297,8 +297,16 @@ impl BlockManager {
         let data_path = self.path_to_data(block_id);
         let desc_path = self.path_to_desc(block_id);
 
+        {
+            // resize imminently for better testing.
+            let mut data_block = FILE_CACHE
+                .write_or_create(&data_path, SeekFrom::Current(0))
+                .await?;
+            data_block.set_len(block_size)?;
+        }
+
         let sync_block = async move {
-            /* resize data block then sync descriptor and data */
+            /* sync descriptor and data */
             {
                 let mut data_block = FILE_CACHE
                     .write_or_create(&data_path, SeekFrom::Current(0))
