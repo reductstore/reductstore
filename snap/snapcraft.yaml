@@ -1,7 +1,7 @@
 title: ReductStore
 name: reductstore # you probably want to 'snapcraft register <name>'
 base: core24 # the base snap is the execution environment for this snap
-version: git
+adopt-info: reductstore
 summary: High Performance Data Storage and Streaming for Robotics and Industrial IoT # 79 char long summary
 description: |
   ReductStore is a high-performance, time-series object storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT).
@@ -26,6 +26,10 @@ parts:
   reductstore:
     plugin: dump
     source: .snap-build/bin
+    override-pull: |
+      craftctl default
+      VERSION=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' "$CRAFT_PROJECT_DIR/Cargo.toml" | head -n1)
+      craftctl set version="$VERSION"
     organize:
       reductstore: bin/reductstore
   hooks:
