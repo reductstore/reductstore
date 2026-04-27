@@ -578,6 +578,7 @@ mod tests {
                 api_requests_per_window: Some(WindowLimit::new(1, Duration::from_secs(3600))),
                 ingress_bytes_per_window: Some(WindowLimit::new(3, Duration::from_secs(3600))),
                 egress_bytes_per_window: Some(WindowLimit::new(5, Duration::from_secs(3600))),
+                ..LimitsConfig::default()
             })
             .build();
 

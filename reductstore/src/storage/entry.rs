@@ -17,6 +17,7 @@ use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
 use crate::storage::entry::entry_loader::EntryLoader;
+use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
@@ -35,6 +36,7 @@ pub(crate) use system::{
     is_system_meta_entry, meta_entry_name, meta_entry_parent, strategy_for_entry,
     validate_remove_entry, validate_remove_records, SystemEntryBehavior, META_ENTRY_MAX_BLOCK_SIZE,
 };
+use tokio::sync::OwnedSemaphorePermit;
 use tokio::task::JoinHandle;
 
 struct QueryHandle {
@@ -60,6 +62,7 @@ pub(crate) struct Entry {
     status: AsyncRwLock<ResourceStatus>,
     path: PathBuf,
     cfg: Arc<Cfg>,
+    io_limiter: InFlightIoLimiter,
 }
 
 #[derive(PartialEq)]
@@ -77,11 +80,23 @@ pub struct EntrySettings {
 }
 
 impl Entry {
+    #[allow(dead_code)]
     pub async fn try_build(
         name: &str,
         path: PathBuf,
         settings: EntrySettings,
         cfg: Arc<Cfg>,
+    ) -> Result<Self, ReductError> {
+        let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
+        Self::try_build_with_limiter(name, path, settings, cfg, io_limiter).await
+    }
+
+    pub(crate) async fn try_build_with_limiter(
+        name: &str,
+        path: PathBuf,
+        settings: EntrySettings,
+        cfg: Arc<Cfg>,
+        io_limiter: InFlightIoLimiter,
     ) -> Result<Self, ReductError> {
         let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let path = path.join(name);
@@ -113,9 +128,11 @@ impl Entry {
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
             cfg,
+            io_limiter,
         })
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn restore(
         path: PathBuf,
         entry_name: String,
@@ -123,10 +140,40 @@ impl Entry {
         options: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Option<Entry>, ReductError> {
-        let entry =
-            EntryLoader::restore_entry_with_names(path, entry_name, bucket_name, options, cfg)
-                .await?;
+        let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
+        Self::restore_with_limiter(path, entry_name, bucket_name, options, cfg, io_limiter).await
+    }
+
+    pub(crate) async fn restore_with_limiter(
+        path: PathBuf,
+        entry_name: String,
+        bucket_name: String,
+        options: EntrySettings,
+        cfg: Arc<Cfg>,
+        io_limiter: InFlightIoLimiter,
+    ) -> Result<Option<Entry>, ReductError> {
+        let entry = EntryLoader::restore_entry_with_names(
+            path,
+            entry_name,
+            bucket_name,
+            options,
+            cfg,
+            io_limiter,
+        )
+        .await?;
         Ok(entry)
+    }
+
+    pub(crate) async fn acquire_writer_slot(
+        &self,
+    ) -> Result<Option<OwnedSemaphorePermit>, ReductError> {
+        self.io_limiter.acquire_writer_slot().await
+    }
+
+    pub(crate) async fn acquire_reader_slot(
+        &self,
+    ) -> Result<Option<OwnedSemaphorePermit>, ReductError> {
+        self.io_limiter.acquire_reader_slot().await
     }
 
     /// Query records for a time range.
@@ -153,6 +200,7 @@ impl Entry {
             stop,
             options.clone(),
             self.cfg.io_conf.clone(),
+            self.io_limiter.clone(),
         )?;
 
         let io_settings = query.as_ref().io_settings().clone();

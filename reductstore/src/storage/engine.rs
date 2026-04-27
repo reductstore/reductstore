@@ -8,6 +8,7 @@ use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
+use crate::storage::in_flight::InFlightIoLimiter;
 use async_trait::async_trait;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
@@ -66,6 +67,7 @@ impl StorageEngineBuilder {
     pub async fn build(self) -> StorageEngine {
         let cfg = self.cfg.expect("Config must be set");
         let data_path = self.data_path.expect("Data path must be set");
+        let io_limiter = InFlightIoLimiter::from_cfg(&cfg);
 
         if !FILE_CACHE.try_exists(&data_path).await.unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
@@ -84,7 +86,8 @@ impl StorageEngineBuilder {
             .await
             .expect("Failed to list folders")
         {
-            match Bucket::restore(path.clone(), cfg.clone()).await {
+            match Bucket::restore_with_limiter(path.clone(), cfg.clone(), io_limiter.clone()).await
+            {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
                     buckets.insert(bucket.name().to_string(), bucket);
@@ -105,6 +108,7 @@ impl StorageEngineBuilder {
             cfg,
             last_replica_sync: AsyncRwLock::new(Instant::now()),
             folder_keeper: Arc::new(folder_keeper),
+            io_limiter,
         }
     }
 }
@@ -118,6 +122,7 @@ pub struct StorageEngine {
     cfg: Cfg,
     last_replica_sync: AsyncRwLock<Instant>,
     folder_keeper: Arc<FolderKeeper>,
+    io_limiter: InFlightIoLimiter,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -258,8 +263,16 @@ impl StorageEngine {
         }
 
         self.folder_keeper.add_folder(name).await?;
-        let bucket =
-            Arc::new(Bucket::try_build(name, &self.data_path, settings, self.cfg.clone()).await?);
+        let bucket = Arc::new(
+            Bucket::try_build_with_limiter(
+                name,
+                &self.data_path,
+                settings,
+                self.cfg.clone(),
+                self.io_limiter.clone(),
+            )
+            .await?,
+        );
         buckets.insert(name.to_string(), Arc::clone(&bucket));
 
         Ok(bucket.into())
@@ -377,7 +390,7 @@ impl StorageEngine {
         folder_keeper.rename_folder(&old_name, &new_name).await?;
 
         buckets.remove(&old_name);
-        let bucket = Bucket::restore(new_path, cfg).await?;
+        let bucket = Bucket::restore_with_limiter(new_path, cfg, self.io_limiter.clone()).await?;
         buckets.insert(new_name.to_string(), Arc::new(bucket));
         debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
         Ok(())

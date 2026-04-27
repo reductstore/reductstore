@@ -25,12 +25,13 @@ impl Bucket {
                     .strip_prefix(&self.path)
                     .unwrap_or(entry_path.as_path()),
             );
-            task_set.push(Entry::restore(
+            task_set.push(Entry::restore_with_limiter(
                 entry_path,
                 entry_name.clone(),
                 self.name.clone(),
                 settings_for_entry(&entry_name, settings),
                 self.cfg.clone(),
+                self.io_limiter.clone(),
             ));
         }
 

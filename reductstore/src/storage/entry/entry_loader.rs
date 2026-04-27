@@ -23,6 +23,7 @@ use crate::storage::block_manager::{
 };
 use crate::storage::entry::strategy_for_entry;
 use crate::storage::entry::{Entry, EntrySettings};
+use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
@@ -38,6 +39,7 @@ impl EntryLoader {
         options: EntrySettings,
         cfg: Arc<Cfg>,
     ) -> Result<Option<Entry>, ReductError> {
+        let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
         let entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let bucket_name = path
             .parent()
@@ -47,7 +49,8 @@ impl EntryLoader {
             .to_str()
             .unwrap()
             .to_string();
-        Self::restore_entry_with_names(path, entry_name, bucket_name, options, cfg).await
+        Self::restore_entry_with_names(path, entry_name, bucket_name, options, cfg, io_limiter)
+            .await
     }
 
     pub async fn restore_entry_with_names(
@@ -56,6 +59,7 @@ impl EntryLoader {
         bucket_name: String,
         options: EntrySettings,
         cfg: Arc<Cfg>,
+        io_limiter: InFlightIoLimiter,
     ) -> Result<Option<Entry>, ReductError> {
         let start_time = Instant::now();
 
@@ -65,6 +69,7 @@ impl EntryLoader {
             bucket_name.clone(),
             options.clone(),
             cfg.clone(),
+            io_limiter.clone(),
         )
         .await
         {
@@ -85,6 +90,7 @@ impl EntryLoader {
                     bucket_name.clone(),
                     options.clone(),
                     cfg.clone(),
+                    io_limiter.clone(),
                 )
                 .await?
             }
@@ -115,6 +121,7 @@ impl EntryLoader {
                     bucket_name,
                     options,
                     cfg.clone(),
+                    io_limiter.clone(),
                 )
                 .await?;
             }
@@ -142,6 +149,7 @@ impl EntryLoader {
         bucket_name: String,
         options: EntrySettings,
         cfg: Arc<Cfg>,
+        io_limiter: InFlightIoLimiter,
     ) -> Result<Entry, ReductError> {
         async fn remove_block_files(path: &PathBuf) -> Result<(), ReductError> {
             warn!("Removing meta block {:?}", path);
@@ -244,6 +252,7 @@ impl EntryLoader {
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
             cfg,
+            io_limiter,
         })
     }
 
@@ -254,6 +263,7 @@ impl EntryLoader {
         bucket_name: String,
         options: EntrySettings,
         cfg: Arc<Cfg>,
+        io_limiter: InFlightIoLimiter,
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
 
@@ -276,6 +286,7 @@ impl EntryLoader {
             status: AsyncRwLock::new(ResourceStatus::Ready),
             path,
             cfg,
+            io_limiter,
         })
     }
 

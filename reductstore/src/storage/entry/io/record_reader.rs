@@ -17,6 +17,7 @@ use std::io::Read;
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::OwnedSemaphorePermit;
 
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
@@ -25,6 +26,7 @@ pub(crate) struct RecordReader {
     offset: u64,
     content_size: u64,
     pos: u64,
+    _permit: Option<OwnedSemaphorePermit>,
 }
 
 impl RecordReader {
@@ -47,6 +49,7 @@ impl RecordReader {
         block_ref: BlockRef,
         record_timestamp: u64,
         processed_record: Option<Record>,
+        permit: Option<OwnedSemaphorePermit>,
     ) -> Result<Self, ReductError> {
         let bm = block_manager.read().await?;
         let block = block_ref.read().await?;
@@ -83,6 +86,7 @@ impl RecordReader {
             offset,
             content_size,
             pos: 0,
+            _permit: permit,
         })
     }
 
@@ -108,6 +112,7 @@ impl RecordReader {
             offset: 0,
             content_size: 0,
             pos: 0,
+            _permit: None,
         }
     }
 

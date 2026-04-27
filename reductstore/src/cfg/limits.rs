@@ -191,6 +191,7 @@ mod tests {
                     512_000_000,
                     std::time::Duration::from_secs(3600)
                 )),
+                ..LimitsConfig::default()
             }
         );
     }
@@ -226,6 +227,7 @@ mod tests {
                     2_000_000_000,
                     std::time::Duration::from_secs(1)
                 )),
+                ..LimitsConfig::default()
             }
         );
     }
@@ -261,6 +263,7 @@ mod tests {
                     10_000_000,
                     std::time::Duration::from_millis(1)
                 )),
+                ..LimitsConfig::default()
             }
         );
     }
@@ -296,6 +299,7 @@ mod tests {
                     4_096,
                     std::time::Duration::from_secs(3600)
                 )),
+                ..LimitsConfig::default()
             }
         );
     }

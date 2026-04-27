@@ -12,6 +12,7 @@ use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
+use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::query::base::{Query, QueryOptions};
 use log::{debug, trace};
 use reduct_base::error::ErrorCode::NoContent;
@@ -43,6 +44,7 @@ pub(in crate::storage) fn build_query(
     stop: u64,
     options: QueryOptions,
     io_defaults: IoConfig,
+    io_limiter: InFlightIoLimiter,
 ) -> Result<Box<dyn Query + Send + Sync>, ReductError> {
     if start > stop && !options.continuous {
         return Err(unprocessable_entity!("Start time must be before stop time",));
@@ -55,6 +57,7 @@ pub(in crate::storage) fn build_query(
             stop,
             options,
             io_defaults,
+            io_limiter,
         )?)
     } else if options.continuous {
         Box::new(continuous::ContinuousQuery::try_new(
@@ -62,6 +65,7 @@ pub(in crate::storage) fn build_query(
             start,
             options,
             io_defaults,
+            io_limiter,
         )?)
     } else {
         Box::new(historical::HistoricalQuery::try_new(
@@ -70,6 +74,7 @@ pub(in crate::storage) fn build_query(
             stop,
             options,
             io_defaults,
+            io_limiter,
         )?)
     })
 }
@@ -207,7 +212,8 @@ mod tests {
                 10,
                 5,
                 options.clone(),
-                IoConfig::default()
+                IoConfig::default(),
+                InFlightIoLimiter::default(),
             )
             .err()
             .unwrap(),
@@ -219,7 +225,8 @@ mod tests {
             10,
             10,
             options.clone(),
-            IoConfig::default()
+            IoConfig::default(),
+            InFlightIoLimiter::default(),
         )
         .is_ok());
         assert!(build_query(
@@ -227,7 +234,8 @@ mod tests {
             10,
             11,
             options.clone(),
-            IoConfig::default()
+            IoConfig::default(),
+            InFlightIoLimiter::default(),
         )
         .is_ok());
     }
@@ -243,7 +251,8 @@ mod tests {
             10,
             5,
             options.clone(),
-            IoConfig::default()
+            IoConfig::default(),
+            InFlightIoLimiter::default(),
         )
         .is_ok());
     }
@@ -263,6 +272,7 @@ mod tests {
             5,
             options.clone(),
             IoConfig::default(),
+            InFlightIoLimiter::default(),
         )
         .unwrap();
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -292,6 +302,7 @@ mod tests {
             5,
             options.clone(),
             IoConfig::default(),
+            InFlightIoLimiter::default(),
         )
         .unwrap();
 
@@ -328,6 +339,7 @@ mod tests {
             5,
             options.clone(),
             IoConfig::default(),
+            InFlightIoLimiter::default(),
         )
         .unwrap();
         let (mut rx, handle) = spawn_query_task(
@@ -382,6 +394,7 @@ mod tests {
             10,
             options.clone(),
             IoConfig::default(),
+            InFlightIoLimiter::default(),
         )
         .unwrap();
 
