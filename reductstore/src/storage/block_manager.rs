@@ -311,7 +311,6 @@ impl BlockManager {
                 let mut data_block = FILE_CACHE
                     .write_or_create(&data_path, SeekFrom::Current(0))
                     .await?;
-                data_block.set_len(block_size)?;
                 data_block.sync_all().await?;
             }
 
