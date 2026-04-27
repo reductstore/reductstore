@@ -21,7 +21,6 @@ use tokio::sync::mpsc;
 const AGGREGATOR_BUFFER_SIZE: usize = 64;
 
 pub(super) struct MultiEntryQuery {
-    entry_queries: HashMap<String, u64>,
     aggregated_rx: Arc<AsyncRwLock<QueryRx>>,
     io_settings: IoConfig,
     options: QueryOptions,
@@ -52,7 +51,6 @@ impl Bucket {
         let (aggregated_rx, io_settings) = self.init_aggregator(&entry_queries).await?;
 
         let multi_query = MultiEntryQuery {
-            entry_queries,
             aggregated_rx,
             io_settings,
             options,
