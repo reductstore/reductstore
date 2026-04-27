@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Suppress non-actionable file-cache sync warnings when a file disappears during background sync (`NotFound`), [PR-1360](https://github.com/reductstore/reductstore/pull/1360)
+- Reduce reader-permit hoarding under configured in-flight reader limits by applying limiter-aware query/aggregator buffering and backpressure, [PR-1361](https://github.com/reductstore/reductstore/pull/1361)
 
 ## 1.19.6 - 2026-04-27
 
