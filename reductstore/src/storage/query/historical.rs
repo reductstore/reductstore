@@ -5,7 +5,6 @@ use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::entry::RecordReader;
-use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::record;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
@@ -67,8 +66,6 @@ pub struct HistoricalQuery {
     is_interrupted: bool,
     /// Io Config
     io_config: IoConfig,
-    /// Limits in-flight storage readers.
-    io_limiter: InFlightIoLimiter,
 }
 
 impl HistoricalQuery {
@@ -78,7 +75,6 @@ impl HistoricalQuery {
         stop_time: u64,
         options: QueryOptions,
         io_defaults: IoConfig,
-        io_limiter: InFlightIoLimiter,
     ) -> Result<Self, ReductError> {
         let mut filters: Vec<Filter> = vec![
             Box::new(TimeRangeFilter::new(start_time, stop_time)),
@@ -133,7 +129,6 @@ impl HistoricalQuery {
             only_metadata,
             is_interrupted: false,
             io_config,
-            io_limiter,
         })
     }
 }
@@ -236,13 +231,12 @@ impl Query for HistoricalQuery {
         if self.only_metadata {
             Ok(RecordReader::form_record(&self.entry_name, record))
         } else {
-            let permit = self.io_limiter.acquire_reader_slot().await?;
             RecordReader::try_new(
                 Arc::clone(&block_manager),
                 block.clone(),
                 ts_to_us(&record.timestamp.unwrap()),
                 Some(record),
-                permit,
+                None,
             )
             .await
         }
@@ -276,10 +270,8 @@ impl HistoricalQuery {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::time::Duration;
-
     use rstest::rstest;
+    use std::collections::HashMap;
 
     use super::*;
 
@@ -288,7 +280,6 @@ mod tests {
     use crate::core::file_cache::FILE_CACHE;
     use crate::storage::block_manager::block::Block;
     use crate::storage::block_manager::block_index::BlockIndex;
-    use crate::storage::in_flight::InFlightIoLimiter;
     use crate::storage::proto::record;
     use crate::storage::proto::{us_to_ts, Record};
     use crate::storage::query::base::tests::block_manager;
@@ -308,7 +299,6 @@ mod tests {
             stop_time,
             options,
             IoConfig::default(),
-            InFlightIoLimiter::default(),
         )
     }
 
@@ -402,38 +392,6 @@ mod tests {
             "entry",
             "entry_name should be returned for HEAD request (only_metadata=true)"
         );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_reader_limit_applies_to_content_readers(
-        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
-    ) {
-        let block_manager = block_manager.await;
-        let cfg = Cfg {
-            io_conf: IoConfig {
-                max_readers_in_flight: Some(1),
-                operation_timeout: Duration::from_millis(1),
-                ..IoConfig::default()
-            },
-            ..Cfg::default()
-        };
-        let limiter = InFlightIoLimiter::from_cfg(&cfg);
-        let mut query = HistoricalQuery::try_new(
-            "entry".to_string(),
-            0,
-            1000,
-            QueryOptions::default(),
-            cfg.io_conf.clone(),
-            limiter,
-        )
-        .unwrap();
-
-        let _reader = query.next(block_manager.clone()).await.unwrap();
-        let err = query.next(block_manager).await.err().unwrap();
-
-        assert_eq!(err.status, ErrorCode::TooManyRequests);
-        assert!(err.message.contains("in-flight readers limit exceeded"));
     }
 
     #[rstest]

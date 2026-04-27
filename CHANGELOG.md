@@ -16,6 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Downgrade `write_batched` log severity for closed writer-channel handoff from error to warning to reduce noisy false-positive error bursts under expected stream abort/backpressure scenarios, [PR-1356](https://github.com/reductstore/reductstore/pull/1356)
 
+## 1.19.7 - 2026-04-27
+
+### Fixed
+
+- Suppress non-actionable file-cache sync warnings when a file disappears during background sync (`NotFound`), [PR-1360](https://github.com/reductstore/reductstore/pull/1360)
+- Remove in-flight reader limiting from storage read/query paths (`RS_IO_MAX_READERS_IN_FLIGHT`) while keeping writer in-flight limiting enabled, [PR-1361](https://github.com/reductstore/reductstore/pull/1361)
+
 ## 1.19.6 - 2026-04-27
 
 ### Changed

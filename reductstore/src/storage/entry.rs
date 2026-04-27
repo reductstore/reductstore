@@ -170,12 +170,6 @@ impl Entry {
         self.io_limiter.acquire_writer_slot().await
     }
 
-    pub(crate) async fn acquire_reader_slot(
-        &self,
-    ) -> Result<Option<OwnedSemaphorePermit>, ReductError> {
-        self.io_limiter.acquire_reader_slot().await
-    }
-
     /// Query records for a time range.
     ///
     /// # Arguments
@@ -200,7 +194,6 @@ impl Entry {
             stop,
             options.clone(),
             self.cfg.io_conf.clone(),
-            self.io_limiter.clone(),
         )?;
 
         let io_settings = query.as_ref().io_settings().clone();

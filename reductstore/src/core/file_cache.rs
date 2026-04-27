@@ -187,7 +187,11 @@ impl FileCache {
             };
 
             if let Err(err) = file_lock.sync_all().await {
-                warn!("Failed to sync file {}: {}", path.display(), err);
+                // ignore not found errors, since file can be removed while we are syncing,
+                // it's better than holding the file lock for too long and preventing other operations on the file
+                if err.kind() != std::io::ErrorKind::NotFound {
+                    warn!("Failed to sync file {}: {}", path.display(), err);
+                }
                 continue;
             }
         }
