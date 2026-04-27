@@ -5,7 +5,6 @@ use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
-use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::historical::HistoricalQuery;
 use async_trait::async_trait;
@@ -20,7 +19,6 @@ pub struct ContinuousQuery {
     count: usize,
     options: QueryOptions,
     io_defaults: IoConfig,
-    io_limiter: InFlightIoLimiter,
 }
 
 impl ContinuousQuery {
@@ -29,7 +27,6 @@ impl ContinuousQuery {
         start: u64,
         options: QueryOptions,
         io_defaults: IoConfig,
-        io_limiter: InFlightIoLimiter,
     ) -> Result<Self, ReductError> {
         if !options.continuous {
             panic!("Continuous query must be continuous");
@@ -43,13 +40,11 @@ impl ContinuousQuery {
                 u64::MAX,
                 options.clone(),
                 io_defaults.clone(),
-                io_limiter.clone(),
             )?,
             next_start: start,
             count: 0,
             options,
             io_defaults,
-            io_limiter,
         })
     }
 }
@@ -76,7 +71,6 @@ impl Query for ContinuousQuery {
                     u64::MAX,
                     self.options.clone(),
                     self.io_defaults.clone(),
-                    self.io_limiter.clone(),
                 )?;
                 Err(ReductError {
                     status: ErrorCode::NoContent,
@@ -114,7 +108,6 @@ mod tests {
                 ..QueryOptions::default()
             },
             IoConfig::default(),
-            InFlightIoLimiter::default(),
         )
         .unwrap();
         {
