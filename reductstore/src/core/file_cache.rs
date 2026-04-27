@@ -385,26 +385,31 @@ impl FileCache {
             return Ok(());
         }
 
+        let remove_from_backend = async |path| {
+            let backend = self.backend.read().await?.clone();
+            backend.remove(path).await?;
+            Ok::<(), ReductError>(())
+        };
+
         // We hold the lock to ensure that no other operations are being performed on the file
-        let _lock = {
-            let mut cache = self.cache.write().await?;
-            if let Some(file) = cache.remove(path) {
-                if let Some(lock) = file.try_write_owned() {
-                    Some(lock)
-                } else {
-                    cache.insert(path.clone(), file);
+        let cache = self.cache.read().await?;
+        if let Some(file) = cache.get(path).cloned() {
+            drop(cache);
+            match file.write().await {
+                Ok(_) => {
+                    self.cache.write().await?.remove(path);
+                    remove_from_backend(path).await?;
+                }
+                Err(_) => {
                     return Err(internal_server_error!(
                         "Cannot remove file {} because it is in use",
                         path.display()
-                    ));
+                    ))
                 }
-            } else {
-                None
             }
-        };
-
-        let backend = self.backend.read().await?.clone();
-        backend.remove(path).await?;
+        } else {
+            remove_from_backend(path).await?;
+        }
 
         Ok(())
     }
