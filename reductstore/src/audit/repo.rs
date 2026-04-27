@@ -169,32 +169,64 @@ mod tests {
         token_name: &str,
         timestamp: u64,
     ) -> AuditEvent {
-        let bucket = repo
-            .storage
-            .get_bucket(AUDIT_BUCKET_NAME)
-            .await
-            .unwrap()
-            .upgrade_and_unwrap();
-        let mut reader = bucket
-            .begin_read(&audit_entry_name(token_name), timestamp)
-            .await
-            .unwrap();
-        let record = reader.read_chunk().unwrap().unwrap();
-        serde_json::from_slice(&record).unwrap()
+        let entry_name = audit_entry_name(token_name);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+
+        loop {
+            match repo.storage.get_bucket(AUDIT_BUCKET_NAME).await {
+                Ok(bucket) => {
+                    let bucket = bucket.upgrade_and_unwrap();
+                    match bucket.begin_read(&entry_name, timestamp).await {
+                        Ok(mut reader) => {
+                            let record = reader.read_chunk().unwrap().unwrap();
+                            return serde_json::from_slice(&record).unwrap();
+                        }
+                        Err(err)
+                            if err.status == ErrorCode::NotFound
+                                || err.status == ErrorCode::TooEarly => {}
+                        Err(err) => panic!("{err}"),
+                    }
+                }
+                Err(err)
+                    if err.status == ErrorCode::NotFound || err.status == ErrorCode::TooEarly => {}
+                Err(err) => panic!("{err}"),
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                panic!("Audit event '{entry_name}' at {timestamp} was not flushed");
+            }
+
+            sleep(Duration::from_millis(50)).await;
+        }
     }
 
     async fn read_audit_labels(repo: &AuditRepository, token_name: &str, timestamp: u64) -> Labels {
-        let bucket = repo
-            .storage
-            .get_bucket(AUDIT_BUCKET_NAME)
-            .await
-            .unwrap()
-            .upgrade_and_unwrap();
-        let reader = bucket
-            .begin_read(&audit_entry_name(token_name), timestamp)
-            .await
-            .unwrap();
-        reader.meta().labels().clone()
+        let entry_name = audit_entry_name(token_name);
+        let deadline = tokio::time::Instant::now() + Duration::from_secs(5);
+
+        loop {
+            match repo.storage.get_bucket(AUDIT_BUCKET_NAME).await {
+                Ok(bucket) => {
+                    let bucket = bucket.upgrade_and_unwrap();
+                    match bucket.begin_read(&entry_name, timestamp).await {
+                        Ok(reader) => return reader.meta().labels().clone(),
+                        Err(err)
+                            if err.status == ErrorCode::NotFound
+                                || err.status == ErrorCode::TooEarly => {}
+                        Err(err) => panic!("{err}"),
+                    }
+                }
+                Err(err)
+                    if err.status == ErrorCode::NotFound || err.status == ErrorCode::TooEarly => {}
+                Err(err) => panic!("{err}"),
+            }
+
+            if tokio::time::Instant::now() >= deadline {
+                panic!("Audit labels for '{entry_name}' at {timestamp} were not flushed");
+            }
+
+            sleep(Duration::from_millis(50)).await;
+        }
     }
 
     async fn audit_record_exists(repo: &AuditRepository, token_name: &str, timestamp: u64) -> bool {

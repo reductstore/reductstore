@@ -920,13 +920,17 @@ mod tests {
 
             block_manager.finish_block(loaded_block).await.unwrap();
 
-            let file = std::fs::File::open(
-                block_manager
-                    .path
-                    .join(format!("{}{}", block_id, DATA_FILE_EXT)),
-            )
-            .unwrap();
-            assert_eq!(file.metadata().unwrap().len(), 0);
+            let path = block_manager
+                .path
+                .join(format!("{}{}", block_id, DATA_FILE_EXT));
+            for _ in 0..100 {
+                if std::fs::metadata(&path).unwrap().len() == 0 {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+
+            assert_eq!(std::fs::metadata(path).unwrap().len(), 0);
         }
 
         #[rstest]
