@@ -100,7 +100,18 @@ impl Parser {
                     parsed_values.push(Value::String(value.to_string()));
                 } else if value.is_array() {
                     for item in value.as_array().unwrap() {
-                        parsed_values.push(parse_primitive(item));
+                        if item.is_object() {
+                            if key == "#ext" {
+                                parsed_values.push(Value::String(item.to_string()));
+                            } else {
+                                return Err(unprocessable_entity!(
+                                    "Directive '{}' does not support object items in arrays",
+                                    key
+                                ));
+                            }
+                        } else {
+                            parsed_values.push(parse_primitive(item));
+                        }
                     }
                 } else {
                     parsed_values.push(parse_primitive(value))
@@ -618,6 +629,33 @@ mod tests {
             assert_eq!(
                 directives.get("#ext").unwrap(),
                 &vec![Value::String(r#"{"key":"value"}"#.to_string())]
+            );
+        }
+
+        #[rstest]
+        fn test_parse_ext_array_of_objects_directive(parser: Parser) {
+            let json = json!({
+                "#ext": [{"step": 1}, {"step": 2}]
+            });
+            let (_, directives) = parser.parse(json).unwrap();
+            assert_eq!(
+                directives.get("#ext").unwrap(),
+                &vec![
+                    Value::String(r#"{"step":1}"#.to_string()),
+                    Value::String(r#"{"step":2}"#.to_string())
+                ]
+            );
+        }
+
+        #[rstest]
+        fn test_parse_non_ext_array_of_objects_directive(parser: Parser) {
+            let json = json!({
+                "#select_labels": [{"label": "x"}]
+            });
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#select_labels' does not support object items in arrays"
             );
         }
 

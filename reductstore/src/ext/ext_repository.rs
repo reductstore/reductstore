@@ -16,15 +16,12 @@ use futures_util::StreamExt;
 use log::warn;
 use reduct_base::error::ErrorCode::{NoContent, NotFound};
 use reduct_base::error::ReductError;
-use reduct_base::ext::{
-    BoxedCommiter, BoxedProcessor, BoxedRecordStream, ExtSettings, IoExtension,
-};
+use reduct_base::ext::{BoxedCommiter, BoxedProcessor, ExtSettings, IoExtension};
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{no_content, unprocessable_entity};
 use serde_json::Map;
 use std::collections::HashMap;
-use std::pin::Pin;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -69,10 +66,12 @@ pub type BoxedManageExtensions = Box<dyn ManageExtensions + Sync + Send>;
 
 pub(crate) struct QueryContext {
     query: QueryOptions,
-    condition_filter: Box<dyn RecordFilter<BoxedReadRecord> + Send + Sync>,
     last_access: Instant,
-    current_stream: Option<Pin<BoxedRecordStream>>,
+    steps: Vec<PipelineStep>,
+}
 
+pub(crate) struct PipelineStep {
+    condition_filter: Box<dyn RecordFilter<BoxedReadRecord> + Send + Sync>,
     processor: BoxedProcessor,
     commiter: BoxedCommiter,
 }
@@ -114,14 +113,7 @@ impl ManageExtensions for ExtRepository {
             if let Some(when) = &query_request.when {
                 let (_, directives) = Parser::new().parse(when.clone())?;
                 if let Some(ext) = directives.get("#ext") {
-                    Some(
-                        serde_json::from_str(
-                            &ext.get(0)
-                                .unwrap_or(&Value::String("null".to_string()))
-                                .to_string(),
-                        )
-                        .unwrap(), // The parser already checked the syntax
-                    )
+                    Some(Self::decode_ext_directive(ext, query_id)?)
                 } else {
                     None
                 }
@@ -135,56 +127,105 @@ impl ManageExtensions for ExtRepository {
 
         let controllers = {
             if let Some(ext_params) = &mut ext_params {
-                let Some(ext_query) = ext_params.as_object_mut() else {
-                    return Err(unprocessable_entity!(
-                        "Extension parameters must be a JSON object in query id={}",
-                        query_id
-                    ));
-                };
-
-                // check if the query has references to computed labels and no extension is found
-                let condition = if let Some(condition) = ext_query.remove("when") {
-                    let node = Parser::new().parse(condition)?;
-                    Some(node)
-                } else {
-                    None
-                };
-
-                if ext_query.iter().count() > 1 {
-                    return Err(unprocessable_entity!(
-                        "Multiple extensions are not supported in query id={}",
-                        query_id
-                    ));
-                }
-
-                let Some(name) = ext_query.keys().next().cloned() else {
+                let Some(mut ext_steps) = Self::decode_ext_steps(ext_params, query_id)? else {
                     return Err(unprocessable_entity!(
                         "Extension name is not found in query id={}",
                         query_id
                     ));
                 };
 
-                if let Some(attachments) = self
-                    .get_ext_attachments(bucket_name, entry_name, &query_request, &name)
-                    .await?
-                {
-                    Self::attach_ext_attachments(ext_query, &name, attachments);
-                }
+                let mut pipeline = Vec::with_capacity(ext_steps.len());
+                for (idx, ext_query) in ext_steps.iter_mut().enumerate() {
+                    let condition_filter = if let Some(condition) = ext_query.remove("when") {
+                        let (node, directives) = Parser::new().parse(condition)?;
+                        Box::new(WhenFilter::try_new(
+                            node,
+                            directives,
+                            self.io_config.clone(),
+                            true,
+                        )?)
+                    } else {
+                        DummyFilter::boxed()
+                    };
 
-                if let Some(ext) = self.extension_map.get(&name) {
-                    query_request.ext = Some(serde_json::Value::Object(ext_query.clone()));
+                    if ext_query.is_empty() {
+                        return Err(unprocessable_entity!(
+                            "Extension name is not found in query id={}",
+                            query_id
+                        ));
+                    }
+
+                    if ext_query.iter().count() > 1 {
+                        if ext_steps.len() == 1 {
+                            return Err(unprocessable_entity!(
+                                "Multiple extensions are not supported in query id={}",
+                                query_id
+                            ));
+                        }
+
+                        return Err(unprocessable_entity!(
+                            "Each '#ext' pipeline step must contain exactly one extension in query id={}",
+                            query_id
+                        ));
+                    }
+
+                    let Some(name) = ext_query.keys().next().cloned() else {
+                        return Err(unprocessable_entity!(
+                            "Extension name is not found in query id={}",
+                            query_id
+                        ));
+                    };
+
+                    if let Some(attachments) = self
+                        .get_ext_attachments(bucket_name, entry_name, &query_request, &name)
+                        .await?
+                    {
+                        Self::attach_ext_attachments(ext_query, &name, attachments);
+                    }
+
+                    let Some(ext) = self.extension_map.get(&name) else {
+                        if ext_steps.len() == 1 {
+                            return Err(unprocessable_entity!(
+                                "Unknown extension '{}' in query id={}",
+                                name,
+                                query_id
+                            ));
+                        }
+
+                        return Err(unprocessable_entity!(
+                            "Unknown extension '{}' in query id={} at step {}",
+                            name,
+                            query_id,
+                            idx
+                        ));
+                    };
+
+                    let mut ext_query_request = query_request.clone();
+                    ext_query_request.ext = Some(serde_json::Value::Object(ext_query.clone()));
                     let (processor, commiter) =
                         ext.write()
                             .await?
-                            .query(bucket_name, entry_name, &query_request)?;
-                    Some((processor, commiter, condition))
-                } else {
-                    return Err(unprocessable_entity!(
-                        "Unknown extension '{}' in query id={}",
-                        name,
-                        query_id
-                    ));
+                            .query(bucket_name, entry_name, &ext_query_request)?;
+                    pipeline.push(PipelineStep {
+                        condition_filter,
+                        processor,
+                        commiter,
+                    });
                 }
+
+                query_request.ext = Some(if ext_steps.len() == 1 {
+                    serde_json::Value::Object(ext_steps[0].clone())
+                } else {
+                    serde_json::Value::Array(
+                        ext_steps
+                            .iter()
+                            .cloned()
+                            .map(serde_json::Value::Object)
+                            .collect(),
+                    )
+                });
+
+                Some(pipeline)
             } else {
                 None
             }
@@ -204,27 +245,12 @@ impl ManageExtensions for ExtRepository {
             query_map.remove(&key);
         }
 
-        if let Some((processor, commiter, condition)) = controllers {
-            let condition_filter = if let Some(condition) = condition {
-                let (node, directives) = condition;
-                Box::new(WhenFilter::try_new(
-                    node,
-                    directives,
-                    self.io_config.clone(),
-                    true,
-                )?)
-            } else {
-                DummyFilter::boxed()
-            };
-
+        if let Some(steps) = controllers {
             query_map.insert(query_id, {
                 QueryContext {
                     query: query_options,
-                    condition_filter,
                     last_access: Instant::now(),
-                    current_stream: None,
-                    processor,
-                    commiter,
+                    steps,
                 }
             });
         }
@@ -237,8 +263,6 @@ impl ManageExtensions for ExtRepository {
         query_id: u64,
         query_rx: Arc<AsyncRwLock<QueryRx>>,
     ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
-        // TODO: The code is awkward, we need to refactor it
-        // unfortunately stream! macro does not work here and crashes compiler
         let mut lock = match self.query_map.write().await {
             Ok(lock) => lock,
             Err(err) => return Some(vec![Err(err)]),
@@ -270,51 +294,6 @@ impl ManageExtensions for ExtRepository {
 
         query.last_access = Instant::now();
 
-        if let Some(mut current_stream) = query.current_stream.take() {
-            let item = current_stream.next().await;
-            query.current_stream = Some(current_stream);
-
-            if let Some(result) = item {
-                if let Err(e) = result {
-                    return Some(vec![Err(e)]);
-                }
-
-                let record = result.unwrap();
-
-                return match query.condition_filter.filter(record) {
-                    Ok(Some(records)) => {
-                        let mut commited_records = vec![];
-                        for record in records {
-                            if let Some(rec) = query.commiter.commit_record(record).await {
-                                if rec
-                                    .as_ref()
-                                    .is_ok_and(|rec| rec.meta().entry_name().is_empty())
-                                {
-                                    warn!("Extension commiter returned an invalid record with empty entry name, skipping it");
-                                    continue;
-                                }
-                                commited_records.push(rec);
-                            }
-                        }
-
-                        if commited_records.is_empty() {
-                            None
-                        } else {
-                            Some(commited_records)
-                        }
-                    }
-                    Ok(None) => {
-                        query.current_stream = None;
-                        None
-                    }
-                    Err(e) => Some(vec![Err(e)]),
-                };
-            } else {
-                // stream is empty, we need to process the next record
-                query.current_stream = None;
-            }
-        }
-
         let Some(record) = (match query_rx.write().await {
             Ok(mut rx) => rx.recv().await,
             Err(err) => return Some(vec![Err(err)]),
@@ -326,13 +305,9 @@ impl ManageExtensions for ExtRepository {
             Ok(record) => record,
             Err(e) => {
                 return if e.status == NoContent {
-                    if let Some(last_record) = query.commiter.flush().await {
-                        match last_record {
-                            Ok(rec) => {
-                                Some(vec![Ok(rec), Err(e)]) // return the last record if available and the error
-                            }
-                            Err(e) => Some(vec![Err(e)]),
-                        }
+                    if let Some(mut flushed_records) = self.flush_pipeline(query).await {
+                        flushed_records.push(Err(e));
+                        Some(flushed_records)
                     } else {
                         Some(vec![Err(e)])
                     }
@@ -342,19 +317,206 @@ impl ManageExtensions for ExtRepository {
             }
         };
 
-        assert!(query.current_stream.is_none(), "Must be None");
-
-        let stream = match query.processor.process_record(Box::new(record)).await {
-            Ok(stream) => stream,
-            Err(e) => return Some(vec![Err(e)]),
-        };
-
-        query.current_stream = Some(Box::into_pin(stream));
-        None
+        self.process_pipeline_record(query, Box::new(record)).await
     }
 }
 
 impl ExtRepository {
+    fn parse_directive_value(
+        value: &Value,
+        query_id: u64,
+    ) -> Result<serde_json::Value, ReductError> {
+        serde_json::from_str(&value.to_string()).map_err(|err| {
+            unprocessable_entity!(
+                "Directive '#ext' must be a JSON object or an array of JSON objects in query id={}: {}",
+                query_id,
+                err
+            )
+        })
+    }
+
+    fn decode_ext_directive(
+        ext: &[Value],
+        query_id: u64,
+    ) -> Result<serde_json::Value, ReductError> {
+        if ext.is_empty() {
+            return Ok(serde_json::Value::Null);
+        }
+
+        if ext.len() == 1 {
+            return Self::parse_directive_value(&ext[0], query_id);
+        }
+
+        let mut steps = Vec::with_capacity(ext.len());
+        for step in ext {
+            steps.push(Self::parse_directive_value(step, query_id)?);
+        }
+
+        Ok(serde_json::Value::Array(steps))
+    }
+
+    fn decode_ext_steps(
+        ext_params: &serde_json::Value,
+        query_id: u64,
+    ) -> Result<Option<Vec<Map<String, serde_json::Value>>>, ReductError> {
+        match ext_params {
+            serde_json::Value::Object(ext_query) => Ok(Some(vec![ext_query.clone()])),
+            serde_json::Value::Array(steps) => {
+                if steps.is_empty() {
+                    return Ok(None);
+                }
+
+                let mut ext_steps = Vec::with_capacity(steps.len());
+                for step in steps {
+                    let Some(ext_query) = step.as_object() else {
+                        return Err(unprocessable_entity!(
+                            "Each '#ext' pipeline step must be a JSON object in query id={}",
+                            query_id
+                        ));
+                    };
+                    ext_steps.push(ext_query.clone());
+                }
+                Ok(Some(ext_steps))
+            }
+            _ => Err(unprocessable_entity!(
+                "Extension parameters must be a JSON object or an array of JSON objects in query id={}",
+                query_id
+            )),
+        }
+    }
+
+    async fn process_pipeline_step(
+        &self,
+        query: &mut QueryContext,
+        step_index: usize,
+        inputs: Vec<BoxedReadRecord>,
+    ) -> Result<Vec<BoxedReadRecord>, ReductError> {
+        if inputs.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut outputs = Vec::new();
+        for input in inputs {
+            let stream = {
+                let step = &mut query.steps[step_index];
+                match step.processor.process_record(input).await {
+                    Ok(stream) => stream,
+                    Err(err) => return Err(err),
+                }
+            };
+
+            let mut stream = Box::into_pin(stream);
+            while let Some(item) = stream.next().await {
+                let record = match item {
+                    Ok(record) => record,
+                    Err(err) => return Err(err),
+                };
+
+                let filtered = {
+                    let step = &mut query.steps[step_index];
+                    match step.condition_filter.filter(record) {
+                        Ok(Some(records)) => records,
+                        Ok(None) => continue,
+                        Err(err) => return Err(err),
+                    }
+                };
+
+                for record in filtered {
+                    let inherited_computed = record.meta().computed_labels().clone();
+                    let committed = {
+                        let step = &mut query.steps[step_index];
+                        step.commiter.commit_record(record).await
+                    };
+                    if let Some(committed) = committed {
+                        match committed {
+                            Ok(mut rec) => {
+                                for (key, value) in inherited_computed {
+                                    rec.meta_mut()
+                                        .computed_labels_mut()
+                                        .entry(key)
+                                        .or_insert(value);
+                                }
+
+                                if rec.meta().entry_name().is_empty() {
+                                    warn!("Extension commiter returned an invalid record with empty entry name, skipping it");
+                                    continue;
+                                }
+                                outputs.push(rec);
+                            }
+                            Err(err) => return Err(err),
+                        }
+                    }
+                }
+            }
+        }
+
+        Ok(outputs)
+    }
+
+    async fn process_pipeline_record(
+        &self,
+        query: &mut QueryContext,
+        record: BoxedReadRecord,
+    ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
+        let mut inputs = vec![record];
+        for idx in 0..query.steps.len() {
+            let outputs = match self.process_pipeline_step(query, idx, inputs).await {
+                Ok(outputs) => outputs,
+                Err(err) => return Some(vec![Err(err)]),
+            };
+            inputs = outputs;
+        }
+
+        if inputs.is_empty() {
+            None
+        } else {
+            Some(inputs.into_iter().map(Ok).collect())
+        }
+    }
+
+    async fn flush_pipeline(
+        &self,
+        query: &mut QueryContext,
+    ) -> Option<Vec<Result<BoxedReadRecord, ReductError>>> {
+        let mut flushed_records = Vec::new();
+
+        for idx in 0..query.steps.len() {
+            let flushed = {
+                let step = &mut query.steps[idx];
+                step.commiter.flush().await
+            };
+
+            let Some(flushed) = flushed else {
+                continue;
+            };
+
+            let mut inputs = match flushed {
+                Ok(rec) => vec![rec],
+                Err(err) => return Some(vec![Err(err)]),
+            };
+
+            for downstream_idx in (idx + 1)..query.steps.len() {
+                inputs = match self
+                    .process_pipeline_step(query, downstream_idx, inputs)
+                    .await
+                {
+                    Ok(outputs) => outputs,
+                    Err(err) => return Some(vec![Err(err)]),
+                };
+            }
+
+            for rec in inputs {
+                flushed_records.push(Ok(rec));
+            }
+        }
+
+        if flushed_records.is_empty() {
+            None
+        } else {
+            Some(flushed_records)
+        }
+    }
+
     async fn get_ext_attachments(
         &self,
         bucket_name: &str,
@@ -500,7 +662,7 @@ pub(super) mod tests {
     use mockall::predicate::eq;
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
-    use reduct_base::ext::{Commiter, IoExtensionInfo, Processor};
+    use reduct_base::ext::{BoxedRecordStream, Commiter, IoExtensionInfo, Processor};
     use reduct_base::io::records::OneShotRecord;
     use reduct_base::io::RecordMeta;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -508,12 +670,14 @@ pub(super) mod tests {
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use serde_json::json;
+    use std::pin::Pin;
     use std::task::{Context, Poll};
     use tempfile::tempdir;
 
     mod register_query {
         use super::*;
         use mockall::predicate::always;
+        use mockall::Sequence;
 
         use reduct_base::not_found;
         use std::time::Duration;
@@ -678,7 +842,7 @@ pub(super) mod tests {
             assert_eq!(query_map.len(), 1, "Query should be registered");
             let query_context = query_map.get_mut(&1).unwrap();
             assert_eq!(
-                query_context
+                query_context.steps[0]
                     .condition_filter
                     .filter(record_with_labels("not-in-when", "val"))
                     .err()
@@ -686,6 +850,64 @@ pub(super) mod tests {
                 not_found!("Reference '@label' not found"),
                 "Condition should be parsed and applied"
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_with_pipeline_from_ext_directive_in_when(mut mock_ext: MockIoExtension) {
+            let mut sequence = Sequence::new();
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| {
+                    q.ext == Some(json!({"test-ext": {"extract": {"as_label": {"z": "vector.z"}}}}))
+                })
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| {
+                    Ok((
+                        Box::new(MockProcessor::new()),
+                        Box::new(MockCommiter::new()),
+                    ))
+                });
+
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| {
+                    q.ext
+                        == Some(
+                            json!({"test-ext": {"select": {"json": {}, "columns": [{"name": "vector"}]}}}),
+                        )
+                })
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| {
+                    Ok((Box::new(MockProcessor::new()), Box::new(MockCommiter::new())))
+                });
+
+            let query = QueryEntry {
+                when: Some(json!({
+                    "#ext": [
+                        {
+                            "test-ext": {"extract": {"as_label": {"z": "vector.z"}}},
+                            "when": {"@z": {"$gte": 124}}
+                        },
+                        {
+                            "test-ext": {"select": {"json": {}, "columns": [{"name": "vector"}]}}
+                        }
+                    ]
+                })),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
+            assert!(mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .is_ok());
+
+            let query_map = mocked_ext_repo.query_map.read().await.unwrap();
+            assert_eq!(query_map.len(), 1);
+            assert_eq!(query_map.get(&1).unwrap().steps.len(), 2);
         }
 
         #[rstest]
@@ -773,6 +995,111 @@ pub(super) mod tests {
                     .err()
                     .unwrap(),
                 expected_error
+            );
+        }
+
+        #[rstest]
+        #[case(
+            json!([]),
+            unprocessable_entity!("Extension name is not found in query id=1")
+        )]
+        #[case(
+            json!(["test-ext"]),
+            unprocessable_entity!("Each '#ext' pipeline step must be a JSON object in query id=1")
+        )]
+        #[case(
+            json!([{"test-ext": {}, "test-ext2": {}}, {"test-ext": {}}]),
+            unprocessable_entity!("Each '#ext' pipeline step must contain exactly one extension in query id=1")
+        )]
+        #[tokio::test]
+        async fn test_pipeline_error_handling(
+            mock_ext: MockIoExtension,
+            #[case] ext_params: serde_json::Value,
+            #[case] expected_error: ReductError,
+        ) {
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
+            let query = QueryEntry {
+                ext: Some(ext_params),
+                ..Default::default()
+            };
+
+            assert_eq!(
+                mocked_ext_repo
+                    .register_query(1, "bucket", "entry", query)
+                    .await
+                    .err()
+                    .unwrap(),
+                expected_error
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_unknown_extension_in_pipeline_reports_step(
+            mut mock_ext: MockIoExtension,
+            processor: BoxedProcessor,
+            commiter: BoxedCommiter,
+        ) {
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"test-ext": {}})))
+                .times(1)
+                .return_once(|_, _, _| Ok((processor, commiter)));
+
+            let mocked_ext_repo = mocked_ext_repo("test-ext", mock_ext);
+            let query = QueryEntry {
+                ext: Some(json!([
+                    {"test-ext": {}},
+                    {"unknown-ext": {}}
+                ])),
+                ..Default::default()
+            };
+
+            assert_eq!(
+                mocked_ext_repo
+                    .register_query(1, "bucket", "entry", query)
+                    .await
+                    .err()
+                    .unwrap(),
+                unprocessable_entity!("Unknown extension 'unknown-ext' in query id=1 at step 1")
+            );
+        }
+
+        #[test]
+        fn test_parse_ext_directive_rejects_bad_json_syntax() {
+            let err = ExtRepository::parse_directive_value(&Value::String("{bad".to_string()), 1)
+                .err()
+                .unwrap();
+
+            assert_eq!(
+                err.status(),
+                reduct_base::error::ErrorCode::UnprocessableEntity
+            );
+            assert!(
+                err.message().starts_with(
+                    "Directive '#ext' must be a JSON object or an array of JSON objects in query id=1:"
+                ),
+                "{err}"
+            );
+        }
+
+        #[test]
+        fn test_decode_ext_directive_returns_null_for_empty_directive() {
+            assert_eq!(
+                ExtRepository::decode_ext_directive(&[], 1).unwrap(),
+                serde_json::Value::Null
+            );
+        }
+
+        #[test]
+        fn test_decode_ext_directive_parses_single_element() {
+            assert_eq!(
+                ExtRepository::decode_ext_directive(
+                    &[Value::String(r#"{"test-ext":{"scale":100}}"#.to_string())],
+                    1
+                )
+                .unwrap(),
+                json!({"test-ext": {"scale": 100}})
             );
         }
     }
@@ -1164,6 +1491,7 @@ pub(super) mod tests {
         use crate::storage::entry::RecordReader;
 
         use mockall::predicate;
+        use mockall::Sequence;
         use reduct_base::internal_server_error;
         use tokio::sync::mpsc;
 
@@ -1236,7 +1564,7 @@ pub(super) mod tests {
         ) {
             processor
                 .expect_process_record()
-                .return_once(|_| Ok(MockStream::boxed(Poll::Pending) as BoxedRecordStream));
+                .return_once(|_| Ok(MockStream::boxed(Poll::Ready(None)) as BoxedRecordStream));
             commiter.expect_commit_record().never();
 
             mock_ext
@@ -1266,6 +1594,274 @@ pub(super) mod tests {
                 .fetch_and_process_record(1, query_rx)
                 .await
                 .is_none());
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_pipeline_step_when_applies_before_next_step(
+            record_reader: RecordReader,
+            mut mock_ext: MockIoExtension,
+            mut processor: Box<MockProcessor>,
+            mut commiter: Box<MockCommiter>,
+        ) {
+            let mut sequence = Sequence::new();
+            let mut processor_2 = Box::new(MockProcessor::new());
+            let mut commiter_2 = Box::new(MockCommiter::new());
+
+            processor.expect_process_record().return_once(|_| {
+                Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                    record_with_labels("z", "100"),
+                )))))
+            });
+            commiter.expect_commit_record().never();
+            commiter.expect_flush().return_once(|| None).times(1);
+
+            processor_2.expect_process_record().never();
+            commiter_2.expect_flush().return_once(|| None).times(1);
+
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"test1": {"extract": {}}})))
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor, commiter)));
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| {
+                    q.ext
+                        == Some(
+                            json!({"test1": {"select": {"json": {}, "columns": [{"name": "vector"}]}}}),
+                        )
+                })
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor_2, commiter_2)));
+
+            let query = QueryEntry {
+                ext: Some(json!([
+                    {
+                        "test1": {"extract": {}},
+                        "when": {"@z": {"$gte": 124}}
+                    },
+                    {
+                        "test1": {"select": {"json": {}, "columns": [{"name": "vector"}]}}
+                    }
+                ])),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .unwrap();
+
+            let (tx, rx) = tokio::sync::mpsc::channel(2);
+            tx.send(Ok(record_reader)).await.unwrap();
+            tx.send(Err(no_content!(""))).await.unwrap();
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+
+            assert!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx.clone())
+                    .await
+                    .is_none(),
+                "step-local when should filter out the record before step 2"
+            );
+
+            assert_eq!(
+                mocked_ext_repo
+                    .fetch_and_process_record(1, query_rx)
+                    .await
+                    .unwrap()[0]
+                    .as_ref()
+                    .err()
+                    .unwrap()
+                    .status(),
+                NoContent
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_pipeline_propagates_computed_labels_to_next_step(
+            record_reader: RecordReader,
+            mut mock_ext: MockIoExtension,
+        ) {
+            let mut sequence = Sequence::new();
+            let mut processor_1 = Box::new(MockProcessor::new());
+            let mut commiter_1 = Box::new(MockCommiter::new());
+            let mut processor_2 = Box::new(MockProcessor::new());
+            let mut commiter_2 = Box::new(MockCommiter::new());
+
+            processor_1.expect_process_record().return_once(|_| {
+                Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                    record_with_computed_labels(&[("z", "130")]),
+                )))))
+            });
+            commiter_1
+                .expect_commit_record()
+                .return_once(|_| Some(Ok(record_with_computed_labels(&[("z", "130")]))));
+
+            processor_2
+                .expect_process_record()
+                .withf(|record| {
+                    record
+                        .meta()
+                        .computed_labels()
+                        .get("z")
+                        .is_some_and(|v| v == "130")
+                })
+                .return_once(|_| {
+                    Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                        record_with_computed_labels(&[("z", "130"), ("y", "1")]),
+                    )))))
+                });
+            commiter_2
+                .expect_commit_record()
+                .return_once(|_| Some(Ok(record_with_computed_labels(&[("y", "1")]))));
+
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"test1": {"extract": {}}})))
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor_1, commiter_1)));
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| {
+                    q.ext
+                        == Some(
+                            json!({"test1": {"select": {"json": {}, "columns": [{"name": "vector"}]}}}),
+                        )
+                })
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor_2, commiter_2)));
+
+            let query = QueryEntry {
+                ext: Some(json!([
+                    {"test1": {"extract": {}}},
+                    {"test1": {"select": {"json": {}, "columns": [{"name": "vector"}]}}}
+                ])),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .unwrap();
+
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            tx.send(Ok(record_reader)).await.unwrap();
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+
+            let mut results = mocked_ext_repo
+                .fetch_and_process_record(1, query_rx)
+                .await
+                .unwrap();
+            let record = results.get_mut(0).unwrap().as_ref().unwrap();
+
+            assert_eq!(
+                record.meta().computed_labels().get("z"),
+                Some(&"130".to_string())
+            );
+            assert_eq!(
+                record.meta().computed_labels().get("y"),
+                Some(&"1".to_string())
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_pipeline_processes_flushed_record_in_downstream_step(
+            record_reader: RecordReader,
+            mut mock_ext: MockIoExtension,
+        ) {
+            let mut sequence = Sequence::new();
+            let mut processor_1 = Box::new(MockProcessor::new());
+            let mut commiter_1 = Box::new(MockCommiter::new());
+            let mut processor_2 = Box::new(MockProcessor::new());
+            let mut commiter_2 = Box::new(MockCommiter::new());
+
+            processor_1
+                .expect_process_record()
+                .return_once(|_| Ok(MockStream::boxed(Poll::Ready(None))));
+            commiter_1.expect_commit_record().never();
+            commiter_1
+                .expect_flush()
+                .return_once(|| Some(Ok(record_with_labels("z", "130"))))
+                .times(1);
+
+            processor_2
+                .expect_process_record()
+                .withf(|record| {
+                    record
+                        .meta()
+                        .computed_labels()
+                        .get("z")
+                        .is_some_and(|value| value == "130")
+                })
+                .return_once(|_| {
+                    Ok(MockStream::boxed(Poll::Ready(Some(Ok(
+                        record_with_labels("projected", "true"),
+                    )))))
+                });
+            commiter_2
+                .expect_commit_record()
+                .return_once(|_| Some(Ok(record_with_labels("projected", "true"))));
+            commiter_2.expect_flush().return_once(|| None).times(1);
+
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"test1": {"extract": {}}})))
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor_1, commiter_1)));
+            mock_ext
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"test1": {"select": {}}})))
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| Ok((processor_2, commiter_2)));
+
+            let query = QueryEntry {
+                ext: Some(json!([
+                    {"test1": {"extract": {}}},
+                    {"test1": {"select": {}}}
+                ])),
+                ..Default::default()
+            };
+
+            let mocked_ext_repo = mocked_ext_repo("test1", mock_ext);
+            mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .unwrap();
+
+            let (tx, rx) = tokio::sync::mpsc::channel(2);
+            tx.send(Ok(record_reader)).await.unwrap();
+            tx.send(Err(no_content!(""))).await.unwrap();
+            let query_rx = Arc::new(AsyncRwLock::new(rx));
+
+            assert!(mocked_ext_repo
+                .fetch_and_process_record(1, query_rx.clone())
+                .await
+                .is_none());
+
+            let results = mocked_ext_repo
+                .fetch_and_process_record(1, query_rx)
+                .await
+                .unwrap();
+
+            assert_eq!(results.len(), 2);
+            let record = results[0].as_ref().unwrap();
+            assert_eq!(
+                record.meta().computed_labels().get("projected"),
+                Some(&"true".to_string())
+            );
+            assert_eq!(results[1].as_ref().err().unwrap().status(), NoContent);
         }
 
         #[rstest]
@@ -1311,14 +1907,6 @@ pub(super) mod tests {
             tx.send(Err(no_content!(""))).await.unwrap();
 
             let query_rx = Arc::new(AsyncRwLock::new(rx));
-
-            assert!(
-                mocked_ext_repo
-                    .fetch_and_process_record(1, query_rx.clone())
-                    .await
-                    .is_none(),
-                "First run should be None (stupid implementation)"
-            );
 
             let mut records = mocked_ext_repo
                 .fetch_and_process_record(1, query_rx.clone())
@@ -1394,14 +1982,6 @@ pub(super) mod tests {
                 "Empty entry name should be skipped"
             );
 
-            assert!(
-                mocked_ext_repo
-                    .fetch_and_process_record(1, query_rx.clone())
-                    .await
-                    .is_none(),
-                "Stream should be drained before no content"
-            );
-
             assert_eq!(
                 *mocked_ext_repo
                     .fetch_and_process_record(1, query_rx)
@@ -1465,14 +2045,6 @@ pub(super) mod tests {
                     .await
                     .is_none(),
                 "First run should be None (stupid implementation)"
-            );
-
-            assert!(
-                mocked_ext_repo
-                    .fetch_and_process_record(1, query_rx.clone())
-                    .await
-                    .is_none(),
-                "we don't commit the record waiting for flush"
             );
 
             let results = mocked_ext_repo
@@ -1544,25 +2116,12 @@ pub(super) mod tests {
 
         let query_rx = Arc::new(AsyncRwLock::new(rx));
 
-        assert!(mocked_ext_repo
-            .fetch_and_process_record(1, query_rx.clone())
-            .await
-            .is_none());
-
         mocked_ext_repo
             .fetch_and_process_record(1, query_rx.clone())
             .await
             .unwrap()[0]
             .as_ref()
             .expect("Should return a record");
-
-        assert!(
-            mocked_ext_repo
-                .fetch_and_process_record(1, query_rx.clone())
-                .await
-                .is_none(),
-            "Flush should not return any records"
-        );
 
         assert_eq!(
             *mocked_ext_repo
@@ -1714,6 +2273,17 @@ pub(super) mod tests {
             .timestamp(0)
             .computed_labels(Labels::from_iter(
                 vec![(key.to_string(), val.to_string())].into_iter(),
+            ))
+            .build();
+        OneShotRecord::boxed(Bytes::new(), meta)
+    }
+
+    pub fn record_with_computed_labels(labels: &[(&str, &str)]) -> BoxedReadRecord {
+        let meta = RecordMeta::builder()
+            .entry_name("entry")
+            .timestamp(0)
+            .computed_labels(Labels::from_iter(
+                labels.iter().map(|(k, v)| (k.to_string(), v.to_string())),
             ))
             .build();
         OneShotRecord::boxed(Bytes::new(), meta)
