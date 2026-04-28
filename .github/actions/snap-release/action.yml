@@ -53,12 +53,13 @@ runs:
         from pathlib import Path
 
         cargo = Path('Cargo.toml').read_text(encoding='utf-8')
-        m = re.search(r'(?ms)^\[package\]\n(.*?)(?:^\[|\Z)', cargo)
+        m = re.search(r'(?ms)^\[workspace\.package\]\n(.*?)(?:^\[|\Z)', cargo)
         if not m:
-            raise SystemExit('Could not find [package] section in Cargo.toml')
+            raise SystemExit('Could not find [workspace.package] section in Cargo.toml')
         v = re.search(r'^version\s*=\s*"([^"]+)"\s*$', m.group(1), re.M)
         if not v:
-            raise SystemExit('Could not find package.version in Cargo.toml')
+            raise SystemExit('Could not find workspace.package.version in Cargo.toml')
+
         sha = os.environ.get('GITHUB_SHA', '')[:7]
         if not sha:
             raise SystemExit('GITHUB_SHA is required for snap version')
