@@ -44,6 +44,35 @@ runs:
         set -euo pipefail
         chmod +x .snap-build/bin/reductstore
 
+    - name: Set snap version from Cargo.toml and GITHUB_SHA
+      shell: bash
+      run: |
+        set -euo pipefail
+        python3 - <<'PY'
+        import os, re
+        from pathlib import Path
+
+        cargo = Path('Cargo.toml').read_text(encoding='utf-8')
+        m = re.search(r'(?ms)^\[package\]\n(.*?)(?:^\[|\Z)', cargo)
+        if not m:
+            raise SystemExit('Could not find [package] section in Cargo.toml')
+        v = re.search(r'^version\s*=\s*"([^"]+)"\s*$', m.group(1), re.M)
+        if not v:
+            raise SystemExit('Could not find package.version in Cargo.toml')
+        sha = os.environ.get('GITHUB_SHA', '')[:7]
+        if not sha:
+            raise SystemExit('GITHUB_SHA is required for snap version')
+        version = f"{v.group(1)}-git{sha}"
+
+        p = Path('snap/snapcraft.yaml')
+        text = p.read_text(encoding='utf-8')
+        text, n = re.subn(r'^version:\s*"[^"]*"\s*$', f'version: "{version}"', text, count=1, flags=re.M)
+        if n != 1:
+            raise SystemExit('Could not update version in snap/snapcraft.yaml')
+        p.write_text(text, encoding='utf-8')
+        print(f'set snap version to {version}')
+        PY
+
     - uses: snapcore/action-build@v1
       id: build-snap
       with:

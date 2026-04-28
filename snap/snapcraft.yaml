@@ -26,18 +26,29 @@ parts:
   reductstore:
     plugin: dump
     source: .snap-build/bin
-    override-pull: |
-      craftctl default
-      VERSION=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' "$CRAFT_PROJECT_DIR/Cargo.toml" | head -n1)
-      SHA=${GITHUB_SHA:0:7}
-      if [ -z "$SHA" ]; then
-        echo "ERROR: GITHUB_SHA is required for snap version" >&2
-        exit 1
-      fi
-      craftctl set version="${VERSION}-git${SHA}"
     organize:
       reductstore: bin/reductstore
   hooks:
+    plugin: dump
+    source: snap/local/hooks
+    organize:
+      bin/: snap/hooks/
+  scripts:
+    plugin: dump
+    source: snap/local/scripts
+
+
+apps:
+  reductstore:
+    command: bin/wrapper
+    daemon: simple
+    restart-condition: on-failure
+    plugs:
+      - network
+      - network-bind
+      - removable-media
+      - home
+
     plugin: dump
     source: snap/local/hooks
     organize:
