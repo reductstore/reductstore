@@ -49,35 +49,21 @@ runs:
       run: |
         set -euo pipefail
         python3 - <<'PY'
-        import os
+        import os, re
         from pathlib import Path
-        import tomllib
 
-        root_manifest = Path('Cargo.toml')
-        root = tomllib.loads(root_manifest.read_text(encoding='utf-8'))
-        ws = root.get('workspace')
-        if not ws:
-            raise SystemExit('Expected workspace Cargo.toml at repository root')
-
-        members = ws.get('members', [])
-        package_version = None
-        for member in members:
-            member_manifest = Path(member) / 'Cargo.toml'
-            if not member_manifest.exists():
-                continue
-            data = tomllib.loads(member_manifest.read_text(encoding='utf-8'))
-            pkg = data.get('package') or {}
-            if pkg.get('name') == 'reductstore':
-                package_version = pkg.get('version')
-                break
-
-        if not package_version:
-            raise SystemExit('Could not find reductstore package version from workspace members')
+        cargo = Path('reductstore/Cargo.toml').read_text(encoding='utf-8')
+        m = re.search(r'(?ms)^\[package\]\n(.*?)(?:^\[|\Z)', cargo)
+        if not m:
+            raise SystemExit('Could not find [package] section in reductstore/Cargo.toml')
+        v = re.search(r'^version\s*=\s*"([^"]+)"\s*$', m.group(1), re.M)
+        if not v:
+            raise SystemExit('Could not find package.version in reductstore/Cargo.toml')
 
         sha = os.environ.get('GITHUB_SHA', '')[:7]
         if not sha:
             raise SystemExit('GITHUB_SHA is required for snap version')
-        version = f"{package_version}-git{sha}"
+        version = f"{v.group(1)}-git{sha}"
 
         p = Path('snap/snapcraft.yaml')
         text = p.read_text(encoding='utf-8')
