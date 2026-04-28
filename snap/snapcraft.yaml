@@ -29,9 +29,13 @@ parts:
     override-pull: |
       craftctl default
       VERSION=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' "$CRAFT_PROJECT_DIR/Cargo.toml" | head -n1)
-      SHA=${GITHUB_SHA:-$(git -C "$CRAFT_PROJECT_DIR" rev-parse --short=7 HEAD 2>/dev/null || echo local)}
+      SHA=${GITHUB_SHA:-$(git -C "$CRAFT_PROJECT_DIR" rev-parse --short=7 HEAD 2>/dev/null || true)}
       SHA=${SHA:0:7}
-      craftctl set version="${VERSION}-git.${SHA}"
+      if [ -z "$SHA" ]; then
+        echo "ERROR: Unable to determine git commit SHA for snap version" >&2
+        exit 1
+      fi
+      craftctl set version="${VERSION}-git${SHA}"
     organize:
       reductstore: bin/reductstore
   hooks:
