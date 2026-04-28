@@ -52,13 +52,20 @@ runs:
         import os, re
         from pathlib import Path
 
-        cargo = Path('Cargo.toml').read_text(encoding='utf-8')
-        m = re.search(r'(?ms)^\[package\]\n(.*?)(?:^\[|\Z)', cargo)
-        if not m:
-            raise SystemExit('Could not find [package] section in Cargo.toml')
-        v = re.search(r'^version\s*=\s*"([^"]+)"\s*$', m.group(1), re.M)
+        candidates = [Path('Cargo.toml'), Path('reductstore/Cargo.toml')]
+        v = None
+        for cargo_path in candidates:
+            if not cargo_path.exists():
+                continue
+            cargo = cargo_path.read_text(encoding='utf-8')
+            m = re.search(r'(?ms)^\[package\]\n(.*?)(?:^\[|\Z)', cargo)
+            if not m:
+                continue
+            v = re.search(r'^version\s*=\s*"([^"]+)"\s*$', m.group(1), re.M)
+            if v:
+                break
         if not v:
-            raise SystemExit('Could not find package.version in Cargo.toml')
+            raise SystemExit('Could not find package.version in Cargo.toml (checked root and reductstore/Cargo.toml)')
         sha = os.environ.get('GITHUB_SHA', '')[:7]
         if not sha:
             raise SystemExit('GITHUB_SHA is required for snap version')
