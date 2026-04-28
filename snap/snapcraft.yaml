@@ -29,13 +29,9 @@ parts:
     override-pull: |
       craftctl default
       VERSION=$(sed -n 's/^version = "\([^"]*\)"$/\1/p' "$CRAFT_PROJECT_DIR/Cargo.toml" | head -n1)
-      SHA=${GITHUB_SHA:-${CRAFT_PART_SRC_COMMIT:-}}
+      SHA=${GITHUB_SHA:0:7}
       if [ -z "$SHA" ]; then
-        SHA=$(git -C "$CRAFT_PROJECT_DIR" rev-parse --short=7 HEAD 2>/dev/null || true)
-      fi
-      SHA=${SHA:0:7}
-      if [ -z "$SHA" ]; then
-        echo "ERROR: Unable to determine git commit SHA for snap version (GITHUB_SHA/CRAFT_PART_SRC_COMMIT/git unavailable)" >&2
+        echo "ERROR: GITHUB_SHA is required for snap version" >&2
         exit 1
       fi
       craftctl set version="${VERSION}-git${SHA}"
