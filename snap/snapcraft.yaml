@@ -1,7 +1,7 @@
 title: ReductStore
 name: reductstore # you probably want to 'snapcraft register <name>'
 base: core24 # the base snap is the execution environment for this snap
-version: git
+adopt-info: reductstore
 summary: High Performance Data Storage and Streaming for Robotics and Industrial IoT # 79 char long summary
 description: |
   ReductStore is a high-performance, time-series object storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT).
@@ -29,6 +29,26 @@ parts:
     organize:
       reductstore: bin/reductstore
   hooks:
+    plugin: dump
+    source: snap/local/hooks
+    organize:
+      bin/: snap/hooks/
+  scripts:
+    plugin: dump
+    source: snap/local/scripts
+
+
+apps:
+  reductstore:
+    command: bin/wrapper
+    daemon: simple
+    restart-condition: on-failure
+    plugs:
+      - network
+      - network-bind
+      - removable-media
+      - home
+
     plugin: dump
     source: snap/local/hooks
     organize:
