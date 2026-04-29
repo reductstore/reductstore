@@ -14,6 +14,7 @@ use log::{error, info};
 use reduct_base::logger::Logger;
 use std::io::Write;
 use std::net::{IpAddr, SocketAddr};
+use std::process::exit;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
@@ -21,27 +22,14 @@ use tokio::sync::mpsc;
 
 static SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 
-fn has_version_flag<I, S>(args: I) -> bool
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-{
-    args.into_iter()
+pub fn maybe_print_version_and_exit() {
+    if std::env::args()
+        .into_iter()
         .skip(1)
         .any(|arg| matches!(arg.as_ref(), "--version" | "-V"))
-}
-
-fn maybe_print_version<I, S, W>(args: I, version: &str, mut writer: W) -> bool
-where
-    I: IntoIterator<Item = S>,
-    S: AsRef<str>,
-    W: Write,
-{
-    if has_version_flag(args) {
-        let _ = writeln!(writer, "{version}");
-        true
-    } else {
-        false
+    {
+        println!(env!("CARGO_PKG_VERSION"));
+        exit(0)
     }
 }
 
@@ -49,19 +37,7 @@ pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pares
 where
     Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
 {
-    launch_server_with_version(ext_cfg_pareser, env!("CARGO_PKG_VERSION")).await;
-}
-
-pub async fn launch_server_with_version<Parser, ExtCfg: ExtCfgBounds + 'static>(
-    ext_cfg_pareser: Parser,
-    version: &str,
-) where
-    Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
-{
-    if maybe_print_version(std::env::args(), version, std::io::stdout()) {
-        return;
-    }
-
+    let version = env!("CARGO_PKG_VERSION");
     Logger::init("INFO");
     info!(
         "ReductStore Core {} [{} at {}]",
