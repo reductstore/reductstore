@@ -1,6 +1,7 @@
 title: ReductStore
 name: reductstore # you probably want to 'snapcraft register <name>'
 base: core24 # the base snap is the execution environment for this snap
+version: "1.20.0-gitdeadbee"
 adopt-info: reductstore
 summary: High Performance Data Storage and Streaming for Robotics and Industrial IoT # 79 char long summary
 description: |
@@ -22,6 +23,7 @@ platforms:
   arm64:
     build-on: [amd64]
     build-for: [arm64]
+
 parts:
   reductstore:
     plugin: dump
@@ -36,27 +38,6 @@ parts:
   scripts:
     plugin: dump
     source: snap/local/scripts
-
-
-apps:
-  reductstore:
-    command: bin/wrapper
-    daemon: simple
-    restart-condition: on-failure
-    plugs:
-      - network
-      - network-bind
-      - removable-media
-      - home
-
-    plugin: dump
-    source: snap/local/hooks
-    organize:
-      bin/: snap/hooks/
-  scripts:
-    plugin: dump
-    source: snap/local/scripts
-
 
 apps:
   reductstore:
