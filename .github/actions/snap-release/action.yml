@@ -67,9 +67,16 @@ runs:
 
         p = Path('snap/snapcraft.yaml')
         text = p.read_text(encoding='utf-8')
-        text, n = re.subn(r'^version:\s*"[^"]*"\s*$', f'version: "{version}"', text, count=1, flags=re.M)
+
+        text, n = re.subn(
+            r'(?m)^version:\s*(?:"[^"]*"|[^#\n]+)\s*(?:#.*)?$',
+            f'version: "{version}"',
+            text,
+            count=1,
+        )
         if n != 1:
             raise SystemExit('Could not update version in snap/snapcraft.yaml')
+
         p.write_text(text, encoding='utf-8')
         print(f'set snap version to {version}')
         PY
