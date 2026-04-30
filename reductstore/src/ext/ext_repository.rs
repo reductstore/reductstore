@@ -360,7 +360,20 @@ impl ExtRepository {
         query_id: u64,
     ) -> Result<Option<Vec<Map<String, serde_json::Value>>>, ReductError> {
         match ext_params {
-            serde_json::Value::Object(ext_query) => Ok(Some(vec![ext_query.clone()])),
+            serde_json::Value::Object(ext_query) => {
+                if ext_query.len() <= 1 || ext_query.contains_key("when") {
+                    return Ok(Some(vec![ext_query.clone()]));
+                }
+
+                let mut steps = Vec::with_capacity(ext_query.len());
+                for (name, cfg) in ext_query {
+                    let mut step = Map::new();
+                    step.insert(name.clone(), cfg.clone());
+                    steps.push(step);
+                }
+
+                Ok(Some(steps))
+            }
             serde_json::Value::Array(steps) => {
                 if steps.is_empty() {
                     return Ok(None);
@@ -912,6 +925,61 @@ pub(super) mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_with_unconditional_object_pipeline_shorthand() {
+            let mut ext_1 = MockIoExtension::new();
+            let mut ext_2 = MockIoExtension::new();
+            let mut sequence = Sequence::new();
+
+            ext_1
+                .expect_query()
+                .withf(|_, _, q| q.ext == Some(json!({"ext-1": {"extract": {}}})))
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| {
+                    Ok((
+                        Box::new(MockProcessor::new()),
+                        Box::new(MockCommiter::new()),
+                    ))
+                });
+
+            ext_2
+                .expect_query()
+                .withf(|_, _, q| {
+                    q.ext
+                        == Some(json!({"ext-2": {"select": {"json": {}, "columns": [{"name": "camera_info"}]}}}))
+                })
+                .times(1)
+                .in_sequence(&mut sequence)
+                .return_once(|_, _, _| {
+                    Ok((Box::new(MockProcessor::new()), Box::new(MockCommiter::new())))
+                });
+
+            let mut mocked_ext_repo = mocked_ext_repo("ext-1", ext_1);
+            mocked_ext_repo.extension_map.insert(
+                "ext-2".to_string(),
+                Arc::new(AsyncRwLock::new(Box::new(ext_2))),
+            );
+
+            let query = QueryEntry {
+                ext: Some(json!({
+                    "ext-1": {"extract": {}},
+                    "ext-2": {"select": {"json": {}, "columns": [{"name": "camera_info"}]}}
+                })),
+                ..Default::default()
+            };
+
+            assert!(mocked_ext_repo
+                .register_query(1, "bucket", "entry", query)
+                .await
+                .is_ok());
+
+            let query_map = mocked_ext_repo.query_map.read().await.unwrap();
+            assert_eq!(query_map.len(), 1);
+            assert_eq!(query_map.get(&1).unwrap().steps.len(), 2);
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_ttl(mut mock_ext: MockIoExtension) {
             let query = QueryEntry {
                 ttl: Some(1),
@@ -964,10 +1032,9 @@ pub(super) mod tests {
         }
 
         #[rstest]
-        #[case(json!({"test-ext": {}, "test-ext2": {}}),  unprocessable_entity!("Multiple extensions are not supported in query id=1")
-        )]
         #[case(json!({"unknown-ext": {}}),  unprocessable_entity!("Unknown extension 'unknown-ext' in query id=1")
         )]
+        #[case(json!({"ext-1": {}, "ext-2": {}, "when": {"@x": {"$eq": 1}}}),  unprocessable_entity!("Multiple extensions are not supported in query id=1"))]
         #[case(json!({}),  unprocessable_entity!("Extension name is not found in query id=1"))]
         #[tokio::test]
         async fn test_error_handling(
