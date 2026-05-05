@@ -11,6 +11,8 @@ use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{Parser, Value};
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
 use log::warn;
@@ -616,15 +618,19 @@ impl ExtRepository {
                 data.extend_from_slice(chunk.as_ref());
             }
 
-            let parsed = serde_json::from_slice::<serde_json::Value>(&data).map_err(|err| {
-                unprocessable_entity!(
-                    "Meta attachment '${}' in '{}/{}' must be valid JSON: {}",
-                    ext_name,
-                    bucket_name,
-                    meta_name,
-                    err
-                )
-            })?;
+            let parsed = if Self::is_json_content_type(record.meta().content_type()) {
+                serde_json::from_slice::<serde_json::Value>(&data).map_err(|err| {
+                    unprocessable_entity!(
+                        "Meta attachment '${}' in '{}/{}' must be valid JSON: {}",
+                        ext_name,
+                        bucket_name,
+                        meta_name,
+                        err
+                    )
+                })?
+            } else {
+                serde_json::Value::String(BASE64_STANDARD.encode(&data))
+            };
 
             attachments.insert(entry, parsed);
         }
@@ -653,6 +659,13 @@ impl ExtRepository {
                 .entry("attachments".to_string())
                 .or_insert(attachments);
         }
+    }
+
+    fn is_json_content_type(content_type: &str) -> bool {
+        let ct = content_type.split(';').next().unwrap_or("").trim();
+        ct.eq_ignore_ascii_case("application/json")
+            || ct.eq_ignore_ascii_case("text/json")
+            || ct.to_ascii_lowercase().ends_with("+json")
     }
 }
 
