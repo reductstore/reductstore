@@ -11,6 +11,8 @@ use crate::storage::query::base::QueryOptions;
 use crate::storage::query::condition::{Parser, Value};
 use crate::storage::query::QueryRx;
 use async_trait::async_trait;
+use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
+use base64::Engine;
 use dlopen2::wrapper::{Container, WrapperApi};
 use futures_util::StreamExt;
 use log::warn;
@@ -616,15 +618,19 @@ impl ExtRepository {
                 data.extend_from_slice(chunk.as_ref());
             }
 
-            let parsed = serde_json::from_slice::<serde_json::Value>(&data).map_err(|err| {
-                unprocessable_entity!(
-                    "Meta attachment '${}' in '{}/{}' must be valid JSON: {}",
-                    ext_name,
-                    bucket_name,
-                    meta_name,
-                    err
-                )
-            })?;
+            let parsed = if Self::is_json_content_type(record.meta().content_type()) {
+                serde_json::from_slice::<serde_json::Value>(&data).map_err(|err| {
+                    unprocessable_entity!(
+                        "Meta attachment '${}' in '{}/{}' must be valid JSON: {}",
+                        ext_name,
+                        bucket_name,
+                        meta_name,
+                        err
+                    )
+                })?
+            } else {
+                serde_json::Value::String(BASE64_STANDARD.encode(&data))
+            };
 
             attachments.insert(entry, parsed);
         }
@@ -653,6 +659,13 @@ impl ExtRepository {
                 .entry("attachments".to_string())
                 .or_insert(attachments);
         }
+    }
+
+    fn is_json_content_type(content_type: &str) -> bool {
+        let ct = content_type.split(';').next().unwrap_or("").trim();
+        ct.eq_ignore_ascii_case("application/json")
+            || ct.eq_ignore_ascii_case("text/json")
+            || ct.to_ascii_lowercase().ends_with("+json")
     }
 }
 
@@ -1195,6 +1208,7 @@ pub(super) mod tests {
             entry_name: &str,
             key: &str,
             payload: &'static [u8],
+            content_type: Option<&str>,
         ) {
             let bucket = storage
                 .get_bucket(bucket_name)
@@ -1207,7 +1221,7 @@ pub(super) mod tests {
                     entry_name,
                     1,
                     payload.len() as u64,
-                    "application/json".to_string(),
+                    content_type.unwrap_or("application/json").to_string(),
                     Labels::from_iter([("key".to_string(), key.to_string())]),
                 )
                 .await
@@ -1332,6 +1346,7 @@ pub(super) mod tests {
                 "entry/$meta",
                 "$another-ext",
                 br#"{"scale":100}"#,
+                None,
             )
             .await;
 
@@ -1353,7 +1368,15 @@ pub(super) mod tests {
                 .await
                 .unwrap();
 
-            write_meta_record(&storage, "bucket", "entry/$meta", "$test-ext", b"not-json").await;
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$test-ext",
+                b"not-json",
+                None,
+            )
+            .await;
 
             let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
             let err = repo
@@ -1381,6 +1404,7 @@ pub(super) mod tests {
                 "entry-a/$meta",
                 "$test-ext",
                 br#"{"topic":"/a"}"#,
+                None,
             )
             .await;
             write_meta_record(
@@ -1389,6 +1413,7 @@ pub(super) mod tests {
                 "entry-b/$meta",
                 "$test-ext",
                 br#"{"topic":"/b"}"#,
+                None,
             )
             .await;
 
@@ -1423,6 +1448,7 @@ pub(super) mod tests {
                 "entry-matched/$meta",
                 "$test-ext",
                 br#"{"topic":"/matched"}"#,
+                None,
             )
             .await;
             write_meta_record(
@@ -1431,6 +1457,7 @@ pub(super) mod tests {
                 "other/$meta",
                 "$test-ext",
                 br#"{"topic":"/other"}"#,
+                None,
             )
             .await;
             write_record(&storage, "bucket", "entry-no-meta").await;
@@ -1465,6 +1492,7 @@ pub(super) mod tests {
                 "entry-a/$meta",
                 "$test-ext",
                 br#"{"topic":"/a"}"#,
+                None,
             )
             .await;
             write_meta_record(
@@ -1473,6 +1501,7 @@ pub(super) mod tests {
                 "entry-b/$meta",
                 "$test-ext",
                 br#"{"topic":"/b"}"#,
+                None,
             )
             .await;
 
@@ -1490,6 +1519,70 @@ pub(super) mod tests {
                     "entry-b": {"topic": "/b"}
                 }))
             );
+        }
+
+        #[rstest]
+        #[case::protobuf(b"\x00\x01\x02\x03", "application/protobuf")]
+        #[case::yaml(b"schema:\n  version: 1\n  fields:\n    - name", "application/yaml")]
+        #[case::octet_stream(b"\xCA\xFE\xBA\xBE", "application/octet-stream")]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn returns_base64_string_for_non_json_content_type(
+            mock_ext: MockIoExtension,
+            #[case] payload: &'static [u8],
+            #[case] content_type: &'static str,
+        ) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$test-ext",
+                payload,
+                Some(content_type),
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let result = repo
+                .get_ext_attachments("bucket", "entry", &QueryEntry::default(), "test-ext")
+                .await
+                .unwrap();
+
+            let expected = BASE64_STANDARD.encode(payload);
+            assert_eq!(result, Some(json!({"entry": expected})));
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn parses_json_for_json_content_type_variants(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$test-ext",
+                br#"{"schema":"v1"}"#,
+                Some("application/schema+json"),
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let result = repo
+                .get_ext_attachments("bucket", "entry", &QueryEntry::default(), "test-ext")
+                .await
+                .unwrap();
+
+            assert_eq!(result, Some(json!({"entry": {"schema": "v1"}})));
         }
     }
 
