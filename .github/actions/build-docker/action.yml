@@ -41,7 +41,7 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/download-artifact@v5
+    - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: reductstore-${{ inputs.target }}
         path: /tmp/reductstore/
@@ -122,7 +122,7 @@ runs:
 
     - name: Upload artifact
       if: ${{ inputs.upload_artifact == 'true' }}
-      uses: actions/upload-artifact@v5
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: ${{ inputs.image_artifact_name }}
         path: /tmp/image.tar

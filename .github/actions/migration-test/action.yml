@@ -19,7 +19,7 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/setup-python@v6
+    - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405
       with:
         python-version: 3.12
 
@@ -56,7 +56,7 @@ runs:
           "chown -R 10001:10001 /data && chmod -R 770 /data"
 
     - name: Download artifact
-      uses: actions/download-artifact@v5
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: image
         path: /tmp/
@@ -98,7 +98,7 @@ runs:
       shell: bash
       run: docker logs current | zip > /tmp/docker-log.zip
 
-    - uses: actions/upload-artifact@v5
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       if: always()
       with:
         name: docker-log-migration-${{ inputs.version }}
