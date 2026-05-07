@@ -398,7 +398,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let replication_engine = self
             .provision_replication_repo(Arc::clone(&storage))
             .await?;
-        let mut lifecycle_engine = self.provision_lifecycle_repo(Arc::clone(&storage)).await?;
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
                 internal_server_error!(
@@ -421,6 +420,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .build(Arc::clone(&storage))
             .await;
         let audit_logger = Arc::new(AsyncRwLock::new(audit_logger));
+
+        let mut lifecycle_engine = self.provision_lifecycle_repo(Arc::clone(&storage)).await?;
 
         lifecycle_engine.set_audit_sink(LifecycleAuditSink {
             audit_logger: Arc::clone(&audit_logger),

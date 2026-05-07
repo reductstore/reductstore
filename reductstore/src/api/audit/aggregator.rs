@@ -45,15 +45,6 @@ pub(crate) struct AuditState {
 }
 
 pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> AuditEvent {
-    let payload = ApiAuditPayload {
-        token_name: key.token_name.clone(),
-        method: key.method.clone(),
-        path: key.path.clone(),
-        client_ip: key.client_ip.clone(),
-        call_count: aggregate.call_count,
-        duration: aggregate.total_duration,
-    };
-
     AuditEvent {
         event_type: "api_call".to_string(),
         timestamp: aggregate.first_timestamp,
@@ -66,7 +57,7 @@ pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> A
         client_ip: key.client_ip,
         call_count: aggregate.call_count,
         duration: aggregate.total_duration,
-        payload: Some(payload.to_value()),
+        payload: None,
     }
 }
 

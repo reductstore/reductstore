@@ -11,7 +11,7 @@ use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use serde::{Deserialize, Serialize};
-use serde_json::Value;
+use serde_json::{Map, Value};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -65,6 +65,45 @@ pub(crate) struct AuditEvent {
     pub duration: f64,
     #[serde(default)]
     pub payload: Option<Value>,
+}
+
+impl AuditEvent {
+    pub(crate) fn to_flat_json_value(&self) -> Value {
+        let mut map = Map::new();
+        map.insert("timestamp".to_string(), Value::from(self.timestamp));
+        map.insert("status".to_string(), Value::from(self.status));
+        map.insert("message".to_string(), Value::from(self.message.clone()));
+        map.insert("duration".to_string(), Value::from(self.duration));
+
+        if self.event_type == "api_call" {
+            map.insert("instance".to_string(), Value::from(self.instance.clone()));
+            map.insert(
+                "token_name".to_string(),
+                Value::from(self.token_name.clone()),
+            );
+            map.insert("method".to_string(), Value::from(self.method.clone()));
+            map.insert("path".to_string(), Value::from(self.path.clone()));
+            map.insert("call_count".to_string(), Value::from(self.call_count));
+            map.insert(
+                "client_ip".to_string(),
+                self.client_ip
+                    .as_ref()
+                    .map_or(Value::Null, |ip| Value::from(ip.clone())),
+            );
+        }
+
+        if let Some(payload) = &self.payload {
+            if let Some(payload_map) = payload.as_object() {
+                for (key, value) in payload_map {
+                    if !value.is_null() {
+                        map.insert(key.clone(), value.clone());
+                    }
+                }
+            }
+        }
+
+        Value::Object(map)
+    }
 }
 
 fn default_audit_type() -> String {

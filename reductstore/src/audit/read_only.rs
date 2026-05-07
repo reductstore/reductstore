@@ -129,7 +129,7 @@ impl ReadOnlyAuditLogger {
         event: &AuditEvent,
     ) -> Result<(), ReductError> {
         let url = build_write_url(base_url, event);
-        let payload = serde_json::to_vec(event)
+        let payload = serde_json::to_vec(&event.to_flat_json_value())
             .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
 
         let headers = build_audit_headers(event, payload.len())?;

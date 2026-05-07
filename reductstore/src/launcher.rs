@@ -6,6 +6,7 @@ use crate::api::http::AxumAppBuilder;
 use crate::api::zenoh;
 use crate::cfg::{CfgParser, ExtCfgBounds, ExtCfgParser};
 use crate::core::env::StdEnvGetter;
+use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::set_rwlock_timeout;
 use crate::storage::engine::StorageEngine;
 use axum_server::tls_rustls::RustlsConfig;
@@ -67,6 +68,12 @@ where
         }
 
         let components = parser.build().await.unwrap();
+
+        #[cfg(not(test))]
+        {
+            components.replication_repo.write().await.unwrap().start();
+            components.lifecycle_repo.write().await.unwrap().start();
+        }
 
         if !engine_config.compaction_interval.is_zero() {
             tokio::spawn(periodical_compact_storage(
@@ -168,6 +175,7 @@ where
         .sync_storage()
         .await
         .expect("Failed to shutdown storage");
+    FILE_CACHE.stop_sync_worker();
     drop(lock_file);
     info!("Server has been shut down.");
 }

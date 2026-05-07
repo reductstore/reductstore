@@ -68,7 +68,7 @@ impl FullAccessAuditLogger {
         };
         let entry_name = format!("{}/{}", instance, event.token_name);
         let labels = Labels::from([("status".to_string(), event.status.to_string())]);
-        let payload = serde_json::to_vec(&event)
+        let payload = serde_json::to_vec(&event.to_flat_json_value())
             .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
         let mut writer = match storage
             .begin_write(

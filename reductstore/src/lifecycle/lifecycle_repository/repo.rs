@@ -161,7 +161,27 @@ impl ManageLifecycles for LifecycleRepository {
     }
 
     fn set_audit_sink(&mut self, sink: LifecycleAuditSink) {
-        self.audit_sink = Some(sink);
+        self.audit_sink = Some(sink.clone());
+
+        if let Some(mut lifecycles) = self.lifecycles.try_write() {
+            for (_, task) in lifecycles.iter_mut() {
+                task.set_audit_sink(Some(sink.clone()));
+            }
+        } else {
+            let lifecycles = Arc::clone(&self.lifecycles);
+            tokio::spawn(async move {
+                let mut lifecycles = match lifecycles.write().await {
+                    Ok(guard) => guard,
+                    Err(err) => {
+                        error!("Failed to lock lifecycle map: {}", err);
+                        return;
+                    }
+                };
+                for (_, task) in lifecycles.iter_mut() {
+                    task.set_audit_sink(Some(sink.clone()));
+                }
+            });
+        }
     }
 }
 
@@ -262,6 +282,14 @@ impl LifecycleRepository {
             unprocessable_entity!("Invalid lifecycle max age '{}': {}", settings.max_age, err)
         })?;
 
+        let interval_us = parse_duration_to_micros(&settings.interval).map_err(|err| {
+            unprocessable_entity!(
+                "Invalid lifecycle interval '{}': {}",
+                settings.interval,
+                err
+            )
+        })?;
+
         if let Some(when) = &settings.when {
             let (_, directives) = Parser::new().parse(when.clone()).map_err(|err| {
                 unprocessable_entity!("Invalid lifecycle condition: {}", err.message)
@@ -279,7 +307,7 @@ impl LifecycleRepository {
             old.stop().await;
         }
 
-        let interval = Duration::from_secs(settings.interval);
+        let interval = Duration::from_micros(interval_us.max(0) as u64);
         let mut lifecycle = LifecycleTask::new(
             name.to_string(),
             settings,
@@ -658,7 +686,7 @@ mod tests {
             bucket: "bucket-1".to_string(),
             entries: vec!["entry-1".to_string()],
             max_age: "1d".to_string(),
-            interval: 3600,
+            interval: "1h".to_string(),
             when: None,
         }
     }

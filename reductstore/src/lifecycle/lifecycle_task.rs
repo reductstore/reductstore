@@ -66,6 +66,12 @@ impl LifecycleTask {
         let handle = tokio::spawn(async move {
             debug!("Lifecycle worker '{}' started", name);
             while !stop_flag.load(Ordering::Relaxed) {
+                debug!(
+                    "Lifecycle worker '{}' running {:?} action for bucket '{}'",
+                    name,
+                    action.lifecycle_type(),
+                    settings.bucket
+                );
                 let started = std::time::Instant::now();
                 match action.run(&name, &settings, context.clone()).await {
                     Ok(result) => {
@@ -135,6 +141,10 @@ impl LifecycleTask {
         self.is_provisioned = provisioned;
     }
 
+    pub(super) fn set_audit_sink(&mut self, audit_sink: Option<LifecycleAuditSink>) {
+        self.audit_sink = audit_sink;
+    }
+
     pub(super) fn is_running(&self) -> bool {
         self.worker_handle.is_some()
     }
@@ -159,6 +169,10 @@ impl LifecycleTask {
         result: Result<u64, ReductError>,
     ) {
         let Some(sink) = audit_sink else {
+            debug!(
+                "Skipping lifecycle audit event for '{}' because audit sink is not configured",
+                name
+            );
             return;
         };
 
@@ -197,7 +211,7 @@ impl LifecycleTask {
                 .unwrap_or_default()
                 .as_micros() as u64,
             instance: sink.instance_name.clone(),
-            token_name: "system:lifecycle".to_string(),
+            token_name: "system-lifecycle".to_string(),
             method: "".to_string(),
             path: "".to_string(),
             status,
@@ -212,13 +226,22 @@ impl LifecycleTask {
         let lock = audit_logger.write().await;
         match lock {
             Ok(mut audit_logger) => {
+                debug!(
+                    "Writing lifecycle audit event for '{}' with status {}",
+                    name, status
+                );
                 if let Err(err) = audit_logger.log_event(event).await {
-                    debug!("Failed to persist lifecycle audit event: {}", err);
+                    error!(
+                        "Failed to persist lifecycle audit event for '{}': {}",
+                        name, err
+                    );
+                } else {
+                    debug!("Lifecycle audit event persisted for '{}'", name);
                 }
             }
-            Err(err) => debug!(
-                "Failed to lock audit repository for lifecycle event: {}",
-                err
+            Err(err) => error!(
+                "Failed to lock audit repository for lifecycle event '{}': {}",
+                name, err
             ),
         }
     }
