@@ -10,12 +10,12 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/setup-python@v5
+    - uses: actions/setup-python@v6
       with:
         python-version: 3.12
 
     - name: Download artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v5
       with:
         name: image
         path: /tmp/
@@ -68,7 +68,7 @@ runs:
       shell: bash
       run: docker logs reductstore | zip > /tmp/docker-log.zip
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@v5
       if: always()
       with:
         name: docker-log-recovery-${{ inputs.cmd }}

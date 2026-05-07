@@ -154,7 +154,7 @@ jobs:
           image_tag: ${{ github.repository }}
 
       - name: Upload default image artifact (amd64)
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: image
           path: /tmp/image.tar
@@ -431,12 +431,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Download ${{ matrix.target }} artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: reductstore-${{ matrix.target }}
           path: /tmp/
       - name: Download ${{ matrix.target }} SBOM artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           name: reductstore-sbom-${{ matrix.target }}
           path: /tmp/
@@ -570,7 +570,7 @@ jobs:
           digest="${{ steps.build.outputs.digest }}"
           touch "/tmp/digests/${digest#sha256:}"
       - name: Upload digest
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: digests-${{ matrix.digest }}
           path: /tmp/digests/
@@ -584,7 +584,7 @@ jobs:
       - push_image_dockerhub
     steps:
       - name: Download digests
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           pattern: digests-*
           path: /tmp/digests
