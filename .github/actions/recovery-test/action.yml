@@ -7,6 +7,9 @@ inputs:
   rs_api_token:
     description: 'API token for ReductStore.'
     required: true
+  repository:
+    description: 'GitHub repository.'
+    required: true
 runs:
   using: 'composite'
   steps:

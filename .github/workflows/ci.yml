@@ -22,6 +22,7 @@ permissions:
 env:
   REGISTRY_IMAGE: reduct/store
   AWS_LC_SYS_USE_PREBUILT: 0
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
   rust_fmt:
@@ -341,7 +342,6 @@ jobs:
         with:
           rs_api_token: ${{ env.RS_API_TOKEN }}
           repository: ${{ github.repository }}
-          minio_endpoint: ${{ env.MINIO_ENDPOINT }}
 
   primary_secondary_test:
     name: Primary-Secondary Tests
