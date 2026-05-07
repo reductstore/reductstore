@@ -54,9 +54,13 @@ async def test_publish_multiple_records(bucket, entry_name, zenoh_session):
         zenoh_session.put(key_expr, f"record_{i}".encode())
         await asyncio.sleep(0.01)
 
-    await asyncio.sleep(0.5)
+    records = []
+    for _ in range(10):
+        records = [record async for record in bucket.query(entry_name)]
+        if len(records) == 5:
+            break
+        await asyncio.sleep(0.2)
 
-    records = [record async for record in bucket.query(entry_name)]
     assert len(records) == 5
 
 
