@@ -2,11 +2,11 @@
 // Licensed under the Apache License, Version 2.0
 
 mod aggregator;
+mod full_access;
 mod read_only;
-mod repo;
 
+use crate::audit::full_access::AuditRepository;
 use crate::audit::read_only::ReadOnlyAuditRepository;
-use crate::audit::repo::AuditRepository;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
