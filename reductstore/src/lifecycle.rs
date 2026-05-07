@@ -1,13 +1,22 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::audit::LogAuditEvent;
+use crate::core::sync::AsyncRwLock;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{FullLifecycleInfo, LifecycleInfo, LifecycleSettings};
+use std::sync::Arc;
 
 mod action;
 mod lifecycle_repository;
 mod lifecycle_task;
+
+#[derive(Clone)]
+pub struct LifecycleAuditSink {
+    pub(crate) audit_logger: Arc<AsyncRwLock<Box<dyn LogAuditEvent + Send + Sync>>>,
+    pub(crate) instance_name: String,
+}
 
 #[async_trait]
 pub trait ManageLifecycles {
@@ -52,6 +61,9 @@ pub trait ManageLifecycles {
 
     /// Stop background workers and wait until they finish.
     async fn stop(&mut self);
+
+    /// Configure lifecycle audit event sink.
+    fn set_audit_sink(&mut self, _sink: LifecycleAuditSink) {}
 }
 
 pub(crate) use lifecycle_repository::LifecycleRepoBuilder;

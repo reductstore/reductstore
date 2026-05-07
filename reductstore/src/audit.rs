@@ -95,18 +95,18 @@ fn default_audit_call_count() -> u64 {
     1
 }
 
-pub(crate) struct AuditRepositoryBuilder {
+pub(crate) struct AuditLoggerBuilder {
     cfg: Cfg,
 }
 
-impl AuditRepositoryBuilder {
+impl AuditLoggerBuilder {
     pub fn new(cfg: Cfg) -> Self {
         Self { cfg }
     }
 
-    pub async fn build(self, storage: Arc<StorageEngine>) -> BoxedAuditRepository {
+    pub async fn build(self, storage: Arc<StorageEngine>) -> BoxedAuditLogger {
         if !self.cfg.audit_conf.enabled {
-            Box::new(DisabledAuditRepository)
+            Box::new(DisabledAuditLogger)
         } else if self.cfg.role == InstanceRole::Replica {
             Box::new(ReadOnlyAuditLogger::new(self.cfg, storage).await)
         } else {
@@ -115,16 +115,16 @@ impl AuditRepositoryBuilder {
     }
 }
 
-struct DisabledAuditRepository;
+struct DisabledAuditLogger;
 
 #[async_trait]
-impl LogAuditEvent for DisabledAuditRepository {
+impl LogAuditEvent for DisabledAuditLogger {
     async fn log_event(&mut self, _event: AuditEvent) -> Result<(), ReductError> {
         Ok(())
     }
 }
 
-pub(crate) type BoxedAuditRepository = Box<dyn LogAuditEvent + Send + Sync>;
+pub(crate) type BoxedAuditLogger = Box<dyn LogAuditEvent + Send + Sync>;
 
 #[cfg(test)]
 mod tests {
@@ -177,7 +177,7 @@ mod tests {
         #[future] storage_and_cfg: (Arc<StorageEngine>, Cfg),
     ) {
         let (storage, cfg) = storage_and_cfg.await;
-        let mut repo = AuditRepositoryBuilder::new(cfg)
+        let mut repo = AuditLoggerBuilder::new(cfg)
             .build(Arc::clone(&storage))
             .await;
 
@@ -203,7 +203,7 @@ mod tests {
     ) {
         let (storage, mut cfg) = storage_and_cfg.await;
         cfg.role = InstanceRole::Replica;
-        let mut repo = AuditRepositoryBuilder::new(cfg)
+        let mut repo = AuditLoggerBuilder::new(cfg)
             .build(Arc::clone(&storage))
             .await;
 
@@ -220,7 +220,7 @@ mod tests {
     ) {
         let (storage, mut cfg) = storage_and_cfg.await;
         cfg.audit_conf.enabled = false;
-        let mut repo = AuditRepositoryBuilder::new(cfg)
+        let mut repo = AuditLoggerBuilder::new(cfg)
             .build(Arc::clone(&storage))
             .await;
 

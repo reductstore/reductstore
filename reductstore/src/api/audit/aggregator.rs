@@ -109,7 +109,11 @@ impl ApiAuditEventAggregator {
                     maybe_event = rx.recv() => {
                         match maybe_event {
                             Some(event) => {
-                                let _ = Self::aggregate_event(&state, event).await;
+                                if event.event_type == "api_call" {
+                                    let _ = Self::aggregate_event(&state, event).await;
+                                } else {
+                                    let _ = handler(event).await;
+                                }
                             }
                             None => {
                                 let _ = Self::flush_all(&state, &handler).await;
@@ -124,7 +128,11 @@ impl ApiAuditEventAggregator {
             } else {
                 match rx.recv().await {
                     Some(event) => {
-                        let _ = Self::aggregate_event(&state, event).await;
+                        if event.event_type == "api_call" {
+                            let _ = Self::aggregate_event(&state, event).await;
+                        } else {
+                            let _ = handler(event).await;
+                        }
                     }
                     None => break,
                 }
@@ -570,6 +578,40 @@ mod tests {
         let events = flushed_events.lock().await;
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].timestamp, 1);
+        assert!(state.read().await.unwrap().aggregates.is_empty());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn run_worker_forwards_non_api_event_without_aggregation(
+        flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
+    ) {
+        let handler = make_test_handler(Arc::clone(&flushed_events));
+        let state = Arc::new(AsyncRwLock::new(AuditState::default()));
+        let (tx, rx) = mpsc::channel(4);
+
+        tx.send(AuditEvent {
+            event_type: "lifecycle_run".to_string(),
+            timestamp: 1,
+            instance: "instance-a".to_string(),
+            token_name: "system:lifecycle".to_string(),
+            method: "".to_string(),
+            path: "".to_string(),
+            status: 200,
+            message: "ok".to_string(),
+            client_ip: None,
+            call_count: 1,
+            duration: 0.5,
+            payload: Some(serde_json::json!({"policy_name":"p1"})),
+        })
+        .await
+        .unwrap();
+        drop(tx);
+
+        ApiAuditEventAggregator::run_worker(rx, Arc::clone(&state), handler).await;
+        let events = flushed_events.lock().await;
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].event_type, "lifecycle_run");
         assert!(state.read().await.unwrap().aggregates.is_empty());
     }
 }

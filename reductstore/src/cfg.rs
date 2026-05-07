@@ -16,7 +16,7 @@ pub mod zenoh;
 use crate::api::components::Components;
 use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
-use crate::audit::AuditRepositoryBuilder;
+use crate::audit::AuditLoggerBuilder;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType, GeneralBackendConfig};
 use crate::cfg::audit::AuditConfig;
@@ -33,6 +33,7 @@ use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
+use crate::lifecycle::LifecycleAuditSink;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use async_trait::async_trait;
 use log::{info, warn};
@@ -397,7 +398,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let replication_engine = self
             .provision_replication_repo(Arc::clone(&storage))
             .await?;
-        let lifecycle_engine = self.provision_lifecycle_repo(Arc::clone(&storage)).await?;
+        let mut lifecycle_engine = self.provision_lifecycle_repo(Arc::clone(&storage)).await?;
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
                 internal_server_error!(
@@ -416,9 +417,15 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .server_info(server_info.clone())
             .build();
         let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
-        let audit_repo = AuditRepositoryBuilder::new(self.cfg.clone())
+        let audit_logger = AuditLoggerBuilder::new(self.cfg.clone())
             .build(Arc::clone(&storage))
             .await;
+        let audit_logger = Arc::new(AsyncRwLock::new(audit_logger));
+
+        lifecycle_engine.set_audit_sink(LifecycleAuditSink {
+            audit_logger: Arc::clone(&audit_logger),
+            instance_name: self.cfg.instance_name.clone(),
+        });
 
         Ok(Components {
             storage: Arc::clone(&storage),
@@ -438,7 +445,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),
-            audit_repo: AsyncRwLock::new(audit_repo),
+            audit_logger,
             limits: LimitsBuilder::new()
                 .with_config(self.cfg.limits_config)
                 .build(),

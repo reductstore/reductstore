@@ -149,9 +149,9 @@ async fn write_audit_event(
         payload: Some(payload.to_value()),
     };
 
-    match components.audit_repo.write().await {
-        Ok(mut audit_repo) => {
-            if let Err(err) = audit_repo.log_event(event).await {
+    match components.audit_logger.write().await {
+        Ok(mut audit_logger) => {
+            if let Err(err) = audit_logger.log_event(event).await {
                 debug!("Failed to persist audit event: {}", err);
             }
         }

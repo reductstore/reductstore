@@ -38,7 +38,7 @@ pub struct Components {
     pub(crate) lifecycle_repo: AsyncRwLock<Box<dyn ManageLifecycles + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
-    pub(crate) audit_repo: AsyncRwLock<Box<dyn LogAuditEvent + Send + Sync>>,
+    pub(crate) audit_logger: Arc<AsyncRwLock<Box<dyn LogAuditEvent + Send + Sync>>>,
     pub(crate) limits: BoxedLimits,
 
     pub(crate) cfg: Cfg,

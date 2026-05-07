@@ -7,7 +7,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::lifecycle::action::{build_lifecycle_action, LifecycleContext};
 use crate::lifecycle::lifecycle_task::LifecycleTask;
-use crate::lifecycle::ManageLifecycles;
+use crate::lifecycle::{LifecycleAuditSink, ManageLifecycles};
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
 use async_trait::async_trait;
@@ -50,6 +50,7 @@ pub(crate) struct LifecycleRepository {
     config: Cfg,
     started: bool,
     action_builder: LifecycleActionBuilder,
+    audit_sink: Option<LifecycleAuditSink>,
 }
 
 #[async_trait]
@@ -158,6 +159,10 @@ impl ManageLifecycles for LifecycleRepository {
         }
         self.started = false;
     }
+
+    fn set_audit_sink(&mut self, sink: LifecycleAuditSink) {
+        self.audit_sink = Some(sink);
+    }
 }
 
 impl LifecycleRepository {
@@ -170,6 +175,7 @@ impl LifecycleRepository {
             config,
             started: false,
             action_builder: Arc::new(build_lifecycle_action),
+            audit_sink: None,
         };
 
         let read_conf_file = async || {
@@ -280,6 +286,7 @@ impl LifecycleRepository {
             self.config.lifecycle_conf.interval,
             action,
             LifecycleContext::new(Arc::clone(&self.storage)),
+            self.audit_sink.clone(),
         );
         if self.started {
             lifecycle.start();

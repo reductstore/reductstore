@@ -289,7 +289,7 @@ pub(crate) mod tests {
     use crate::api::components::ComponentError;
     use crate::api::limits::{LimitsBuilder, LimitsConfig, WindowLimit};
     use crate::asset::asset_manager::create_asset_manager;
-    use crate::audit::AuditRepositoryBuilder;
+    use crate::audit::AuditLoggerBuilder;
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::core::cache::Cache;
@@ -834,7 +834,7 @@ pub(crate) mod tests {
         let token_repo = TokenRepositoryBuilder::new(cfg.clone())
             .build_with_storage(cfg.data_path.clone(), Arc::clone(&storage))
             .await;
-        let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
+        let audit_logger = AuditLoggerBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
@@ -856,7 +856,7 @@ pub(crate) mod tests {
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
-            audit_repo: AsyncRwLock::new(audit_repo),
+            audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -935,7 +935,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-        let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
+        let audit_logger = AuditLoggerBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
         let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
@@ -976,7 +976,7 @@ pub(crate) mod tests {
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
-            audit_repo: AsyncRwLock::new(audit_repo),
+            audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -1054,7 +1054,7 @@ pub(crate) mod tests {
         let lifecycle_repo = LifecycleRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
-        let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
+        let audit_logger = AuditLoggerBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
 
@@ -1080,7 +1080,7 @@ pub(crate) mod tests {
                 Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
-            audit_repo: AsyncRwLock::new(audit_repo),
+            audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: crate::api::limits::LimitsBuilder::new().build(),
