@@ -157,11 +157,15 @@ where
     // so we set rwlock timeout to 1 hour to avoid panics during shutdown
     set_rwlock_timeout(Duration::from_hours(1));
     state_keeper
-        .get_anonymous()
+        .stop_lifecycle_tasks()
         .await
-        .expect("Failed to access storage engine")
-        .storage
-        .sync_fs()
+        .expect("Failed to stop lifecycle policies");
+    state_keeper
+        .stop_replication_tasks()
+        .await
+        .expect("Failed to stop replication tasks");
+    state_keeper
+        .sync_storage()
         .await
         .expect("Failed to shutdown storage");
     drop(lock_file);

@@ -306,6 +306,7 @@ pub(crate) mod tests {
     use reduct_base::error::ReductError as BaseHttpError;
     use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::msg::lifecycle_api::LifecycleSettings;
     use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
@@ -553,6 +554,35 @@ pub(crate) mod tests {
             let components = keeper.get_anonymous().await.unwrap();
             let repo = components.replication_repo.read().await.unwrap();
             assert!(!repo.is_replication_running("api-test").await.unwrap());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_stop_lifecycle_tasks(#[future] keeper: Arc<StateKeeper>) {
+            let keeper = keeper.await;
+            let components = keeper.get_anonymous().await.unwrap();
+
+            {
+                let mut repo = components.lifecycle_repo.write().await.unwrap();
+                repo.create_lifecycle(
+                    "api-test",
+                    LifecycleSettings {
+                        bucket: "bucket-1".to_string(),
+                        max_age: "1d".to_string(),
+                        ..LifecycleSettings::default()
+                    },
+                )
+                .await
+                .unwrap();
+                repo.start();
+                assert!(repo.is_lifecycle_running("api-test").await.unwrap());
+            }
+
+            keeper.stop_lifecycle_tasks().await.unwrap();
+
+            let components = keeper.get_anonymous().await.unwrap();
+            let repo = components.lifecycle_repo.read().await.unwrap();
+            assert!(!repo.is_lifecycle_running("api-test").await.unwrap());
         }
 
         #[rstest]
