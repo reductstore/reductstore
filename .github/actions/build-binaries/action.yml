@@ -26,7 +26,7 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: arduino/setup-protoc@v3
+    - uses: reductstore/setup-protoc@ac76da16b8e70736e159368a4bc962934d1f825a # master
       with:
         version: '26.x'
         repo-token: ${{ inputs.action_github_token }}
@@ -83,7 +83,7 @@ runs:
       shell: bash
 
     - name: Upload binary (PR)
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       # Only upload Linux binary for PRs for sanity test
       if: github.event_name == 'pull_request' && inputs.target == 'x86_64-unknown-linux-gnu'
       with:
@@ -92,7 +92,7 @@ runs:
         if-no-files-found: 'error'
 
     - name: Upload binary (Release)
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       if: github.event_name != 'pull_request'
       with:
         name: reductstore-${{ inputs.target }}
@@ -111,7 +111,7 @@ runs:
         syft "file:Cargo.lock" -o spdx-json="$sbom_path"
 
     - name: Upload SBOM
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: reductstore-sbom-${{ inputs.target }}
         path: /tmp/sbom/reductstore.${{ inputs.target }}.sbom.spdx.json
@@ -122,7 +122,7 @@ runs:
       shell: bash
 
     - name: Upload tests
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       with:
         name: reductstore-tests-${{ inputs.target }}
         path: target/${{ inputs.target }}/tests
