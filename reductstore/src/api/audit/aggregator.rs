@@ -1,29 +1,25 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::audit::AuditEvent;
+use crate::api::audit::ApiAuditPayload;
+use crate::audit::{AuditAggregationHandler, AuditEvent, AuditEventAggregator};
 use crate::core::sync::AsyncRwLock;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::collections::HashMap;
-use std::future::Future;
-use std::pin::Pin;
 use std::sync::Arc;
 use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 #[cfg(not(test))]
-pub(super) const AGGREGATION_WINDOW_SECS: u64 = 5;
+pub(crate) const AGGREGATION_WINDOW_SECS: u64 = 5;
 #[cfg(test)]
-pub(super) const AGGREGATION_WINDOW_SECS: u64 = 1;
-pub(super) const FORCE_FLUSH_TIMEOUT_SECS: u64 = 60;
-pub(super) const AUDIT_CHANNEL_SIZE: usize = 1024;
-
-pub(super) type FlushFuture = Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>;
-pub(super) type FlushHandler = Arc<dyn Fn(AuditEvent) -> FlushFuture + Send + Sync>;
+pub(crate) const AGGREGATION_WINDOW_SECS: u64 = 1;
+pub(crate) const FORCE_FLUSH_TIMEOUT_SECS: u64 = 60;
+pub(crate) const AUDIT_CHANNEL_SIZE: usize = 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(super) struct AuditAggregateKey {
+pub(crate) struct AuditAggregateKey {
     pub instance: String,
     pub token_name: String,
     pub method: String,
@@ -34,7 +30,7 @@ pub(super) struct AuditAggregateKey {
 }
 
 #[derive(Debug, Clone)]
-pub(super) struct AuditAggregate {
+pub(crate) struct AuditAggregate {
     pub first_timestamp: u64,
     pub last_timestamp: u64,
     pub call_count: u64,
@@ -44,12 +40,22 @@ pub(super) struct AuditAggregate {
 }
 
 #[derive(Default)]
-pub(super) struct AuditState {
+pub(crate) struct AuditState {
     pub aggregates: HashMap<AuditAggregateKey, AuditAggregate>,
 }
 
-pub(super) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> AuditEvent {
+pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> AuditEvent {
+    let payload = ApiAuditPayload {
+        token_name: key.token_name.clone(),
+        method: key.method.clone(),
+        path: key.path.clone(),
+        client_ip: key.client_ip.clone(),
+        call_count: aggregate.call_count,
+        duration: aggregate.total_duration,
+    };
+
     AuditEvent {
+        event_type: "api_call".to_string(),
         timestamp: aggregate.first_timestamp,
         instance: key.instance,
         token_name: key.token_name,
@@ -60,17 +66,19 @@ pub(super) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> A
         client_ip: key.client_ip,
         call_count: aggregate.call_count,
         duration: aggregate.total_duration,
+        payload: Some(payload.to_value()),
     }
 }
 
-pub(super) struct AuditAggregator {
+pub(crate) struct ApiAuditEventAggregator {
     tx: mpsc::Sender<AuditEvent>,
     #[cfg(test)]
+    #[allow(dead_code)]
     pub state: Arc<AsyncRwLock<AuditState>>,
 }
 
-impl AuditAggregator {
-    pub(super) fn new(handler: FlushHandler) -> Self {
+impl ApiAuditEventAggregator {
+    pub(crate) fn new(handler: AuditAggregationHandler) -> Self {
         let state = Arc::new(AsyncRwLock::new(AuditState::default()));
         let (tx, rx) = mpsc::channel(AUDIT_CHANNEL_SIZE);
 
@@ -83,7 +91,7 @@ impl AuditAggregator {
         }
     }
 
-    pub(super) async fn log_event(&self, event: AuditEvent) -> Result<(), ReductError> {
+    async fn enqueue(&self, event: AuditEvent) -> Result<(), ReductError> {
         self.tx
             .send(event)
             .await
@@ -93,7 +101,7 @@ impl AuditAggregator {
     async fn run_worker(
         mut rx: mpsc::Receiver<AuditEvent>,
         state: Arc<AsyncRwLock<AuditState>>,
-        handler: FlushHandler,
+        handler: AuditAggregationHandler,
     ) {
         loop {
             if let Some(deadline) = Self::next_deadline(&state).await {
@@ -128,15 +136,18 @@ impl AuditAggregator {
         state: &Arc<AsyncRwLock<AuditState>>,
         event: AuditEvent,
     ) -> Result<(), ReductError> {
+        let Some(payload) = ApiAuditPayload::from_event(&event) else {
+            return Ok(());
+        };
         let now = Instant::now();
         let key = AuditAggregateKey {
             instance: event.instance,
-            token_name: event.token_name,
-            method: event.method,
-            path: event.path,
+            token_name: payload.token_name,
+            method: payload.method,
+            path: payload.path,
             status: event.status,
             message: event.message,
-            client_ip: event.client_ip,
+            client_ip: payload.client_ip,
         };
 
         let mut state = state.write().await?;
@@ -144,8 +155,8 @@ impl AuditAggregator {
             .aggregates
             .entry(key)
             .and_modify(|aggregate| {
-                aggregate.call_count += event.call_count;
-                aggregate.total_duration += event.duration;
+                aggregate.call_count += payload.call_count;
+                aggregate.total_duration += payload.duration;
                 aggregate.last_timestamp = event.timestamp;
                 if event.timestamp < aggregate.first_timestamp {
                     aggregate.first_timestamp = event.timestamp;
@@ -155,8 +166,8 @@ impl AuditAggregator {
             .or_insert_with(|| AuditAggregate {
                 first_timestamp: event.timestamp,
                 last_timestamp: event.timestamp,
-                call_count: event.call_count,
-                total_duration: event.duration,
+                call_count: payload.call_count,
+                total_duration: payload.duration,
                 flush_at: now + Duration::from_secs(AGGREGATION_WINDOW_SECS),
                 force_flush_at: now + Duration::from_secs(FORCE_FLUSH_TIMEOUT_SECS),
             });
@@ -175,7 +186,7 @@ impl AuditAggregator {
 
     async fn flush_expired(
         state: &Arc<AsyncRwLock<AuditState>>,
-        handler: &FlushHandler,
+        handler: &AuditAggregationHandler,
     ) -> Result<(), ReductError> {
         let now = Instant::now();
         let events = {
@@ -209,7 +220,7 @@ impl AuditAggregator {
 
     async fn flush_all(
         state: &Arc<AsyncRwLock<AuditState>>,
-        handler: &FlushHandler,
+        handler: &AuditAggregationHandler,
     ) -> Result<(), ReductError> {
         let events = {
             let mut state = state.write().await?;
@@ -228,6 +239,13 @@ impl AuditAggregator {
     }
 }
 
+#[async_trait::async_trait]
+impl AuditEventAggregator for ApiAuditEventAggregator {
+    async fn log_event(&self, event: AuditEvent) -> Result<(), ReductError> {
+        self.enqueue(event).await
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -235,7 +253,17 @@ mod tests {
     use tokio::sync::Mutex;
 
     fn make_test_event(timestamp: u64) -> AuditEvent {
+        let payload = ApiAuditPayload {
+            token_name: "token-1".to_string(),
+            method: "GET".to_string(),
+            path: "/api/v1/info".to_string(),
+            client_ip: None,
+            call_count: 1,
+            duration: 0.1,
+        };
+
         AuditEvent {
+            event_type: "api_call".to_string(),
             timestamp,
             instance: "instance-a".to_string(),
             token_name: "token-1".to_string(),
@@ -246,10 +274,11 @@ mod tests {
             client_ip: None,
             call_count: 1,
             duration: 0.1,
+            payload: Some(payload.to_value()),
         }
     }
 
-    fn make_test_handler(events: Arc<Mutex<Vec<AuditEvent>>>) -> FlushHandler {
+    fn make_test_handler(events: Arc<Mutex<Vec<AuditEvent>>>) -> AuditAggregationHandler {
         Arc::new(move |event| {
             let events = Arc::clone(&events);
             Box::pin(async move {
@@ -332,7 +361,9 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn next_deadline_returns_none_when_empty(state: Arc<AsyncRwLock<AuditState>>) {
-        assert!(AuditAggregator::next_deadline(&state).await.is_none());
+        assert!(ApiAuditEventAggregator::next_deadline(&state)
+            .await
+            .is_none());
     }
 
     #[rstest]
@@ -352,16 +383,19 @@ mod tests {
         );
         drop(guard);
 
-        assert_eq!(AuditAggregator::next_deadline(&state).await, Some(earlier));
+        assert_eq!(
+            ApiAuditEventAggregator::next_deadline(&state).await,
+            Some(earlier)
+        );
     }
 
     #[rstest]
     #[tokio::test]
     async fn aggregate_event_updates_existing_entry(state: Arc<AsyncRwLock<AuditState>>) {
-        AuditAggregator::aggregate_event(&state, make_test_event(20))
+        ApiAuditEventAggregator::aggregate_event(&state, make_test_event(20))
             .await
             .unwrap();
-        AuditAggregator::aggregate_event(&state, make_test_event(10))
+        ApiAuditEventAggregator::aggregate_event(&state, make_test_event(10))
             .await
             .unwrap();
 
@@ -376,7 +410,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn aggregate_event_extends_sliding_flush_only(state: Arc<AsyncRwLock<AuditState>>) {
-        AuditAggregator::aggregate_event(&state, make_test_event(1))
+        ApiAuditEventAggregator::aggregate_event(&state, make_test_event(1))
             .await
             .unwrap();
         let (initial_flush_at, initial_force_flush_at) = {
@@ -387,7 +421,7 @@ mod tests {
 
         tokio::time::sleep(Duration::from_millis(10)).await;
 
-        AuditAggregator::aggregate_event(&state, make_test_event(2))
+        ApiAuditEventAggregator::aggregate_event(&state, make_test_event(2))
             .await
             .unwrap();
         let guard = state.read().await.unwrap();
@@ -428,7 +462,7 @@ mod tests {
         );
         drop(guard);
 
-        AuditAggregator::flush_expired(&state, &handler)
+        ApiAuditEventAggregator::flush_expired(&state, &handler)
             .await
             .unwrap();
 
@@ -466,7 +500,7 @@ mod tests {
         );
         drop(guard);
 
-        AuditAggregator::flush_expired(&state, &handler)
+        ApiAuditEventAggregator::flush_expired(&state, &handler)
             .await
             .unwrap();
 
@@ -493,7 +527,9 @@ mod tests {
         }
         drop(guard);
 
-        AuditAggregator::flush_all(&state, &handler).await.unwrap();
+        ApiAuditEventAggregator::flush_all(&state, &handler)
+            .await
+            .unwrap();
 
         assert_eq!(flushed_events.lock().await.len(), 2);
         assert!(state.read().await.unwrap().aggregates.is_empty());
@@ -504,7 +540,7 @@ mod tests {
     async fn log_event_returns_internal_error_when_worker_channel_is_closed() {
         let (tx, rx) = mpsc::channel(1);
         drop(rx);
-        let aggregator = AuditAggregator {
+        let aggregator = ApiAuditEventAggregator {
             tx,
             state: Arc::new(AsyncRwLock::new(AuditState::default())),
         };
@@ -529,7 +565,7 @@ mod tests {
         tx.send(make_test_event(1)).await.unwrap();
         drop(tx);
 
-        AuditAggregator::run_worker(rx, Arc::clone(&state), handler).await;
+        ApiAuditEventAggregator::run_worker(rx, Arc::clone(&state), handler).await;
 
         let events = flushed_events.lock().await;
         assert_eq!(events.len(), 1);

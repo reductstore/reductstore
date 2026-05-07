@@ -1,42 +1,74 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-mod aggregator;
 mod full_access;
 mod read_only;
 
-use crate::audit::full_access::AuditRepository;
-use crate::audit::read_only::ReadOnlyAuditRepository;
+use crate::audit::full_access::FullAccessAuditLogger;
+use crate::audit::read_only::ReadOnlyAuditLogger;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 pub(crate) const AUDIT_BUCKET_NAME: &str = "$audit";
 
+pub(crate) type AuditFlushFuture = Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>;
+pub(crate) type AuditAggregationHandler = Arc<dyn Fn(AuditEvent) -> AuditFlushFuture + Send + Sync>;
+
 #[async_trait]
-pub(crate) trait ManageAudit {
+pub(crate) trait AuditEventAggregator: Send + Sync {
+    async fn log_event(&self, event: AuditEvent) -> Result<(), ReductError>;
+}
+
+pub(crate) type BoxedAuditEventAggregator = Box<dyn AuditEventAggregator + Send + Sync>;
+
+pub(crate) fn build_audit_event_aggregator(
+    handler: AuditAggregationHandler,
+) -> BoxedAuditEventAggregator {
+    Box::new(crate::api::audit::aggregator::ApiAuditEventAggregator::new(
+        handler,
+    ))
+}
+
+#[async_trait]
+pub(crate) trait LogAuditEvent {
     async fn log_event(&mut self, event: AuditEvent) -> Result<(), ReductError>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct AuditEvent {
+    #[serde(default = "default_audit_type", rename = "type")]
+    pub event_type: String,
     pub timestamp: u64,
     #[serde(default = "default_audit_instance")]
     pub instance: String,
+    #[serde(default = "default_audit_token_name")]
     pub token_name: String,
     #[serde(default = "default_audit_method")]
     pub method: String,
     #[serde(default = "default_audit_path")]
     pub path: String,
     pub status: u16,
+    #[serde(default = "default_audit_message")]
     pub message: String,
     #[serde(default)]
     pub client_ip: Option<String>,
+    #[serde(default = "default_audit_call_count")]
     pub call_count: u64,
+    #[serde(default)]
     pub duration: f64,
+    #[serde(default)]
+    pub payload: Option<Value>,
+}
+
+fn default_audit_type() -> String {
+    "api_call".to_string()
 }
 
 fn default_audit_instance() -> String {
@@ -49,6 +81,18 @@ fn default_audit_method() -> String {
 
 fn default_audit_path() -> String {
     "".to_string()
+}
+
+fn default_audit_message() -> String {
+    "".to_string()
+}
+
+fn default_audit_token_name() -> String {
+    "unknown".to_string()
+}
+
+fn default_audit_call_count() -> u64 {
+    1
 }
 
 pub(crate) struct AuditRepositoryBuilder {
@@ -64,9 +108,9 @@ impl AuditRepositoryBuilder {
         if !self.cfg.audit_conf.enabled {
             Box::new(DisabledAuditRepository)
         } else if self.cfg.role == InstanceRole::Replica {
-            Box::new(ReadOnlyAuditRepository::new(self.cfg, storage).await)
+            Box::new(ReadOnlyAuditLogger::new(self.cfg, storage).await)
         } else {
-            Box::new(AuditRepository::new(self.cfg, storage).await)
+            Box::new(FullAccessAuditLogger::new(self.cfg, storage).await)
         }
     }
 }
@@ -74,18 +118,18 @@ impl AuditRepositoryBuilder {
 struct DisabledAuditRepository;
 
 #[async_trait]
-impl ManageAudit for DisabledAuditRepository {
+impl LogAuditEvent for DisabledAuditRepository {
     async fn log_event(&mut self, _event: AuditEvent) -> Result<(), ReductError> {
         Ok(())
     }
 }
 
-pub(crate) type BoxedAuditRepository = Box<dyn ManageAudit + Send + Sync>;
+pub(crate) type BoxedAuditRepository = Box<dyn LogAuditEvent + Send + Sync>;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audit::aggregator::AGGREGATION_WINDOW_SECS;
+    use crate::api::audit::aggregator::AGGREGATION_WINDOW_SECS;
     use crate::cfg::Cfg;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
@@ -112,6 +156,7 @@ mod tests {
 
     fn make_event() -> AuditEvent {
         AuditEvent {
+            event_type: "api_call".to_string(),
             timestamp: 1,
             instance: "test-instance".to_string(),
             token_name: "token-1".to_string(),
@@ -122,6 +167,7 @@ mod tests {
             client_ip: None,
             call_count: 1,
             duration: 0.1,
+            payload: None,
         }
     }
 
@@ -185,22 +231,23 @@ mod tests {
     }
 
     #[test]
-    fn deserializes_legacy_event_with_missing_instance_as_unknown() {
+    fn deserializes_legacy_event_with_missing_fields() {
         let event: AuditEvent = serde_json::from_str(
             r#"{
                 "timestamp": 1,
                 "token_name": "token-1",
                 "endpoint": "GET /api/v1/info",
                 "status": 200,
-                "message": "",
                 "call_count": 1,
                 "duration": 0.1
             }"#,
         )
         .unwrap();
 
+        assert_eq!(event.event_type, "api_call");
         assert_eq!(event.instance, "unknown");
         assert_eq!(event.method, "UNKNOWN");
         assert_eq!(event.path, "");
+        assert_eq!(event.message, "");
     }
 }

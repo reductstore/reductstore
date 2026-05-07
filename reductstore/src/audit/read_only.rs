@@ -1,8 +1,10 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::audit::aggregator::{AuditAggregator, FlushHandler};
-use crate::audit::{AuditEvent, ManageAudit, AUDIT_BUCKET_NAME};
+use crate::audit::{
+    build_audit_event_aggregator, AuditAggregationHandler, AuditEvent, BoxedAuditEventAggregator,
+    LogAuditEvent, AUDIT_BUCKET_NAME,
+};
 use crate::cfg::Cfg;
 use crate::core::internal_client::{
     ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
@@ -20,8 +22,8 @@ use url::form_urlencoded;
 
 use log::error;
 
-pub(crate) struct ReadOnlyAuditRepository {
-    aggregator: AuditAggregator,
+pub(crate) struct ReadOnlyAuditLogger {
+    aggregator: BoxedAuditEventAggregator,
 }
 
 #[derive(Clone)]
@@ -31,7 +33,7 @@ struct AuditForwardContext {
 
 impl AuditForwardContext {
     async fn log_event(&self, event: &AuditEvent) -> Result<(), ReductError> {
-        ReadOnlyAuditRepository::log_event_with_failover(
+        ReadOnlyAuditLogger::log_event_with_failover(
             self.client_api.client(),
             self.client_api.primary_url(),
             self.client_api.secondary_url(),
@@ -42,7 +44,7 @@ impl AuditForwardContext {
     }
 }
 
-impl ReadOnlyAuditRepository {
+impl ReadOnlyAuditLogger {
     pub async fn new(cfg: Cfg, _storage: Arc<StorageEngine>) -> Self {
         let client = Self::build_client(&cfg).expect("audit replica client must build");
 
@@ -54,12 +56,12 @@ impl ReadOnlyAuditRepository {
             ),
         };
 
-        let handler: FlushHandler = Arc::new(move |event| {
+        let handler: AuditAggregationHandler = Arc::new(move |event| {
             let context = context.clone();
             Box::pin(async move { context.log_event(&event).await })
         });
 
-        let aggregator = AuditAggregator::new(handler);
+        let aggregator = build_audit_event_aggregator(handler);
         Self { aggregator }
     }
 
@@ -190,7 +192,7 @@ fn check_response(
 }
 
 #[async_trait]
-impl ManageAudit for ReadOnlyAuditRepository {
+impl LogAuditEvent for ReadOnlyAuditLogger {
     async fn log_event(&mut self, event: AuditEvent) -> Result<(), ReductError> {
         self.aggregator.log_event(event).await
     }
@@ -199,7 +201,7 @@ impl ManageAudit for ReadOnlyAuditRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audit::aggregator::AGGREGATION_WINDOW_SECS;
+    use crate::api::audit::aggregator::AGGREGATION_WINDOW_SECS;
     use crate::cfg::Cfg;
     use crate::core::sync::AsyncRwLock;
     use crate::storage::engine::StorageEngine;
@@ -332,6 +334,7 @@ mod tests {
 
     fn make_event(timestamp: u64) -> AuditEvent {
         AuditEvent {
+            event_type: "api_call".to_string(),
             timestamp,
             instance: "instance-a".to_string(),
             token_name: "token-1".to_string(),
@@ -342,6 +345,7 @@ mod tests {
             client_ip: None,
             call_count: 1,
             duration: 0.1,
+            payload: None,
         }
     }
 
@@ -351,9 +355,9 @@ mod tests {
         let (primary_url, primary_events, _, _, _) = start_test_server(StatusCode::OK, None).await;
         let preferred_url = Arc::new(AsyncRwLock::new(None));
         let cfg = make_cfg(Some(primary_url.clone()), None);
-        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+        let client = ReadOnlyAuditLogger::build_client(&cfg).unwrap();
 
-        ReadOnlyAuditRepository::log_event_with_failover(
+        ReadOnlyAuditLogger::log_event_with_failover(
             &client,
             Some(&primary_url),
             None,
@@ -377,9 +381,9 @@ mod tests {
             Some("http://127.0.0.1:1/".to_string()),
             Some(secondary_url.clone()),
         );
-        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+        let client = ReadOnlyAuditLogger::build_client(&cfg).unwrap();
 
-        ReadOnlyAuditRepository::log_event_with_failover(
+        ReadOnlyAuditLogger::log_event_with_failover(
             &client,
             Some("http://127.0.0.1:1/"),
             Some(&secondary_url),
@@ -401,9 +405,9 @@ mod tests {
             start_test_server(StatusCode::OK, None).await;
         let preferred_url = Arc::new(AsyncRwLock::new(Some(secondary_url.clone())));
         let cfg = make_cfg(Some(primary_url.clone()), Some(secondary_url.clone()));
-        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+        let client = ReadOnlyAuditLogger::build_client(&cfg).unwrap();
 
-        ReadOnlyAuditRepository::log_event_with_failover(
+        ReadOnlyAuditLogger::log_event_with_failover(
             &client,
             Some(&primary_url),
             Some(&secondary_url),
@@ -427,9 +431,9 @@ mod tests {
             start_test_server(StatusCode::OK, None).await;
         let preferred_url = Arc::new(AsyncRwLock::new(None));
         let cfg = make_cfg(Some(primary_url.clone()), Some(secondary_url.clone()));
-        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+        let client = ReadOnlyAuditLogger::build_client(&cfg).unwrap();
 
-        let err = ReadOnlyAuditRepository::log_event_with_failover(
+        let err = ReadOnlyAuditLogger::log_event_with_failover(
             &client,
             Some(&primary_url),
             Some(&secondary_url),
@@ -453,9 +457,9 @@ mod tests {
             start_test_server(StatusCode::OK, None).await;
         let preferred_url = Arc::new(AsyncRwLock::new(None));
         let cfg = make_cfg(Some(primary_url.clone()), Some(secondary_url.clone()));
-        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+        let client = ReadOnlyAuditLogger::build_client(&cfg).unwrap();
 
-        ReadOnlyAuditRepository::log_event_with_failover(
+        ReadOnlyAuditLogger::log_event_with_failover(
             &client,
             Some(&primary_url),
             Some(&secondary_url),
@@ -475,9 +479,9 @@ mod tests {
     async fn fails_when_no_replica_urls_are_configured() {
         let preferred_url = Arc::new(AsyncRwLock::new(None));
         let cfg = make_cfg(None, None);
-        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+        let client = ReadOnlyAuditLogger::build_client(&cfg).unwrap();
 
-        let err = ReadOnlyAuditRepository::log_event_with_failover(
+        let err = ReadOnlyAuditLogger::log_event_with_failover(
             &client,
             None,
             None,
@@ -500,7 +504,7 @@ mod tests {
         let (primary_url, primary_events, _, _, _) = start_test_server(StatusCode::OK, None).await;
         let storage = storage.await;
         let cfg = make_cfg(Some(primary_url), None);
-        let mut repo = ReadOnlyAuditRepository::new(cfg, storage).await;
+        let mut repo = ReadOnlyAuditLogger::new(cfg, storage).await;
 
         repo.log_event(make_event(1)).await.unwrap();
         repo.log_event(make_event(2)).await.unwrap();
@@ -536,6 +540,7 @@ mod tests {
     #[test]
     fn builds_write_url_with_unknown_instance_when_empty() {
         let event = AuditEvent {
+            event_type: "api_call".to_string(),
             instance: "".to_string(),
             ..make_event(42)
         };
@@ -559,9 +564,9 @@ mod tests {
             api_token: api_token.to_string(),
             ..Cfg::default()
         };
-        let client = ReadOnlyAuditRepository::build_client(&cfg).unwrap();
+        let client = ReadOnlyAuditLogger::build_client(&cfg).unwrap();
 
-        ReadOnlyAuditRepository::log_event_to_url(&client, &base_url, &make_event(1))
+        ReadOnlyAuditLogger::log_event_to_url(&client, &base_url, &make_event(1))
             .await
             .unwrap();
 
@@ -575,9 +580,9 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn uses_unknown_error_message_when_header_is_missing() {
         let (base_url, _, _, _, _) = start_test_server(StatusCode::FORBIDDEN, None).await;
-        let client = ReadOnlyAuditRepository::build_client(&Cfg::default()).unwrap();
+        let client = ReadOnlyAuditLogger::build_client(&Cfg::default()).unwrap();
 
-        let err = ReadOnlyAuditRepository::log_event_to_url(&client, &base_url, &make_event(1))
+        let err = ReadOnlyAuditLogger::log_event_to_url(&client, &base_url, &make_event(1))
             .await
             .unwrap_err();
 
@@ -589,6 +594,7 @@ mod tests {
     fn build_audit_headers_does_not_set_instance_label() {
         let headers = build_audit_headers(
             &AuditEvent {
+                event_type: "api_call".to_string(),
                 instance: "bad\ninstance".to_string(),
                 ..make_event(1)
             },
@@ -608,7 +614,7 @@ mod tests {
             .join("certificate.crt");
         cfg.audit_conf.remote_ca_path = Some(cert_path);
 
-        assert!(ReadOnlyAuditRepository::build_client(&cfg).is_ok());
+        assert!(ReadOnlyAuditLogger::build_client(&cfg).is_ok());
     }
 
     #[test]
@@ -616,7 +622,7 @@ mod tests {
         let mut cfg = Cfg::default();
         cfg.audit_conf.remote_ca_path = Some("/tmp/does-not-exist-ca.pem".into());
 
-        let err = ReadOnlyAuditRepository::build_client(&cfg).unwrap_err();
+        let err = ReadOnlyAuditLogger::build_client(&cfg).unwrap_err();
         assert_eq!(err.status, ErrorCode::InternalServerError);
         assert!(err
             .message
@@ -636,7 +642,7 @@ mod tests {
         let mut cfg = Cfg::default();
         cfg.audit_conf.remote_ca_path = Some(path);
 
-        let err = ReadOnlyAuditRepository::build_client(&cfg).unwrap_err();
+        let err = ReadOnlyAuditLogger::build_client(&cfg).unwrap_err();
         assert_eq!(err.status, ErrorCode::InternalServerError);
     }
 }
