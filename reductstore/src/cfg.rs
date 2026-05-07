@@ -281,6 +281,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         let replications = Self::parse_replications(&mut env);
         let lifecycles = Self::parse_lifecycles(&mut env);
+        let has_lifecycles = !lifecycles.is_empty();
 
         let api_token = env.get_masked("RS_API_TOKEN", "".to_string());
 
@@ -309,7 +310,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             replications,
             lifecycles,
             io_conf: Self::parse_io_config(&mut env),
-            audit_conf: Self::parse_audit_config(&mut env, &api_token),
+            audit_conf: Self::parse_audit_config(&mut env, &api_token, has_lifecycles),
             replication_conf: Self::parse_replication_config(&mut env, port),
             lifecycle_conf: Self::parse_lifecycle_config(&mut env),
             backend_config: ext_cfg.remote_storage_config(),

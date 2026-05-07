@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::cfg::Cfg;
+use crate::core::duration::parse_duration_to_micros;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::lifecycle::action::{build_lifecycle_action, LifecycleContext};
@@ -241,6 +242,10 @@ impl LifecycleRepository {
                 name
             ));
         }
+
+        parse_duration_to_micros(&settings.max_age).map_err(|err| {
+            unprocessable_entity!("Invalid lifecycle max age '{}': {}", settings.max_age, err)
+        })?;
 
         if let Some(when) = &settings.when {
             let (_, directives) = Parser::new().parse(when.clone()).map_err(|err| {
