@@ -73,7 +73,6 @@ jobs:
       - uses: ./.github/actions/build-binaries
         with:
           minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
-          action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
           target: ${{ matrix.target }}
           os: ${{ matrix.os }}
           compiler: ${{ matrix.compiler }}
