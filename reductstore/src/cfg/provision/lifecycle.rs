@@ -107,6 +107,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 continue;
             }
 
+            if let Some(interval) =
+                env.get_optional::<u64>(&format!("RS_LIFECYCLE_{}_INTERVAL", id))
+            {
+                lifecycle.settings.interval = interval;
+            }
+
             if let Some(entries) =
                 env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_ENTRIES", id))
             {
@@ -198,6 +204,7 @@ mod tests {
                 "sensors/*, env/temp ,,env/humidity".to_string(),
             ),
             ("RS_LIFECYCLE_A_MAX_AGE".to_string(), "30d".to_string()),
+            ("RS_LIFECYCLE_A_INTERVAL".to_string(), "600".to_string()),
             (
                 "RS_LIFECYCLE_A_WHEN".to_string(),
                 r#"{"$eq":["&label","true"]}"#.to_string(),
@@ -243,6 +250,7 @@ mod tests {
             vec!["sensors/*", "env/temp", "env/humidity"]
         );
         assert_eq!(settings.max_age, "30d");
+        assert_eq!(settings.interval, 600);
         assert_eq!(
             settings.when,
             Some(serde_json::json!({"$eq": ["&label", "true"]}))
@@ -286,6 +294,7 @@ mod tests {
                 "sensors/*, env/temp ,,env/humidity",
             ),
             ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
+            ("RS_LIFECYCLE_A_INTERVAL", "600"),
             ("RS_LIFECYCLE_A_WHEN", r#"{"$eq":["&label","true"]}"#),
         ]);
         let mut env = Env::new(getter);
@@ -299,6 +308,7 @@ mod tests {
             vec!["sensors/*", "env/temp", "env/humidity"]
         );
         assert_eq!(lifecycle.settings.max_age, "30d");
+        assert_eq!(lifecycle.settings.interval, 600);
         assert_eq!(
             lifecycle.settings.when,
             Some(serde_json::json!({"$eq": ["&label", "true"]}))

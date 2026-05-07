@@ -26,9 +26,16 @@ pub struct LifecycleSettings {
     pub entries: Vec<String>,
     /// Maximum record age, e.g. "30d", "24h", or "3600s".
     pub max_age: String,
+    /// Interval in seconds between lifecycle runs.
+    #[serde(default = "default_lifecycle_interval_secs")]
+    pub interval: u64,
     /// When condition.
     #[serde(default)]
     pub when: Option<Value>,
+}
+
+fn default_lifecycle_interval_secs() -> u64 {
+    3600
 }
 
 /// Lifecycle policy information.

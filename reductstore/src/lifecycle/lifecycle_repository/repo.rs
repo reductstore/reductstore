@@ -23,6 +23,7 @@ use std::io::SeekFrom::Start;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 
 const LIFECYCLE_REPO_FILE_NAME: &str = ".lifecycles";
 
@@ -47,7 +48,6 @@ pub(crate) struct LifecycleRepository {
     lifecycles: Arc<AsyncRwLock<HashMap<String, LifecycleTask>>>,
     storage: Arc<StorageEngine>,
     repo_path: PathBuf,
-    config: Cfg,
     started: bool,
     action_builder: LifecycleActionBuilder,
     audit_sink: Option<LifecycleAuditSink>,
@@ -166,13 +166,12 @@ impl ManageLifecycles for LifecycleRepository {
 }
 
 impl LifecycleRepository {
-    pub(crate) async fn load_or_create(storage: Arc<StorageEngine>, config: Cfg) -> Self {
+    pub(crate) async fn load_or_create(storage: Arc<StorageEngine>, _config: Cfg) -> Self {
         let repo_path = storage.data_path().join(LIFECYCLE_REPO_FILE_NAME);
         let mut repo = Self {
             lifecycles: Arc::new(AsyncRwLock::new(HashMap::new())),
             storage,
             repo_path,
-            config,
             started: false,
             action_builder: Arc::new(build_lifecycle_action),
             audit_sink: None,
@@ -280,10 +279,11 @@ impl LifecycleRepository {
             old.stop().await;
         }
 
+        let interval = Duration::from_secs(settings.interval);
         let mut lifecycle = LifecycleTask::new(
             name.to_string(),
             settings,
-            self.config.lifecycle_conf.interval,
+            interval,
             action,
             LifecycleContext::new(Arc::clone(&self.storage)),
             self.audit_sink.clone(),
@@ -658,6 +658,7 @@ mod tests {
             bucket: "bucket-1".to_string(),
             entries: vec!["entry-1".to_string()],
             max_age: "1d".to_string(),
+            interval: 3600,
             when: None,
         }
     }

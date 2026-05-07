@@ -5,6 +5,8 @@ use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{LifecycleSettings, LifecycleType};
 use std::sync::Arc;
+mod delete;
+use delete::DeleteLifecycleAction;
 
 use crate::storage::engine::StorageEngine;
 
@@ -41,24 +43,5 @@ pub(super) fn build_lifecycle_action(
 ) -> Arc<dyn LifecycleAction + Send + Sync> {
     match lifecycle_type {
         LifecycleType::Delete => Arc::new(DeleteLifecycleAction),
-    }
-}
-
-struct DeleteLifecycleAction;
-
-#[async_trait]
-impl LifecycleAction for DeleteLifecycleAction {
-    fn lifecycle_type(&self) -> LifecycleType {
-        LifecycleType::Delete
-    }
-
-    async fn run(
-        &self,
-        _name: &str,
-        _settings: &LifecycleSettings,
-        context: LifecycleContext,
-    ) -> Result<LifecycleRunResult, ReductError> {
-        let _storage = context.storage;
-        Ok(LifecycleRunResult::default())
     }
 }
