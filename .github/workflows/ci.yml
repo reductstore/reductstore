@@ -73,6 +73,7 @@ jobs:
       - uses: ./.github/actions/build-binaries
         with:
           minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
+          action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
           target: ${{ matrix.target }}
           os: ${{ matrix.os }}
           compiler: ${{ matrix.compiler }}
@@ -654,7 +655,7 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: ${{ vars.MINIMAL_RUST_VERSION }}
-      - uses: arduino/setup-protoc@149f6c87b92550901b26acd1632e11c3662e381f # v1.3.0
+      - uses: reductstore/setup-protoc@ac76da16b8e70736e159368a4bc962934d1f825a # master
         with:
           version: "3.x"
           repo-token: ${{ secrets.ACTION_GITHUB_TOKEN }}

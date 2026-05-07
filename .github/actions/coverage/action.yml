@@ -22,7 +22,7 @@ runs:
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
 
-    - uses: arduino/setup-protoc@v3
+    - uses: reductstore/setup-protoc@ac76da16b8e70736e159368a4bc962934d1f825a # master
       with:
         version: '26.x'
         repo-token: ${{ inputs.action_github_token }}

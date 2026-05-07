@@ -4,6 +4,9 @@ inputs:
   minimal_rust_version:
     description: 'Minimal Rust version.'
     required: true
+  action_github_token:
+    description: 'GitHub token for setup-protoc.'
+    required: true
   target:
     description: 'Target triple.'
     required: true
@@ -23,57 +26,10 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - name: Install protoc
-      shell: bash
-      env:
-        PROTOC_VERSION: '26.1'
-      run: |
-        set -euo pipefail
-
-        case "${RUNNER_OS}-${RUNNER_ARCH}" in
-          Linux-X64)
-            asset="protoc-${PROTOC_VERSION}-linux-x86_64.zip"
-            ;;
-          Linux-ARM64)
-            asset="protoc-${PROTOC_VERSION}-linux-aarch_64.zip"
-            ;;
-          macOS-X64)
-            asset="protoc-${PROTOC_VERSION}-osx-x86_64.zip"
-            ;;
-          macOS-ARM64)
-            asset="protoc-${PROTOC_VERSION}-osx-aarch_64.zip"
-            ;;
-          Windows-X64)
-            asset="protoc-${PROTOC_VERSION}-win64.zip"
-            ;;
-          *)
-            echo "Unsupported runner platform for protoc: ${RUNNER_OS}-${RUNNER_ARCH}" >&2
-            exit 1
-            ;;
-        esac
-
-        archive_path="${RUNNER_TEMP}/${asset}"
-        install_dir="${RUNNER_TEMP}/protoc-${PROTOC_VERSION}-${RUNNER_OS}-${RUNNER_ARCH}"
-
-        rm -rf "${install_dir}"
-        mkdir -p "${install_dir}"
-
-        curl -fsSL --retry 5 --retry-all-errors \
-          "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/${asset}" \
-          -o "${archive_path}"
-
-        python_bin="python3"
-        if ! command -v "${python_bin}" >/dev/null 2>&1; then
-          python_bin="python"
-        fi
-
-        "${python_bin}" -c 'import sys, zipfile; zipfile.ZipFile(sys.argv[1]).extractall(sys.argv[2])' "${archive_path}" "${install_dir}"
-
-        chmod +x "${install_dir}/bin/protoc"
-        echo "${install_dir}/bin" >> "${GITHUB_PATH}"
-        echo "PROTOC=${install_dir}/bin/protoc" >> "${GITHUB_ENV}"
-        echo "PROTOC_INCLUDE=${install_dir}/include" >> "${GITHUB_ENV}"
-        "${install_dir}/bin/protoc" --version
+    - uses: reductstore/setup-protoc@ac76da16b8e70736e159368a4bc962934d1f825a # master
+      with:
+        version: '26.x'
+        repo-token: ${{ inputs.action_github_token }}
 
     - name: Install Rust
       uses: dtolnay/rust-toolchain@stable
