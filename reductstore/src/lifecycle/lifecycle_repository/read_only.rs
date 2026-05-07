@@ -73,3 +73,83 @@ impl ManageLifecycles for ReadOnlyLifecycleRepository {
         // No-op
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reduct_base::forbidden;
+    use rstest::{fixture, rstest};
+
+    #[fixture]
+    fn repo() -> ReadOnlyLifecycleRepository {
+        ReadOnlyLifecycleRepository::new()
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_create(mut repo: ReadOnlyLifecycleRepository) {
+        let err = repo
+            .create_lifecycle("test", LifecycleSettings::default())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(err, forbidden!("Cannot create lifecycle in read-only mode"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_update(mut repo: ReadOnlyLifecycleRepository) {
+        let err = repo
+            .update_lifecycle("test", LifecycleSettings::default())
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(err, forbidden!("Cannot update lifecycle in read-only mode"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn returns_empty_list(repo: ReadOnlyLifecycleRepository) {
+        assert!(repo.lifecycles().await.unwrap().is_empty());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_getters(repo: ReadOnlyLifecycleRepository) {
+        assert_eq!(
+            repo.get_info("test").await.err().unwrap(),
+            forbidden!("Cannot get lifecycle info in read-only mode")
+        );
+        assert_eq!(
+            repo.get_lifecycle_settings("test").await.err().unwrap(),
+            forbidden!("Cannot get lifecycle settings in read-only mode")
+        );
+        assert_eq!(
+            repo.is_lifecycle_running("test").await.err().unwrap(),
+            forbidden!("Cannot get lifecycle in read-only mode")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_mutations(mut repo: ReadOnlyLifecycleRepository) {
+        assert_eq!(
+            repo.set_lifecycle_provisioned("test", true)
+                .await
+                .err()
+                .unwrap(),
+            forbidden!("Cannot set lifecycle provisioned state in read-only mode")
+        );
+        assert_eq!(
+            repo.remove_lifecycle("test").await.err().unwrap(),
+            forbidden!("Cannot remove lifecycle in read-only mode")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn start_and_stop_are_noops(mut repo: ReadOnlyLifecycleRepository) {
+        repo.start();
+        repo.stop().await;
+    }
+}

@@ -13,7 +13,9 @@ use crate::storage::query::condition::Parser;
 use async_trait::async_trait;
 use log::{debug, error, warn};
 use reduct_base::error::ReductError;
-use reduct_base::msg::lifecycle_api::{FullLifecycleInfo, LifecycleInfo, LifecycleSettings};
+use reduct_base::msg::lifecycle_api::{
+    FullLifecycleInfo, LifecycleInfo, LifecycleSettings, LifecycleType,
+};
 use reduct_base::{conflict, not_found, unprocessable_entity};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
@@ -23,6 +25,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 const LIFECYCLE_REPO_FILE_NAME: &str = ".lifecycles";
+
+type LifecycleActionBuilder = Arc<
+    dyn Fn(LifecycleType) -> Arc<dyn crate::lifecycle::action::LifecycleAction + Send + Sync>
+        + Send
+        + Sync,
+>;
 
 #[derive(Serialize, Deserialize, Default)]
 struct LifecycleRepoData {
@@ -41,6 +49,7 @@ pub(crate) struct LifecycleRepository {
     repo_path: PathBuf,
     config: Cfg,
     started: bool,
+    action_builder: LifecycleActionBuilder,
 }
 
 #[async_trait]
@@ -160,6 +169,7 @@ impl LifecycleRepository {
             repo_path,
             config,
             started: false,
+            action_builder: Arc::new(build_lifecycle_action),
         };
 
         let read_conf_file = async || {
@@ -258,7 +268,7 @@ impl LifecycleRepository {
             }
         }
 
-        let action = build_lifecycle_action(settings.lifecycle_type);
+        let action = (self.action_builder)(settings.lifecycle_type);
         let mut removed = self.lifecycles.write().await?.remove(name);
         if let Some(mut old) = removed.take() {
             old.stop().await;
@@ -279,6 +289,12 @@ impl LifecycleRepository {
             .await?
             .insert(name.to_string(), lifecycle);
         self.save_repo().await
+    }
+
+    #[cfg(test)]
+    fn with_action_builder(mut self, action_builder: LifecycleActionBuilder) -> Self {
+        self.action_builder = action_builder;
+        self
     }
 
     fn start_all(&mut self) {
@@ -306,5 +322,369 @@ impl LifecycleRepository {
             });
         }
         self.started = true;
+    }
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cfg::lifecycle::LifecycleConfig;
+    use crate::lifecycle::action::{LifecycleAction, LifecycleRunResult};
+    use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::msg::lifecycle_api::LifecycleType;
+    use reduct_base::{conflict, not_found, unprocessable_entity};
+    use rstest::{fixture, rstest};
+    use tokio::sync::mpsc;
+    use tokio::time::{timeout, Duration};
+
+    mockall::mock! {
+        Action {}
+
+        #[async_trait]
+        impl LifecycleAction for Action {
+            fn lifecycle_type(&self) -> LifecycleType;
+
+            async fn run(
+                &self,
+                name: &str,
+                settings: &LifecycleSettings,
+                context: LifecycleContext,
+            ) -> Result<LifecycleRunResult, ReductError>;
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn creates_lifecycle(
+        #[future] mut repo: LifecycleRepository,
+        settings: LifecycleSettings,
+    ) {
+        let mut repo = repo.await;
+        repo.create_lifecycle("test", settings.clone())
+            .await
+            .unwrap();
+
+        let lifecycles = repo.lifecycles().await.unwrap();
+        assert_eq!(lifecycles.len(), 1);
+        assert_eq!(lifecycles[0].name, "test");
+        assert!(!lifecycles[0].is_provisioned);
+        assert!(!lifecycles[0].is_running);
+        assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), settings);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_duplicate_lifecycle(
+        #[future] mut repo: LifecycleRepository,
+        settings: LifecycleSettings,
+    ) {
+        let mut repo = repo.await;
+        repo.create_lifecycle("test", settings.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(
+            repo.create_lifecycle("test", settings).await,
+            Err(conflict!("Lifecycle 'test' already exists"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn persists_lifecycle(
+        #[future] storage: Arc<StorageEngine>,
+        settings: LifecycleSettings,
+    ) {
+        let storage = storage.await;
+        let mut repo =
+            LifecycleRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
+        repo.create_lifecycle("test", settings.clone())
+            .await
+            .unwrap();
+
+        let repo = LifecycleRepository::load_or_create(storage, Cfg::default()).await;
+        assert_eq!(repo.lifecycles().await.unwrap().len(), 1);
+        assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), settings);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn updates_lifecycle(
+        #[future] mut repo: LifecycleRepository,
+        settings: LifecycleSettings,
+    ) {
+        let mut repo = repo.await;
+        repo.create_lifecycle("test", settings).await.unwrap();
+
+        let updated = LifecycleSettings {
+            entries: vec!["entry-2".to_string()],
+            max_age: "2d".to_string(),
+            when: Some(serde_json::json!({"$eq": ["&label", "value"]})),
+            ..settings_fixture()
+        };
+        repo.update_lifecycle("test", updated.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), updated);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_update_for_missing_lifecycle(#[future] mut repo: LifecycleRepository) {
+        let mut repo = repo.await;
+        assert_eq!(
+            repo.update_lifecycle("missing", settings_fixture()).await,
+            Err(not_found!("Lifecycle 'missing' does not exist"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_update_for_provisioned_lifecycle(
+        #[future] mut repo: LifecycleRepository,
+        settings: LifecycleSettings,
+    ) {
+        let mut repo = repo.await;
+        repo.create_lifecycle("test", settings.clone())
+            .await
+            .unwrap();
+        repo.set_lifecycle_provisioned("test", true).await.unwrap();
+
+        assert_eq!(
+            repo.update_lifecycle("test", settings).await,
+            Err(conflict!("Can't update provisioned lifecycle 'test'"))
+        );
+    }
+
+    #[rstest]
+    #[case::missing_bucket(
+        LifecycleSettings {
+            bucket: "missing".to_string(),
+            ..settings_fixture()
+        },
+        not_found!("Bucket 'missing' for lifecycle 'test' does not exist")
+    )]
+    #[case::bad_max_age(
+        LifecycleSettings {
+            max_age: "30days".to_string(),
+            ..settings_fixture()
+        },
+        unprocessable_entity!(
+            "Invalid lifecycle max age '30days': [UnprocessableEntity] Invalid duration unit: days"
+        )
+    )]
+    #[case::bad_when(
+        LifecycleSettings {
+            when: Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y"]})),
+            ..settings_fixture()
+        },
+        unprocessable_entity!("Invalid lifecycle condition: Operator '$UNKNOWN_OP' not supported")
+    )]
+    #[case::ext_when(
+        LifecycleSettings {
+            when: Some(serde_json::json!({"#ext": {"name": "pipe"}})),
+            ..settings_fixture()
+        },
+        unprocessable_entity!("Lifecycle condition cannot use '#ext' directive")
+    )]
+    #[tokio::test]
+    async fn rejects_invalid_settings(
+        #[future] mut repo: LifecycleRepository,
+        #[case] settings: LifecycleSettings,
+        #[case] expected: ReductError,
+    ) {
+        let mut repo = repo.await;
+        assert_eq!(repo.create_lifecycle("test", settings).await, Err(expected));
+        assert!(repo.lifecycles().await.unwrap().is_empty());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn removes_lifecycle(
+        #[future] mut repo: LifecycleRepository,
+        #[future] storage: Arc<StorageEngine>,
+        settings: LifecycleSettings,
+    ) {
+        let mut repo = repo.await;
+        let storage = storage.await;
+        repo.create_lifecycle("test", settings).await.unwrap();
+
+        repo.remove_lifecycle("test").await.unwrap();
+        assert!(repo.lifecycles().await.unwrap().is_empty());
+
+        let repo = LifecycleRepository::load_or_create(storage, Cfg::default()).await;
+        assert!(repo.lifecycles().await.unwrap().is_empty());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_remove_for_provisioned_lifecycle(
+        #[future] mut repo: LifecycleRepository,
+        settings: LifecycleSettings,
+    ) {
+        let mut repo = repo.await;
+        repo.create_lifecycle("test", settings).await.unwrap();
+        repo.set_lifecycle_provisioned("test", true).await.unwrap();
+
+        assert_eq!(
+            repo.remove_lifecycle("test").await,
+            Err(conflict!("Can't remove provisioned lifecycle 'test'"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn reports_missing_lifecycle(#[future] repo: LifecycleRepository) {
+        let repo = repo.await;
+        assert_eq!(
+            repo.get_info("missing").await.err(),
+            Some(not_found!("Lifecycle 'missing' does not exist"))
+        );
+        assert_eq!(
+            repo.get_lifecycle_settings("missing").await.err(),
+            Some(not_found!("Lifecycle 'missing' does not exist"))
+        );
+        assert_eq!(
+            repo.is_lifecycle_running("missing").await.err(),
+            Some(not_found!("Lifecycle 'missing' does not exist"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_provisioned_flag_for_missing_lifecycle(
+        #[future] mut repo: LifecycleRepository,
+    ) {
+        let mut repo = repo.await;
+        assert_eq!(
+            repo.set_lifecycle_provisioned("missing", true).await.err(),
+            Some(not_found!("Lifecycle 'missing' does not exist"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn starts_worker_and_calls_action(
+        #[future] storage: Arc<StorageEngine>,
+        settings: LifecycleSettings,
+    ) {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut action = MockAction::new();
+        action
+            .expect_lifecycle_type()
+            .return_const(LifecycleType::Delete);
+        action
+            .expect_run()
+            .times(1)
+            .returning(move |name, settings, context| {
+                let bucket_name = settings.bucket.clone();
+                let tx = tx.clone();
+                assert!(Arc::strong_count(&context.storage) > 0);
+                tx.send((name.to_string(), bucket_name)).unwrap();
+                Ok(LifecycleRunResult {
+                    affected_records: 1,
+                })
+            });
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(action);
+        let action_builder: LifecycleActionBuilder = Arc::new(move |lifecycle_type| {
+            assert_eq!(lifecycle_type, LifecycleType::Delete);
+            Arc::clone(&action)
+        });
+
+        let storage = storage.await;
+        let mut repo = LifecycleRepository::load_or_create(storage, lifecycle_cfg())
+            .await
+            .with_action_builder(action_builder);
+        repo.create_lifecycle("test", settings).await.unwrap();
+
+        repo.start();
+        let call = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        repo.stop().await;
+
+        assert_eq!(call, ("test".to_string(), "bucket-1".to_string()));
+        assert!(!repo.is_lifecycle_running("test").await.unwrap());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn starts_new_lifecycle_when_repo_is_already_started(
+        #[future] storage: Arc<StorageEngine>,
+        settings: LifecycleSettings,
+    ) {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut action = MockAction::new();
+        action
+            .expect_lifecycle_type()
+            .return_const(LifecycleType::Delete);
+        action.expect_run().times(1).returning(move |name, _, _| {
+            tx.send(name.to_string()).unwrap();
+            Ok(LifecycleRunResult::default())
+        });
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(action);
+        let action_builder: LifecycleActionBuilder = Arc::new(move |_| Arc::clone(&action));
+
+        let storage = storage.await;
+        let mut repo = LifecycleRepository::load_or_create(storage, lifecycle_cfg())
+            .await
+            .with_action_builder(action_builder);
+        repo.start();
+        repo.create_lifecycle("test", settings).await.unwrap();
+
+        assert_eq!(
+            timeout(Duration::from_secs(1), rx.recv()).await.unwrap(),
+            Some("test".to_string())
+        );
+        repo.stop().await;
+    }
+
+    #[fixture]
+    fn settings() -> LifecycleSettings {
+        settings_fixture()
+    }
+
+    fn settings_fixture() -> LifecycleSettings {
+        LifecycleSettings {
+            lifecycle_type: LifecycleType::Delete,
+            bucket: "bucket-1".to_string(),
+            entries: vec!["entry-1".to_string()],
+            max_age: "1d".to_string(),
+            when: None,
+        }
+    }
+
+    fn lifecycle_cfg() -> Cfg {
+        Cfg {
+            lifecycle_conf: LifecycleConfig {
+                interval: Duration::from_secs(3600),
+            },
+            ..Cfg::default()
+        }
+    }
+
+    #[fixture]
+    async fn storage() -> Arc<StorageEngine> {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let cfg = Cfg {
+            data_path: tmp_dir.keep(),
+            ..Cfg::default()
+        };
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build()
+            .await;
+        storage
+            .create_bucket("bucket-1", BucketSettings::default())
+            .await
+            .unwrap();
+        Arc::new(storage)
+    }
+
+    #[fixture]
+    async fn repo(#[future] storage: Arc<StorageEngine>) -> LifecycleRepository {
+        LifecycleRepository::load_or_create(storage.await, lifecycle_cfg()).await
     }
 }
