@@ -295,6 +295,7 @@ pub(crate) mod tests {
     use crate::core::cache::Cache;
     use crate::core::sync::AsyncRwLock;
     use crate::ext::ext_repository::create_ext_repository;
+    use crate::lifecycle::LifecycleRepoBuilder;
     use crate::lock_file::{LockFile, LockFileBuilder};
     use crate::replication::ReplicationRepoBuilder;
     use crate::storage::engine::StorageEngine;
@@ -809,6 +810,9 @@ pub(crate) mod tests {
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
+        let lifecycle_repo = LifecycleRepoBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
 
         #[cfg(feature = "web-console")]
         let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
@@ -821,6 +825,7 @@ pub(crate) mod tests {
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
+            lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             audit_repo: AsyncRwLock::new(audit_repo),
             ext_repo: create_ext_repository(
                 None,
@@ -925,6 +930,9 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
+        let lifecycle_repo = LifecycleRepoBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
 
         #[cfg(feature = "web-console")]
         let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
@@ -937,6 +945,7 @@ pub(crate) mod tests {
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
+            lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             audit_repo: AsyncRwLock::new(audit_repo),
             ext_repo: create_ext_repository(
                 None,
@@ -1012,6 +1021,9 @@ pub(crate) mod tests {
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
+        let lifecycle_repo = LifecycleRepoBuilder::new(cfg.clone())
+            .build(Arc::clone(&storage))
+            .await;
         let audit_repo = AuditRepositoryBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -1027,6 +1039,7 @@ pub(crate) mod tests {
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
+            lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             ext_repo: create_ext_repository(
                 None,
                 vec![],

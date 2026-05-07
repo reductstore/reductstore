@@ -2,5 +2,6 @@
 // Licensed under the Apache License, Version 2.0
 
 mod bucket;
+mod lifecycle;
 mod replication;
 mod token;

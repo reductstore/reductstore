@@ -3,6 +3,7 @@
 pub mod bucket_api;
 pub mod diagnostics;
 pub mod entry_api;
+pub mod lifecycle_api;
 pub mod query_link_api;
 pub mod replication_api;
 pub mod server_api;

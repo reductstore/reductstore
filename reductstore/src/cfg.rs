@@ -3,6 +3,7 @@
 
 pub mod audit;
 pub mod io;
+pub mod lifecycle;
 pub mod limits;
 pub mod lock_file;
 mod provision;
@@ -20,6 +21,7 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType, GeneralBackendConfig};
 use crate::cfg::audit::AuditConfig;
 use crate::cfg::io::IoConfig;
+use crate::cfg::lifecycle::LifecycleConfig;
 use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
@@ -39,6 +41,7 @@ use reduct_base::ext::{ExtSettings, IoExtension};
 use reduct_base::internal_server_error;
 use reduct_base::logger::Logger;
 use reduct_base::msg::bucket_api::BucketSettings;
+use reduct_base::msg::lifecycle_api::LifecycleSettings;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::server_api::License;
 use reduct_base::msg::token_api::Token;
@@ -70,6 +73,11 @@ pub struct ProvisionedReplication {
     pub mode_override: Option<String>,
 }
 
+#[derive(Clone, Default)]
+pub struct ProvisionedLifecycle {
+    pub settings: LifecycleSettings,
+}
+
 #[derive(Clone)]
 pub struct Cfg {
     pub log_level: String,
@@ -91,9 +99,11 @@ pub struct Cfg {
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ProvisionedReplication>,
+    pub lifecycles: HashMap<String, ProvisionedLifecycle>,
     pub io_conf: IoConfig,
     pub audit_conf: AuditConfig,
     pub replication_conf: ReplicationConfig,
+    pub lifecycle_conf: LifecycleConfig,
     pub backend_config: GeneralBackendConfig,
     pub lock_file_config: LockFileConfig,
     pub rw_lock_config: RwLockConfig,
@@ -124,9 +134,11 @@ impl Default for Cfg {
             buckets: HashMap::new(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
+            lifecycles: HashMap::new(),
             io_conf: IoConfig::default(),
             audit_conf: AuditConfig::default(),
             replication_conf: ReplicationConfig::default(),
+            lifecycle_conf: LifecycleConfig::default(),
             backend_config: GeneralBackendConfig::default(),
             lock_file_config: LockFileConfig::default(),
             rw_lock_config: RwLockConfig::default(),
@@ -268,6 +280,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let ext_cfg = ext_parser.from_env(&mut env, version).await;
 
         let replications = Self::parse_replications(&mut env);
+        let lifecycles = Self::parse_lifecycles(&mut env);
 
         let api_token = env.get_masked("RS_API_TOKEN", "".to_string());
 
@@ -294,9 +307,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
             replications,
+            lifecycles,
             io_conf: Self::parse_io_config(&mut env),
             audit_conf: Self::parse_audit_config(&mut env, &api_token),
             replication_conf: Self::parse_replication_config(&mut env, port),
+            lifecycle_conf: Self::parse_lifecycle_config(&mut env),
             backend_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
@@ -381,6 +396,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let replication_engine = self
             .provision_replication_repo(Arc::clone(&storage))
             .await?;
+        let lifecycle_engine = self.provision_lifecycle_repo(Arc::clone(&storage)).await?;
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
                 internal_server_error!(
@@ -409,6 +425,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             auth: TokenAuthorization::new(&self.cfg.api_token),
             console,
             replication_repo: AsyncRwLock::new(replication_engine),
+            lifecycle_repo: AsyncRwLock::new(lifecycle_engine),
             ext_repo: create_ext_repository(
                 ext_path,
                 static_extensions,

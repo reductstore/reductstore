@@ -13,6 +13,7 @@ use crate::cfg::Cfg;
 use crate::core::cache::Cache;
 use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::ManageExtensions;
+use crate::lifecycle::ManageLifecycles;
 use crate::lock_file::BoxedLockFile;
 use crate::replication::ManageReplications;
 use crate::storage::engine::StorageEngine;
@@ -34,6 +35,7 @@ pub struct Components {
     pub(crate) token_repo: AsyncRwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub(crate) console: Box<dyn ManageStaticAsset + Send + Sync>,
     pub(crate) replication_repo: AsyncRwLock<Box<dyn ManageReplications + Send + Sync>>,
+    pub(crate) lifecycle_repo: AsyncRwLock<Box<dyn ManageLifecycles + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
     pub(crate) audit_repo: AsyncRwLock<Box<dyn ManageAudit + Send + Sync>>,
@@ -130,7 +132,10 @@ impl StateKeeper {
                 // ensure background services (like replication) start after HTTP is ready to accept connections
                 // however, in tests we want to control when these services start
                 #[cfg(not(test))]
-                components.replication_repo.write().await?.start();
+                {
+                    components.replication_repo.write().await?.start();
+                    components.lifecycle_repo.write().await?.start();
+                }
                 lock.replace(Arc::new(components));
             }
         }
@@ -149,6 +154,13 @@ impl StateKeeper {
     pub async fn stop_replication_tasks(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
         let mut repo = components.replication_repo.write().await?;
+        repo.stop().await;
+        Ok(())
+    }
+
+    pub async fn stop_lifecycle_tasks(&self) -> Result<(), ReductError> {
+        let components = self.wait_components().await?.clone();
+        let mut repo = components.lifecycle_repo.write().await?;
         repo.stop().await;
         Ok(())
     }
