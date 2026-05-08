@@ -138,15 +138,10 @@ async fn write_audit_event(
             .unwrap_or_default()
             .as_micros() as u64,
         instance: components.cfg.instance_name.clone(),
-        token_name,
-        method,
-        path,
+        entry_name: payload.entry_name(),
         status,
         message,
-        client_ip,
-        call_count: 1,
-        duration,
-        payload: Some(payload.to_value()),
+        payload: payload.to_value(),
     };
 
     match components.audit_logger.write().await {

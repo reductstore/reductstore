@@ -181,7 +181,7 @@ fn build_write_url(base_url: &str, event: &AuditEvent) -> String {
     let query = query.finish();
     format!(
         "{}api/v1/b/{}/{}/{}?{}",
-        base_url, AUDIT_BUCKET_NAME, instance_name, event.token_name, query
+        base_url, AUDIT_BUCKET_NAME, instance_name, event.entry_name, query
     )
 }
 
@@ -202,6 +202,7 @@ impl LogAuditEvent for ReadOnlyAuditLogger {
 mod tests {
     use super::*;
     use crate::api::audit::aggregator::AGGREGATION_WINDOW_SECS;
+    use crate::api::audit::ApiAuditPayload;
     use crate::cfg::Cfg;
     use crate::core::sync::AsyncRwLock;
     use crate::storage::engine::StorageEngine;
@@ -337,15 +338,18 @@ mod tests {
             event_type: "api_call".to_string(),
             timestamp,
             instance: "instance-a".to_string(),
-            token_name: "token-1".to_string(),
-            method: "GET".to_string(),
-            path: "/api/v1/info".to_string(),
+            entry_name: "token-1".to_string(),
             status: 200,
             message: "".to_string(),
-            client_ip: None,
-            call_count: 1,
-            duration: 0.1,
-            payload: None,
+            payload: ApiAuditPayload {
+                token_name: "token-1".to_string(),
+                method: "GET".to_string(),
+                path: "/api/v1/info".to_string(),
+                client_ip: None,
+                call_count: 1,
+                duration: 0.1,
+            }
+            .to_value(),
         }
     }
 
@@ -515,8 +519,9 @@ mod tests {
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
         let events = primary_events.lock().await;
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].call_count, 2);
-        assert!((events[0].duration - 0.2).abs() < 1e-9);
+        let payload: ApiAuditPayload = serde_json::from_value(events[0].payload.clone()).unwrap();
+        assert_eq!(payload.call_count, 2);
+        assert!((payload.duration - 0.2).abs() < 1e-9);
         assert_eq!(events[0].timestamp, 1);
     }
 

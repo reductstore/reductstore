@@ -48,23 +48,11 @@ pub(crate) struct AuditEvent {
     pub timestamp: u64,
     #[serde(default = "default_audit_instance")]
     pub instance: String,
-    #[serde(default = "default_audit_token_name")]
-    pub token_name: String,
-    #[serde(default = "default_audit_method")]
-    pub method: String,
-    #[serde(default = "default_audit_path")]
-    pub path: String,
+    pub entry_name: String,
     pub status: u16,
     #[serde(default = "default_audit_message")]
     pub message: String,
-    #[serde(default)]
-    pub client_ip: Option<String>,
-    #[serde(default = "default_audit_call_count")]
-    pub call_count: u64,
-    #[serde(default)]
-    pub duration: f64,
-    #[serde(default)]
-    pub payload: Option<Value>,
+    pub payload: Value,
 }
 
 impl AuditEvent {
@@ -73,31 +61,12 @@ impl AuditEvent {
         map.insert("timestamp".to_string(), Value::from(self.timestamp));
         map.insert("status".to_string(), Value::from(self.status));
         map.insert("message".to_string(), Value::from(self.message.clone()));
-        map.insert("duration".to_string(), Value::from(self.duration));
+        map.insert("instance".to_string(), Value::from(self.instance.clone()));
 
-        if self.event_type == "api_call" {
-            map.insert("instance".to_string(), Value::from(self.instance.clone()));
-            map.insert(
-                "token_name".to_string(),
-                Value::from(self.token_name.clone()),
-            );
-            map.insert("method".to_string(), Value::from(self.method.clone()));
-            map.insert("path".to_string(), Value::from(self.path.clone()));
-            map.insert("call_count".to_string(), Value::from(self.call_count));
-            map.insert(
-                "client_ip".to_string(),
-                self.client_ip
-                    .as_ref()
-                    .map_or(Value::Null, |ip| Value::from(ip.clone())),
-            );
-        }
-
-        if let Some(payload) = &self.payload {
-            if let Some(payload_map) = payload.as_object() {
-                for (key, value) in payload_map {
-                    if !value.is_null() {
-                        map.insert(key.clone(), value.clone());
-                    }
+        if let Some(payload_map) = self.payload.as_object() {
+            for (key, value) in payload_map {
+                if !value.is_null() {
+                    map.insert(key.clone(), value.clone());
                 }
             }
         }
@@ -114,24 +83,8 @@ fn default_audit_instance() -> String {
     "unknown".to_string()
 }
 
-fn default_audit_method() -> String {
-    "UNKNOWN".to_string()
-}
-
-fn default_audit_path() -> String {
-    "".to_string()
-}
-
 fn default_audit_message() -> String {
     "".to_string()
-}
-
-fn default_audit_token_name() -> String {
-    "unknown".to_string()
-}
-
-fn default_audit_call_count() -> u64 {
-    1
 }
 
 pub(crate) struct AuditLoggerBuilder {
@@ -198,15 +151,17 @@ mod tests {
             event_type: "api_call".to_string(),
             timestamp: 1,
             instance: "test-instance".to_string(),
-            token_name: "token-1".to_string(),
-            method: "GET".to_string(),
-            path: "/api/v1/info".to_string(),
+            entry_name: "token-1".to_string(),
             status: 200,
             message: "".to_string(),
-            client_ip: None,
-            call_count: 1,
-            duration: 0.1,
-            payload: None,
+            payload: serde_json::json!({
+                "token_name": "token-1",
+                "method": "GET",
+                "path": "/api/v1/info",
+                "client_ip": null,
+                "call_count": 1,
+                "duration": 0.1
+            }),
         }
     }
 
@@ -231,7 +186,7 @@ mod tests {
         let mut reader = bucket.begin_read("test-instance/token-1", 1).await.unwrap();
         let record = reader.read_chunk().unwrap().unwrap();
         let event: AuditEvent = serde_json::from_slice(&record).unwrap();
-        assert_eq!(event.token_name, "token-1");
+        assert_eq!(event.entry_name, "token-1");
         assert_eq!(event.instance, "test-instance");
     }
 
@@ -267,26 +222,5 @@ mod tests {
         sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
 
         assert!(storage.get_bucket(AUDIT_BUCKET_NAME).await.is_err());
-    }
-
-    #[test]
-    fn deserializes_legacy_event_with_missing_fields() {
-        let event: AuditEvent = serde_json::from_str(
-            r#"{
-                "timestamp": 1,
-                "token_name": "token-1",
-                "endpoint": "GET /api/v1/info",
-                "status": 200,
-                "call_count": 1,
-                "duration": 0.1
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(event.event_type, "api_call");
-        assert_eq!(event.instance, "unknown");
-        assert_eq!(event.method, "UNKNOWN");
-        assert_eq!(event.path, "");
-        assert_eq!(event.message, "");
     }
 }

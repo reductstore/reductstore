@@ -9,6 +9,7 @@ use reduct_base::msg::lifecycle_api::{FullLifecycleInfo, LifecycleInfo, Lifecycl
 use std::sync::Arc;
 
 mod action;
+pub(crate) mod audit;
 mod lifecycle_repository;
 mod lifecycle_task;
 

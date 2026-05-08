@@ -45,19 +45,23 @@ pub(crate) struct AuditState {
 }
 
 pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> AuditEvent {
+    let payload = ApiAuditPayload {
+        token_name: key.token_name.clone(),
+        method: key.method,
+        path: key.path,
+        client_ip: key.client_ip,
+        call_count: aggregate.call_count,
+        duration: aggregate.total_duration,
+    };
+
     AuditEvent {
         event_type: "api_call".to_string(),
         timestamp: aggregate.first_timestamp,
         instance: key.instance,
-        token_name: key.token_name,
-        method: key.method,
-        path: key.path,
+        entry_name: payload.entry_name(),
         status: key.status,
         message: key.message,
-        client_ip: key.client_ip,
-        call_count: aggregate.call_count,
-        duration: aggregate.total_duration,
-        payload: None,
+        payload: payload.to_value(),
     }
 }
 
@@ -135,9 +139,8 @@ impl ApiAuditEventAggregator {
         state: &Arc<AsyncRwLock<AuditState>>,
         event: AuditEvent,
     ) -> Result<(), ReductError> {
-        let Some(payload) = ApiAuditPayload::from_event(&event) else {
-            return Ok(());
-        };
+        let payload: ApiAuditPayload = serde_json::from_value(event.payload.clone())
+            .map_err(|err| internal_server_error!("Invalid API audit payload: {}", err))?;
         let now = Instant::now();
         let key = AuditAggregateKey {
             instance: event.instance,
@@ -265,15 +268,10 @@ mod tests {
             event_type: "api_call".to_string(),
             timestamp,
             instance: "instance-a".to_string(),
-            token_name: "token-1".to_string(),
-            method: "GET".to_string(),
-            path: "/api/v1/info".to_string(),
+            entry_name: payload.entry_name(),
             status: 200,
             message: "".to_string(),
-            client_ip: None,
-            call_count: 1,
-            duration: 0.1,
-            payload: Some(payload.to_value()),
+            payload: payload.to_value(),
         }
     }
 
@@ -349,12 +347,13 @@ mod tests {
 
         assert_eq!(event.timestamp, 10);
         assert_eq!(event.instance, "instance-a");
-        assert_eq!(event.token_name, "token-1");
-        assert_eq!(event.method, "GET");
-        assert_eq!(event.path, "/api/v1/info");
         assert_eq!(event.status, 200);
-        assert_eq!(event.call_count, 3);
-        assert!((event.duration - 4.5).abs() < 1e-9);
+        let payload: ApiAuditPayload = serde_json::from_value(event.payload).unwrap();
+        assert_eq!(payload.token_name, "token-1");
+        assert_eq!(payload.method, "GET");
+        assert_eq!(payload.path, "/api/v1/info");
+        assert_eq!(payload.call_count, 3);
+        assert!((payload.duration - 4.5).abs() < 1e-9);
     }
 
     #[rstest]
@@ -467,7 +466,8 @@ mod tests {
 
         let events = flushed_events.lock().await;
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].token_name, "expired");
+        let payload: ApiAuditPayload = serde_json::from_value(events[0].payload.clone()).unwrap();
+        assert_eq!(payload.token_name, "expired");
         drop(events);
 
         let guard = state.read().await.unwrap();
@@ -505,7 +505,8 @@ mod tests {
 
         let events = flushed_events.lock().await;
         assert_eq!(events.len(), 1);
-        assert_eq!(events[0].token_name, "forced");
+        let payload: ApiAuditPayload = serde_json::from_value(events[0].payload.clone()).unwrap();
+        assert_eq!(payload.token_name, "forced");
         assert!(state.read().await.unwrap().aggregates.is_empty());
     }
 
@@ -585,15 +586,10 @@ mod tests {
             event_type: "lifecycle_run".to_string(),
             timestamp: 1,
             instance: "instance-a".to_string(),
-            token_name: "system:lifecycle".to_string(),
-            method: "".to_string(),
-            path: "".to_string(),
+            entry_name: "system-lifecycle".to_string(),
             status: 200,
             message: "ok".to_string(),
-            client_ip: None,
-            call_count: 1,
-            duration: 0.5,
-            payload: Some(serde_json::json!({"policy_name":"p1"})),
+            payload: serde_json::json!({"policy_name":"p1"}),
         })
         .await
         .unwrap();

@@ -1,9 +1,10 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::audit::LifecycleAuditPayload;
 use crate::audit::AuditEvent;
 use crate::lifecycle::action::{LifecycleAction, LifecycleContext};
+use crate::lifecycle::audit::LifecycleAuditPayload;
+
 use crate::lifecycle::LifecycleAuditSink;
 use log::{debug, error};
 use reduct_base::error::ReductError;
@@ -179,7 +180,7 @@ impl LifecycleTask {
         let (status, message, payload) = match result {
             Ok(processed_records) => (
                 200u16,
-                format!("Lifecycle '{}' completed", name),
+                "".to_string(),
                 LifecycleAuditPayload::success(
                     name,
                     &format!("{:?}", action_type).to_lowercase(),
@@ -211,15 +212,10 @@ impl LifecycleTask {
                 .unwrap_or_default()
                 .as_micros() as u64,
             instance: sink.instance_name.clone(),
-            token_name: "system-lifecycle".to_string(),
-            method: "".to_string(),
-            path: "".to_string(),
+            entry_name: format!("__lifecycle_tasks/{}", name),
             status,
             message,
-            client_ip: None,
-            call_count: 1,
-            duration,
-            payload: Some(payload),
+            payload,
         };
 
         let audit_logger = Arc::clone(&sink.audit_logger);

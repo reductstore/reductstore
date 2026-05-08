@@ -66,7 +66,7 @@ impl FullAccessAuditLogger {
         } else {
             event.instance.clone()
         };
-        let entry_name = format!("{}/{}", instance, event.token_name);
+        let entry_name = format!("{}/{}", instance, event.entry_name);
         let labels = Labels::from([("status".to_string(), event.status.to_string())]);
         let payload = serde_json::to_vec(&event.to_flat_json_value())
             .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
@@ -116,6 +116,7 @@ impl LogAuditEvent for FullAccessAuditLogger {
 mod tests {
     use super::*;
     use crate::api::audit::aggregator::AGGREGATION_WINDOW_SECS;
+    use crate::api::audit::ApiAuditPayload;
     use crate::cfg::Cfg;
     use crate::storage::engine::StorageEngine;
     use reduct_base::io::ReadRecord;
@@ -152,15 +153,18 @@ mod tests {
             event_type: "api_call".to_string(),
             timestamp,
             instance: "unknown".to_string(),
-            token_name: token_name.to_string(),
-            method: method.to_string(),
-            path: path.to_string(),
+            entry_name: token_name.to_string(),
             status,
             message: message.to_string(),
-            client_ip: None,
-            call_count: 1,
-            duration: 0.1,
-            payload: None,
+            payload: ApiAuditPayload {
+                token_name: token_name.to_string(),
+                method: method.to_string(),
+                path: path.to_string(),
+                client_ip: None,
+                call_count: 1,
+                duration: 0.1,
+            }
+            .to_value(),
         }
     }
 
@@ -235,8 +239,9 @@ mod tests {
 
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
         let event = read_audit_event(&repo, "token-1", 1).await;
-        assert_eq!(event.call_count, 2);
-        assert!((event.duration - 0.2).abs() < 1e-9);
+        let payload: ApiAuditPayload = serde_json::from_value(event.payload).unwrap();
+        assert_eq!(payload.call_count, 2);
+        assert!((payload.duration - 0.2).abs() < 1e-9);
         assert_eq!(event.timestamp, 1);
     }
 
@@ -307,13 +312,14 @@ mod tests {
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
 
         let event = read_audit_event(&repo, "token-1", 1).await;
-        assert_eq!(event.token_name, "token-1");
-        assert_eq!(event.method, "GET");
-        assert_eq!(event.path, "/api/v1/b/test");
+        let payload: ApiAuditPayload = serde_json::from_value(event.payload).unwrap();
+        assert_eq!(payload.token_name, "token-1");
+        assert_eq!(payload.method, "GET");
+        assert_eq!(payload.path, "/api/v1/b/test");
         assert_eq!(event.status, 200);
         assert_eq!(event.message, "");
-        assert_eq!(event.call_count, 1);
-        assert!((event.duration - 0.1).abs() < 1e-9);
+        assert_eq!(payload.call_count, 1);
+        assert!((payload.duration - 0.1).abs() < 1e-9);
         assert_eq!(event.timestamp, 1);
         assert_eq!(event.instance, "unknown");
     }
@@ -350,7 +356,7 @@ mod tests {
         .unwrap();
 
         let event = read_audit_event(&repo, "token-1", 1).await;
-        assert_eq!(event.token_name, "token-1");
+        assert_eq!(event.entry_name, "token-1");
         assert_eq!(event.status, 200);
     }
 
@@ -372,7 +378,7 @@ mod tests {
         .unwrap();
 
         let event = read_audit_event(&repo, "token-empty", 11).await;
-        assert_eq!(event.token_name, "token-empty");
+        assert_eq!(event.entry_name, "token-empty");
     }
 
     #[rstest]
@@ -431,8 +437,9 @@ mod tests {
 
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
         let event = read_audit_event(&repo, "token-1", 1).await;
-        assert_eq!(event.call_count, 2);
-        assert!((event.duration - 0.2).abs() < 1e-9);
+        let payload: ApiAuditPayload = serde_json::from_value(event.payload).unwrap();
+        assert_eq!(payload.call_count, 2);
+        assert!((payload.duration - 0.2).abs() < 1e-9);
         assert_eq!(event.timestamp, 1);
     }
 
@@ -456,8 +463,9 @@ mod tests {
 
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
         let event = read_audit_event(&repo, "token-1", 1).await;
-        assert_eq!(event.call_count, 2);
-        assert!((event.duration - 0.2).abs() < 1e-9);
+        let payload: ApiAuditPayload = serde_json::from_value(event.payload).unwrap();
+        assert_eq!(payload.call_count, 2);
+        assert!((payload.duration - 0.2).abs() < 1e-9);
         assert_eq!(event.timestamp, 1);
     }
 }
