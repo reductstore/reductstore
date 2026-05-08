@@ -13,7 +13,6 @@ use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use bytes::Bytes;
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client};
@@ -129,8 +128,7 @@ impl ReadOnlyAuditLogger {
         event: &AuditEvent,
     ) -> Result<(), ReductError> {
         let url = build_write_url(base_url, event);
-        let payload = serde_json::to_vec(&event)
-            .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
+        let payload = event.to_flat_json()?;
 
         let headers = build_audit_headers(event, payload.len())?;
 
@@ -214,6 +212,7 @@ mod tests {
     use axum::Router;
     use reduct_base::error::ErrorCode;
     use rstest::{fixture, rstest};
+    use serde_json::Value;
     use std::sync::Arc;
     use tempfile::tempdir;
     use tokio::net::TcpListener;
@@ -224,7 +223,7 @@ mod tests {
     struct TestServerState {
         status: StatusCode,
         error_header: Option<&'static str>,
-        events: Arc<Mutex<Vec<AuditEvent>>>,
+        events: Arc<Mutex<Vec<Value>>>,
         auth_headers: Arc<Mutex<Vec<Option<String>>>>,
         status_labels: Arc<Mutex<Vec<Option<String>>>>,
         instance_labels: Arc<Mutex<Vec<Option<String>>>>,
@@ -235,7 +234,7 @@ mod tests {
         headers: axum::http::HeaderMap,
         body: AxumBytes,
     ) -> impl IntoResponse {
-        let event: AuditEvent = serde_json::from_slice(&body).unwrap();
+        let event: Value = serde_json::from_slice(&body).unwrap();
         state.events.lock().await.push(event);
         state.auth_headers.lock().await.push(
             headers
@@ -271,7 +270,7 @@ mod tests {
         error_header: Option<&'static str>,
     ) -> (
         String,
-        Arc<Mutex<Vec<AuditEvent>>>,
+        Arc<Mutex<Vec<Value>>>,
         Arc<Mutex<Vec<Option<String>>>>,
         Arc<Mutex<Vec<Option<String>>>>,
         Arc<Mutex<Vec<Option<String>>>>,
@@ -519,10 +518,10 @@ mod tests {
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
         let events = primary_events.lock().await;
         assert_eq!(events.len(), 1);
-        let payload: ApiAuditPayload = serde_json::from_value(events[0].payload.clone()).unwrap();
+        let payload: ApiAuditPayload = serde_json::from_value(events[0].clone()).unwrap();
         assert_eq!(payload.call_count, 2);
         assert!((payload.duration - 0.2).abs() < 1e-9);
-        assert_eq!(events[0].timestamp, 1);
+        assert_eq!(events[0]["timestamp"], 1);
     }
 
     #[rstest]

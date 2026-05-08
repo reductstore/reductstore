@@ -11,7 +11,6 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
 use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
 use reduct_base::Labels;
 use std::sync::Arc;
@@ -68,8 +67,7 @@ impl FullAccessAuditLogger {
         };
         let entry_name = format!("{}/{}", instance, event.entry_name);
         let labels = Labels::from([("status".to_string(), event.status.to_string())]);
-        let payload = serde_json::to_vec(&event)
-            .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))?;
+        let payload = event.to_flat_json()?;
         let mut writer = match storage
             .begin_write(
                 AUDIT_BUCKET_NAME,
@@ -121,6 +119,7 @@ mod tests {
     use crate::storage::engine::StorageEngine;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
+    use serde_json::Value;
     use tempfile::tempdir;
     use tokio::time::{sleep, Duration};
 
@@ -176,7 +175,7 @@ mod tests {
         repo: &FullAccessAuditLogger,
         token_name: &str,
         timestamp: u64,
-    ) -> AuditEvent {
+    ) -> Value {
         let bucket = repo
             .storage
             .get_bucket(AUDIT_BUCKET_NAME)
@@ -239,10 +238,10 @@ mod tests {
 
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
         let event = read_audit_event(&repo, "token-1", 1).await;
-        let payload: ApiAuditPayload = serde_json::from_value(event.payload).unwrap();
+        let payload: ApiAuditPayload = serde_json::from_value(event.clone()).unwrap();
         assert_eq!(payload.call_count, 2);
         assert!((payload.duration - 0.2).abs() < 1e-9);
-        assert_eq!(event.timestamp, 1);
+        assert_eq!(event["timestamp"], 1);
     }
 
     #[rstest]
@@ -312,16 +311,16 @@ mod tests {
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
 
         let event = read_audit_event(&repo, "token-1", 1).await;
-        let payload: ApiAuditPayload = serde_json::from_value(event.payload).unwrap();
+        let payload: ApiAuditPayload = serde_json::from_value(event.clone()).unwrap();
         assert_eq!(payload.token_name, "token-1");
         assert_eq!(payload.method, "GET");
         assert_eq!(payload.path, "/api/v1/b/test");
-        assert_eq!(event.status, 200);
-        assert_eq!(event.message, "");
+        assert_eq!(event["status"], 200);
+        assert_eq!(event["message"], "");
         assert_eq!(payload.call_count, 1);
         assert!((payload.duration - 0.1).abs() < 1e-9);
-        assert_eq!(event.timestamp, 1);
-        assert_eq!(event.instance, "unknown");
+        assert_eq!(event["timestamp"], 1);
+        assert_eq!(event["instance"], "unknown");
     }
 
     #[rstest]
@@ -356,8 +355,8 @@ mod tests {
         .unwrap();
 
         let event = read_audit_event(&repo, "token-1", 1).await;
-        assert_eq!(event.entry_name, "token-1");
-        assert_eq!(event.status, 200);
+        assert_eq!(event["token_name"], "token-1");
+        assert_eq!(event["status"], 200);
     }
 
     #[rstest]
@@ -378,7 +377,7 @@ mod tests {
         .unwrap();
 
         let event = read_audit_event(&repo, "token-empty", 11).await;
-        assert_eq!(event.entry_name, "token-empty");
+        assert_eq!(event["token_name"], "token-empty");
     }
 
     #[rstest]
@@ -437,10 +436,10 @@ mod tests {
 
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
         let event = read_audit_event(&repo, "token-1", 1).await;
-        let payload: ApiAuditPayload = serde_json::from_value(event.payload).unwrap();
+        let payload: ApiAuditPayload = serde_json::from_value(event.clone()).unwrap();
         assert_eq!(payload.call_count, 2);
         assert!((payload.duration - 0.2).abs() < 1e-9);
-        assert_eq!(event.timestamp, 1);
+        assert_eq!(event["timestamp"], 1);
     }
 
     #[rstest]
@@ -463,9 +462,9 @@ mod tests {
 
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
         let event = read_audit_event(&repo, "token-1", 1).await;
-        let payload: ApiAuditPayload = serde_json::from_value(event.payload).unwrap();
+        let payload: ApiAuditPayload = serde_json::from_value(event.clone()).unwrap();
         assert_eq!(payload.call_count, 2);
         assert!((payload.duration - 0.2).abs() < 1e-9);
-        assert_eq!(event.timestamp, 1);
+        assert_eq!(event["timestamp"], 1);
     }
 }

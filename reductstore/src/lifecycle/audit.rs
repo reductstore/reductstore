@@ -57,14 +57,22 @@ impl LifecycleAuditPayload {
     }
 
     pub(crate) fn to_value(&self) -> Value {
-        json!({
+        let mut payload = json!({
             "policy_name": self.policy_name,
             "action_type": self.action_type,
             "bucket": self.bucket,
             "duration": self.duration,
             "processed_records": self.processed_records,
-            "error_code": self.error_code,
-            "error_message": self.error_message,
-        })
+        });
+
+        if let Some(error_code) = self.error_code {
+            payload["error_code"] = json!(error_code);
+        }
+
+        if let Some(error_message) = &self.error_message {
+            payload["error_message"] = json!(error_message);
+        }
+
+        payload
     }
 }

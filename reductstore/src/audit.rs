@@ -10,6 +10,7 @@ use crate::cfg::{Cfg, InstanceRole};
 use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use std::future::Future;
@@ -55,7 +56,23 @@ pub(crate) struct AuditEvent {
     pub payload: Value,
 }
 
-impl AuditEvent {}
+impl AuditEvent {
+    pub(crate) fn to_flat_json(&self) -> Result<Vec<u8>, ReductError> {
+        let mut map = serde_json::Map::new();
+        map.insert("timestamp".to_string(), serde_json::json!(self.timestamp));
+        map.insert("instance".to_string(), serde_json::json!(self.instance));
+        map.insert("status".to_string(), serde_json::json!(self.status));
+        map.insert("message".to_string(), serde_json::json!(self.message));
+        if let Value::Object(payload_map) = &self.payload {
+            for (k, v) in payload_map {
+                map.insert(k.clone(), v.clone());
+            }
+        }
+
+        serde_json::to_vec(&map)
+            .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))
+    }
+}
 
 fn default_audit_type() -> String {
     "api_call".to_string()
@@ -167,9 +184,9 @@ mod tests {
             .upgrade_and_unwrap();
         let mut reader = bucket.begin_read("test-instance/token-1", 1).await.unwrap();
         let record = reader.read_chunk().unwrap().unwrap();
-        let event: AuditEvent = serde_json::from_slice(&record).unwrap();
-        assert_eq!(event.entry_name, "token-1");
-        assert_eq!(event.instance, "test-instance");
+        let event: Value = serde_json::from_slice(&record).unwrap();
+        assert_eq!(event["token_name"], "token-1");
+        assert_eq!(event["instance"], "test-instance");
     }
 
     #[rstest]

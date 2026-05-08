@@ -6,7 +6,7 @@ use crate::lifecycle::action::{LifecycleAction, LifecycleContext};
 use crate::lifecycle::audit::LifecycleAuditPayload;
 
 use crate::lifecycle::LifecycleAuditSink;
-use log::{debug, error};
+use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{
     LifecycleInfo, LifecycleMode, LifecycleSettings, LifecycleType,
@@ -77,21 +77,9 @@ impl LifecycleTask {
                     continue;
                 }
 
-                debug!(
-                    "Lifecycle worker '{}' running {:?} action for bucket '{}'",
-                    name,
-                    action.lifecycle_type(),
-                    settings.bucket
-                );
                 let started = std::time::Instant::now();
                 match action.run(&name, &settings, context.clone()).await {
                     Ok(result) => {
-                        debug!(
-                            "Lifecycle worker '{}' ran {:?} action, affected_records={}",
-                            name,
-                            action.lifecycle_type(),
-                            result.affected_records
-                        );
                         Self::log_audit_event(
                             audit_sink.clone(),
                             &name,
@@ -241,21 +229,25 @@ impl LifecycleTask {
             payload,
         };
 
+        info!(
+            "Lifecycle audit event: policy='{}', action='{}', bucket='{}', status={}, message='{}', payload={}",
+            name,
+            format!("{:?}", action_type).to_lowercase(),
+            bucket,
+            status,
+            event.message,
+            event.payload
+        );
+
         let audit_logger = Arc::clone(&sink.audit_logger);
         let lock = audit_logger.write().await;
         match lock {
             Ok(mut audit_logger) => {
-                debug!(
-                    "Writing lifecycle audit event for '{}' with status {}",
-                    name, status
-                );
                 if let Err(err) = audit_logger.log_event(event).await {
                     error!(
                         "Failed to persist lifecycle audit event for '{}': {}",
                         name, err
                     );
-                } else {
-                    debug!("Lifecycle audit event persisted for '{}'", name);
                 }
             }
             Err(err) => error!(
@@ -454,8 +446,8 @@ mod tests {
         assert_eq!(event.payload["action_type"], "delete");
         assert_eq!(event.payload["bucket"], "bucket-1");
         assert_eq!(event.payload["processed_records"], 42);
-        assert_eq!(event.payload["error_code"], serde_json::Value::Null);
-        assert_eq!(event.payload["error_message"], serde_json::Value::Null);
+        assert!(event.payload.get("error_code").is_none());
+        assert!(event.payload.get("error_message").is_none());
     }
 
     #[tokio::test]
