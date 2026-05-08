@@ -422,12 +422,15 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .await;
         let audit_logger = Arc::new(AsyncRwLock::new(audit_logger));
 
-        let mut lifecycle_engine = self.provision_lifecycle_repo(Arc::clone(&storage)).await?;
-
-        lifecycle_engine.set_audit_sink(LifecycleAuditSink {
-            audit_logger: Arc::clone(&audit_logger),
-            instance_name: self.cfg.instance_name.clone(),
-        });
+        let lifecycle_engine = self
+            .provision_lifecycle_repo(
+                Arc::clone(&storage),
+                LifecycleAuditSink {
+                    audit_logger: Arc::clone(&audit_logger),
+                    instance_name: self.cfg.instance_name.clone(),
+                },
+            )
+            .await?;
 
         Ok(Components {
             storage: Arc::clone(&storage),

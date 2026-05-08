@@ -67,9 +67,6 @@ pub trait ManageLifecycles {
 
     /// Stop background workers and wait until they finish.
     async fn stop(&mut self);
-
-    /// Configure lifecycle audit event sink.
-    fn set_audit_sink(&mut self, _sink: LifecycleAuditSink) {}
 }
 
 pub(crate) use lifecycle_repository::LifecycleRepoBuilder;

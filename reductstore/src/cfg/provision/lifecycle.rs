@@ -4,7 +4,7 @@
 use crate::cfg::{CfgParser, ExtCfgBounds, ProvisionedLifecycle};
 use crate::core::duration::parse_duration_to_micros;
 use crate::core::env::{Env, GetEnv};
-use crate::lifecycle::{LifecycleRepoBuilder, ManageLifecycles};
+use crate::lifecycle::{LifecycleAuditSink, LifecycleRepoBuilder, ManageLifecycles};
 use crate::storage::engine::StorageEngine;
 use log::{error, info};
 use reduct_base::error::{ErrorCode, ReductError};
@@ -16,8 +16,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_lifecycle_repo(
         &self,
         storage: Arc<StorageEngine>,
+        audit_sink: LifecycleAuditSink,
     ) -> Result<Box<dyn ManageLifecycles + Send + Sync>, ReductError> {
         let mut repo = LifecycleRepoBuilder::new(self.cfg.clone())
+            .with_audit_sink(audit_sink)
             .build(Arc::clone(&storage))
             .await;
 

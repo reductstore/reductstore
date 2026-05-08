@@ -153,10 +153,6 @@ impl LifecycleTask {
         self.is_provisioned = provisioned;
     }
 
-    pub(super) fn set_audit_sink(&mut self, audit_sink: Option<LifecycleAuditSink>) {
-        self.audit_sink = audit_sink;
-    }
-
     pub(super) fn set_mode(&mut self, mode: LifecycleMode) {
         self.settings.mode = mode;
         self.mode.store(mode as u8, Ordering::Relaxed);
