@@ -612,11 +612,11 @@ mod tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn build_client_accepts_valid_custom_ca_path() {
+        let dir = tempdir().unwrap();
+        let cert_path = dir.path().join("certificate.crt");
+        std::fs::write(&cert_path, include_bytes!("../../../misc/certificate.crt")).unwrap();
+
         let mut cfg = Cfg::default();
-        let cert_path = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-            .join("..")
-            .join("misc")
-            .join("certificate.crt");
         cfg.audit_conf.remote_ca_path = Some(cert_path);
 
         assert!(ReadOnlyAuditLogger::build_client(&cfg).is_ok());
