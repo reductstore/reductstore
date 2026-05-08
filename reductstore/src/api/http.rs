@@ -569,6 +569,7 @@ pub(crate) mod tests {
                     LifecycleSettings {
                         bucket: "bucket-1".to_string(),
                         max_age: "1d".to_string(),
+                        interval: "1h".to_string(),
                         ..LifecycleSettings::default()
                     },
                 )

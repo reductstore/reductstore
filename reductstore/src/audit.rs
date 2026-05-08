@@ -11,7 +11,7 @@ use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use serde::{Deserialize, Serialize};
-use serde_json::{Map, Value};
+use serde_json::Value;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -55,25 +55,7 @@ pub(crate) struct AuditEvent {
     pub payload: Value,
 }
 
-impl AuditEvent {
-    pub(crate) fn to_flat_json_value(&self) -> Value {
-        let mut map = Map::new();
-        map.insert("timestamp".to_string(), Value::from(self.timestamp));
-        map.insert("status".to_string(), Value::from(self.status));
-        map.insert("message".to_string(), Value::from(self.message.clone()));
-        map.insert("instance".to_string(), Value::from(self.instance.clone()));
-
-        if let Some(payload_map) = self.payload.as_object() {
-            for (key, value) in payload_map {
-                if !value.is_null() {
-                    map.insert(key.clone(), value.clone());
-                }
-            }
-        }
-
-        Value::Object(map)
-    }
-}
+impl AuditEvent {}
 
 fn default_audit_type() -> String {
     "api_call".to_string()

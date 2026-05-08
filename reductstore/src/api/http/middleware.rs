@@ -512,14 +512,14 @@ mod tests {
 
         wait_for_audit_flush().await;
         let event = read_audit_event(&keeper, "unauthorized").await.unwrap();
-        assert_eq!(event.token_name, "unauthorized");
-        assert_eq!(event.method, "GET");
-        assert_eq!(event.path, "/protected");
+        assert_eq!(event.payload["token_name"], "unauthorized");
+        assert_eq!(event.payload["method"], "GET");
+        assert_eq!(event.payload["path"], "/protected");
         assert_eq!(event.status, StatusCode::UNAUTHORIZED.as_u16());
         assert_eq!(event.message, "");
-        assert_eq!(event.call_count, 1);
+        assert_eq!(event.payload["call_count"], 1);
         assert_eq!(event.instance, "unknown");
-        assert!(event.duration >= 0.0);
+        assert!(event.payload["duration"].as_f64().unwrap() >= 0.0);
     }
 
     #[rstest]
@@ -584,11 +584,11 @@ mod tests {
 
         wait_for_audit_flush().await;
         let event = read_audit_event(&keeper, "init-token").await.unwrap();
-        assert_eq!(event.instance, "unknown");
+        let duration = event.payload["duration"].as_f64().unwrap();
         assert!(
-            (0.03..1.0).contains(&event.duration),
+            (0.03..1.0).contains(&duration),
             "expected duration in seconds, got {}",
-            event.duration
+            duration
         );
     }
 
