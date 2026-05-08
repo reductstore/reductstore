@@ -93,3 +93,77 @@ pub struct FullLifecycleInfo {
     /// Settings.
     pub settings: LifecycleSettings,
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn lifecycle_mode_default_is_enabled() {
+        assert_eq!(LifecycleMode::default(), LifecycleMode::Enabled);
+    }
+
+    #[test]
+    fn lifecycle_mode_serde_roundtrip() {
+        assert_eq!(
+            serde_json::to_string(&LifecycleMode::Enabled).unwrap(),
+            "\"enabled\""
+        );
+        assert_eq!(
+            serde_json::to_string(&LifecycleMode::Disabled).unwrap(),
+            "\"disabled\""
+        );
+
+        assert_eq!(
+            serde_json::from_str::<LifecycleMode>("\"enabled\"").unwrap(),
+            LifecycleMode::Enabled
+        );
+        assert_eq!(
+            serde_json::from_str::<LifecycleMode>("\"disabled\"").unwrap(),
+            LifecycleMode::Disabled
+        );
+    }
+
+    #[test]
+    fn lifecycle_settings_mode_defaults_on_missing() {
+        let settings: LifecycleSettings = serde_json::from_str(
+            r#"{
+                "type": "delete",
+                "bucket": "bucket-1",
+                "entries": ["entry-1"],
+                "max_age": "1d",
+                "interval": "1h"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.mode, LifecycleMode::Enabled);
+    }
+
+    #[test]
+    fn lifecycle_info_mode_defaults_on_missing() {
+        let info: LifecycleInfo = serde_json::from_str(
+            r#"{
+                "name": "test",
+                "is_provisioned": false,
+                "is_running": true
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(info.mode, LifecycleMode::Enabled);
+    }
+
+    #[test]
+    fn lifecycle_mode_payload_serde_roundtrip() {
+        let payload = LifecycleModePayload {
+            mode: LifecycleMode::Disabled,
+        };
+
+        let serialized = serde_json::to_string(&payload).unwrap();
+        assert_eq!(serialized, r#"{"mode":"disabled"}"#);
+
+        let deserialized: LifecycleModePayload = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, payload);
+    }
+}

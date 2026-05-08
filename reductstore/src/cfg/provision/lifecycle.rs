@@ -178,11 +178,14 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::Cfg;
+    use crate::storage::engine::StorageEngine;
     use reduct_base::msg::lifecycle_api::{LifecycleInfo, LifecycleMode};
     use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
     use std::env::VarError;
     use std::path::PathBuf;
+    use std::sync::Arc;
 
     #[derive(Clone)]
     struct TestEnvGetter {
@@ -363,5 +366,109 @@ mod tests {
         let lifecycle = lifecycles.get("purge-sensors-30d").unwrap();
         assert_eq!(lifecycle.settings.mode, LifecycleMode::Disabled);
         assert_eq!(lifecycle.mode_override, Some("disabled".to_string()));
+    }
+
+    #[rstest]
+    fn parse_lifecycles_defaults_mode_when_not_set() {
+        let getter = TestEnvGetter::new(&[
+            ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
+            ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
+            ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
+        ]);
+        let mut env = Env::new(getter);
+        let lifecycles = CfgParser::<TestEnvGetter>::parse_lifecycles(&mut env);
+
+        let lifecycle = lifecycles.get("purge-sensors-30d").unwrap();
+        assert_eq!(lifecycle.settings.mode, LifecycleMode::Enabled);
+        assert_eq!(lifecycle.mode_override, None);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn provision_preserves_existing_mode(path: PathBuf) {
+        let cfg = Cfg {
+            data_path: path.clone(),
+            ..Cfg::default()
+        };
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
+        storage
+            .create_bucket("telemetry", Default::default())
+            .await
+            .unwrap();
+
+        let mut repo = LifecycleRepoBuilder::new(cfg).build(storage).await;
+        repo.create_lifecycle(
+            "purge-sensors-30d",
+            LifecycleSettings {
+                lifecycle_type: LifecycleType::Delete,
+                bucket: "telemetry".to_string(),
+                entries: vec![],
+                max_age: "1d".to_string(),
+                interval: "1h".to_string(),
+                when: None,
+                mode: LifecycleMode::Enabled,
+            },
+        )
+        .await
+        .unwrap();
+        repo.set_mode("purge-sensors-30d", LifecycleMode::Disabled)
+            .await
+            .unwrap();
+
+        let mut env_getter = lifecycle_env(path, &[]);
+        env_getter.values.remove("RS_LIFECYCLE_A_MODE");
+
+        let (lifecycles, _, _) = lifecycle_infos(env_getter).await;
+        assert_eq!(lifecycles.len(), 1);
+        assert_eq!(lifecycles[0].mode, LifecycleMode::Disabled);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn provision_overrides_mode_when_env_set(path: PathBuf) {
+        let cfg = Cfg {
+            data_path: path.clone(),
+            ..Cfg::default()
+        };
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
+        storage
+            .create_bucket("telemetry", Default::default())
+            .await
+            .unwrap();
+
+        let mut repo = LifecycleRepoBuilder::new(cfg).build(storage).await;
+        repo.create_lifecycle(
+            "purge-sensors-30d",
+            LifecycleSettings {
+                lifecycle_type: LifecycleType::Delete,
+                bucket: "telemetry".to_string(),
+                entries: vec![],
+                max_age: "1d".to_string(),
+                interval: "1h".to_string(),
+                when: None,
+                mode: LifecycleMode::Enabled,
+            },
+        )
+        .await
+        .unwrap();
+        repo.set_mode("purge-sensors-30d", LifecycleMode::Disabled)
+            .await
+            .unwrap();
+
+        let (lifecycles, _, _) = lifecycle_infos(lifecycle_env(path, &[])).await;
+        assert_eq!(lifecycles.len(), 1);
+        assert_eq!(lifecycles[0].mode, LifecycleMode::Enabled);
     }
 }

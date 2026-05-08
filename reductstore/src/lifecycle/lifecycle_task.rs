@@ -282,3 +282,171 @@ impl Drop for LifecycleTask {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::cfg::Cfg;
+    use crate::lifecycle::action::LifecycleRunResult;
+    use crate::storage::engine::StorageEngine;
+    use async_trait::async_trait;
+    use reduct_base::msg::bucket_api::BucketSettings;
+    use tokio::sync::mpsc;
+    use tokio::time::{timeout, Duration};
+
+    mockall::mock! {
+        Action {}
+
+        #[async_trait]
+        impl LifecycleAction for Action {
+            fn lifecycle_type(&self) -> LifecycleType;
+
+            async fn run(
+                &self,
+                name: &str,
+                settings: &LifecycleSettings,
+                context: LifecycleContext,
+            ) -> Result<LifecycleRunResult, ReductError>;
+        }
+    }
+
+    #[tokio::test]
+    async fn new_initializes_mode_from_settings() {
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(MockAction::new());
+        let task = new_task(LifecycleMode::Disabled, action).await;
+
+        assert_eq!(task.info().mode, LifecycleMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn set_mode_updates_info() {
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(MockAction::new());
+        let mut task = new_task(LifecycleMode::Enabled, action).await;
+
+        task.set_mode(LifecycleMode::Disabled);
+        assert_eq!(task.info().mode, LifecycleMode::Disabled);
+
+        task.set_mode(LifecycleMode::Enabled);
+        assert_eq!(task.info().mode, LifecycleMode::Enabled);
+    }
+
+    #[tokio::test]
+    async fn set_mode_updates_settings() {
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(MockAction::new());
+        let mut task = new_task(LifecycleMode::Enabled, action).await;
+
+        task.set_mode(LifecycleMode::Disabled);
+
+        assert_eq!(task.settings().mode, LifecycleMode::Disabled);
+    }
+
+    #[tokio::test]
+    async fn info_reports_correct_state() {
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(MockAction::new());
+        let mut task = new_task(LifecycleMode::Enabled, action).await;
+
+        task.set_provisioned(true);
+        task.start();
+
+        let info = task.info();
+        assert_eq!(info.name, "test");
+        assert!(info.is_provisioned);
+        assert!(info.is_running);
+        assert_eq!(info.mode, LifecycleMode::Enabled);
+
+        task.stop().await;
+    }
+
+    #[tokio::test]
+    async fn worker_skips_action_when_disabled() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut action = MockAction::new();
+        action
+            .expect_lifecycle_type()
+            .return_const(LifecycleType::Delete);
+        action.expect_run().returning(move |name, _, _| {
+            tx.send(name.to_string()).unwrap();
+            Ok(LifecycleRunResult::default())
+        });
+
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(action);
+        let mut task = new_task(LifecycleMode::Disabled, action).await;
+        task.start();
+
+        assert!(timeout(Duration::from_millis(250), rx.recv())
+            .await
+            .is_err());
+
+        task.stop().await;
+    }
+
+    #[tokio::test]
+    async fn worker_runs_action_when_enabled() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut action = MockAction::new();
+        action
+            .expect_lifecycle_type()
+            .return_const(LifecycleType::Delete);
+        action.expect_run().times(1).returning(move |name, _, _| {
+            tx.send(name.to_string()).unwrap();
+            Ok(LifecycleRunResult {
+                affected_records: 1,
+            })
+        });
+
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(action);
+        let mut task = new_task(LifecycleMode::Enabled, action).await;
+        task.start();
+
+        let call = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(call, "test");
+
+        task.stop().await;
+    }
+
+    async fn new_task(
+        mode: LifecycleMode,
+        action: Arc<dyn LifecycleAction + Send + Sync>,
+    ) -> LifecycleTask {
+        let settings = LifecycleSettings {
+            lifecycle_type: LifecycleType::Delete,
+            bucket: "bucket-1".to_string(),
+            entries: vec!["entry-1".to_string()],
+            max_age: "1d".to_string(),
+            interval: "100ms".to_string(),
+            when: None,
+            mode,
+        };
+
+        LifecycleTask::new(
+            "test".to_string(),
+            settings,
+            Duration::from_millis(100),
+            action,
+            LifecycleContext::new(storage().await),
+            None,
+        )
+    }
+
+    async fn storage() -> Arc<StorageEngine> {
+        let tmp_dir = tempfile::tempdir().unwrap();
+        let cfg = Cfg {
+            data_path: tmp_dir.keep(),
+            ..Cfg::default()
+        };
+
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build()
+            .await;
+        storage
+            .create_bucket("bucket-1", BucketSettings::default())
+            .await
+            .unwrap();
+        Arc::new(storage)
+    }
+}

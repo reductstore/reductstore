@@ -725,6 +725,80 @@ mod tests {
         repo.stop().await;
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn disabled_worker_does_not_run_action(
+        #[future] storage: Arc<StorageEngine>,
+        settings: LifecycleSettings,
+    ) {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut action = MockAction::new();
+        action
+            .expect_lifecycle_type()
+            .return_const(LifecycleType::Delete);
+        action.expect_run().returning(move |name, _, _| {
+            tx.send(name.to_string()).unwrap();
+            Ok(LifecycleRunResult::default())
+        });
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(action);
+        let action_builder: LifecycleActionBuilder = Arc::new(move |_| Arc::clone(&action));
+
+        let storage = storage.await;
+        let mut repo = LifecycleRepository::load_or_create(storage, lifecycle_cfg())
+            .await
+            .with_action_builder(action_builder);
+
+        let settings = LifecycleSettings {
+            mode: LifecycleMode::Disabled,
+            ..settings
+        };
+        repo.create_lifecycle("test", settings).await.unwrap();
+
+        repo.start();
+        assert!(timeout(Duration::from_millis(300), rx.recv())
+            .await
+            .is_err());
+        repo.stop().await;
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn persists_mode_across_reload(
+        #[future] storage: Arc<StorageEngine>,
+        settings: LifecycleSettings,
+    ) {
+        let storage = storage.await;
+        let mut repo =
+            LifecycleRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
+        repo.create_lifecycle("test", settings).await.unwrap();
+        repo.set_mode("test", LifecycleMode::Disabled)
+            .await
+            .unwrap();
+
+        let repo = LifecycleRepository::load_or_create(storage, Cfg::default()).await;
+        let info = repo.get_info("test").await.unwrap();
+        assert_eq!(info.info.mode, LifecycleMode::Disabled);
+        assert_eq!(info.settings.mode, LifecycleMode::Disabled);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn sets_mode_on_provisioned_lifecycle(
+        #[future] mut repo: LifecycleRepository,
+        settings: LifecycleSettings,
+    ) {
+        let mut repo = repo.await;
+        repo.create_lifecycle("test", settings).await.unwrap();
+        repo.set_lifecycle_provisioned("test", true).await.unwrap();
+
+        repo.set_mode("test", LifecycleMode::Disabled)
+            .await
+            .unwrap();
+
+        let info = repo.get_info("test").await.unwrap();
+        assert_eq!(info.info.mode, LifecycleMode::Disabled);
+    }
+
     #[fixture]
     fn settings() -> LifecycleSettings {
         settings_fixture()
