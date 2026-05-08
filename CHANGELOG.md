@@ -9,7 +9,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Support format-agnostic schema attachments in `$meta` entries by encoding non-JSON payloads as base64 strings during extension attachment resolution, while preserving native JSON parsing for JSON content types, [PR-1372](https://github.com/reductstore/reductstore/pull/1372)
 - Support object shorthand for unconditional `#ext` pipelines by expanding multi-extension objects into ordered execution steps, while keeping array-based pipeline syntax unchanged, [PR-1367](https://github.com/reductstore/reductstore/pull/1367)
 - Support strict extension pipelines in `#ext` directives with ordered step execution and backward compatibility for legacy `"#ext": { ... }` object format, [PR-1351](https://github.com/reductstore/reductstore/pull/1351)
 - Add `--version` (`-V`) CLI option to the `reductstore` server binary to print the version and exit successfully from shared launcher code, [PR-1343](https://github.com/reductstore/reductstore/pull/1343)
