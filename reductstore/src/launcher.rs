@@ -73,7 +73,14 @@ where
         #[cfg(not(test))]
         {
             components.replication_repo.write().await.unwrap().start();
-            components.lifecycle_repo.write().await.unwrap().start();
+            components
+                .lifecycle_repo
+                .write()
+                .await
+                .unwrap()
+                .start()
+                .await
+                .unwrap();
         }
 
         if !engine_config.compaction_interval.is_zero() {

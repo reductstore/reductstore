@@ -71,8 +71,9 @@ impl ManageLifecycles for ReadOnlyLifecycleRepository {
         Err(forbidden!("Cannot remove lifecycle in read-only mode"))
     }
 
-    fn start(&mut self) {
+    async fn start(&mut self) -> Result<(), ReductError> {
         // No-op
+        Ok(())
     }
 
     async fn stop(&mut self) {
@@ -162,7 +163,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn start_and_stop_are_noops(mut repo: ReadOnlyLifecycleRepository) {
-        repo.start();
+        repo.start().await.unwrap();
         repo.stop().await;
     }
 }

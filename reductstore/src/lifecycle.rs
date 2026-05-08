@@ -63,7 +63,7 @@ pub trait ManageLifecycles {
     async fn remove_lifecycle(&mut self, name: &str) -> Result<(), ReductError>;
 
     /// Start background workers if they are not running yet.
-    fn start(&mut self);
+    async fn start(&mut self) -> Result<(), ReductError>;
 
     /// Stop background workers and wait until they finish.
     async fn stop(&mut self);

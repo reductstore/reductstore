@@ -575,7 +575,7 @@ pub(crate) mod tests {
                 )
                 .await
                 .unwrap();
-                repo.start();
+                repo.start().await.unwrap();
                 assert!(repo.is_lifecycle_running("api-test").await.unwrap());
             }
 

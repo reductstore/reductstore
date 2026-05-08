@@ -16,7 +16,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{
     FullLifecycleInfo, LifecycleInfo, LifecycleMode, LifecycleSettings, LifecycleType,
 };
-use reduct_base::{conflict, not_found, unprocessable_entity};
+use reduct_base::{conflict, internal_server_error, not_found, unprocessable_entity};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::SeekFrom::Start;
@@ -158,8 +158,8 @@ impl ManageLifecycles for LifecycleRepository {
         self.save_repo().await
     }
 
-    fn start(&mut self) {
-        self.start_all();
+    async fn start(&mut self) -> Result<(), ReductError> {
+        self.start_all().await
     }
 
     async fn stop(&mut self) {
@@ -322,31 +322,21 @@ impl LifecycleRepository {
         self
     }
 
-    fn start_all(&mut self) {
+    async fn start_all(&mut self) -> Result<(), ReductError> {
         if self.started {
-            return;
+            return Ok(());
         }
 
-        if let Some(mut lifecycles) = self.lifecycles.try_write() {
-            for (_, task) in lifecycles.iter_mut() {
-                task.start();
-            }
-        } else {
-            let lifecycles = Arc::clone(&self.lifecycles);
-            tokio::spawn(async move {
-                let mut lifecycles = match lifecycles.write().await {
-                    Ok(guard) => guard,
-                    Err(err) => {
-                        error!("Failed to lock lifecycle map: {}", err);
-                        return;
-                    }
-                };
-                for (_, task) in lifecycles.iter_mut() {
-                    task.start();
-                }
-            });
+        let mut lifecycles = self
+            .lifecycles
+            .write()
+            .await
+            .map_err(|err| internal_server_error!("Failed to lock lifecycle map: {}", err))?;
+        for (_, task) in lifecycles.iter_mut() {
+            task.start();
         }
         self.started = true;
+        Ok(())
     }
 }
 #[cfg(test)]
@@ -662,7 +652,7 @@ mod tests {
             .with_action_builder(action_builder);
         repo.create_lifecycle("test", settings).await.unwrap();
 
-        repo.start();
+        repo.start().await.unwrap();
         let call = timeout(Duration::from_secs(1), rx.recv())
             .await
             .unwrap()
@@ -695,7 +685,7 @@ mod tests {
         let mut repo = LifecycleRepository::load_or_create(storage, lifecycle_cfg(), None)
             .await
             .with_action_builder(action_builder);
-        repo.start();
+        repo.start().await.unwrap();
         repo.create_lifecycle("test", settings).await.unwrap();
 
         assert_eq!(
@@ -734,7 +724,7 @@ mod tests {
         };
         repo.create_lifecycle("test", settings).await.unwrap();
 
-        repo.start();
+        repo.start().await.unwrap();
         assert!(timeout(Duration::from_millis(300), rx.recv())
             .await
             .is_err());
