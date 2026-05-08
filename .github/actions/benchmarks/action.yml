@@ -14,7 +14,7 @@ runs:
   using: 'composite'
   steps:
     - name: Download image artifact
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
       with:
         name: image
         path: /tmp/
@@ -95,7 +95,7 @@ runs:
       shell: bash
       run: docker logs reductstore | zip > /tmp/docker-log.zip
 
-    - uses: actions/upload-artifact@v4
+    - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
       if: always()
       with:
         name: docker-log-benchmark-${{ inputs.branch }}
