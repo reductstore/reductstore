@@ -23,12 +23,9 @@ impl Default for LifecycleConfig {
 }
 
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
-    pub(super) fn parse_lifecycle_config(env: &mut Env<EnvGetter>) -> LifecycleConfig {
+    pub(super) fn parse_lifecycle_config(_env: &mut Env<EnvGetter>) -> LifecycleConfig {
         LifecycleConfig {
-            interval: Duration::from_secs(
-                env.get_optional("RS_LIFECYCLE_INTERVAL")
-                    .unwrap_or(DEFAULT_LIFECYCLE_INTERVAL_SECS),
-            ),
+            interval: Duration::from_secs(DEFAULT_LIFECYCLE_INTERVAL_SECS),
         }
     }
 }

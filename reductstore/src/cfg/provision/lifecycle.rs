@@ -8,7 +8,7 @@ use crate::lifecycle::{LifecycleRepoBuilder, ManageLifecycles};
 use crate::storage::engine::StorageEngine;
 use log::{error, info};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::lifecycle_api::{LifecycleSettings, LifecycleType};
+use reduct_base::msg::lifecycle_api::{LifecycleMode, LifecycleSettings, LifecycleType};
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -22,13 +22,16 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .await;
 
         for (name, lifecycle) in &self.cfg.lifecycles {
-            if let Err(err) = repo
-                .create_lifecycle(name, lifecycle.settings.clone())
-                .await
-            {
+            let mut settings = lifecycle.settings.clone();
+            if lifecycle.mode_override.is_none() {
+                if let Ok(info) = repo.get_info(name).await {
+                    settings.mode = info.info.mode;
+                }
+            }
+
+            if let Err(err) = repo.create_lifecycle(name, settings.clone()).await {
                 if err.status() == ErrorCode::Conflict {
-                    repo.update_lifecycle(name, lifecycle.settings.clone())
-                        .await?;
+                    repo.update_lifecycle(name, settings).await?;
                 } else {
                     error!("Failed to provision lifecycle '{}': {}", name, err);
                     continue;
@@ -57,6 +60,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     name,
                     ProvisionedLifecycle {
                         settings: LifecycleSettings::default(),
+                        mode_override: None,
                     },
                 ),
             );
@@ -144,6 +148,23 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     }
                 }
             }
+
+            if let Some(mode) = env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_MODE", id)) {
+                match mode.to_lowercase().as_str() {
+                    "enabled" => {
+                        lifecycle.settings.mode = LifecycleMode::Enabled;
+                        lifecycle.mode_override = Some(mode);
+                    }
+                    "disabled" => {
+                        lifecycle.settings.mode = LifecycleMode::Disabled;
+                        lifecycle.mode_override = Some(mode);
+                    }
+                    _ => {
+                        error!("Lifecycle '{}' has invalid mode '{}'. Drop it.", name, mode);
+                        unfinished_lifecycles.push(id.clone());
+                    }
+                }
+            }
         }
 
         lifecycles
@@ -157,7 +178,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reduct_base::msg::lifecycle_api::LifecycleInfo;
+    use reduct_base::msg::lifecycle_api::{LifecycleInfo, LifecycleMode};
     use rstest::{fixture, rstest};
     use std::collections::BTreeMap;
     use std::env::VarError;
@@ -217,6 +238,7 @@ mod tests {
                 "RS_LIFECYCLE_A_WHEN".to_string(),
                 r#"{"$eq":["&label","true"]}"#.to_string(),
             ),
+            ("RS_LIFECYCLE_A_MODE".to_string(), "enabled".to_string()),
         ]);
 
         for (key, value) in overrides {
@@ -259,6 +281,7 @@ mod tests {
         );
         assert_eq!(settings.max_age, "30d");
         assert_eq!(settings.interval, "10m");
+        assert_eq!(settings.mode, LifecycleMode::Enabled);
         assert_eq!(
             settings.when,
             Some(serde_json::json!({"$eq": ["&label", "true"]}))
@@ -280,6 +303,7 @@ mod tests {
     #[case("RS_LIFECYCLE_A_MAX_AGE", "30days")]
     #[case("RS_LIFECYCLE_A_INTERVAL", "10minutes")]
     #[case("RS_LIFECYCLE_A_WHEN", r#"{"$eq":["&label","true"]"#)]
+    #[case("RS_LIFECYCLE_A_MODE", "paused")]
     #[tokio::test]
     async fn drops_lifecycle_with_invalid_cfg(
         path: PathBuf,
@@ -318,9 +342,26 @@ mod tests {
         );
         assert_eq!(lifecycle.settings.max_age, "30d");
         assert_eq!(lifecycle.settings.interval, "10m");
+        assert_eq!(lifecycle.settings.mode, LifecycleMode::Enabled);
         assert_eq!(
             lifecycle.settings.when,
             Some(serde_json::json!({"$eq": ["&label", "true"]}))
         );
+    }
+
+    #[rstest]
+    fn parse_lifecycles_parses_mode() {
+        let getter = TestEnvGetter::new(&[
+            ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
+            ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
+            ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
+            ("RS_LIFECYCLE_A_MODE", "disabled"),
+        ]);
+        let mut env = Env::new(getter);
+        let lifecycles = CfgParser::<TestEnvGetter>::parse_lifecycles(&mut env);
+
+        let lifecycle = lifecycles.get("purge-sensors-30d").unwrap();
+        assert_eq!(lifecycle.settings.mode, LifecycleMode::Disabled);
+        assert_eq!(lifecycle.mode_override, Some("disabled".to_string()));
     }
 }

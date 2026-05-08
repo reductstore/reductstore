@@ -13,6 +13,23 @@ pub enum LifecycleType {
     Delete,
 }
 
+/// Lifecycle mode.
+#[repr(u8)]
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum LifecycleMode {
+    /// Lifecycle is active and executes actions.
+    Enabled,
+    /// Lifecycle is inactive and does not execute actions.
+    Disabled,
+}
+
+impl Default for LifecycleMode {
+    fn default() -> Self {
+        Self::Enabled
+    }
+}
+
 /// Lifecycle policy settings.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct LifecycleSettings {
@@ -32,6 +49,9 @@ pub struct LifecycleSettings {
     /// When condition.
     #[serde(default)]
     pub when: Option<Value>,
+    /// Lifecycle mode.
+    #[serde(default)]
+    pub mode: LifecycleMode,
 }
 
 fn default_lifecycle_interval() -> String {
@@ -47,6 +67,15 @@ pub struct LifecycleInfo {
     pub is_provisioned: bool,
     /// Lifecycle worker is running.
     pub is_running: bool,
+    /// Lifecycle mode.
+    #[serde(default)]
+    pub mode: LifecycleMode,
+}
+
+/// Payload for updating lifecycle mode.
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+pub struct LifecycleModePayload {
+    pub mode: LifecycleMode,
 }
 
 /// Lifecycle policy list.

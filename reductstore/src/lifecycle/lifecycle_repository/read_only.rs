@@ -5,7 +5,9 @@ use crate::lifecycle::ManageLifecycles;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::forbidden;
-use reduct_base::msg::lifecycle_api::{FullLifecycleInfo, LifecycleInfo, LifecycleSettings};
+use reduct_base::msg::lifecycle_api::{
+    FullLifecycleInfo, LifecycleInfo, LifecycleMode, LifecycleSettings,
+};
 
 pub(super) struct ReadOnlyLifecycleRepository;
 
@@ -49,6 +51,10 @@ impl ManageLifecycles for ReadOnlyLifecycleRepository {
 
     async fn is_lifecycle_running(&self, _name: &str) -> Result<bool, ReductError> {
         Err(forbidden!("Cannot get lifecycle in read-only mode"))
+    }
+
+    async fn set_mode(&mut self, _name: &str, _mode: LifecycleMode) -> Result<(), ReductError> {
+        Err(forbidden!("Cannot set lifecycle mode in read-only mode"))
     }
 
     async fn set_lifecycle_provisioned(
@@ -143,6 +149,13 @@ mod tests {
         assert_eq!(
             repo.remove_lifecycle("test").await.err().unwrap(),
             forbidden!("Cannot remove lifecycle in read-only mode")
+        );
+        assert_eq!(
+            repo.set_mode("test", LifecycleMode::Disabled)
+                .await
+                .err()
+                .unwrap(),
+            forbidden!("Cannot set lifecycle mode in read-only mode")
         );
     }
 

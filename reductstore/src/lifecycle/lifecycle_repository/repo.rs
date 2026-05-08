@@ -14,7 +14,7 @@ use async_trait::async_trait;
 use log::{debug, error, warn};
 use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{
-    FullLifecycleInfo, LifecycleInfo, LifecycleSettings, LifecycleType,
+    FullLifecycleInfo, LifecycleInfo, LifecycleMode, LifecycleSettings, LifecycleType,
 };
 use reduct_base::{conflict, not_found, unprocessable_entity};
 use serde::{Deserialize, Serialize};
@@ -116,6 +116,16 @@ impl ManageLifecycles for LifecycleRepository {
             .get(name)
             .map(|lifecycle| lifecycle.is_running())
             .ok_or_else(|| not_found!("Lifecycle '{}' does not exist", name))
+    }
+
+    async fn set_mode(&mut self, name: &str, mode: LifecycleMode) -> Result<(), ReductError> {
+        let mut guard = self.lifecycles.write().await?;
+        let lifecycle = guard
+            .get_mut(name)
+            .ok_or_else(|| not_found!("Lifecycle '{}' does not exist", name))?;
+        lifecycle.set_mode(mode);
+        drop(guard);
+        self.save_repo().await
     }
 
     async fn set_lifecycle_provisioned(
@@ -365,7 +375,7 @@ mod tests {
     use crate::cfg::lifecycle::LifecycleConfig;
     use crate::lifecycle::action::{LifecycleAction, LifecycleRunResult};
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::lifecycle_api::LifecycleType;
+    use reduct_base::msg::lifecycle_api::{LifecycleMode, LifecycleType};
     use reduct_base::{conflict, not_found, unprocessable_entity};
     use rstest::{fixture, rstest};
     use tokio::sync::mpsc;
@@ -488,6 +498,46 @@ mod tests {
         assert_eq!(
             repo.update_lifecycle("test", settings).await,
             Err(conflict!("Can't update provisioned lifecycle 'test'"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn sets_mode(#[future] mut repo: LifecycleRepository, settings: LifecycleSettings) {
+        let mut repo = repo.await;
+        repo.create_lifecycle("test", settings).await.unwrap();
+
+        repo.set_mode("test", LifecycleMode::Disabled)
+            .await
+            .unwrap();
+        assert_eq!(
+            repo.get_info("test").await.unwrap().info.mode,
+            LifecycleMode::Disabled
+        );
+        assert_eq!(
+            repo.get_lifecycle_settings("test").await.unwrap().mode,
+            LifecycleMode::Disabled
+        );
+
+        repo.set_mode("test", LifecycleMode::Enabled).await.unwrap();
+        assert_eq!(
+            repo.get_info("test").await.unwrap().info.mode,
+            LifecycleMode::Enabled
+        );
+        assert_eq!(
+            repo.get_lifecycle_settings("test").await.unwrap().mode,
+            LifecycleMode::Enabled
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_set_mode_for_missing_lifecycle(#[future] mut repo: LifecycleRepository) {
+        let mut repo = repo.await;
+
+        assert_eq!(
+            repo.set_mode("missing", LifecycleMode::Disabled).await,
+            Err(not_found!("Lifecycle 'missing' does not exist"))
         );
     }
 
@@ -688,6 +738,7 @@ mod tests {
             max_age: "1d".to_string(),
             interval: "1h".to_string(),
             when: None,
+            mode: LifecycleMode::Enabled,
         }
     }
 

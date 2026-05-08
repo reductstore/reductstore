@@ -8,9 +8,10 @@ use crate::lifecycle::audit::LifecycleAuditPayload;
 use crate::lifecycle::LifecycleAuditSink;
 use log::{debug, error};
 use reduct_base::error::ReductError;
-use reduct_base::msg::lifecycle_api::LifecycleType;
-use reduct_base::msg::lifecycle_api::{LifecycleInfo, LifecycleSettings};
-use std::sync::atomic::{AtomicBool, Ordering};
+use reduct_base::msg::lifecycle_api::{
+    LifecycleInfo, LifecycleMode, LifecycleSettings, LifecycleType,
+};
+use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -25,6 +26,7 @@ pub(super) struct LifecycleTask {
     context: LifecycleContext,
     audit_sink: Option<LifecycleAuditSink>,
     stop_flag: Arc<AtomicBool>,
+    mode: Arc<AtomicU8>,
     worker_handle: Option<JoinHandle<()>>,
 }
 
@@ -37,6 +39,7 @@ impl LifecycleTask {
         context: LifecycleContext,
         audit_sink: Option<LifecycleAuditSink>,
     ) -> Self {
+        let mode = settings.mode;
         Self {
             name,
             is_provisioned: false,
@@ -46,6 +49,7 @@ impl LifecycleTask {
             context,
             audit_sink,
             stop_flag: Arc::new(AtomicBool::new(false)),
+            mode: Arc::new(AtomicU8::new(mode as u8)),
             worker_handle: None,
         }
     }
@@ -63,10 +67,16 @@ impl LifecycleTask {
         let context = self.context.clone();
         let audit_sink = self.audit_sink.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
+        let mode = Arc::clone(&self.mode);
 
         let handle = tokio::spawn(async move {
             debug!("Lifecycle worker '{}' started", name);
             while !stop_flag.load(Ordering::Relaxed) {
+                if matches!(Self::load_mode_from(&mode), LifecycleMode::Disabled) {
+                    Self::sleep_with_stop(interval, Arc::clone(&stop_flag)).await;
+                    continue;
+                }
+
                 debug!(
                     "Lifecycle worker '{}' running {:?} action for bucket '{}'",
                     name,
@@ -127,6 +137,7 @@ impl LifecycleTask {
             name: self.name.clone(),
             is_provisioned: self.is_provisioned,
             is_running: self.is_running(),
+            mode: self.load_mode(),
         }
     }
 
@@ -146,8 +157,24 @@ impl LifecycleTask {
         self.audit_sink = audit_sink;
     }
 
+    pub(super) fn set_mode(&mut self, mode: LifecycleMode) {
+        self.settings.mode = mode;
+        self.mode.store(mode as u8, Ordering::Relaxed);
+    }
+
     pub(super) fn is_running(&self) -> bool {
         self.worker_handle.is_some()
+    }
+
+    fn load_mode(&self) -> LifecycleMode {
+        Self::load_mode_from(&self.mode)
+    }
+
+    fn load_mode_from(mode: &Arc<AtomicU8>) -> LifecycleMode {
+        match mode.load(Ordering::Relaxed) {
+            x if x == LifecycleMode::Disabled as u8 => LifecycleMode::Disabled,
+            _ => LifecycleMode::Enabled,
+        }
     }
 
     async fn sleep_with_stop(interval: Duration, stop_flag: Arc<AtomicBool>) {

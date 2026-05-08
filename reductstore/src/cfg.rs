@@ -77,6 +77,7 @@ pub struct ProvisionedReplication {
 #[derive(Clone, Default)]
 pub struct ProvisionedLifecycle {
     pub settings: LifecycleSettings,
+    pub mode_override: Option<String>,
 }
 
 #[derive(Clone)]

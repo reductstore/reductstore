@@ -5,7 +5,9 @@ use crate::audit::LogAuditEvent;
 use crate::core::sync::AsyncRwLock;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
-use reduct_base::msg::lifecycle_api::{FullLifecycleInfo, LifecycleInfo, LifecycleSettings};
+use reduct_base::msg::lifecycle_api::{
+    FullLifecycleInfo, LifecycleInfo, LifecycleMode, LifecycleSettings,
+};
 use std::sync::Arc;
 
 mod action;
@@ -46,6 +48,9 @@ pub trait ManageLifecycles {
 
     /// Check if lifecycle worker is running.
     async fn is_lifecycle_running(&self, name: &str) -> Result<bool, ReductError>;
+
+    /// Set lifecycle mode.
+    async fn set_mode(&mut self, name: &str, mode: LifecycleMode) -> Result<(), ReductError>;
 
     /// Mark lifecycle policy as provisioned/unprovisioned.
     async fn set_lifecycle_provisioned(
