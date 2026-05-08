@@ -152,7 +152,7 @@ mod tests {
     use super::*;
     use crate::api::components::StateKeeper;
     use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
-    use crate::audit::{AuditEvent, AUDIT_BUCKET_NAME};
+    use crate::audit::AUDIT_BUCKET_NAME;
     use axum::extract::ConnectInfo;
     use axum::http::Request;
     use axum::http::{HeaderMap, HeaderValue};
@@ -436,7 +436,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    async fn read_audit_event(keeper: &Arc<StateKeeper>, token_name: &str) -> Option<AuditEvent> {
+    async fn read_audit_event(
+        keeper: &Arc<StateKeeper>,
+        token_name: &str,
+    ) -> Option<serde_json::Value> {
         let components = keeper.get_anonymous().await.unwrap();
         let bucket = components
             .storage
@@ -512,14 +515,14 @@ mod tests {
 
         wait_for_audit_flush().await;
         let event = read_audit_event(&keeper, "unauthorized").await.unwrap();
-        assert_eq!(event.payload["token_name"], "unauthorized");
-        assert_eq!(event.payload["method"], "GET");
-        assert_eq!(event.payload["path"], "/protected");
-        assert_eq!(event.status, StatusCode::UNAUTHORIZED.as_u16());
-        assert_eq!(event.message, "");
-        assert_eq!(event.payload["call_count"], 1);
-        assert_eq!(event.instance, "unknown");
-        assert!(event.payload["duration"].as_f64().unwrap() >= 0.0);
+        assert_eq!(event["token_name"], "unauthorized");
+        assert_eq!(event["method"], "GET");
+        assert_eq!(event["path"], "/protected");
+        assert_eq!(event["status"], StatusCode::UNAUTHORIZED.as_u16());
+        assert_eq!(event["message"], "");
+        assert_eq!(event["call_count"], 1);
+        assert_eq!(event["instance"], "unknown");
+        assert!(event["duration"].as_f64().unwrap() >= 0.0);
     }
 
     #[rstest]
@@ -551,8 +554,8 @@ mod tests {
 
         wait_for_audit_flush().await;
         let event = read_audit_event(&keeper, "init-token").await.unwrap();
-        assert_eq!(event.status, StatusCode::INTERNAL_SERVER_ERROR.as_u16());
-        assert_eq!(event.message, "database unavailable");
+        assert_eq!(event["status"], StatusCode::INTERNAL_SERVER_ERROR.as_u16());
+        assert_eq!(event["message"], "database unavailable");
     }
 
     #[rstest]
@@ -584,7 +587,7 @@ mod tests {
 
         wait_for_audit_flush().await;
         let event = read_audit_event(&keeper, "init-token").await.unwrap();
-        let duration = event.payload["duration"].as_f64().unwrap();
+        let duration = event["duration"].as_f64().unwrap();
         assert!(
             (0.03..1.0).contains(&duration),
             "expected duration in seconds, got {}",
