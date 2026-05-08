@@ -231,6 +231,7 @@ async fn periodical_compact_storage(storage: Arc<StorageEngine>, sync_interval: 
 mod tests {
     use super::*;
     use crate::cfg::CoreExtCfgParser;
+    use crate::core::sync::reset_rwlock_config;
     use log::warn;
     use rstest::rstest;
     use serial_test::serial;
@@ -246,6 +247,14 @@ mod tests {
 
     static STOP_SERVER: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
+    struct RwLockResetGuard;
+
+    impl Drop for RwLockResetGuard {
+        fn drop(&mut self) {
+            reset_rwlock_config();
+        }
+    }
+
     pub(super) async fn shutdown_server(handle: Handle<SocketAddr>) {
         while !*STOP_SERVER.lock().await {
             sleep(Duration::from_millis(10)).await;
@@ -258,6 +267,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_launch_http() {
+        let _reset = RwLockResetGuard;
         let task = set_env_and_run(HashMap::new()).await;
 
         reqwest::get("http://127.0.0.1:8383/api/v1/info")
@@ -275,6 +285,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_launch_https() {
+        let _reset = RwLockResetGuard;
         let cert_path = resolve_misc_file("certificate.crt");
         let cert_key_path = resolve_misc_file("privateKey.key");
         let mut cfg = HashMap::new();
@@ -310,6 +321,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_compaction_task_runs_when_interval_non_zero() {
+        let _reset = RwLockResetGuard;
         let compactions = Arc::new(AtomicUsize::new(0));
         test_observer::set_compaction_observer(Some(compactions.clone()));
 

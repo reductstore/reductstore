@@ -286,11 +286,15 @@ impl Drop for LifecycleTask {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::audit::{AuditEvent, LogAuditEvent};
     use crate::cfg::Cfg;
+    use crate::core::sync::AsyncRwLock;
     use crate::lifecycle::action::LifecycleRunResult;
     use crate::storage::engine::StorageEngine;
     use async_trait::async_trait;
     use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::unprocessable_entity;
+    use std::sync::Mutex;
     use tokio::sync::mpsc;
     use tokio::time::{timeout, Duration};
 
@@ -405,6 +409,96 @@ mod tests {
         assert_eq!(call, "test");
 
         task.stop().await;
+    }
+
+    #[derive(Clone)]
+    struct CapturingAuditLogger {
+        events: Arc<Mutex<Vec<AuditEvent>>>,
+    }
+
+    #[async_trait]
+    impl LogAuditEvent for CapturingAuditLogger {
+        async fn log_event(&mut self, event: AuditEvent) -> Result<(), ReductError> {
+            self.events.lock().unwrap().push(event);
+            Ok(())
+        }
+    }
+
+    #[tokio::test]
+    async fn log_audit_event_writes_success_message() {
+        let captured = Arc::new(Mutex::new(Vec::<AuditEvent>::new()));
+        let sink = LifecycleAuditSink {
+            audit_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingAuditLogger {
+                events: Arc::clone(&captured),
+            })
+                as Box<dyn LogAuditEvent + Send + Sync>)),
+            instance_name: "instance-1".to_string(),
+        };
+
+        LifecycleTask::log_audit_event(
+            Some(sink),
+            "policy-1",
+            LifecycleType::Delete,
+            "bucket-1",
+            0.25,
+            Ok(42),
+        )
+        .await;
+
+        let events = captured.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+
+        assert_eq!(event.event_type, "lifecycle_run");
+        assert_eq!(event.instance, "instance-1");
+        assert_eq!(event.entry_name, "__lifecycle_tasks/policy-1");
+        assert_eq!(event.status, 200);
+        assert_eq!(event.message, "");
+        assert_eq!(event.payload["policy_name"], "policy-1");
+        assert_eq!(event.payload["action_type"], "delete");
+        assert_eq!(event.payload["bucket"], "bucket-1");
+        assert_eq!(event.payload["processed_records"], 42);
+        assert_eq!(event.payload["error_code"], serde_json::Value::Null);
+        assert_eq!(event.payload["error_message"], serde_json::Value::Null);
+    }
+
+    #[tokio::test]
+    async fn log_audit_event_writes_error_message() {
+        let captured = Arc::new(Mutex::new(Vec::<AuditEvent>::new()));
+        let sink = LifecycleAuditSink {
+            audit_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingAuditLogger {
+                events: Arc::clone(&captured),
+            })
+                as Box<dyn LogAuditEvent + Send + Sync>)),
+            instance_name: "instance-1".to_string(),
+        };
+
+        let err = unprocessable_entity!("failed to run");
+        LifecycleTask::log_audit_event(
+            Some(sink),
+            "policy-1",
+            LifecycleType::Delete,
+            "bucket-1",
+            0.25,
+            Err(err),
+        )
+        .await;
+
+        let events = captured.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+
+        assert_eq!(event.event_type, "lifecycle_run");
+        assert_eq!(event.instance, "instance-1");
+        assert_eq!(event.entry_name, "__lifecycle_tasks/policy-1");
+        assert_eq!(event.status, 422);
+        assert_eq!(event.message, "failed to run");
+        assert_eq!(event.payload["policy_name"], "policy-1");
+        assert_eq!(event.payload["action_type"], "delete");
+        assert_eq!(event.payload["bucket"], "bucket-1");
+        assert_eq!(event.payload["processed_records"], serde_json::Value::Null);
+        assert_eq!(event.payload["error_code"], 422);
+        assert_eq!(event.payload["error_message"], "failed to run");
     }
 
     async fn new_task(
