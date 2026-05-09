@@ -22,6 +22,9 @@ pub enum LifecycleMode {
     Enabled,
     /// Lifecycle is inactive and does not execute actions.
     Disabled,
+    /// Lifecycle runs in preview mode and does not remove records.
+    #[serde(rename = "dry_run")]
+    DryRun,
 }
 
 impl Default for LifecycleMode {
@@ -113,6 +116,10 @@ mod tests {
             serde_json::to_string(&LifecycleMode::Disabled).unwrap(),
             "\"disabled\""
         );
+        assert_eq!(
+            serde_json::to_string(&LifecycleMode::DryRun).unwrap(),
+            "\"dry_run\""
+        );
 
         assert_eq!(
             serde_json::from_str::<LifecycleMode>("\"enabled\"").unwrap(),
@@ -121,6 +128,10 @@ mod tests {
         assert_eq!(
             serde_json::from_str::<LifecycleMode>("\"disabled\"").unwrap(),
             LifecycleMode::Disabled
+        );
+        assert_eq!(
+            serde_json::from_str::<LifecycleMode>("\"dry_run\"").unwrap(),
+            LifecycleMode::DryRun
         );
     }
 

@@ -5,7 +5,7 @@ use crate::cfg::{CfgParser, ExtCfgBounds, ProvisionedLifecycle};
 use crate::core::env::{Env, GetEnv};
 use crate::lifecycle::{LifecycleAuditSink, LifecycleRepoBuilder, ManageLifecycles};
 use crate::storage::engine::StorageEngine;
-use log::{error, info};
+use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::lifecycle_api::{LifecycleMode, LifecycleSettings, LifecycleType};
 use std::collections::HashMap;
@@ -34,7 +34,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 if err.status() == ErrorCode::Conflict {
                     repo.update_lifecycle(name, settings).await?;
                 } else {
-                    error!("Failed to provision lifecycle '{}': {}", name, err);
+                    debug!(
+                        "Skip provisioning lifecycle '{}' because create failed: {}",
+                        name, err
+                    );
                     continue;
                 }
             }
@@ -144,8 +147,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                         lifecycle.settings.mode = LifecycleMode::Disabled;
                         lifecycle.mode_override = Some(mode);
                     }
+                    "dry_run" => {
+                        lifecycle.settings.mode = LifecycleMode::DryRun;
+                        lifecycle.mode_override = Some(mode);
+                    }
                     _ => {
-                        error!("Lifecycle '{}' has invalid mode '{}'. Drop it.", name, mode);
+                        debug!("Lifecycle '{}' has invalid mode '{}'. Drop it.", name, mode);
                         unfinished_lifecycles.push(id.clone());
                     }
                 }
@@ -349,6 +356,22 @@ mod tests {
         let lifecycle = lifecycles.get("purge-sensors-30d").unwrap();
         assert_eq!(lifecycle.settings.mode, LifecycleMode::Disabled);
         assert_eq!(lifecycle.mode_override, Some("disabled".to_string()));
+    }
+
+    #[rstest]
+    fn parse_lifecycles_parses_dry_run_mode() {
+        let getter = TestEnvGetter::new(&[
+            ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
+            ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
+            ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
+            ("RS_LIFECYCLE_A_MODE", "dry_run"),
+        ]);
+        let mut env = Env::new(getter);
+        let lifecycles = CfgParser::<TestEnvGetter>::parse_lifecycles(&mut env);
+
+        let lifecycle = lifecycles.get("purge-sensors-30d").unwrap();
+        assert_eq!(lifecycle.settings.mode, LifecycleMode::DryRun);
+        assert_eq!(lifecycle.mode_override, Some("dry_run".to_string()));
     }
 
     #[rstest]

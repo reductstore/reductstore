@@ -161,6 +161,7 @@ impl LifecycleTask {
     fn load_mode_from(mode: &Arc<AtomicU8>) -> LifecycleMode {
         match mode.load(Ordering::Relaxed) {
             x if x == LifecycleMode::Disabled as u8 => LifecycleMode::Disabled,
+            x if x == LifecycleMode::DryRun as u8 => LifecycleMode::DryRun,
             _ => LifecycleMode::Enabled,
         }
     }
@@ -233,7 +234,7 @@ impl LifecycleTask {
             payload,
         };
 
-        info!(
+        debug!(
             "Lifecycle audit event: policy='{}', action='{}', bucket='{}', status={}, message='{}', payload={}",
             name,
             format!("{:?}", action_type).to_lowercase(),
@@ -392,6 +393,33 @@ mod tests {
 
         let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(action);
         let mut task = new_task(LifecycleMode::Enabled, action).await;
+        task.start();
+
+        let call = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(call, "test");
+
+        task.stop().await;
+    }
+
+    #[tokio::test]
+    async fn worker_runs_action_when_dry_run() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut action = MockAction::new();
+        action
+            .expect_lifecycle_type()
+            .return_const(LifecycleType::Delete);
+        action.expect_run().times(1).returning(move |name, _, _| {
+            tx.send(name.to_string()).unwrap();
+            Ok(LifecycleRunResult {
+                affected_records: 1,
+            })
+        });
+
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(action);
+        let mut task = new_task(LifecycleMode::DryRun, action).await;
         task.start();
 
         let call = timeout(Duration::from_secs(1), rx.recv())
