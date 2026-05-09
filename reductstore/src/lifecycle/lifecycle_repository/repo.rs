@@ -26,6 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const LIFECYCLE_REPO_FILE_NAME: &str = ".lifecycles";
+const MIN_LIFECYCLE_MAX_AGE_US: i64 = 60 * 60 * 1_000_000;
 
 type LifecycleActionBuilder = Arc<
     dyn Fn(LifecycleType) -> Arc<dyn crate::lifecycle::action::LifecycleAction + Send + Sync>
@@ -268,9 +269,16 @@ impl LifecycleRepository {
             ));
         }
 
-        parse_duration_to_micros(&settings.max_age).map_err(|err| {
+        let max_age_us = parse_duration_to_micros(&settings.max_age).map_err(|err| {
             unprocessable_entity!("Invalid lifecycle max age '{}': {}", settings.max_age, err)
         })?;
+
+        if max_age_us < MIN_LIFECYCLE_MAX_AGE_US {
+            return Err(unprocessable_entity!(
+                "Lifecycle max age '{}' is shorter than minimum allowed value of 1h",
+                settings.max_age
+            ));
+        }
 
         let interval_us = parse_duration_to_micros(&settings.interval).map_err(|err| {
             unprocessable_entity!(
@@ -528,6 +536,13 @@ mod tests {
             "Invalid lifecycle max age '30days': [UnprocessableEntity] Invalid duration unit: days"
         )
     )]
+    #[case::too_short_max_age(
+        LifecycleSettings {
+            max_age: "30m".to_string(),
+            ..settings_fixture()
+        },
+        unprocessable_entity!("Lifecycle max age '30m' is shorter than minimum allowed value of 1h")
+    )]
     #[case::bad_when(
         LifecycleSettings {
             when: Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y"]})),
@@ -781,7 +796,7 @@ mod tests {
             lifecycle_type: LifecycleType::Delete,
             bucket: "bucket-1".to_string(),
             entries: vec!["entry-1".to_string()],
-            max_age: "1d".to_string(),
+            max_age: "1h".to_string(),
             interval: "1h".to_string(),
             when: None,
             mode: LifecycleMode::Enabled,

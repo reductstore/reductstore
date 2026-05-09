@@ -12,6 +12,8 @@ use reduct_base::msg::lifecycle_api::{LifecycleMode, LifecycleSettings, Lifecycl
 use std::collections::HashMap;
 use std::sync::Arc;
 
+const MIN_LIFECYCLE_MAX_AGE_US: i64 = 60 * 60 * 1_000_000;
+
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_lifecycle_repo(
         &self,
@@ -98,10 +100,22 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             if let Some(max_age) =
                 env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_MAX_AGE", id))
             {
-                if let Err(err) = parse_duration_to_micros(&max_age) {
+                let max_age_us = match parse_duration_to_micros(&max_age) {
+                    Ok(value) => value,
+                    Err(err) => {
+                        error!(
+                            "Lifecycle '{}' has invalid max age '{}': {}. Drop it.",
+                            name, max_age, err
+                        );
+                        unfinished_lifecycles.push(id.clone());
+                        continue;
+                    }
+                };
+
+                if max_age_us < MIN_LIFECYCLE_MAX_AGE_US {
                     error!(
-                        "Lifecycle '{}' has invalid max age '{}': {}. Drop it.",
-                        name, max_age, err
+                        "Lifecycle '{}' has max age '{}' shorter than minimum 1h. Drop it.",
+                        name, max_age
                     );
                     unfinished_lifecycles.push(id.clone());
                     continue;
@@ -306,6 +320,7 @@ mod tests {
     #[rstest]
     #[case("RS_LIFECYCLE_A_TYPE", "archive")]
     #[case("RS_LIFECYCLE_A_MAX_AGE", "30days")]
+    #[case("RS_LIFECYCLE_A_MAX_AGE", "30m")]
     #[case("RS_LIFECYCLE_A_INTERVAL", "10minutes")]
     #[case("RS_LIFECYCLE_A_WHEN", r#"{"$eq":["&label","true"]"#)]
     #[case("RS_LIFECYCLE_A_MODE", "paused")]
