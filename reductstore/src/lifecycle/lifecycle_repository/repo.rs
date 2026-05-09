@@ -621,8 +621,9 @@ mod tests {
     #[tokio::test]
     async fn starts_worker_and_calls_action(
         #[future] storage: Arc<StorageEngine>,
-        settings: LifecycleSettings,
+        mut settings: LifecycleSettings,
     ) {
+        settings.interval = "100ms".to_string();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut action = MockAction::new();
         action
@@ -667,8 +668,9 @@ mod tests {
     #[tokio::test]
     async fn starts_new_lifecycle_when_repo_is_already_started(
         #[future] storage: Arc<StorageEngine>,
-        settings: LifecycleSettings,
+        mut settings: LifecycleSettings,
     ) {
+        settings.interval = "100ms".to_string();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut action = MockAction::new();
         action

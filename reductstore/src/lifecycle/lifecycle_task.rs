@@ -77,6 +77,11 @@ impl LifecycleTask {
                     continue;
                 }
 
+                Self::sleep_with_stop(interval, Arc::clone(&stop_flag)).await;
+                if stop_flag.load(Ordering::Relaxed) {
+                    break;
+                }
+
                 let started = std::time::Instant::now();
                 match action.run(&name, &settings, context.clone()).await {
                     Ok(result) => {
@@ -103,7 +108,6 @@ impl LifecycleTask {
                         .await;
                     }
                 }
-                Self::sleep_with_stop(interval, Arc::clone(&stop_flag)).await;
             }
             debug!("Lifecycle worker '{}' stopped", name);
         });
@@ -389,6 +393,35 @@ mod tests {
         let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(action);
         let mut task = new_task(LifecycleMode::Enabled, action).await;
         task.start();
+
+        let call = timeout(Duration::from_secs(1), rx.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(call, "test");
+
+        task.stop().await;
+    }
+
+    #[tokio::test]
+    async fn worker_waits_interval_before_first_run() {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut action = MockAction::new();
+        action
+            .expect_lifecycle_type()
+            .return_const(LifecycleType::Delete);
+        action.expect_run().times(1).returning(move |name, _, _| {
+            tx.send(name.to_string()).unwrap();
+            Ok(LifecycleRunResult {
+                affected_records: 1,
+            })
+        });
+
+        let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(action);
+        let mut task = new_task(LifecycleMode::Enabled, action).await;
+        task.start();
+
+        assert!(timeout(Duration::from_millis(50), rx.recv()).await.is_err());
 
         let call = timeout(Duration::from_secs(1), rx.recv())
             .await
