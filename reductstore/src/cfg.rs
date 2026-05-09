@@ -3,7 +3,6 @@
 
 pub mod audit;
 pub mod io;
-pub mod lifecycle;
 pub mod limits;
 pub mod lock_file;
 mod provision;
@@ -21,7 +20,6 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType, GeneralBackendConfig};
 use crate::cfg::audit::AuditConfig;
 use crate::cfg::io::IoConfig;
-use crate::cfg::lifecycle::LifecycleConfig;
 use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
@@ -105,7 +103,6 @@ pub struct Cfg {
     pub io_conf: IoConfig,
     pub audit_conf: AuditConfig,
     pub replication_conf: ReplicationConfig,
-    pub lifecycle_conf: LifecycleConfig,
     pub backend_config: GeneralBackendConfig,
     pub lock_file_config: LockFileConfig,
     pub rw_lock_config: RwLockConfig,
@@ -140,7 +137,6 @@ impl Default for Cfg {
             io_conf: IoConfig::default(),
             audit_conf: AuditConfig::default(),
             replication_conf: ReplicationConfig::default(),
-            lifecycle_conf: LifecycleConfig::default(),
             backend_config: GeneralBackendConfig::default(),
             lock_file_config: LockFileConfig::default(),
             rw_lock_config: RwLockConfig::default(),
@@ -314,7 +310,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             io_conf: Self::parse_io_config(&mut env),
             audit_conf: Self::parse_audit_config(&mut env, &api_token, has_lifecycles),
             replication_conf: Self::parse_replication_config(&mut env, port),
-            lifecycle_conf: Self::parse_lifecycle_config(&mut env),
             backend_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),

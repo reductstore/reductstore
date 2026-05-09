@@ -27,6 +27,14 @@ use std::time::Duration;
 
 const LIFECYCLE_REPO_FILE_NAME: &str = ".lifecycles";
 const MIN_LIFECYCLE_MAX_AGE_US: i64 = 60 * 60 * 1_000_000;
+#[cfg(debug_assertions)]
+const MIN_LIFECYCLE_INTERVAL_US: i64 = 10 * 1_000_000;
+#[cfg(not(debug_assertions))]
+const MIN_LIFECYCLE_INTERVAL_US: i64 = 10 * 60 * 1_000_000;
+#[cfg(debug_assertions)]
+const MIN_LIFECYCLE_INTERVAL_LABEL: &str = "10s";
+#[cfg(not(debug_assertions))]
+const MIN_LIFECYCLE_INTERVAL_LABEL: &str = "10m";
 
 type LifecycleActionBuilder = Arc<
     dyn Fn(LifecycleType) -> Arc<dyn crate::lifecycle::action::LifecycleAction + Send + Sync>
@@ -288,6 +296,14 @@ impl LifecycleRepository {
             )
         })?;
 
+        if interval_us < MIN_LIFECYCLE_INTERVAL_US {
+            return Err(unprocessable_entity!(
+                "Lifecycle interval '{}' is shorter than minimum allowed value of {}",
+                settings.interval,
+                MIN_LIFECYCLE_INTERVAL_LABEL
+            ));
+        }
+
         if let Some(when) = &settings.when {
             let (_, directives) = Parser::new().parse(when.clone()).map_err(|err| {
                 unprocessable_entity!("Invalid lifecycle condition: {}", err.message)
@@ -350,7 +366,6 @@ impl LifecycleRepository {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cfg::lifecycle::LifecycleConfig;
     use crate::lifecycle::action::{LifecycleAction, LifecycleRunResult};
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::lifecycle_api::{LifecycleMode, LifecycleType};
@@ -549,6 +564,13 @@ mod tests {
             ..settings_fixture()
         },
         unprocessable_entity!("Invalid lifecycle condition: Operator '$UNKNOWN_OP' not supported")
+    )]
+    #[case::too_short_interval(
+        LifecycleSettings {
+            interval: "5s".to_string(),
+            ..settings_fixture()
+        },
+        too_short_interval_error()
     )]
     #[case::ext_when(
         LifecycleSettings {
@@ -803,13 +825,22 @@ mod tests {
         }
     }
 
+    #[cfg(debug_assertions)]
+    fn too_short_interval_error() -> ReductError {
+        unprocessable_entity!(
+            "Lifecycle interval '5s' is shorter than minimum allowed value of 10s"
+        )
+    }
+
+    #[cfg(not(debug_assertions))]
+    fn too_short_interval_error() -> ReductError {
+        unprocessable_entity!(
+            "Lifecycle interval '5s' is shorter than minimum allowed value of 10m"
+        )
+    }
+
     fn lifecycle_cfg() -> Cfg {
-        Cfg {
-            lifecycle_conf: LifecycleConfig {
-                interval: Duration::from_secs(3600),
-            },
-            ..Cfg::default()
-        }
+        Cfg::default()
     }
 
     #[fixture]
