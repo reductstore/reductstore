@@ -27,13 +27,13 @@ use std::time::Duration;
 
 const LIFECYCLE_REPO_FILE_NAME: &str = ".lifecycles";
 const MIN_LIFECYCLE_MAX_AGE_US: i64 = 60 * 60 * 1_000_000;
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 const MIN_LIFECYCLE_INTERVAL_US: i64 = 10 * 1_000_000;
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, test)))]
 const MIN_LIFECYCLE_INTERVAL_US: i64 = 10 * 60 * 1_000_000;
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, test))]
 const MIN_LIFECYCLE_INTERVAL_LABEL: &str = "10s";
-#[cfg(not(debug_assertions))]
+#[cfg(not(any(debug_assertions, test)))]
 const MIN_LIFECYCLE_INTERVAL_LABEL: &str = "10m";
 
 type LifecycleActionBuilder = Arc<
@@ -660,7 +660,7 @@ mod tests {
         #[future] storage: Arc<StorageEngine>,
         mut settings: LifecycleSettings,
     ) {
-        settings.interval = "100ms".to_string();
+        settings.interval = "10s".to_string();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut action = MockAction::new();
         action
@@ -691,7 +691,7 @@ mod tests {
         repo.create_lifecycle("test", settings).await.unwrap();
 
         repo.start().await.unwrap();
-        let call = timeout(Duration::from_secs(1), rx.recv())
+        let call = timeout(Duration::from_secs(12), rx.recv())
             .await
             .unwrap()
             .unwrap();
@@ -707,7 +707,7 @@ mod tests {
         #[future] storage: Arc<StorageEngine>,
         mut settings: LifecycleSettings,
     ) {
-        settings.interval = "100ms".to_string();
+        settings.interval = "10s".to_string();
         let (tx, mut rx) = mpsc::unbounded_channel();
         let mut action = MockAction::new();
         action
@@ -728,7 +728,7 @@ mod tests {
         repo.create_lifecycle("test", settings).await.unwrap();
 
         assert_eq!(
-            timeout(Duration::from_secs(1), rx.recv()).await.unwrap(),
+            timeout(Duration::from_secs(12), rx.recv()).await.unwrap(),
             Some("test".to_string())
         );
         repo.stop().await;
