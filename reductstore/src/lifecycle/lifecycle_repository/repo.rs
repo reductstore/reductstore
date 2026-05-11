@@ -825,14 +825,14 @@ mod tests {
         }
     }
 
-    #[cfg(debug_assertions)]
+    #[cfg(any(debug_assertions, test))]
     fn too_short_interval_error() -> ReductError {
         unprocessable_entity!(
             "Lifecycle interval '5s' is shorter than minimum allowed value of 10s"
         )
     }
 
-    #[cfg(not(debug_assertions))]
+    #[cfg(not(any(debug_assertions, test)))]
     fn too_short_interval_error() -> ReductError {
         unprocessable_entity!(
             "Lifecycle interval '5s' is shorter than minimum allowed value of 10m"

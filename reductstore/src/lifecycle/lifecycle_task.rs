@@ -6,7 +6,7 @@ use crate::lifecycle::action::{LifecycleAction, LifecycleContext};
 use crate::lifecycle::audit::LifecycleAuditPayload;
 
 use crate::lifecycle::LifecycleAuditSink;
-use log::{debug, error, info};
+use log::{debug, error};
 use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{
     LifecycleInfo, LifecycleMode, LifecycleSettings, LifecycleType,
