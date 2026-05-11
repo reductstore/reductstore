@@ -284,10 +284,12 @@ pub(in crate::storage) async fn create_wal(entry_path: PathBuf) -> Box<dyn Wal +
     }
 
     if !wal_folder.try_exists().unwrap() {
-        FILE_CACHE
-            .create_dir_all(&wal_folder)
-            .await
-            .expect("Failed to create WAL folder");
+        if let Err(err) = FILE_CACHE.create_dir_all(&wal_folder).await {
+            panic!(
+                "Failed to create WAL folder {:?} for entry {:?}: {}",
+                wal_folder, entry_path, err
+            );
+        }
     }
     Box::new(WalImpl::new(entry_path.join(WAL_DIR)))
 }

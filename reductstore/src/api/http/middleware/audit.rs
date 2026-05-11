@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::audit::ApiAuditPayload;
 use crate::api::components::{Components, StateKeeper};
 use crate::api::http::middleware::client_ip::client_ip_from_request;
 use crate::api::http::HttpError;
@@ -121,25 +122,31 @@ async fn write_audit_event(
     client_ip: Option<String>,
     duration: f64,
 ) {
+    let payload = ApiAuditPayload {
+        token_name: token_name.clone(),
+        method: method.clone(),
+        path: path.clone(),
+        client_ip: client_ip.clone(),
+        call_count: 1,
+        duration,
+    };
+
     let event = AuditEvent {
+        event_type: "api_call".to_string(),
         timestamp: SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_micros() as u64,
         instance: components.cfg.instance_name.clone(),
-        token_name,
-        method,
-        path,
+        entry_name: payload.entry_name(),
         status,
         message,
-        client_ip,
-        call_count: 1,
-        duration,
+        payload: payload.to_value(),
     };
 
-    match components.audit_repo.write().await {
-        Ok(mut audit_repo) => {
-            if let Err(err) = audit_repo.log_event(event).await {
+    match components.audit_logger.write().await {
+        Ok(mut audit_logger) => {
+            if let Err(err) = audit_logger.log_event(event).await {
                 debug!("Failed to persist audit event: {}", err);
             }
         }

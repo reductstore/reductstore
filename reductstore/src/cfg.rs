@@ -15,7 +15,7 @@ pub mod zenoh;
 use crate::api::components::Components;
 use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
-use crate::audit::AuditRepositoryBuilder;
+use crate::audit::AuditLoggerBuilder;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType, GeneralBackendConfig};
 use crate::cfg::audit::AuditConfig;
@@ -31,6 +31,7 @@ use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
+use crate::lifecycle::LifecycleAuditSink;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use async_trait::async_trait;
 use log::{info, warn};
@@ -39,6 +40,7 @@ use reduct_base::ext::{ExtSettings, IoExtension};
 use reduct_base::internal_server_error;
 use reduct_base::logger::Logger;
 use reduct_base::msg::bucket_api::BucketSettings;
+use reduct_base::msg::lifecycle_api::LifecycleSettings;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use reduct_base::msg::server_api::License;
 use reduct_base::msg::token_api::Token;
@@ -70,6 +72,12 @@ pub struct ProvisionedReplication {
     pub mode_override: Option<String>,
 }
 
+#[derive(Clone, Default)]
+pub struct ProvisionedLifecycle {
+    pub settings: LifecycleSettings,
+    pub mode_override: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct Cfg {
     pub log_level: String,
@@ -91,6 +99,7 @@ pub struct Cfg {
     pub buckets: HashMap<String, BucketSettings>,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ProvisionedReplication>,
+    pub lifecycles: HashMap<String, ProvisionedLifecycle>,
     pub io_conf: IoConfig,
     pub audit_conf: AuditConfig,
     pub replication_conf: ReplicationConfig,
@@ -124,6 +133,7 @@ impl Default for Cfg {
             buckets: HashMap::new(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
+            lifecycles: HashMap::new(),
             io_conf: IoConfig::default(),
             audit_conf: AuditConfig::default(),
             replication_conf: ReplicationConfig::default(),
@@ -268,6 +278,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let ext_cfg = ext_parser.from_env(&mut env, version).await;
 
         let replications = Self::parse_replications(&mut env);
+        let lifecycles = Self::parse_lifecycles(&mut env);
+        let has_lifecycles = !lifecycles.is_empty();
 
         let api_token = env.get_masked("RS_API_TOKEN", "".to_string());
 
@@ -294,8 +306,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
             replications,
+            lifecycles,
             io_conf: Self::parse_io_config(&mut env),
-            audit_conf: Self::parse_audit_config(&mut env, &api_token),
+            audit_conf: Self::parse_audit_config(&mut env, &api_token, has_lifecycles),
             replication_conf: Self::parse_replication_config(&mut env, port),
             backend_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
@@ -399,9 +412,20 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .server_info(server_info.clone())
             .build();
         let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
-        let audit_repo = AuditRepositoryBuilder::new(self.cfg.clone())
+        let audit_logger = AuditLoggerBuilder::new(self.cfg.clone())
             .build(Arc::clone(&storage))
             .await;
+        let audit_logger = Arc::new(AsyncRwLock::new(audit_logger));
+
+        let lifecycle_engine = self
+            .provision_lifecycle_repo(
+                Arc::clone(&storage),
+                LifecycleAuditSink {
+                    audit_logger: Arc::clone(&audit_logger),
+                    instance_name: self.cfg.instance_name.clone(),
+                },
+            )
+            .await?;
 
         Ok(Components {
             storage: Arc::clone(&storage),
@@ -409,6 +433,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             auth: TokenAuthorization::new(&self.cfg.api_token),
             console,
             replication_repo: AsyncRwLock::new(replication_engine),
+            lifecycle_repo: AsyncRwLock::new(lifecycle_engine),
             ext_repo: create_ext_repository(
                 ext_path,
                 static_extensions,
@@ -420,7 +445,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),
-            audit_repo: AsyncRwLock::new(audit_repo),
+            audit_logger,
             limits: LimitsBuilder::new()
                 .with_config(self.cfg.limits_config)
                 .build(),

@@ -124,6 +124,58 @@ impl Entry {
         Ok(total_records)
     }
 
+    /// Query and count multiple records over a range of timestamps.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - The query options.
+    ///
+    /// # Returns
+    ///
+    /// The number of matched records.
+    ///
+    /// # Errors
+    ///
+    /// * If the query fails.
+    pub async fn query_count_records(&self, mut options: QueryEntry) -> Result<u64, ReductError> {
+        options.continuous = None; // force non-continuous query
+
+        let rx = async || {
+            // io defaults isn't used in count queries
+            let query_id = self.query(options).await?;
+            self.get_query_receiver(query_id).await
+        };
+
+        let rx = match rx().await {
+            Ok((rx, _)) => rx,
+            Err(e) => return Err(e).into(),
+        };
+
+        let mut continue_query = true;
+        let mut total_records = 0;
+
+        while continue_query {
+            let result = &mut rx.upgrade()?.write().await?.recv().await;
+            match result {
+                Some(Ok(_)) => {
+                    total_records += 1;
+                }
+                Some(Err(ReductError {
+                    status: ErrorCode::NoContent,
+                    ..
+                })) => {
+                    continue_query = false;
+                }
+                None => {
+                    continue_query = false;
+                }
+                Some(Err(e)) => return Err(e.clone()),
+            }
+        }
+
+        Ok(total_records)
+    }
+
     async fn inner_remove_records(
         timestamps: Vec<u64>,
         block_manager: Arc<AsyncRwLock<BlockManager>>,
@@ -262,6 +314,26 @@ mod tests {
             entry_with_data.begin_read(3).await.err().unwrap(),
             not_found!("Record 3 not found in block bucket/entry/3")
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_query_count_records(#[future] entry_with_data: Arc<Entry>) {
+        let entry_with_data = entry_with_data.await;
+
+        let params = QueryEntry {
+            start: Some(2),
+            stop: Some(4),
+            ..Default::default()
+        };
+
+        let counted_records = entry_with_data.query_count_records(params).await.unwrap();
+
+        assert_eq!(counted_records, 2);
+
+        assert!(entry_with_data.begin_read(2).await.is_ok());
+        assert!(entry_with_data.begin_read(3).await.is_ok());
     }
 
     // TODO: replace with multiple add/remove on RwLock

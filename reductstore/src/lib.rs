@@ -9,6 +9,7 @@ pub mod cfg;
 pub mod core;
 pub mod ext;
 pub mod launcher;
+pub mod lifecycle;
 pub mod lock_file;
 pub mod replication;
 pub mod storage;

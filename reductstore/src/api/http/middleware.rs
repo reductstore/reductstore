@@ -152,7 +152,7 @@ mod tests {
     use super::*;
     use crate::api::components::StateKeeper;
     use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
-    use crate::audit::{AuditEvent, AUDIT_BUCKET_NAME};
+    use crate::audit::AUDIT_BUCKET_NAME;
     use axum::extract::ConnectInfo;
     use axum::http::Request;
     use axum::http::{HeaderMap, HeaderValue};
@@ -436,7 +436,10 @@ mod tests {
         assert_eq!(response.status(), StatusCode::SERVICE_UNAVAILABLE);
     }
 
-    async fn read_audit_event(keeper: &Arc<StateKeeper>, token_name: &str) -> Option<AuditEvent> {
+    async fn read_audit_event(
+        keeper: &Arc<StateKeeper>,
+        token_name: &str,
+    ) -> Option<serde_json::Value> {
         let components = keeper.get_anonymous().await.unwrap();
         let bucket = components
             .storage
@@ -445,10 +448,26 @@ mod tests {
             .ok()?;
         let bucket = bucket.upgrade_and_unwrap();
         let info = Arc::clone(&bucket).info().await.unwrap();
+        let available_entries: Vec<String> = info
+            .entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect();
         let entry = info
             .entries
             .into_iter()
-            .find(|entry| entry.name.ends_with(&format!("/{}", token_name)))?;
+            .find(|entry| entry.name.ends_with(&format!("/{}", token_name)));
+
+        let entry = match entry {
+            Some(entry) => entry,
+            None => {
+                eprintln!(
+                    "audit entry lookup failed: token='{}', available_entries={:?}",
+                    token_name, available_entries
+                );
+                return None;
+            }
+        };
         let mut reader = bucket
             .begin_read(&entry.name, entry.oldest_record)
             .await
@@ -512,14 +531,14 @@ mod tests {
 
         wait_for_audit_flush().await;
         let event = read_audit_event(&keeper, "unauthorized").await.unwrap();
-        assert_eq!(event.token_name, "unauthorized");
-        assert_eq!(event.method, "GET");
-        assert_eq!(event.path, "/protected");
-        assert_eq!(event.status, StatusCode::UNAUTHORIZED.as_u16());
-        assert_eq!(event.message, "");
-        assert_eq!(event.call_count, 1);
-        assert_eq!(event.instance, "unknown");
-        assert!(event.duration >= 0.0);
+        assert_eq!(event["token_name"], "unauthorized");
+        assert_eq!(event["method"], "GET");
+        assert_eq!(event["path"], "/protected");
+        assert_eq!(event["status"], StatusCode::UNAUTHORIZED.as_u16());
+        assert_eq!(event["message"], "");
+        assert_eq!(event["call_count"], 1);
+        assert_eq!(event["instance"], "unknown");
+        assert!(event["duration"].as_f64().unwrap() >= 0.0);
     }
 
     #[rstest]
@@ -551,8 +570,8 @@ mod tests {
 
         wait_for_audit_flush().await;
         let event = read_audit_event(&keeper, "init-token").await.unwrap();
-        assert_eq!(event.status, StatusCode::INTERNAL_SERVER_ERROR.as_u16());
-        assert_eq!(event.message, "database unavailable");
+        assert_eq!(event["status"], StatusCode::INTERNAL_SERVER_ERROR.as_u16());
+        assert_eq!(event["message"], "database unavailable");
     }
 
     #[rstest]
@@ -584,11 +603,11 @@ mod tests {
 
         wait_for_audit_flush().await;
         let event = read_audit_event(&keeper, "init-token").await.unwrap();
-        assert_eq!(event.instance, "unknown");
+        let duration = event["duration"].as_f64().unwrap();
         assert!(
-            (0.03..1.0).contains(&event.duration),
+            (0.03..1.0).contains(&duration),
             "expected duration in seconds, got {}",
-            event.duration
+            duration
         );
     }
 

@@ -551,6 +551,10 @@ impl FileCache {
             .await?;
         Ok(())
     }
+
+    pub fn stop_sync_worker(&self) {
+        self.stop_sync_worker.store(true, Ordering::Relaxed);
+    }
 }
 
 impl Drop for FileCache {

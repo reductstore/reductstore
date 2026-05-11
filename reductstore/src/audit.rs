@@ -1,91 +1,126 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-mod aggregator;
+mod full_access;
 mod read_only;
-mod repo;
 
-use crate::audit::read_only::ReadOnlyAuditRepository;
-use crate::audit::repo::AuditRepository;
+use crate::audit::full_access::FullAccessAuditLogger;
+use crate::audit::read_only::ReadOnlyAuditLogger;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
+use reduct_base::internal_server_error;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
 
 pub(crate) const AUDIT_BUCKET_NAME: &str = "$audit";
 
+pub(crate) type AuditFlushFuture = Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>;
+pub(crate) type AuditAggregationHandler = Arc<dyn Fn(AuditEvent) -> AuditFlushFuture + Send + Sync>;
+
 #[async_trait]
-pub(crate) trait ManageAudit {
+pub(crate) trait AuditEventAggregator: Send + Sync {
+    async fn log_event(&self, event: AuditEvent) -> Result<(), ReductError>;
+}
+
+pub(crate) type BoxedAuditEventAggregator = Box<dyn AuditEventAggregator + Send + Sync>;
+
+pub(crate) fn build_audit_event_aggregator(
+    handler: AuditAggregationHandler,
+) -> BoxedAuditEventAggregator {
+    Box::new(crate::api::audit::aggregator::ApiAuditEventAggregator::new(
+        handler,
+    ))
+}
+
+#[async_trait]
+pub(crate) trait LogAuditEvent {
     async fn log_event(&mut self, event: AuditEvent) -> Result<(), ReductError>;
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub(crate) struct AuditEvent {
+    #[serde(default = "default_audit_type", rename = "type")]
+    pub event_type: String,
     pub timestamp: u64,
     #[serde(default = "default_audit_instance")]
     pub instance: String,
-    pub token_name: String,
-    #[serde(default = "default_audit_method")]
-    pub method: String,
-    #[serde(default = "default_audit_path")]
-    pub path: String,
+    pub entry_name: String,
     pub status: u16,
+    #[serde(default = "default_audit_message")]
     pub message: String,
-    #[serde(default)]
-    pub client_ip: Option<String>,
-    pub call_count: u64,
-    pub duration: f64,
+    pub payload: Value,
+}
+
+impl AuditEvent {
+    pub(crate) fn to_flat_json(&self) -> Result<Vec<u8>, ReductError> {
+        let mut map = serde_json::Map::new();
+        map.insert("timestamp".to_string(), serde_json::json!(self.timestamp));
+        map.insert("instance".to_string(), serde_json::json!(self.instance));
+        map.insert("status".to_string(), serde_json::json!(self.status));
+        map.insert("message".to_string(), serde_json::json!(self.message));
+        if let Value::Object(payload_map) = &self.payload {
+            for (k, v) in payload_map {
+                map.insert(k.clone(), v.clone());
+            }
+        }
+
+        serde_json::to_vec(&map)
+            .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))
+    }
+}
+
+fn default_audit_type() -> String {
+    "api_call".to_string()
 }
 
 fn default_audit_instance() -> String {
     "unknown".to_string()
 }
 
-fn default_audit_method() -> String {
-    "UNKNOWN".to_string()
-}
-
-fn default_audit_path() -> String {
+fn default_audit_message() -> String {
     "".to_string()
 }
 
-pub(crate) struct AuditRepositoryBuilder {
+pub(crate) struct AuditLoggerBuilder {
     cfg: Cfg,
 }
 
-impl AuditRepositoryBuilder {
+impl AuditLoggerBuilder {
     pub fn new(cfg: Cfg) -> Self {
         Self { cfg }
     }
 
-    pub async fn build(self, storage: Arc<StorageEngine>) -> BoxedAuditRepository {
+    pub async fn build(self, storage: Arc<StorageEngine>) -> BoxedAuditLogger {
         if !self.cfg.audit_conf.enabled {
-            Box::new(DisabledAuditRepository)
+            Box::new(DisabledAuditLogger)
         } else if self.cfg.role == InstanceRole::Replica {
-            Box::new(ReadOnlyAuditRepository::new(self.cfg, storage).await)
+            Box::new(ReadOnlyAuditLogger::new(self.cfg, storage).await)
         } else {
-            Box::new(AuditRepository::new(self.cfg, storage).await)
+            Box::new(FullAccessAuditLogger::new(self.cfg, storage).await)
         }
     }
 }
 
-struct DisabledAuditRepository;
+struct DisabledAuditLogger;
 
 #[async_trait]
-impl ManageAudit for DisabledAuditRepository {
+impl LogAuditEvent for DisabledAuditLogger {
     async fn log_event(&mut self, _event: AuditEvent) -> Result<(), ReductError> {
         Ok(())
     }
 }
 
-pub(crate) type BoxedAuditRepository = Box<dyn ManageAudit + Send + Sync>;
+pub(crate) type BoxedAuditLogger = Box<dyn LogAuditEvent + Send + Sync>;
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::audit::aggregator::AGGREGATION_WINDOW_SECS;
+    use crate::api::audit::aggregator::AGGREGATION_WINDOW_SECS;
     use crate::cfg::Cfg;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
@@ -112,16 +147,20 @@ mod tests {
 
     fn make_event() -> AuditEvent {
         AuditEvent {
+            event_type: "api_call".to_string(),
             timestamp: 1,
             instance: "test-instance".to_string(),
-            token_name: "token-1".to_string(),
-            method: "GET".to_string(),
-            path: "/api/v1/info".to_string(),
+            entry_name: "token-1".to_string(),
             status: 200,
             message: "".to_string(),
-            client_ip: None,
-            call_count: 1,
-            duration: 0.1,
+            payload: serde_json::json!({
+                "token_name": "token-1",
+                "method": "GET",
+                "path": "/api/v1/info",
+                "client_ip": null,
+                "call_count": 1,
+                "duration": 0.1
+            }),
         }
     }
 
@@ -131,7 +170,7 @@ mod tests {
         #[future] storage_and_cfg: (Arc<StorageEngine>, Cfg),
     ) {
         let (storage, cfg) = storage_and_cfg.await;
-        let mut repo = AuditRepositoryBuilder::new(cfg)
+        let mut repo = AuditLoggerBuilder::new(cfg)
             .build(Arc::clone(&storage))
             .await;
 
@@ -145,9 +184,9 @@ mod tests {
             .upgrade_and_unwrap();
         let mut reader = bucket.begin_read("test-instance/token-1", 1).await.unwrap();
         let record = reader.read_chunk().unwrap().unwrap();
-        let event: AuditEvent = serde_json::from_slice(&record).unwrap();
-        assert_eq!(event.token_name, "token-1");
-        assert_eq!(event.instance, "test-instance");
+        let event: Value = serde_json::from_slice(&record).unwrap();
+        assert_eq!(event["token_name"], "token-1");
+        assert_eq!(event["instance"], "test-instance");
     }
 
     #[rstest]
@@ -157,7 +196,7 @@ mod tests {
     ) {
         let (storage, mut cfg) = storage_and_cfg.await;
         cfg.role = InstanceRole::Replica;
-        let mut repo = AuditRepositoryBuilder::new(cfg)
+        let mut repo = AuditLoggerBuilder::new(cfg)
             .build(Arc::clone(&storage))
             .await;
 
@@ -174,7 +213,7 @@ mod tests {
     ) {
         let (storage, mut cfg) = storage_and_cfg.await;
         cfg.audit_conf.enabled = false;
-        let mut repo = AuditRepositoryBuilder::new(cfg)
+        let mut repo = AuditLoggerBuilder::new(cfg)
             .build(Arc::clone(&storage))
             .await;
 
@@ -182,25 +221,5 @@ mod tests {
         sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
 
         assert!(storage.get_bucket(AUDIT_BUCKET_NAME).await.is_err());
-    }
-
-    #[test]
-    fn deserializes_legacy_event_with_missing_instance_as_unknown() {
-        let event: AuditEvent = serde_json::from_str(
-            r#"{
-                "timestamp": 1,
-                "token_name": "token-1",
-                "endpoint": "GET /api/v1/info",
-                "status": 200,
-                "message": "",
-                "call_count": 1,
-                "duration": 0.1
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(event.instance, "unknown");
-        assert_eq!(event.method, "UNKNOWN");
-        assert_eq!(event.path, "");
     }
 }

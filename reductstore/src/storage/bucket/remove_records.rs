@@ -8,6 +8,31 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 impl Bucket {
+    fn requested_entries(entries: &Option<Vec<String>>) -> Option<Vec<String>> {
+        match entries {
+            Some(entries) if entries.iter().any(|entry| entry == "*") => None,
+            Some(entries) => Some(entries.clone()),
+            None => None,
+        }
+    }
+
+    fn entry_matches_patterns(entry: &str, patterns: &[String]) -> bool {
+        patterns.iter().any(|pattern| {
+            if let Some(prefix) = pattern.strip_suffix('*') {
+                entry.starts_with(prefix)
+            } else {
+                entry == pattern
+            }
+        })
+    }
+
+    fn is_requested_entry(entry_name: &str, requested_entries: &Option<Vec<String>>) -> bool {
+        requested_entries
+            .as_ref()
+            .map(|patterns| Self::entry_matches_patterns(entry_name, patterns))
+            .unwrap_or(true)
+    }
+
     /// Remove records from the bucket
     ///
     /// # Arguments
@@ -50,28 +75,11 @@ impl Bucket {
         options: QueryEntry,
     ) -> Result<u64, ReductError> {
         let entries = self.entries.read().await?.clone();
-        let requested_entries = match &options.entries {
-            Some(entries) if entries.iter().any(|entry| entry == "*") => None,
-            Some(entries) => Some(entries.clone()),
-            None => None,
-        };
-        let matches_pattern = |entry: &str, patterns: &[String]| {
-            patterns.iter().any(|pattern| {
-                if let Some(prefix) = pattern.strip_suffix('*') {
-                    entry.starts_with(prefix)
-                } else {
-                    entry == pattern
-                }
-            })
-        };
+        let requested_entries = Self::requested_entries(&options.entries);
         let mut total_removed = 0;
 
         for (entry_name, entry) in entries {
-            if requested_entries
-                .as_ref()
-                .map(|patterns| matches_pattern(&entry_name, patterns))
-                .is_some_and(|matched| !matched)
-            {
+            if !Self::is_requested_entry(&entry_name, &requested_entries) {
                 continue;
             }
 
@@ -84,6 +92,38 @@ impl Bucket {
         }
 
         Ok(total_removed)
+    }
+
+    /// Query and count multiple records over a range of timestamps.
+    ///
+    /// # Arguments
+    ///
+    /// * `options` - The query options.
+    ///
+    /// # Returns
+    /// The number of records matched by the query.
+    pub async fn query_count_records(
+        self: Arc<Self>,
+        options: QueryEntry,
+    ) -> Result<u64, ReductError> {
+        let entries = self.entries.read().await?.clone();
+        let requested_entries = Self::requested_entries(&options.entries);
+        let mut total_counted = 0;
+
+        for (entry_name, entry) in entries {
+            if !Self::is_requested_entry(&entry_name, &requested_entries) {
+                continue;
+            }
+
+            if !entry.is_removable_by_query() {
+                continue;
+            }
+
+            let counted_records = entry.query_count_records(options.clone()).await?;
+            total_counted += counted_records;
+        }
+
+        Ok(total_counted)
     }
 }
 
@@ -249,5 +289,30 @@ mod tests {
             bucket.begin_read("entry-b", 1).await.err().unwrap(),
             not_found!("Record 1 not found in entry test/entry-b")
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_count_records_filters_entries(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "entry-a", 1, b"a1").await.unwrap();
+        write(&bucket, "entry-a", 4, b"a2").await.unwrap();
+        write(&bucket, "entry-b", 2, b"b1").await.unwrap();
+        write(&bucket, "entry-c", 2, b"c1").await.unwrap();
+
+        let request = QueryEntry {
+            entries: Some(vec!["entry-a".into(), "entry-b".into()]),
+            start: Some(1),
+            stop: Some(3),
+            ..Default::default()
+        };
+
+        let counted = bucket.clone().query_count_records(request).await.unwrap();
+        assert_eq!(counted, 2);
+
+        assert!(bucket.begin_read("entry-a", 1).await.is_ok());
+        assert!(bucket.begin_read("entry-b", 2).await.is_ok());
+        assert!(bucket.begin_read("entry-a", 4).await.is_ok());
+        assert!(bucket.begin_read("entry-c", 2).await.is_ok());
     }
 }
