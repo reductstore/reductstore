@@ -448,10 +448,26 @@ mod tests {
             .ok()?;
         let bucket = bucket.upgrade_and_unwrap();
         let info = Arc::clone(&bucket).info().await.unwrap();
+        let available_entries: Vec<String> = info
+            .entries
+            .iter()
+            .map(|entry| entry.name.clone())
+            .collect();
         let entry = info
             .entries
             .into_iter()
-            .find(|entry| entry.name.ends_with(&format!("/{}", token_name)))?;
+            .find(|entry| entry.name.ends_with(&format!("/{}", token_name)));
+
+        let entry = match entry {
+            Some(entry) => entry,
+            None => {
+                eprintln!(
+                    "audit entry lookup failed: token='{}', available_entries={:?}",
+                    token_name, available_entries
+                );
+                return None;
+            }
+        };
         let mut reader = bucket
             .begin_read(&entry.name, entry.oldest_record)
             .await
