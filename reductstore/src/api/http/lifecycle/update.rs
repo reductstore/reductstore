@@ -39,8 +39,7 @@ pub(super) async fn update_lifecycle_policy(
         "interval": existing.interval,
         "type": existing.lifecycle_type,
         "mode": existing.mode,
-    }))
-    ?;
+    }))?;
     components
         .lifecycle_repo
         .write()
@@ -164,5 +163,4 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.status(), NotFound);
     }
-
 }

@@ -19,13 +19,7 @@ pub(super) async fn list_lifecycle_policies(
         .await?;
 
     let mut list = LifecyclePolicyListAxum::default();
-    for policy_info in components
-        .lifecycle_repo
-        .read()
-        .await?
-        .lifecycles()
-        .await?
-    {
+    for policy_info in components.lifecycle_repo.read().await?.lifecycles().await? {
         if components
             .lifecycle_repo
             .read()
@@ -74,10 +68,11 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_list_empty(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
-        let list = list_lifecycle_policies(State(keeper.await), Path("bucket-1".to_string()), headers)
-            .await
-            .unwrap()
-            .0;
+        let list =
+            list_lifecycle_policies(State(keeper.await), Path("bucket-1".to_string()), headers)
+                .await
+                .unwrap()
+                .0;
         assert_eq!(list.lifecycles.len(), 0);
     }
 

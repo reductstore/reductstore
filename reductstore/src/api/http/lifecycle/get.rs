@@ -95,5 +95,4 @@ mod tests {
         .unwrap_err();
         assert_eq!(err.status(), NotFound);
     }
-
 }

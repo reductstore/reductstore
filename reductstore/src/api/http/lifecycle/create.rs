@@ -29,8 +29,7 @@ pub(super) async fn create_lifecycle_policy(
         "entries": body.entries,
         "max_age": body.max_age,
         "when": body.when,
-    }))
-    ?;
+    }))?;
     components
         .lifecycle_repo
         .write()
@@ -144,5 +143,4 @@ mod tests {
             .unwrap();
         assert_eq!(settings.interval, "3600s");
     }
-
 }
