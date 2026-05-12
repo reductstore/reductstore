@@ -4,6 +4,7 @@
 mod bucket;
 mod entry;
 mod io;
+mod lifecycle;
 mod links;
 mod middleware;
 mod replication;
@@ -27,6 +28,7 @@ use axum::{
 };
 use bucket::create_bucket_api_routes;
 use entry::create_entry_api_routes;
+use lifecycle::create_lifecycle_policy_api_routes;
 use hyper::http::HeaderValue;
 use log::{error, warn};
 use middleware::{
@@ -212,7 +214,9 @@ impl AxumAppBuilder {
         }
 
         let cfg = self.cfg.unwrap();
-        let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
+        let b_route = create_bucket_api_routes()
+            .merge(create_entry_api_routes())
+            .merge(create_lifecycle_policy_api_routes());
         let cors = Self::configure_cors(&cfg.cors_allow_origin);
         let state_keeper = Arc::new(StateKeeper::new(
             self.lc

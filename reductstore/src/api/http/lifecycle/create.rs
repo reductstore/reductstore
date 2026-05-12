@@ -30,7 +30,7 @@ pub(super) async fn create_lifecycle_policy(
         "max_age": body.max_age,
         "when": body.when,
     }))
-    .map_err(HttpError::from)?;
+    ?;
     components
         .lifecycle_repo
         .write()
