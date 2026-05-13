@@ -1363,7 +1363,15 @@ pub(super) mod tests {
                 .await
                 .unwrap();
 
-            write_meta_record(&storage, "bucket", "entry/$meta", "$test-ext", b"not-json", 1).await;
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$test-ext",
+                b"not-json",
+                1,
+            )
+            .await;
 
             let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
             let err = repo
@@ -1506,6 +1514,102 @@ pub(super) mod tests {
                     "entry-b": {"topic": "/b"}
                 }))
             );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn uses_schema_key_when_present(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$schema",
+                br#"{"encoding":"protobuf","schema_name":"factory.Msg"}"#,
+                1,
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let result = repo
+                .get_ext_attachments("bucket", "entry", &QueryEntry::default(), "test-ext")
+                .await
+                .unwrap();
+
+            assert_eq!(
+                result,
+                Some(json!({"entry": {"encoding": "protobuf", "schema_name": "factory.Msg"}}))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn schema_key_takes_priority_over_ext_key(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$schema",
+                br#"{"encoding":"protobuf"}"#,
+                1,
+            )
+            .await;
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$test-ext",
+                br#"{"encoding":"ros1"}"#,
+                2,
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let result = repo
+                .get_ext_attachments("bucket", "entry", &QueryEntry::default(), "test-ext")
+                .await
+                .unwrap();
+
+            assert_eq!(result, Some(json!({"entry": {"encoding": "protobuf"}})));
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn falls_back_to_ext_key_when_no_schema_key(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$test-ext",
+                br#"{"encoding":"ros1"}"#,
+                1,
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let result = repo
+                .get_ext_attachments("bucket", "entry", &QueryEntry::default(), "test-ext")
+                .await
+                .unwrap();
+
+            assert_eq!(result, Some(json!({"entry": {"encoding": "ros1"}})));
         }
     }
 
