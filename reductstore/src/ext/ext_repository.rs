@@ -589,25 +589,33 @@ impl ExtRepository {
                 Err(err) => return Err(err),
             };
 
-            let query_id = meta_entry
-                .query(QueryEntry {
-                    include: Some(HashMap::from([("key".to_string(), format!("${ext_name}"))])),
-                    limit: Some(1),
-                    ..Default::default()
-                })
-                .await?;
+            // Try $schema first, then $<ext_name> for backwards compatibility
+            let mut record = None;
+            for key in [format!("$schema"), format!("${ext_name}")] {
+                let query_id = meta_entry
+                    .query(QueryEntry {
+                        include: Some(HashMap::from([("key".to_string(), key)])),
+                        limit: Some(1),
+                        ..Default::default()
+                    })
+                    .await?;
 
-            let (rx, _) = meta_entry.get_query_receiver(query_id).await?;
-            let rx = rx.upgrade()?;
+                let (rx, _) = meta_entry.get_query_receiver(query_id).await?;
+                let rx = rx.upgrade()?;
 
-            let Some(result) = rx.write().await?.recv().await else {
+                let Some(result) = rx.write().await?.recv().await else {
+                    continue;
+                };
+
+                record = Some(match result {
+                    Ok(r) => r,
+                    Err(err) if err.status == NoContent => continue,
+                    Err(err) => return Err(err),
+                });
+                break;
+            }
+            let Some(mut record) = record else {
                 continue;
-            };
-
-            let mut record = match result {
-                Ok(record) => record,
-                Err(err) if err.status == NoContent => continue,
-                Err(err) => return Err(err),
             };
 
             let mut data = Vec::new();
@@ -1195,6 +1203,7 @@ pub(super) mod tests {
             entry_name: &str,
             key: &str,
             payload: &'static [u8],
+            timestamp: u64,
         ) {
             let bucket = storage
                 .get_bucket(bucket_name)
@@ -1205,7 +1214,7 @@ pub(super) mod tests {
             let mut writer = bucket
                 .begin_write(
                     entry_name,
-                    1,
+                    timestamp,
                     payload.len() as u64,
                     "application/json".to_string(),
                     Labels::from_iter([("key".to_string(), key.to_string())]),
@@ -1332,6 +1341,7 @@ pub(super) mod tests {
                 "entry/$meta",
                 "$another-ext",
                 br#"{"scale":100}"#,
+                1,
             )
             .await;
 
@@ -1353,7 +1363,7 @@ pub(super) mod tests {
                 .await
                 .unwrap();
 
-            write_meta_record(&storage, "bucket", "entry/$meta", "$test-ext", b"not-json").await;
+            write_meta_record(&storage, "bucket", "entry/$meta", "$test-ext", b"not-json", 1).await;
 
             let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
             let err = repo
@@ -1381,6 +1391,7 @@ pub(super) mod tests {
                 "entry-a/$meta",
                 "$test-ext",
                 br#"{"topic":"/a"}"#,
+                1,
             )
             .await;
             write_meta_record(
@@ -1389,6 +1400,7 @@ pub(super) mod tests {
                 "entry-b/$meta",
                 "$test-ext",
                 br#"{"topic":"/b"}"#,
+                1,
             )
             .await;
 
@@ -1423,6 +1435,7 @@ pub(super) mod tests {
                 "entry-matched/$meta",
                 "$test-ext",
                 br#"{"topic":"/matched"}"#,
+                1,
             )
             .await;
             write_meta_record(
@@ -1431,6 +1444,7 @@ pub(super) mod tests {
                 "other/$meta",
                 "$test-ext",
                 br#"{"topic":"/other"}"#,
+                1,
             )
             .await;
             write_record(&storage, "bucket", "entry-no-meta").await;
@@ -1465,6 +1479,7 @@ pub(super) mod tests {
                 "entry-a/$meta",
                 "$test-ext",
                 br#"{"topic":"/a"}"#,
+                1,
             )
             .await;
             write_meta_record(
@@ -1473,6 +1488,7 @@ pub(super) mod tests {
                 "entry-b/$meta",
                 "$test-ext",
                 br#"{"topic":"/b"}"#,
+                1,
             )
             .await;
 
