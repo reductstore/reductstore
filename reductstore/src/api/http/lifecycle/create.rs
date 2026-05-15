@@ -1,40 +1,28 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::http::lifecycle::{BucketLifecyclePolicyBodyAxum, PolicyPath};
+use crate::api::http::lifecycle::LifecycleSettingsAxum;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use reduct_base::msg::lifecycle_api::LifecycleSettings;
-use serde_json::json;
 use std::sync::Arc;
 
-// POST /b/:bucket_name/lifecycle-policies/:policy_id
+// POST /api/v1/lifecycles/:policy_name
 pub(super) async fn create_lifecycle_policy(
     State(keeper): State<Arc<StateKeeper>>,
-    Path(PolicyPath {
-        bucket_name,
-        policy_id,
-    }): Path<PolicyPath>,
+    Path(policy_name): Path<String>,
     headers: HeaderMap,
-    body: BucketLifecyclePolicyBodyAxum,
+    settings: LifecycleSettingsAxum,
 ) -> Result<(), HttpError> {
     let components = keeper
         .get_with_permissions(&headers, FullAccessPolicy {})
         .await?;
-    let body = body.0;
-    let settings: LifecycleSettings = serde_json::from_value(json!({
-        "bucket": bucket_name,
-        "entries": body.entries,
-        "max_age": body.max_age,
-        "when": body.when,
-    }))?;
     components
         .lifecycle_repo
         .write()
         .await?
-        .create_lifecycle(&policy_id, settings)
+        .create_lifecycle(&policy_name, settings.into())
         .await?;
     Ok(())
 }
@@ -42,34 +30,27 @@ pub(super) async fn create_lifecycle_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::http::lifecycle::tests::policy_body;
-    use crate::api::http::lifecycle::BucketLifecyclePolicyBody;
+    use crate::api::http::lifecycle::tests::settings;
     use crate::api::http::tests::{headers, keeper};
+    use reduct_base::msg::lifecycle_api::LifecycleSettings;
     use rstest::rstest;
     use std::sync::Arc;
-
-    fn policy_path(bucket: &str, policy: &str) -> Path<PolicyPath> {
-        Path(PolicyPath {
-            bucket_name: bucket.to_string(),
-            policy_id: policy.to_string(),
-        })
-    }
 
     #[rstest]
     #[tokio::test]
     async fn test_create_ok(
         #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
-        policy_body: BucketLifecyclePolicyBody,
+        settings: LifecycleSettings,
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
 
         create_lifecycle_policy(
             State(Arc::clone(&keeper)),
-            policy_path("bucket-1", "test-policy"),
+            Path("test-policy".to_string()),
             headers,
-            BucketLifecyclePolicyBodyAxum::from(policy_body),
+            LifecycleSettingsAxum::from(settings),
         )
         .await
         .unwrap();
@@ -89,16 +70,17 @@ mod tests {
     async fn test_create_sets_bucket(
         #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
-        policy_body: BucketLifecyclePolicyBody,
+        mut settings: LifecycleSettings,
     ) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();
+        settings.bucket = "bucket-2".to_string();
 
         create_lifecycle_policy(
             State(Arc::clone(&keeper)),
-            policy_path("bucket-1", "test-policy"),
+            Path("test-policy".to_string()),
             headers,
-            BucketLifecyclePolicyBodyAxum::from(policy_body),
+            LifecycleSettingsAxum::from(settings),
         )
         .await
         .unwrap();
@@ -111,36 +93,26 @@ mod tests {
             .get_lifecycle_settings("test-policy")
             .await
             .unwrap();
-        assert_eq!(settings.bucket, "bucket-1");
+        assert_eq!(settings.bucket, "bucket-2");
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_default_interval(
+    async fn test_create_invalid_bucket(
         #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
-        policy_body: BucketLifecyclePolicyBody,
+        mut settings: LifecycleSettings,
     ) {
-        let keeper = keeper.await;
-        let components = keeper.get_anonymous().await.unwrap();
+        settings.bucket = "no-such-bucket".to_string();
 
-        create_lifecycle_policy(
-            State(Arc::clone(&keeper)),
-            policy_path("bucket-1", "test-policy"),
+        let result = create_lifecycle_policy(
+            State(keeper.await),
+            Path("test-policy".to_string()),
             headers,
-            BucketLifecyclePolicyBodyAxum::from(policy_body),
+            LifecycleSettingsAxum::from(settings),
         )
-        .await
-        .unwrap();
+        .await;
 
-        let settings = components
-            .lifecycle_repo
-            .read()
-            .await
-            .unwrap()
-            .get_lifecycle_settings("test-policy")
-            .await
-            .unwrap();
-        assert_eq!(settings.interval, "3600s");
+        assert!(result.is_err());
     }
 }

@@ -10,7 +10,7 @@ use crate::api::http::replication::ReplicationListAxum;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 
-// GET /api/v1/replications/
+// GET /api/v1/replications
 pub(super) async fn list_replications(
     State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
@@ -18,16 +18,16 @@ pub(super) async fn list_replications(
     let components = keeper
         .get_with_permissions(&headers, FullAccessPolicy {})
         .await?;
-    let mut list = ReplicationListAxum::default();
 
-    for x in components
+    let mut list = ReplicationListAxum::default();
+    for replication_info in components
         .replication_repo
         .read()
         .await?
         .replications()
         .await?
     {
-        list.0.replications.push((x).clone());
+        list.0.replications.push(replication_info);
     }
 
     Ok(list)

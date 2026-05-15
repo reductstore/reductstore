@@ -1,50 +1,29 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::http::lifecycle::{BucketLifecyclePolicyBodyAxum, PolicyPath};
+use crate::api::http::lifecycle::LifecycleSettingsAxum;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
-use reduct_base::msg::lifecycle_api::LifecycleSettings;
-use serde_json::json;
 use std::sync::Arc;
 
-// PUT /b/:bucket_name/lifecycle-policies/:policy_id
+// PUT /api/v1/lifecycles/:policy_name
 pub(super) async fn update_lifecycle_policy(
     State(keeper): State<Arc<StateKeeper>>,
-    Path(PolicyPath {
-        bucket_name,
-        policy_id,
-    }): Path<PolicyPath>,
+    Path(policy_name): Path<String>,
     headers: HeaderMap,
-    body: BucketLifecyclePolicyBodyAxum,
+    settings: LifecycleSettingsAxum,
 ) -> Result<(), HttpError> {
     let components = keeper
         .get_with_permissions(&headers, FullAccessPolicy {})
         .await?;
 
-    let existing = components
-        .lifecycle_repo
-        .read()
-        .await?
-        .get_lifecycle_settings(&policy_id)
-        .await?;
-    let body = body.0;
-    let settings: LifecycleSettings = serde_json::from_value(json!({
-        "bucket": bucket_name,
-        "entries": body.entries,
-        "max_age": body.max_age,
-        "when": body.when,
-        "interval": existing.interval,
-        "type": existing.lifecycle_type,
-        "mode": existing.mode,
-    }))?;
     components
         .lifecycle_repo
         .write()
         .await?
-        .update_lifecycle(&policy_id, settings)
+        .update_lifecycle(&policy_name, settings.into())
         .await?;
     Ok(())
 }
@@ -52,7 +31,7 @@ pub(super) async fn update_lifecycle_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::api::http::lifecycle::{BucketLifecyclePolicyBody, BucketLifecyclePolicyBodyAxum};
+    use crate::api::http::lifecycle::tests::settings;
     use crate::api::http::tests::{headers, keeper};
     use reduct_base::error::ErrorCode::NotFound;
     use reduct_base::msg::lifecycle_api::LifecycleSettings;
@@ -80,32 +59,23 @@ mod tests {
         keeper
     }
 
-    fn policy_path(bucket: &str, policy: &str) -> Path<PolicyPath> {
-        Path(PolicyPath {
-            bucket_name: bucket.to_string(),
-            policy_id: policy.to_string(),
-        })
-    }
-
-    fn update_body(max_age: &str) -> BucketLifecyclePolicyBodyAxum {
-        BucketLifecyclePolicyBodyAxum::from(BucketLifecyclePolicyBody {
-            entries: vec![],
-            max_age: max_age.to_string(),
-            when: None,
-        })
-    }
-
     #[rstest]
     #[tokio::test]
-    async fn test_update_ok(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
+    async fn test_update_ok(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+        mut settings: LifecycleSettings,
+    ) {
         let keeper = make_keeper_with_policy(keeper.await).await;
         let components = keeper.get_anonymous().await.unwrap();
+        settings.max_age = "7d".to_string();
+        settings.interval = "2h".to_string();
 
         update_lifecycle_policy(
             State(Arc::clone(&keeper)),
-            policy_path("bucket-1", "test-policy"),
+            Path("test-policy".to_string()),
             headers,
-            update_body("7d"),
+            LifecycleSettingsAxum::from(settings),
         )
         .await
         .unwrap();
@@ -119,45 +89,21 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(settings.max_age, "7d");
+        assert_eq!(settings.interval, "2h");
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_update_preserves_interval_when_omitted(
+    async fn test_update_not_found(
         #[future] keeper: Arc<StateKeeper>,
         headers: HeaderMap,
+        settings: LifecycleSettings,
     ) {
-        let keeper = make_keeper_with_policy(keeper.await).await;
-        let components = keeper.get_anonymous().await.unwrap();
-
-        update_lifecycle_policy(
-            State(Arc::clone(&keeper)),
-            policy_path("bucket-1", "test-policy"),
-            headers,
-            update_body("7d"),
-        )
-        .await
-        .unwrap();
-
-        let settings = components
-            .lifecycle_repo
-            .read()
-            .await
-            .unwrap()
-            .get_lifecycle_settings("test-policy")
-            .await
-            .unwrap();
-        assert_eq!(settings.interval, "1h");
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_update_not_found(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let err = update_lifecycle_policy(
             State(keeper.await),
-            policy_path("bucket-1", "no-such-policy"),
+            Path("no-such-policy".to_string()),
             headers,
-            update_body("1d"),
+            LifecycleSettingsAxum::from(settings),
         )
         .await
         .unwrap_err();

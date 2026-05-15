@@ -4,14 +4,13 @@
 use crate::api::http::lifecycle::LifecyclePolicyListAxum;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
-use axum::extract::{Path, State};
+use axum::extract::State;
 use axum::http::HeaderMap;
 use std::sync::Arc;
 
-// GET /b/:bucket_name/lifecycle-policies
+// GET /api/v1/lifecycles
 pub(super) async fn list_lifecycle_policies(
     State(keeper): State<Arc<StateKeeper>>,
-    Path(bucket_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<LifecyclePolicyListAxum, HttpError> {
     let components = keeper
@@ -20,17 +19,7 @@ pub(super) async fn list_lifecycle_policies(
 
     let mut list = LifecyclePolicyListAxum::default();
     for policy_info in components.lifecycle_repo.read().await?.lifecycles().await? {
-        if components
-            .lifecycle_repo
-            .read()
-            .await?
-            .get_lifecycle_settings(&policy_info.name)
-            .await?
-            .bucket
-            == bucket_name
-        {
-            list.0.lifecycles.push(policy_info);
-        }
+        list.0.lifecycles.push(policy_info);
     }
 
     Ok(list)
@@ -68,11 +57,10 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_list_empty(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
-        let list =
-            list_lifecycle_policies(State(keeper.await), Path("bucket-1".to_string()), headers)
-                .await
-                .unwrap()
-                .0;
+        let list = list_lifecycle_policies(State(keeper.await), headers)
+            .await
+            .unwrap()
+            .0;
         assert_eq!(list.lifecycles.len(), 0);
     }
 
@@ -80,22 +68,11 @@ mod tests {
     #[tokio::test]
     async fn test_list_with_policy(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let keeper = make_keeper_with_policy(keeper.await).await;
-        let list = list_lifecycle_policies(State(keeper), Path("bucket-1".to_string()), headers)
+        let list = list_lifecycle_policies(State(keeper), headers)
             .await
             .unwrap()
             .0;
         assert_eq!(list.lifecycles.len(), 1);
         assert_eq!(list.lifecycles[0].name, "test-policy");
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_list_filters_by_bucket(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
-        let keeper = make_keeper_with_policy(keeper.await).await;
-        let list = list_lifecycle_policies(State(keeper), Path("bucket-2".to_string()), headers)
-            .await
-            .unwrap()
-            .0;
-        assert_eq!(list.lifecycles.len(), 0);
     }
 }

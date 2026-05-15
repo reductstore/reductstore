@@ -1,20 +1,17 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::http::lifecycle::{FullLifecyclePolicyInfoAxum, PolicyPath};
+use crate::api::http::lifecycle::FullLifecyclePolicyInfoAxum;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use std::sync::Arc;
 
-// GET /b/:bucket_name/lifecycle-policies/:policy_id
+// GET /api/v1/lifecycles/:policy_name
 pub(super) async fn get_lifecycle_policy(
     State(keeper): State<Arc<StateKeeper>>,
-    Path(PolicyPath {
-        bucket_name: _,
-        policy_id,
-    }): Path<PolicyPath>,
+    Path(policy_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<FullLifecyclePolicyInfoAxum, HttpError> {
     let components = keeper
@@ -25,7 +22,7 @@ pub(super) async fn get_lifecycle_policy(
         .lifecycle_repo
         .read()
         .await?
-        .get_info(&policy_id)
+        .get_info(&policy_name)
         .await?;
     Ok(info.into())
 }
@@ -60,25 +57,14 @@ mod tests {
         keeper
     }
 
-    fn policy_path(bucket: &str, policy: &str) -> Path<PolicyPath> {
-        Path(PolicyPath {
-            bucket_name: bucket.to_string(),
-            policy_id: policy.to_string(),
-        })
-    }
-
     #[rstest]
     #[tokio::test]
     async fn test_get_ok(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let keeper = make_keeper_with_policy(keeper.await).await;
-        let info = get_lifecycle_policy(
-            State(keeper),
-            policy_path("bucket-1", "test-policy"),
-            headers,
-        )
-        .await
-        .unwrap()
-        .0;
+        let info = get_lifecycle_policy(State(keeper), Path("test-policy".to_string()), headers)
+            .await
+            .unwrap()
+            .0;
         assert_eq!(info.info.name, "test-policy");
         assert_eq!(info.settings.bucket, "bucket-1");
     }
@@ -88,7 +74,7 @@ mod tests {
     async fn test_get_not_found(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let err = get_lifecycle_policy(
             State(keeper.await),
-            policy_path("bucket-1", "no-such-policy"),
+            Path("no-such-policy".to_string()),
             headers,
         )
         .await

@@ -214,9 +214,7 @@ impl AxumAppBuilder {
         }
 
         let cfg = self.cfg.unwrap();
-        let b_route = create_bucket_api_routes()
-            .merge(create_entry_api_routes())
-            .merge(create_lifecycle_policy_api_routes());
+        let b_route = create_bucket_api_routes().merge(create_entry_api_routes());
         let cors = Self::configure_cors(&cfg.cors_allow_origin);
         let state_keeper = Arc::new(StateKeeper::new(
             self.lc
@@ -243,6 +241,11 @@ impl AxumAppBuilder {
                 .nest(
                     &format!("{}api/v1/replications", cfg.api_base_path),
                     create_replication_api_routes(),
+                )
+                // Lifecycle API
+                .nest(
+                    &format!("{}api/v1/lifecycles", cfg.api_base_path),
+                    create_lifecycle_policy_api_routes(),
                 )
                 .nest(
                     &format!("{}api/v1/io", cfg.api_base_path),

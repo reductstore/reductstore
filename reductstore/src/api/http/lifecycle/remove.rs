@@ -1,20 +1,16 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::http::lifecycle::PolicyPath;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::FullAccessPolicy;
 use axum::extract::{Path, State};
 use axum::http::HeaderMap;
 use std::sync::Arc;
 
-// DELETE /b/:bucket_name/lifecycle-policies/:policy_id
+// DELETE /api/v1/lifecycles/:policy_name
 pub(super) async fn remove_lifecycle_policy(
     State(keeper): State<Arc<StateKeeper>>,
-    Path(PolicyPath {
-        bucket_name: _,
-        policy_id,
-    }): Path<PolicyPath>,
+    Path(policy_name): Path<String>,
     headers: HeaderMap,
 ) -> Result<(), HttpError> {
     let components = keeper
@@ -25,7 +21,7 @@ pub(super) async fn remove_lifecycle_policy(
         .lifecycle_repo
         .write()
         .await?
-        .remove_lifecycle(&policy_id)
+        .remove_lifecycle(&policy_name)
         .await?;
     Ok(())
 }
@@ -60,13 +56,6 @@ mod tests {
         keeper
     }
 
-    fn policy_path(bucket: &str, policy: &str) -> Path<PolicyPath> {
-        Path(PolicyPath {
-            bucket_name: bucket.to_string(),
-            policy_id: policy.to_string(),
-        })
-    }
-
     #[rstest]
     #[tokio::test]
     async fn test_remove_ok(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
@@ -75,7 +64,7 @@ mod tests {
 
         remove_lifecycle_policy(
             State(Arc::clone(&keeper)),
-            policy_path("bucket-1", "test-policy"),
+            Path("test-policy".to_string()),
             headers,
         )
         .await
@@ -101,11 +90,15 @@ mod tests {
     async fn test_remove_not_found(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let err = remove_lifecycle_policy(
             State(keeper.await),
-            policy_path("bucket-1", "no-such-policy"),
+            Path("no-such-policy".to_string()),
             headers,
         )
         .await
         .unwrap_err();
-        assert_eq!(err.status(), NotFound);
+        assert_eq!(
+            err.status(),
+            NotFound,
+            "Expected NotFound error when removing non-existent policy"
+        );
     }
 }
