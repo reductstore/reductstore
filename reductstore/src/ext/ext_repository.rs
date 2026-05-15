@@ -27,6 +27,7 @@ use std::time::Instant;
 
 type IoExtRef = Arc<AsyncRwLock<Box<dyn IoExtension + Send + Sync>>>;
 type IoExtMap = HashMap<String, IoExtRef>;
+const MAX_META_ATTACHMENTS: u64 = 100;
 
 #[derive(WrapperApi)]
 struct ExtensionApi {
@@ -536,8 +537,6 @@ impl ExtRepository {
         entry_name: &str,
         query_request: &QueryEntry,
     ) -> Result<Option<serde_json::Value>, ReductError> {
-        const MAX_META_ATTACHMENTS: u64 = 100;
-
         let Some(storage) = &self.storage else {
             return Ok(None);
         };
@@ -600,52 +599,9 @@ impl ExtRepository {
             let (rx, _) = meta_entry.get_query_receiver(query_id).await?;
             let rx = rx.upgrade()?;
 
-            let mut entry_map = Map::new();
             let mut rx = rx.write().await?;
-            let mut records_read = 0;
-            loop {
-                let Some(result) = rx.recv().await else { break };
-                let mut record = match result {
-                    Ok(r) => r,
-                    Err(err) if err.status == NoContent => break,
-                    Err(err) => return Err(err),
-                };
-
-                records_read += 1;
-                if records_read > MAX_META_ATTACHMENTS {
-                    return Err(unprocessable_entity!(
-                        "Too many meta attachments in '{}/{}': maximum {} records are supported",
-                        bucket_name,
-                        meta_name,
-                        MAX_META_ATTACHMENTS
-                    ));
-                }
-
-                let key = record
-                    .meta()
-                    .labels()
-                    .get("key")
-                    .cloned()
-                    .unwrap_or_default();
-                if key.is_empty() {
-                    continue;
-                }
-                let mut data = Vec::new();
-                while let Some(chunk) = record.read_chunk() {
-                    let chunk = chunk?;
-                    data.extend_from_slice(chunk.as_ref());
-                }
-                let parsed = serde_json::from_slice::<serde_json::Value>(&data).map_err(|err| {
-                    unprocessable_entity!(
-                        "Meta attachment '{}' in '{}/{}' must be valid JSON: {}",
-                        key,
-                        bucket_name,
-                        meta_name,
-                        err
-                    )
-                })?;
-                entry_map.insert(key, parsed);
-            }
+            let entry_map =
+                Self::collect_meta_attachments(&mut rx, bucket_name, &meta_name).await?;
 
             if entry_map.is_empty() {
                 continue;
@@ -658,6 +614,61 @@ impl ExtRepository {
         } else {
             Ok(Some(serde_json::Value::Object(attachments)))
         }
+    }
+
+    async fn collect_meta_attachments(
+        rx: &mut QueryRx,
+        bucket_name: &str,
+        meta_name: &str,
+    ) -> Result<Map<String, serde_json::Value>, ReductError> {
+        let mut entry_map = Map::new();
+        let mut records_read = 0;
+        loop {
+            let Some(result) = rx.recv().await else { break };
+            let mut record = match result {
+                Ok(r) => r,
+                Err(err) if err.status == NoContent => break,
+                Err(err) => return Err(err),
+            };
+
+            let key = record
+                .meta()
+                .labels()
+                .get("key")
+                .cloned()
+                .unwrap_or_default();
+            if key.is_empty() {
+                continue;
+            }
+
+            records_read += 1;
+            if records_read > MAX_META_ATTACHMENTS {
+                return Err(unprocessable_entity!(
+                    "Too many meta attachments in '{}/{}': maximum {} records are supported",
+                    bucket_name,
+                    meta_name,
+                    MAX_META_ATTACHMENTS
+                ));
+            }
+
+            let mut data = Vec::new();
+            while let Some(chunk) = record.read_chunk() {
+                let chunk = chunk?;
+                data.extend_from_slice(chunk.as_ref());
+            }
+            let parsed = serde_json::from_slice::<serde_json::Value>(&data).map_err(|err| {
+                unprocessable_entity!(
+                    "Meta attachment '{}' in '{}/{}' must be valid JSON: {}",
+                    key,
+                    bucket_name,
+                    meta_name,
+                    err
+                )
+            })?;
+            entry_map.insert(key, parsed);
+        }
+
+        Ok(entry_map)
     }
 
     fn attach_ext_attachments(
@@ -1198,6 +1209,8 @@ pub(super) mod tests {
     mod get_ext_attachments {
         use super::*;
         use reduct_base::error::ErrorCode;
+        use reduct_base::internal_server_error;
+        use tokio::sync::mpsc;
 
         async fn create_storage() -> Arc<StorageEngine> {
             let cfg = Cfg {
@@ -1432,6 +1445,96 @@ pub(super) mod tests {
             assert_eq!(err.status, ErrorCode::UnprocessableEntity);
             assert!(err.message.contains("Too many meta attachments"));
             assert!(err.message.contains("maximum 100 records are supported"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn collect_meta_attachments_returns_empty_when_rx_is_closed(
+            mock_ext: MockIoExtension,
+        ) {
+            let _repo = mocked_ext_repo("test-ext", mock_ext);
+            let (tx, mut rx) = mpsc::channel(1);
+            drop(tx);
+
+            let result = ExtRepository::collect_meta_attachments(&mut rx, "bucket", "entry/$meta")
+                .await
+                .unwrap();
+
+            assert!(result.is_empty());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn collect_meta_attachments_returns_empty_on_no_content(mock_ext: MockIoExtension) {
+            let _repo = mocked_ext_repo("test-ext", mock_ext);
+            let (tx, mut rx) = mpsc::channel(1);
+            tx.send(Err(no_content!("No content"))).await.unwrap();
+            drop(tx);
+
+            let result = ExtRepository::collect_meta_attachments(&mut rx, "bucket", "entry/$meta")
+                .await
+                .unwrap();
+
+            assert!(result.is_empty());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn collect_meta_attachments_returns_error_on_non_no_content(
+            mock_ext: MockIoExtension,
+        ) {
+            let _repo = mocked_ext_repo("test-ext", mock_ext);
+            let (tx, mut rx) = mpsc::channel(1);
+            tx.send(Err(internal_server_error!("Boom"))).await.unwrap();
+            drop(tx);
+
+            let err = ExtRepository::collect_meta_attachments(&mut rx, "bucket", "entry/$meta")
+                .await
+                .err()
+                .unwrap();
+
+            assert_eq!(err.status, ErrorCode::InternalServerError);
+            assert!(err.message.contains("Boom"));
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn ignores_empty_keys_when_counting_attachment_limit(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            for idx in 0..200 {
+                write_meta_record(
+                    &storage,
+                    "bucket",
+                    "entry/$meta",
+                    "",
+                    br#"{"ignored":true}"#,
+                    idx + 1,
+                )
+                .await;
+            }
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$test-ext",
+                br#"{"ok":true}"#,
+                201,
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let result = repo
+                .get_ext_attachments("bucket", "entry", &QueryEntry::default())
+                .await
+                .unwrap();
+
+            assert_eq!(result, Some(json!({"entry": {"$test-ext": {"ok": true}}})));
         }
 
         #[rstest]
