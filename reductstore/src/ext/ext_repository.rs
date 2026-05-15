@@ -536,6 +536,8 @@ impl ExtRepository {
         entry_name: &str,
         query_request: &QueryEntry,
     ) -> Result<Option<serde_json::Value>, ReductError> {
+        const MAX_META_ATTACHMENTS: u64 = 100;
+
         let Some(storage) = &self.storage else {
             return Ok(None);
         };
@@ -590,7 +592,7 @@ impl ExtRepository {
 
             let query_id = meta_entry
                 .query(QueryEntry {
-                    limit: Some(100),
+                    limit: Some(MAX_META_ATTACHMENTS + 1),
                     ..Default::default()
                 })
                 .await?;
@@ -600,6 +602,7 @@ impl ExtRepository {
 
             let mut entry_map = Map::new();
             let mut rx = rx.write().await?;
+            let mut records_read = 0;
             loop {
                 let Some(result) = rx.recv().await else { break };
                 let mut record = match result {
@@ -607,6 +610,17 @@ impl ExtRepository {
                     Err(err) if err.status == NoContent => break,
                     Err(err) => return Err(err),
                 };
+
+                records_read += 1;
+                if records_read > MAX_META_ATTACHMENTS {
+                    return Err(unprocessable_entity!(
+                        "Too many meta attachments in '{}/{}': maximum {} records are supported",
+                        bucket_name,
+                        meta_name,
+                        MAX_META_ATTACHMENTS
+                    ));
+                }
+
                 let key = record
                     .meta()
                     .labels()
@@ -1384,6 +1398,40 @@ pub(super) mod tests {
 
             assert_eq!(err.status, ErrorCode::UnprocessableEntity);
             assert!(err.message.contains("must be valid JSON"));
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn returns_error_when_attachment_limit_exceeded(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            for idx in 0..101 {
+                let key = format!("$test-ext-{}", idx);
+                write_meta_record(
+                    &storage,
+                    "bucket",
+                    "entry/$meta",
+                    &key,
+                    br#"{"topic":"/test"}"#,
+                    idx + 1,
+                )
+                .await;
+            }
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            let err = repo
+                .get_ext_attachments("bucket", "entry", &QueryEntry::default())
+                .await
+                .err()
+                .unwrap();
+
+            assert_eq!(err.status, ErrorCode::UnprocessableEntity);
+            assert!(err.message.contains("Too many meta attachments"));
+            assert!(err.message.contains("maximum 100 records are supported"));
         }
 
         #[rstest]
