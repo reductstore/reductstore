@@ -96,8 +96,10 @@ pub(super) fn create_lifecycle_policy_api_routes() -> axum::Router<Arc<StateKeep
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::http::tests::keeper;
     use reduct_base::msg::lifecycle_api::{LifecycleMode, LifecycleSettings};
     use rstest::fixture;
+    use std::sync::Arc;
 
     #[fixture]
     pub(super) fn settings() -> LifecycleSettings {
@@ -110,6 +112,21 @@ mod tests {
             mode: LifecycleMode::Enabled,
             ..LifecycleSettings::default()
         }
+    }
+
+    #[fixture]
+    pub(super) async fn keeper_with_policy(#[future] keeper: Arc<StateKeeper>) -> Arc<StateKeeper> {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        components
+            .lifecycle_repo
+            .write()
+            .await
+            .unwrap()
+            .create_lifecycle("test-policy", settings())
+            .await
+            .unwrap();
+        keeper
     }
 
     mod from_request {

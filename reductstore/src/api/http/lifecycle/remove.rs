@@ -29,37 +29,16 @@ pub(super) async fn remove_lifecycle_policy(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::http::lifecycle::tests::keeper_with_policy;
     use crate::api::http::tests::{headers, keeper};
     use reduct_base::error::ErrorCode::NotFound;
-    use reduct_base::msg::lifecycle_api::LifecycleSettings;
     use rstest::rstest;
     use std::sync::Arc;
 
-    async fn make_keeper_with_policy(keeper: Arc<StateKeeper>) -> Arc<StateKeeper> {
-        let components = keeper.get_anonymous().await.unwrap();
-        components
-            .lifecycle_repo
-            .write()
-            .await
-            .unwrap()
-            .create_lifecycle(
-                "test-policy",
-                LifecycleSettings {
-                    bucket: "bucket-1".to_string(),
-                    max_age: "1d".to_string(),
-                    interval: "1h".to_string(),
-                    ..LifecycleSettings::default()
-                },
-            )
-            .await
-            .unwrap();
-        keeper
-    }
-
     #[rstest]
     #[tokio::test]
-    async fn test_remove_ok(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
-        let keeper = make_keeper_with_policy(keeper.await).await;
+    async fn test_remove_ok(#[future] keeper_with_policy: Arc<StateKeeper>, headers: HeaderMap) {
+        let keeper = keeper_with_policy.await;
         let components = keeper.get_anonymous().await.unwrap();
 
         remove_lifecycle_policy(
