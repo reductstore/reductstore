@@ -4,6 +4,7 @@
 mod bucket;
 mod entry;
 mod io;
+mod lifecycle;
 mod links;
 mod middleware;
 mod replication;
@@ -28,6 +29,7 @@ use axum::{
 use bucket::create_bucket_api_routes;
 use entry::create_entry_api_routes;
 use hyper::http::HeaderValue;
+use lifecycle::create_lifecycle_policy_api_routes;
 use log::{error, warn};
 use middleware::{
     attach_client_ip, audit_requests, check_api_rate_limit, default_headers, print_statuses,
@@ -239,6 +241,11 @@ impl AxumAppBuilder {
                 .nest(
                     &format!("{}api/v1/replications", cfg.api_base_path),
                     create_replication_api_routes(),
+                )
+                // Lifecycle API
+                .nest(
+                    &format!("{}api/v1/lifecycles", cfg.api_base_path),
+                    create_lifecycle_policy_api_routes(),
                 )
                 .nest(
                     &format!("{}api/v1/io", cfg.api_base_path),
