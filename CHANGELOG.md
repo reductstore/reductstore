@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Pass attachment key-value maps to extensions instead of selecting a single attachment key, [PR-1383](https://github.com/reductstore/reductstore/pull/1383)
+- Add HTTP CRUD endpoints for lifecycle policies, [PR-1382](https://github.com/reductstore/reductstore/pull/1382)
 - Add lifecycle policy environment provisioning and background delete workers with structured lifecycle audit events, [PR-1376](https://github.com/reductstore/reductstore/pull/1376)
 - Support object shorthand for unconditional `#ext` pipelines by expanding multi-extension objects into ordered execution steps, while keeping array-based pipeline syntax unchanged, [PR-1367](https://github.com/reductstore/reductstore/pull/1367)
 - Support strict extension pipelines in `#ext` directives with ordered step execution and backward compatibility for legacy `"#ext": { ... }` object format, [PR-1351](https://github.com/reductstore/reductstore/pull/1351)
