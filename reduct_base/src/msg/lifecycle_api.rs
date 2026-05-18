@@ -34,7 +34,7 @@ impl Default for LifecycleMode {
 }
 
 /// Lifecycle policy settings.
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct LifecycleSettings {
     /// Lifecycle policy action type.
     #[serde(default, rename = "type")]
@@ -55,6 +55,20 @@ pub struct LifecycleSettings {
     /// Lifecycle mode.
     #[serde(default)]
     pub mode: LifecycleMode,
+}
+
+impl Default for LifecycleSettings {
+    fn default() -> Self {
+        Self {
+            lifecycle_type: LifecycleType::default(),
+            bucket: String::default(),
+            entries: Vec::default(),
+            max_age: String::default(),
+            interval: default_lifecycle_interval(),
+            when: Option::default(),
+            mode: LifecycleMode::default(),
+        }
+    }
 }
 
 fn default_lifecycle_interval() -> String {
