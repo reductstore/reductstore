@@ -166,6 +166,12 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_settings_default_interval_is_3600s() {
+        let settings = LifecycleSettings::default();
+        assert_eq!(settings.interval, "3600s");
+    }
+
+    #[test]
     fn lifecycle_info_mode_defaults_on_missing() {
         let info: LifecycleInfo = serde_json::from_str(
             r#"{
