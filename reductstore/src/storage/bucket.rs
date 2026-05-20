@@ -382,9 +382,15 @@ impl Bucket {
 
         self.save_settings().await?;
 
-        let entries = self.entries.clone();
+        let entries = self
+            .entries
+            .read()
+            .await?
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
         let mut count = 0usize;
-        for entry in entries.read().await?.values() {
+        for entry in entries {
             let result = match mode {
                 EntryMaintenanceMode::Compact => entry.compact().await,
                 EntryMaintenanceMode::SyncFs => entry.sync_fs().await,
