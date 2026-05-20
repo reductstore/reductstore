@@ -108,9 +108,17 @@ impl BlockManager {
     }
 
     pub async fn save_cache_metadata_on_disk(&mut self) -> Result<(), ReductError> {
+        let blocks_with_wal = self.wal.list().await.unwrap_or_default();
+        if blocks_with_wal.is_empty() {
+            return Ok(());
+        }
+
         let blocks = self.block_cache.write_values();
         for block in blocks {
-            self.save_meta_on_disk(block).await?;
+            let block_id = block.read().await?.block_id();
+            if blocks_with_wal.contains(&block_id) {
+                self.save_meta_on_disk(block).await?;
+            }
         }
 
         Ok(())
@@ -744,7 +752,7 @@ impl BlockManager {
                 .await?;
             lock.set_len(len)?;
             lock.write_all(&buf)?;
-            lock.sync_all().await?; // fix https://github.com/reductstore/reductstore/issues/642
+            lock.flush_local().await?; // fix https://github.com/reductstore/reductstore/issues/642
         }
 
         trace!("Updating block index");
@@ -854,6 +862,30 @@ mod tests {
 
             let block_from_file: Block = BlockProto::decode(Bytes::from(buf)).unwrap().into();
             assert_eq!(block_from_file, block_ref.read().await.unwrap().to_owned());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_save_cache_metadata_skips_blocks_without_wal() {
+            let path = tempdir().unwrap().keep().join("bucket").join("entry");
+            let mut block_manager = BlockManager::build(
+                path.clone(),
+                BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                "bucket".to_string(),
+                "entry".to_string(),
+                Cfg::default().into(),
+            )
+            .await;
+
+            let block_id = 1_000_005;
+            block_manager.start_new_block(block_id, 1024).await.unwrap();
+
+            block_manager.save_cache_metadata_on_disk().await.unwrap();
+
+            assert!(!path
+                .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT))
+                .exists());
+            assert!(!path.join(BLOCK_INDEX_FILE).exists());
         }
 
         #[rstest]
