@@ -7,6 +7,7 @@ pub(in crate::storage) mod block_index;
 mod read_only;
 pub(in crate::storage) mod wal;
 
+use crate::backend::BackendType;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
@@ -267,7 +268,12 @@ impl BlockManager {
             let mut file = FILE_CACHE
                 .write_or_create(&self.path_to_data(block_id), SeekFrom::Start(0))
                 .await?;
-            file.set_len(max_block_size)?;
+
+            if self.cfg.backend_config.backend_type == BackendType::Filesystem {
+                // Pre-allocation for remote storage is inefficient
+                // because we synchronize full size even if block is empty
+                file.set_len(max_block_size)?;
+            }
         }
 
         self.block_index.insert_or_update(block.clone());
@@ -848,6 +854,35 @@ mod tests {
 
             let block_from_file: Block = BlockProto::decode(Bytes::from(buf)).unwrap().into();
             assert_eq!(block_from_file, block_ref.read().await.unwrap().to_owned());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_starting_block_no_preallocation_for_remote_backend() {
+            let path = tempdir().unwrap().keep().join("bucket").join("entry");
+            let mut cfg = Cfg::default();
+            cfg.backend_config.backend_type = BackendType::Remote;
+
+            let mut block_manager = BlockManager::build(
+                path.clone(),
+                BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(cfg),
+            )
+            .await;
+
+            let block_id = 2_000_005;
+            block_manager.start_new_block(block_id, 1024).await.unwrap();
+            block_manager.save_cache_on_disk().await.unwrap();
+
+            let file = std::fs::File::open(
+                block_manager
+                    .path
+                    .join(format!("{}{}", block_id, DATA_FILE_EXT)),
+            )
+            .unwrap();
+            assert_eq!(file.metadata().unwrap().len(), 0);
         }
 
         #[rstest]
