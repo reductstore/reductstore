@@ -3,7 +3,7 @@
 
 use super::{normalize_entry_name, settings_for_entry, Bucket};
 use crate::core::file_cache::FILE_CACHE;
-use crate::storage::engine::{check_entry_name_convention, ReadOnlyMode};
+use crate::storage::engine::check_entry_name_convention;
 use crate::storage::entry::Entry;
 use reduct_base::conflict;
 use reduct_base::error::ReductError;

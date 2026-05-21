@@ -4,13 +4,13 @@
 use crate::api::http::AxumAppBuilder;
 #[cfg(feature = "zenoh-api")]
 use crate::api::zenoh;
-use crate::cfg::{CfgParser, ExtCfgBounds, ExtCfgParser};
+use crate::cfg::{CfgParser, ExtCfgBounds, ExtCfgParser, InstanceRole};
 use crate::core::env::StdEnvGetter;
 use crate::core::sync::set_rwlock_timeout;
 use crate::storage::engine::StorageEngine;
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
-use log::{error, info};
+use log::{error, info, warn};
 use reduct_base::logger::Logger;
 use std::net::{IpAddr, SocketAddr};
 use std::str::FromStr;
@@ -45,6 +45,7 @@ where
     let signal_handle = handle.clone();
     let cfg = parser.cfg.clone();
     let engine_config = cfg.engine_config.clone();
+    let instance_role = cfg.role.clone();
     let (tx, rx) = mpsc::channel(1);
     tokio::spawn(async move {
         while config_lock.is_waiting().await.unwrap_or(false) {
@@ -61,6 +62,15 @@ where
             tokio::spawn(periodical_compact_storage(
                 components.storage.clone(),
                 engine_config.compaction_interval,
+            ));
+        }
+
+        if instance_role == InstanceRole::Replica
+            && !engine_config.replica_update_interval.is_zero()
+        {
+            tokio::spawn(periodical_replica_reload(
+                components.storage.clone(),
+                engine_config.replica_update_interval,
             ));
         }
 
@@ -181,9 +191,15 @@ mod test_observer {
 
     pub static COMPACTION_OBSERVER: LazyLock<Mutex<Option<Arc<AtomicUsize>>>> =
         LazyLock::new(|| Mutex::new(None));
+    pub static REPLICA_RELOAD_OBSERVER: LazyLock<Mutex<Option<Arc<AtomicUsize>>>> =
+        LazyLock::new(|| Mutex::new(None));
 
     pub fn set_compaction_observer(observer: Option<Arc<AtomicUsize>>) {
         *COMPACTION_OBSERVER.lock().unwrap() = observer;
+    }
+
+    pub fn set_replica_reload_observer(observer: Option<Arc<AtomicUsize>>) {
+        *REPLICA_RELOAD_OBSERVER.lock().unwrap() = observer;
     }
 
     pub fn observe_compaction_tick() {
@@ -191,24 +207,77 @@ mod test_observer {
             observer.fetch_add(1, Ordering::Relaxed);
         }
     }
+
+    pub fn observe_replica_reload_tick() {
+        if let Some(observer) = REPLICA_RELOAD_OBSERVER.lock().unwrap().as_ref() {
+            observer.fetch_add(1, Ordering::Relaxed);
+        }
+    }
 }
 
 async fn periodical_compact_storage(storage: Arc<StorageEngine>, sync_interval: Duration) {
-    loop {
-        tokio::time::sleep(sync_interval).await;
-        #[cfg(test)]
-        test_observer::observe_compaction_tick();
-        if let Err(e) = storage.compact().await {
-            log::error!("Failed to sync storage: {}", e);
+    run_periodic_task(sync_interval, "compaction", || {
+        let storage = storage.clone();
+        async move {
+            #[cfg(test)]
+            test_observer::observe_compaction_tick();
+
+            if let Err(e) = storage.compact().await {
+                log::error!("Failed to sync storage: {}", e);
+            }
         }
+    })
+    .await;
+}
+
+async fn periodical_replica_reload(storage: Arc<StorageEngine>, sync_interval: Duration) {
+    run_periodic_task(sync_interval, "replica reload", || {
+        let storage = storage.clone();
+        async move {
+            #[cfg(test)]
+            test_observer::observe_replica_reload_tick();
+
+            if let Err(e) = storage.reload_replica().await {
+                log::error!("Failed to reload replica state: {}", e);
+            }
+        }
+    })
+    .await;
+}
+
+async fn run_periodic_task<F, Fut>(interval: Duration, task_name: &'static str, mut task: F)
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = ()>,
+{
+    let mut next_tick = tokio::time::Instant::now() + interval;
+
+    loop {
+        tokio::time::sleep_until(next_tick).await;
+        let started_at = std::time::Instant::now();
+
+        task().await;
+
+        let execution_time = started_at.elapsed();
+        if execution_time > interval {
+            warn!(
+                "Periodic {} took {:?}, exceeding configured interval {:?}",
+                task_name, execution_time, interval
+            );
+        }
+
+        next_tick += interval;
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::storage_engine::StorageEngineConfig;
+    use crate::cfg::Cfg;
     use crate::cfg::CoreExtCfgParser;
     use log::warn;
+    use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::rstest;
     use serial_test::serial;
     use std::collections::HashMap;
@@ -309,6 +378,73 @@ mod tests {
             compactions.load(Ordering::Relaxed) > 0,
             "periodical_compact_storage should run when interval is non-zero"
         );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn test_replica_reload_task_runs_when_interval_non_zero() {
+        let reloads = Arc::new(AtomicUsize::new(0));
+        test_observer::set_replica_reload_observer(Some(reloads.clone()));
+
+        let data_path = tempdir().unwrap().keep();
+        let cfg = Cfg {
+            data_path: data_path.clone(),
+            role: InstanceRole::Primary,
+            engine_config: StorageEngineConfig {
+                replica_update_interval: Duration::from_millis(50),
+                ..StorageEngineConfig::default()
+            },
+            ..Cfg::default()
+        };
+        let primary_storage = StorageEngine::builder()
+            .with_cfg(cfg.clone())
+            .with_data_path(cfg.data_path.clone())
+            .build()
+            .await;
+        primary_storage
+            .create_bucket("bucket-1", BucketSettings::default())
+            .await
+            .unwrap();
+
+        let mut replica_cfg = cfg.clone();
+        replica_cfg.role = InstanceRole::Replica;
+        let replica_storage = Arc::new(
+            StorageEngine::builder()
+                .with_cfg(replica_cfg.clone())
+                .with_data_path(replica_cfg.data_path.clone())
+                .build()
+                .await,
+        );
+        primary_storage
+            .create_bucket("bucket-2", BucketSettings::default())
+            .await
+            .unwrap();
+
+        let handler = tokio::spawn(periodical_replica_reload(
+            replica_storage.clone(),
+            Duration::from_millis(50),
+        ));
+
+        sleep(Duration::from_millis(120)).await;
+        handler.abort();
+        let _ = handler.await;
+
+        test_observer::set_replica_reload_observer(None);
+
+        assert!(
+            reloads.load(Ordering::Relaxed) > 0,
+            "periodical_replica_reload should run when interval is non-zero"
+        );
+        let bucket_names = replica_storage
+            .bucket_list_snapshot()
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|bucket| bucket.name().to_string())
+            .collect::<Vec<_>>();
+        assert!(bucket_names.contains(&"bucket-1".to_string()));
+        assert!(bucket_names.contains(&"bucket-2".to_string()));
     }
 
     async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {

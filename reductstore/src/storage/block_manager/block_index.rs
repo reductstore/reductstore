@@ -154,16 +154,6 @@ impl BlockIndex {
         Ok(block_index)
     }
 
-    pub async fn update_from_disc(&mut self) -> Result<(), ReductError> {
-        FILE_CACHE
-            .invalidate_local_cache_file(&self.path_buf)
-            .await?;
-
-        let updated_index = BlockIndex::try_load(self.path_buf.clone()).await?;
-        *self = updated_index;
-        Ok(())
-    }
-
     pub fn from_proto(path: PathBuf, value: BlockIndexProto) -> Result<Self, ReductError> {
         let mut block_index = BlockIndex {
             path_buf: path.clone(),

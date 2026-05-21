@@ -1,57 +1,45 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::cfg::{Cfg, InstanceRole};
-use crate::storage::bucket::Bucket;
-use crate::storage::engine::ReadOnlyMode;
-use crate::storage::entry::{Entry, EntrySettings};
-use async_trait::async_trait;
+use super::{settings_for_entry, Bucket};
+use crate::storage::entry::Entry;
+use log::error;
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
 
 fn normalize_entry_name(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
-#[async_trait]
-impl ReadOnlyMode for Bucket {
-    fn cfg(&self) -> &Cfg {
-        &self.cfg
+impl Bucket {
+    /// List directory and update bucket list
+    pub(in crate::storage) async fn reload(&self) -> Result<(), ReductError> {
+        // Replica reloading is driven by the launcher background task.
+        Ok(())
     }
 
-    /// List directory and update bucket list
-    async fn reload(&self) -> Result<(), ReductError> {
-        let mut last_sync = self.last_replica_sync.write().await?;
-        if self.cfg().role != InstanceRole::Replica
-            || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
-        {
-            // Only read-only instances need to update bucket list from backend
-            return Ok(());
-        }
-        *last_sync = Instant::now();
-
-        let mut task_set = vec![];
-
-        let current_bucket_paths = self
+    pub(crate) async fn reload_entries(&self) -> Result<(), ReductError> {
+        let current_entry_paths = self
             .entries
             .read()
             .await?
             .values()
-            .map(|b| b.path().clone())
+            .map(|entry| entry.path().clone())
             .collect::<HashSet<_>>();
 
-        let mut entries_to_retain = vec![];
         self.folder_keeper.reload().await?;
-        for entry_path in self.folder_keeper.list_folders().await? {
-            if current_bucket_paths.contains(&entry_path) {
+        let all_paths = self.folder_keeper.list_folders().await?;
+        let settings = self.settings.read().await?.clone();
+
+        let mut entries_to_retain = vec![];
+        let mut task_set = vec![];
+        for entry_path in all_paths {
+            if current_entry_paths.contains(&entry_path) {
                 entries_to_retain.push(entry_path);
                 continue;
             }
 
-            // Restore new bucket
-            let settings = self.settings.read().await?;
             let entry_name = normalize_entry_name(
                 entry_path
                     .strip_prefix(self.path())
@@ -59,12 +47,9 @@ impl ReadOnlyMode for Bucket {
             );
             let handler = Entry::restore_with_limiter(
                 entry_path,
-                entry_name,
+                entry_name.clone(),
                 self.name().to_string(),
-                EntrySettings {
-                    max_block_size: settings.max_block_size.unwrap(),
-                    max_block_records: settings.max_block_records.unwrap(),
-                },
+                settings_for_entry(&entry_name, &settings),
                 self.cfg.clone(),
                 self.io_limiter.clone(),
             );
@@ -79,9 +64,23 @@ impl ReadOnlyMode for Bucket {
             }
         }
 
-        let mut entries = self.entries.write().await?;
-        entries.retain(|_, v| entries_to_retain.contains(v.path()));
-        entries.extend(new_entries.into_iter());
+        let entry_snapshot = {
+            let mut entries = self.entries.write().await?;
+            entries.retain(|_, entry| entries_to_retain.contains(entry.path()));
+            entries.extend(new_entries);
+            entries.values().cloned().collect::<Vec<_>>()
+        };
+
+        for entry in entry_snapshot {
+            if let Err(err) = entry.reload_index_on_replica().await {
+                error!(
+                    "Failed to reload replica index for entry '{}' in bucket '{}': {}",
+                    entry.name(),
+                    self.name(),
+                    err
+                );
+            }
+        }
 
         Ok(())
     }
@@ -92,6 +91,8 @@ mod tests {
     use super::*;
 
     use crate::cfg::storage_engine::StorageEngineConfig;
+    use crate::cfg::Cfg;
+    use crate::cfg::InstanceRole;
     use crate::storage::bucket::tests::write;
     use crate::storage::bucket::FILE_CACHE;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -110,9 +111,6 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
-        read_only_bucket.reload().await.unwrap();
-
         // Initially, read-only bucket has one entry
         {
             let entries = read_only_bucket.entries.read().await.unwrap();
@@ -126,18 +124,16 @@ mod tests {
             .unwrap();
 
         primary_bucket.sync_fs().await.unwrap();
-        read_only_bucket.reset_last_replica_sync().await;
         read_only_bucket.reload().await.unwrap();
 
         assert_eq!(
             read_only_bucket.entries.read().await.unwrap().len(),
             1,
-            "Should not reload before interval"
+            "reload() should not refresh replica entries inline"
         );
 
         // Reload read-only bucket
-        tokio::time::sleep(cfg.engine_config.replica_update_interval * 2).await;
-        read_only_bucket.reload().await.unwrap();
+        read_only_bucket.reload_entries().await.unwrap();
 
         // Now, read-only bucket should have two entries
         {
@@ -160,9 +156,6 @@ mod tests {
                 .await
                 .unwrap(),
         );
-        tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
-        read_only_bucket.reload().await.unwrap();
-
         // Initially, read-only bucket has one entry
         {
             let entries = read_only_bucket.entries.read().await.unwrap();
@@ -172,19 +165,18 @@ mod tests {
 
         // Remove entry in primary bucket
         primary_bucket.remove_entry("test-1").await.unwrap();
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         primary_bucket.sync_fs().await.unwrap();
-        read_only_bucket.reset_last_replica_sync().await;
         read_only_bucket.reload().await.unwrap();
 
         assert_eq!(
             read_only_bucket.entries.read().await.unwrap().len(),
             1,
-            "Should not reload before interval"
+            "reload() should not refresh replica entries inline"
         );
 
         // Reload read-only bucket
-        tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
-        read_only_bucket.reload().await.unwrap();
+        read_only_bucket.reload_entries().await.unwrap();
 
         // Now, read-only bucket should have zero entries
         {
@@ -192,6 +184,43 @@ mod tests {
             assert_eq!(entries.len(), 0);
         }
     }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_reload_updates_existing_entry_index(#[future] primary_bucket: Arc<Bucket>) {
+        let primary_bucket = primary_bucket.await;
+        let mut cfg = primary_bucket.cfg().clone();
+        cfg.role = InstanceRole::Replica;
+        let read_only_bucket = Arc::new(
+            Bucket::restore(primary_bucket.path().clone(), cfg.clone())
+                .await
+                .unwrap(),
+        );
+
+        write(&primary_bucket, "test-1", 2, b"new data")
+            .await
+            .unwrap();
+        primary_bucket.sync_fs().await.unwrap();
+
+        let info = read_only_bucket.clone().info().await.unwrap();
+        let entry = info
+            .entries
+            .iter()
+            .find(|entry| entry.name == "test-1")
+            .unwrap();
+        assert_eq!(entry.record_count, 1);
+
+        read_only_bucket.reload_entries().await.unwrap();
+
+        let info = read_only_bucket.clone().info().await.unwrap();
+        let entry = info
+            .entries
+            .iter()
+            .find(|entry| entry.name == "test-1")
+            .unwrap();
+        assert_eq!(entry.record_count, 2);
+    }
+
     mod forbidden {
         use super::*;
         use reduct_base::forbidden;
@@ -250,7 +279,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_reload_before_access_entries(#[future] primary_bucket: Arc<Bucket>) {
+        async fn test_info_does_not_reload_entries_inline(#[future] primary_bucket: Arc<Bucket>) {
             let primary_bucket = primary_bucket.await;
             let mut cfg = primary_bucket.cfg().clone();
             cfg.role = InstanceRole::Replica;
@@ -259,8 +288,6 @@ mod tests {
                     .await
                     .unwrap(),
             );
-            tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
-            read_only_bucket.reload().await.unwrap();
 
             {
                 let entries = read_only_bucket.entries.read().await.unwrap();
@@ -274,11 +301,49 @@ mod tests {
                 .unwrap();
             primary_bucket.sync_fs().await.unwrap();
 
-            tokio::time::sleep(cfg.engine_config.replica_update_interval).await;
             {
-                let entries = read_only_bucket.info().await.unwrap().entries;
-                assert_eq!(entries.len(), 2);
+                let entries = read_only_bucket.clone().info().await.unwrap().entries;
+                assert_eq!(entries.len(), 1);
             }
+
+            read_only_bucket.reload_entries().await.unwrap();
+            let entries = read_only_bucket.clone().info().await.unwrap().entries;
+            assert_eq!(entries.len(), 2);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_get_entry_does_not_wait_for_replica_reload(
+            #[future] primary_bucket: Arc<Bucket>,
+        ) {
+            let primary_bucket = primary_bucket.await;
+            let mut cfg = primary_bucket.cfg().clone();
+            cfg.role = InstanceRole::Replica;
+            let read_only_bucket = Arc::new(
+                Bucket::restore(primary_bucket.path().clone(), cfg.clone())
+                    .await
+                    .unwrap(),
+            );
+
+            write(&primary_bucket, "test-2", 1, b"test data")
+                .await
+                .unwrap();
+            primary_bucket.sync_fs().await.unwrap();
+
+            let reloader = {
+                let read_only_bucket = read_only_bucket.clone();
+                tokio::spawn(async move { read_only_bucket.reload_entries().await })
+            };
+
+            tokio::time::timeout(
+                std::time::Duration::from_secs(1),
+                read_only_bucket.get_entry("test-1"),
+            )
+            .await
+            .expect("get_entry should not wait for replica entry restoration")
+            .unwrap();
+
+            reloader.await.unwrap().unwrap();
         }
     }
 

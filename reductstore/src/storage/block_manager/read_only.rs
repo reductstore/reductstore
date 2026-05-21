@@ -3,48 +3,78 @@
 
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
-use crate::storage::block_manager::BlockManager;
+use crate::storage::block_manager::block_index::BlockIndex;
+use crate::storage::block_manager::{
+    BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
+};
+use crate::storage::proto::block_index::Block as BlockEntry;
+use reduct_base::error::ReductError;
+use std::collections::HashMap;
+use std::path::PathBuf;
 use std::time::Instant;
 
-impl BlockManager {
-    pub(super) async fn reload_if_readonly(
-        &mut self,
-    ) -> Result<(), reduct_base::error::ReductError> {
-        self.reload_if_readonly_with(false).await
-    }
+pub(in crate::storage) struct ReplicaIndexReload {
+    entry_path: PathBuf,
+    index_path: PathBuf,
+    previous_state: HashMap<u64, BlockEntry>,
+}
 
-    pub(super) async fn reload_if_readonly_with(
-        &mut self,
-        force: bool,
-    ) -> Result<(), reduct_base::error::ReductError> {
-        if self.cfg.role == InstanceRole::Replica
-            && (force
-                || self.last_replica_sync.elapsed()
-                    > self.cfg.engine_config.replica_update_interval)
-        {
-            // we need to update the index from disk and chaned blocks for read-only instances
-            let previous_state = self.block_index.info().clone();
-            self.block_index.update_from_disc().await?;
+impl ReplicaIndexReload {
+    pub(in crate::storage) async fn load_updated_index(&self) -> Result<BlockIndex, ReductError> {
+        FILE_CACHE
+            .invalidate_local_cache_file(&self.index_path)
+            .await?;
 
-            for (block_id, new_block_info) in self.block_index.info().iter() {
-                if let Some(previous_block_info) = previous_state.get(block_id) {
-                    if previous_block_info.crc64 != new_block_info.crc64 {
-                        // block changed, we need to reload it
-                        FILE_CACHE
-                            .invalidate_local_cache_file(&self.path_to_desc(*block_id))
-                            .await?;
-                        FILE_CACHE
-                            .invalidate_local_cache_file(&self.path_to_data(*block_id))
-                            .await?;
-                    }
+        let updated_index = BlockIndex::try_load(self.index_path.clone()).await?;
+
+        for (block_id, new_block_info) in updated_index.info().iter() {
+            if let Some(previous_block_info) = self.previous_state.get(block_id) {
+                if previous_block_info.crc64 != new_block_info.crc64 {
+                    FILE_CACHE
+                        .invalidate_local_cache_file(
+                            &self
+                                .entry_path
+                                .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT)),
+                        )
+                        .await?;
+                    FILE_CACHE
+                        .invalidate_local_cache_file(
+                            &self
+                                .entry_path
+                                .join(format!("{}{}", block_id, DATA_FILE_EXT)),
+                        )
+                        .await?;
                 }
             }
-
-            self.block_cache.clear();
-            self.last_replica_sync = Instant::now();
         }
 
+        Ok(updated_index)
+    }
+}
+
+impl BlockManager {
+    #[cfg(test)]
+    pub(super) async fn reload_if_readonly(&mut self) -> Result<(), ReductError> {
+        // Replica index refresh is driven by the launcher background task.
         Ok(())
+    }
+
+    pub(in crate::storage) fn prepare_replica_index_reload(&self) -> Option<ReplicaIndexReload> {
+        if self.cfg.role != InstanceRole::Replica {
+            return None;
+        }
+
+        Some(ReplicaIndexReload {
+            entry_path: self.path.clone(),
+            index_path: self.path.join(BLOCK_INDEX_FILE),
+            previous_state: self.block_index.info().clone(),
+        })
+    }
+
+    pub(in crate::storage) fn apply_replica_index_reload(&mut self, updated_index: BlockIndex) {
+        self.block_index = updated_index;
+        self.block_cache.clear();
+        self.last_replica_sync = Instant::now();
     }
 }
 
@@ -69,7 +99,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_reload_if_readonly(#[future] path: PathBuf) {
+    async fn test_reload_if_readonly_is_noop(#[future] path: PathBuf) {
         let path = path.await;
         let cfg = Cfg {
             role: InstanceRole::Replica,
@@ -105,6 +135,45 @@ mod tests {
         // wait for the replica update interval to pass
         tokio::time::sleep(Duration::from_millis(150)).await;
         block_manager.reload_if_readonly().await.unwrap();
+
+        assert!(block_manager.block_index.info().get(&1).is_none());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_background_replica_index_reload(#[future] path: PathBuf) {
+        let path = path.await;
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            data_path: path.clone(),
+            engine_config: StorageEngineConfig {
+                replica_update_interval: Duration::from_millis(100),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
+        index.save().await.unwrap();
+        let mut block_manager = BlockManager::build(
+            path.clone(),
+            index,
+            "bucket".to_string(),
+            "entry".to_string(),
+            Arc::new(cfg.clone()),
+        )
+        .await
+        .unwrap();
+
+        let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap();
+        new_index.insert_or_update(Block::new(1));
+        new_index.save().await.unwrap();
+
+        let reload = block_manager.prepare_replica_index_reload().unwrap();
+        let updated_index = reload.load_updated_index().await.unwrap();
+        block_manager.apply_replica_index_reload(updated_index);
 
         assert!(block_manager.block_index.info().get(&1).is_some());
     }
@@ -144,8 +213,14 @@ mod tests {
         updated_index.insert_or_update_with_crc(Block::new(1), 2);
         updated_index.save().await.unwrap();
 
-        tokio::time::sleep(Duration::from_millis(75)).await;
-        block_manager.reload_if_readonly().await.unwrap();
+        let reload = block_manager.prepare_replica_index_reload().unwrap();
+        let updated_index = reload.load_updated_index().await.unwrap();
+        block_manager.apply_replica_index_reload(updated_index);
+
+        assert_eq!(
+            block_manager.block_index.info().get(&1).unwrap().crc64,
+            Some(2)
+        );
     }
 
     #[rstest]

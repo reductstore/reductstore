@@ -9,7 +9,6 @@ use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use crate::storage::in_flight::InFlightIoLimiter;
-use async_trait::async_trait;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
@@ -30,22 +29,6 @@ pub struct StorageEngineBuilder {
     cfg: Option<Cfg>,
     license: Option<License>,
     data_path: Option<PathBuf>,
-}
-
-#[async_trait]
-pub(super) trait ReadOnlyMode {
-    fn cfg(&self) -> &Cfg;
-
-    async fn reload(&self) -> Result<(), ReductError>;
-
-    fn check_mode(&self) -> Result<(), ReductError> {
-        if self.cfg().role == InstanceRole::Replica {
-            return Err(forbidden!(
-                "Cannot perform this operation in read-only mode"
-            ));
-        }
-        Ok(())
-    }
 }
 
 impl StorageEngineBuilder {
@@ -106,7 +89,6 @@ impl StorageEngineBuilder {
             buckets: Arc::new(AsyncRwLock::new(buckets)),
             license: self.license,
             cfg,
-            last_replica_sync: AsyncRwLock::new(Instant::now()),
             folder_keeper: Arc::new(folder_keeper),
             io_limiter,
         }
@@ -120,7 +102,6 @@ pub struct StorageEngine {
     buckets: Arc<AsyncRwLock<BTreeMap<String, Arc<Bucket>>>>,
     license: Option<License>,
     cfg: Cfg,
-    last_replica_sync: AsyncRwLock<Instant>,
     folder_keeper: Arc<FolderKeeper>,
     io_limiter: InFlightIoLimiter,
 }
@@ -138,6 +119,26 @@ impl StorageEngine {
             license: None,
             data_path: None,
         }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn cfg(&self) -> &Cfg {
+        &self.cfg
+    }
+
+    async fn reload(&self) -> Result<(), ReductError> {
+        // Replica reloading is driven by the launcher background task.
+        Ok(())
+    }
+
+    fn check_mode(&self) -> Result<(), ReductError> {
+        if self.cfg.role == InstanceRole::Replica {
+            return Err(forbidden!(
+                "Cannot perform this operation in read-only mode"
+            ));
+        }
+
+        Ok(())
     }
 
     /// Get the reductstore info.
@@ -416,6 +417,12 @@ impl StorageEngine {
         Ok(BucketInfoList { buckets })
     }
 
+    #[cfg(test)]
+    pub(crate) async fn bucket_list_snapshot(&self) -> Result<Vec<Arc<Bucket>>, ReductError> {
+        let buckets = self.buckets.read().await?;
+        Ok(buckets.values().cloned().collect())
+    }
+
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
         self.run_bucket_maintenance(BucketMaintenanceMode::SyncFs)
             .await?;
@@ -510,14 +517,6 @@ pub(super) fn check_entry_name_convention(name: &str) -> Result<(), ReductError>
     Err(unprocessable_entity!(
         "Entry name can contain only letters, digits and [-,_,/] symbols or end with '/$meta'",
     ))
-}
-
-#[cfg(test)]
-impl StorageEngine {
-    pub async fn reset_last_replica_sync(&self) {
-        let mut sync = self.last_replica_sync.write().await.unwrap();
-        *sync = Instant::now();
-    }
 }
 
 #[cfg(test)]

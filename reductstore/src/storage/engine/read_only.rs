@@ -1,35 +1,17 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::bucket::settings::SETTINGS_NAME;
 use crate::storage::bucket::Bucket;
-use crate::storage::engine::{ReadOnlyMode, StorageEngine};
-use async_trait::async_trait;
+use crate::storage::engine::StorageEngine;
 use log::error;
 use reduct_base::error::ReductError;
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
 
-#[async_trait]
-impl ReadOnlyMode for StorageEngine {
-    fn cfg(&self) -> &Cfg {
-        &self.cfg
-    }
-
-    async fn reload(&self) -> Result<(), ReductError> {
-        let mut last_sync = self.last_replica_sync.write().await?;
-        if self.cfg.role != InstanceRole::Replica
-            || last_sync.elapsed() < self.cfg.engine_config.replica_update_interval
-        {
-            // Only read-only instances need to update bucket list from backend
-            return Ok(());
-        }
-
-        *last_sync = Instant::now();
-
+impl StorageEngine {
+    pub(crate) async fn reload_replica(&self) -> Result<(), ReductError> {
         let mut new_buckets = BTreeMap::new();
         let current_bucket_paths = self
             .buckets
@@ -73,9 +55,23 @@ impl ReadOnlyMode for StorageEngine {
             }
         }
 
-        let mut buckets = self.buckets.write().await?;
-        buckets.retain(|_, b| buckets_to_retain.contains(&b.path()));
-        buckets.extend(new_buckets);
+        let bucket_snapshot = {
+            let mut buckets = self.buckets.write().await?;
+            buckets.retain(|_, b| buckets_to_retain.contains(&b.path()));
+            buckets.extend(new_buckets);
+            buckets.values().cloned().collect::<Vec<_>>()
+        };
+
+        for bucket in bucket_snapshot {
+            if let Err(e) = bucket.reload_entries().await {
+                error!(
+                    "Failed to reload entries for replica bucket '{}': {}",
+                    bucket.name(),
+                    e
+                );
+            }
+        }
+
         Ok(())
     }
 }
@@ -85,6 +81,8 @@ mod tests {
     use super::*;
 
     use crate::cfg::storage_engine::StorageEngineConfig;
+    use crate::cfg::Cfg;
+    use crate::cfg::InstanceRole;
 
     use crate::storage::engine::StorageEngine;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -108,7 +106,6 @@ mod tests {
                 .build()
                 .await,
         );
-        read_only_engine.reset_last_replica_sync().await;
 
         // Initially, read-only engine has one bucket
         {
@@ -122,17 +119,14 @@ mod tests {
             .create_bucket("bucket-2", BucketSettings::default())
             .await
             .unwrap();
-        read_only_engine.reset_last_replica_sync().await;
         read_only_engine.reload().await.unwrap();
         assert_eq!(
             read_only_engine.buckets.read().await.unwrap().len(),
             1,
-            "Should not reload before interval"
+            "reload() should not refresh replica buckets inline"
         );
 
-        // Wait for interval and reload
-        tokio::time::sleep(primary_engine.cfg.engine_config.replica_update_interval).await;
-        read_only_engine.reload().await.unwrap();
+        read_only_engine.reload_replica().await.unwrap();
         let buckets = read_only_engine.buckets.read().await.unwrap();
         assert_eq!(buckets.len(), 2);
         assert!(buckets.contains_key("bucket-1"));
@@ -153,7 +147,6 @@ mod tests {
                 .build()
                 .await,
         );
-        read_only_engine.reset_last_replica_sync().await;
 
         {
             let buckets = read_only_engine.buckets.read().await.unwrap();
@@ -165,16 +158,14 @@ mod tests {
         primary_engine.remove_bucket("bucket-1").await.unwrap();
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
         primary_engine.sync_fs().await.unwrap();
-        read_only_engine.reset_last_replica_sync().await;
         read_only_engine.reload().await.unwrap();
         assert_eq!(
             read_only_engine.buckets.read().await.unwrap().len(),
             1,
-            "Should not reload before interval"
+            "reload() should not refresh replica buckets inline"
         );
 
-        tokio::time::sleep(primary_engine.cfg.engine_config.replica_update_interval).await;
-        read_only_engine.reload().await.unwrap();
+        read_only_engine.reload_replica().await.unwrap();
         let buckets = read_only_engine.buckets.read().await.unwrap();
         assert_eq!(buckets.len(), 0);
     }
@@ -208,9 +199,7 @@ mod tests {
         .await
         .unwrap();
 
-        read_only_engine.reset_last_replica_sync().await;
-        tokio::time::sleep(primary_engine.cfg.engine_config.replica_update_interval).await;
-        read_only_engine.reload().await.unwrap();
+        read_only_engine.reload_replica().await.unwrap();
 
         let buckets = read_only_engine.buckets.read().await.unwrap();
         assert!(!buckets.contains_key("$audit"));
@@ -280,7 +269,9 @@ mod tests {
         #[rstest]
         #[serial]
         #[tokio::test]
-        async fn test_reload_before_access_buckets(#[future] primary_engine: Arc<StorageEngine>) {
+        async fn test_access_does_not_reload_buckets_inline(
+            #[future] primary_engine: Arc<StorageEngine>,
+        ) {
             let primary_engine = primary_engine.await;
             let mut cfg = primary_engine.cfg().clone();
             cfg.role = InstanceRole::Replica;
@@ -291,7 +282,6 @@ mod tests {
                     .build()
                     .await,
             );
-            read_only_engine.reset_last_replica_sync().await;
             {
                 let buckets = read_only_engine.buckets.read().await.unwrap();
                 assert_eq!(buckets.len(), 1);
@@ -308,6 +298,11 @@ mod tests {
                 assert_eq!(buckets.len(), 1, "Should not reload before reload call");
             }
             read_only_engine.reload().await.unwrap();
+            {
+                let buckets = read_only_engine.buckets.read().await.unwrap();
+                assert_eq!(buckets.len(), 1, "reload() should be a no-op");
+            }
+            read_only_engine.reload_replica().await.unwrap();
             let buckets = read_only_engine.buckets.read().await.unwrap();
             assert_eq!(buckets.len(), 2);
         }

@@ -125,8 +125,6 @@ impl BlockManager {
     }
 
     pub async fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
-        self.update_and_get_index().await?;
-
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
             start_block_id.unwrap().clone()
@@ -686,15 +684,6 @@ impl BlockManager {
 
     pub fn index(&self) -> &BlockIndex {
         &self.block_index
-    }
-
-    pub async fn update_and_get_index(&mut self) -> Result<&BlockIndex, ReductError> {
-        self.reload_if_readonly().await?;
-        Ok(&self.block_index)
-    }
-
-    pub async fn force_reload_index_on_replica(&mut self) -> Result<(), ReductError> {
-        self.reload_if_readonly_with(true).await
     }
 
     pub fn bucket_name(&self) -> &String {

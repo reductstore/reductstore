@@ -152,11 +152,10 @@ impl Query for HistoricalQuery {
                 let first_block = match bm.find_block(start).await {
                     Ok(block) => block.read().await?.block_id(),
                     Err(err) if err.status() == ErrorCode::TooEarly => {
-                        bm.force_reload_index_on_replica().await?;
                         debug!(
-                            "Reloaded index after transient find_block miss for query '{}': {}",
-                            self.entry_name, err
-                        );
+                                "Replica index refresh is asynchronous after transient find_block miss for query '{}': {}",
+                                self.entry_name, err
+                            );
                         match bm.find_block(start).await {
                             Ok(block) => block.read().await?.block_id(),
                             Err(_) => 0,
@@ -176,9 +175,8 @@ impl Query for HistoricalQuery {
                 let block_ref = match bm.load_block(block_id).await {
                     Ok(block_ref) => block_ref,
                     Err(err) if err.status() == ErrorCode::TooEarly => {
-                        bm.force_reload_index_on_replica().await?;
                         debug!(
-                            "Reloaded index after transient block {} miss for query '{}': {}",
+                            "Replica index refresh is asynchronous after transient block {} miss for query '{}': {}",
                             block_id, self.entry_name, err
                         );
                         match bm.load_block(block_id).await {
@@ -464,7 +462,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_reloads_index_and_retries_on_crc_mismatch_replica(
+    async fn test_query_does_not_reload_index_on_crc_mismatch_replica(
         #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) {
         let source_block_manager = block_manager.await;
@@ -498,15 +496,9 @@ mod tests {
         }
 
         let mut query = build_query(1000, 1001, QueryOptions::default()).unwrap();
-        let mut reader = query.next(replica_block_manager).await.unwrap();
+        let err = query.next(replica_block_manager).await.err().unwrap();
 
-        assert_eq!(reader.meta().timestamp(), 1000);
-
-        let mut content = String::new();
-        while let Some(chunk) = reader.read_chunk() {
-            content.push_str(String::from_utf8(chunk.unwrap().to_vec()).unwrap().as_str());
-        }
-        assert_eq!(content, "0123456789");
+        assert_eq!(err.status(), ErrorCode::NoContent);
     }
 
     #[rstest]

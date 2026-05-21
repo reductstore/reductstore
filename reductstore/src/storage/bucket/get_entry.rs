@@ -3,7 +3,7 @@
 
 use super::{settings_for_entry, Bucket};
 use crate::core::weak::Weak;
-use crate::storage::engine::{check_entry_name_convention, ReadOnlyMode};
+use crate::storage::engine::check_entry_name_convention;
 use crate::storage::entry::Entry;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
