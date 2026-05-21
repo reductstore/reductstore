@@ -153,13 +153,10 @@ impl Query for HistoricalQuery {
                     Ok(block) => block.read().await?.block_id(),
                     Err(err) if err.status() == ErrorCode::TooEarly => {
                         debug!(
-                                "Replica index refresh is asynchronous after transient find_block miss for query '{}': {}",
-                                self.entry_name, err
-                            );
-                        match bm.find_block(start).await {
-                            Ok(block) => block.read().await?.block_id(),
-                            Err(_) => 0,
-                        }
+                            "Skip query start block lookup for '{}' due to transient replica state: {}",
+                            self.entry_name, err
+                        );
+                        0
                     }
                     Err(_) => 0,
                 };
@@ -176,27 +173,10 @@ impl Query for HistoricalQuery {
                     Ok(block_ref) => block_ref,
                     Err(err) if err.status() == ErrorCode::TooEarly => {
                         debug!(
-                            "Replica index refresh is asynchronous after transient block {} miss for query '{}': {}",
+                            "Skip transient replica block {} for query '{}': {}",
                             block_id, self.entry_name, err
                         );
-                        match bm.load_block(block_id).await {
-                            Ok(block_ref) => block_ref,
-                            Err(retry_err) if retry_err.status() == ErrorCode::TooEarly => {
-                                debug!(
-                                    "Block {} is still transiently unavailable for query '{}' after reload: {}",
-                                    block_id, self.entry_name, retry_err
-                                );
-                                continue;
-                            }
-                            Err(retry_err) if retry_err.status() == ErrorCode::NotFound => {
-                                debug!(
-                                    "Skip stale block {} for query '{}' after reload: {}",
-                                    block_id, self.entry_name, retry_err
-                                );
-                                continue;
-                            }
-                            Err(retry_err) => return Err(retry_err),
-                        }
+                        continue;
                     }
                     Err(err) if err.status() == ErrorCode::NotFound => {
                         debug!(
