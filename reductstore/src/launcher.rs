@@ -447,12 +447,69 @@ mod tests {
         assert!(bucket_names.contains(&"bucket-2".to_string()));
     }
 
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn test_launch_spawns_replica_reload_for_replica_role_with_non_zero_interval() {
+        let reloads = Arc::new(AtomicUsize::new(0));
+        test_observer::set_replica_reload_observer(Some(reloads.clone()));
+
+        let mut cfg = HashMap::new();
+        cfg.insert("RS_INSTANCE_ROLE".to_string(), "REPLICA".to_string());
+        cfg.insert(
+            "RS_ENGINE_REPLICA_UPDATE_INTERVAL".to_string(),
+            "1".to_string(),
+        );
+
+        let task = set_env_and_run(cfg).await;
+        sleep(Duration::from_millis(300)).await;
+
+        *STOP_SERVER.lock().await = true;
+        task.join().unwrap();
+        test_observer::set_replica_reload_observer(None);
+
+        assert!(
+            reloads.load(Ordering::Relaxed) > 0,
+            "replica reload task should be spawned for replica role with non-zero interval"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn test_launch_does_not_spawn_replica_reload_for_zero_interval() {
+        let reloads = Arc::new(AtomicUsize::new(0));
+        test_observer::set_replica_reload_observer(Some(reloads.clone()));
+
+        let mut cfg = HashMap::new();
+        cfg.insert("RS_INSTANCE_ROLE".to_string(), "REPLICA".to_string());
+        cfg.insert(
+            "RS_ENGINE_REPLICA_UPDATE_INTERVAL".to_string(),
+            "0".to_string(),
+        );
+
+        let task = set_env_and_run(cfg).await;
+        sleep(Duration::from_millis(300)).await;
+
+        *STOP_SERVER.lock().await = true;
+        task.join().unwrap();
+        test_observer::set_replica_reload_observer(None);
+
+        assert_eq!(
+            reloads.load(Ordering::Relaxed),
+            0,
+            "replica reload task should not be spawned when interval is zero"
+        );
+    }
+
     async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {
         let data_path = tempdir().unwrap().keep();
 
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
         env::set_var("RS_CERT_PATH", "");
         env::set_var("RS_CERT_KEY_PATH", "");
+        env::set_var("RS_INSTANCE_ROLE", "STANDALONE");
+        env::set_var("RS_ENGINE_REPLICA_UPDATE_INTERVAL", "60");
 
         for (key, value) in cfg {
             env::set_var(key, value);

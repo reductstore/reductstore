@@ -462,6 +462,27 @@ mod tests {
         assert!(wal.read(1).await.is_ok());
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_try_build_returns_error_if_local_wal_path_is_not_directory() {
+        let path = tempfile::tempdir().unwrap().keep();
+        let wal_path = path.join(WAL_DIR);
+        std::fs::write(&wal_path, b"not a directory").unwrap();
+
+        let err = WalImpl::try_build(wal_path).await.err().unwrap();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_try_build_missing_local_wal_dir_propagates_backend_error() {
+        let path = tempfile::tempdir().unwrap().keep();
+        let wal_path = path.join(WAL_DIR);
+
+        let err = WalImpl::try_build(wal_path).await.err().unwrap();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
+    }
+
     #[fixture]
     async fn wal() -> WalImpl {
         let path = tempfile::tempdir().unwrap().keep();
