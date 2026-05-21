@@ -46,8 +46,8 @@ jobs:
                 "aarch64-unknown-linux-gnu",
                 "armv7-unknown-linux-gnueabihf",
                 "x86_64-pc-windows-gnu",
-#                "x86_64-apple-darwin",
-#                "aarch64-apple-darwin",
+                "x86_64-apple-darwin",
+                "aarch64-apple-darwin",
               ]
         include:
           - target: "x86_64-unknown-linux-gnu"
@@ -62,12 +62,12 @@ jobs:
           - target: "x86_64-pc-windows-gnu"
             os: ubuntu-22.04
             compiler: "gcc-mingw-w64-x86-64"
-#          - target: "x86_64-apple-darwin"
-#            os: macos-14
-#            compiler: ""
-#          - target: "aarch64-apple-darwin"
-#            os: macos-14
-#            compiler: ""
+          - target: "x86_64-apple-darwin"
+            os: macos-14
+            compiler: ""
+          - target: "aarch64-apple-darwin"
+            os: macos-14
+            compiler: ""
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/build-binaries

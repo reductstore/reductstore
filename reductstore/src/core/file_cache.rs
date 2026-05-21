@@ -197,7 +197,7 @@ impl FileCache {
                 // ignore not found errors, since file can be removed while we are syncing,
                 // it's better than holding the file lock for too long and preventing other operations on the file
                 if err.kind() != std::io::ErrorKind::NotFound {
-                    warn!("Failed to sync file {}: {}", path.display(), err);
+                    debug!("Failed to sync file {}: {}", path.display(), err);
                 }
                 continue;
             }
@@ -258,7 +258,7 @@ impl FileCache {
                 discarded_count += 1;
                 if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
                     lock.sync_all().await.unwrap_or_else(|err| {
-                        warn!("Failed to sync discarded file {:?}: {}", path, err);
+                        debug!("Failed to sync discarded file {:?}: {}", path, err);
                     });
                     synced_count += 1;
                 }
