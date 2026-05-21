@@ -75,8 +75,8 @@ impl BlockManager {
         bucket: String,
         entry: String,
         cfg: Arc<Cfg>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ReductError> {
+        Ok(Self {
             path: path.clone(),
             bucket,
             entry,
@@ -87,10 +87,10 @@ impl BlockManager {
                 READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
             ),
-            wal: create_wal(path.clone()).await,
+            wal: create_wal(path.clone()).await?,
             cfg,
             last_replica_sync: Instant::now(),
-        }
+        })
     }
 
     pub async fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
@@ -813,7 +813,8 @@ mod tests {
                 "entry".to_string(),
                 Arc::new(cfg),
             )
-            .await;
+            .await
+            .unwrap();
             block_manager.sync_data_block(1).await.unwrap();
         }
 
@@ -829,7 +830,8 @@ mod tests {
                 "entry".to_string(),
                 Arc::new(cfg),
             )
-            .await;
+            .await
+            .unwrap();
             block_manager.sync_data_block(999).await.unwrap();
         }
 
@@ -875,7 +877,8 @@ mod tests {
                 "entry".to_string(),
                 Cfg::default().into(),
             )
-            .await;
+            .await
+            .unwrap();
 
             let block_id = 1_000_005;
             block_manager.start_new_block(block_id, 1024).await.unwrap();
@@ -902,7 +905,8 @@ mod tests {
                 "entry".to_string(),
                 Arc::new(cfg),
             )
-            .await;
+            .await
+            .unwrap();
 
             let block_id = 2_000_005;
             block_manager.start_new_block(block_id, 1024).await.unwrap();
@@ -1451,7 +1455,8 @@ mod tests {
             "entry".to_string(),
             Cfg::default().into(),
         )
-        .await;
+        .await
+        .unwrap();
         let block_ref = bm.start_new_block(block_id, 1024).await.unwrap().clone();
 
         let mut block = block_ref.write().await.unwrap();

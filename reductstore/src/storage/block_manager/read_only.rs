@@ -90,7 +90,8 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg.clone()),
         )
-        .await;
+        .await
+        .unwrap();
 
         // change index on disc
         let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))
@@ -136,7 +137,8 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg.clone()),
         )
-        .await;
+        .await
+        .unwrap();
 
         let mut updated_index = BlockIndex::new(index_path.clone());
         updated_index.insert_or_update_with_crc(Block::new(1), 2);
@@ -172,7 +174,8 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg),
         )
-        .await;
+        .await
+        .unwrap();
 
         let err = block_manager.load_block(1).await.err().unwrap();
         assert_eq!(err.status(), ErrorCode::TooEarly);
@@ -206,7 +209,8 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg),
         )
-        .await;
+        .await
+        .unwrap();
 
         let err = block_manager.load_block(1).await.err().unwrap();
         assert_eq!(err.status(), ErrorCode::TooEarly);

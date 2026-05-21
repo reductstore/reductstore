@@ -141,7 +141,8 @@ pub(crate) mod tests {
             "entry".to_string(),
             Cfg::default().into(),
         )
-        .await;
+        .await
+        .unwrap();
         let block_ref = block_manager.start_new_block(0, 10).await.unwrap();
 
         {

@@ -121,7 +121,7 @@ impl Entry {
                     name.to_string(),
                     cfg.clone(),
                 )
-                .await,
+                .await?,
             )),
             system_behavior: strategy_for_entry(name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
