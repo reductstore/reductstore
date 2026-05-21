@@ -3,10 +3,10 @@
 
 use async_trait::async_trait;
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::HashMap;
-use std::io::{Read, Seek, SeekFrom, Write};
+use std::collections::{BTreeSet, HashMap};
+use std::io::{ErrorKind, Read, Seek, SeekFrom, Write};
 use std::mem;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crc64fast::Digest;
 use log::warn;
@@ -142,6 +142,14 @@ impl WalImpl {
     fn block_wal_path(&self, block_id: u64) -> PathBuf {
         self.root_path.join(format!("{}.wal", block_id))
     }
+
+    fn parse_wal_block_id(path: &Path) -> Option<u64> {
+        if path.extension()? != "wal" {
+            return None;
+        }
+
+        path.file_stem()?.to_str()?.parse::<u64>().ok()
+    }
 }
 
 const STOP_MARKER: u8 = 255;
@@ -236,20 +244,31 @@ impl Wal for WalImpl {
     }
 
     async fn list(&self) -> Result<Vec<u64>, ReductError> {
-        let mut blocks = Vec::new();
-        for path in FILE_CACHE.read_dir(&self.root_path).await? {
-            if path.extension().unwrap_or_default() == "wal" {
-                let block_id = path
-                    .file_stem()
-                    .unwrap()
-                    .to_str()
-                    .unwrap()
-                    .parse::<u64>()
-                    .unwrap();
-                blocks.push(block_id);
+        let mut blocks = BTreeSet::new();
+
+        // WAL files can be dirty only in the local cache. Remote backends list
+        // objects from remote storage, so check the local WAL directory first to
+        // make strict sync/compaction see WALs before FILE_CACHE uploads them.
+        let local_entries = match tokio::fs::read_dir(&self.root_path).await {
+            Ok(entries) => Some(entries),
+            Err(err) if err.kind() == ErrorKind::NotFound => None,
+            Err(err) => return Err(err.into()),
+        };
+
+        if let Some(mut entries) = local_entries {
+            while let Some(entry) = entries.next_entry().await? {
+                if let Some(block_id) = Self::parse_wal_block_id(&entry.path()) {
+                    blocks.insert(block_id);
+                }
             }
         }
-        Ok(blocks)
+
+        for path in FILE_CACHE.read_dir(&self.root_path).await? {
+            if let Some(block_id) = Self::parse_wal_block_id(&path) {
+                blocks.insert(block_id);
+            }
+        }
+        Ok(blocks.into_iter().collect())
     }
 }
 
@@ -355,6 +374,16 @@ mod tests {
         assert_eq!(blocks.len(), 2);
         assert!(blocks.contains(&1));
         assert!(blocks.contains(&2));
+    }
+
+    #[test]
+    fn test_parse_wal_block_id() {
+        assert_eq!(
+            WalImpl::parse_wal_block_id(&PathBuf::from("42.wal")),
+            Some(42)
+        );
+        assert_eq!(WalImpl::parse_wal_block_id(&PathBuf::from("42.tmp")), None);
+        assert_eq!(WalImpl::parse_wal_block_id(&PathBuf::from("bad.wal")), None);
     }
 
     #[rstest]
