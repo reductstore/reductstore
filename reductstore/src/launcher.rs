@@ -7,7 +7,6 @@ use crate::api::zenoh;
 use crate::cfg::{CfgParser, ExtCfgBounds, ExtCfgParser, InstanceRole};
 use crate::core::env::StdEnvGetter;
 use crate::core::file_cache::FILE_CACHE;
-#[cfg(not(test))]
 use crate::core::sync::set_rwlock_timeout;
 use crate::storage::engine::StorageEngine;
 use axum_server::tls_rustls::RustlsConfig;
