@@ -157,7 +157,6 @@ mod tests {
     use super::*;
     use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
-    use crate::core::sync::reset_rwlock_config;
     use prost::bytes::Bytes;
     use reduct_base::error::ErrorCode;
     use reduct_base::error::ReductError;
@@ -274,15 +273,6 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn test_rename_entry_rolls_back_when_rebuild_fails(#[future] bucket: Arc<Bucket>) {
-        struct ResetGuard;
-        impl Drop for ResetGuard {
-            fn drop(&mut self) {
-                reset_rwlock_config();
-            }
-        }
-        let _reset = ResetGuard;
-        reset_rwlock_config();
-
         let bucket = bucket.await;
         write(&bucket, "test-1", 1, b"test").await.unwrap();
 
@@ -294,10 +284,7 @@ mod tests {
         sleep(Duration::from_millis(5300)).await;
         drop(entries_guard);
 
-        let err = handle
-            .await
-            .unwrap()
-            .expect_err("rename must fail when entries write lock is contended");
+        let err = handle.await.unwrap().err().unwrap();
         assert_eq!(err.status(), ErrorCode::InternalServerError);
         assert!(err
             .message()

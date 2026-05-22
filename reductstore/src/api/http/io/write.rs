@@ -305,7 +305,7 @@ async fn spawn_getting_writers(
                 })
                 .await
                 .map_err(|err| {
-                    debug!(
+                    warn!(
                         "Failed to send the writer for {}/{}/{}: {}",
                         bucket_name, entry_name, timestamp, err
                     )

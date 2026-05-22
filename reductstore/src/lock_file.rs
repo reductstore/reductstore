@@ -332,7 +332,6 @@ mod tests {
     use super::*;
     use crate::cfg::lock_file::LockFileConfig;
     use crate::cfg::{Cfg, InstanceRole};
-    use crate::core::file_cache::FILE_CACHE;
     use rstest::{fixture, rstest};
     use std::fs;
     use tempfile::tempdir;
@@ -426,8 +425,6 @@ mod tests {
         assert!(lock_file.is_locked().await.unwrap());
         assert!(!lock_file.is_failed().await.unwrap());
         assert!(!lock_file.is_waiting().await.unwrap());
-
-        wait_for_lock_file_overwrite(&lock_file_path, "dummy").await;
 
         assert_ne!(
             fs::read_to_string(&lock_file_path).unwrap(),
@@ -722,21 +719,6 @@ mod tests {
         .expect("Lock file must be cleaned up in time");
     }
 
-    async fn wait_for_lock_file_overwrite(lock_file_path: &PathBuf, previous_content: &str) {
-        timeout(Duration::from_secs(3), async {
-            loop {
-                if let Ok(content) = fs::read_to_string(lock_file_path) {
-                    if content != previous_content {
-                        break;
-                    }
-                }
-                tokio::time::sleep(Duration::from_millis(50)).await;
-            }
-        })
-        .await
-        .expect("Lock file must be overwritten in time");
-    }
-
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_remove_lock_file_when_path_exists(lock_file_path: PathBuf) {
@@ -799,7 +781,6 @@ mod tests {
 
     #[fixture]
     fn lock_file_path() -> PathBuf {
-        FILE_CACHE.set_read_only(false);
         let dir = tempdir().unwrap().keep();
 
         let filepath = dir.join("test.lock");
