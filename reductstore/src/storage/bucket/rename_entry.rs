@@ -157,6 +157,7 @@ mod tests {
     use super::*;
     use crate::cfg::Cfg;
     use crate::core::file_cache::FILE_CACHE;
+    use crate::core::sync::rwlock_timeout;
     use prost::bytes::Bytes;
     use reduct_base::error::ErrorCode;
     use reduct_base::error::ReductError;
@@ -281,7 +282,7 @@ mod tests {
         let handle =
             tokio::spawn(async move { bucket_for_rename.rename_entry("test-1", "test-2").await });
 
-        sleep(Duration::from_millis(5300)).await;
+        sleep(rwlock_timeout() + Duration::from_millis(100)).await;
         drop(entries_guard);
 
         let err = handle.await.unwrap().err().unwrap();

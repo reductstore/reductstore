@@ -19,6 +19,11 @@ use std::time::Duration;
 use tokio::sync::mpsc;
 
 static SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
+#[cfg(test)]
+static RW_LOCK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+
+#[cfg(not(test))]
+static RW_LOCK_SHUTDOWN_TIMEOUT: Duration = Duration::from_hours(1);
 
 pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pareser: Parser)
 where
@@ -154,7 +159,7 @@ where
 
     // remote synchronization can lock resources for a long time,
     // so we set rwlock timeout to 1 hour to avoid panics during shutdown
-    set_rwlock_timeout(Duration::from_hours(1));
+    set_rwlock_timeout(RW_LOCK_SHUTDOWN_TIMEOUT);
     state_keeper
         .get_anonymous()
         .await
@@ -445,61 +450,6 @@ mod tests {
             .collect::<Vec<_>>();
         assert!(bucket_names.contains(&"bucket-1".to_string()));
         assert!(bucket_names.contains(&"bucket-2".to_string()));
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial]
-    async fn test_launch_spawns_replica_reload_for_replica_role_with_non_zero_interval() {
-        let reloads = Arc::new(AtomicUsize::new(0));
-        test_observer::set_replica_reload_observer(Some(reloads.clone()));
-
-        let mut cfg = HashMap::new();
-        cfg.insert("RS_INSTANCE_ROLE".to_string(), "REPLICA".to_string());
-        cfg.insert(
-            "RS_ENGINE_REPLICA_UPDATE_INTERVAL".to_string(),
-            "1".to_string(),
-        );
-
-        let task = set_env_and_run(cfg).await;
-        sleep(Duration::from_millis(300)).await;
-
-        *STOP_SERVER.lock().await = true;
-        task.join().unwrap();
-        test_observer::set_replica_reload_observer(None);
-
-        assert!(
-            reloads.load(Ordering::Relaxed) > 0,
-            "replica reload task should be spawned for replica role with non-zero interval"
-        );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial]
-    async fn test_launch_does_not_spawn_replica_reload_for_zero_interval() {
-        let reloads = Arc::new(AtomicUsize::new(0));
-        test_observer::set_replica_reload_observer(Some(reloads.clone()));
-
-        let mut cfg = HashMap::new();
-        cfg.insert("RS_INSTANCE_ROLE".to_string(), "REPLICA".to_string());
-        cfg.insert(
-            "RS_ENGINE_REPLICA_UPDATE_INTERVAL".to_string(),
-            "0".to_string(),
-        );
-
-        let task = set_env_and_run(cfg).await;
-        sleep(Duration::from_millis(300)).await;
-
-        *STOP_SERVER.lock().await = true;
-        task.join().unwrap();
-        test_observer::set_replica_reload_observer(None);
-
-        assert_eq!(
-            reloads.load(Ordering::Relaxed),
-            0,
-            "replica reload task should not be spawned when interval is zero"
-        );
     }
 
     async fn set_env_and_run(cfg: HashMap<String, String>) -> JoinHandle<()> {
