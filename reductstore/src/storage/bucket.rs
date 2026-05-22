@@ -21,7 +21,6 @@ use crate::storage::bucket::query::MultiEntryQuery;
 use crate::storage::bucket::settings::{
     DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
 };
-use crate::storage::engine::ReadOnlyMode;
 use crate::storage::entry::{
     is_system_meta_entry, Entry, EntrySettings, META_ENTRY_MAX_BLOCK_SIZE,
 };
@@ -35,7 +34,7 @@ use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::status::ResourceStatus;
-use reduct_base::{conflict, internal_server_error, Labels};
+use reduct_base::{conflict, forbidden, internal_server_error, Labels};
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
@@ -66,7 +65,6 @@ pub(crate) struct Bucket {
     settings: AsyncRwLock<BucketSettings>,
     folder_keeper: Arc<FolderKeeper>,
     cfg: Arc<Cfg>,
-    last_replica_sync: AsyncRwLock<Instant>,
     is_provisioned: AtomicBool,
     status: AsyncRwLock<ResourceStatus>,
     #[allow(dead_code)]
@@ -81,6 +79,21 @@ enum EntryMaintenanceMode {
 }
 
 impl Bucket {
+    #[cfg(test)]
+    pub(crate) fn cfg(&self) -> &Cfg {
+        &self.cfg
+    }
+
+    fn check_mode(&self) -> Result<(), ReductError> {
+        if self.cfg.role == InstanceRole::Replica {
+            return Err(forbidden!(
+                "Cannot perform this operation in read-only mode"
+            ));
+        }
+
+        Ok(())
+    }
+
     /// Create a new Bucket
     ///
     /// # Arguments
@@ -123,7 +136,6 @@ impl Bucket {
             is_provisioned: AtomicBool::new(false),
             status: AsyncRwLock::new(ResourceStatus::Ready),
             cfg: Arc::new(cfg),
-            last_replica_sync: AsyncRwLock::new(Instant::now()),
             folder_keeper: Arc::new(folder_keeper),
             queries: AsyncRwLock::new(HashMap::new()),
             io_limiter,
@@ -204,7 +216,6 @@ impl Bucket {
             settings: AsyncRwLock::new(settings),
             is_provisioned: AtomicBool::new(false),
             status: AsyncRwLock::new(ResourceStatus::Ready),
-            last_replica_sync: AsyncRwLock::new(Instant::now()),
             cfg,
             folder_keeper: Arc::new(folder_keeper),
             queries: AsyncRwLock::new(HashMap::new()),
@@ -382,9 +393,15 @@ impl Bucket {
 
         self.save_settings().await?;
 
-        let entries = self.entries.clone();
+        let entries = self
+            .entries
+            .read()
+            .await?
+            .values()
+            .cloned()
+            .collect::<Vec<_>>();
         let mut count = 0usize;
-        for entry in entries.read().await?.values() {
+        for entry in entries {
             let result = match mode {
                 EntryMaintenanceMode::Compact => entry.compact().await,
                 EntryMaintenanceMode::SyncFs => entry.sync_fs().await,
@@ -468,14 +485,6 @@ impl Bucket {
             || candidate
                 .strip_prefix(entry_name)
                 .is_some_and(|suffix| suffix.starts_with('/'))
-    }
-}
-
-#[cfg(test)]
-impl Bucket {
-    pub async fn reset_last_replica_sync(&self) {
-        let mut sync = self.last_replica_sync.write().await.unwrap();
-        *sync = Instant::now();
     }
 }
 

@@ -131,6 +131,17 @@ impl File {
         self.is_synced = true;
         Ok(())
     }
+
+    /// Flush data to local filesystem without triggering remote upload.
+    pub async fn flush_local(&mut self) -> std::io::Result<()> {
+        if self.ignore_write {
+            return Ok(());
+        }
+
+        Self::run_blocking_io(|| self.inner.sync_all())?;
+        Ok(())
+    }
+
     pub fn metadata(&self) -> std::io::Result<std::fs::Metadata> {
         self.inner.metadata()
     }
@@ -319,6 +330,26 @@ mod tests {
             assert!(!file.is_synced());
             file.sync_all().await.unwrap();
             assert!(file.is_synced());
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_flush_local_does_not_upload(mut mock_backend: MockBackend) {
+            mock_backend.expect_upload().times(0);
+
+            let mut file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .write(true)
+                .open("test.txt")
+                .await
+                .unwrap();
+
+            assert!(file.is_synced());
+            file.write_all(b" more").unwrap();
+            assert!(!file.is_synced());
+
+            file.flush_local().await.unwrap();
+
+            assert!(!file.is_synced());
         }
 
         #[rstest]

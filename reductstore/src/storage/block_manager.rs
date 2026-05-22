@@ -7,6 +7,7 @@ pub(in crate::storage) mod block_index;
 mod read_only;
 pub(in crate::storage) mod wal;
 
+use crate::backend::BackendType;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
@@ -74,8 +75,8 @@ impl BlockManager {
         bucket: String,
         entry: String,
         cfg: Arc<Cfg>,
-    ) -> Self {
-        Self {
+    ) -> Result<Self, ReductError> {
+        Ok(Self {
             path: path.clone(),
             bucket,
             entry,
@@ -86,10 +87,10 @@ impl BlockManager {
                 READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
             ),
-            wal: create_wal(path.clone()).await,
+            wal: create_wal(path.clone()).await?,
             cfg,
             last_replica_sync: Instant::now(),
-        }
+        })
     }
 
     pub async fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
@@ -107,17 +108,23 @@ impl BlockManager {
     }
 
     pub async fn save_cache_metadata_on_disk(&mut self) -> Result<(), ReductError> {
+        let blocks_with_wal = self.wal.list().await.unwrap_or_default();
+        if blocks_with_wal.is_empty() {
+            return Ok(());
+        }
+
         let blocks = self.block_cache.write_values();
         for block in blocks {
-            self.save_meta_on_disk(block).await?;
+            let block_id = block.read().await?.block_id();
+            if blocks_with_wal.contains(&block_id) {
+                self.save_meta_on_disk(block).await?;
+            }
         }
 
         Ok(())
     }
 
     pub async fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
-        self.update_and_get_index().await?;
-
         let start_block_id = self.block_index.tree().range(start..).next();
         let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
             start_block_id.unwrap().clone()
@@ -267,7 +274,12 @@ impl BlockManager {
             let mut file = FILE_CACHE
                 .write_or_create(&self.path_to_data(block_id), SeekFrom::Start(0))
                 .await?;
-            file.set_len(max_block_size)?;
+
+            if self.cfg.backend_config.backend_type == BackendType::Filesystem {
+                // Pre-allocation for remote storage is inefficient
+                // because we synchronize full size even if block is empty
+                file.set_len(max_block_size)?;
+            }
         }
 
         self.block_index.insert_or_update(block.clone());
@@ -674,15 +686,6 @@ impl BlockManager {
         &self.block_index
     }
 
-    pub async fn update_and_get_index(&mut self) -> Result<&BlockIndex, ReductError> {
-        self.reload_if_readonly().await?;
-        Ok(&self.block_index)
-    }
-
-    pub async fn force_reload_index_on_replica(&mut self) -> Result<(), ReductError> {
-        self.reload_if_readonly_with(true).await
-    }
-
     pub fn bucket_name(&self) -> &String {
         &self.bucket
     }
@@ -738,7 +741,7 @@ impl BlockManager {
                 .await?;
             lock.set_len(len)?;
             lock.write_all(&buf)?;
-            lock.sync_all().await?; // fix https://github.com/reductstore/reductstore/issues/642
+            lock.flush_local().await?; // fix https://github.com/reductstore/reductstore/issues/642
         }
 
         trace!("Updating block index");
@@ -799,7 +802,8 @@ mod tests {
                 "entry".to_string(),
                 Arc::new(cfg),
             )
-            .await;
+            .await
+            .unwrap();
             block_manager.sync_data_block(1).await.unwrap();
         }
 
@@ -815,7 +819,8 @@ mod tests {
                 "entry".to_string(),
                 Arc::new(cfg),
             )
-            .await;
+            .await
+            .unwrap();
             block_manager.sync_data_block(999).await.unwrap();
         }
 
@@ -848,6 +853,61 @@ mod tests {
 
             let block_from_file: Block = BlockProto::decode(Bytes::from(buf)).unwrap().into();
             assert_eq!(block_from_file, block_ref.read().await.unwrap().to_owned());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_save_cache_metadata_skips_blocks_without_wal() {
+            let path = tempdir().unwrap().keep().join("bucket").join("entry");
+            let mut block_manager = BlockManager::build(
+                path.clone(),
+                BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                "bucket".to_string(),
+                "entry".to_string(),
+                Cfg::default().into(),
+            )
+            .await
+            .unwrap();
+
+            let block_id = 1_000_005;
+            block_manager.start_new_block(block_id, 1024).await.unwrap();
+
+            block_manager.save_cache_metadata_on_disk().await.unwrap();
+
+            assert!(!path
+                .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT))
+                .exists());
+            assert!(!path.join(BLOCK_INDEX_FILE).exists());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_starting_block_no_preallocation_for_remote_backend() {
+            let path = tempdir().unwrap().keep().join("bucket").join("entry");
+            let mut cfg = Cfg::default();
+            cfg.backend_config.backend_type = BackendType::Remote;
+
+            let mut block_manager = BlockManager::build(
+                path.clone(),
+                BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(cfg),
+            )
+            .await
+            .unwrap();
+
+            let block_id = 2_000_005;
+            block_manager.start_new_block(block_id, 1024).await.unwrap();
+            block_manager.save_cache_on_disk().await.unwrap();
+
+            let file = std::fs::File::open(
+                block_manager
+                    .path
+                    .join(format!("{}{}", block_id, DATA_FILE_EXT)),
+            )
+            .unwrap();
+            assert_eq!(file.metadata().unwrap().len(), 0);
         }
 
         #[rstest]
@@ -1384,7 +1444,8 @@ mod tests {
             "entry".to_string(),
             Cfg::default().into(),
         )
-        .await;
+        .await
+        .unwrap();
         let block_ref = bm.start_new_block(block_id, 1024).await.unwrap().clone();
 
         let mut block = block_ref.write().await.unwrap();

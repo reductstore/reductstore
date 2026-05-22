@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.19.8 - 2026-05-21
+
+### Fixed
+
+- Bad performance when many entries must be syncronized on primary and read-only replicas, [PR-1357](https://github.com/reductstore/reductstore/pull/1387)
+
 ## 1.19.7 - 2026-04-27
 
 ### Fixed

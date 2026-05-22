@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0
 
 use super::Bucket;
-use crate::storage::engine::ReadOnlyMode;
 use crate::storage::entry::is_system_meta_entry;
 use crate::storage::entry::Entry;
 use log::{debug, error};

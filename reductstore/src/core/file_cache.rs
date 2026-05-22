@@ -21,6 +21,7 @@ const FILE_CACHE_MAX_SIZE: usize = 512;
 const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
 const FILE_CACHE_SYNC_INTERVAL: Duration = Duration::from_millis(10);
+const FILE_CACHE_SYNC_BATCH_SIZE: usize = 16;
 
 pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
     #[allow(unused_mut)]
@@ -172,11 +173,17 @@ impl FileCache {
                     continue;
                 }
 
-                files_to_sync.push((path.clone(), file.clone()));
+                files_to_sync.push((path.clone(), file.clone(), file_lock.last_synced()));
             }
         }
 
-        for (path, file) in files_to_sync {
+        // For scheduled synchronization we syn only a batch of files that are the most overdue for synchronization
+        if !force {
+            files_to_sync.sort_by(|a, b| a.2.cmp(&b.2));
+            files_to_sync.truncate(FILE_CACHE_SYNC_BATCH_SIZE);
+        }
+
+        for (path, file, _) in files_to_sync {
             let mut file_lock = if force {
                 file.write().await?
             } else {
@@ -190,7 +197,7 @@ impl FileCache {
                 // ignore not found errors, since file can be removed while we are syncing,
                 // it's better than holding the file lock for too long and preventing other operations on the file
                 if err.kind() != std::io::ErrorKind::NotFound {
-                    warn!("Failed to sync file {}: {}", path.display(), err);
+                    debug!("Failed to sync file {}: {}", path.display(), err);
                 }
                 continue;
             }
@@ -251,7 +258,7 @@ impl FileCache {
                 discarded_count += 1;
                 if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
                     lock.sync_all().await.unwrap_or_else(|err| {
-                        warn!("Failed to sync discarded file {:?}: {}", path, err);
+                        debug!("Failed to sync discarded file {:?}: {}", path, err);
                     });
                     synced_count += 1;
                 }
@@ -1285,6 +1292,68 @@ mod tests {
 
             cache.force_sync_all().await.unwrap();
             assert!(!file_path.exists(), "invalidated file should be removed");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn scheduled_sync_processes_only_batch_size(tmp_dir: PathBuf) {
+            let file_count = FILE_CACHE_SYNC_BATCH_SIZE + 1;
+            let oldest_subset = 10;
+            let file_paths: Vec<PathBuf> = (0..file_count)
+                .map(|i| tmp_dir.join(format!("test_scheduled_sync_batch_{i}.txt")))
+                .collect();
+
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, file_count);
+                for file_path in &file_paths {
+                    expect_try_exists(mock, file_path, false, 1);
+                    expect_update_local_cache(mock, file_path, AccessMode::ReadWrite, 1);
+                }
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(Vec::new)
+                    .times(1);
+                mock.expect_upload()
+                    .returning(|_| Ok(()))
+                    .times(FILE_CACHE_SYNC_BATCH_SIZE);
+            });
+
+            let cache = FileCache::new(
+                file_count + 1,
+                Duration::from_secs(60),
+                Duration::from_secs(60),
+            );
+            cache.set_storage_backend(backend).await;
+            cache.stop_sync_worker.store(true, Ordering::Relaxed);
+            for file_path in &file_paths {
+                let mut file_ref = cache
+                    .write_or_create(file_path, SeekFrom::Start(0))
+                    .await
+                    .unwrap();
+                file_ref.write_all(b"test").unwrap();
+                tokio::time::sleep(Duration::from_millis(1)).await;
+            }
+
+            let sync_interval = Some(Arc::new(RwLock::new(Duration::from_millis(0))));
+            FileCache::sync_rw_and_unused_files(
+                &cache.read_only,
+                &cache.backend,
+                &cache.cache,
+                &sync_interval,
+            )
+            .await
+            .unwrap();
+
+            for file_path in &file_paths[..oldest_subset] {
+                let file = cache
+                    .cache
+                    .read()
+                    .await
+                    .unwrap()
+                    .get(file_path)
+                    .unwrap()
+                    .clone();
+                assert!(file.read().await.unwrap().is_synced());
+            }
         }
     }
 

@@ -493,7 +493,8 @@ mod tests {
                 "entry".to_string(),
                 Cfg::default().into(),
             )
-            .await;
+            .await
+            .unwrap();
             Arc::new(AsyncRwLock::new(manager))
         }
 

@@ -17,7 +17,7 @@ use axum::response::IntoResponse;
 use axum_extra::headers::{Expect, Header};
 use bytes::Bytes;
 use futures_util::StreamExt;
-use log::{debug, error};
+use log::{debug, warn};
 use reduct_base::batch::v2::{
     make_entries_header, make_error_batched_header, make_start_timestamp_header,
     parse_batched_headers, parse_entries, parse_start_timestamp, sort_headers_by_entry_and_time,
@@ -282,11 +282,13 @@ async fn spawn_getting_writers(
         let mut error_map: ErrorMap = ErrorMap::new();
 
         for record in records.into_iter() {
+            let entry_name = record.record.entry.clone();
+            let timestamp = record.record.timestamp;
             let writer = start_writing(
                 &bucket_name,
-                &record.record.entry,
+                &entry_name,
                 storage.clone(),
-                record.record.timestamp,
+                timestamp,
                 &record.record.header,
                 &mut error_map,
                 record.entry_index,
@@ -296,13 +298,18 @@ async fn spawn_getting_writers(
 
             tx_writer
                 .send(WriteContext {
-                    entry_name: record.record.entry.clone(),
-                    time: record.record.timestamp,
+                    entry_name: entry_name.clone(),
+                    time: timestamp,
                     header: record.record,
                     writer,
                 })
                 .await
-                .map_err(|err| error!("Failed to send the writer: {}", err))
+                .map_err(|err| {
+                    warn!(
+                        "Failed to send the writer for {}/{}/{}: {}",
+                        bucket_name, entry_name, timestamp, err
+                    )
+                })
                 .unwrap_or(());
         }
         error_map
