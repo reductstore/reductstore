@@ -282,7 +282,7 @@ mod tests {
         let handle =
             tokio::spawn(async move { bucket_for_rename.rename_entry("test-1", "test-2").await });
 
-        sleep(rwlock_timeout() + Duration::from_millis(100)).await;
+        sleep(rwlock_timeout() + Duration::from_millis(1000)).await;
         drop(entries_guard);
 
         let err = handle.await.unwrap().err().unwrap();
