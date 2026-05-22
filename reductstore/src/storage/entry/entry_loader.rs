@@ -245,7 +245,7 @@ impl EntryLoader {
                     entry_name.clone(),
                     cfg.clone(),
                 )
-                .await,
+                .await?,
             )),
             system_behavior: strategy_for_entry(&entry_name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
@@ -279,7 +279,7 @@ impl EntryLoader {
                     entry_name.clone(),
                     cfg.clone(),
                 )
-                .await,
+                .await?,
             )),
             system_behavior: strategy_for_entry(&entry_name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
@@ -351,7 +351,7 @@ impl EntryLoader {
         entry_path: PathBuf,
         entry: &mut Entry,
     ) -> Result<(), ReductError> {
-        let wal = create_wal(entry_path.clone()).await;
+        let mut wal = create_wal(entry_path.clone()).await?;
         let wal_blocks = wal.list().await?;
         if !wal_blocks.is_empty() {
             warn!(
@@ -575,7 +575,8 @@ mod tests {
             "entry".to_string(),
             Cfg::default().into(),
         )
-        .await;
+        .await
+        .unwrap();
         {
             let block_v1_8_ref = block_manager.start_new_block(1, 100).await.unwrap();
             let mut block_v1_8 = block_v1_8_ref.write().await.unwrap();
@@ -641,7 +642,8 @@ mod tests {
             "entry".to_string(),
             Cfg::default().into(),
         )
-        .await;
+        .await
+        .unwrap();
         let block_v1_9 = block_manager
             .load_block(1)
             .await
@@ -875,7 +877,7 @@ mod tests {
         #[tokio::test]
         async fn test_new_block(#[future] entry_fix: (Arc<Entry>, PathBuf), record2: Record) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone()).await;
+            let mut wal = create_wal(path.clone()).await.unwrap();
             // Block #3 was created
             wal.append(3, WalEntry::WriteRecord(record2.clone()))
                 .await
@@ -924,7 +926,7 @@ mod tests {
             mut record2: Record,
         ) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone()).await;
+            let mut wal = create_wal(path.clone()).await.unwrap();
 
             // Block #1 was updated
             wal.append(1, WalEntry::WriteRecord(record2.clone()))
@@ -968,7 +970,7 @@ mod tests {
         #[tokio::test]
         async fn test_remove_record(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone()).await;
+            let mut wal = create_wal(path.clone()).await.unwrap();
 
             // Record #1 was removed
             wal.append(1, WalEntry::RemoveRecord(0)).await.unwrap();
@@ -1000,7 +1002,7 @@ mod tests {
         #[tokio::test]
         async fn test_remove_block(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone()).await;
+            let mut wal = create_wal(path.clone()).await.unwrap();
 
             // Block #1 was removed
             wal.append(1, WalEntry::RemoveBlock).await.unwrap();
@@ -1047,7 +1049,7 @@ mod tests {
         #[tokio::test]
         async fn test_recovery_without_index(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone()).await;
+            let mut wal = create_wal(path.clone()).await.unwrap();
 
             // Block #1 was appended to the WAL
             wal.append(

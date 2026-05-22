@@ -121,7 +121,7 @@ impl Entry {
                     name.to_string(),
                     cfg.clone(),
                 )
-                .await,
+                .await?,
             )),
             system_behavior: strategy_for_entry(name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
@@ -168,6 +168,37 @@ impl Entry {
         &self,
     ) -> Result<Option<OwnedSemaphorePermit>, ReductError> {
         self.io_limiter.acquire_writer_slot().await
+    }
+
+    pub(crate) async fn reload_index_on_replica(&self) -> Result<(), ReductError> {
+        let reload = {
+            let Some(block_manager) = self.block_manager.try_read() else {
+                debug!(
+                    "Skipping replica index reload for {}/{} because block manager is busy",
+                    self.bucket_name, self.name
+                );
+                return Ok(());
+            };
+
+            block_manager.prepare_replica_index_reload()
+        };
+
+        let Some(reload) = reload else {
+            return Ok(());
+        };
+
+        let updated_index = reload.load_updated_index().await?;
+
+        let Some(mut block_manager) = self.block_manager.try_write() else {
+            debug!(
+                "Skipping replica index swap for {}/{} because block manager is busy",
+                self.bucket_name, self.name
+            );
+            return Ok(());
+        };
+
+        block_manager.apply_replica_index_reload(updated_index);
+        Ok(())
     }
 
     /// Query records for a time range.
@@ -249,8 +280,8 @@ impl Entry {
         let name = self.name.clone();
         let status_result = self.status();
 
-        let mut bm = self.block_manager.write().await?;
-        let index = bm.update_and_get_index().await?;
+        let bm = self.block_manager.read().await?;
+        let index = bm.index();
         let oldest_record = index
             .tree()
             .iter()
@@ -312,8 +343,7 @@ impl Entry {
 
     pub(super) async fn remove_all_blocks(&self) -> Result<(), ReductError> {
         let block_ids = {
-            let mut block_manager = self.block_manager.write().await?;
-            block_manager.update_and_get_index().await?;
+            let block_manager = self.block_manager.read().await?;
             Ok::<BTreeSet<u64>, ReductError>(block_manager.index().tree().clone())
         };
 
