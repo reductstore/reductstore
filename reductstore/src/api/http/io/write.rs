@@ -17,7 +17,7 @@ use axum::response::IntoResponse;
 use axum_extra::headers::{Expect, Header};
 use bytes::Bytes;
 use futures_util::StreamExt;
-use log::{debug, warn};
+use log::debug;
 use reduct_base::batch::v2::{
     make_entries_header, make_error_batched_header, make_start_timestamp_header,
     parse_batched_headers, parse_entries, parse_start_timestamp, sort_headers_by_entry_and_time,

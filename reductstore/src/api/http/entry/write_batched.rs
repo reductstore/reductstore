@@ -16,7 +16,7 @@ use crate::api::http::StateKeeper;
 use crate::api::limits::limit_scope_from_client_ip;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::RecordDrainer;
-use log::{debug, warn};
+use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
 use reduct_base::io::{RecordMeta, WriteRecord};
