@@ -929,7 +929,14 @@ mod tests {
         }
         {
             let _lock = replication.log_map.write().await.unwrap();
-            tokio_sleep(rwlock_timeout() + Duration::from_millis(100)).await;
+            let deadline = Instant::now() + rwlock_timeout() + Duration::from_millis(500);
+            while Instant::now() < deadline {
+                if !replication.is_active.load(Ordering::Relaxed) {
+                    break;
+                }
+                tokio_sleep(Duration::from_millis(10)).await;
+            }
+
             assert!(
                 !replication.is_active.load(Ordering::Relaxed),
                 "Replication must be marked inactive while sender can't acquire the log lock"

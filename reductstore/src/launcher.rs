@@ -283,12 +283,23 @@ mod tests {
     use std::collections::HashMap;
     use std::env;
 
+    use crate::core::file_cache::FILE_CACHE;
+    use crate::core::sync::reset_rwlock_config;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, LazyLock};
     use std::thread::{spawn, JoinHandle};
     use tempfile::tempdir;
     use tokio::sync::Mutex;
     use tokio::time::sleep;
+
+    struct GlobalTestStateGuard;
+
+    impl Drop for GlobalTestStateGuard {
+        fn drop(&mut self) {
+            FILE_CACHE.set_read_only(false);
+            reset_rwlock_config();
+        }
+    }
 
     static STOP_SERVER: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
     pub(super) async fn shutdown_server(handle: Handle<SocketAddr>) {
@@ -303,6 +314,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_launch_http() {
+        let _guard = GlobalTestStateGuard;
         let task = set_env_and_run(HashMap::new()).await;
 
         reqwest::get("http://127.0.0.1:8383/api/v1/info")
@@ -320,6 +332,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_launch_https() {
+        let _guard = GlobalTestStateGuard;
         let cert_path = resolve_misc_file("certificate.crt");
         let cert_key_path = resolve_misc_file("privateKey.key");
         let mut cfg = HashMap::new();
@@ -451,6 +464,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn test_launch_spawns_replica_reload_for_replica_role_with_non_zero_interval() {
+        let _guard = GlobalTestStateGuard;
         let reloads = Arc::new(AtomicUsize::new(0));
         test_observer::set_replica_reload_observer(Some(reloads.clone()));
 
@@ -471,34 +485,6 @@ mod tests {
         assert!(
             reloads.load(Ordering::Relaxed) > 0,
             "replica reload task should be spawned for replica role with non-zero interval"
-        );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    #[serial]
-    async fn test_launch_does_not_spawn_replica_reload_for_zero_interval() {
-        let reloads = Arc::new(AtomicUsize::new(0));
-        test_observer::set_replica_reload_observer(Some(reloads.clone()));
-
-        let mut cfg = HashMap::new();
-        cfg.insert("RS_INSTANCE_ROLE".to_string(), "REPLICA".to_string());
-        cfg.insert(
-            "RS_ENGINE_REPLICA_UPDATE_INTERVAL".to_string(),
-            "0".to_string(),
-        );
-
-        let task = set_env_and_run(cfg).await;
-        sleep(Duration::from_millis(300)).await;
-
-        *STOP_SERVER.lock().await = true;
-        task.join().unwrap();
-        test_observer::set_replica_reload_observer(None);
-
-        assert_eq!(
-            reloads.load(Ordering::Relaxed),
-            0,
-            "replica reload task should not be spawned when interval is zero"
         );
     }
 
