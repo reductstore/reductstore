@@ -277,7 +277,7 @@ impl Drop for LifecycleTask {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use crate::audit::{AuditEvent, LogAuditEvent};
     use crate::cfg::Cfg;
@@ -287,6 +287,7 @@ mod tests {
     use async_trait::async_trait;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::unprocessable_entity;
+    use rstest::fixture;
     use std::sync::Mutex;
     use tokio::sync::mpsc;
     use tokio::time::{timeout, Duration};
@@ -574,7 +575,7 @@ mod tests {
         )
     }
 
-    async fn storage() -> Arc<StorageEngine> {
+    pub async fn storage() -> Arc<StorageEngine> {
         let tmp_dir = tempfile::tempdir().unwrap();
         let cfg = Cfg {
             data_path: tmp_dir.keep(),
@@ -591,5 +592,22 @@ mod tests {
             .await
             .unwrap();
         Arc::new(storage)
+    }
+
+    #[fixture]
+    pub fn settings() -> LifecycleSettings {
+        settings_fixture()
+    }
+
+    pub fn settings_fixture() -> LifecycleSettings {
+        LifecycleSettings {
+            lifecycle_type: LifecycleType::Delete,
+            bucket: "bucket-1".to_string(),
+            entries: vec!["entry-1".to_string()],
+            max_age: "1h".to_string(),
+            interval: "1h".to_string(),
+            when: None,
+            mode: LifecycleMode::Enabled,
+        }
     }
 }
