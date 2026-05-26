@@ -50,7 +50,9 @@ impl LifecycleAction for DeleteLifecycleAction {
                 QueryType::Remove
             },
             entries,
-            start: None,
+            // Use absolute range start to avoid invalid (start > stop) when
+            // an entry contains only fresh records newer than `cutoff`.
+            start: Some(0),
             stop,
             when: settings.when.clone(),
             ..Default::default()
@@ -114,6 +116,46 @@ mod tests {
         assert_eq!(result.affected_records, 2);
         assert!(bucket.begin_read("entry-1", 1).await.is_ok());
         assert!(bucket.begin_read("entry-1", 2).await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn dry_run_delete_with_only_fresh_records_returns_zero() {
+        let storage = storage().await;
+        let bucket = storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+
+        let now_us = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64;
+        write(&bucket, "entry-1", now_us, b"fresh").await.unwrap();
+
+        let settings = LifecycleSettings {
+            lifecycle_type: LifecycleType::Delete,
+            bucket: "bucket-1".to_string(),
+            entries: vec!["entry-1".to_string()],
+            max_age: "1h".to_string(),
+            interval: "1h".to_string(),
+            when: None,
+            mode: LifecycleMode::DryRun,
+        };
+
+        let action = DeleteLifecycleAction;
+        let result = action
+            .run(
+                "test",
+                &settings,
+                LifecycleContext::new(Arc::clone(&storage)),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.affected_records, 0);
+        assert!(bucket.begin_read("entry-1", now_us).await.is_ok());
     }
 
     async fn storage() -> Arc<StorageEngine> {
