@@ -489,7 +489,7 @@ impl Bucket {
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use super::*;
     use reduct_base::conflict;
     use reduct_base::io::ReadRecord;

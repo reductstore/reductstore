@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix lifecycle delete worker first-run failure (`422 Start time must be before stop time`) by ensuring delete queries use a valid initial time range even when all records are newer than `max_age`, [PR-1394](https://github.com/reductstore/reductstore/pull/1394)
 - Fix runtime default for lifecycle interval by implementing manual Default for LifecycleSettings, [PR-1385](https://github.com/reductstore/reductstore/pull/1385)
 - Downgrade `write_batched` log severity for closed writer-channel handoff from error to warning to reduce noisy false-positive error bursts under expected stream abort/backpressure scenarios, [PR-1356](https://github.com/reductstore/reductstore/pull/1356)
 - Handle `--version` (`-V`) in `main` before server startup so version output remains clean and exits without initialization side effects, [PR-1365](https://github.com/reductstore/reductstore/pull/1365)

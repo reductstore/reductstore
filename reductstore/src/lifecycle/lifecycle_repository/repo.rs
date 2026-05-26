@@ -367,6 +367,8 @@ impl LifecycleRepository {
 mod tests {
     use super::*;
     use crate::lifecycle::action::{LifecycleAction, LifecycleRunResult};
+    use crate::lifecycle::lifecycle_task::tests::settings;
+    use crate::lifecycle::lifecycle_task::tests::settings_fixture;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::lifecycle_api::{LifecycleMode, LifecycleType};
     use reduct_base::{conflict, not_found, unprocessable_entity};
@@ -806,23 +808,6 @@ mod tests {
 
         let info = repo.get_info("test").await.unwrap();
         assert_eq!(info.info.mode, LifecycleMode::Disabled);
-    }
-
-    #[fixture]
-    fn settings() -> LifecycleSettings {
-        settings_fixture()
-    }
-
-    fn settings_fixture() -> LifecycleSettings {
-        LifecycleSettings {
-            lifecycle_type: LifecycleType::Delete,
-            bucket: "bucket-1".to_string(),
-            entries: vec!["entry-1".to_string()],
-            max_age: "1h".to_string(),
-            interval: "1h".to_string(),
-            when: None,
-            mode: LifecycleMode::Enabled,
-        }
     }
 
     #[cfg(any(debug_assertions, test))]
