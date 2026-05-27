@@ -42,6 +42,7 @@ pub struct LifecycleSettings {
     /// Bucket to apply the lifecycle policy to.
     pub bucket: String,
     /// Entries to clean. If empty, all removable entries are matched. Prefix wildcards are supported.
+    /// System metadata entries (e.g. `entry/$meta`) are always excluded.
     #[serde(default)]
     pub entries: Vec<String>,
     /// Maximum record age, e.g. "30d", "24h", or "3600s".
