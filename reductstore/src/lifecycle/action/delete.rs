@@ -72,7 +72,7 @@ impl LifecycleAction for DeleteLifecycleAction {
 mod tests {
     use super::*;
     use crate::lifecycle::lifecycle_task::tests::{settings, storage};
-    use crate::storage::bucket::tests::write;
+    use crate::storage::bucket::tests::{write, write_meta};
     use crate::storage::bucket::Bucket;
     use crate::storage::engine::StorageEngine;
     use rstest::{fixture, rstest};
@@ -143,5 +143,33 @@ mod tests {
 
         assert_eq!(result.affected_records, 0);
         assert!(test_bucket.begin_read("entry-1", now_us).await.is_ok());
+    }
+
+    #[tokio::test]
+    #[rstest]
+    async fn delete_lifecycle_keeps_meta_attachments(
+        #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
+        action: DeleteLifecycleAction,
+        mut settings: LifecycleSettings,
+    ) {
+        let (test_storage, test_bucket) = test_context.await;
+
+        write_meta(&test_bucket, "entry-1/$meta", 1, br#"{"k":"v"}"#)
+            .await
+            .unwrap();
+        write(&test_bucket, "entry-1", 1, b"data").await.unwrap();
+
+        settings.mode = LifecycleMode::Enabled;
+        settings.max_age = "0s".to_string();
+        settings.entries = vec!["entry-1*".to_string()];
+
+        let result = action
+            .run("test", &settings, LifecycleContext::new(test_storage))
+            .await
+            .unwrap();
+
+        assert_eq!(result.affected_records, 1);
+        assert!(test_bucket.begin_read("entry-1", 1).await.is_err());
+        assert!(test_bucket.begin_read("entry-1/$meta", 1).await.is_ok());
     }
 }
