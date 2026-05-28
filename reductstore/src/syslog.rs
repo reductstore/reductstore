@@ -260,6 +260,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn default_audit_type_is_api_call() {
+        assert_eq!(default_audit_type(), "api_call");
+    }
+
+    #[test]
+    fn default_audit_instance_is_unknown() {
+        assert_eq!(default_audit_instance(), "unknown");
+    }
+
+    #[test]
+    fn default_audit_message_is_empty() {
+        assert_eq!(default_audit_message(), "");
+    }
+
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn build_uses_local_repository_for_non_replica(
