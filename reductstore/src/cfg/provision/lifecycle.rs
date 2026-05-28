@@ -3,7 +3,7 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds, ProvisionedLifecycle};
 use crate::core::env::{Env, GetEnv};
-use crate::lifecycle::{LifecycleAuditSink, LifecycleRepoBuilder, ManageLifecycles};
+use crate::lifecycle::{LifecycleRepoBuilder, ManageLifecycles, SystemEventSink};
 use crate::storage::engine::StorageEngine;
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
@@ -15,10 +15,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_lifecycle_repo(
         &self,
         storage: Arc<StorageEngine>,
-        audit_sink: LifecycleAuditSink,
+        system_event_sink: SystemEventSink,
     ) -> Result<Box<dyn ManageLifecycles + Send + Sync>, ReductError> {
         let mut repo = LifecycleRepoBuilder::new(self.cfg.clone())
-            .with_audit_sink(audit_sink)
+            .with_system_event_sink(system_event_sink)
             .build(Arc::clone(&storage))
             .await;
 
@@ -245,29 +245,32 @@ mod tests {
 
     async fn lifecycle_infos(
         env_getter: TestEnvGetter,
-    ) -> (Vec<LifecycleInfo>, Option<LifecycleSettings>, bool) {
+    ) -> (Vec<LifecycleInfo>, Option<LifecycleSettings>, bool, bool) {
         let components = CfgParser::from_env(env_getter, "0.0.0")
             .await
             .build()
             .await
             .unwrap();
         let audit_enabled = components.cfg.audit_conf.enabled;
+        let system_events_enabled = components.cfg.system_events_conf.enabled;
         let repo = components.lifecycle_repo.read().await.unwrap();
         let lifecycles = repo.lifecycles().await.unwrap();
         let settings = match lifecycles.first() {
             Some(info) => Some(repo.get_lifecycle_settings(&info.name).await.unwrap()),
             None => None,
         };
-        (lifecycles, settings, audit_enabled)
+        (lifecycles, settings, audit_enabled, system_events_enabled)
     }
 
     #[rstest]
     #[tokio::test]
     async fn parses_lifecycle_settings_from_env(path: PathBuf) {
-        let (_, settings, audit_enabled) = lifecycle_infos(lifecycle_env(path, &[])).await;
+        let (_, settings, audit_enabled, system_events_enabled) =
+            lifecycle_infos(lifecycle_env(path, &[])).await;
         let settings = settings.unwrap();
 
-        assert!(audit_enabled);
+        assert!(!audit_enabled);
+        assert!(system_events_enabled);
         assert_eq!(settings.lifecycle_type, LifecycleType::Delete);
         assert_eq!(settings.bucket, "telemetry");
         assert_eq!(
@@ -289,7 +292,7 @@ mod tests {
         let mut env_getter = lifecycle_env(path, &[]);
         env_getter.values.remove("RS_LIFECYCLE_A_TYPE");
 
-        let (_, settings, _) = lifecycle_infos(env_getter).await;
+        let (_, settings, _, _) = lifecycle_infos(env_getter).await;
         assert_eq!(settings.unwrap().lifecycle_type, LifecycleType::Delete);
     }
 
@@ -303,7 +306,8 @@ mod tests {
         #[case] key: &str,
         #[case] value: &str,
     ) {
-        let (lifecycles, settings, _) = lifecycle_infos(lifecycle_env(path, &[(key, value)])).await;
+        let (lifecycles, settings, _, _) =
+            lifecycle_infos(lifecycle_env(path, &[(key, value)])).await;
 
         assert!(lifecycles.is_empty());
         assert!(settings.is_none());
@@ -430,7 +434,7 @@ mod tests {
         let mut env_getter = lifecycle_env(path, &[]);
         env_getter.values.remove("RS_LIFECYCLE_A_MODE");
 
-        let (lifecycles, _, _) = lifecycle_infos(env_getter).await;
+        let (lifecycles, _, _, _) = lifecycle_infos(env_getter).await;
         assert_eq!(lifecycles.len(), 1);
         assert_eq!(lifecycles[0].mode, LifecycleMode::Disabled);
     }
@@ -473,7 +477,7 @@ mod tests {
             .await
             .unwrap();
 
-        let (lifecycles, _, _) = lifecycle_infos(lifecycle_env(path, &[])).await;
+        let (lifecycles, _, _, _) = lifecycle_infos(lifecycle_env(path, &[])).await;
         assert_eq!(lifecycles.len(), 1);
         assert_eq!(lifecycles[0].mode, LifecycleMode::Enabled);
     }

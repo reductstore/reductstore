@@ -133,20 +133,6 @@ impl InternalClientApi {
         Self::new(client, Some(url), None)
     }
 
-    pub(crate) fn new_with_preferred(
-        client: Client,
-        primary_url: Option<String>,
-        secondary_url: Option<String>,
-        preferred_url: Arc<AsyncRwLock<Option<String>>>,
-    ) -> Self {
-        Self {
-            client,
-            primary_url: normalize_url(primary_url),
-            secondary_url: normalize_url(secondary_url),
-            preferred_url,
-        }
-    }
-
     pub(crate) fn client(&self) -> &Client {
         &self.client
     }
@@ -157,10 +143,6 @@ impl InternalClientApi {
 
     pub(crate) fn secondary_url(&self) -> Option<&str> {
         self.secondary_url.as_deref()
-    }
-
-    pub(crate) fn preferred_url_handle(&self) -> Arc<AsyncRwLock<Option<String>>> {
-        Arc::clone(&self.preferred_url)
     }
 
     pub(crate) async fn execute_with_failover<T, F, Fut>(

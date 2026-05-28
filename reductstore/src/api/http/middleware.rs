@@ -152,7 +152,7 @@ mod tests {
     use super::*;
     use crate::api::components::StateKeeper;
     use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
-    use crate::audit::AUDIT_BUCKET_NAME;
+    use crate::syslog::AUDIT_BUCKET_NAME;
     use axum::extract::ConnectInfo;
     use axum::http::Request;
     use axum::http::{HeaderMap, HeaderValue};

@@ -296,7 +296,6 @@ pub(crate) mod tests {
     use crate::api::components::ComponentError;
     use crate::api::limits::{LimitsBuilder, LimitsConfig, WindowLimit};
     use crate::asset::asset_manager::create_asset_manager;
-    use crate::audit::AuditLoggerBuilder;
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::core::cache::Cache;
@@ -306,6 +305,7 @@ pub(crate) mod tests {
     use crate::lock_file::{LockFile, LockFileBuilder};
     use crate::replication::ReplicationRepoBuilder;
     use crate::storage::engine::StorageEngine;
+    use crate::syslog::build_audit_logger;
     use axum::body::Body;
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
@@ -842,9 +842,7 @@ pub(crate) mod tests {
         let token_repo = TokenRepositoryBuilder::new(cfg.clone())
             .build_with_storage(cfg.data_path.clone(), Arc::clone(&storage))
             .await;
-        let audit_logger = AuditLoggerBuilder::new(cfg.clone())
-            .build(Arc::clone(&storage))
-            .await;
+        let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -943,9 +941,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-        let audit_logger = AuditLoggerBuilder::new(cfg.clone())
-            .build(Arc::clone(&storage))
-            .await;
+        let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
         let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -1062,9 +1058,7 @@ pub(crate) mod tests {
         let lifecycle_repo = LifecycleRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
-        let audit_logger = AuditLoggerBuilder::new(cfg.clone())
-            .build(Arc::clone(&storage))
-            .await;
+        let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
 
         #[cfg(feature = "web-console")]
         let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));

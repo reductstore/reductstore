@@ -34,7 +34,7 @@ mod tests {
     use super::*;
 
     use crate::api::http::tests::{headers, keeper};
-    use crate::audit::AUDIT_BUCKET_NAME;
+    use crate::syslog::AUDIT_BUCKET_NAME;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::Labels;

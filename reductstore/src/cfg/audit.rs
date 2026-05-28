@@ -39,12 +39,8 @@ impl Default for AuditConfig {
 }
 
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
-    pub(super) fn parse_audit_config(
-        env: &mut Env<EnvGetter>,
-        api_token: &str,
-        has_lifecycles: bool,
-    ) -> AuditConfig {
-        let default_audit_enabled = !api_token.is_empty() || has_lifecycles;
+    pub(super) fn parse_audit_config(env: &mut Env<EnvGetter>, api_token: &str) -> AuditConfig {
+        let default_audit_enabled = !api_token.is_empty();
 
         AuditConfig {
             enabled: parse_bool(
@@ -107,11 +103,8 @@ mod tests {
             .with(eq("RS_AUDIT_REMOTE_TIMEOUT"))
             .return_const(Ok("10".to_string()));
 
-        let config = CfgParser::<MockEnvGetter>::parse_audit_config(
-            &mut Env::new(env_getter),
-            "token",
-            false,
-        );
+        let config =
+            CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "token");
 
         assert_eq!(
             config,
@@ -132,8 +125,7 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let config =
-            CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "", false);
+        let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "");
         assert_eq!(config, AuditConfig::default());
     }
 
@@ -144,11 +136,8 @@ mod tests {
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let config = CfgParser::<MockEnvGetter>::parse_audit_config(
-            &mut Env::new(env_getter),
-            "token",
-            false,
-        );
+        let config =
+            CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "token");
         assert_eq!(
             config,
             AuditConfig {
@@ -182,34 +171,24 @@ mod tests {
             .with(eq("RS_AUDIT_REMOTE_TIMEOUT"))
             .return_const(Err(VarError::NotPresent));
 
-        let config = CfgParser::<MockEnvGetter>::parse_audit_config(
-            &mut Env::new(env_getter),
-            "token",
-            false,
-        );
+        let config =
+            CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "token");
         assert!(!config.enabled);
     }
 
     #[rstest]
-    fn test_default_audit_config_with_lifecycles() {
+    fn test_default_audit_config_with_no_api_token() {
         let mut env_getter = MockEnvGetter::new();
         env_getter
             .expect_get()
             .return_const(Err(VarError::NotPresent));
 
-        let config =
-            CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "", true);
-        assert_eq!(
-            config,
-            AuditConfig {
-                enabled: true,
-                ..AuditConfig::default()
-            }
-        );
+        let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "");
+        assert!(!config.enabled);
     }
 
     #[rstest]
-    fn test_audit_enabled_can_be_overridden_when_lifecycles_are_set() {
+    fn test_audit_enabled_can_be_overridden_when_no_api_token() {
         let mut env_getter = MockEnvGetter::new();
         env_getter
             .expect_get()
@@ -232,8 +211,7 @@ mod tests {
             .with(eq("RS_AUDIT_REMOTE_TIMEOUT"))
             .return_const(Err(VarError::NotPresent));
 
-        let config =
-            CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "", true);
+        let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "");
         assert!(!config.enabled);
     }
 
@@ -261,8 +239,7 @@ mod tests {
             .with(eq("RS_AUDIT_REMOTE_TIMEOUT"))
             .return_const(Err(VarError::NotPresent));
 
-        let config =
-            CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "", false);
+        let config = CfgParser::<MockEnvGetter>::parse_audit_config(&mut Env::new(env_getter), "");
         assert_eq!(config.remote_ca_path, None);
     }
 }

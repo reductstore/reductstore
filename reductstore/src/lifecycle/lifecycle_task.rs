@@ -1,11 +1,11 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::audit::AuditEvent;
 use crate::lifecycle::action::{LifecycleAction, LifecycleContext};
-use crate::lifecycle::audit::LifecycleAuditPayload;
+use crate::lifecycle::system_event_payload::LifecycleSystemEventPayload;
+use crate::syslog::SystemEvent;
 
-use crate::lifecycle::LifecycleAuditSink;
+use crate::lifecycle::SystemEventSink;
 use log::{debug, error};
 use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{
@@ -24,7 +24,7 @@ pub(super) struct LifecycleTask {
     interval: Duration,
     action: Arc<dyn LifecycleAction + Send + Sync>,
     context: LifecycleContext,
-    audit_sink: Option<LifecycleAuditSink>,
+    system_event_sink: Option<SystemEventSink>,
     stop_flag: Arc<AtomicBool>,
     mode: Arc<AtomicU8>,
     worker_handle: Option<JoinHandle<()>>,
@@ -37,7 +37,7 @@ impl LifecycleTask {
         interval: Duration,
         action: Arc<dyn LifecycleAction + Send + Sync>,
         context: LifecycleContext,
-        audit_sink: Option<LifecycleAuditSink>,
+        system_event_sink: Option<SystemEventSink>,
     ) -> Self {
         let mode = settings.mode;
         Self {
@@ -47,7 +47,7 @@ impl LifecycleTask {
             interval,
             action,
             context,
-            audit_sink,
+            system_event_sink,
             stop_flag: Arc::new(AtomicBool::new(false)),
             mode: Arc::new(AtomicU8::new(mode as u8)),
             worker_handle: None,
@@ -65,7 +65,7 @@ impl LifecycleTask {
         let settings = self.settings.clone();
         let action = Arc::clone(&self.action);
         let context = self.context.clone();
-        let audit_sink = self.audit_sink.clone();
+        let system_event_sink = self.system_event_sink.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
         let mode = Arc::clone(&self.mode);
 
@@ -85,8 +85,8 @@ impl LifecycleTask {
                 let started = std::time::Instant::now();
                 match action.run(&name, &settings, context.clone()).await {
                     Ok(result) => {
-                        Self::log_audit_event(
-                            audit_sink.clone(),
+                        Self::log_system_event(
+                            system_event_sink.clone(),
                             &name,
                             action.lifecycle_type(),
                             &settings.bucket,
@@ -97,8 +97,8 @@ impl LifecycleTask {
                     }
                     Err(err) => {
                         error!("Lifecycle worker '{}' failed: {}", name, err);
-                        Self::log_audit_event(
-                            audit_sink.clone(),
+                        Self::log_system_event(
+                            system_event_sink.clone(),
                             &name,
                             action.lifecycle_type(),
                             &settings.bucket,
@@ -177,17 +177,17 @@ impl LifecycleTask {
         }
     }
 
-    async fn log_audit_event(
-        audit_sink: Option<LifecycleAuditSink>,
+    async fn log_system_event(
+        system_event_sink: Option<SystemEventSink>,
         name: &str,
         action_type: LifecycleType,
         bucket: &str,
         duration: f64,
         result: Result<u64, ReductError>,
     ) {
-        let Some(sink) = audit_sink else {
+        let Some(sink) = system_event_sink else {
             debug!(
-                "Skipping lifecycle audit event for '{}' because audit sink is not configured",
+                "Skipping lifecycle system event for '{}' because system-event sink is not configured",
                 name
             );
             return;
@@ -197,7 +197,7 @@ impl LifecycleTask {
             Ok(processed_records) => (
                 200u16,
                 "".to_string(),
-                LifecycleAuditPayload::success(
+                LifecycleSystemEventPayload::success(
                     name,
                     &format!("{:?}", action_type).to_lowercase(),
                     bucket,
@@ -209,7 +209,7 @@ impl LifecycleTask {
             Err(err) => (
                 err.status as u16,
                 err.message.clone(),
-                LifecycleAuditPayload::error(
+                LifecycleSystemEventPayload::error(
                     name,
                     &format!("{:?}", action_type).to_lowercase(),
                     bucket,
@@ -221,21 +221,21 @@ impl LifecycleTask {
             ),
         };
 
-        let event = AuditEvent {
+        let event = SystemEvent {
             event_type: "lifecycle_run".to_string(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_micros() as u64,
             instance: sink.instance_name.clone(),
-            entry_name: format!("__lifecycle_tasks/{}", name),
+            entry_name: format!("lifecycle_tasks/{}", Self::sanitize_task_name(name)),
             status,
             message,
             payload,
         };
 
         debug!(
-            "Lifecycle audit event: policy='{}', action='{}', bucket='{}', status={}, message='{}', payload={}",
+            "Lifecycle system event: policy='{}', action='{}', bucket='{}', status={}, message='{}', payload={}",
             name,
             format!("{:?}", action_type).to_lowercase(),
             bucket,
@@ -244,22 +244,34 @@ impl LifecycleTask {
             event.payload
         );
 
-        let audit_logger = Arc::clone(&sink.audit_logger);
-        let lock = audit_logger.write().await;
+        let system_logger = Arc::clone(&sink.system_logger);
+        let lock = system_logger.write().await;
         match lock {
-            Ok(mut audit_logger) => {
-                if let Err(err) = audit_logger.log_event(event).await {
+            Ok(mut system_logger) => {
+                if let Err(err) = system_logger.log_event(event).await {
                     error!(
-                        "Failed to persist lifecycle audit event for '{}': {}",
+                        "Failed to persist lifecycle system event for '{}': {}",
                         name, err
                     );
                 }
             }
             Err(err) => error!(
-                "Failed to lock audit repository for lifecycle event '{}': {}",
+                "Failed to lock system logger for lifecycle event '{}': {}",
                 name, err
             ),
         }
+    }
+
+    fn sanitize_task_name(name: &str) -> String {
+        name.chars()
+            .map(|ch| {
+                if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
+                    ch
+                } else {
+                    '_'
+                }
+            })
+            .collect()
     }
 }
 
@@ -279,11 +291,11 @@ impl Drop for LifecycleTask {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::audit::{AuditEvent, LogAuditEvent};
     use crate::cfg::Cfg;
     use crate::core::sync::AsyncRwLock;
     use crate::lifecycle::action::LifecycleRunResult;
     use crate::storage::engine::StorageEngine;
+    use crate::syslog::{LogSystemEvent, SystemEvent};
     use async_trait::async_trait;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::unprocessable_entity;
@@ -462,30 +474,30 @@ pub(super) mod tests {
     }
 
     #[derive(Clone)]
-    struct CapturingAuditLogger {
-        events: Arc<Mutex<Vec<AuditEvent>>>,
+    struct CapturingSystemLogger {
+        events: Arc<Mutex<Vec<SystemEvent>>>,
     }
 
     #[async_trait]
-    impl LogAuditEvent for CapturingAuditLogger {
-        async fn log_event(&mut self, event: AuditEvent) -> Result<(), ReductError> {
+    impl LogSystemEvent for CapturingSystemLogger {
+        async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError> {
             self.events.lock().unwrap().push(event);
             Ok(())
         }
     }
 
     #[tokio::test]
-    async fn log_audit_event_writes_success_message() {
-        let captured = Arc::new(Mutex::new(Vec::<AuditEvent>::new()));
-        let sink = LifecycleAuditSink {
-            audit_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingAuditLogger {
+    async fn log_system_event_writes_success_message() {
+        let captured = Arc::new(Mutex::new(Vec::<SystemEvent>::new()));
+        let sink = SystemEventSink {
+            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
                 events: Arc::clone(&captured),
             })
-                as Box<dyn LogAuditEvent + Send + Sync>)),
+                as Box<dyn LogSystemEvent + Send + Sync>)),
             instance_name: "instance-1".to_string(),
         };
 
-        LifecycleTask::log_audit_event(
+        LifecycleTask::log_system_event(
             Some(sink),
             "policy-1",
             LifecycleType::Delete,
@@ -501,7 +513,7 @@ pub(super) mod tests {
 
         assert_eq!(event.event_type, "lifecycle_run");
         assert_eq!(event.instance, "instance-1");
-        assert_eq!(event.entry_name, "__lifecycle_tasks/policy-1");
+        assert_eq!(event.entry_name, "lifecycle_tasks/policy-1");
         assert_eq!(event.status, 200);
         assert_eq!(event.message, "");
         assert_eq!(event.payload["policy_name"], "policy-1");
@@ -513,18 +525,18 @@ pub(super) mod tests {
     }
 
     #[tokio::test]
-    async fn log_audit_event_writes_error_message() {
-        let captured = Arc::new(Mutex::new(Vec::<AuditEvent>::new()));
-        let sink = LifecycleAuditSink {
-            audit_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingAuditLogger {
+    async fn log_system_event_writes_error_message() {
+        let captured = Arc::new(Mutex::new(Vec::<SystemEvent>::new()));
+        let sink = SystemEventSink {
+            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
                 events: Arc::clone(&captured),
             })
-                as Box<dyn LogAuditEvent + Send + Sync>)),
+                as Box<dyn LogSystemEvent + Send + Sync>)),
             instance_name: "instance-1".to_string(),
         };
 
         let err = unprocessable_entity!("failed to run");
-        LifecycleTask::log_audit_event(
+        LifecycleTask::log_system_event(
             Some(sink),
             "policy-1",
             LifecycleType::Delete,
@@ -540,7 +552,7 @@ pub(super) mod tests {
 
         assert_eq!(event.event_type, "lifecycle_run");
         assert_eq!(event.instance, "instance-1");
-        assert_eq!(event.entry_name, "__lifecycle_tasks/policy-1");
+        assert_eq!(event.entry_name, "lifecycle_tasks/policy-1");
         assert_eq!(event.status, 422);
         assert_eq!(event.message, "failed to run");
         assert_eq!(event.payload["policy_name"], "policy-1");

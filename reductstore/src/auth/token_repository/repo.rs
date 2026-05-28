@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::audit::AUDIT_BUCKET_NAME;
 use crate::auth::proto::TokenRepo;
 use crate::auth::token_repository::AccessTokens;
 use crate::auth::token_repository::{
@@ -14,6 +13,7 @@ use crate::auth::token_secret::{
 use crate::core::cache::Cache;
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::engine::StorageEngine;
+use crate::syslog::AUDIT_BUCKET_NAME;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
