@@ -13,11 +13,12 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
     - name: Install Rust
-      shell: bash
-      run: rustup update stable
+      uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      with:
+        toolchain: 1.89.0
 
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
@@ -40,7 +41,7 @@ runs:
         RUST_LOG: debug
       run: |
         set -e -x
-        cargo llvm-cov --features fs-backend,ci --workspace --lcov --output-path lcov.info
+        cargo llvm-cov --locked --features fs-backend,ci --workspace --lcov --output-path lcov.info
 
     - name: Upload coverage artifact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

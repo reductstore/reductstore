@@ -25,7 +25,7 @@ static SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 static RW_LOCK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[cfg(not(test))]
-static RW_LOCK_SHUTDOWN_TIMEOUT: Duration = Duration::from_hours(1);
+static RW_LOCK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 pub fn maybe_print_version_and_exit() {
     if std::env::args()
