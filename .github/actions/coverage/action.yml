@@ -18,7 +18,7 @@ runs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       with:
-        toolchain: 1.89.0
+        toolchain: 1.91.0
 
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
