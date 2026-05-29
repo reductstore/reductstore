@@ -95,7 +95,13 @@ runs:
         curl -sSfL "${base_url}/${artifact}" -o "/tmp/${artifact}"
 
         grep "  ${artifact}$" "/tmp/${checksums}" > /tmp/syft-checksum.txt
-        sha256sum -c /tmp/syft-checksum.txt
+        if command -v sha256sum >/dev/null 2>&1; then
+          sha256sum -c /tmp/syft-checksum.txt
+        else
+          expected_sha=$(cut -d' ' -f1 /tmp/syft-checksum.txt)
+          actual_sha=$(shasum -a 256 "/tmp/${artifact}" | cut -d' ' -f1)
+          [ "$expected_sha" = "$actual_sha" ]
+        fi
 
         tar -xzf "/tmp/${artifact}" -C "$HOME/.local/bin" syft
         chmod +x "$HOME/.local/bin/syft"
