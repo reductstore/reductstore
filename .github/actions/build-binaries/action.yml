@@ -94,7 +94,8 @@ runs:
         curl -sSfL "${base_url}/${checksums}" -o "/tmp/${checksums}"
         curl -sSfL "${base_url}/${artifact}" -o "/tmp/${artifact}"
 
-        grep "  ${artifact}$" "/tmp/${checksums}" > /tmp/syft-checksum.txt
+        checksum=$(grep "  ${artifact}$" "/tmp/${checksums}" | awk '{print $1}')
+        echo "${checksum}  /tmp/${artifact}" > /tmp/syft-checksum.txt
         if command -v sha256sum >/dev/null 2>&1; then
           sha256sum -c /tmp/syft-checksum.txt
         else
