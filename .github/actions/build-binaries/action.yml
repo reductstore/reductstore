@@ -1,9 +1,6 @@
 name: 'Build Binaries'
 description: 'Builds binaries for a specific target and uploads them as artifacts.'
 inputs:
-  minimal_rust_version:
-    description: 'Minimal Rust version.'
-    required: true
   action_github_token:
     description: 'GitHub token for setup-protoc.'
     required: true
@@ -34,7 +31,7 @@ runs:
     - name: Install Rust
       uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       with:
-        toolchain: ${{ inputs.minimal_rust_version }}
+        toolchain: 1.91.0
 
     - name: Install toolchain
       shell: bash
