@@ -14,6 +14,10 @@ inputs:
   image_tag:
     description: 'Tag used for docker export.'
     required: true
+  reduct_cli_version:
+    description: 'Pinned reduct-cli release tag used in docker image build context.'
+    required: false
+    default: v0.11.1
   docker_labels:
     description: 'Optional docker labels.'
     required: false
@@ -46,21 +50,37 @@ runs:
         name: reductstore-${{ inputs.target }}
         path: /tmp/reductstore/
 
-    - name: Download reduct-cli from latest release
+    - name: Download pinned reduct-cli release asset
       shell: bash
       run: |
         set -euo pipefail
         target="${{ inputs.target }}"
+        version="${{ inputs.reduct_cli_version }}"
         ext="tar.gz"
         if [[ "$target" == *windows* ]]; then
           ext="zip"
         fi
+
+        case "$target" in
+          aarch64-apple-darwin) expected_sha="770efc69859331736d393411e463d146c5a81e42583e6292b48e82f79f402960" ;;
+          aarch64-unknown-linux-gnu) expected_sha="4557e8bd0b7ff7398f0299a246446c74eb3c456c21c6f62f5221f85bf2dea67c" ;;
+          armv7-unknown-linux-gnueabihf) expected_sha="e51d67fb9bbd66da14b599e13e827878a53c37a0aa7822088bb068685ca29d4e" ;;
+          x86_64-apple-darwin) expected_sha="9a2edae8551c819e3b85f4c0abcae1f046bbccd39e1cb5eee3984a92a6114524" ;;
+          x86_64-pc-windows-gnu) expected_sha="5ee6dc83d46a4796f374b79414b91c3e1b84815027b6f6e22453fe73ef0a6a62" ;;
+          x86_64-unknown-linux-gnu) expected_sha="b4d2806a76697bc59caa08bf00601b44419f11388fae720fc88516c9ad257221" ;;
+          *)
+            echo "Unsupported reduct-cli target: $target"
+            exit 1
+            ;;
+        esac
+
         asset_name="reduct-cli.${target}.${ext}"
-        asset_url="https://github.com/reductstore/reduct-cli/releases/latest/download/${asset_name}"
+        asset_url="https://github.com/reductstore/reduct-cli/releases/download/${version}/${asset_name}"
 
         mkdir -p /tmp/reduct-cli
-        wget -q -O "/tmp/${asset_name}" "$asset_url"
-        echo "Downloaded ${asset_name} from ${asset_url}"
+        curl -sSfL "$asset_url" -o "/tmp/${asset_name}"
+        echo "${expected_sha}  /tmp/${asset_name}" | sha256sum -c -
+        echo "Downloaded and verified ${asset_name} from ${asset_url}"
 
         if [ "$ext" = "zip" ]; then
           unzip -q "/tmp/${asset_name}" -d /tmp/reduct-cli

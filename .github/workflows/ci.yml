@@ -72,7 +72,6 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/build-binaries
         with:
-          minimal_rust_version: ${{ vars.MINIMAL_RUST_VERSION }}
           action_github_token: ${{ secrets.ACTION_GITHUB_TOKEN }}
           target: ${{ matrix.target }}
           os: ${{ matrix.os }}
@@ -372,7 +371,7 @@ jobs:
       - name: Check tag
         if: startsWith(github.ref, 'refs/tags/')
         run: |
-          cargo install cargo-get
+          cargo install cargo-get --version 1.4.0 --locked
           for PKG_NAME in reduct_base reduct_macros reductstore; do
             version=$(cargo get package.version --entry $PKG_NAME)
             echo "Version in $PKG_NAME/Cargo.toml: $version"
@@ -663,8 +662,8 @@ jobs:
         run: |
           cargo login ${{ secrets.CRATES_IO_TOKEN }}
       - name: Publish reduct-base
-        run: cargo publish -p reduct-base
+        run: cargo publish --locked -p reduct-base
       - name: Publish reduct-macros
-        run: cargo publish -p reduct-macros
+        run: cargo publish --locked -p reduct-macros
       - name: Publish reductstore
-        run: cargo publish -p reductstore
+        run: cargo publish --locked -p reductstore

@@ -59,10 +59,11 @@ docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
 
 Alternatively, you can opt for Cargo:
 
-```
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh  # Install the latest Rust
+```bash
+# Install Rust via the official rustup instructions:
+# https://www.rust-lang.org/tools/install
 apt install protobuf-compiler
-cargo install reductstore
+cargo install --locked reductstore
 RS_DATA_PATH=./data reductstore
 ```
 

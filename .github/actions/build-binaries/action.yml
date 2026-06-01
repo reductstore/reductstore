@@ -1,9 +1,6 @@
 name: 'Build Binaries'
 description: 'Builds binaries for a specific target and uploads them as artifacts.'
 inputs:
-  minimal_rust_version:
-    description: 'Minimal Rust version.'
-    required: true
   action_github_token:
     description: 'GitHub token for setup-protoc.'
     required: true
@@ -32,9 +29,9 @@ runs:
         repo-token: ${{ inputs.action_github_token }}
 
     - name: Install Rust
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       with:
-        toolchain: ${{ inputs.minimal_rust_version }}
+        toolchain: 1.91.0
 
     - name: Install toolchain
       shell: bash
@@ -66,20 +63,51 @@ runs:
 
     - name: Install cargo-export
       shell: bash
-      run: cargo install cargo-export --force
+      run: cargo install cargo-export --version 0.3.0 --locked --force
 
     - name: Install Syft
       shell: bash
       run: |
         set -euo pipefail
         SYFT_VERSION=v1.42.3
+        SYFT_VERSION_NO_V="${SYFT_VERSION#v}"
         mkdir -p "$HOME/.local/bin"
-        curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b "$HOME/.local/bin" "$SYFT_VERSION"
+
+        os=$(uname -s | tr '[:upper:]' '[:lower:]')
+        arch=$(uname -m)
+        case "$arch" in
+          x86_64) arch="amd64" ;;
+          aarch64|arm64) arch="arm64" ;;
+          *)
+            echo "Unsupported architecture: $arch"
+            exit 1
+            ;;
+        esac
+
+        artifact="syft_${SYFT_VERSION_NO_V}_${os}_${arch}.tar.gz"
+        checksums="syft_${SYFT_VERSION_NO_V}_checksums.txt"
+        base_url="https://github.com/anchore/syft/releases/download/${SYFT_VERSION}"
+
+        curl -sSfL "${base_url}/${checksums}" -o "/tmp/${checksums}"
+        curl -sSfL "${base_url}/${artifact}" -o "/tmp/${artifact}"
+
+        checksum=$(grep "  ${artifact}$" "/tmp/${checksums}" | awk '{print $1}')
+        echo "${checksum}  /tmp/${artifact}" > /tmp/syft-checksum.txt
+        if command -v sha256sum >/dev/null 2>&1; then
+          sha256sum -c /tmp/syft-checksum.txt
+        else
+          expected_sha=$(cut -d' ' -f1 /tmp/syft-checksum.txt)
+          actual_sha=$(shasum -a 256 "/tmp/${artifact}" | cut -d' ' -f1)
+          [ "$expected_sha" = "$actual_sha" ]
+        fi
+
+        tar -xzf "/tmp/${artifact}" -C "$HOME/.local/bin" syft
+        chmod +x "$HOME/.local/bin/syft"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
         "$HOME/.local/bin/syft" version
 
     - name: Build binary
-      run: cargo build --profile release -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api"
+      run: cargo build --locked --profile release -p reductstore --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api"
       shell: bash
 
     - name: Upload binary (PR)
@@ -118,7 +146,7 @@ runs:
         if-no-files-found: 'error'
 
     - name: Build and export tests
-      run: cargo export target/${{ inputs.target }}/tests -- test --quiet --profile release --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api" --lib
+      run: cargo export target/${{ inputs.target }}/tests -- test --locked --quiet --profile release --target ${{ inputs.target }} --features "fs-backend,web-console,zenoh-api" --lib
       shell: bash
 
     - name: Upload tests

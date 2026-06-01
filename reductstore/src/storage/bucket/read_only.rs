@@ -165,7 +165,17 @@ mod tests {
 
         // Remove entry in primary bucket
         primary_bucket.remove_entry("test-1").await.unwrap();
-        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+        // On Windows, file removal can lag briefly after remove_entry returns.
+        // Wait until the entry folder is actually gone to avoid flaky assertions.
+        let removed_entry_path = primary_bucket.path().join("test-1");
+        for _ in 0..20 {
+            if !removed_entry_path.exists() {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+
         primary_bucket.sync_fs().await.unwrap();
         read_only_bucket.reload().await.unwrap();
 
