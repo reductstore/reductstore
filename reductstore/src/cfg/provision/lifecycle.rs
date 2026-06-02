@@ -3,7 +3,7 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds, ProvisionedLifecycle};
 use crate::core::env::{Env, GetEnv};
-use crate::lifecycle::{LifecycleAuditSink, LifecycleRepoBuilder, ManageLifecycles};
+use crate::lifecycle::{LifecycleRepoBuilder, ManageLifecycles, SystemEventSink};
 use crate::storage::engine::StorageEngine;
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
@@ -15,10 +15,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_lifecycle_repo(
         &self,
         storage: Arc<StorageEngine>,
-        audit_sink: LifecycleAuditSink,
+        system_event_sink: SystemEventSink,
     ) -> Result<Box<dyn ManageLifecycles + Send + Sync>, ReductError> {
         let mut repo = LifecycleRepoBuilder::new(self.cfg.clone())
-            .with_audit_sink(audit_sink)
+            .with_system_event_sink(system_event_sink)
             .build(Arc::clone(&storage))
             .await;
 
@@ -251,23 +251,23 @@ mod tests {
             .build()
             .await
             .unwrap();
-        let audit_enabled = components.cfg.audit_conf.enabled;
+        let system_events_enabled = components.cfg.system_events_conf.enabled;
         let repo = components.lifecycle_repo.read().await.unwrap();
         let lifecycles = repo.lifecycles().await.unwrap();
         let settings = match lifecycles.first() {
             Some(info) => Some(repo.get_lifecycle_settings(&info.name).await.unwrap()),
             None => None,
         };
-        (lifecycles, settings, audit_enabled)
+        (lifecycles, settings, system_events_enabled)
     }
 
     #[rstest]
     #[tokio::test]
     async fn parses_lifecycle_settings_from_env(path: PathBuf) {
-        let (_, settings, audit_enabled) = lifecycle_infos(lifecycle_env(path, &[])).await;
+        let (_, settings, system_events_enabled) = lifecycle_infos(lifecycle_env(path, &[])).await;
         let settings = settings.unwrap();
 
-        assert!(audit_enabled);
+        assert!(system_events_enabled);
         assert_eq!(settings.lifecycle_type, LifecycleType::Delete);
         assert_eq!(settings.bucket, "telemetry");
         assert_eq!(

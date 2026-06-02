@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Send lifecycle run diagnostics and audit events to the `$system` bucket with configurable system event storage, [PR-1399](https://github.com/reductstore/reductstore/pull/1399)
+
 ### Added
 
 - Pass attachment key-value maps to extensions instead of selecting a single attachment key, [PR-1383](https://github.com/reductstore/reductstore/pull/1383)

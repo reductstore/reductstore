@@ -152,7 +152,7 @@ mod tests {
     use super::*;
     use crate::api::components::StateKeeper;
     use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
-    use crate::audit::AUDIT_BUCKET_NAME;
+    use crate::syslog::{SYSTEM_AUDIT_ENTRY_PREFIX, SYSTEM_BUCKET_NAME};
     use axum::extract::ConnectInfo;
     use axum::http::Request;
     use axum::http::{HeaderMap, HeaderValue};
@@ -443,7 +443,7 @@ mod tests {
         let components = keeper.get_anonymous().await.unwrap();
         let bucket = components
             .storage
-            .get_bucket(AUDIT_BUCKET_NAME)
+            .get_bucket(SYSTEM_BUCKET_NAME)
             .await
             .ok()?;
         let bucket = bucket.upgrade_and_unwrap();
@@ -453,10 +453,12 @@ mod tests {
             .iter()
             .map(|entry| entry.name.clone())
             .collect();
-        let entry = info
-            .entries
-            .into_iter()
-            .find(|entry| entry.name.ends_with(&format!("/{}", token_name)));
+        let entry = info.entries.into_iter().find(|entry| {
+            entry
+                .name
+                .starts_with(&format!("{}/", SYSTEM_AUDIT_ENTRY_PREFIX))
+                && entry.name.ends_with(&format!("/{}", token_name))
+        });
 
         let entry = match entry {
             Some(entry) => entry,
@@ -480,7 +482,7 @@ mod tests {
         let components = keeper.get_anonymous().await.unwrap();
         components
             .storage
-            .get_bucket(AUDIT_BUCKET_NAME)
+            .get_bucket(SYSTEM_BUCKET_NAME)
             .await
             .is_ok()
     }

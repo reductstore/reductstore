@@ -40,7 +40,7 @@ mod tests {
     use super::*;
 
     use crate::api::http::tests::{headers, keeper};
-    use crate::audit::AUDIT_BUCKET_NAME;
+    use crate::syslog::SYSTEM_BUCKET_NAME;
     use bytes::Bytes;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::Labels;
@@ -69,19 +69,19 @@ mod tests {
         let components = keeper.get_anonymous().await.unwrap();
         components
             .storage
-            .create_system_bucket(AUDIT_BUCKET_NAME, BucketSettings::default())
+            .create_system_bucket(SYSTEM_BUCKET_NAME, BucketSettings::default())
             .await
             .unwrap();
 
         let bucket = components
             .storage
-            .get_bucket(AUDIT_BUCKET_NAME)
+            .get_bucket(SYSTEM_BUCKET_NAME)
             .await
             .unwrap()
             .upgrade_and_unwrap();
         let mut writer = bucket
             .begin_write(
-                "test",
+                "audit/instance-a/test",
                 2_000_000,
                 2,
                 "application/json".to_string(),

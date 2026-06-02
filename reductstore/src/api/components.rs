@@ -5,7 +5,6 @@
 
 use crate::api::limits::BoxedLimits;
 use crate::asset::asset_manager::ManageStaticAsset;
-use crate::audit::LogAuditEvent;
 use crate::auth::policy::Policy;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
@@ -17,6 +16,7 @@ use crate::lifecycle::ManageLifecycles;
 use crate::lock_file::BoxedLockFile;
 use crate::replication::ManageReplications;
 use crate::storage::engine::StorageEngine;
+use crate::syslog::LogSystemEvent;
 use axum::http::HeaderMap;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
@@ -38,7 +38,7 @@ pub struct Components {
     pub(crate) lifecycle_repo: AsyncRwLock<Box<dyn ManageLifecycles + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
-    pub(crate) audit_logger: Arc<AsyncRwLock<Box<dyn LogAuditEvent + Send + Sync>>>,
+    pub(crate) audit_logger: Arc<AsyncRwLock<Box<dyn LogSystemEvent + Send + Sync>>>,
     pub(crate) limits: BoxedLimits,
 
     pub(crate) cfg: Cfg,

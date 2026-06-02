@@ -5,7 +5,7 @@ use crate::api::audit::ApiAuditPayload;
 use crate::api::components::{Components, StateKeeper};
 use crate::api::http::middleware::client_ip::client_ip_from_request;
 use crate::api::http::HttpError;
-use crate::audit::AuditEvent;
+use crate::syslog::SystemEvent;
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Request, StatusCode};
@@ -131,7 +131,7 @@ async fn write_audit_event(
         duration,
     };
 
-    let event = AuditEvent {
+    let event = SystemEvent {
         event_type: "api_call".to_string(),
         timestamp: SystemTime::now()
             .duration_since(UNIX_EPOCH)

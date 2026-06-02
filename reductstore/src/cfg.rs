@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-pub mod audit;
 pub mod io;
 pub mod limits;
 pub mod lock_file;
@@ -9,21 +8,21 @@ mod provision;
 pub mod replication;
 pub mod rw_lock;
 pub mod storage_engine;
+pub mod system_events;
 #[cfg(feature = "zenoh-api")]
 pub mod zenoh;
 
 use crate::api::components::Components;
 use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
-use crate::audit::AuditLoggerBuilder;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType, GeneralBackendConfig};
-use crate::cfg::audit::AuditConfig;
 use crate::cfg::io::IoConfig;
 use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::replication::ReplicationConfig;
 use crate::cfg::rw_lock::RwLockConfig;
 use crate::cfg::storage_engine::StorageEngineConfig;
+use crate::cfg::system_events::SystemEventsConfig;
 #[cfg(feature = "zenoh-api")]
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::cache::Cache;
@@ -31,8 +30,10 @@ use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
-use crate::lifecycle::LifecycleAuditSink;
+use crate::lifecycle::SystemEventSink;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
+use crate::syslog::build_audit_logger;
+use crate::syslog::build_system_logger;
 use async_trait::async_trait;
 use log::{info, warn};
 use reduct_base::error::ReductError;
@@ -101,7 +102,7 @@ pub struct Cfg {
     pub replications: HashMap<String, ProvisionedReplication>,
     pub lifecycles: HashMap<String, ProvisionedLifecycle>,
     pub io_conf: IoConfig,
-    pub audit_conf: AuditConfig,
+    pub system_events_conf: SystemEventsConfig,
     pub replication_conf: ReplicationConfig,
     pub backend_config: GeneralBackendConfig,
     pub lock_file_config: LockFileConfig,
@@ -135,7 +136,7 @@ impl Default for Cfg {
             replications: HashMap::new(),
             lifecycles: HashMap::new(),
             io_conf: IoConfig::default(),
-            audit_conf: AuditConfig::default(),
+            system_events_conf: SystemEventsConfig::default(),
             replication_conf: ReplicationConfig::default(),
             backend_config: GeneralBackendConfig::default(),
             lock_file_config: LockFileConfig::default(),
@@ -248,6 +249,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     {
         let mut env = Env::new(env_getter);
 
+        let uses_deprecated_audit_settings = !env.keys_with_prefix("RS_AUDIT_").is_empty();
+
         let mut api_base_path = env.get("RS_API_BASE_PATH", "/".to_string());
         Self::normalize_url_path(&mut api_base_path);
 
@@ -308,7 +311,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             replications,
             lifecycles,
             io_conf: Self::parse_io_config(&mut env),
-            audit_conf: Self::parse_audit_config(&mut env, &api_token, has_lifecycles),
+            system_events_conf: Self::parse_system_events_config(&mut env, has_lifecycles),
             replication_conf: Self::parse_replication_config(&mut env, port),
             backend_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
@@ -332,12 +335,17 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         Logger::init(&me.cfg.log_level);
         info!("Configuration: \n {}", me);
+        if uses_deprecated_audit_settings {
+            warn!(
+                "RS_AUDIT_* settings are deprecated and ignored. Use RS_SYSTEM_EVENTS_* settings instead."
+            );
+        }
         if me.cfg.role == InstanceRole::Replica
             && me.cfg.primary_url.is_none()
             && me.cfg.secondary_url.is_none()
         {
             warn!(
-                "RS_PRIMARY_URL and RS_SECONDARY_URL are not set. Audit messages will not be forwarded from replica instances."
+                "RS_PRIMARY_URL and RS_SECONDARY_URL are not set. System events will not be forwarded from replica instances."
             );
         }
 
@@ -412,16 +420,16 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .server_info(server_info.clone())
             .build();
         let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
-        let audit_logger = AuditLoggerBuilder::new(self.cfg.clone())
-            .build(Arc::clone(&storage))
-            .await;
+        let audit_logger = build_audit_logger(&self.cfg, Arc::clone(&storage)).await;
         let audit_logger = Arc::new(AsyncRwLock::new(audit_logger));
+        let system_logger = build_system_logger(&self.cfg, Arc::clone(&storage)).await;
+        let system_logger = Arc::new(AsyncRwLock::new(system_logger));
 
         let lifecycle_engine = self
             .provision_lifecycle_repo(
                 Arc::clone(&storage),
-                LifecycleAuditSink {
-                    audit_logger: Arc::clone(&audit_logger),
+                SystemEventSink {
+                    system_logger: Arc::clone(&system_logger),
                     instance_name: self.cfg.instance_name.clone(),
                 },
             )

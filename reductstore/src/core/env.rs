@@ -160,6 +160,15 @@ impl<EnvGetter: GetEnv> Env<EnvGetter> {
 
         matches
     }
+
+    pub fn keys_with_prefix(&self, prefix: &str) -> Vec<String> {
+        self.getter
+            .all()
+            .into_keys()
+            .filter(|key| key.starts_with(prefix))
+            .collect()
+    }
+
     /// Get pretty printed message.
     pub fn message(&self) -> &String {
         &self.message
@@ -203,6 +212,25 @@ mod tests {
         assert_eq!(matches.len(), 2);
         assert_eq!(matches.get("TEST").unwrap(), "test");
         assert_eq!(matches.get("TEST2").unwrap(), "test2");
+    }
+
+    #[rstest]
+    fn test_keys_with_prefix() {
+        std::env::set_var("RS_AUDIT_ENABLED", "true");
+        std::env::set_var("RS_AUDIT_QUOTA_SIZE", "10MB");
+        std::env::set_var("RS_SYSTEM_EVENTS_ENABLED", "true");
+
+        let env = Env::default();
+        let mut keys = env.keys_with_prefix("RS_AUDIT_");
+        keys.sort();
+
+        assert_eq!(
+            keys,
+            vec![
+                "RS_AUDIT_ENABLED".to_string(),
+                "RS_AUDIT_QUOTA_SIZE".to_string()
+            ]
+        );
     }
 
     #[fixture]
