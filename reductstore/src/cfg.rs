@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-pub mod audit;
 pub mod io;
 pub mod limits;
 pub mod lock_file;
@@ -18,7 +17,6 @@ use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
 use crate::backend::{Backend, BackendType, GeneralBackendConfig};
-use crate::cfg::audit::AuditConfig;
 use crate::cfg::io::IoConfig;
 use crate::cfg::lock_file::LockFileConfig;
 use crate::cfg::replication::ReplicationConfig;
@@ -104,7 +102,6 @@ pub struct Cfg {
     pub replications: HashMap<String, ProvisionedReplication>,
     pub lifecycles: HashMap<String, ProvisionedLifecycle>,
     pub io_conf: IoConfig,
-    pub audit_conf: AuditConfig,
     pub system_events_conf: SystemEventsConfig,
     pub replication_conf: ReplicationConfig,
     pub backend_config: GeneralBackendConfig,
@@ -139,7 +136,6 @@ impl Default for Cfg {
             replications: HashMap::new(),
             lifecycles: HashMap::new(),
             io_conf: IoConfig::default(),
-            audit_conf: AuditConfig::default(),
             system_events_conf: SystemEventsConfig::default(),
             replication_conf: ReplicationConfig::default(),
             backend_config: GeneralBackendConfig::default(),
@@ -315,7 +311,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             replications,
             lifecycles,
             io_conf: Self::parse_io_config(&mut env),
-            audit_conf: Self::parse_audit_config(&mut env, &api_token),
             system_events_conf: Self::parse_system_events_config(&mut env, has_lifecycles),
             replication_conf: Self::parse_replication_config(&mut env, port),
             backend_config: ext_cfg.remote_storage_config(),
