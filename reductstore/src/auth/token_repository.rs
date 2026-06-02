@@ -11,6 +11,7 @@ use crate::auth::token_repository::repo::TokenRepository;
 use crate::auth::token_secret::verify_token_secret;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::storage::engine::StorageEngine;
+use crate::syslog::SYSTEM_AUDIT_ENTRY_PREFIX;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use log::warn;
@@ -43,14 +44,22 @@ pub(super) fn resolve_last_access_from_cache(
     cache: &HashMap<String, u64>,
     token_name: &str,
 ) -> Option<DateTime<Utc>> {
-    let suffix = format!("/{}", token_name);
     cache
         .iter()
         .filter_map(|(entry_name, timestamp)| {
-            if entry_name == token_name || entry_name.ends_with(&suffix) {
-                Some(*timestamp)
-            } else {
-                None
+            let mut segments = entry_name.split('/');
+            let namespace = segments.next();
+            let instance = segments.next();
+            let token = segments.next();
+            let no_tail = segments.next().is_none();
+
+            match (namespace, instance, token, no_tail) {
+                (Some(SYSTEM_AUDIT_ENTRY_PREFIX), Some(_), Some(found_token), true)
+                    if found_token == token_name =>
+                {
+                    Some(*timestamp)
+                }
+                _ => None,
             }
         })
         .max()
@@ -643,7 +652,7 @@ mod tests {
     #[test]
     fn test_resolve_last_access_from_cache_exact_name() {
         let mut cache = HashMap::new();
-        cache.insert("token-a".to_string(), 1_000_000);
+        cache.insert("audit/instance-a/token-a".to_string(), 1_000_000);
 
         let ts = resolve_last_access_from_cache(&cache, "token-a").unwrap();
         assert_eq!(
@@ -655,7 +664,7 @@ mod tests {
     #[test]
     fn test_resolve_last_access_from_cache_instance_prefixed_name() {
         let mut cache = HashMap::new();
-        cache.insert("instance-a/token-a".to_string(), 2_000_000);
+        cache.insert("audit/instance-a/token-a".to_string(), 2_000_000);
 
         let ts = resolve_last_access_from_cache(&cache, "token-a").unwrap();
         assert_eq!(
@@ -667,9 +676,9 @@ mod tests {
     #[test]
     fn test_resolve_last_access_from_cache_prefers_latest_match() {
         let mut cache = HashMap::new();
-        cache.insert("token-a".to_string(), 1_000_000);
-        cache.insert("instance-a/token-a".to_string(), 3_000_000);
-        cache.insert("instance-b/token-a".to_string(), 2_000_000);
+        cache.insert("audit/instance-a/token-a".to_string(), 3_000_000);
+        cache.insert("audit/instance-b/token-a".to_string(), 2_000_000);
+        cache.insert("lifecycle/instance-a/token-a".to_string(), 4_000_000);
 
         let ts = resolve_last_access_from_cache(&cache, "token-a").unwrap();
         assert_eq!(
@@ -681,7 +690,8 @@ mod tests {
     #[test]
     fn test_resolve_last_access_from_cache_no_match() {
         let mut cache = HashMap::new();
-        cache.insert("instance-a/other-token".to_string(), 1_000_000);
+        cache.insert("audit/instance-a/other-token".to_string(), 1_000_000);
+        cache.insert("instance-a/token-a".to_string(), 2_000_000);
 
         assert!(resolve_last_access_from_cache(&cache, "token-a").is_none());
     }

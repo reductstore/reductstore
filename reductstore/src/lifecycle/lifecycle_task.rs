@@ -228,7 +228,7 @@ impl LifecycleTask {
                 .unwrap_or_default()
                 .as_micros() as u64,
             instance: sink.instance_name.clone(),
-            entry_name: format!("lifecycle_tasks/{}", Self::sanitize_task_name(name)),
+            entry_name: Self::sanitize_task_name(name),
             status,
             message,
             payload,
@@ -513,7 +513,7 @@ pub(super) mod tests {
 
         assert_eq!(event.event_type, "lifecycle_run");
         assert_eq!(event.instance, "instance-1");
-        assert_eq!(event.entry_name, "lifecycle_tasks/policy-1");
+        assert_eq!(event.entry_name, "policy-1");
         assert_eq!(event.status, 200);
         assert_eq!(event.message, "");
         assert_eq!(event.payload["policy_name"], "policy-1");
@@ -552,7 +552,7 @@ pub(super) mod tests {
 
         assert_eq!(event.event_type, "lifecycle_run");
         assert_eq!(event.instance, "instance-1");
-        assert_eq!(event.entry_name, "lifecycle_tasks/policy-1");
+        assert_eq!(event.entry_name, "policy-1");
         assert_eq!(event.status, 422);
         assert_eq!(event.message, "failed to run");
         assert_eq!(event.payload["policy_name"], "policy-1");

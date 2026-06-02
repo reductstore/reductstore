@@ -253,6 +253,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     {
         let mut env = Env::new(env_getter);
 
+        let uses_deprecated_audit_settings = !env.keys_with_prefix("RS_AUDIT_").is_empty();
+
         let mut api_base_path = env.get("RS_API_BASE_PATH", "/".to_string());
         Self::normalize_url_path(&mut api_base_path);
 
@@ -338,12 +340,17 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         Logger::init(&me.cfg.log_level);
         info!("Configuration: \n {}", me);
+        if uses_deprecated_audit_settings {
+            warn!(
+                "RS_AUDIT_* settings are deprecated and ignored. Use RS_SYSTEM_EVENTS_* settings instead."
+            );
+        }
         if me.cfg.role == InstanceRole::Replica
             && me.cfg.primary_url.is_none()
             && me.cfg.secondary_url.is_none()
         {
             warn!(
-                "RS_PRIMARY_URL and RS_SECONDARY_URL are not set. Audit messages will not be forwarded from replica instances."
+                "RS_PRIMARY_URL and RS_SECONDARY_URL are not set. System events will not be forwarded from replica instances."
             );
         }
 

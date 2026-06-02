@@ -4,13 +4,20 @@
 use crate::cfg::{parse_bool, CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use bytesize::ByteSize;
+use std::path::PathBuf;
+use std::time::Duration;
 
 const DEFAULT_SYSTEM_EVENTS_ENABLED: bool = true;
+const DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL: bool = true;
+const DEFAULT_SYSTEM_EVENTS_REMOTE_TIMEOUT_S: u64 = 5;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SystemEventsConfig {
     pub enabled: bool,
     pub quota_size: Option<u64>,
+    pub remote_verify_ssl: bool,
+    pub remote_ca_path: Option<PathBuf>,
+    pub remote_timeout: Duration,
 }
 
 impl Default for SystemEventsConfig {
@@ -18,6 +25,9 @@ impl Default for SystemEventsConfig {
         Self {
             enabled: DEFAULT_SYSTEM_EVENTS_ENABLED,
             quota_size: None,
+            remote_verify_ssl: DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL,
+            remote_ca_path: None,
+            remote_timeout: Duration::from_secs(DEFAULT_SYSTEM_EVENTS_REMOTE_TIMEOUT_S),
         }
     }
 }
@@ -35,6 +45,22 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             quota_size: env
                 .get_optional::<ByteSize>("RS_SYSTEM_EVENTS_QUOTA_SIZE")
                 .map(|size| size.as_u64()),
+            remote_verify_ssl: env
+                .get_optional("RS_SYSTEM_EVENTS_REMOTE_VERIFY_SSL")
+                .unwrap_or(DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL),
+            remote_ca_path: env
+                .get_optional::<String>("RS_SYSTEM_EVENTS_REMOTE_CA_PATH")
+                .and_then(|p| {
+                    if p.is_empty() {
+                        None
+                    } else {
+                        Some(PathBuf::from(p))
+                    }
+                }),
+            remote_timeout: Duration::from_secs(
+                env.get_optional("RS_SYSTEM_EVENTS_REMOTE_TIMEOUT")
+                    .unwrap_or(DEFAULT_SYSTEM_EVENTS_REMOTE_TIMEOUT_S),
+            ),
         }
     }
 }
@@ -58,6 +84,18 @@ mod tests {
             .expect_get()
             .with(eq("RS_SYSTEM_EVENTS_QUOTA_SIZE"))
             .return_const(Ok("10MB".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_SYSTEM_EVENTS_REMOTE_VERIFY_SSL"))
+            .return_const(Ok("false".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_SYSTEM_EVENTS_REMOTE_CA_PATH"))
+            .return_const(Ok("/tmp/system-ca.pem".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_SYSTEM_EVENTS_REMOTE_TIMEOUT"))
+            .return_const(Ok("10".to_string()));
 
         let config = CfgParser::<MockEnvGetter>::parse_system_events_config(
             &mut Env::new(env_getter),
@@ -69,6 +107,9 @@ mod tests {
             SystemEventsConfig {
                 enabled: true,
                 quota_size: Some(10_000_000),
+                remote_verify_ssl: false,
+                remote_ca_path: Some(PathBuf::from("/tmp/system-ca.pem")),
+                remote_timeout: Duration::from_secs(10),
             }
         );
     }
@@ -89,6 +130,9 @@ mod tests {
             SystemEventsConfig {
                 enabled: true,
                 quota_size: None,
+                remote_verify_ssl: true,
+                remote_ca_path: None,
+                remote_timeout: Duration::from_secs(5),
             }
         );
     }
@@ -107,7 +151,42 @@ mod tests {
             SystemEventsConfig {
                 enabled: true,
                 quota_size: None,
+                remote_verify_ssl: true,
+                remote_ca_path: None,
+                remote_timeout: Duration::from_secs(5),
             }
         );
+    }
+
+    #[rstest]
+    fn test_empty_ca_path_is_treated_as_none() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_SYSTEM_EVENTS_ENABLED"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_SYSTEM_EVENTS_QUOTA_SIZE"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_SYSTEM_EVENTS_REMOTE_VERIFY_SSL"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_SYSTEM_EVENTS_REMOTE_CA_PATH"))
+            .return_const(Ok("".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_SYSTEM_EVENTS_REMOTE_TIMEOUT"))
+            .return_const(Err(VarError::NotPresent));
+
+        let config = CfgParser::<MockEnvGetter>::parse_system_events_config(
+            &mut Env::new(env_getter),
+            false,
+        );
+
+        assert_eq!(config.remote_ca_path, None);
     }
 }

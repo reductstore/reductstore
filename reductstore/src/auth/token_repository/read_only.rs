@@ -17,13 +17,13 @@ use crate::core::internal_client::{
 };
 use crate::core::sync::AsyncRwLock;
 use crate::storage::engine::StorageEngine;
-use crate::syslog::AUDIT_BUCKET_NAME;
+use crate::syslog::{AUDIT_BUCKET_NAME, SYSTEM_AUDIT_ENTRY_PREFIX, SYSTEM_BUCKET_NAME};
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use log::{debug, error};
 use prost::Message;
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::FullBucketInfo;
 use reduct_base::msg::token_api::{Permissions, Token, TokenCreateRequest, TokenCreateResponse};
 use reduct_base::{forbidden, internal_server_error};
@@ -91,15 +91,15 @@ impl ReadOnlyTokenRepository {
         }
 
         let client = InternalClientBuilder::new(ClientBuildErrorContext {
-            ca_read: "Failed to read audit remote CA certificate",
-            ca_parse: "Failed to parse audit remote CA certificate",
-            client_build: "Failed to build audit read-only token client",
+            ca_read: "Failed to read system-events remote CA certificate",
+            ca_parse: "Failed to parse system-events remote CA certificate",
+            client_build: "Failed to build system-events read-only token client",
             kind: ClientBuildErrorKind::InternalServerError,
         })
         .api_token(&cfg.api_token)
-        .verify_ssl(cfg.audit_conf.remote_verify_ssl)
-        .ca_path(cfg.audit_conf.remote_ca_path.as_ref())
-        .connect_timeout(cfg.audit_conf.remote_timeout)
+        .verify_ssl(cfg.system_events_conf.remote_verify_ssl)
+        .ca_path(cfg.system_events_conf.remote_ca_path.as_ref())
+        .connect_timeout(cfg.system_events_conf.remote_timeout)
         .build();
 
         match client {
@@ -110,7 +110,7 @@ impl ReadOnlyTokenRepository {
             )),
             Err(err) => {
                 error!(
-                    "Failed to initialize audit client for read-only token repository: {}",
+                    "Failed to initialize system-events client for read-only token repository: {}",
                     err
                 );
                 None
@@ -159,7 +159,11 @@ impl ReadOnlyTokenRepository {
                 created_at: DateTime::<Utc>::from(SystemTime::now()),
                 permissions: Some(Permissions {
                     full_access: false,
-                    read: vec!["*".to_string(), AUDIT_BUCKET_NAME.to_string()],
+                    read: vec![
+                        "*".to_string(),
+                        AUDIT_BUCKET_NAME.to_string(),
+                        SYSTEM_BUCKET_NAME.to_string(),
+                    ],
                     write: vec![],
                 }),
                 is_provisioned: true,
@@ -208,10 +212,10 @@ impl ReadOnlyTokenRepository {
 
         let bucket_info = audit_client
             .execute_with_failover(
-                "Neither primary nor secondary URL is configured for replica audit reads",
+                "Neither primary nor secondary URL is configured for replica system-events reads",
                 |client, base_url| async move {
                     let response = client
-                        .get(format!("{}api/v1/b/{}", base_url, AUDIT_BUCKET_NAME))
+                        .get(format!("{}api/v1/b/{}", base_url, SYSTEM_BUCKET_NAME))
                         .send()
                         .await;
                     let response = check_response(response)?;
@@ -228,14 +232,23 @@ impl ReadOnlyTokenRepository {
                 self.last_access_cache = bucket_info
                     .entries
                     .into_iter()
-                    .filter(|entry| entry.record_count > 0)
+                    .filter(|entry| {
+                        entry.record_count > 0
+                            && entry
+                                .name
+                                .starts_with(&format!("{}/", SYSTEM_AUDIT_ENTRY_PREFIX))
+                    })
                     .map(|entry| (entry.name, entry.latest_record))
                     .collect();
                 self.last_access_cache_updated_at = Some(now);
             }
+            Err(err) if err.status == ErrorCode::NotFound => {
+                self.last_access_cache.clear();
+                self.last_access_cache_updated_at = Some(now);
+            }
             Err(err) => {
                 debug!(
-                    "Failed to fetch remote audit info for token last access: {}",
+                    "Failed to fetch remote system bucket info for token last access: {}",
                     err
                 );
             }
@@ -479,7 +492,11 @@ mod tests {
                 token.permissions,
                 Some(Permissions {
                     full_access: false,
-                    read: vec!["*".to_string(), AUDIT_BUCKET_NAME.to_string()],
+                    read: vec![
+                        "*".to_string(),
+                        AUDIT_BUCKET_NAME.to_string(),
+                        SYSTEM_BUCKET_NAME.to_string(),
+                    ],
                     write: vec![],
                 })
             );
@@ -540,7 +557,11 @@ mod tests {
                 res.permissions,
                 Some(Permissions {
                     full_access: false,
-                    read: vec!["*".to_string(), AUDIT_BUCKET_NAME.to_string()],
+                    read: vec![
+                        "*".to_string(),
+                        AUDIT_BUCKET_NAME.to_string(),
+                        SYSTEM_BUCKET_NAME.to_string(),
+                    ],
                     write: vec![],
                 })
             );
@@ -673,7 +694,7 @@ mod tests {
 
     async fn start_bucket_info_server(body: FullBucketInfo) -> String {
         let app = Router::new()
-            .route("/api/v1/b/$audit", get(bucket_info_handler))
+            .route("/api/v1/b/$system", get(bucket_info_handler))
             .with_state(BucketInfoState { body });
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -696,7 +717,7 @@ mod tests {
         let mut cfg = Cfg::default();
         cfg.api_token = "secret".to_string();
         cfg.primary_url = Some("http://127.0.0.1:1/".to_string());
-        cfg.audit_conf.remote_ca_path = Some("/tmp/does-not-exist-ca.pem".into());
+        cfg.system_events_conf.remote_ca_path = Some("/tmp/does-not-exist-ca.pem".into());
         assert!(ReadOnlyTokenRepository::build_audit_client(&cfg).is_none());
     }
 
@@ -706,7 +727,7 @@ mod tests {
             info: BucketInfo::default(),
             settings: BucketSettings::default(),
             entries: vec![EntryInfo {
-                name: "instance-a/file_token".to_string(),
+                name: "audit/instance-a/file_token".to_string(),
                 record_count: 1,
                 latest_record: 5_000_000,
                 ..Default::default()

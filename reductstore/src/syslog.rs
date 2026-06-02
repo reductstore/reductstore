@@ -21,6 +21,8 @@ use tokio::sync::Mutex;
 
 pub(crate) const AUDIT_BUCKET_NAME: &str = "$audit";
 pub(crate) const SYSTEM_BUCKET_NAME: &str = "$system";
+pub(crate) const SYSTEM_AUDIT_ENTRY_PREFIX: &str = "audit";
+pub(crate) const SYSTEM_LIFECYCLE_ENTRY_PREFIX: &str = "lifecycle";
 
 pub(crate) type SystemEventFlushFuture =
     Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>;
@@ -50,6 +52,7 @@ pub(crate) trait LogSystemEvent {
 pub(crate) struct SystemLoggerBuilder {
     bucket_name: &'static str,
     bucket_settings: BucketSettings,
+    entry_prefix: Option<&'static str>,
 }
 
 impl SystemLoggerBuilder {
@@ -57,7 +60,13 @@ impl SystemLoggerBuilder {
         Self {
             bucket_name,
             bucket_settings,
+            entry_prefix: None,
         }
+    }
+
+    pub(crate) fn with_entry_prefix(mut self, entry_prefix: &'static str) -> Self {
+        self.entry_prefix = Some(entry_prefix);
+        self
     }
 
     pub(crate) fn build(
@@ -66,11 +75,16 @@ impl SystemLoggerBuilder {
         storage: Arc<StorageEngine>,
     ) -> Result<Box<dyn LogSystemEvent + Send + Sync>, ReductError> {
         if cfg.role == crate::cfg::InstanceRole::Replica {
-            Ok(Box::new(ForwardSystemLogger::new(self.bucket_name, cfg)?))
+            Ok(Box::new(ForwardSystemLogger::new(
+                self.bucket_name,
+                self.entry_prefix,
+                cfg,
+            )?))
         } else {
             Ok(Box::new(LocalSystemLogger::new(
                 self.bucket_name,
                 self.bucket_settings,
+                self.entry_prefix,
                 storage,
             )))
         }
@@ -125,11 +139,12 @@ pub(crate) async fn build_audit_logger(
     cfg: &Cfg,
     storage: Arc<StorageEngine>,
 ) -> BoxedSystemLogger {
-    if !cfg.audit_conf.enabled {
+    if !cfg.system_events_conf.enabled {
         Box::new(DisabledAuditLogger)
     } else {
-        let bucket_settings = audit_bucket_settings(cfg);
-        let system_logger = SystemLoggerBuilder::new(AUDIT_BUCKET_NAME, bucket_settings)
+        let bucket_settings = system_bucket_settings(cfg);
+        let system_logger = SystemLoggerBuilder::new(SYSTEM_BUCKET_NAME, bucket_settings)
+            .with_entry_prefix(SYSTEM_AUDIT_ENTRY_PREFIX)
             .build(cfg, storage)
             .expect("audit system logger must build");
 
@@ -154,20 +169,9 @@ pub(crate) async fn build_system_logger(
     }
 
     SystemLoggerBuilder::new(SYSTEM_BUCKET_NAME, system_bucket_settings(cfg))
+        .with_entry_prefix(SYSTEM_LIFECYCLE_ENTRY_PREFIX)
         .build(cfg, storage)
         .expect("system logger must build")
-}
-
-fn audit_bucket_settings(cfg: &Cfg) -> BucketSettings {
-    if let Some(quota_size) = cfg.audit_conf.quota_size {
-        BucketSettings {
-            quota_type: Some(QuotaType::FIFO),
-            quota_size: Some(quota_size),
-            ..BucketSettings::default()
-        }
-    } else {
-        BucketSettings::default()
-    }
 }
 
 fn system_bucket_settings(cfg: &Cfg) -> BucketSettings {
@@ -230,7 +234,7 @@ mod tests {
             data_path: tmp_dir.keep(),
             ..Cfg::default()
         };
-        cfg.audit_conf.enabled = true;
+        cfg.system_events_conf.enabled = true;
         let storage = Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())
@@ -287,11 +291,14 @@ mod tests {
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
 
         let bucket = storage
-            .get_bucket(AUDIT_BUCKET_NAME)
+            .get_bucket(SYSTEM_BUCKET_NAME)
             .await
             .unwrap()
             .upgrade_and_unwrap();
-        let mut reader = bucket.begin_read("test-instance/token-1", 1).await.unwrap();
+        let mut reader = bucket
+            .begin_read("audit/test-instance/token-1", 1)
+            .await
+            .unwrap();
         let record = reader.read_chunk().unwrap().unwrap();
         let event: Value = serde_json::from_slice(&record).unwrap();
         assert_eq!(event["token_name"], "token-1");
@@ -310,7 +317,7 @@ mod tests {
         repo.log_event(make_event()).await.unwrap();
         sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
 
-        assert!(storage.get_bucket(AUDIT_BUCKET_NAME).await.is_err());
+        assert!(storage.get_bucket(SYSTEM_BUCKET_NAME).await.is_err());
     }
 
     #[rstest]
@@ -319,13 +326,13 @@ mod tests {
         #[future] storage_and_cfg: (Arc<StorageEngine>, Cfg),
     ) {
         let (storage, mut cfg) = storage_and_cfg.await;
-        cfg.audit_conf.enabled = false;
+        cfg.system_events_conf.enabled = false;
         let mut repo = build_audit_logger(&cfg, Arc::clone(&storage)).await;
 
         repo.log_event(make_event()).await.unwrap();
         sleep(Duration::from_millis(AGGREGATION_WINDOW_SECS * 1000 + 300)).await;
 
-        assert!(storage.get_bucket(AUDIT_BUCKET_NAME).await.is_err());
+        assert!(storage.get_bucket(SYSTEM_BUCKET_NAME).await.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -352,7 +359,7 @@ mod tests {
                 event_type: "lifecycle_run".to_string(),
                 timestamp: 100,
                 instance: "instance-1".to_string(),
-                entry_name: "lifecycle_tasks".to_string(),
+                entry_name: "policy-1".to_string(),
                 status: 200,
                 message: "".to_string(),
                 payload: serde_json::json!({"policy_name": "policy-1"}),
@@ -367,7 +374,7 @@ mod tests {
             .upgrade_and_unwrap();
 
         let mut reader = bucket
-            .begin_read("instance-1/lifecycle_tasks", 100)
+            .begin_read("lifecycle/instance-1/policy-1", 100)
             .await
             .unwrap();
         let record = reader.read_chunk().unwrap().unwrap();

@@ -13,7 +13,7 @@ use crate::auth::token_secret::{
 use crate::core::cache::Cache;
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::engine::StorageEngine;
-use crate::syslog::AUDIT_BUCKET_NAME;
+use crate::syslog::{SYSTEM_AUDIT_ENTRY_PREFIX, SYSTEM_BUCKET_NAME};
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
@@ -178,7 +178,7 @@ impl TokenRepository {
             return;
         };
 
-        let bucket = match storage.get_bucket(AUDIT_BUCKET_NAME).await {
+        let bucket = match storage.get_bucket(SYSTEM_BUCKET_NAME).await {
             Ok(bucket) => bucket.upgrade_and_unwrap(),
             Err(err) if err.status == ErrorCode::NotFound => {
                 self.last_access_cache.clear();
@@ -186,7 +186,7 @@ impl TokenRepository {
                 return;
             }
             Err(err) => {
-                debug!("Failed to get audit bucket for token last access: {}", err);
+                debug!("Failed to get system bucket for token last access: {}", err);
                 return;
             }
         };
@@ -196,14 +196,19 @@ impl TokenRepository {
                 self.last_access_cache = bucket_info
                     .entries
                     .into_iter()
-                    .filter(|entry| entry.record_count > 0)
+                    .filter(|entry| {
+                        entry.record_count > 0
+                            && entry
+                                .name
+                                .starts_with(&format!("{}/", SYSTEM_AUDIT_ENTRY_PREFIX))
+                    })
                     .map(|entry| (entry.name, entry.latest_record))
                     .collect();
                 self.last_access_cache_updated_at = Some(now);
             }
             Err(err) => {
                 debug!(
-                    "Failed to read audit bucket info for token last access: {}",
+                    "Failed to read system bucket info for token last access: {}",
                     err
                 );
             }
@@ -527,6 +532,11 @@ mod tests {
     use crate::auth::token_secret::{is_hashed_token_secret, verify_token_secret};
 
     use crate::cfg::Cfg;
+    use crate::storage::engine::StorageEngine;
+    use crate::syslog::{AUDIT_BUCKET_NAME, SYSTEM_BUCKET_NAME};
+    use bytes::Bytes;
+    use reduct_base::msg::bucket_api::BucketSettings;
+    use reduct_base::Labels;
     use reduct_base::{conflict, unauthorized, unprocessable_entity};
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
@@ -1330,6 +1340,99 @@ mod tests {
 
             assert_eq!(permissions.read, vec!["bucket-2".to_string()]);
             assert_eq!(permissions.write, vec!["bucket-2".to_string()]);
+        }
+    }
+
+    mod last_access {
+        use super::*;
+
+        #[tokio::test]
+        async fn resolves_last_access_from_system_audit_namespace_only() {
+            let temp_dir = tempdir().unwrap();
+            let mut cfg = Cfg {
+                data_path: temp_dir.keep(),
+                api_token: "init-token".to_string(),
+                ..Cfg::default()
+            };
+            cfg.system_events_conf.enabled = true;
+
+            let storage = Arc::new(
+                StorageEngine::builder()
+                    .with_data_path(cfg.data_path.clone())
+                    .with_cfg(cfg.clone())
+                    .build()
+                    .await,
+            );
+
+            let mut repo = TokenRepositoryBuilder::new(cfg.clone())
+                .build_with_storage(cfg.data_path.clone(), Arc::clone(&storage))
+                .await;
+
+            repo.generate_token(
+                "test",
+                TokenCreateRequest {
+                    permissions: Permissions::default(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+            storage
+                .create_system_bucket(SYSTEM_BUCKET_NAME, BucketSettings::default())
+                .await
+                .unwrap();
+            let system_bucket = storage
+                .get_bucket(SYSTEM_BUCKET_NAME)
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut system_writer = system_bucket
+                .begin_write(
+                    "audit/instance-a/test",
+                    6_000_000,
+                    2,
+                    "application/json".to_string(),
+                    Labels::new(),
+                )
+                .await
+                .unwrap();
+            system_writer
+                .send(Ok(Some(Bytes::from_static(b"{}"))))
+                .await
+                .unwrap();
+            system_writer.send(Ok(None)).await.unwrap();
+
+            storage
+                .create_system_bucket(AUDIT_BUCKET_NAME, BucketSettings::default())
+                .await
+                .unwrap();
+            let legacy_bucket = storage
+                .get_bucket(AUDIT_BUCKET_NAME)
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut legacy_writer = legacy_bucket
+                .begin_write(
+                    "test",
+                    9_000_000,
+                    2,
+                    "application/json".to_string(),
+                    Labels::new(),
+                )
+                .await
+                .unwrap();
+            legacy_writer
+                .send(Ok(Some(Bytes::from_static(b"{}"))))
+                .await
+                .unwrap();
+            legacy_writer.send(Ok(None)).await.unwrap();
+
+            let token = repo.get_token_with_last_access("test").await.unwrap();
+            assert_eq!(
+                token.last_access,
+                chrono::DateTime::from_timestamp_micros(6_000_000)
+            );
         }
     }
 

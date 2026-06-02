@@ -885,7 +885,7 @@ pub(crate) mod tests {
             api_token: "init-token".to_string(),
             ..Cfg::default()
         };
-        cfg.audit_conf.enabled = true;
+        cfg.system_events_conf.enabled = true;
 
         let storage = Arc::new(
             StorageEngine::builder()

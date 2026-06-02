@@ -17,11 +17,22 @@ use url::form_urlencoded;
 
 pub(super) struct ForwardSystemLogger {
     bucket_name: &'static str,
+    entry_prefix: Option<&'static str>,
     client_api: InternalClientApi,
 }
 
 impl ForwardSystemLogger {
-    pub(super) fn new(bucket_name: &'static str, cfg: &Cfg) -> Result<Self, ReductError> {
+    pub(super) fn new(
+        bucket_name: &'static str,
+        entry_prefix: Option<&'static str>,
+        cfg: &Cfg,
+    ) -> Result<Self, ReductError> {
+        let (remote_verify_ssl, remote_ca_path, remote_timeout) = (
+            cfg.system_events_conf.remote_verify_ssl,
+            cfg.system_events_conf.remote_ca_path.as_ref(),
+            cfg.system_events_conf.remote_timeout,
+        );
+
         let client = InternalClientBuilder::new(ClientBuildErrorContext {
             ca_read: "Failed to read system bucket remote CA certificate",
             ca_parse: "Failed to parse system bucket remote CA certificate",
@@ -29,13 +40,14 @@ impl ForwardSystemLogger {
             kind: ClientBuildErrorKind::InternalServerError,
         })
         .api_token(&cfg.api_token)
-        .verify_ssl(cfg.audit_conf.remote_verify_ssl)
-        .ca_path(cfg.audit_conf.remote_ca_path.as_ref())
-        .connect_timeout(cfg.audit_conf.remote_timeout)
+        .verify_ssl(remote_verify_ssl)
+        .ca_path(remote_ca_path)
+        .connect_timeout(remote_timeout)
         .build()?;
 
         Ok(Self {
             bucket_name,
+            entry_prefix,
             client_api: InternalClientApi::new(
                 client,
                 cfg.primary_url.clone(),
@@ -47,10 +59,12 @@ impl ForwardSystemLogger {
     #[cfg(test)]
     pub(super) fn new_with_client_api(
         bucket_name: &'static str,
+        entry_prefix: Option<&'static str>,
         client_api: InternalClientApi,
     ) -> Self {
         Self {
             bucket_name,
+            entry_prefix,
             client_api,
         }
     }
@@ -65,7 +79,12 @@ impl ForwardSystemLogger {
                 |client, base_url| {
                     let event = event.clone();
                     async move {
-                        let url = build_write_url(base_url.as_str(), self.bucket_name, &event);
+                        let url = build_write_url(
+                            base_url.as_str(),
+                            self.bucket_name,
+                            self.entry_prefix,
+                            &event,
+                        );
                         let payload = event.to_flat_json()?;
                         let headers = build_headers(&event, payload.len())?;
 
@@ -127,7 +146,12 @@ fn build_headers(event: &SystemEvent, payload_len: usize) -> Result<HeaderMap, R
     Ok(headers)
 }
 
-fn build_write_url(base_url: &str, bucket_name: &str, event: &SystemEvent) -> String {
+fn build_write_url(
+    base_url: &str,
+    bucket_name: &str,
+    entry_prefix: Option<&str>,
+    event: &SystemEvent,
+) -> String {
     let instance_name = if event.instance.is_empty() {
         "unknown"
     } else {
@@ -136,9 +160,14 @@ fn build_write_url(base_url: &str, bucket_name: &str, event: &SystemEvent) -> St
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("ts", &event.timestamp.to_string());
     let query = query.finish();
+    let entry_path = match entry_prefix {
+        Some(prefix) => format!("{}/{}/{}", prefix, instance_name, event.entry_name),
+        None => format!("{}/{}", instance_name, event.entry_name),
+    };
+
     format!(
-        "{}api/v1/b/{}/{}/{}?{}",
-        base_url, bucket_name, instance_name, event.entry_name, query
+        "{}api/v1/b/{}/{}?{}",
+        base_url, bucket_name, entry_path, query
     )
 }
 
@@ -234,10 +263,7 @@ mod tests {
         requests: Arc<Mutex<Vec<CapturedRequest>>>,
     ) -> String {
         let app = Router::new()
-            .route(
-                "/api/v1/b/{bucket}/{instance}/{entry}",
-                post(mock_write_handler),
-            )
+            .route("/api/v1/b/{bucket}/{*entry}", post(mock_write_handler))
             .with_state(MockState { status, requests });
 
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -257,6 +283,7 @@ mod tests {
         let primary_url = start_mock_server(primary_status, primary_requests).await;
         ForwardSystemLogger::new_with_client_api(
             "$system",
+            Some("audit"),
             test_client_api(Some(primary_url), secondary_url),
         )
     }
@@ -272,7 +299,7 @@ mod tests {
         assert_eq!(requests.len(), 1);
         assert_eq!(
             requests[0].path_and_query,
-            "/api/v1/b/$system/replica-a/entry-1?ts=42"
+            "/api/v1/b/$system/audit/replica-a/entry-1?ts=42"
         );
     }
 
@@ -343,6 +370,7 @@ mod tests {
             start_mock_server(StatusCode::OK, Arc::clone(&secondary_requests)).await;
         let mut logger = ForwardSystemLogger::new_with_client_api(
             "$system",
+            Some("audit"),
             test_client_api(Some("http://127.0.0.1:1/".to_string()), Some(secondary_url)),
         );
 
@@ -353,8 +381,11 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_urls_configured_returns_error() {
-        let mut logger =
-            ForwardSystemLogger::new_with_client_api("$system", test_client_api(None, None));
+        let mut logger = ForwardSystemLogger::new_with_client_api(
+            "$system",
+            Some("audit"),
+            test_client_api(None, None),
+        );
 
         let err = logger.log_event(make_event()).await.err().unwrap();
 
@@ -399,7 +430,7 @@ mod tests {
 
         assert_eq!(
             requests.lock().unwrap()[0].path_and_query,
-            "/api/v1/b/$system/node-1/startup?ts=1700000000000000"
+            "/api/v1/b/$system/audit/node-1/startup?ts=1700000000000000"
         );
     }
 
@@ -414,7 +445,7 @@ mod tests {
 
         assert_eq!(
             requests.lock().unwrap()[0].path_and_query,
-            "/api/v1/b/$system/unknown/entry-1?ts=42"
+            "/api/v1/b/$system/audit/unknown/entry-1?ts=42"
         );
     }
 
@@ -433,11 +464,11 @@ mod tests {
     fn test_build_write_url_formats_correctly() {
         let event = make_event();
 
-        let url = build_write_url("http://127.0.0.1:8383/", "$system", &event);
+        let url = build_write_url("http://127.0.0.1:8383/", "$system", Some("audit"), &event);
 
         assert_eq!(
             url,
-            "http://127.0.0.1:8383/api/v1/b/$system/replica-a/entry-1?ts=42"
+            "http://127.0.0.1:8383/api/v1/b/$system/audit/replica-a/entry-1?ts=42"
         );
     }
 
@@ -446,11 +477,11 @@ mod tests {
         let mut event = make_event();
         event.instance.clear();
 
-        let url = build_write_url("http://127.0.0.1:8383/", "$system", &event);
+        let url = build_write_url("http://127.0.0.1:8383/", "$system", Some("audit"), &event);
 
         assert_eq!(
             url,
-            "http://127.0.0.1:8383/api/v1/b/$system/unknown/entry-1?ts=42"
+            "http://127.0.0.1:8383/api/v1/b/$system/audit/unknown/entry-1?ts=42"
         );
     }
 

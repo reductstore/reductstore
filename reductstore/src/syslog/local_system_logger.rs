@@ -13,6 +13,7 @@ use std::sync::Arc;
 pub(super) struct LocalSystemLogger {
     bucket_name: &'static str,
     bucket_settings: BucketSettings,
+    entry_prefix: Option<&'static str>,
     storage: Arc<StorageEngine>,
 }
 
@@ -20,11 +21,13 @@ impl LocalSystemLogger {
     pub(super) fn new(
         bucket_name: &'static str,
         bucket_settings: BucketSettings,
+        entry_prefix: Option<&'static str>,
         storage: Arc<StorageEngine>,
     ) -> Self {
         Self {
             bucket_name,
             bucket_settings,
+            entry_prefix,
             storage,
         }
     }
@@ -35,7 +38,10 @@ impl LocalSystemLogger {
         } else {
             event.instance.clone()
         };
-        let entry_name = format!("{}/{}", instance, event.entry_name);
+        let entry_name = match self.entry_prefix {
+            Some(prefix) => format!("{}/{}/{}", prefix, instance, event.entry_name),
+            None => format!("{}/{}", instance, event.entry_name),
+        };
         let labels = Labels::from([("status".to_string(), event.status.to_string())]);
         let payload = event.to_flat_json()?;
         let mut writer = match self
