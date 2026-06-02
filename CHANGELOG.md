@@ -7,9 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- Send lifecycle run diagnostics and audit events to the `$system` bucket with configurable system event storage, [PR-1399](https://github.com/reductstore/reductstore/pull/1399)
+
 ### Added
 
-- Send lifecycle run diagnostics to the `$system` bucket with configurable system event storage, [PR-1399](https://github.com/reductstore/reductstore/pull/1399)
 - Pass attachment key-value maps to extensions instead of selecting a single attachment key, [PR-1383](https://github.com/reductstore/reductstore/pull/1383)
 - Add HTTP CRUD endpoints for lifecycle policies, [PR-1382](https://github.com/reductstore/reductstore/pull/1382)
 - Add lifecycle policy environment provisioning and background delete workers with structured lifecycle audit events, [PR-1376](https://github.com/reductstore/reductstore/pull/1376)
