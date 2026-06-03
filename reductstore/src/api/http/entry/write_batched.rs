@@ -11,7 +11,7 @@ use axum_extra::headers::{Expect, Header, HeaderMap};
 use bytes::Bytes;
 use futures_util::StreamExt;
 
-use crate::api::http::entry::common::err_to_batched_header;
+use crate::api::http::entry::common::{err_to_batched_header, parse_content_length_from_header};
 use crate::api::http::StateKeeper;
 use crate::api::limits::limit_scope_from_client_ip;
 use crate::replication::{Transaction, TransactionNotification};
@@ -278,15 +278,8 @@ fn check_and_get_content_length(
         .map(|(_, header)| header.content_length)
         .sum();
 
-    if total_content_length
-        != headers
-            .get("content-length")
-            .ok_or(unprocessable_entity!("content-length header is required",))?
-            .to_str()
-            .unwrap()
-            .parse::<u64>()
-            .map_err(|_| unprocessable_entity!("Invalid content-length header"))?
-    {
+    let header_content_length = parse_content_length_from_header(headers)?;
+    if total_content_length != header_content_length {
         return Err(unprocessable_entity!(
             "content-length header does not match the sum of the content-lengths in the headers",
         )

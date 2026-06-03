@@ -10,13 +10,19 @@ use std::collections::HashMap;
 use std::str::FromStr;
 
 pub(crate) fn parse_content_length_from_header(headers: &HeaderMap) -> Result<u64, HttpError> {
-    let content_size = headers
-        .get("content-length")
-        .ok_or(unprocessable_entity!("content-length header is required"))?
+    let (name, value) = if let Some(v) = headers.get("content-length") {
+        ("content-length", v)
+    } else if let Some(v) = headers.get("x-reduct-content-length") {
+        ("x-reduct-content-length", v)
+    } else {
+        return Err(unprocessable_entity!("content-length header is required").into());
+    };
+
+    let content_size = value
         .to_str()
-        .map_err(|_| unprocessable_entity!("content-length header must be a string",))?
+        .map_err(|_| unprocessable_entity!("{} header must be a string", name))?
         .parse::<u64>()
-        .map_err(|_| unprocessable_entity!("content-length header must be a number"))?;
+        .map_err(|_| unprocessable_entity!("{} header must be a number", name))?;
     Ok(content_size)
 }
 
@@ -223,8 +229,55 @@ pub(super) fn check_and_extract_ts_or_query_id(
 mod tests {
     use super::*;
 
+    use axum::http::HeaderMap;
     use rstest::rstest;
     use std::collections::HashMap;
+
+    mod parse_content_length_from_header {
+        use super::*;
+
+        #[rstest]
+        fn test_content_length() {
+            let mut headers = HeaderMap::new();
+            headers.insert("content-length", "42".parse().unwrap());
+            assert_eq!(parse_content_length_from_header(&headers).unwrap(), 42);
+        }
+
+        #[rstest]
+        fn test_x_reduct_content_length() {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-reduct-content-length", "42".parse().unwrap());
+            assert_eq!(parse_content_length_from_header(&headers).unwrap(), 42);
+        }
+
+        #[rstest]
+        fn test_content_length_takes_priority_when_both_present() {
+            let mut headers = HeaderMap::new();
+            headers.insert("content-length", "99".parse().unwrap());
+            headers.insert("x-reduct-content-length", "10".parse().unwrap());
+            assert_eq!(parse_content_length_from_header(&headers).unwrap(), 99);
+        }
+
+        #[rstest]
+        fn test_missing() {
+            let headers = HeaderMap::new();
+            assert_eq!(
+                parse_content_length_from_header(&headers)
+                    .err()
+                    .unwrap()
+                    .into_inner()
+                    .to_string(),
+                "[UnprocessableEntity] content-length header is required"
+            );
+        }
+
+        #[rstest]
+        fn test_invalid_value() {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-reduct-content-length", "abc".parse().unwrap());
+            assert!(parse_content_length_from_header(&headers).is_err());
+        }
+    }
 
     mod parse_ttl {
         use super::*;
