@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Accept `x-reduct-content-length` as an alternative to `Content-Length` for browser streaming via the Fetch API, [PR-1411](https://github.com/reductstore/reductstore/pull/1411)
 - Pass attachment key-value maps to extensions instead of selecting a single attachment key, [PR-1383](https://github.com/reductstore/reductstore/pull/1383)
 - Add HTTP CRUD endpoints for lifecycle policies, [PR-1382](https://github.com/reductstore/reductstore/pull/1382)
 - Add lifecycle policy environment provisioning and background delete workers with structured lifecycle audit events, [PR-1376](https://github.com/reductstore/reductstore/pull/1376)
