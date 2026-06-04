@@ -5,9 +5,13 @@ use crate::cfg::io::IoConfig;
 use crate::replication::TransactionNotification;
 use crate::storage::entry::{is_system_meta_entry, meta_entry_parent};
 use crate::storage::query::condition::Parser;
+// use crate::storage::query::filters::{
+//     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
+//     IncludeLabelFilter, RecordFilter, WhenFilter,
+// };
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
-    IncludeLabelFilter, RecordFilter, WhenFilter,
+    apply_filters_recursively, EachNFilter, ExcludeLabelFilter, FilterRecord, IncludeLabelFilter,
+    RecordFilter, WhenFilter,
 };
 use log::warn;
 use reduct_base::error::ReductError;
@@ -75,10 +79,6 @@ impl TransactionFilter {
 
         if let Some(each_n) = settings.each_n {
             query_filters.push(Box::new(EachNFilter::new(each_n)));
-        }
-
-        if let Some(each_s) = settings.each_s {
-            query_filters.push(Box::new(EachSecondFilter::new(each_s)));
         }
 
         if let Some(when) = settings.when {
@@ -322,28 +322,6 @@ mod tests {
         assert_eq!(filter.filter(notification.clone()).len(), 1);
         assert_eq!(filter.filter(notification.clone()).len(), 0);
         assert_eq!(filter.filter(notification).len(), 1);
-    }
-
-    #[rstest]
-    fn test_transaction_filter_each_s(mut notification: TransactionNotification) {
-        let mut filter = TransactionFilter::try_new(
-            "test",
-            ReplicationSettings {
-                src_bucket: "bucket".to_string(),
-                each_s: Some(1.0),
-                ..ReplicationSettings::default()
-            },
-            IoConfig::default(),
-        )
-        .unwrap();
-
-        assert_eq!(filter.filter(notification.clone()).len(), 1);
-        notification.event = Transaction::WriteRecord(1);
-        assert_eq!(filter.filter(notification.clone()).len(), 0);
-        notification.event = Transaction::WriteRecord(2);
-        assert_eq!(filter.filter(notification.clone()).len(), 0);
-        notification.event = Transaction::WriteRecord(1000_002);
-        assert_eq!(filter.filter(notification.clone()).len(), 1);
     }
 
     #[rstest]

@@ -63,8 +63,6 @@ pub(crate) struct QueryOptions {
     pub limit: Option<u64>,
     /// Return each N records
     pub each_n: Option<u64>,
-    /// Return a record every S seconds
-    pub each_s: Option<f64>,
     /// Only metadata
     pub only_metadata: bool,
     /// Condition
@@ -86,7 +84,6 @@ impl From<QueryEntry> for QueryOptions {
             continuous: query.continuous.unwrap_or(false),
             limit: query.limit,
             each_n: query.each_n,
-            each_s: query.each_s,
             only_metadata: query.only_metadata.unwrap_or(false),
             when: query.when,
             strict: query.strict.unwrap_or(false),
@@ -104,7 +101,6 @@ impl Default for QueryOptions {
             continuous: false,
             limit: None,
             each_n: None,
-            each_s: None,
             only_metadata: false,
             when: None,
             strict: false,

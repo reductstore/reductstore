@@ -49,9 +49,6 @@ pub struct ReplicationSettings {
     /// Replication each N-th record
     #[serde(default)]
     pub each_n: Option<u64>,
-    /// Replication a record every S seconds
-    #[serde(default)]
-    pub each_s: Option<f64>,
     /// When condition
     #[serde(default)]
     pub when: Option<Value>,

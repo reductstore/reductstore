@@ -69,7 +69,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     include: Labels::default(),
                     exclude: Labels::default(),
                     each_n: None,
-                    each_s: None,
                     when: None,
                     mode: ReplicationMode::Enabled,
                 },
@@ -155,11 +154,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             if let Some(each_n) = env.get_optional::<u64>(&format!("RS_REPLICATION_{}_EACH_N", id))
             {
                 replication.settings.each_n = Some(each_n);
-            }
-
-            if let Some(each_s) = env.get_optional::<f64>(&format!("RS_REPLICATION_{}_EACH_S", id))
-            {
-                replication.settings.each_s = Some(each_s);
             }
 
             if let Some(when) =
@@ -255,7 +249,6 @@ mod tests {
         assert_eq!(replication.entries, vec!["entry1", "entry2"]);
         assert_eq!(replication.dst_prefix, "robot-1");
         assert_eq!(replication.each_n, Some(10));
-        assert_eq!(replication.each_s, Some(0.5));
         assert_eq!(
             replication.when,
             Some(serde_json::json!({"$and": [true, false]}))
@@ -532,7 +525,6 @@ mod tests {
                 include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
-                each_s: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
             },
@@ -622,7 +614,6 @@ mod tests {
                 include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
-                each_s: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
             },
@@ -707,7 +698,6 @@ mod tests {
                 include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
-                each_s: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
             },
@@ -810,10 +800,7 @@ mod tests {
             .expect_get()
             .with(eq("RS_REPLICATION_1_EACH_N"))
             .return_const(Ok("10".to_string()));
-        mock_getter
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_EACH_S"))
-            .return_const(Ok("0.5".to_string()));
+
         mock_getter
             .expect_get()
             .with(eq("RS_REPLICATION_1_WHEN"))
