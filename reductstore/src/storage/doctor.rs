@@ -935,4 +935,132 @@ mod tests {
         );
         assert_eq!(report.summary.block_count, 1);
     }
+
+    #[test]
+    fn doctor_accepts_valid_bucket_settings() {
+        let dir = tempdir().unwrap();
+        let bucket = dir.path().join("bucket-1");
+        fs::create_dir_all(&bucket).unwrap();
+        let settings = crate::storage::proto::BucketSettings {
+            quota_size: Some(0),
+            quota_type: Some(0),
+            max_block_records: Some(1024),
+            max_block_size: Some(64_000_000),
+        };
+        let bytes = settings.encode_to_vec();
+        fs::write(bucket.join(BUCKET_SETTINGS_FILE), bytes).unwrap();
+
+        let report = scan_data_path(dir.path()).unwrap();
+
+        assert!(
+            !report.issues.iter().any(|i| matches!(
+                i.kind,
+                DoctorIssueKind::UnreadableBucketSettings | DoctorIssueKind::InvalidBucketSettings
+            )),
+            "expected no bucket-settings issues, got: {:?}",
+            report.issues
+        );
+    }
+
+    #[test]
+    fn doctor_reports_descriptor_block_id_mismatch() {
+        let dir = tempdir().unwrap();
+        let bucket = dir.path().join("bucket-1");
+        let entry = bucket.join("entry");
+        fs::create_dir_all(&entry).unwrap();
+        fs::write(bucket.join(BUCKET_SETTINGS_FILE), []).unwrap();
+
+        // Descriptor begin_time is 2000, but the index claims block_id 1000.
+        let descriptor = build_minimal_block(2000, 8);
+        let mut crc = Digest::new();
+        crc.write(&descriptor);
+        let descriptor_crc = crc.sum64();
+        let index_bytes =
+            build_index_bytes(&[(1000, descriptor.len() as u64, 0, 0, Some(descriptor_crc))]);
+        fs::write(entry.join(BLOCK_INDEX_FILE), index_bytes).unwrap();
+        fs::write(entry.join("1000.meta"), descriptor).unwrap();
+        fs::write(entry.join("1000.blk"), vec![0u8; 16]).unwrap();
+
+        let report = scan_data_path(dir.path()).unwrap();
+
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.kind == DoctorIssueKind::DescriptorBlockIdMismatch));
+    }
+
+    #[test]
+    fn doctor_reports_invalid_index_proto_decode() {
+        let dir = tempdir().unwrap();
+        let bucket = dir.path().join("bucket-1");
+        let entry = bucket.join("entry");
+        fs::create_dir_all(&entry).unwrap();
+        fs::write(bucket.join(BUCKET_SETTINGS_FILE), []).unwrap();
+        // Protobuf must start with the field tag for the `blocks` field; this
+        // is malformed and should fail to decode.
+        fs::write(entry.join(BLOCK_INDEX_FILE), [0xff, 0xff, 0xff, 0xff]).unwrap();
+
+        let report = scan_data_path(dir.path()).unwrap();
+
+        assert!(report
+            .issues
+            .iter()
+            .any(|i| i.kind == DoctorIssueKind::CorruptBlockIndex));
+    }
+
+    #[test]
+    fn doctor_indexes_with_and_without_descriptor_crc() {
+        let dir = tempdir().unwrap();
+        let bucket = dir.path().join("bucket-1");
+        let entry = bucket.join("entry");
+        fs::create_dir_all(&entry).unwrap();
+        fs::write(bucket.join(BUCKET_SETTINGS_FILE), []).unwrap();
+
+        // Block 1000 has a descriptor CRC; block 2000 does not.
+        let descriptor_with_crc = build_minimal_block(1000, 8);
+        let mut crc = Digest::new();
+        crc.write(&descriptor_with_crc);
+        let crc_with = crc.sum64();
+        let descriptor_without_crc = build_minimal_block(2000, 8);
+
+        let index_bytes = build_index_bytes(&[
+            (1000, descriptor_with_crc.len() as u64, 0, 0, Some(crc_with)),
+            (2000, descriptor_without_crc.len() as u64, 0, 0, None),
+        ]);
+        fs::write(entry.join(BLOCK_INDEX_FILE), index_bytes).unwrap();
+        fs::write(entry.join("1000.meta"), descriptor_with_crc).unwrap();
+        fs::write(entry.join("1000.blk"), vec![0u8; 16]).unwrap();
+        fs::write(entry.join("2000.meta"), descriptor_without_crc).unwrap();
+        fs::write(entry.join("2000.blk"), vec![0u8; 16]).unwrap();
+
+        let report = scan_data_path(dir.path()).unwrap();
+
+        assert_eq!(report.summary.block_count, 2);
+        assert!(
+            report.issues.is_empty(),
+            "expected no issues, got: {:?}",
+            report.issues
+        );
+    }
+
+    #[test]
+    fn doctor_reports_unrecognized_entry_files() {
+        let dir = tempdir().unwrap();
+        let bucket = dir.path().join("bucket-1");
+        let entry = bucket.join("entry");
+        fs::create_dir_all(&entry).unwrap();
+        fs::write(bucket.join(BUCKET_SETTINGS_FILE), []).unwrap();
+        fs::write(entry.join(BLOCK_INDEX_FILE), []).unwrap();
+        fs::write(entry.join("stray-file.txt"), b"hello").unwrap();
+
+        let report = scan_data_path(dir.path()).unwrap();
+
+        let info = report
+            .issues
+            .iter()
+            .find(|i| i.kind == DoctorIssueKind::UnknownEntryInternalFile)
+            .expect("expected UnknownEntryInternalFile issue");
+        assert_eq!(info.severity, DoctorSeverity::Info);
+        assert!(info.message.contains("stray-file.txt"));
+    }
 }
