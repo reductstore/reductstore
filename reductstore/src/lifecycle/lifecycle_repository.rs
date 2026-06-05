@@ -6,7 +6,7 @@ mod repo;
 
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole::Replica;
-use crate::lifecycle::{LifecycleAuditSink, ManageLifecycles};
+use crate::lifecycle::{ManageLifecycles, SystemEventSink};
 use crate::storage::engine::StorageEngine;
 use read_only::ReadOnlyLifecycleRepository;
 use repo::LifecycleRepository;
@@ -14,7 +14,7 @@ use std::sync::Arc;
 
 pub(crate) struct LifecycleRepoBuilder {
     cfg: Cfg,
-    audit_sink: Option<LifecycleAuditSink>,
+    system_event_sink: Option<SystemEventSink>,
 }
 
 type BoxedLifecycleRepository = Box<dyn ManageLifecycles + Send + Sync>;
@@ -23,12 +23,12 @@ impl LifecycleRepoBuilder {
     pub fn new(cfg: Cfg) -> Self {
         LifecycleRepoBuilder {
             cfg,
-            audit_sink: None,
+            system_event_sink: None,
         }
     }
 
-    pub fn with_audit_sink(mut self, audit_sink: LifecycleAuditSink) -> Self {
-        self.audit_sink = Some(audit_sink);
+    pub fn with_system_event_sink(mut self, system_event_sink: SystemEventSink) -> Self {
+        self.system_event_sink = Some(system_event_sink);
         self
     }
 
@@ -36,7 +36,10 @@ impl LifecycleRepoBuilder {
         if self.cfg.role == Replica {
             Box::new(ReadOnlyLifecycleRepository::new())
         } else {
-            Box::new(LifecycleRepository::load_or_create(storage, self.cfg, self.audit_sink).await)
+            Box::new(
+                LifecycleRepository::load_or_create(storage, self.cfg, self.system_event_sink)
+                    .await,
+            )
         }
     }
 }

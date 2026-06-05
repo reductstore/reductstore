@@ -2,8 +2,8 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::audit::ApiAuditPayload;
-use crate::audit::{AuditAggregationHandler, AuditEvent, AuditEventAggregator};
 use crate::core::sync::AsyncRwLock;
+use crate::syslog::{SystemEvent, SystemEventAggregator, SystemEventHandler};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::collections::HashMap;
@@ -44,7 +44,7 @@ pub(crate) struct AuditState {
     pub aggregates: HashMap<AuditAggregateKey, AuditAggregate>,
 }
 
-pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> AuditEvent {
+pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> SystemEvent {
     let payload = ApiAuditPayload {
         token_name: key.token_name.clone(),
         method: key.method,
@@ -54,7 +54,7 @@ pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> A
         duration: aggregate.total_duration,
     };
 
-    AuditEvent {
+    SystemEvent {
         event_type: "api_call".to_string(),
         timestamp: aggregate.first_timestamp,
         instance: key.instance,
@@ -66,14 +66,14 @@ pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> A
 }
 
 pub(crate) struct ApiAuditEventAggregator {
-    tx: mpsc::Sender<AuditEvent>,
+    tx: mpsc::Sender<SystemEvent>,
     #[cfg(test)]
     #[allow(dead_code)]
     pub state: Arc<AsyncRwLock<AuditState>>,
 }
 
 impl ApiAuditEventAggregator {
-    pub(crate) fn new(handler: AuditAggregationHandler) -> Self {
+    pub(crate) fn new(handler: SystemEventHandler) -> Self {
         let state = Arc::new(AsyncRwLock::new(AuditState::default()));
         let (tx, rx) = mpsc::channel(AUDIT_CHANNEL_SIZE);
 
@@ -86,7 +86,7 @@ impl ApiAuditEventAggregator {
         }
     }
 
-    async fn enqueue(&self, event: AuditEvent) -> Result<(), ReductError> {
+    async fn enqueue(&self, event: SystemEvent) -> Result<(), ReductError> {
         self.tx
             .send(event)
             .await
@@ -94,9 +94,9 @@ impl ApiAuditEventAggregator {
     }
 
     async fn run_worker(
-        mut rx: mpsc::Receiver<AuditEvent>,
+        mut rx: mpsc::Receiver<SystemEvent>,
         state: Arc<AsyncRwLock<AuditState>>,
-        handler: AuditAggregationHandler,
+        handler: SystemEventHandler,
     ) {
         loop {
             if let Some(deadline) = Self::next_deadline(&state).await {
@@ -137,7 +137,7 @@ impl ApiAuditEventAggregator {
 
     async fn aggregate_event(
         state: &Arc<AsyncRwLock<AuditState>>,
-        event: AuditEvent,
+        event: SystemEvent,
     ) -> Result<(), ReductError> {
         let payload: ApiAuditPayload = serde_json::from_value(event.payload.clone())
             .map_err(|err| internal_server_error!("Invalid API audit payload: {}", err))?;
@@ -188,7 +188,7 @@ impl ApiAuditEventAggregator {
 
     async fn flush_expired(
         state: &Arc<AsyncRwLock<AuditState>>,
-        handler: &AuditAggregationHandler,
+        handler: &SystemEventHandler,
     ) -> Result<(), ReductError> {
         let now = Instant::now();
         let events = {
@@ -222,7 +222,7 @@ impl ApiAuditEventAggregator {
 
     async fn flush_all(
         state: &Arc<AsyncRwLock<AuditState>>,
-        handler: &AuditAggregationHandler,
+        handler: &SystemEventHandler,
     ) -> Result<(), ReductError> {
         let events = {
             let mut state = state.write().await?;
@@ -242,8 +242,8 @@ impl ApiAuditEventAggregator {
 }
 
 #[async_trait::async_trait]
-impl AuditEventAggregator for ApiAuditEventAggregator {
-    async fn log_event(&self, event: AuditEvent) -> Result<(), ReductError> {
+impl SystemEventAggregator for ApiAuditEventAggregator {
+    async fn log_event(&self, event: SystemEvent) -> Result<(), ReductError> {
         self.enqueue(event).await
     }
 }
@@ -254,7 +254,7 @@ mod tests {
     use rstest::{fixture, rstest};
     use tokio::sync::Mutex;
 
-    fn make_test_event(timestamp: u64) -> AuditEvent {
+    fn make_test_event(timestamp: u64) -> SystemEvent {
         let payload = ApiAuditPayload {
             token_name: "token-1".to_string(),
             method: "GET".to_string(),
@@ -264,7 +264,7 @@ mod tests {
             duration: 0.1,
         };
 
-        AuditEvent {
+        SystemEvent {
             event_type: "api_call".to_string(),
             timestamp,
             instance: "instance-a".to_string(),
@@ -275,7 +275,7 @@ mod tests {
         }
     }
 
-    fn make_test_handler(events: Arc<Mutex<Vec<AuditEvent>>>) -> AuditAggregationHandler {
+    fn make_test_handler(events: Arc<Mutex<Vec<SystemEvent>>>) -> SystemEventHandler {
         Arc::new(move |event| {
             let events = Arc::clone(&events);
             Box::pin(async move {
@@ -327,7 +327,7 @@ mod tests {
     }
 
     #[fixture]
-    fn flushed_events() -> Arc<Mutex<Vec<AuditEvent>>> {
+    fn flushed_events() -> Arc<Mutex<Vec<SystemEvent>>> {
         Arc::new(Mutex::new(Vec::new()))
     }
 
@@ -432,7 +432,7 @@ mod tests {
     #[tokio::test]
     async fn flush_expired_flushes_only_expired_entries(
         state: Arc<AsyncRwLock<AuditState>>,
-        flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
+        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
     ) {
         let handler = make_test_handler(Arc::clone(&flushed_events));
         let now = Instant::now();
@@ -482,7 +482,7 @@ mod tests {
     #[tokio::test]
     async fn flush_expired_flushes_entry_when_force_deadline_expires(
         state: Arc<AsyncRwLock<AuditState>>,
-        flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
+        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
     ) {
         let handler = make_test_handler(Arc::clone(&flushed_events));
         let now = Instant::now();
@@ -514,7 +514,7 @@ mod tests {
     #[tokio::test]
     async fn flush_all_drains_all_entries(
         state: Arc<AsyncRwLock<AuditState>>,
-        flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
+        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
     ) {
         let handler = make_test_handler(Arc::clone(&flushed_events));
 
@@ -556,7 +556,7 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn run_worker_flushes_all_when_channel_is_closed(
-        flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
+        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
     ) {
         let handler = make_test_handler(Arc::clone(&flushed_events));
         let state = Arc::new(AsyncRwLock::new(AuditState::default()));
@@ -576,13 +576,13 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn run_worker_forwards_non_api_event_without_aggregation(
-        flushed_events: Arc<Mutex<Vec<AuditEvent>>>,
+        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
     ) {
         let handler = make_test_handler(Arc::clone(&flushed_events));
         let state = Arc::new(AsyncRwLock::new(AuditState::default()));
         let (tx, rx) = mpsc::channel(4);
 
-        tx.send(AuditEvent {
+        tx.send(SystemEvent {
             event_type: "lifecycle_run".to_string(),
             timestamp: 1,
             instance: "instance-a".to_string(),
