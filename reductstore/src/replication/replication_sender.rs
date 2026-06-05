@@ -834,7 +834,7 @@ mod tests {
             storage,
             settings,
             io_config: IoConfig::default(),
-            bucket: Box::new(remote_bucket),
+            bucket: Some(Box::new(remote_bucket)),
         }
     }
 
