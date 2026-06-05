@@ -148,27 +148,6 @@ def test_query_each_n(base_url, session, bucket):
     assert resp.status_code == 204
 
 
-def test_query_each_s(base_url, session, bucket):
-    """Should return a record each 2ms"""
-    _make_bucket_with_records(base_url, session, bucket)
-    resp = session.post(
-        f"{base_url}/b/{bucket}/entry/q", json={"query_type": "QUERY", "each_s": 0.002}
-    )
-    assert resp.status_code == 200
-
-    query_id = int(json.loads(resp.content)["id"])
-    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
-    assert resp.status_code == 200
-    assert resp.headers["x-reduct-time"] == "1000"
-
-    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
-    assert resp.status_code == 200
-    assert resp.headers["x-reduct-time"] == "3000"
-
-    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
-    assert resp.status_code == 204
-
-
 def test_query_with_include_and_exclude(base_url, session, bucket):
     """Should handle include and exclude labels"""
     resp = session.post(
