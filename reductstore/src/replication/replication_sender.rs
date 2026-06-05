@@ -2,8 +2,8 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::cfg::io::IoConfig;
-use crate::replication::remote_bucket::RemoteBucket;
-use crate::replication::transaction_log::TransactionLogMap;
+use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucket};
+use crate::replication::transaction_log::{TransactionLogMap, TransactionLogRef};
 use crate::replication::Transaction;
 use crate::storage::engine::StorageEngine;
 use log::{debug, error};
@@ -12,6 +12,7 @@ use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::cmp::PartialEq;
 use std::sync::Arc;
+use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 /// Internal worker for replication to process a sole iteration of the replication loop.
@@ -20,7 +21,7 @@ pub(super) struct ReplicationSender {
     storage: Arc<StorageEngine>,
     settings: ReplicationSettings,
     io_config: IoConfig,
-    bucket: Box<dyn RemoteBucket + Send + Sync>,
+    bucket: Option<Box<dyn RemoteBucket + Send + Sync>>,
 }
 
 type ResultResult = (Result<(), ReductError>, u64);
@@ -46,16 +47,32 @@ impl ReplicationSender {
             storage,
             settings: config,
             io_config,
-            bucket,
+            bucket: Some(bucket),
         }
     }
 
     pub async fn probe_availability(&mut self) -> bool {
-        self.bucket.probe_availability().await;
-        self.bucket.is_active()
+        self.bucket
+            .as_mut()
+            .unwrap()
+            .probe_availability()
+            .await;
+        self.bucket
+            .as_ref()
+            .unwrap()
+            .is_active()
     }
 
     pub async fn run(&mut self) -> Result<SyncState, ReductError> {
+        struct PendingSend {
+            bucket: Box<dyn RemoteBucket + Send + Sync>,
+            entry_name: String,
+            log: TransactionLogRef,
+            processed_transactions: usize,
+            batch_size: u64,
+            result: Result<ErrorRecordMap, ReductError>,
+            bucket_active: bool,
+        }
         let entries = self
             .log_map
             .read()
@@ -65,6 +82,10 @@ impl ReplicationSender {
             .collect::<Vec<_>>();
 
         let mut counter = Vec::new();
+        let mut bucket = self.bucket.take();
+
+        let mut pending_send: Option<JoinHandle<PendingSend>> = None;
+        let mut bucket_unavailable = false;
 
         for entry_name in entries.iter() {
             let log = {
@@ -120,36 +141,82 @@ impl ReplicationSender {
                         }
                     }
 
-                    let batch_size = batch.len() as u64;
-                    match self.bucket.write_batch(entry_name, batch).await {
-                        Ok(map) => {
-                            counter.push((Ok(()), batch_size - map.len() as u64));
-                            for (timestamp, err) in map.into_iter() {
+                    if let Some(handle) = pending_send.take() {
+                        let output = handle
+                            .await
+                            .expect("replication send task panicked");
+
+                        bucket = Some(output.bucket);
+
+                        match output.result {
+                            Ok(map) => {
+                                counter.push((Ok(()), output.batch_size - map.len() as u64));
+
+                                for (timestamp, err) in map.into_iter() {
+                                    debug!(
+                                        "Failed to replicate record {}/{}/{}: {:?}",
+                                        self.settings.src_bucket,
+                                        output.entry_name,
+                                        timestamp,
+                                        err
+                                    );
+
+                                    counter.push((Err(err), 1));
+                                }
+                            }
+                            Err(err) => {
                                 debug!(
-                                    "Failed to replicate record {}/{}/{}: {:?}",
-                                    self.settings.src_bucket, entry_name, timestamp, err
+                                    "Failed to replicate batch of records from {}/{} {:?}",
+                                    self.settings.src_bucket,
+                                    output.entry_name,
+                                    err
                                 );
-                                counter.push((Err(err), 1));
+
+                                counter.push((Err(err), output.batch_size));
                             }
                         }
-                        Err(err) => {
-                            debug!(
-                                "Failed to replicate batch of records from {}/{} {:?}",
-                                self.settings.src_bucket, entry_name, err
-                            );
 
-                            counter.push((Err(err), batch_size));
+                        if output.bucket_active {
+                            if let Err(err) = output
+                                .log
+                                .write()
+                                .await?
+                                .pop_front(output.processed_transactions)
+                                .await
+                            {
+                                error!("Failed to remove transaction: {:?}", err);
+                            }
+                        } else {
+                            bucket_unavailable = true;
+                            break;
                         }
                     }
 
-                    if !self.bucket.is_active() {
-                        break;
-                    }
+                    let batch_size = batch.len() as u64;
+                    let send_entry_name = entry_name.clone();
+                    let send_log = Arc::clone(&log);
 
-                    // remove processed transactions from the log
-                    if let Err(err) = log.write().await?.pop_front(processed_transactions).await {
-                        error!("Failed to remove transaction: {:?}", err);
-                    }
+                    let mut send_bucket = bucket
+                        .take()
+                        .expect("remote bucket was already taken");
+
+                    pending_send = Some(tokio::spawn(async move {
+                        let result = send_bucket
+                            .write_batch(&send_entry_name, batch)
+                            .await;
+
+                        let bucket_active = send_bucket.is_active();
+
+                        PendingSend {
+                            bucket: send_bucket,
+                            entry_name: send_entry_name,
+                            log: send_log,
+                            processed_transactions,
+                            batch_size,
+                            result,
+                            bucket_active,
+                        }
+                    }));
                 }
 
                 Err(err) => {
@@ -159,11 +226,62 @@ impl ReplicationSender {
             };
         }
 
-        Ok(if !counter.is_empty() {
-            if self.bucket.is_active() {
-                SyncState::SyncedOrRemoved(counter)
+        //Handle pending HTTP request
+        if let Some(handle) = pending_send.take() {
+            let output = handle
+                .await
+                .expect("replication send task panicked");
+
+            bucket = Some(output.bucket);
+
+            match output.result {
+                Ok(map) => {
+                    counter.push((Ok(()), output.batch_size - map.len() as u64));
+
+                    for (timestamp, err) in map.into_iter() {
+                        debug!(
+                    "Failed to replicate record {}/{}/{}: {:?}",
+                    self.settings.src_bucket,
+                    output.entry_name,
+                    timestamp,
+                    err
+                );
+
+                        counter.push((Err(err), 1));
+                    }
+                }
+                Err(err) => {
+                    debug!(
+                "Failed to replicate batch of records from {}/{} {:?}",
+                self.settings.src_bucket,
+                output.entry_name,
+                err
+            );
+
+                    counter.push((Err(err), output.batch_size));
+                }
+            }
+
+            if output.bucket_active {
+                if let Err(err) = output
+                    .log
+                    .write()
+                    .await?
+                    .pop_front(output.processed_transactions)
+                    .await
+                {
+                    error!("Failed to remove transaction: {:?}", err);
+                }
             } else {
+                bucket_unavailable = true;
+            }
+        }
+        self.bucket = bucket;
+        Ok(if !counter.is_empty() {
+            if bucket_unavailable || !self.bucket.as_ref().unwrap().is_active() {
                 SyncState::NotAvailable(counter)
+            } else {
+                SyncState::SyncedOrRemoved(counter)
             }
         } else {
             SyncState::NoTransactions
