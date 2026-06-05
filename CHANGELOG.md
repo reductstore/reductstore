@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add read-only storage doctor for offline data-path inspection, by @khoinp1012, [PR-1413](https://github.com/reductstore/reductstore/pull/1413)
 - Accept `x-reduct-content-length` as an alternative to `Content-Length` for browser streaming via the Fetch API, [PR-1411](https://github.com/reductstore/reductstore/pull/1411)
 - Pass attachment key-value maps to extensions instead of selecting a single attachment key, [PR-1383](https://github.com/reductstore/reductstore/pull/1383)
 - Add HTTP CRUD endpoints for lifecycle policies, [PR-1382](https://github.com/reductstore/reductstore/pull/1382)
