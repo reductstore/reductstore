@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Enforce SSDLC-style build/release input pinning by adding a repository Rust toolchain pin (`1.89.0`), lockfile-enforced cargo invocations, digest-pinned Docker base images, and checksum-verified external artifact downloads in CI/build actions, [PR-1400](https://github.com/reductstore/reductstore/pull/1400)
 - Pin third-party GitHub Actions to immutable commit SHAs in CI workflows and upgrade `actions/checkout` references to the Node 24-compatible `v6.0.2` commit to address deprecation warnings, [PR-1373](https://github.com/reductstore/reductstore/pull/1373)
+- Pipelined replication batch sending to overlap preparing the next entry’s batch with sending the current batch.
 
 ### Fixed
 
