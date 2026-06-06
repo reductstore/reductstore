@@ -165,9 +165,10 @@ impl ReplicationTask {
         let thr_mode = Arc::clone(&self.mode);
 
         let handle = tokio::spawn(async move {
-            // Aggregates replication diagnostics into periodic $system events.
-            // Dropped on loop exit, which flushes the last open bucket.
-            let diagnostics_aggregator = thr_system_event_sink
+            // Aggregates replication diagnostics into periodic $system events,
+            // driven inline by this worker loop (flushed on idle/cap each
+            // iteration and on loop exit).
+            let mut diagnostics_aggregator = thr_system_event_sink
                 .map(|sink| ReplicationEventAggregator::new(sink, replication_name.clone()));
             let init_transaction_logs = async || {
                 let mut logs = thr_log_map.write().await?;
@@ -226,6 +227,11 @@ impl ReplicationTask {
             );
 
             while !thr_stop_flag.load(Ordering::Relaxed) {
+                // Flush an idle/capped diagnostics bucket regardless of mode.
+                if let Some(aggregator) = &mut diagnostics_aggregator {
+                    aggregator.flush_if_due().await;
+                }
+
                 match ReplicationTask::load_mode_from(&thr_mode) {
                     ReplicationMode::Disabled => {
                         thr_is_active.store(false, Ordering::Relaxed);
@@ -336,13 +342,18 @@ impl ReplicationTask {
                         Err(err) => error!("Failed to acquire hourly diagnostics lock: {:?}", err),
                     }
 
-                    if let Some(aggregator) = &diagnostics_aggregator {
+                    if let Some(aggregator) = &mut diagnostics_aggregator {
                         let pending_records = Self::count_pending_records(&thr_log_map).await;
                         aggregator
                             .record_pass(pending_records, pass_duration, &c)
                             .await;
                     }
                 }
+            }
+
+            // Flush the last open bucket before the worker exits.
+            if let Some(mut aggregator) = diagnostics_aggregator {
+                aggregator.flush().await;
             }
         });
 

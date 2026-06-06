@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-//! Aggregates replication diagnostics into periodic system events.
+//! Aggregates replication diagnostics into periodic `$system` events.
 //!
 //! One active "bucket" (running tally) is kept per replication task, keyed by
 //! the status code. The bucket is flushed and a new one opened when ANY of:
@@ -9,66 +9,38 @@
 //!   2. no records were replicated for [`AGGREGATION_WINDOW_SECS`] (idle),
 //!   3. the bucket accumulated [`FORCE_FLUSH_TIMEOUT_SECS`] of data (cap).
 //!
-//! The window/force-flush timing (conditions 2 and 3) reuses the model of
-//! [`crate::api::audit::aggregator::ApiAuditEventAggregator`]; the status-change
-//! trigger (condition 1) is added on top.
+//! Replication only runs on the primary node, so — unlike the API audit
+//! aggregator, which forwards events off read-only replicas through a channel
+//! and a background worker — this aggregator is owned and driven directly by
+//! the single-threaded replication worker loop. It emits straight through the
+//! [`SystemEventSink`], the same way the lifecycle module does.
 
 use crate::api::audit::aggregator::{AGGREGATION_WINDOW_SECS, FORCE_FLUSH_TIMEOUT_SECS};
-use crate::core::sync::AsyncRwLock;
 use crate::lifecycle::SystemEventSink;
 use crate::replication::replication_event_payload::ReplicationSystemEventPayload;
-use crate::syslog::{SystemEvent, SystemEventHandler};
+use crate::syslog::SystemEvent;
 use log::error;
 use reduct_base::error::ReductError;
-use reduct_base::internal_server_error;
-use std::collections::hash_map::Entry;
-use std::collections::{BTreeMap, HashMap};
-use std::sync::Arc;
-use std::time::{SystemTime, UNIX_EPOCH};
-use tokio::sync::mpsc;
-use tokio::time::{Duration, Instant};
+use std::collections::BTreeMap;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-const REPLICATION_CHANNEL_SIZE: usize = 1024;
 const REPLICATION_EVENT_TYPE: &str = "replication_sync";
 
-/// A single observation reported by a replication pass for one status code.
+/// The active aggregation bucket for a replication task, keyed by status code.
 #[derive(Debug, Clone)]
-pub(crate) struct ReplicationObservation {
-    pub instance: String,
-    pub replication_name: String,
-    pub timestamp: u64,
-    pub status: u16,
-    pub pending_records: u64,
-    pub records: u64,
-    pub data_size: u64,
-    pub duration: f64,
-    pub message: String,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub(crate) struct ReplicationAggregateKey {
-    pub instance: String,
-    pub replication_name: String,
-}
-
-#[derive(Debug, Clone)]
-pub(crate) struct ReplicationAggregate {
-    pub status: u16,
-    pub first_timestamp: u64,
-    pub last_timestamp: u64,
-    pub pending_records: u64,
-    pub written_records: u64,
-    pub failed_records: u64,
-    pub replicated_data_size: u64,
-    pub duration: f64,
-    pub message: String,
-    pub flush_at: Instant,
-    pub force_flush_at: Instant,
-}
-
-#[derive(Default)]
-pub(crate) struct ReplicationAggregatorState {
-    pub aggregates: HashMap<ReplicationAggregateKey, ReplicationAggregate>,
+struct ReplicationAggregate {
+    status: u16,
+    first_timestamp: u64,
+    pending_records: u64,
+    written_records: u64,
+    failed_records: u64,
+    replicated_data_size: u64,
+    duration: f64,
+    message: String,
+    /// Sliding idle deadline (condition 2).
+    flush_at: Instant,
+    /// Hard time-cap deadline (condition 3).
+    force_flush_at: Instant,
 }
 
 fn is_success(status: u16) -> bool {
@@ -82,25 +54,9 @@ fn now_micros() -> u64 {
         .as_micros() as u64
 }
 
-fn new_aggregate(obs: &ReplicationObservation, now: Instant) -> ReplicationAggregate {
-    let success = is_success(obs.status);
-    ReplicationAggregate {
-        status: obs.status,
-        first_timestamp: obs.timestamp,
-        last_timestamp: obs.timestamp,
-        pending_records: obs.pending_records,
-        written_records: if success { obs.records } else { 0 },
-        failed_records: if success { 0 } else { obs.records },
-        replicated_data_size: obs.data_size,
-        duration: obs.duration,
-        message: obs.message.clone(),
-        flush_at: now + Duration::from_secs(AGGREGATION_WINDOW_SECS),
-        force_flush_at: now + Duration::from_secs(FORCE_FLUSH_TIMEOUT_SECS),
-    }
-}
-
-pub(crate) fn make_event(
-    key: ReplicationAggregateKey,
+fn make_event(
+    instance: &str,
+    replication_name: &str,
     aggregate: ReplicationAggregate,
 ) -> SystemEvent {
     let payload = ReplicationSystemEventPayload {
@@ -115,56 +71,38 @@ pub(crate) fn make_event(
     SystemEvent {
         event_type: REPLICATION_EVENT_TYPE.to_string(),
         timestamp: aggregate.first_timestamp,
-        instance: key.instance,
-        entry_name: key.replication_name,
+        instance: instance.to_string(),
+        entry_name: replication_name.to_string(),
         status: aggregate.status,
         message: aggregate.message,
         payload: payload.to_value(),
     }
 }
 
-pub(crate) struct ReplicationEventAggregator {
-    instance_name: String,
+/// Per-task replication diagnostics aggregator.
+pub(super) struct ReplicationEventAggregator {
+    sink: SystemEventSink,
     replication_name: String,
-    tx: mpsc::Sender<ReplicationObservation>,
-    #[cfg(test)]
-    #[allow(dead_code)]
-    pub state: Arc<AsyncRwLock<ReplicationAggregatorState>>,
+    active: Option<ReplicationAggregate>,
 }
 
 impl ReplicationEventAggregator {
-    pub(crate) fn new(sink: SystemEventSink, replication_name: String) -> Self {
-        let instance_name = sink.instance_name.clone();
-        let logger = Arc::clone(&sink.system_logger);
-        let handler: SystemEventHandler = Arc::new(move |event| {
-            let logger = Arc::clone(&logger);
-            Box::pin(async move {
-                let mut guard = logger.write().await?;
-                guard.log_event(event).await
-            })
-        });
-
-        let state = Arc::new(AsyncRwLock::new(ReplicationAggregatorState::default()));
-        let (tx, rx) = mpsc::channel(REPLICATION_CHANNEL_SIZE);
-        tokio::spawn(Self::run_worker(rx, Arc::clone(&state), handler));
-
+    pub(super) fn new(sink: SystemEventSink, replication_name: String) -> Self {
         Self {
-            instance_name,
+            sink,
             replication_name,
-            tx,
-            #[cfg(test)]
-            state,
+            active: None,
         }
     }
 
-    /// Record a replication pass.
+    /// Record one replication pass as a list of `(result, records, data_size)`.
     ///
-    /// Telemetry must never break replication, so enqueue failures are
-    /// swallowed and logged rather than propagated. The pass `duration` is
-    /// attributed to the lowest-status observation only, so it is never
-    /// double-counted when a single pass produces several status codes.
-    pub(crate) async fn record_pass(
-        &self,
+    /// Telemetry must never break replication, so emission failures are
+    /// swallowed and logged. The pass `duration` is attributed once, to the
+    /// lowest-status observation, so it is never double-counted when a single
+    /// pass produces several status codes.
+    pub(super) async fn record_pass(
+        &mut self,
         pending_records: u64,
         duration: f64,
         counter: &[(Result<(), ReductError>, u64, u64)],
@@ -190,190 +128,90 @@ impl ReplicationEventAggregator {
         let timestamp = now_micros();
         let mut first = true;
         for (status, (records, data_size, message)) in per_status {
-            let observation = ReplicationObservation {
-                instance: self.instance_name.clone(),
-                replication_name: self.replication_name.clone(),
-                timestamp,
-                status,
-                pending_records,
-                records,
-                data_size,
-                duration: if first { duration } else { 0.0 },
-                message,
-            };
+            let pass_duration = if first { duration } else { 0.0 };
             first = false;
-            if let Err(err) = self.enqueue(observation).await {
-                error!(
-                    "Failed to enqueue replication diagnostics for '{}': {}",
-                    self.replication_name, err
-                );
+
+            // Condition 1: a status change flushes the current bucket.
+            if self
+                .active
+                .as_ref()
+                .is_some_and(|aggregate| aggregate.status != status)
+            {
+                self.flush().await;
             }
-        }
-    }
 
-    async fn enqueue(&self, observation: ReplicationObservation) -> Result<(), ReductError> {
-        self.tx
-            .send(observation)
-            .await
-            .map_err(|_| internal_server_error!("Replication diagnostics worker is not available"))
-    }
-
-    async fn run_worker(
-        mut rx: mpsc::Receiver<ReplicationObservation>,
-        state: Arc<AsyncRwLock<ReplicationAggregatorState>>,
-        handler: SystemEventHandler,
-    ) {
-        loop {
-            if let Some(deadline) = Self::next_deadline(&state).await {
-                tokio::select! {
-                    maybe_observation = rx.recv() => {
-                        match maybe_observation {
-                            Some(observation) => {
-                                Self::handle_observation(&state, &handler, observation).await;
-                            }
-                            None => {
-                                let _ = Self::flush_all(&state, &handler).await;
-                                break;
-                            }
-                        }
-                    }
-                    _ = tokio::time::sleep_until(deadline) => {
-                        let _ = Self::flush_expired(&state, &handler).await;
-                    }
-                }
-            } else {
-                match rx.recv().await {
-                    Some(observation) => {
-                        Self::handle_observation(&state, &handler, observation).await;
-                    }
-                    None => break,
-                }
-            }
-        }
-    }
-
-    async fn handle_observation(
-        state: &Arc<AsyncRwLock<ReplicationAggregatorState>>,
-        handler: &SystemEventHandler,
-        observation: ReplicationObservation,
-    ) {
-        match Self::aggregate_event(state, observation).await {
-            Ok(events) => Self::emit_all(handler, events).await,
-            Err(err) => error!("Failed to aggregate replication diagnostics: {}", err),
-        }
-    }
-
-    /// Apply an observation to the active bucket, returning any event displaced
-    /// by a status change (condition 1).
-    async fn aggregate_event(
-        state: &Arc<AsyncRwLock<ReplicationAggregatorState>>,
-        observation: ReplicationObservation,
-    ) -> Result<Vec<SystemEvent>, ReductError> {
-        let now = Instant::now();
-        let key = ReplicationAggregateKey {
-            instance: observation.instance.clone(),
-            replication_name: observation.replication_name.clone(),
-        };
-
-        let mut state = state.write().await?;
-        let mut displaced = Vec::new();
-        match state.aggregates.entry(key.clone()) {
-            Entry::Occupied(mut entry) => {
-                if entry.get().status != observation.status {
-                    let previous = entry.insert(new_aggregate(&observation, now));
-                    displaced.push(make_event(key, previous));
-                } else {
-                    let aggregate = entry.get_mut();
-                    if is_success(observation.status) {
-                        aggregate.written_records += observation.records;
-                        aggregate.replicated_data_size += observation.data_size;
+            let now = Instant::now();
+            match &mut self.active {
+                Some(aggregate) => {
+                    if is_success(status) {
+                        aggregate.written_records += records;
+                        aggregate.replicated_data_size += data_size;
                     } else {
-                        aggregate.failed_records += observation.records;
+                        aggregate.failed_records += records;
                     }
-                    aggregate.pending_records = observation.pending_records;
-                    aggregate.duration += observation.duration;
-                    aggregate.last_timestamp = observation.timestamp;
-                    if observation.timestamp < aggregate.first_timestamp {
-                        aggregate.first_timestamp = observation.timestamp;
-                    }
-                    if !observation.message.is_empty() {
-                        aggregate.message = observation.message;
+                    aggregate.pending_records = pending_records;
+                    aggregate.duration += pass_duration;
+                    if !message.is_empty() {
+                        aggregate.message = message;
                     }
                     aggregate.flush_at = now + Duration::from_secs(AGGREGATION_WINDOW_SECS);
                 }
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(new_aggregate(&observation, now));
+                None => {
+                    let success = is_success(status);
+                    self.active = Some(ReplicationAggregate {
+                        status,
+                        first_timestamp: timestamp,
+                        pending_records,
+                        written_records: if success { records } else { 0 },
+                        failed_records: if success { 0 } else { records },
+                        replicated_data_size: data_size,
+                        duration: pass_duration,
+                        message,
+                        flush_at: now + Duration::from_secs(AGGREGATION_WINDOW_SECS),
+                        force_flush_at: now + Duration::from_secs(FORCE_FLUSH_TIMEOUT_SECS),
+                    });
+                }
             }
         }
 
-        Ok(displaced)
+        // Condition 3: the bucket may have hit its time cap.
+        self.flush_if_due().await;
     }
 
-    async fn next_deadline(
-        state: &Arc<AsyncRwLock<ReplicationAggregatorState>>,
-    ) -> Option<Instant> {
-        let state = state.read().await.ok()?;
-        state
-            .aggregates
-            .values()
-            .map(|aggregate| aggregate.flush_at.min(aggregate.force_flush_at))
-            .min()
-    }
-
-    async fn flush_expired(
-        state: &Arc<AsyncRwLock<ReplicationAggregatorState>>,
-        handler: &SystemEventHandler,
-    ) -> Result<(), ReductError> {
+    /// Flush the open bucket if its idle window elapsed (condition 2) or it hit
+    /// the time cap (condition 3). Called every worker iteration so an idle
+    /// bucket is flushed even when no new records arrive.
+    pub(super) async fn flush_if_due(&mut self) {
         let now = Instant::now();
-        let events = {
-            let mut state = state.write().await?;
-            let expired_keys: Vec<_> = state
-                .aggregates
-                .iter()
-                .filter(|(_, aggregate)| {
-                    aggregate.flush_at <= now || aggregate.force_flush_at <= now
-                })
-                .map(|(key, _)| key.clone())
-                .collect();
-
-            expired_keys
-                .into_iter()
-                .filter_map(|key| {
-                    state
-                        .aggregates
-                        .remove(&key)
-                        .map(|aggregate| make_event(key, aggregate))
-                })
-                .collect::<Vec<_>>()
-        };
-
-        Self::emit_all(handler, events).await;
-        Ok(())
+        if self
+            .active
+            .as_ref()
+            .is_some_and(|aggregate| now >= aggregate.flush_at || now >= aggregate.force_flush_at)
+        {
+            self.flush().await;
+        }
     }
 
-    async fn flush_all(
-        state: &Arc<AsyncRwLock<ReplicationAggregatorState>>,
-        handler: &SystemEventHandler,
-    ) -> Result<(), ReductError> {
-        let events = {
-            let mut state = state.write().await?;
-            state
-                .aggregates
-                .drain()
-                .map(|(key, aggregate)| make_event(key, aggregate))
-                .collect::<Vec<_>>()
+    /// Emit the open bucket (if any) as a `$system` event and clear it.
+    pub(super) async fn flush(&mut self) {
+        let Some(aggregate) = self.active.take() else {
+            return;
         };
+        let event = make_event(&self.sink.instance_name, &self.replication_name, aggregate);
 
-        Self::emit_all(handler, events).await;
-        Ok(())
-    }
-
-    async fn emit_all(handler: &SystemEventHandler, events: Vec<SystemEvent>) {
-        for event in events {
-            if let Err(err) = handler(event).await {
-                error!("Failed to persist replication system event: {}", err);
+        match self.sink.system_logger.write().await {
+            Ok(mut logger) => {
+                if let Err(err) = logger.log_event(event).await {
+                    error!(
+                        "Failed to persist replication diagnostics for '{}': {}",
+                        self.replication_name, err
+                    );
+                }
             }
+            Err(err) => error!(
+                "Failed to lock system logger for replication '{}': {}",
+                self.replication_name, err
+            ),
         }
     }
 }
@@ -381,89 +219,108 @@ impl ReplicationEventAggregator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::sync::AsyncRwLock;
+    use crate::syslog::LogSystemEvent;
     use reduct_base::{not_found, timeout};
     use rstest::{fixture, rstest};
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
 
-    fn observation(status: u16, records: u64, data_size: u64) -> ReplicationObservation {
-        ReplicationObservation {
-            instance: "instance-a".to_string(),
-            replication_name: "repl-1".to_string(),
-            timestamp: 10,
-            status,
-            pending_records: 3,
-            records,
-            data_size,
-            duration: 0.5,
-            message: if is_success(status) {
-                String::new()
-            } else {
-                "boom".to_string()
-            },
+    #[derive(Clone)]
+    struct CapturingLogger {
+        events: Arc<Mutex<Vec<SystemEvent>>>,
+        fail: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl LogSystemEvent for CapturingLogger {
+        async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError> {
+            if self.fail {
+                return Err(timeout!("sink is down"));
+            }
+            self.events.lock().unwrap().push(event);
+            Ok(())
         }
     }
 
-    fn make_test_handler(events: Arc<Mutex<Vec<SystemEvent>>>) -> SystemEventHandler {
-        Arc::new(move |event| {
-            let events = Arc::clone(&events);
-            Box::pin(async move {
-                events.lock().unwrap().push(event);
-                Ok(())
-            })
-        })
+    fn aggregator(events: Arc<Mutex<Vec<SystemEvent>>>, fail: bool) -> ReplicationEventAggregator {
+        let sink = SystemEventSink {
+            system_logger: Arc::new(AsyncRwLock::new(
+                Box::new(CapturingLogger { events, fail }) as Box<dyn LogSystemEvent + Send + Sync>
+            )),
+            instance_name: "instance-1".to_string(),
+        };
+        ReplicationEventAggregator::new(sink, "repl-1".to_string())
     }
 
     #[fixture]
-    fn state() -> Arc<AsyncRwLock<ReplicationAggregatorState>> {
-        Arc::new(AsyncRwLock::new(ReplicationAggregatorState::default()))
-    }
-
-    #[fixture]
-    fn flushed_events() -> Arc<Mutex<Vec<SystemEvent>>> {
+    fn events() -> Arc<Mutex<Vec<SystemEvent>>> {
         Arc::new(Mutex::new(Vec::new()))
     }
 
     #[rstest]
-    fn make_event_carries_unified_payload() {
-        let event = make_event(
-            ReplicationAggregateKey {
-                instance: "instance-a".to_string(),
-                replication_name: "repl-1".to_string(),
-            },
-            new_aggregate(&observation(200, 5, 1234), Instant::now()),
-        );
+    #[tokio::test]
+    async fn records_and_flushes_success(events: Arc<Mutex<Vec<SystemEvent>>>) {
+        let mut agg = aggregator(Arc::clone(&events), false);
+        agg.record_pass(3, 0.5, &[(Ok(()), 5, 1234)]).await;
+        agg.flush().await;
 
+        let captured = events.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        let event = &captured[0];
         assert_eq!(event.event_type, "replication_sync");
-        assert_eq!(event.instance, "instance-a");
+        assert_eq!(event.instance, "instance-1");
         assert_eq!(event.entry_name, "repl-1");
         assert_eq!(event.status, 200);
-        assert_eq!(event.timestamp, 10);
-        assert_eq!(event.payload["status"], 200);
         assert_eq!(event.payload["pending_records"], 3);
         assert_eq!(event.payload["written_records"], 5);
         assert_eq!(event.payload["failed_records"], 0);
         assert_eq!(event.payload["replicated_data_size"], 1234);
     }
 
-    /// Schema invariant: a success and a failure event carry the identical
-    /// field set (status, pending, written, failed, size, duration).
+    /// Status-change flush (condition 1): accumulate at 200, then a 404 record
+    /// flushes one 200 event with the accumulated written_records and opens a
+    /// fresh 404 bucket whose flush carries failed_records=X.
     #[rstest]
-    fn success_and_failure_events_share_schema() {
-        let success = make_event(
-            ReplicationAggregateKey {
-                instance: "instance-a".to_string(),
-                replication_name: "repl-1".to_string(),
-            },
-            new_aggregate(&observation(200, 5, 100), Instant::now()),
-        );
-        let failure = make_event(
-            ReplicationAggregateKey {
-                instance: "instance-a".to_string(),
-                replication_name: "repl-1".to_string(),
-            },
-            new_aggregate(&observation(404, 7, 0), Instant::now()),
-        );
+    #[tokio::test]
+    async fn status_change_flushes_previous_bucket(events: Arc<Mutex<Vec<SystemEvent>>>) {
+        let mut agg = aggregator(Arc::clone(&events), false);
+        agg.record_pass(0, 0.1, &[(Ok(()), 2, 20)]).await;
+        agg.record_pass(0, 0.1, &[(Ok(()), 3, 30)]).await;
+        assert!(events.lock().unwrap().is_empty(), "same status accumulates");
 
+        agg.record_pass(7, 0.1, &[(Err(not_found!("missing")), 4, 0)])
+            .await;
+
+        {
+            let captured = events.lock().unwrap();
+            assert_eq!(captured.len(), 1, "status change flushed the 200 bucket");
+            assert_eq!(captured[0].status, 200);
+            assert_eq!(captured[0].payload["written_records"], 5);
+            assert_eq!(captured[0].payload["replicated_data_size"], 50);
+        }
+
+        agg.flush().await;
+        let captured = events.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+        assert_eq!(captured[1].status, 404);
+        assert_eq!(captured[1].payload["failed_records"], 4);
+        assert_eq!(captured[1].payload["written_records"], 0);
+        assert_eq!(captured[1].message, "missing");
+    }
+
+    /// Schema invariant (#4): success and failure events carry the identical
+    /// field set.
+    #[rstest]
+    #[tokio::test]
+    async fn success_and_failure_events_share_schema(events: Arc<Mutex<Vec<SystemEvent>>>) {
+        let mut agg = aggregator(Arc::clone(&events), false);
+        agg.record_pass(0, 0.1, &[(Ok(()), 5, 100)]).await;
+        agg.flush().await;
+        agg.record_pass(0, 0.1, &[(Err(not_found!("x")), 7, 0)])
+            .await;
+        agg.flush().await;
+
+        let captured = events.lock().unwrap();
         let keys_of = |event: &SystemEvent| {
             let mut keys = event
                 .payload
@@ -475,281 +332,85 @@ mod tests {
             keys.sort();
             keys
         };
-        assert_eq!(keys_of(&success), keys_of(&failure));
-
-        // success: written=N, failed=0; failure: failed=X, written=0
-        assert_eq!(success.payload["written_records"], 5);
-        assert_eq!(success.payload["failed_records"], 0);
-        assert_eq!(failure.payload["written_records"], 0);
-        assert_eq!(failure.payload["failed_records"], 7);
+        assert_eq!(keys_of(&captured[0]), keys_of(&captured[1]));
+        assert_eq!(captured[0].payload["written_records"], 5);
+        assert_eq!(captured[0].payload["failed_records"], 0);
+        assert_eq!(captured[1].payload["written_records"], 0);
+        assert_eq!(captured[1].payload["failed_records"], 7);
     }
 
-    /// Status-change flush (condition 1): a 200 observation then a 404 one
-    /// flushes exactly one 200 event with the accumulated written_records and
-    /// opens a fresh 404 bucket.
+    /// Idle flush (condition 2): once the sliding window elapses, flush_if_due
+    /// emits the bucket without any new activity.
     #[rstest]
     #[tokio::test]
-    async fn status_change_flushes_previous_bucket(
-        state: Arc<AsyncRwLock<ReplicationAggregatorState>>,
-    ) {
-        ReplicationEventAggregator::aggregate_event(&state, observation(200, 2, 20))
-            .await
-            .unwrap();
-        let displaced =
-            ReplicationEventAggregator::aggregate_event(&state, observation(200, 3, 30))
-                .await
-                .unwrap();
-        assert!(displaced.is_empty(), "same status keeps accumulating");
+    async fn idle_window_flushes(events: Arc<Mutex<Vec<SystemEvent>>>) {
+        let mut agg = aggregator(Arc::clone(&events), false);
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
+        // age the idle deadline into the past
+        agg.active.as_mut().unwrap().flush_at = Instant::now() - Duration::from_millis(1);
 
-        let displaced = ReplicationEventAggregator::aggregate_event(&state, observation(404, 4, 0))
-            .await
-            .unwrap();
-
-        assert_eq!(displaced.len(), 1, "status change flushes the 200 bucket");
-        let event = &displaced[0];
-        assert_eq!(event.status, 200);
-        assert_eq!(event.payload["written_records"], 5);
-        assert_eq!(event.payload["failed_records"], 0);
-        assert_eq!(event.payload["replicated_data_size"], 50);
-
-        let guard = state.read().await.unwrap();
-        assert_eq!(guard.aggregates.len(), 1);
-        let aggregate = guard.aggregates.values().next().unwrap();
-        assert_eq!(aggregate.status, 404);
-        assert_eq!(aggregate.failed_records, 4);
-        assert_eq!(aggregate.written_records, 0);
+        agg.flush_if_due().await;
+        assert_eq!(events.lock().unwrap().len(), 1);
+        assert!(agg.active.is_none());
     }
 
-    /// End-to-end 200 -> 404 example: the 404 event carries failed_records=X.
+    /// Cap flush (condition 3): once the force-flush deadline passes, the bucket
+    /// is flushed even though the idle window has not elapsed.
     #[rstest]
     #[tokio::test]
-    async fn flush_all_emits_open_bucket(
-        state: Arc<AsyncRwLock<ReplicationAggregatorState>>,
-        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
-    ) {
-        let handler = make_test_handler(Arc::clone(&flushed_events));
-
-        ReplicationEventAggregator::aggregate_event(&state, observation(404, 6, 0))
-            .await
-            .unwrap();
-        ReplicationEventAggregator::flush_all(&state, &handler)
-            .await
-            .unwrap();
-
-        let events = flushed_events.lock().unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].status, 404);
-        assert_eq!(events[0].payload["failed_records"], 6);
-        assert_eq!(events[0].message, "boom");
-        assert!(state.read().await.unwrap().aggregates.is_empty());
-    }
-
-    /// Counts: written/failed map correctly and pending is pulled from the
-    /// latest observation; record_pass groups a mixed pass by status.
-    #[rstest]
-    #[tokio::test]
-    async fn record_pass_groups_counter_by_status(flushed_events: Arc<Mutex<Vec<SystemEvent>>>) {
-        let sink = SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingLogger {
-                events: Arc::clone(&flushed_events),
-                fail: false,
-            })
-                as Box<dyn crate::syslog::LogSystemEvent + Send + Sync>)),
-            instance_name: "instance-a".to_string(),
-        };
-        let aggregator = ReplicationEventAggregator::new(sink, "repl-1".to_string());
-
-        let counter = vec![
-            (Ok(()), 2u64, 40u64),
-            (Err(not_found!("missing")), 1u64, 0u64),
-        ];
-        aggregator.record_pass(7, 0.25, &counter).await;
-
-        // allow the worker to drain the channel
-        tokio::time::sleep(Duration::from_millis(50)).await;
-
-        let guard = aggregator.state.read().await.unwrap();
-        // 200 grouped, then 404 grouped -> status change flushed the 200 bucket
-        assert_eq!(guard.aggregates.len(), 1);
-        let aggregate = guard.aggregates.values().next().unwrap();
-        assert_eq!(aggregate.status, 404);
-        assert_eq!(aggregate.failed_records, 1);
-        assert_eq!(aggregate.pending_records, 7);
-        drop(guard);
-
-        let events = flushed_events.lock().unwrap();
-        assert_eq!(
-            events.len(),
-            1,
-            "the 200 bucket was flushed on status change"
-        );
-        assert_eq!(events[0].status, 200);
-        assert_eq!(events[0].payload["written_records"], 2);
-        assert_eq!(events[0].payload["replicated_data_size"], 40);
-    }
-
-    /// Safety: a logger whose log_event returns Err must not break the
-    /// aggregator; the error is swallowed and logged, never propagated.
-    #[rstest]
-    #[tokio::test]
-    async fn emission_errors_are_swallowed(
-        state: Arc<AsyncRwLock<ReplicationAggregatorState>>,
-        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
-    ) {
-        let handler: SystemEventHandler = Arc::new(move |_event| {
-            Box::pin(async move { Err(internal_server_error!("disk is on fire")) })
-        });
-
-        ReplicationEventAggregator::aggregate_event(&state, observation(200, 1, 10))
-            .await
-            .unwrap();
-
-        // must not panic / propagate despite the failing handler
-        ReplicationEventAggregator::flush_all(&state, &handler)
-            .await
-            .unwrap();
-
-        assert!(flushed_events.lock().unwrap().is_empty());
-        assert!(state.read().await.unwrap().aggregates.is_empty());
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn next_deadline_returns_none_when_empty(
-        state: Arc<AsyncRwLock<ReplicationAggregatorState>>,
-    ) {
-        assert!(ReplicationEventAggregator::next_deadline(&state)
-            .await
-            .is_none());
-    }
-
-    fn insert_aggregate(
-        state: &ReplicationAggregatorState,
-        flush_at: Instant,
-        force_flush_at: Instant,
-    ) -> ReplicationAggregatorState {
-        let mut state = ReplicationAggregatorState {
-            aggregates: state.aggregates.clone(),
-        };
-        state.aggregates.insert(
-            ReplicationAggregateKey {
-                instance: "instance-a".to_string(),
-                replication_name: "repl-1".to_string(),
-            },
-            ReplicationAggregate {
-                status: 200,
-                first_timestamp: 1,
-                last_timestamp: 1,
-                pending_records: 0,
-                written_records: 1,
-                failed_records: 0,
-                replicated_data_size: 10,
-                duration: 0.1,
-                message: String::new(),
-                flush_at,
-                force_flush_at,
-            },
-        );
-        state
-    }
-
-    /// Idle flush (condition 2): a bucket whose sliding window expired is
-    /// flushed even though the cap has not been reached.
-    #[rstest]
-    #[tokio::test]
-    async fn flush_expired_flushes_idle_bucket(flushed_events: Arc<Mutex<Vec<SystemEvent>>>) {
+    async fn time_cap_flushes(events: Arc<Mutex<Vec<SystemEvent>>>) {
+        let mut agg = aggregator(Arc::clone(&events), false);
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
         let now = Instant::now();
-        let state = Arc::new(AsyncRwLock::new(insert_aggregate(
-            &ReplicationAggregatorState::default(),
-            now - Duration::from_millis(1),
-            now + Duration::from_secs(60),
-        )));
-        let handler = make_test_handler(Arc::clone(&flushed_events));
+        let aggregate = agg.active.as_mut().unwrap();
+        aggregate.flush_at = now + Duration::from_secs(5); // not idle
+        aggregate.force_flush_at = now - Duration::from_millis(1); // capped
 
-        ReplicationEventAggregator::flush_expired(&state, &handler)
-            .await
-            .unwrap();
-
-        assert_eq!(flushed_events.lock().unwrap().len(), 1);
-        assert!(state.read().await.unwrap().aggregates.is_empty());
-    }
-
-    /// Cap flush (condition 3): a bucket whose force-flush deadline expired is
-    /// flushed even though it is still receiving activity (window not idle).
-    #[rstest]
-    #[tokio::test]
-    async fn flush_expired_flushes_capped_bucket(flushed_events: Arc<Mutex<Vec<SystemEvent>>>) {
-        let now = Instant::now();
-        let state = Arc::new(AsyncRwLock::new(insert_aggregate(
-            &ReplicationAggregatorState::default(),
-            now + Duration::from_secs(5),
-            now - Duration::from_millis(1),
-        )));
-        let handler = make_test_handler(Arc::clone(&flushed_events));
-
-        ReplicationEventAggregator::flush_expired(&state, &handler)
-            .await
-            .unwrap();
-
-        assert_eq!(flushed_events.lock().unwrap().len(), 1);
-        assert!(state.read().await.unwrap().aggregates.is_empty());
+        agg.flush_if_due().await;
+        assert_eq!(events.lock().unwrap().len(), 1);
+        assert!(agg.active.is_none());
     }
 
     #[rstest]
     #[tokio::test]
-    async fn flush_expired_keeps_active_bucket(flushed_events: Arc<Mutex<Vec<SystemEvent>>>) {
-        let now = Instant::now();
-        let state = Arc::new(AsyncRwLock::new(insert_aggregate(
-            &ReplicationAggregatorState::default(),
-            now + Duration::from_secs(5),
-            now + Duration::from_secs(60),
-        )));
-        let handler = make_test_handler(Arc::clone(&flushed_events));
+    async fn flush_if_due_keeps_fresh_bucket(events: Arc<Mutex<Vec<SystemEvent>>>) {
+        let mut agg = aggregator(Arc::clone(&events), false);
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
 
-        ReplicationEventAggregator::flush_expired(&state, &handler)
-            .await
-            .unwrap();
-
-        assert!(flushed_events.lock().unwrap().is_empty());
-        assert_eq!(state.read().await.unwrap().aggregates.len(), 1);
+        agg.flush_if_due().await;
+        assert!(events.lock().unwrap().is_empty());
+        assert!(agg.active.is_some());
     }
 
-    /// Idle flush through the real worker (condition 2): after the aggregation
-    /// window elapses with no further activity, the bucket is flushed.
-    #[cfg(target_os = "linux")] // we need precise timing
+    /// Safety (#6): a logger that always errors must not break the aggregator;
+    /// the error is swallowed, the bucket is still cleared.
+    #[rstest]
+    #[tokio::test]
+    async fn emission_errors_are_swallowed(events: Arc<Mutex<Vec<SystemEvent>>>) {
+        let mut agg = aggregator(Arc::clone(&events), true);
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
+        agg.flush().await; // must not panic / propagate
+
+        assert!(events.lock().unwrap().is_empty());
+        assert!(agg.active.is_none());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn empty_pass_is_ignored(events: Arc<Mutex<Vec<SystemEvent>>>) {
+        let mut agg = aggregator(Arc::clone(&events), false);
+        agg.record_pass(0, 0.1, &[]).await;
+        assert!(agg.active.is_none());
+        agg.flush().await;
+        assert!(events.lock().unwrap().is_empty());
+    }
+
+    /// Entry path (#7): events land at replications/<instance>/<name>. With the
+    /// inline aggregator, flush() persists synchronously, so the entry is
+    /// readable immediately after — no polling needed.
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn worker_flushes_after_idle_window(flushed_events: Arc<Mutex<Vec<SystemEvent>>>) {
-        let sink = SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingLogger {
-                events: Arc::clone(&flushed_events),
-                fail: false,
-            })
-                as Box<dyn crate::syslog::LogSystemEvent + Send + Sync>)),
-            instance_name: "instance-a".to_string(),
-        };
-        let aggregator = ReplicationEventAggregator::new(sink, "repl-1".to_string());
-
-        aggregator
-            .record_pass(0, 0.1, &[(Ok(()), 1u64, 10u64)])
-            .await;
-
-        // AGGREGATION_WINDOW_SECS is 1 in test builds; wait past it
-        tokio::time::sleep(
-            Duration::from_secs(AGGREGATION_WINDOW_SECS) + Duration::from_millis(500),
-        )
-        .await;
-
-        let events = flushed_events.lock().unwrap();
-        assert_eq!(events.len(), 1);
-        assert_eq!(events[0].status, 200);
-        assert_eq!(events[0].payload["written_records"], 1);
-    }
-
-    /// Entry path (#7): events land at replications/<instance>/<replication-name>.
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn writes_replication_event_to_system_bucket() {
+    async fn writes_event_to_replications_entry_path() {
         use crate::cfg::Cfg;
         use crate::storage::engine::StorageEngine;
         use crate::syslog::{build_replication_system_logger, SYSTEM_BUCKET_NAME};
@@ -776,38 +437,26 @@ mod tests {
             system_logger: Arc::new(AsyncRwLock::new(logger)),
             instance_name: "instance-1".to_string(),
         };
-        let aggregator = ReplicationEventAggregator::new(sink, "repl-1".to_string());
+        let mut agg = ReplicationEventAggregator::new(sink, "repl-1".to_string());
 
-        aggregator
-            .record_pass(2, 0.5, &[(Ok(()), 3u64, 120u64)])
-            .await;
+        agg.record_pass(2, 0.5, &[(Ok(()), 3, 120)]).await;
+        agg.flush().await;
 
-        // drop the aggregator to close the channel and flush the open bucket
-        drop(aggregator);
-
-        // The worker creates the bucket, flushes and persists asynchronously, so
-        // poll for the entry to appear rather than relying on a single fixed sleep
-        // (disk I/O can be slow on some platforms, e.g. Windows CI).
+        let bucket = storage
+            .get_bucket(SYSTEM_BUCKET_NAME)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
         let entry_path = "replications/instance-1/repl-1";
-        let mut found = None;
-        for _ in 0..100 {
-            if let Ok(weak_bucket) = storage.get_bucket(SYSTEM_BUCKET_NAME).await {
-                let bucket = weak_bucket.upgrade_and_unwrap();
-                if let Some(entry) = Arc::clone(&bucket)
-                    .info()
-                    .await
-                    .unwrap()
-                    .entries
-                    .into_iter()
-                    .find(|entry| entry.name == entry_path)
-                {
-                    found = Some((bucket, entry.latest_record));
-                    break;
-                }
-            }
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
-        let (bucket, latest_record) = found.expect("replication diagnostics entry must exist");
+        let latest_record = Arc::clone(&bucket)
+            .info()
+            .await
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|entry| entry.name == entry_path)
+            .expect("replication diagnostics entry must exist")
+            .latest_record;
         let mut reader = bucket.begin_read(entry_path, latest_record).await.unwrap();
         let record = reader.read_chunk().unwrap().unwrap();
         let event: serde_json::Value = serde_json::from_slice(&record).unwrap();
@@ -817,22 +466,5 @@ mod tests {
         assert_eq!(event["written_records"], 3);
         assert_eq!(event["replicated_data_size"], 120);
         assert_eq!(event["pending_records"], 2);
-    }
-
-    #[derive(Clone)]
-    struct CapturingLogger {
-        events: Arc<Mutex<Vec<SystemEvent>>>,
-        fail: bool,
-    }
-
-    #[async_trait::async_trait]
-    impl crate::syslog::LogSystemEvent for CapturingLogger {
-        async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError> {
-            if self.fail {
-                return Err(timeout!("nope"));
-            }
-            self.events.lock().unwrap().push(event);
-            Ok(())
-        }
     }
 }
