@@ -11,6 +11,8 @@ use reduct_base::msg::replication_api::{
 mod diagnostics;
 pub mod proto;
 mod remote_bucket;
+mod replication_aggregator;
+mod replication_event_payload;
 mod replication_repository;
 mod replication_sender;
 mod replication_task;
@@ -27,9 +29,9 @@ pub enum Transaction {
     UpdateRecord(u64),
 }
 
-impl Into<u8> for Transaction {
-    fn into(self) -> u8 {
-        match self {
+impl From<Transaction> for u8 {
+    fn from(val: Transaction) -> Self {
+        match val {
             Transaction::WriteRecord(_) => 0,
             Transaction::UpdateRecord(_) => 1,
         }

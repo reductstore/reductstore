@@ -5,8 +5,10 @@ use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
+use crate::lifecycle::SystemEventSink;
 use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketBuilder};
+use crate::replication::replication_aggregator::ReplicationEventAggregator;
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::{TransactionLog, TransactionLogMap, TransactionLogRef};
@@ -20,7 +22,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 
 #[derive(Clone)]
@@ -41,6 +43,7 @@ pub struct ReplicationTask {
     log_map: TransactionLogMap,
     storage: Arc<StorageEngine>,
     hourly_diagnostics: Arc<AsyncRwLock<DiagnosticsCounter>>,
+    system_event_sink: Option<SystemEventSink>,
     stop_flag: Arc<AtomicBool>,
     is_active: Arc<AtomicBool>,
     mode: Arc<AtomicU8>,
@@ -66,6 +69,7 @@ impl ReplicationTask {
         settings: ReplicationSettings,
         config: Cfg,
         storage: Arc<StorageEngine>,
+        system_event_sink: Option<SystemEventSink>,
     ) -> Result<Self, ReductError> {
         let ReplicationSettings {
             dst_bucket: remote_bucket,
@@ -88,7 +92,7 @@ impl ReplicationTask {
 
         let system_options = ReplicationSystemOptions {
             transaction_log_size: config.replication_conf.replication_log_size,
-            remote_bucket_unavailable_timeout: config.replication_conf.connection_timeout.clone(),
+            remote_bucket_unavailable_timeout: config.replication_conf.connection_timeout,
             ..Default::default()
         };
 
@@ -99,6 +103,7 @@ impl ReplicationTask {
             config.io_conf,
             remote_bucket,
             storage,
+            system_event_sink,
         ))
     }
 
@@ -109,6 +114,7 @@ impl ReplicationTask {
         io_config: IoConfig,
         remote_bucket: Box<dyn RemoteBucket + Send + Sync>,
         storage: Arc<StorageEngine>,
+        system_event_sink: Option<SystemEventSink>,
     ) -> Self {
         let log_map: TransactionLogMap =
             Arc::new(AsyncRwLock::new(HashMap::<String, TransactionLogRef>::new()));
@@ -131,6 +137,7 @@ impl ReplicationTask {
             filter_map: HashMap::new(),
             log_map,
             hourly_diagnostics,
+            system_event_sink,
             stop_flag,
             is_active,
             mode,
@@ -152,11 +159,16 @@ impl ReplicationTask {
         let thr_storage = Arc::clone(&self.storage);
         let thr_hourly_diagnostics = Arc::clone(&self.hourly_diagnostics);
         let thr_system_options = self.system_options.clone();
+        let thr_system_event_sink = self.system_event_sink.clone();
         let thr_stop_flag = Arc::clone(&self.stop_flag);
         let thr_is_active = Arc::clone(&self.is_active);
         let thr_mode = Arc::clone(&self.mode);
 
         let handle = tokio::spawn(async move {
+            // Aggregates replication diagnostics into periodic $system events.
+            // Dropped on loop exit, which flushes the last open bucket.
+            let diagnostics_aggregator = thr_system_event_sink
+                .map(|sink| ReplicationEventAggregator::new(sink, replication_name.clone()));
             let init_transaction_logs = async || {
                 let mut logs = thr_log_map.write().await?;
                 for entry in thr_storage
@@ -238,7 +250,10 @@ impl ReplicationTask {
                 }
 
                 let mut counter = None;
-                match sender.run().await {
+                let pass_started = Instant::now();
+                let sync_result = sender.run().await;
+                let pass_duration = pass_started.elapsed().as_secs_f64();
+                match sync_result {
                     Ok(SyncState::SyncedOrRemoved(c)) => {
                         thr_is_active.store(true, Ordering::Relaxed);
                         counter = Some(c);
@@ -314,11 +329,16 @@ impl ReplicationTask {
                 if let Some(c) = counter {
                     match thr_hourly_diagnostics.write().await {
                         Ok(mut diagnostics) => {
-                            for (result, count) in c.into_iter() {
-                                diagnostics.count(result, count);
+                            for (result, count, _size) in c.iter() {
+                                diagnostics.count(result.clone(), *count);
                             }
                         }
                         Err(err) => error!("Failed to acquire hourly diagnostics lock: {:?}", err),
+                    }
+
+                    if let Some(aggregator) = &diagnostics_aggregator {
+                        let pending_records = Self::count_pending_records(&thr_log_map).await;
+                        aggregator.record_pass(pending_records, pass_duration, &c).await;
                     }
                 }
             }
@@ -421,7 +441,7 @@ impl ReplicationTask {
     }
 
     pub fn set_mode(&mut self, mode: ReplicationMode) {
-        self.settings.mode = mode.clone();
+        self.settings.mode = mode;
         self.mode.store(mode as u8, Ordering::Relaxed);
     }
 
@@ -438,7 +458,7 @@ impl ReplicationTask {
         let mode = self.load_mode();
         Ok(ReplicationInfo {
             name: self.name.clone(),
-            mode: mode.clone(),
+            mode,
             is_active: matches!(mode, ReplicationMode::Enabled | ReplicationMode::Paused)
                 && self.is_active.load(Ordering::Relaxed),
             is_provisioned: self.is_provisioned,
@@ -450,6 +470,19 @@ impl ReplicationTask {
         Ok(Diagnostics {
             hourly: self.hourly_diagnostics.read().await?.diagnostics(),
         })
+    }
+
+    /// Sum pending (not-yet-replicated) records across all transaction logs.
+    async fn count_pending_records(log_map: &TransactionLogMap) -> u64 {
+        let mut pending_records = 0;
+        if let Ok(logs) = log_map.read().await {
+            for (_, log) in logs.iter() {
+                if let Ok(log) = log.read().await {
+                    pending_records += log.len() as u64;
+                }
+            }
+        }
+        pending_records
     }
 
     async fn sleep_with_stop(stop_flag: &Arc<AtomicBool>, duration: Duration) {
@@ -1037,6 +1070,7 @@ mod tests {
             IoConfig::default(),
             Box::new(remote_bucket),
             storage,
+            None,
         );
 
         repl.start();

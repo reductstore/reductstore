@@ -11,6 +11,7 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::cmp::PartialEq;
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
@@ -23,7 +24,10 @@ pub(super) struct ReplicationSender {
     bucket: Box<dyn RemoteBucket + Send + Sync>,
 }
 
-type ResultResult = (Result<(), ReductError>, u64);
+/// Outcome of replicating a group of records: the result, the number of
+/// records it covers, and the number of bytes successfully replicated
+/// (non-zero only for successful writes).
+type ResultResult = (Result<(), ReductError>, u64, u64);
 
 #[derive(Debug, PartialEq)]
 pub(super) enum SyncState {
@@ -86,6 +90,7 @@ impl ReplicationSender {
                         continue;
                     }
                     let mut batch = Vec::new();
+                    let mut batch_sizes: BTreeMap<u64, u64> = BTreeMap::new();
                     let mut total_size = 0;
                     let mut processed_transactions = 0;
                     for transaction in vec {
@@ -101,6 +106,7 @@ impl ReplicationSender {
                             Ok(record_to_sync) => {
                                 let record_size = record_to_sync.meta().content_length();
                                 total_size += record_size;
+                                batch_sizes.insert(*transaction.timestamp(), record_size);
                                 batch.push((record_to_sync, transaction));
 
                                 if total_size >= self.io_config.batch_max_size {
@@ -115,7 +121,7 @@ impl ReplicationSender {
                                     transaction.timestamp(),
                                     err
                                 );
-                                counter.push((Err(err), 1));
+                                counter.push((Err(err), 1, 0));
                             }
                         }
                     }
@@ -123,13 +129,20 @@ impl ReplicationSender {
                     let batch_size = batch.len() as u64;
                     match self.bucket.write_batch(entry_name, batch).await {
                         Ok(map) => {
-                            counter.push((Ok(()), batch_size - map.len() as u64));
+                            // Bytes successfully replicated are those whose
+                            // timestamp is not reported as failed.
+                            let written_size: u64 = batch_sizes
+                                .iter()
+                                .filter(|(timestamp, _)| !map.contains_key(*timestamp))
+                                .map(|(_, size)| *size)
+                                .sum();
+                            counter.push((Ok(()), batch_size - map.len() as u64, written_size));
                             for (timestamp, err) in map.into_iter() {
                                 debug!(
                                     "Failed to replicate record {}/{}/{}: {:?}",
                                     self.settings.src_bucket, entry_name, timestamp, err
                                 );
-                                counter.push((Err(err), 1));
+                                counter.push((Err(err), 1, 0));
                             }
                         }
                         Err(err) => {
@@ -138,7 +151,7 @@ impl ReplicationSender {
                                 self.settings.src_bucket, entry_name, err
                             );
 
-                            counter.push((Err(err), batch_size));
+                            counter.push((Err(err), batch_size, 0));
                         }
                     }
 
@@ -183,7 +196,7 @@ impl ReplicationSender {
                         .get_bucket(&self.settings.src_bucket)
                         .await?
                         .upgrade()?
-                        .get_entry(&entry_name)
+                        .get_entry(entry_name)
                         .await?
                         .upgrade()?
                         .begin_read(*transaction.timestamp())
@@ -276,7 +289,7 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5)])
         );
         assert_eq!(
             sender
@@ -309,7 +322,7 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::NotAvailable(vec![(Err(timeout!("Timeout")), 1)])
+            SyncState::NotAvailable(vec![(Err(timeout!("Timeout")), 1, 0)])
         );
 
         assert_eq!(
@@ -346,6 +359,7 @@ mod tests {
             SyncState::NotAvailable(vec![(
                 Err(ReductError::new(ErrorCode::TooManyRequests, "slow down")),
                 1,
+                0,
             )])
         );
 
@@ -395,8 +409,12 @@ mod tests {
         assert_eq!(
             sender.run().await.unwrap(),
             SyncState::SyncedOrRemoved(vec![
-                (Err(not_found!("Entry 'test' not found in bucket 'src'")), 1),
-                (Ok(()), 0)
+                (
+                    Err(not_found!("Entry 'test' not found in bucket 'src'")),
+                    1,
+                    0
+                ),
+                (Ok(()), 0, 0)
             ]),
         );
         assert!(
@@ -456,7 +474,7 @@ mod tests {
         writer.send(Ok(None)).await.unwrap();
         assert_eq!(
             handle.await.unwrap().unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 4)])
         );
     }
 
@@ -506,9 +524,10 @@ mod tests {
                     Err(too_early!(
                         "Record with timestamp 20 in src/test is still being written"
                     )),
-                    1
+                    1,
+                    0
                 ),
-                (Ok(()), 0)
+                (Ok(()), 0, 0)
             ])
         );
     }
@@ -536,7 +555,10 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1), (Err(conflict!("AlreadyExists")), 1)])
+            SyncState::SyncedOrRemoved(vec![
+                (Ok(()), 1, 5),
+                (Err(conflict!("AlreadyExists")), 1, 0)
+            ])
         );
         assert!(
             sender
@@ -576,7 +598,11 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
+            SyncState::SyncedOrRemoved(vec![(
+                Ok(()),
+                1,
+                IoConfig::default().batch_max_size + 1
+            )])
         );
         assert!(
             sender
