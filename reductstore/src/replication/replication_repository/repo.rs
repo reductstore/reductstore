@@ -168,8 +168,7 @@ impl ManageReplications for ReplicationRepository {
             )));
         }
 
-        self.create_or_update_replication_task(name, settings)
-            .await
+        self.create_or_update_replication_task(name, settings).await
     }
 
     async fn update_replication(
@@ -195,8 +194,7 @@ impl ManageReplications for ReplicationRepository {
             ))),
         }?;
 
-        self.create_or_update_replication_task(name, settings)
-            .await
+        self.create_or_update_replication_task(name, settings).await
     }
 
     async fn replications(&self) -> Result<Vec<ReplicationInfo>, ReductError> {
@@ -693,13 +691,15 @@ mod tests {
         ) {
             let storage = storage.await;
             let mut repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None).await;
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
+                    .await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
 
             let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None).await;
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
+                    .await;
             assert_eq!(repo.replications().await.unwrap().len(), 1);
             assert_eq!(
                 repo.get_replication_settings("test").await.unwrap(),
@@ -906,7 +906,8 @@ mod tests {
 
             // check if replication is removed from file
             let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None).await;
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
+                    .await;
             assert_eq!(
                 repo.replications().await.unwrap().len(),
                 0,

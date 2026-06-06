@@ -338,7 +338,9 @@ impl ReplicationTask {
 
                     if let Some(aggregator) = &diagnostics_aggregator {
                         let pending_records = Self::count_pending_records(&thr_log_map).await;
-                        aggregator.record_pass(pending_records, pass_duration, &c).await;
+                        aggregator
+                            .record_pass(pending_records, pass_duration, &c)
+                            .await;
                     }
                 }
             }

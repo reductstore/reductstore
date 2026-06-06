@@ -99,7 +99,10 @@ fn new_aggregate(obs: &ReplicationObservation, now: Instant) -> ReplicationAggre
     }
 }
 
-pub(crate) fn make_event(key: ReplicationAggregateKey, aggregate: ReplicationAggregate) -> SystemEvent {
+pub(crate) fn make_event(
+    key: ReplicationAggregateKey,
+    aggregate: ReplicationAggregate,
+) -> SystemEvent {
     let payload = ReplicationSystemEventPayload {
         status: aggregate.status,
         pending_records: aggregate.pending_records,
@@ -307,7 +310,9 @@ impl ReplicationEventAggregator {
         Ok(displaced)
     }
 
-    async fn next_deadline(state: &Arc<AsyncRwLock<ReplicationAggregatorState>>) -> Option<Instant> {
+    async fn next_deadline(
+        state: &Arc<AsyncRwLock<ReplicationAggregatorState>>,
+    ) -> Option<Instant> {
         let state = state.read().await.ok()?;
         state
             .aggregates
@@ -490,15 +495,15 @@ mod tests {
         ReplicationEventAggregator::aggregate_event(&state, observation(200, 2, 20))
             .await
             .unwrap();
-        let displaced = ReplicationEventAggregator::aggregate_event(&state, observation(200, 3, 30))
-            .await
-            .unwrap();
-        assert!(displaced.is_empty(), "same status keeps accumulating");
-
         let displaced =
-            ReplicationEventAggregator::aggregate_event(&state, observation(404, 4, 0))
+            ReplicationEventAggregator::aggregate_event(&state, observation(200, 3, 30))
                 .await
                 .unwrap();
+        assert!(displaced.is_empty(), "same status keeps accumulating");
+
+        let displaced = ReplicationEventAggregator::aggregate_event(&state, observation(404, 4, 0))
+            .await
+            .unwrap();
 
         assert_eq!(displaced.len(), 1, "status change flushes the 200 bucket");
         let event = &displaced[0];
@@ -543,9 +548,7 @@ mod tests {
     /// latest observation; record_pass groups a mixed pass by status.
     #[rstest]
     #[tokio::test]
-    async fn record_pass_groups_counter_by_status(
-        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
-    ) {
+    async fn record_pass_groups_counter_by_status(flushed_events: Arc<Mutex<Vec<SystemEvent>>>) {
         let sink = SystemEventSink {
             system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingLogger {
                 events: Arc::clone(&flushed_events),
@@ -575,7 +578,11 @@ mod tests {
         drop(guard);
 
         let events = flushed_events.lock().unwrap();
-        assert_eq!(events.len(), 1, "the 200 bucket was flushed on status change");
+        assert_eq!(
+            events.len(),
+            1,
+            "the 200 bucket was flushed on status change"
+        );
         assert_eq!(events[0].status, 200);
         assert_eq!(events[0].payload["written_records"], 2);
         assert_eq!(events[0].payload["replicated_data_size"], 40);
@@ -650,9 +657,7 @@ mod tests {
     /// flushed even though the cap has not been reached.
     #[rstest]
     #[tokio::test]
-    async fn flush_expired_flushes_idle_bucket(
-        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
-    ) {
+    async fn flush_expired_flushes_idle_bucket(flushed_events: Arc<Mutex<Vec<SystemEvent>>>) {
         let now = Instant::now();
         let state = Arc::new(AsyncRwLock::new(insert_aggregate(
             &ReplicationAggregatorState::default(),
@@ -673,9 +678,7 @@ mod tests {
     /// flushed even though it is still receiving activity (window not idle).
     #[rstest]
     #[tokio::test]
-    async fn flush_expired_flushes_capped_bucket(
-        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
-    ) {
+    async fn flush_expired_flushes_capped_bucket(flushed_events: Arc<Mutex<Vec<SystemEvent>>>) {
         let now = Instant::now();
         let state = Arc::new(AsyncRwLock::new(insert_aggregate(
             &ReplicationAggregatorState::default(),
@@ -694,9 +697,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn flush_expired_keeps_active_bucket(
-        flushed_events: Arc<Mutex<Vec<SystemEvent>>>,
-    ) {
+    async fn flush_expired_keeps_active_bucket(flushed_events: Arc<Mutex<Vec<SystemEvent>>>) {
         let now = Instant::now();
         let state = Arc::new(AsyncRwLock::new(insert_aggregate(
             &ReplicationAggregatorState::default(),
@@ -734,8 +735,10 @@ mod tests {
             .await;
 
         // AGGREGATION_WINDOW_SECS is 1 in test builds; wait past it
-        tokio::time::sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS) + Duration::from_millis(500))
-            .await;
+        tokio::time::sleep(
+            Duration::from_secs(AGGREGATION_WINDOW_SECS) + Duration::from_millis(500),
+        )
+        .await;
 
         let events = flushed_events.lock().unwrap();
         assert_eq!(events.len(), 1);

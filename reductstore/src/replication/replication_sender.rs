@@ -598,11 +598,7 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(
-                Ok(()),
-                1,
-                IoConfig::default().batch_max_size + 1
-            )])
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, IoConfig::default().batch_max_size + 1)])
         );
         assert!(
             sender

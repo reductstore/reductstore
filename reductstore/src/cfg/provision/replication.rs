@@ -178,8 +178,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             }
         }
 
-        
-
         replications
             .into_iter()
             .filter(|(id, _)| !unfinished_replications.contains(id))
