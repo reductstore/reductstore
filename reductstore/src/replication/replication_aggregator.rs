@@ -784,23 +784,30 @@ mod tests {
 
         // drop the aggregator to close the channel and flush the open bucket
         drop(aggregator);
-        tokio::time::sleep(Duration::from_millis(200)).await;
 
-        let bucket = storage
-            .get_bucket(SYSTEM_BUCKET_NAME)
-            .await
-            .unwrap()
-            .upgrade_and_unwrap();
+        // The worker creates the bucket, flushes and persists asynchronously, so
+        // poll for the entry to appear rather than relying on a single fixed sleep
+        // (disk I/O can be slow on some platforms, e.g. Windows CI).
         let entry_path = "replications/instance-1/repl-1";
-        let latest_record = Arc::clone(&bucket)
-            .info()
-            .await
-            .unwrap()
-            .entries
-            .into_iter()
-            .find(|entry| entry.name == entry_path)
-            .expect("replication diagnostics entry must exist")
-            .latest_record;
+        let mut found = None;
+        for _ in 0..100 {
+            if let Ok(weak_bucket) = storage.get_bucket(SYSTEM_BUCKET_NAME).await {
+                let bucket = weak_bucket.upgrade_and_unwrap();
+                if let Some(entry) = Arc::clone(&bucket)
+                    .info()
+                    .await
+                    .unwrap()
+                    .entries
+                    .into_iter()
+                    .find(|entry| entry.name == entry_path)
+                {
+                    found = Some((bucket, entry.latest_record));
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        let (bucket, latest_record) = found.expect("replication diagnostics entry must exist");
         let mut reader = bucket.begin_read(entry_path, latest_record).await.unwrap();
         let record = reader.read_chunk().unwrap().unwrap();
         let event: serde_json::Value = serde_json::from_slice(&record).unwrap();

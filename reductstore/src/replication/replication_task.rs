@@ -1019,10 +1019,129 @@ mod tests {
         );
     }
 
+    #[derive(Clone)]
+    struct CapturingSystemLogger {
+        events: Arc<std::sync::Mutex<Vec<crate::syslog::SystemEvent>>>,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl crate::syslog::LogSystemEvent for CapturingSystemLogger {
+        async fn log_event(
+            &mut self,
+            event: crate::syslog::SystemEvent,
+        ) -> Result<(), ReductError> {
+            if self.fail {
+                return Err(ReductError::internal_server_error(
+                    "diagnostics sink is down",
+                ));
+            }
+            self.events.lock().unwrap().push(event);
+            Ok(())
+        }
+    }
+
+    fn capturing_sink(
+        events: Arc<std::sync::Mutex<Vec<crate::syslog::SystemEvent>>>,
+        fail: bool,
+    ) -> SystemEventSink {
+        SystemEventSink {
+            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
+                events,
+                fail,
+            })
+                as Box<dyn crate::syslog::LogSystemEvent + Send + Sync>)),
+            instance_name: "instance-1".to_string(),
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_emits_replication_diagnostics(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut replication = build_replication_with_sink(
+            path,
+            remote_bucket,
+            settings,
+            Some(capturing_sink(Arc::clone(&captured), false)),
+        )
+        .await;
+
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(200)).await; // let a sync pass run and feed the aggregator
+        replication.stop().await; // dropping the aggregator flushes the open bucket
+        tokio_sleep(Duration::from_millis(100)).await; // let the aggregator worker emit
+
+        let events = captured.lock().unwrap();
+        let event = events
+            .iter()
+            .find(|event| event.event_type == "replication_sync")
+            .expect("a replication_sync diagnostics event must be emitted");
+        assert_eq!(event.instance, "instance-1");
+        assert_eq!(event.entry_name, "test");
+        assert_eq!(event.status, 200);
+        assert!(
+            event.payload["written_records"].as_u64().unwrap() >= 1,
+            "successful pass should report written_records"
+        );
+    }
+
+    // Safety: a diagnostics sink that always errors must not break replication.
+    #[rstest]
+    #[tokio::test]
+    async fn test_replication_continues_when_diagnostics_logger_errors(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut replication = build_replication_with_sink(
+            path,
+            remote_bucket,
+            settings,
+            Some(capturing_sink(Arc::clone(&captured), true)),
+        )
+        .await;
+
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(200)).await;
+
+        // Replication keeps draining the log despite the failing diagnostics sink.
+        assert!(transaction_log_is_empty(&replication).await);
+        let info = replication.info().await.unwrap();
+        assert_eq!(info.pending_records, 0);
+        assert!(captured.lock().unwrap().is_empty());
+    }
+
     async fn build_replication(
         path: PathBuf,
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
+    ) -> ReplicationTask {
+        build_replication_with_sink(path, remote_bucket, settings, None).await
+    }
+
+    async fn build_replication_with_sink(
+        path: PathBuf,
+        remote_bucket: MockRmBucket,
+        settings: ReplicationSettings,
+        system_event_sink: Option<SystemEventSink>,
     ) -> ReplicationTask {
         let cfg = Cfg {
             data_path: path.clone(),
@@ -1072,7 +1191,7 @@ mod tests {
             IoConfig::default(),
             Box::new(remote_bucket),
             storage,
-            None,
+            system_event_sink,
         );
 
         repl.start();
