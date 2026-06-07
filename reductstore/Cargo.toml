@@ -33,7 +33,7 @@ crate-type = ["lib"]
 reduct-base = { path = "../reduct_base", version = "1.18.0", features = ["ext"] }
 reduct-macros = { path = "../reduct_macros", version = "1.18.0" }
 
-chrono = { version = "0.4.41", features = ["serde"] }
+chrono = { version = "0.4.45", features = ["serde"] }
 chrono-tz = "0.10.4"
 zip = "8.1.0"
 tempfile = "3.27.0"
@@ -79,7 +79,7 @@ zenoh = { version = "1.9.0", optional = true }
 [build-dependencies]
 prost-build = "0.14.1"
 reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls", "blocking", "json"] }
-chrono = "0.4.41"
+chrono = "0.4.45"
 serde_json = "1.0.150"
 
 [dev-dependencies]
