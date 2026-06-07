@@ -156,7 +156,30 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 replication.settings.each_n = Some(each_n);
             }
 
-            if let Some(when) =
+            if let Some(each_s) = env.get_optional::<f64>(&format!("RS_REPLICATION_{}_EACH_S", id))
+            {
+                warn!(
+                    "The 'RS_REPLICATION_{}_EACH_S' environment variable is deprecated and will be migrated to 'when' condition using $each_t operator. Value: {}",
+                    id, each_s
+                );
+
+                // Migrate each_s to $each_t in when condition
+                let each_t_condition = serde_json::json!({"$each_t": each_s});
+
+                // If there's already a when condition, combine them with $and
+                if let Some(existing_when) =
+                    env.get_optional::<serde_json::Value>(&format!("RS_REPLICATION_{}_WHEN", id))
+                {
+                    replication.settings.when = Some(serde_json::json!({
+                        "$and": [
+                            each_t_condition,
+                            existing_when
+                        ]
+                    }));
+                } else {
+                    replication.settings.when = Some(each_t_condition);
+                }
+            } else if let Some(when) =
                 env.get_optional::<serde_json::Value>(&format!("RS_REPLICATION_{}_WHEN", id))
             {
                 replication.settings.when = Some(when);
