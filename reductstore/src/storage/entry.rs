@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+mod compress;
 mod entry_loader;
 pub(crate) mod io;
 mod read_record;

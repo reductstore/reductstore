@@ -730,6 +730,11 @@ impl BlockManager {
         &self.block_index
     }
 
+    #[allow(dead_code)]
+    pub(in crate::storage) fn is_block_in_write_cache(&self, block_id: u64) -> bool {
+        self.block_cache.get_write(&block_id).is_some()
+    }
+
     pub fn bucket_name(&self) -> &String {
         &self.bucket
     }
