@@ -55,7 +55,50 @@ impl BlockManager {
         block_id: u64,
         algorithm: CompressionAlgorithm,
     ) -> Result<(), ReductError> {
-        let block = self.block_index.get_block(block_id).ok_or_else(|| {
+        let block_size = {
+            let block = self.block_index.get_block(block_id).ok_or_else(|| {
+                not_found!(
+                    "Block {} not found in entry {}/{}",
+                    block_id,
+                    self.bucket,
+                    self.entry
+                )
+            })?;
+
+            if block
+                .compression
+                .unwrap_or(i32::from(CompressionAlgorithm::None))
+                != i32::from(CompressionAlgorithm::None)
+            {
+                return Err(conflict!(
+                    "Block {}/{}/{} is already compressed",
+                    self.bucket,
+                    self.entry,
+                    block_id
+                ));
+            }
+
+            block.size
+        };
+
+        match algorithm {
+            CompressionAlgorithm::None => return Ok(()),
+            CompressionAlgorithm::Zstd => {
+                let (data_size, desc_size) = self.compress_block_zstd(block_id, block_size).await?;
+                let block = self.block_index.get_block_mut(block_id).ok_or_else(|| {
+                    not_found!(
+                        "Block {} not found in entry {}/{}",
+                        block_id,
+                        self.bucket,
+                        self.entry
+                    )
+                })?;
+                block.size = data_size;
+                block.metadata_size = desc_size;
+            }
+        }
+
+        let block = self.block_index.get_block_mut(block_id).ok_or_else(|| {
             not_found!(
                 "Block {} not found in entry {}/{}",
                 block_id,
@@ -63,26 +106,7 @@ impl BlockManager {
                 self.entry
             )
         })?;
-
-        if block
-            .compression
-            .unwrap_or(i32::from(CompressionAlgorithm::None))
-            != i32::from(CompressionAlgorithm::None)
-        {
-            return Err(conflict!(
-                "Block {}/{}/{} is already compressed",
-                self.bucket,
-                self.entry,
-                block_id
-            ));
-        }
-
-        match algorithm {
-            CompressionAlgorithm::None => return Ok(()),
-            CompressionAlgorithm::Zstd => self.compress_block_zstd(block_id, block.size).await?,
-        }
-
-        self.block_index.set_compression(block_id, algorithm);
+        block.compression = Some(i32::from(algorithm));
         self.block_index.save().await?;
 
         let data_path = self.path_to_data(block_id);
@@ -95,7 +119,11 @@ impl BlockManager {
         Ok(())
     }
 
-    async fn compress_block_zstd(&self, block_id: u64, block_size: u64) -> Result<(), ReductError> {
+    async fn compress_block_zstd(
+        &self,
+        block_id: u64,
+        block_size: u64,
+    ) -> Result<(u64, u64), ReductError> {
         let data_path = self.path_to_data(block_id);
         let compressed_data_path = self.path_to_compressed_data(block_id);
         let compressed_data_tmp_path = self
@@ -152,7 +180,28 @@ impl BlockManager {
             ));
         }
 
-        Ok(())
+        let compressed_data_size = tokio::fs::metadata(&compressed_data_path)
+            .await
+            .map_err(|err| {
+                internal_server_error!(
+                    "Failed to get compressed data file size {:?}: {}",
+                    compressed_data_path,
+                    err
+                )
+            })?
+            .len();
+        let compressed_desc_size = tokio::fs::metadata(&compressed_desc_path)
+            .await
+            .map_err(|err| {
+                internal_server_error!(
+                    "Failed to get compressed descriptor file size {:?}: {}",
+                    compressed_desc_path,
+                    err
+                )
+            })?
+            .len();
+
+        Ok((compressed_data_size, compressed_desc_size))
     }
 }
 
@@ -227,10 +276,12 @@ mod tests {
     use prost_wkt_types::Timestamp;
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
+    use serial_test::serial;
     use tempfile::tempdir;
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_compress_block_zstd() {
         let data = b"compress me".to_vec();
         let (mut block_manager, block_id, original_data, original_descriptor) =
@@ -264,16 +315,31 @@ mod tests {
                 .compression,
             Some(i32::from(CompressionAlgorithm::Zstd))
         );
+
+        let compressed_data_size = std::fs::metadata(&compressed_data_path).unwrap().len();
+        let compressed_descriptor_size = std::fs::metadata(&compressed_descriptor_path)
+            .unwrap()
+            .len();
+        let block = block_manager.index().get_block(block_id).unwrap();
+        assert_eq!(block.size, compressed_data_size);
+        assert_eq!(block.metadata_size, compressed_descriptor_size);
+        assert_eq!(
+            block_manager.index().size(),
+            compressed_data_size + compressed_descriptor_size
+        );
     }
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_compress_block_already_compressed() {
         let (mut block_manager, block_id, _, _) =
             block_manager_with_data(b"already compressed".to_vec()).await;
         block_manager
             .index_mut()
-            .set_compression(block_id, CompressionAlgorithm::Zstd);
+            .get_block_mut(block_id)
+            .unwrap()
+            .compression = Some(i32::from(CompressionAlgorithm::Zstd));
 
         let err = block_manager
             .compress_block(block_id, CompressionAlgorithm::Zstd)
@@ -286,6 +352,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_compress_block_not_found() {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
         let mut block_manager = BlockManager::build(
@@ -309,6 +376,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_compress_block_large_data() {
         let data = (0..MAX_IO_BUFFER_SIZE + 1)
             .map(|idx| (idx % 251) as u8)

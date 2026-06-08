@@ -12,7 +12,6 @@ use std::path::PathBuf;
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block::Block;
-use crate::storage::block_manager::compress::CompressionAlgorithm;
 use crate::storage::block_manager::DESCRIPTOR_FILE_EXT;
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
@@ -114,17 +113,15 @@ impl BlockIndex {
         self.index_info.get(&block_id)
     }
 
+    pub fn get_block_mut(&mut self, block_id: u64) -> Option<&mut BlockEntry> {
+        self.index_info.get_mut(&block_id)
+    }
+
     pub fn remove_block(&mut self, block_id: u64) -> Option<BlockEntry> {
         let block = self.index_info.remove(&block_id);
         self.index.remove(&block_id);
 
         block
-    }
-
-    pub fn set_compression(&mut self, block_id: u64, algorithm: CompressionAlgorithm) {
-        if let Some(block) = self.index_info.get_mut(&block_id) {
-            block.compression = Some(i32::from(algorithm));
-        }
     }
 
     pub async fn try_load(path: PathBuf) -> Result<Self, ReductError> {
