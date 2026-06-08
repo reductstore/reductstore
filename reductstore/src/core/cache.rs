@@ -179,6 +179,10 @@ impl<K: Eq + Hash + Clone, V> Cache<K, V> {
         self.store.iter().map(|(k, v)| (k, &v.value))
     }
 
+    pub fn discard_expired(&mut self) -> Vec<(K, V)> {
+        self.discard_old_descriptors()
+    }
+
     fn discard_old_descriptors(&mut self) -> Vec<(K, V)> {
         // remove old descriptors
         let mut removed = Vec::new();

@@ -272,6 +272,7 @@ mod tests {
     use crate::cfg::Cfg;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::block_manager::{BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT};
+    use crate::storage::entry::io::record_reader::read_in_chunks;
     use crate::storage::proto::{record, Record};
     use prost_wkt_types::Timestamp;
     use reduct_base::error::ErrorCode;
@@ -393,6 +394,50 @@ mod tests {
             zstd::decode_all(std::fs::File::open(&compressed_data_path).unwrap()).unwrap();
 
         assert_eq!(decompressed_data, original_data);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_load_compressed_block() {
+        let (mut block_manager, block_id, _, _) =
+            block_manager_with_data(b"load compressed descriptor".to_vec()).await;
+
+        block_manager
+            .compress_block(block_id, CompressionAlgorithm::Zstd)
+            .await
+            .unwrap();
+        block_manager.clear_cache_for_test();
+
+        let block_ref = block_manager.load_block(block_id).await.unwrap();
+        let block = block_ref.read().await.unwrap();
+
+        assert_eq!(block.block_id(), block_id);
+        assert!(block.get_record(0).is_some());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_read_record_from_compressed_block() {
+        let data = b"read compressed data".to_vec();
+        let (mut block_manager, block_id, original_data, _) = block_manager_with_data(data).await;
+
+        block_manager
+            .compress_block(block_id, CompressionAlgorithm::Zstd)
+            .await
+            .unwrap();
+        block_manager.clear_cache_for_test();
+
+        let block_ref = block_manager.load_block(block_id).await.unwrap();
+        let block = block_ref.read().await.unwrap();
+        let (file_path, offset) = block_manager.begin_read_record(&block, 0).await.unwrap();
+        let (content, read) = read_in_chunks(&file_path, offset, original_data.len() as u64, 0)
+            .await
+            .unwrap();
+
+        assert_eq!(read, original_data.len());
+        assert_eq!(content, original_data);
     }
 
     async fn block_manager_with_data(data: Vec<u8>) -> (BlockManager, u64, Vec<u8>, Vec<u8>) {

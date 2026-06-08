@@ -5,6 +5,7 @@ pub(in crate::storage) mod block;
 mod block_cache;
 pub(in crate::storage) mod block_index;
 pub(in crate::storage) mod compress;
+pub(in crate::storage) mod decompress_cache;
 mod read_only;
 pub(in crate::storage) mod wal;
 
@@ -14,6 +15,8 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
+use crate::storage::block_manager::compress::CompressionAlgorithm;
+use crate::storage::block_manager::decompress_cache::{DecompressedFileType, DECOMPRESS_CACHE};
 use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
@@ -53,9 +56,7 @@ pub(in crate::storage) struct BlockManager {
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
 pub const DATA_FILE_EXT: &str = ".blk";
-#[allow(dead_code)]
 pub const COMPRESSED_DESCRIPTOR_FILE_EXT: &str = ".meta.zst";
-#[allow(dead_code)]
 pub const COMPRESSED_DATA_FILE_EXT: &str = ".blk.zst";
 pub const BLOCK_INDEX_FILE: &str = "blocks.idx";
 
@@ -162,7 +163,7 @@ impl BlockManager {
         // first check if we have the block in write cache
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
-            let path = self.path_to_desc(block_id);
+            let path = self.resolve_desc_path(block_id).await?;
             let buf = match FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
                 Ok(mut file) => {
                     let mut buf = vec![];
@@ -673,14 +674,52 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If file system operation failed.
-    pub(crate) fn begin_read_record(
+    pub(crate) async fn begin_read_record(
         &self,
         block: &Block,
         record_timestamp: u64,
     ) -> Result<(PathBuf, u64), ReductError> {
-        let path = self.path_to_data(block.block_id());
+        let path = self.resolve_data_path(block.block_id()).await?;
         let offset = block.get_record(record_timestamp).unwrap().begin;
         Ok((path, offset))
+    }
+
+    async fn resolve_desc_path(&self, block_id: u64) -> Result<PathBuf, ReductError> {
+        if self.block_is_compressed(block_id) {
+            DECOMPRESS_CACHE
+                .get_or_decompress(
+                    &self.path,
+                    block_id,
+                    DecompressedFileType::Descriptor,
+                    &self.path_to_compressed_desc(block_id),
+                )
+                .await
+        } else {
+            Ok(self.path_to_desc(block_id))
+        }
+    }
+
+    async fn resolve_data_path(&self, block_id: u64) -> Result<PathBuf, ReductError> {
+        if self.block_is_compressed(block_id) {
+            DECOMPRESS_CACHE
+                .get_or_decompress(
+                    &self.path,
+                    block_id,
+                    DecompressedFileType::Data,
+                    &self.path_to_compressed_data(block_id),
+                )
+                .await
+        } else {
+            Ok(self.path_to_data(block_id))
+        }
+    }
+
+    fn block_is_compressed(&self, block_id: u64) -> bool {
+        self.block_index
+            .get_block(block_id)
+            .and_then(|block| block.compression)
+            .unwrap_or(i32::from(CompressionAlgorithm::None))
+            != i32::from(CompressionAlgorithm::None)
     }
 
     pub fn index_mut(&mut self) -> &mut BlockIndex {
@@ -717,13 +756,11 @@ impl BlockManager {
         self.path.join(format!("{}{}", block_id, DATA_FILE_EXT))
     }
 
-    #[allow(dead_code)]
     fn path_to_compressed_desc(&self, block_id: u64) -> PathBuf {
         self.path
             .join(format!("{}{}", block_id, COMPRESSED_DESCRIPTOR_FILE_EXT))
     }
 
-    #[allow(dead_code)]
     fn path_to_compressed_data(&self, block_id: u64) -> PathBuf {
         self.path
             .join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT))
