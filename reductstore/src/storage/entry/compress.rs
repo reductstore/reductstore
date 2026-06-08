@@ -10,7 +10,6 @@ impl Entry {
     ///
     /// Blocks still present in the write cache are skipped to avoid compressing
     /// blocks that may not be fully flushed yet.
-    #[allow(dead_code)]
     pub async fn compress_blocks(
         &self,
         start: Option<u64>,
@@ -57,6 +56,36 @@ impl Entry {
         }
 
         Ok(compressed_count)
+    }
+
+    /// Count uncompressed blocks whose block IDs fall within `[start, stop)`.
+    pub async fn count_compressible_blocks(
+        &self,
+        start: Option<u64>,
+        stop: Option<u64>,
+    ) -> Result<u64, ReductError> {
+        let bm = self.block_manager.read().await?;
+        let index = bm.index();
+
+        let range: Box<dyn Iterator<Item = &u64> + '_> = match (start, stop) {
+            (Some(start), Some(stop)) => Box::new(index.tree().range(start..stop)),
+            (Some(start), None) => Box::new(index.tree().range(start..)),
+            (None, Some(stop)) => Box::new(index.tree().range(..stop)),
+            (None, None) => Box::new(index.tree().iter()),
+        };
+
+        let count = range
+            .filter(|&&block_id| {
+                !bm.is_block_in_write_cache(block_id)
+                    && index
+                        .get_block(block_id)
+                        .and_then(|block| block.compression)
+                        .unwrap_or(i32::from(CompressionAlgorithm::None))
+                        == i32::from(CompressionAlgorithm::None)
+            })
+            .count() as u64;
+
+        Ok(count)
     }
 }
 
@@ -163,6 +192,42 @@ mod tests {
     async fn test_compress_blocks_empty_entry(path: PathBuf) {
         let entry = entry(multi_block_settings(), path).await;
         assert_eq!(entry.compress_blocks(None, None).await.unwrap(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_count_compressible_blocks_full_range(path: PathBuf) {
+        let entry = entry(multi_block_settings(), path.clone()).await;
+        write_blocks(&entry, &[1_000_000, 2_000_000, 3_000_000]).await;
+        let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
+
+        assert_eq!(
+            entry.count_compressible_blocks(None, None).await.unwrap(),
+            3
+        );
+        assert_eq!(
+            entry
+                .count_compressible_blocks(Some(2_000_000), Some(3_000_000))
+                .await
+                .unwrap(),
+            1
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_count_compressible_blocks_after_compression(path: PathBuf) {
+        let entry = entry(multi_block_settings(), path.clone()).await;
+        write_blocks(&entry, &[1_000_000, 2_000_000, 3_000_000]).await;
+        let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
+
+        assert_eq!(entry.compress_blocks(None, None).await.unwrap(), 3);
+        assert_eq!(
+            entry.count_compressible_blocks(None, None).await.unwrap(),
+            0
+        );
     }
 
     #[rstest]

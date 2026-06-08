@@ -77,6 +77,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             {
                 match lifecycle_type.to_lowercase().as_str() {
                     "delete" => lifecycle.settings.lifecycle_type = LifecycleType::Delete,
+                    "compress" => lifecycle.settings.lifecycle_type = LifecycleType::Compress,
                     _ => {
                         error!(
                             "Lifecycle '{}' has invalid type '{}'. Drop it.",
@@ -86,6 +87,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                         continue;
                     }
                 }
+            } else {
+                error!("Lifecycle '{}' has no type. Drop it.", name);
+                unfinished_lifecycles.push(id.clone());
+                continue;
             }
 
             if let Some(bucket) = env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_BUCKET", id))
@@ -285,12 +290,28 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn defaults_lifecycle_type_to_delete(path: PathBuf) {
+    async fn drops_lifecycle_without_type(path: PathBuf) {
         let mut env_getter = lifecycle_env(path, &[]);
         env_getter.values.remove("RS_LIFECYCLE_A_TYPE");
 
-        let (_, settings, _) = lifecycle_infos(env_getter).await;
-        assert_eq!(settings.unwrap().lifecycle_type, LifecycleType::Delete);
+        let (lifecycles, settings, _) = lifecycle_infos(env_getter).await;
+        assert!(lifecycles.is_empty());
+        assert!(settings.is_none());
+    }
+
+    #[rstest]
+    fn parse_lifecycles_parses_compress_type() {
+        let getter = TestEnvGetter::new(&[
+            ("RS_LIFECYCLE_A_NAME", "compress-sensors-30d"),
+            ("RS_LIFECYCLE_A_TYPE", "compress"),
+            ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
+            ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
+        ]);
+        let mut env = Env::new(getter);
+        let lifecycles = CfgParser::<TestEnvGetter>::parse_lifecycles(&mut env);
+
+        let lifecycle = lifecycles.get("compress-sensors-30d").unwrap();
+        assert_eq!(lifecycle.settings.lifecycle_type, LifecycleType::Compress);
     }
 
     #[rstest]
@@ -346,6 +367,7 @@ mod tests {
     fn parse_lifecycles_parses_mode() {
         let getter = TestEnvGetter::new(&[
             ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
+            ("RS_LIFECYCLE_A_TYPE", "delete"),
             ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
             ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
             ("RS_LIFECYCLE_A_MODE", "disabled"),
@@ -362,6 +384,7 @@ mod tests {
     fn parse_lifecycles_parses_dry_run_mode() {
         let getter = TestEnvGetter::new(&[
             ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
+            ("RS_LIFECYCLE_A_TYPE", "delete"),
             ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
             ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
             ("RS_LIFECYCLE_A_MODE", "dry_run"),
@@ -378,6 +401,7 @@ mod tests {
     fn parse_lifecycles_defaults_mode_when_not_set() {
         let getter = TestEnvGetter::new(&[
             ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
+            ("RS_LIFECYCLE_A_TYPE", "delete"),
             ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
             ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
         ]);

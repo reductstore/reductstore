@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::{WriteChunk, WriteRecord};
-use reduct_base::Labels;
+use reduct_base::{conflict, Labels};
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
 
@@ -78,7 +78,11 @@ impl Entry {
                 bm.start_new_block(time, settings.max_block_size).await?
             } else {
                 let block_id = *bm.index().tree().last().unwrap();
-                bm.load_block(block_id).await?
+                if bm.block_is_compressed(block_id) {
+                    bm.start_new_block(time, settings.max_block_size).await?
+                } else {
+                    bm.load_block(block_id).await?
+                }
             };
             block_ref
         };
@@ -106,9 +110,18 @@ impl Entry {
                     RecordType::BelatedFirst
                 } else {
                     block_ref = bm.find_block(time).await?;
+                    let block_id = block_ref.read().await?.block_id();
+                    if bm.block_is_compressed(block_id) {
+                        return Err(conflict!(
+                            "Cannot write record {} to compressed block {}/{}/{}",
+                            time,
+                            self.bucket_name,
+                            self.name,
+                            block_id
+                        ));
+                    }
                     drop(bm); // drop the lock early to avoid blocking other operations
 
-                    let block_id = block_ref.read().await?.block_id();
                     debug!(
                         "Timestamp {} is belated for {}/{}. Writing to block {}",
                         time, self.bucket_name, self.name, block_id

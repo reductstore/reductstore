@@ -11,6 +11,8 @@ pub enum LifecycleType {
     /// Delete records matched by lifecycle settings.
     #[default]
     Delete,
+    /// Compress blocks matched by lifecycle settings.
+    Compress,
 }
 
 /// Lifecycle mode.
@@ -37,7 +39,7 @@ impl Default for LifecycleMode {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct LifecycleSettings {
     /// Lifecycle policy action type.
-    #[serde(default, rename = "type")]
+    #[serde(rename = "type")]
     pub lifecycle_type: LifecycleType,
     /// Bucket to apply the lifecycle policy to.
     pub bucket: String,
@@ -164,6 +166,19 @@ mod tests {
         .unwrap();
 
         assert_eq!(settings.mode, LifecycleMode::Enabled);
+    }
+
+    #[test]
+    fn lifecycle_settings_type_is_required() {
+        let err = serde_json::from_str::<LifecycleSettings>(
+            r#"{
+                "bucket": "bucket-1",
+                "max_age": "1d"
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("missing field `type`"));
     }
 
     #[test]

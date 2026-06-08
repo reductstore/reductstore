@@ -714,7 +714,7 @@ impl BlockManager {
         }
     }
 
-    fn block_is_compressed(&self, block_id: u64) -> bool {
+    pub(in crate::storage) fn block_is_compressed(&self, block_id: u64) -> bool {
         self.block_index
             .get_block(block_id)
             .and_then(|block| block.compression)
@@ -730,7 +730,6 @@ impl BlockManager {
         &self.block_index
     }
 
-    #[allow(dead_code)]
     pub(in crate::storage) fn is_block_in_write_cache(&self, block_id: u64) -> bool {
         self.block_cache.get_write(&block_id).is_some()
     }
