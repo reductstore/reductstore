@@ -9,6 +9,7 @@ use crate::storage::block_manager::{
 };
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::block_index::CompressionAlgorithm as ProtoCompressionAlgorithm;
+use crc64fast::Digest;
 use reduct_base::error::ReductError;
 use reduct_base::{conflict, internal_server_error, not_found};
 use std::cmp::min;
@@ -115,6 +116,98 @@ impl BlockManager {
         FILE_CACHE.remove(&desc_path).await?;
         FILE_CACHE.discard_recursive(&data_path).await?;
         FILE_CACHE.discard_recursive(&desc_path).await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn decompress_block(&mut self, block_id: u64) -> Result<(), ReductError> {
+        if !self.block_is_compressed(block_id) {
+            return Ok(());
+        }
+
+        let compressed_data_path = self.path_to_compressed_data(block_id);
+        let compressed_desc_path = self.path_to_compressed_desc(block_id);
+        let data_path = self.path_to_data(block_id);
+        let desc_path = self.path_to_desc(block_id);
+
+        decompress_file_zstd(&compressed_data_path, &data_path).await?;
+        decompress_file_zstd(&compressed_desc_path, &desc_path).await?;
+
+        FILE_CACHE.remove(&compressed_data_path).await?;
+        FILE_CACHE.remove(&compressed_desc_path).await?;
+        FILE_CACHE.discard_recursive(&compressed_data_path).await?;
+        FILE_CACHE.discard_recursive(&compressed_desc_path).await?;
+
+        let data_size = tokio::fs::metadata(&data_path)
+            .await
+            .map_err(|err| {
+                internal_server_error!("Failed to get data file size {:?}: {}", data_path, err)
+            })?
+            .len();
+        let desc = std::fs::read(&desc_path).map_err(|err| {
+            internal_server_error!("Failed to read descriptor file {:?}: {}", desc_path, err)
+        })?;
+        let desc_size = desc.len() as u64;
+        let mut crc = Digest::new();
+        crc.write(&desc);
+
+        let block = self.block_index.get_block_mut(block_id).ok_or_else(|| {
+            not_found!(
+                "Block {} not found in entry {}/{}",
+                block_id,
+                self.bucket,
+                self.entry
+            )
+        })?;
+        block.compression = None;
+        block.size = data_size;
+        block.metadata_size = desc_size;
+        self.block_index.save().await?;
+
+        self.decompress_cache.invalidate(&self.path, block_id).await;
+
+        Ok(())
+    }
+
+    pub(crate) async fn decompress_block_metadata(
+        &mut self,
+        block_id: u64,
+    ) -> Result<(), ReductError> {
+        if !self.block_is_compressed(block_id) {
+            return Ok(());
+        }
+
+        let compressed_desc_path = self.path_to_compressed_desc(block_id);
+        if !FILE_CACHE.try_exists(&compressed_desc_path).await? {
+            return Ok(());
+        }
+
+        let desc_path = self.path_to_desc(block_id);
+        decompress_file_zstd(&compressed_desc_path, &desc_path).await?;
+
+        FILE_CACHE.remove(&compressed_desc_path).await?;
+        FILE_CACHE.discard_recursive(&compressed_desc_path).await?;
+
+        let desc = std::fs::read(&desc_path).map_err(|err| {
+            internal_server_error!("Failed to read descriptor file {:?}: {}", desc_path, err)
+        })?;
+        let desc_size = desc.len() as u64;
+        let mut crc = Digest::new();
+        crc.write(&desc);
+
+        let block = self.block_index.get_block_mut(block_id).ok_or_else(|| {
+            not_found!(
+                "Block {} not found in entry {}/{}",
+                block_id,
+                self.bucket,
+                self.entry
+            )
+        })?;
+        block.metadata_size = desc_size;
+        block.crc64 = Some(crc.sum64());
+        self.block_index.save().await?;
+
+        self.decompress_cache.invalidate(&self.path, block_id).await;
 
         Ok(())
     }
@@ -262,6 +355,42 @@ async fn compress_file_zstd(
     Ok(())
 }
 
+async fn decompress_file_zstd(
+    compressed_path: &PathBuf,
+    output_path: &PathBuf,
+) -> Result<(), ReductError> {
+    let mut compressed = vec![];
+    {
+        let mut file = FILE_CACHE.read(compressed_path, SeekFrom::Start(0)).await?;
+        file.read_to_end(&mut compressed).map_err(|err| {
+            internal_server_error!(
+                "Failed to read compressed file {:?}: {}",
+                compressed_path,
+                err
+            )
+        })?;
+    }
+
+    let decompressed = zstd::decode_all(compressed.as_slice()).map_err(|err| {
+        internal_server_error!("Failed to decompress file {:?}: {}", compressed_path, err)
+    })?;
+
+    let mut out = OpenOptions::new()
+        .create(true)
+        .truncate(true)
+        .write(true)
+        .open(output_path)
+        .map_err(|err| {
+            internal_server_error!("Failed to create file {:?}: {}", output_path, err)
+        })?;
+    out.write_all(&decompressed)
+        .map_err(|err| internal_server_error!("Failed to write file {:?}: {}", output_path, err))?;
+    out.sync_all()
+        .map_err(|err| internal_server_error!("Failed to sync file {:?}: {}", output_path, err))?;
+
+    Ok(())
+}
+
 fn cleanup_tmp(path: &Path) {
     let _ = std::fs::remove_file(path);
 }
@@ -271,6 +400,7 @@ mod tests {
     use super::*;
     use crate::cfg::Cfg;
     use crate::storage::block_manager::block_index::BlockIndex;
+    use crate::storage::block_manager::decompress_cache::DecompressedFileType;
     use crate::storage::block_manager::{BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT};
     use crate::storage::entry::io::record_reader::read_in_chunks;
     use crate::storage::proto::{record, Record};
@@ -373,6 +503,75 @@ mod tests {
             .unwrap();
 
         assert_eq!(err.status(), ErrorCode::NotFound);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_decompress_block_restores_files() {
+        let data = b"decompress me".to_vec();
+        let (mut block_manager, block_id, original_data, original_descriptor) =
+            block_manager_with_data(data).await;
+
+        block_manager
+            .compress_block(block_id, CompressionAlgorithm::Zstd)
+            .await
+            .unwrap();
+        let compressed_data_path = block_manager.path_to_compressed_data(block_id);
+        let cached_data_path = block_manager
+            .decompress_cache
+            .get_or_decompress(
+                block_manager.path(),
+                block_id,
+                DecompressedFileType::Data,
+                &compressed_data_path,
+            )
+            .await
+            .unwrap();
+
+        block_manager.decompress_block(block_id).await.unwrap();
+
+        assert!(block_manager.path_to_data(block_id).exists());
+        assert!(block_manager.path_to_desc(block_id).exists());
+        assert!(!block_manager.path_to_compressed_data(block_id).exists());
+        assert!(!block_manager.path_to_compressed_desc(block_id).exists());
+        assert!(!cached_data_path.exists());
+        assert_eq!(
+            std::fs::read(block_manager.path_to_data(block_id)).unwrap(),
+            original_data
+        );
+        assert_eq!(
+            std::fs::read(block_manager.path_to_desc(block_id)).unwrap(),
+            original_descriptor
+        );
+
+        let block = block_manager.index().get_block(block_id).unwrap();
+        assert_eq!(block.compression, None);
+        assert_eq!(block.size, original_data.len() as u64);
+        assert_eq!(block.metadata_size, original_descriptor.len() as u64);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_decompress_block_noop_if_not_compressed() {
+        let (mut block_manager, block_id, original_data, original_descriptor) =
+            block_manager_with_data(b"not compressed".to_vec()).await;
+
+        block_manager.decompress_block(block_id).await.unwrap();
+
+        assert!(block_manager.path_to_data(block_id).exists());
+        assert!(block_manager.path_to_desc(block_id).exists());
+        assert!(!block_manager.path_to_compressed_data(block_id).exists());
+        assert!(!block_manager.path_to_compressed_desc(block_id).exists());
+        assert_eq!(
+            std::fs::read(block_manager.path_to_data(block_id)).unwrap(),
+            original_data
+        );
+        assert_eq!(
+            std::fs::read(block_manager.path_to_desc(block_id)).unwrap(),
+            original_descriptor
+        );
     }
 
     #[rstest]

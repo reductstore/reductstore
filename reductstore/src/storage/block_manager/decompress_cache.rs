@@ -11,14 +11,11 @@ use std::fs::OpenOptions;
 use std::hash::{Hash, Hasher};
 use std::io::{Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const DECOMPRESS_CACHE_MAX_SIZE: usize = 64;
 const DECOMPRESS_CACHE_TTL: Duration = Duration::from_secs(30);
-
-pub(crate) static DECOMPRESS_CACHE: LazyLock<DecompressCache> =
-    LazyLock::new(|| DecompressCache::new(DECOMPRESS_CACHE_MAX_SIZE, DECOMPRESS_CACHE_TTL));
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum DecompressedFileType {
@@ -47,10 +44,14 @@ pub(crate) struct DecompressCache {
 }
 
 impl DecompressCache {
-    fn new(max_size: usize, ttl: Duration) -> Self {
+    pub(crate) fn new(max_size: usize, ttl: Duration) -> Self {
         Self {
             cache: Arc::new(AsyncRwLock::new(Cache::new(max_size, ttl))),
         }
+    }
+
+    pub(crate) fn default() -> Self {
+        Self::new(DECOMPRESS_CACHE_MAX_SIZE, DECOMPRESS_CACHE_TTL)
     }
 
     pub(crate) async fn get_or_decompress(
@@ -82,6 +83,17 @@ impl DecompressCache {
         }
 
         Ok(path)
+    }
+
+    /// Remove cached decompressed files for a block.
+    pub(crate) async fn invalidate(&self, entry_path: &Path, block_id: u64) {
+        let mut cache = self.cache.write().await.unwrap();
+        for file_type in [DecompressedFileType::Data, DecompressedFileType::Descriptor] {
+            let key = Self::key(entry_path, block_id, file_type);
+            if let Some(path) = cache.remove(&key) {
+                cleanup_tmp(&path);
+            }
+        }
     }
 
     fn key(entry_path: &Path, block_id: u64, file_type: DecompressedFileType) -> String {
