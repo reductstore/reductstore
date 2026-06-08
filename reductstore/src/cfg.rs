@@ -33,6 +33,7 @@ use crate::ext::ext_repository::create_ext_repository;
 use crate::lifecycle::SystemEventSink;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use crate::syslog::build_audit_logger;
+use crate::syslog::build_replication_system_logger;
 use crate::syslog::build_system_logger;
 use async_trait::async_trait;
 use log::{info, warn};
@@ -399,8 +400,17 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let storage = Arc::new(self.provision_buckets(&data_path).await);
         let token_repo = self.provision_tokens(&data_path, Arc::clone(&storage));
         let console = create_asset_manager(load_console());
+        let replication_system_logger =
+            build_replication_system_logger(&self.cfg, Arc::clone(&storage)).await;
+        let replication_system_logger = Arc::new(AsyncRwLock::new(replication_system_logger));
         let replication_engine = self
-            .provision_replication_repo(Arc::clone(&storage))
+            .provision_replication_repo(
+                Arc::clone(&storage),
+                SystemEventSink {
+                    system_logger: Arc::clone(&replication_system_logger),
+                    instance_name: self.cfg.instance_name.clone(),
+                },
+            )
             .await?;
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
