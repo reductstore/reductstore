@@ -4,6 +4,7 @@
 pub(in crate::storage) mod block;
 mod block_cache;
 pub(in crate::storage) mod block_index;
+pub(in crate::storage) mod compress;
 mod read_only;
 pub(in crate::storage) mod wal;
 
@@ -52,6 +53,10 @@ pub(in crate::storage) struct BlockManager {
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
 pub const DATA_FILE_EXT: &str = ".blk";
+#[allow(dead_code)]
+pub const COMPRESSED_DESCRIPTOR_FILE_EXT: &str = ".meta.zst";
+#[allow(dead_code)]
+pub const COMPRESSED_DATA_FILE_EXT: &str = ".blk.zst";
 pub const BLOCK_INDEX_FILE: &str = "blocks.idx";
 
 // we need 2 to avoid double sync when start a new one but not yet saved the old one when the record is written
@@ -710,6 +715,18 @@ impl BlockManager {
 
     fn path_to_data(&self, block_id: u64) -> PathBuf {
         self.path.join(format!("{}{}", block_id, DATA_FILE_EXT))
+    }
+
+    #[allow(dead_code)]
+    fn path_to_compressed_desc(&self, block_id: u64) -> PathBuf {
+        self.path
+            .join(format!("{}{}", block_id, COMPRESSED_DESCRIPTOR_FILE_EXT))
+    }
+
+    #[allow(dead_code)]
+    fn path_to_compressed_data(&self, block_id: u64) -> PathBuf {
+        self.path
+            .join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT))
     }
 
     async fn save_meta_on_disk(&mut self, block_ref: BlockRef) -> Result<(), ReductError> {

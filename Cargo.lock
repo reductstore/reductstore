@@ -3055,6 +3055,7 @@ dependencies = [
  "uuid",
  "zenoh",
  "zip",
+ "zstd",
 ]
 
 [[package]]

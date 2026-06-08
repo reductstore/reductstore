@@ -12,6 +12,7 @@ use std::path::PathBuf;
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block::Block;
+use crate::storage::block_manager::compress::CompressionAlgorithm;
 use crate::storage::block_manager::DESCRIPTOR_FILE_EXT;
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
@@ -34,6 +35,7 @@ impl Into<BlockEntry> for MinimalBlock {
             metadata_size: self.metadata_size,
             latest_record_time: self.latest_record_time,
             crc64: None,
+            compression: None,
         }
     }
 }
@@ -47,6 +49,7 @@ impl Into<BlockEntry> for BlockProto {
             metadata_size: self.metadata_size,
             latest_record_time: self.latest_record_time,
             crc64: None,
+            compression: None,
         }
     }
 }
@@ -60,6 +63,7 @@ impl Into<BlockEntry> for Block {
             metadata_size: self.metadata_size(),
             latest_record_time: Some(us_to_ts(&self.latest_record_time())),
             crc64: None,
+            compression: None,
         }
     }
 }
@@ -117,6 +121,12 @@ impl BlockIndex {
         block
     }
 
+    pub fn set_compression(&mut self, block_id: u64, algorithm: CompressionAlgorithm) {
+        if let Some(block) = self.index_info.get_mut(&block_id) {
+            block.compression = Some(i32::from(algorithm));
+        }
+    }
+
     pub async fn try_load(path: PathBuf) -> Result<Self, ReductError> {
         if !FILE_CACHE.try_exists(&path).await? {
             return Err(internal_server_error!("Block index {:?} not found", path));
@@ -163,15 +173,13 @@ impl BlockIndex {
 
         let mut crc = Digest::new();
         value.blocks.into_iter().for_each(|block| {
-            // Count total numbers
-            block_index.index_info.insert(block.block_id, block);
+            let latest_record_time = ts_to_us(block.latest_record_time.as_ref().unwrap());
 
-            // Update CRC
             crc.write(&block.block_id.to_be_bytes());
             crc.write(&block.size.to_be_bytes());
             crc.write(&block.record_count.to_be_bytes());
             crc.write(&block.metadata_size.to_be_bytes());
-            crc.write(&ts_to_us(&block.latest_record_time.unwrap()).to_be_bytes());
+            crc.write(&latest_record_time.to_be_bytes());
 
             if let Some(crc64) = block.crc64 {
                 crc.write(&crc64.to_be_bytes());
@@ -208,6 +216,7 @@ impl BlockIndex {
                 block_entry.metadata_size = block.metadata_size;
                 block_entry.latest_record_time = block.latest_record_time;
                 block_entry.crc64 = block.crc64;
+                block_entry.compression = block.compression;
                 block_entry
             })
             .collect();
@@ -295,6 +304,7 @@ mod tests {
                     metadata_size: 1,
                     latest_record_time: Some(Timestamp::default()),
                     crc64: None,
+                    compression: None,
                 }],
                 crc64: 294433432134063049,
             };
@@ -331,6 +341,7 @@ mod tests {
                     metadata_size: 1,
                     latest_record_time: Some(Timestamp::default()),
                     crc64: None,
+                    compression: None,
                 }],
                 crc64: 0,
             };
@@ -370,6 +381,7 @@ mod tests {
                 metadata_size: 1,
                 latest_record_time: Some(Timestamp::default()),
                 crc64: None,
+                compression: None,
             });
 
             block_index.save().await.unwrap();
