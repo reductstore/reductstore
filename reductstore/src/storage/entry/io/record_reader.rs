@@ -19,7 +19,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
 
-/// RecordReader is responsible for reading the content of a record from the storage.
+/// Responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     meta: RecordMeta,
     file_path: Option<PathBuf>,

@@ -279,15 +279,11 @@ impl StorageEngine {
         Ok(bucket.into())
     }
 
-    /// Get a bucket by name
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the bucket
-    ///
-    /// # Returns
-    ///
-    /// * `Bucket` - The bucket or an HTTPError
+    /// Get a bucket by name.
+    /// # Argument.
+    /// `name` - The name of the bucket.
+    /// # Returns.
+    /// `Bucket` - The bucket or an HTTPError.
     pub(crate) async fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
         self.reload().await?;
         let buckets = self.buckets.read().await?;

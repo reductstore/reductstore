@@ -33,14 +33,11 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
 
     #[cfg(test)]
     {
-        use futures::executor;
-
-        // Use an isolated filesystem backend for tests to avoid relying on
-        // other tests to initialise the global cache.
+        // Use an isolated filesystem backend for tests to avoid relying on other tests to initialise the global cache.
         let temp_dir = tempfile::tempdir()
             .expect("Failed to create temporary directory for FILE_CACHE")
             .keep();
-        executor::block_on(async {
+        futures::executor::block_on(async {
             let mut backend = cache.backend.write().await.unwrap();
             *backend = (Backend::builder().local_data_path(temp_dir).try_build())
                 .await

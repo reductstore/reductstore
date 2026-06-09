@@ -4,15 +4,20 @@
 use crate::cfg::io::IoConfig;
 use crate::replication::remote_bucket::RemoteBucket;
 use crate::replication::transaction_log::TransactionLogMap;
-use crate::replication::Transaction;
 use crate::storage::engine::StorageEngine;
+use futures_util::{TryStreamExt, StreamExt, future, stream};
 use log::{debug, error};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::io::BoxedReadRecord;
+use reduct_base::io::{BoxedReadRecord, ReadRecord};
 use reduct_base::msg::replication_api::ReplicationSettings;
+use tokio_retry::RetryIf;
+use tokio_retry::strategy::ExponentialBackoff;
+use either::Either;
 use std::cmp::PartialEq;
 use std::sync::Arc;
-use tokio::time::{sleep, Duration};
+
+/// TODO just a guess, someone knowing the context should tune this, also foreshadowing this with global parameter would be nice
+pub const DEFAULT_CONCURRENCY_LIMIT: usize = 300;
 
 /// Internal worker for replication to process a sole iteration of the replication loop.
 pub(super) struct ReplicationSender {
@@ -56,72 +61,101 @@ impl ReplicationSender {
     }
 
     pub async fn run(&mut self) -> Result<SyncState, ReductError> {
-        let entries = self
-            .log_map
-            .read()
-            .await?
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
+        let batch_max_size = self.io_config.batch_max_size;
+        let batch_max_records = self.io_config.batch_max_records;
+        
+        let log_map_lock = self
+        .log_map
+        .read()
+        .await?;
+        let log_map = log_map_lock.clone();
+        drop(log_map_lock);
 
-        let mut counter = Vec::new();
+        let mut counter_aggregated = Vec::with_capacity(log_map.len()); // can be estimated slightly better
+        
+        let mut buffered = stream::iter(log_map)
+        .map(|(entry_name, log)| async move {
+            let transactions = log.read().await.map_err(either::Either::Left)?.front(batch_max_records).await.map_err(|err| {
+                error!("Failed to read transaction: {err:?}");
+                either::Either::Right(SyncState::BrokenLog(entry_name.clone()))
+            });
+            transactions.map(|transactions| (entry_name, log, transactions))
+        }).buffer_unordered(DEFAULT_CONCURRENCY_LIMIT)
+        .try_filter(|item| future::ready(!item.2.is_empty()))
+        .map_ok(|(entry_name, log, transactions)| {
+            let src_bucket = self.settings.src_bucket.clone();
+            let storage = self.storage.clone();
+            async move {
+                let mut counter = Vec::with_capacity(1); // it will have at least `Ok()`
+                let entry_name_ref = entry_name.as_str();
+                    
+                let mut batch = Vec::new();
+                let mut total_size = 0;
+                let mut processed_transactions = 0;
+                for transaction in transactions {
+                    debug!(
+                        "Replicating transaction {}/{}/{:?}",
+                        src_bucket, entry_name_ref, transaction
+                    );
 
-        for entry_name in entries.iter() {
-            let log = {
-                // Take only the handle, drop the map lock before touching the log itself.
-                let map = self.log_map.read().await?;
-                match map.get(entry_name) {
-                    Some(log) => Arc::clone(log),
-                    None => continue, // log might be removed
-                }
-            };
+                    const STRATEGY: ExponentialBackoff = ExponentialBackoff::from_millis(5).factor(2); // https://github.com/reductstore/reductstore/pull/1419#pullrequestreview-4447002753
+                    let record_to_sync = RetryIf::start(
+                        STRATEGY.map(tokio_retry::strategy::jitter).take(7), 
+                        async || {
+                            storage
+                            .get_bucket(&src_bucket)
+                            .await?
+                            .upgrade()?
+                            .get_entry(entry_name_ref)
+                            .await?
+                            .upgrade()?
+                            .begin_read(transaction.timestamp()).await
+                        }, 
+                        |error: &ReductError| error.status == ErrorCode::TooEarly
+                    ).await;
+                    processed_transactions += 1;
 
-            let transactions = {
-                let log = log.write().await?;
-                log.front(self.io_config.batch_max_records).await
-            };
-            match transactions {
-                Ok(vec) => {
-                    if vec.is_empty() {
-                        continue;
-                    }
-                    let mut batch = Vec::new();
-                    let mut total_size = 0;
-                    let mut processed_transactions = 0;
-                    for transaction in vec {
-                        debug!(
-                            "Replicating transaction {}/{}/{:?}",
-                            self.settings.src_bucket, entry_name, transaction
-                        );
+                    match record_to_sync {
+                        Ok(record_to_sync) => {
+                            let record_size = record_to_sync.meta().content_length();
+                            total_size += record_size;
+                            batch.push((Box::new(
+                                record_to_sync
+                            ) as BoxedReadRecord, transaction));
 
-                        let record_to_sync = self.read_record(entry_name, &transaction).await;
-                        processed_transactions += 1;
-
-                        match record_to_sync {
-                            Ok(record_to_sync) => {
-                                let record_size = record_to_sync.meta().content_length();
-                                total_size += record_size;
-                                batch.push((record_to_sync, transaction));
-
-                                if total_size >= self.io_config.batch_max_size {
-                                    break;
-                                }
-                            }
-                            Err(err) => {
-                                error!(
-                                    "Failed to read record {}/{}/{}: {:?}",
-                                    self.settings.src_bucket,
-                                    entry_name,
-                                    transaction.timestamp(),
-                                    err
-                                );
-                                counter.push((Err(err), 1));
+                            if total_size >= batch_max_size {
+                                break;
                             }
                         }
+                        Err(err) => {
+                            error!(
+                                "Failed to read record {}/{}/{}: {:?}",
+                                src_bucket,
+                                entry_name_ref,
+                                transaction.timestamp(),
+                                err
+                            );
+                            counter.push((Err(err), 1));
+                        }
                     }
+                }
 
-                    let batch_size = batch.len() as u64;
-                    match self.bucket.write_batch(entry_name, batch).await {
+                Ok((entry_name, log, batch.len() as u64, batch, counter, processed_transactions))
+            }
+        }).try_buffer_unordered(DEFAULT_CONCURRENCY_LIMIT);
+        while let Some(item) = buffered.next().await  { 
+            match item {
+                Err(Either::Left(e)) => return Err(e),
+                Err(Either::Right(ok)) => return Ok(ok),
+                Ok((
+                    entry_name, 
+                    log, 
+                    batch_size,
+                    batch,
+                    mut counter, 
+                    processed_transactions
+                )) => {
+                    match self.bucket.write_batch(entry_name.as_str(), batch).await {
                         Ok(map) => {
                             counter.push((Ok(()), batch_size - map.len() as u64));
                             for (timestamp, err) in map.into_iter() {
@@ -142,79 +176,26 @@ impl ReplicationSender {
                         }
                     }
 
-                    if !self.bucket.is_active() {
-                        break;
+                    if self.bucket.is_active() {
+                        // remove processed transactions from the log
+                        if let Err(err) = 
+                            log.write().await?.pop_front(processed_transactions).await {
+                                error!("Failed to remove transaction: {err:?}");
+                            }
                     }
-
-                    // remove processed transactions from the log
-                    if let Err(err) = log.write().await?.pop_front(processed_transactions).await {
-                        error!("Failed to remove transaction: {:?}", err);
-                    }
+                    
+                    counter_aggregated.append(counter.as_mut());
                 }
-
-                Err(err) => {
-                    error!("Failed to read transaction: {:?}", err);
-                    return Ok(SyncState::BrokenLog(entry_name.clone()));
-                }
-            };
+            }
         }
 
-        Ok(if !counter.is_empty() {
-            if self.bucket.is_active() {
-                SyncState::SyncedOrRemoved(counter)
-            } else {
-                SyncState::NotAvailable(counter)
-            }
-        } else {
+        Ok(if counter_aggregated.is_empty() {
             SyncState::NoTransactions
+        } else if self.bucket.is_active() {
+            SyncState::SyncedOrRemoved(counter_aggregated)
+        } else {
+            SyncState::NotAvailable(counter_aggregated)
         })
-    }
-
-    async fn read_record(
-        &self,
-        entry_name: &str,
-        transaction: &Transaction,
-    ) -> Result<BoxedReadRecord, ReductError> {
-        let read_record_from_storage = async || {
-            let mut attempts = 3;
-            loop {
-                let read_record = async || {
-                    self.storage
-                        .get_bucket(&self.settings.src_bucket)
-                        .await?
-                        .upgrade()?
-                        .get_entry(&entry_name)
-                        .await?
-                        .upgrade()?
-                        .begin_read(*transaction.timestamp())
-                        .await
-                };
-                let record = read_record().await;
-                match record {
-                    Err(ReductError {
-                        status: ErrorCode::TooEarly,
-                        ..
-                    }) => {
-                        debug!("Transaction is too early, retrying later");
-                        sleep(Duration::from_millis(10)).await;
-                        attempts -= 1;
-                    }
-
-                    _ => {
-                        attempts = 0;
-                    }
-                }
-
-                if attempts == 0 {
-                    break record;
-                }
-            }
-        };
-
-        match read_record_from_storage().await {
-            Ok(record) => Ok(Box::new(record)),
-            Err(err) => Err(err),
-        }
     }
 }
 
@@ -259,7 +240,6 @@ mod tests {
 
             fn is_active(&self) -> bool;
         }
-
     }
 
     #[rstest]
@@ -665,7 +645,7 @@ mod tests {
             .upgrade_and_unwrap()
             .begin_write(
                 "test",
-                *transaction.timestamp(),
+                transaction.timestamp(),
                 size,
                 "text/plain".to_string(),
                 Labels::new(),

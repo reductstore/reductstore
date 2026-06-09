@@ -538,7 +538,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> Display for CfgParser<EnvGetter, E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::FutureExt;
+    use futures_util::FutureExt;
 
     use mockall::mock;
     use mockall::predicate::eq;
