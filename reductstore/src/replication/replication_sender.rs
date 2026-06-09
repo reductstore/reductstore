@@ -16,7 +16,7 @@ use std::sync::Arc;
 use tokio_retry::strategy::FibonacciBackoff;
 use tokio_retry::RetryIf;
 
-/// TODO just a guess, someone knowing the context should tune this, also foreshadowing this with global parameter would be nice
+/// TODO just a guess, someone knowing the context should tune this, also shadowing this with global parameter would be nice
 pub const DEFAULT_CONCURRENCY_LIMIT: usize = 300;
 
 /// Internal worker for replication to process a sole iteration of the replication loop.
@@ -85,7 +85,7 @@ impl ReplicationSender {
                 transactions.map(|transactions| (entry_name, log, transactions))
             })
             .buffer_unordered(DEFAULT_CONCURRENCY_LIMIT)
-            .try_filter(|item| future::ready(!item.2.is_empty()))
+            .try_filter(|(_, _, transactions)| future::ready(!transactions.is_empty()))
             .map_ok(|(entry_name, log, transactions)| {
                 let src_bucket = self.settings.src_bucket.clone();
                 let storage = self.storage.clone();
