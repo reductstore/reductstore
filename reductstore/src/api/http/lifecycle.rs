@@ -142,7 +142,8 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_settings_ok() {
-            let json = r#"{"bucket":"bucket-1","entries":["sensors/*"],"max_age":"P30D"}"#;
+            let json =
+                r#"{"type":"delete","bucket":"bucket-1","entries":["sensors/*"],"max_age":"P30D"}"#;
             let req = Request::builder().body(Body::from(json)).unwrap();
             let body = LifecycleSettingsAxum::from_request(req, &()).await.unwrap();
             assert_eq!(body.0.max_age, "P30D");
