@@ -40,19 +40,23 @@ impl Entry {
 
         let mut compressed_count = 0;
         for block_id in block_ids {
-            let mut bm = self.block_manager.write().await?;
-            if bm.is_block_in_write_cache(block_id) {
-                continue;
-            }
-
-            match bm
-                .compress_block(block_id, CompressionAlgorithm::Zstd)
-                .await
             {
-                Ok(()) => compressed_count += 1,
-                Err(err) if matches!(err.status(), ErrorCode::Conflict | ErrorCode::NotFound) => {}
-                Err(err) => return Err(err),
+                let mut bm = self.block_manager.write().await?;
+                if bm.is_block_in_write_cache(block_id) {
+                    continue;
+                }
+
+                match bm
+                    .compress_block(block_id, CompressionAlgorithm::Zstd)
+                    .await
+                {
+                    Ok(()) => compressed_count += 1,
+                    Err(err)
+                        if matches!(err.status(), ErrorCode::Conflict | ErrorCode::NotFound) => {}
+                    Err(err) => return Err(err),
+                }
             }
+            tokio::task::yield_now().await;
         }
 
         Ok(compressed_count)
@@ -184,6 +188,44 @@ mod tests {
 
         assert_eq!(entry.compress_blocks(None, None).await.unwrap(), 3);
         assert_eq!(entry.compress_blocks(None, None).await.unwrap(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn test_compress_blocks_does_not_block_concurrent_reads(path: PathBuf) {
+        let block_ids = [1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000];
+        let entry = entry(multi_block_settings(), path.clone()).await;
+        write_blocks(&entry, &block_ids).await;
+        let entry = Arc::new(restore_flushed_entry(&entry, multi_block_settings(), path).await);
+
+        let observer_entry = Arc::clone(&entry);
+        let observer = tokio::spawn(async move {
+            tokio::time::timeout(Duration::from_secs(2), async move {
+                loop {
+                    let compressed = count_compressed(&observer_entry, &block_ids).await;
+                    if compressed > 0 && compressed < block_ids.len() {
+                        return;
+                    }
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("compression should release the block manager lock between blocks");
+        });
+
+        let compress_entry = Arc::clone(&entry);
+        let compressor =
+            tokio::spawn(async move { compress_entry.compress_blocks(None, None).await });
+
+        observer.await.unwrap();
+
+        tokio::time::timeout(Duration::from_secs(1), entry.begin_read(1_000_000))
+            .await
+            .expect("concurrent read should not wait for all blocks to compress")
+            .unwrap();
+
+        assert_eq!(compressor.await.unwrap().unwrap(), block_ids.len() as u64);
     }
 
     #[rstest]
@@ -337,5 +379,19 @@ mod tests {
             "unexpected compression state for block {}",
             block_id
         );
+    }
+
+    async fn count_compressed(entry: &Entry, block_ids: &[u64]) -> usize {
+        let bm = entry.block_manager.read().await.unwrap();
+        block_ids
+            .iter()
+            .filter(|&&block_id| {
+                bm.index()
+                    .get_block(block_id)
+                    .and_then(|block| block.compression)
+                    .unwrap_or(i32::from(CompressionAlgorithm::None))
+                    == i32::from(CompressionAlgorithm::Zstd)
+            })
+            .count()
     }
 }
