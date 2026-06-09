@@ -73,7 +73,7 @@ aes-siv = "0.8.0-rc.1"
 uuid = { version = "1.21.0", features = ["v4"] }
 parking_lot="0.12.5"
 zenoh = { version = "1.9.0", optional = true }
-tokio-retry = {git = "https://github.com/skaunov/tokio-retry"} # switch to <Crates.io> when <https://github.com/djc/tokio-retry/pull/41>, `0.3.1` did not had it yet
+tokio-retry = "0.3.2"
 either = "*"
 
 [build-dependencies]
