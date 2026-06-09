@@ -839,6 +839,78 @@ mod tests {
     }
 
     #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_restore_compressed_block_missing_data(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
+        FILE_CACHE.remove(&block_index_path).await.unwrap();
+        fs::remove_file(
+            path.join("entry")
+                .join(format!("1{}", COMPRESSED_DATA_FILE_EXT)),
+        )
+        .unwrap();
+
+        let err = match EntryLoader::restore_entry(
+            path.join("entry"),
+            entry_settings,
+            Cfg::default().into(),
+        )
+        .await
+        {
+            Ok(_) => panic!("restore should fail when compressed data file is missing"),
+            Err(err) => err,
+        };
+
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_integrity_check_compressed_block_missing_data(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        fs::remove_file(
+            path.join("entry")
+                .join(format!("1{}", COMPRESSED_DATA_FILE_EXT)),
+        )
+        .unwrap();
+
+        let entry =
+            EntryLoader::restore_entry(path.join("entry"), entry_settings, Cfg::default().into())
+                .await
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(entry.info().await.unwrap().record_count, 0);
+    }
+
+    #[rstest]
     #[tokio::test]
     async fn test_check_integrity_block_index(path: PathBuf, entry_settings: EntrySettings) {
         let entry = entry(entry_settings.clone(), path.clone()).await;

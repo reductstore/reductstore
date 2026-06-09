@@ -226,6 +226,7 @@ fn cleanup_tmp_dir(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use reduct_base::error::ErrorCode;
     use serial_test::serial;
     use tempfile::tempdir;
 
@@ -253,6 +254,73 @@ mod tests {
         assert_eq!(path, cached_path);
         assert_eq!(path.parent().unwrap(), cache.temp_dir);
         assert_eq!(std::fs::read(path).unwrap(), b"content");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_or_decompress_with_corrupted_data_returns_error() {
+        let dir = tempdir().unwrap().keep();
+        let compressed_path = dir.join("1.blk.zst");
+        std::fs::write(&compressed_path, b"not valid zstd").unwrap();
+        let cache = DecompressCache::new(64, Duration::from_secs(30));
+
+        let err = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_or_decompress_descriptor_type() {
+        let dir = tempdir().unwrap().keep();
+        let compressed_path = dir.join("1.meta.zst");
+        std::fs::write(
+            &compressed_path,
+            zstd::encode_all("descriptor content".as_bytes(), 3).unwrap(),
+        )
+        .unwrap();
+        let cache = DecompressCache::new(64, Duration::from_secs(30));
+
+        let path = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Descriptor, &compressed_path)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            std::fs::read_to_string(&path).unwrap(),
+            "descriptor content"
+        );
+        assert!(path.to_str().unwrap().ends_with(".meta"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_invalidate_removes_cached_files() {
+        let dir = tempdir().unwrap().keep();
+        let data_path = dir.join("1.blk.zst");
+        let desc_path = dir.join("1.meta.zst");
+        std::fs::write(&data_path, zstd::encode_all("data".as_bytes(), 3).unwrap()).unwrap();
+        std::fs::write(&desc_path, zstd::encode_all("desc".as_bytes(), 3).unwrap()).unwrap();
+        let cache = DecompressCache::new(64, Duration::from_secs(30));
+
+        let cached_data = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &data_path)
+            .await
+            .unwrap();
+        let cached_desc = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Descriptor, &desc_path)
+            .await
+            .unwrap();
+        assert!(cached_data.exists());
+        assert!(cached_desc.exists());
+
+        cache.invalidate(&dir, 1).await;
+
+        assert!(!cached_data.exists());
+        assert!(!cached_desc.exists());
     }
 
     #[tokio::test]

@@ -208,6 +208,36 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
+    async fn compress_lifecycle_with_empty_entries_compresses_all(
+        #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
+        action: CompressLifecycleAction,
+        mut settings: LifecycleSettings,
+    ) {
+        let (test_storage, test_bucket) = test_context.await;
+        write(&test_bucket, "entry-1", 1, b"r1").await.unwrap();
+        write(&test_bucket, "entry-1", 2, b"r2").await.unwrap();
+        test_bucket.sync_fs().await.unwrap();
+        let (test_storage, _) = restore_storage(&test_storage).await;
+        settings.lifecycle_type = LifecycleType::Compress;
+        settings.max_age = "0s".to_string();
+        settings.entries = vec![];
+
+        let result = action
+            .run("test", &settings, LifecycleContext::new(test_storage))
+            .await
+            .unwrap();
+
+        assert_eq!(result.affected_records, 1);
+    }
+
+    #[rstest]
+    fn compress_action_lifecycle_type(action: CompressLifecycleAction) {
+        assert_eq!(action.lifecycle_type(), LifecycleType::Compress);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
     async fn compress_lifecycle_skips_meta_entries(
         #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
         action: CompressLifecycleAction,

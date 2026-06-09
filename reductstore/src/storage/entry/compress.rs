@@ -260,6 +260,40 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
+    async fn test_count_compressible_blocks_start_only(path: PathBuf) {
+        let entry = entry(multi_block_settings(), path.clone()).await;
+        write_blocks(&entry, &[1_000_000, 2_000_000, 3_000_000]).await;
+        let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
+
+        assert_eq!(
+            entry
+                .count_compressible_blocks(Some(2_000_000), None)
+                .await
+                .unwrap(),
+            2
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_count_compressible_blocks_stop_only(path: PathBuf) {
+        let entry = entry(multi_block_settings(), path.clone()).await;
+        write_blocks(&entry, &[1_000_000, 2_000_000, 3_000_000]).await;
+        let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
+
+        assert_eq!(
+            entry
+                .count_compressible_blocks(None, Some(3_000_000))
+                .await
+                .unwrap(),
+            2
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
     async fn test_count_compressible_blocks_after_compression(path: PathBuf) {
         let entry = entry(multi_block_settings(), path.clone()).await;
         write_blocks(&entry, &[1_000_000, 2_000_000, 3_000_000]).await;
