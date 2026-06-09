@@ -60,7 +60,7 @@ mod tests {
     use super::*;
     use crate::cfg::Cfg;
     use crate::lifecycle::lifecycle_task::tests::{settings, storage};
-    use crate::storage::bucket::tests::write;
+    use crate::storage::bucket::tests::{write, write_meta};
     use crate::storage::bucket::Bucket;
     use crate::storage::engine::StorageEngine;
     use rstest::{fixture, rstest};
@@ -203,5 +203,32 @@ mod tests {
                 .affected_records,
             0
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn compress_lifecycle_skips_meta_entries(
+        #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
+        action: CompressLifecycleAction,
+        mut settings: LifecycleSettings,
+    ) {
+        let (test_storage, test_bucket) = test_context.await;
+        write_meta(&test_bucket, "entry-1/$meta", 1, b"meta")
+            .await
+            .unwrap();
+        test_bucket.sync_fs().await.unwrap();
+        let (test_storage, test_bucket) = restore_storage(&test_storage).await;
+        settings.lifecycle_type = LifecycleType::Compress;
+        settings.max_age = "0s".to_string();
+        settings.entries = vec!["entry-1/$meta".to_string()];
+
+        let result = action
+            .run("test", &settings, LifecycleContext::new(test_storage))
+            .await
+            .unwrap();
+
+        assert_eq!(result.affected_records, 0);
+        assert!(test_bucket.begin_read("entry-1/$meta", 1).await.is_ok());
     }
 }

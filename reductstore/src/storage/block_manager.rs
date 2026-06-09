@@ -419,7 +419,7 @@ impl BlockManager {
         block_id: u64,
         records: Vec<Record>,
     ) -> Result<(), ReductError> {
-        self.decompress_block_metadata(block_id).await?;
+        self.decompress_block(block_id).await?;
         let block_ref = self.load_block(block_id).await?;
 
         // First, append all WAL entries
@@ -813,26 +813,11 @@ impl BlockManager {
 
         trace!("Updating block index");
         // update index with block crc
-        let previous_compression = self
-            .block_index
-            .get_block(block_id)
-            .and_then(|block| block.compression);
-        let previous_size = self.block_index.get_block(block_id).map(|block| block.size);
         let mut crc = Digest::new();
         crc.write(&buf);
         proto.metadata_size = len; // update metadata size because it changed
         self.block_index
             .insert_or_update_with_crc(proto, crc.sum64());
-        if let Some(compression) = previous_compression {
-            if compression != i32::from(CompressionAlgorithm::None) {
-                if let Some(block) = self.block_index.get_block_mut(block_id) {
-                    block.compression = Some(compression);
-                    if let Some(size) = previous_size {
-                        block.size = size;
-                    }
-                }
-            }
-        }
 
         if self.cfg.role != InstanceRole::Replica {
             self.block_index.save().await?;
@@ -1268,7 +1253,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_update_records_decompresses_metadata_only(
+        async fn test_update_records_decompresses_block(
             #[future] block_manager: BlockManager,
             #[future] block: BlockRef,
             block_id: u64,
@@ -1291,10 +1276,10 @@ mod tests {
 
             bm.update_records(block_id, vec![record]).await.unwrap();
 
-            assert!(bm.block_is_compressed(block_id));
-            assert!(!bm.path_to_data(block_id).exists());
+            assert!(!bm.block_is_compressed(block_id));
+            assert!(bm.path_to_data(block_id).exists());
             assert!(bm.path_to_desc(block_id).exists());
-            assert!(bm.path_to_compressed_data(block_id).exists());
+            assert!(!bm.path_to_compressed_data(block_id).exists());
             assert!(!bm.path_to_compressed_desc(block_id).exists());
             let block_ref = bm.load_block(block_id).await.unwrap();
             let block = block_ref.read().await.unwrap();

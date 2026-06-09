@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block::Block;
-use crate::storage::block_manager::DESCRIPTOR_FILE_EXT;
+use crate::storage::block_manager::{COMPRESSED_DESCRIPTOR_FILE_EXT, DESCRIPTOR_FILE_EXT};
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
     ts_to_us, us_to_ts, Block as BlockProto, BlockIndex as BlockIndexProto, MinimalBlock,
@@ -146,7 +146,10 @@ impl BlockIndex {
                 .read_dir(&path.parent().unwrap().into())
                 .await?
                 .iter()
-                .any(|path| path.ends_with(DESCRIPTOR_FILE_EXT));
+                .any(|path| {
+                    path.ends_with(DESCRIPTOR_FILE_EXT)
+                        || path.ends_with(COMPRESSED_DESCRIPTOR_FILE_EXT)
+                });
 
             if has_block_descriptors {
                 return Err(internal_server_error!("Block index {:?} is empty", path));

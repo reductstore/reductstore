@@ -41,12 +41,14 @@ impl DecompressedFileType {
 
 pub(crate) struct DecompressCache {
     cache: Arc<AsyncRwLock<Cache<String, PathBuf>>>,
+    temp_dir: PathBuf,
 }
 
 impl DecompressCache {
     pub(crate) fn new(max_size: usize, ttl: Duration) -> Self {
         Self {
             cache: Arc::new(AsyncRwLock::new(Cache::new(max_size, ttl))),
+            temp_dir: Self::temp_dir(),
         }
     }
 
@@ -128,7 +130,15 @@ impl DecompressCache {
             internal_server_error!("Failed to decompress file {:?}: {}", compressed_path, err)
         })?;
 
-        let temp_path = Self::temp_path(entry_path, block_id, file_type);
+        std::fs::create_dir_all(&self.temp_dir).map_err(|err| {
+            internal_server_error!(
+                "Failed to create decompressed temporary directory {:?}: {}",
+                self.temp_dir,
+                err
+            )
+        })?;
+
+        let temp_path = self.temp_path(entry_path, block_id, file_type);
         let mut temp_file = OpenOptions::new()
             .create(true)
             .truncate(true)
@@ -160,7 +170,25 @@ impl DecompressCache {
         Ok(temp_path)
     }
 
-    fn temp_path(entry_path: &Path, block_id: u64, file_type: DecompressedFileType) -> PathBuf {
+    fn temp_dir() -> PathBuf {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map(|duration| duration.as_nanos())
+            .unwrap_or_default();
+
+        std::env::temp_dir().join(format!(
+            "reductstore_decompress_cache_{}_{}",
+            std::process::id(),
+            unique
+        ))
+    }
+
+    fn temp_path(
+        &self,
+        entry_path: &Path,
+        block_id: u64,
+        file_type: DecompressedFileType,
+    ) -> PathBuf {
         let mut hasher = DefaultHasher::new();
         entry_path.hash(&mut hasher);
         block_id.hash(&mut hasher);
@@ -171,8 +199,8 @@ impl DecompressCache {
             .map(|duration| duration.as_nanos())
             .unwrap_or_default();
 
-        std::env::temp_dir().join(format!(
-            "reductstore_{}_{}_{}.{}",
+        self.temp_dir.join(format!(
+            "{}_{}_{}.{}",
             entry_hash,
             block_id,
             unique,
@@ -181,8 +209,18 @@ impl DecompressCache {
     }
 }
 
+impl Drop for DecompressCache {
+    fn drop(&mut self) {
+        cleanup_tmp_dir(&self.temp_dir);
+    }
+}
+
 fn cleanup_tmp(path: &Path) {
     let _ = std::fs::remove_file(path);
+}
+
+fn cleanup_tmp_dir(path: &Path) {
+    let _ = std::fs::remove_dir_all(path);
 }
 
 #[cfg(test)]
@@ -213,7 +251,33 @@ mod tests {
             .unwrap();
 
         assert_eq!(path, cached_path);
+        assert_eq!(path.parent().unwrap(), cache.temp_dir);
         assert_eq!(std::fs::read(path).unwrap(), b"content");
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_drop_removes_temp_dir() {
+        let dir = tempdir().unwrap().keep();
+        let compressed_path = dir.join("1.blk.zst");
+        std::fs::write(
+            &compressed_path,
+            zstd::encode_all("content".as_bytes(), 3).unwrap(),
+        )
+        .unwrap();
+        let cache = DecompressCache::new(64, Duration::from_secs(30));
+        let temp_dir = cache.temp_dir.clone();
+
+        let path = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+            .await
+            .unwrap();
+        assert!(path.exists());
+
+        drop(cache);
+
+        assert!(!temp_dir.exists());
+        assert!(!path.exists());
     }
 
     #[tokio::test]
