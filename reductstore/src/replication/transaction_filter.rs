@@ -28,7 +28,7 @@ impl FilterRecord for TransactionNotification {
     }
 
     fn labels(&self) -> HashMap<&String, &String> {
-        self.meta.labels().iter().map(|(k, v)| (k, v)).collect()
+        self.meta.labels().iter().collect()
     }
 
     fn set_labels(&mut self, labels: HashMap<String, String>) {
@@ -38,11 +38,7 @@ impl FilterRecord for TransactionNotification {
     }
 
     fn computed_labels(&self) -> HashMap<&String, &String> {
-        self.meta
-            .computed_labels()
-            .iter()
-            .map(|(k, v)| (k, v))
-            .collect()
+        self.meta.computed_labels().iter().collect()
     }
 
     fn state(&self) -> i32 {

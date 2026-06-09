@@ -22,26 +22,26 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .await;
         for (name, replication) in &self.cfg.replications {
             if let Err(e) = repo
-                .create_replication(&name, replication.settings.clone())
+                .create_replication(name, replication.settings.clone())
                 .await
             {
                 if e.status() == ErrorCode::Conflict {
                     let mut settings = replication.settings.clone();
                     if replication.mode_override.is_none() {
-                        if let Ok(info) = repo.get_info(&name).await {
+                        if let Ok(info) = repo.get_info(name).await {
                             settings.mode = info.info.mode;
                         }
                     }
-                    repo.update_replication(&name, settings).await?;
+                    repo.update_replication(name, settings).await?;
                 } else {
                     error!("Failed to provision replication '{}': {}", name, e);
                     continue;
                 }
             }
 
-            repo.set_replication_provisioned(&name, true).await?;
+            repo.set_replication_provisioned(name, true).await?;
 
-            let info_data = repo.get_info(&name).await?;
+            let info_data = repo.get_info(name).await?;
             info!(
                 "Provisioned replication '{}' with {:?}",
                 name, info_data.settings
@@ -175,13 +175,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             }
         }
 
-        let replications = replications
+        replications
             .into_iter()
             .filter(|(id, _)| !unfinished_replications.contains(id))
             .map(|(_, (name, replication))| (name, replication))
-            .collect();
-
-        replications
+            .collect()
     }
 }
 

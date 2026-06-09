@@ -3022,6 +3022,7 @@ dependencies = [
  "crc64fast",
  "crossbeam-channel",
  "dlopen2",
+ "either",
  "flate2",
  "futures",
  "futures-util",
@@ -3049,6 +3050,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "tokio",
+ "tokio-retry",
  "tower",
  "tower-http",
  "url",
@@ -4132,6 +4134,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "tokio-retry"
+version = "0.3.1"
+source = "git+https://github.com/skaunov/tokio-retry#9a37100ec56a689351a8d5d2c9be13523964e7fc"
+dependencies = [
+ "pin-project-lite",
+ "rand 0.10.1",
+ "tokio",
 ]
 
 [[package]]

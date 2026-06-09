@@ -176,7 +176,7 @@ impl FileCache {
 
         // For scheduled synchronization we syn only a batch of files that are the most overdue for synchronization
         if !force {
-            files_to_sync.sort_by(|a, b| a.2.cmp(&b.2));
+            files_to_sync.sort_by_key(|a| a.2);
             files_to_sync.truncate(FILE_CACHE_SYNC_BATCH_SIZE);
         }
 

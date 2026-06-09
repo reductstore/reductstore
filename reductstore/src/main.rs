@@ -7,6 +7,5 @@ use reductstore::{cfg::CoreExtCfgParser, launcher::launch_server};
 #[tokio::main]
 async fn main() {
     maybe_print_version_and_exit();
-    let ext_cfg_parser = CoreExtCfgParser;
-    launch_server(ext_cfg_parser).await;
+    launch_server::<CoreExtCfgParser, _>().await;
 }

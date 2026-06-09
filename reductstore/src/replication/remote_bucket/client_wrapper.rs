@@ -147,9 +147,12 @@ impl BucketWrapper {
 
     fn prepare_batch_to_write(
         mut records: Vec<BoxedReadRecord>,
-    ) -> (HeaderMap, impl futures_util::Stream<Item = Result<Bytes, ReductError>>) {
+    ) -> (
+        HeaderMap,
+        impl futures_util::Stream<Item = Result<Bytes, ReductError>>,
+    ) {
         Self::sort_by_timestamp(&mut records);
-        let headers = Self::build_headers(&mut records, false);
+        let headers = Self::build_headers(&records, false);
 
         let stream = async_stream::stream! {
             while let Some(mut record) = records.pop() {
@@ -163,8 +166,7 @@ impl BucketWrapper {
     }
 
     fn prepare_batch_to_update(records: &Vec<BoxedReadRecord>) -> HeaderMap {
-        let headers = Self::build_headers(&records, true);
-        headers
+        Self::build_headers(records, true)
     }
 
     fn parse_record_errors(
@@ -216,7 +218,7 @@ impl ReductClientApi for ReductClient {
     async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
         let request = self.client_api.client().request(
             Method::GET,
-            &format!("{}{}/b/{}", self.server_url, API_PATH, bucket_name),
+            format!("{}{}/b/{}", self.server_url, API_PATH, bucket_name),
         );
 
         let resp = request.send().await;
@@ -244,7 +246,7 @@ impl ReductBucketApi for BucketWrapper {
         let (headers, stream) = Self::prepare_batch_to_write(records);
         let request = self.client.request(
             Method::POST,
-            &format!(
+            format!(
                 "{}{}/b/{}/{}/batch",
                 self.server_url, API_PATH, self.bucket_name, entry
             ),
@@ -267,7 +269,7 @@ impl ReductBucketApi for BucketWrapper {
         let headers = Self::prepare_batch_to_update(records);
         let request = self.client.request(
             Method::PATCH,
-            &format!(
+            format!(
                 "{}{}/b/{}/{}/batch",
                 self.server_url, API_PATH, self.bucket_name, entry
             ),

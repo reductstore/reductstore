@@ -20,6 +20,7 @@ use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
 
 /// Responsible for reading the content of a record from the storage.
+#[derive(Debug)]
 pub(crate) struct RecordReader {
     meta: RecordMeta,
     file_path: Option<PathBuf>,
@@ -132,7 +133,7 @@ impl RecordReader {
                 let mut file_guard = FILE_CACHE
                     .read(&path, SeekFrom::Start(offset + pos))
                     .await
-                    .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
+                    .map_err(|e| io::Error::other(e.to_string()))?;
                 file_guard.read(buf)
             })
         });
@@ -228,7 +229,7 @@ pub(in crate::storage) async fn read_in_chunks(
     let mut buf = vec![0; chunk_size as usize];
 
     let mut file = FILE_CACHE
-        .read(&file_path, SeekFrom::Start(offset + read_bytes))
+        .read(file_path, SeekFrom::Start(offset + read_bytes))
         .await?;
 
     let read = match file.read(&mut buf) {

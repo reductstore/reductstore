@@ -27,9 +27,9 @@ pub enum Transaction {
     UpdateRecord(u64),
 }
 
-impl Into<u8> for Transaction {
-    fn into(self) -> u8 {
-        match self {
+impl From<Transaction> for u8 {
+    fn from(val: Transaction) -> Self {
+        match val {
             Transaction::WriteRecord(_) => 0,
             Transaction::UpdateRecord(_) => 1,
         }

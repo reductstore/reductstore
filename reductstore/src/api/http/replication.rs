@@ -47,11 +47,11 @@ where
                 "Invalid body",
             )
         })?;
-        let response = match serde_json::from_slice::<ReplicationModePayload>(&*bytes) {
+
+        match serde_json::from_slice::<ReplicationModePayload>(&bytes) {
             Ok(x) => Ok(ReplicationModePayloadAxum::from(x)),
             Err(e) => Err(crate::api::http::HttpError::from(e)),
-        };
-        response
+        }
     }
 }
 
@@ -69,11 +69,11 @@ where
                 "Invalid body",
             )
         })?;
-        let response = match serde_json::from_slice::<ReplicationSettings>(&*bytes) {
+
+        match serde_json::from_slice::<ReplicationSettings>(&bytes) {
             Ok(x) => Ok(ReplicationSettingsAxum::from(x)),
             Err(e) => Err(crate::api::http::HttpError::from(e)),
-        };
-        response
+        }
     }
 }
 
