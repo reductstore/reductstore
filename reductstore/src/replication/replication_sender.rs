@@ -98,19 +98,21 @@ impl ReplicationSender {
                         src_bucket, entry_name_ref, transaction
                     );
 
-                    const STRATEGY: ExponentialBackoff = ExponentialBackoff::from_millis(5).factor(2); // https://github.com/reductstore/reductstore/pull/1419#pullrequestreview-4447002753
+                    const STRATEGY: FibonacciBackoff = FibonacciBackoff::from_millis(5).factor(2); // https://github.com/reductstore/reductstore/pull/1419#pullrequestreview-4447002753
                     let record_to_sync = RetryIf::start(
-                        STRATEGY.map(tokio_retry::strategy::jitter).take(7), 
+                        STRATEGY
+                        // .map(tokio_retry::strategy::jitter)
+                        .take(6),
                         async || {
                             storage
-                            .get_bucket(&src_bucket)
-                            .await?
-                            .upgrade()?
-                            .get_entry(entry_name_ref)
-                            .await?
-                            .upgrade()?
-                            .begin_read(transaction.timestamp()).await
-                        }, 
+                                .get_bucket(&src_bucket)
+                                .await?
+                                .upgrade()?
+                                .get_entry(entry_name_ref)
+                                .await?
+                                .upgrade()?
+                        .begin_read(transaction.timestamp()).await
+                        },
                         |error: &ReductError| error.status == ErrorCode::TooEarly
                     ).await;
                     processed_transactions += 1;
