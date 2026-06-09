@@ -97,6 +97,8 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::cfg::Cfg;
+    use crate::core::file_cache::FILE_CACHE;
+    use crate::storage::block_manager::DATA_FILE_EXT;
     use crate::storage::entry::EntrySettings;
     use bytes::Bytes;
     use reduct_base::Labels;
@@ -326,6 +328,26 @@ mod tests {
         assert_compressed(&entry, 1_000_000, true).await;
         assert_compressed(&entry, 2_000_000, false).await;
         assert_compressed(&entry, 3_000_000, false).await;
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_compress_blocks_returns_internal_error(path: PathBuf) {
+        let entry = entry(multi_block_settings(), path.clone()).await;
+        write_blocks(&entry, &[1_000_000]).await;
+        let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
+        {
+            let bm = entry.block_manager.read().await.unwrap();
+            FILE_CACHE
+                .remove(&bm.path().join(format!("1000000{}", DATA_FILE_EXT)))
+                .await
+                .unwrap();
+        }
+
+        let err = entry.compress_blocks(None, None).await.err().unwrap();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
     }
 
     #[fixture]

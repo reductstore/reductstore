@@ -226,8 +226,11 @@ fn cleanup_tmp_dir(path: &Path) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::cache::Cache;
+    use crate::core::sync::AsyncRwLock;
     use reduct_base::error::ErrorCode;
     use serial_test::serial;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     #[tokio::test]
@@ -321,6 +324,32 @@ mod tests {
 
         assert!(!cached_data.exists());
         assert!(!cached_desc.exists());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_get_or_decompress_returns_error_when_temp_dir_is_file() {
+        let dir = tempdir().unwrap().keep();
+        let compressed_path = dir.join("1.blk.zst");
+        let temp_dir = dir.join("temp-file");
+        std::fs::write(
+            &compressed_path,
+            zstd::encode_all("content".as_bytes(), 3).unwrap(),
+        )
+        .unwrap();
+        std::fs::write(&temp_dir, b"not a directory").unwrap();
+        let cache = DecompressCache {
+            cache: Arc::new(AsyncRwLock::new(Cache::new(64, Duration::from_secs(30)))),
+            temp_dir,
+        };
+
+        let err = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
     }
 
     #[tokio::test]

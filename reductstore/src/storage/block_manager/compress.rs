@@ -440,6 +440,18 @@ mod tests {
     }
 
     #[rstest]
+    fn test_compression_algorithm_from_proto() {
+        assert_eq!(
+            CompressionAlgorithm::from(ProtoCompressionAlgorithm::None),
+            CompressionAlgorithm::None
+        );
+        assert_eq!(
+            CompressionAlgorithm::from(ProtoCompressionAlgorithm::Zstd),
+            CompressionAlgorithm::Zstd
+        );
+    }
+
+    #[rstest]
     #[tokio::test]
     #[serial]
     async fn test_compress_block_noop_with_none_algorithm() {
@@ -487,6 +499,30 @@ mod tests {
             .unwrap();
 
         assert_eq!(err.status(), ErrorCode::NotFound);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_compress_block_cleans_temp_when_data_compression_fails() {
+        let (mut block_manager, block_id, _, _) =
+            block_manager_with_data(b"missing source".to_vec()).await;
+        FILE_CACHE
+            .remove(&block_manager.path_to_data(block_id))
+            .await
+            .unwrap();
+
+        let err = block_manager
+            .compress_block(block_id, CompressionAlgorithm::Zstd)
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(!block_manager
+            .path()
+            .join(format!("{}{}.tmp", block_id, COMPRESSED_DATA_FILE_EXT))
+            .exists());
     }
 
     #[rstest]
@@ -625,6 +661,63 @@ mod tests {
             .await
             .err()
             .unwrap();
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_compress_file_zstd_missing_temp_parent() {
+        let dir = tempdir().unwrap().keep();
+        let source_path = dir.join("source.blk");
+        let temp_path = dir.join("missing").join("source.blk.zst.tmp");
+        std::fs::write(&source_path, b"data").unwrap();
+
+        let err = compress_file_zstd(&source_path, &temp_path, 4)
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_compress_file_zstd_short_source() {
+        let dir = tempdir().unwrap().keep();
+        let source_path = dir.join("source.blk");
+        let temp_path = dir.join("source.blk.zst.tmp");
+        std::fs::write(&source_path, b"a").unwrap();
+
+        let err = compress_file_zstd(&source_path, &temp_path, 2)
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        cleanup_tmp(&temp_path);
+        assert!(!temp_path.exists());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_decompress_file_zstd_missing_output_parent() {
+        let dir = tempdir().unwrap().keep();
+        let compressed_path = dir.join("source.blk.zst");
+        let output_path = dir.join("missing").join("source.blk");
+        std::fs::write(
+            &compressed_path,
+            zstd::encode_all("data".as_bytes(), 3).unwrap(),
+        )
+        .unwrap();
+
+        let err = decompress_file_zstd(&compressed_path, &output_path)
+            .await
+            .err()
+            .unwrap();
+
         assert_eq!(err.status(), ErrorCode::InternalServerError);
     }
 

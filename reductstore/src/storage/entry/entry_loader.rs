@@ -911,6 +911,76 @@ mod tests {
     }
 
     #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_restore_compressed_block_with_corrupted_descriptor(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        FILE_CACHE
+            .remove(&path.join("entry").join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap();
+        fs::write(
+            path.join("entry")
+                .join(format!("1{}", COMPRESSED_DESCRIPTOR_FILE_EXT)),
+            b"not valid zstd",
+        )
+        .unwrap();
+
+        let err = match EntryLoader::restore_entry(
+            path.join("entry"),
+            entry_settings,
+            Cfg::default().into(),
+        )
+        .await
+        {
+            Ok(_) => panic!("restore should fail when descriptor is corrupted"),
+            Err(err) => err,
+        };
+
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_restore_block_without_begin_time(path: PathBuf, entry_settings: EntrySettings) {
+        let entry_path = path.join("entry");
+        FILE_CACHE.create_dir_all(&entry_path).await.unwrap();
+        let block = MinimalBlock {
+            begin_time: None,
+            latest_record_time: None,
+            size: 1,
+            record_count: 1,
+            metadata_size: 0,
+        };
+        fs::write(entry_path.join("1.meta"), block.encode_to_vec()).unwrap();
+        fs::write(entry_path.join("1.blk"), b"a").unwrap();
+
+        let entry =
+            EntryLoader::restore_entry(entry_path.clone(), entry_settings, Cfg::default().into())
+                .await
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(entry.info().await.unwrap().record_count, 0);
+        assert!(!entry_path.join("1.meta").exists());
+        assert!(!entry_path.join("1.blk").exists());
+    }
+
+    #[rstest]
     #[tokio::test]
     async fn test_check_integrity_block_index(path: PathBuf, entry_settings: EntrySettings) {
         let entry = entry(entry_settings.clone(), path.clone()).await;
