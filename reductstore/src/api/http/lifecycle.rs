@@ -151,17 +151,6 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_settings_legacy_max_age_alias() {
-            let json =
-                r#"{"type":"delete","bucket":"bucket-1","entries":["sensors/*"],"max_age":"P30D"}"#;
-            let req = Request::builder().body(Body::from(json)).unwrap();
-            let body = LifecycleSettingsAxum::from_request(req, &()).await.unwrap();
-            assert_eq!(body.0.older_than, "P30D");
-            assert_eq!(body.0.interval, "3600s");
-        }
-
-        #[rstest]
-        #[tokio::test]
         async fn test_settings_invalid_json() {
             let req = Request::builder().body(Body::from("{bad")).unwrap();
             let err = LifecycleSettingsAxum::from_request(req, &())

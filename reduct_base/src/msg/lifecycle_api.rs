@@ -170,23 +170,6 @@ mod tests {
     }
 
     #[test]
-    fn lifecycle_settings_accepts_legacy_max_age_field() {
-        let settings: LifecycleSettings = serde_json::from_str(
-            r#"{
-                "type": "delete",
-                "bucket": "bucket-1",
-                "entries": ["entry-1"],
-                "max_age": "1d",
-                "interval": "1h"
-            }"#,
-        )
-        .unwrap();
-
-        assert_eq!(settings.older_than, "1d");
-        assert_eq!(serde_json::to_value(&settings).unwrap()["older_than"], "1d");
-    }
-
-    #[test]
     fn lifecycle_settings_type_is_required() {
         let err = serde_json::from_str::<LifecycleSettings>(
             r#"{

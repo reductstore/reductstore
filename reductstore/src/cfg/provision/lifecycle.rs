@@ -300,6 +300,17 @@ mod tests {
     }
 
     #[rstest]
+    #[tokio::test]
+    async fn drops_lifecycle_without_older_than(path: PathBuf) {
+        let mut env_getter = lifecycle_env(path, &[]);
+        env_getter.values.remove("RS_LIFECYCLE_A_MAX_AGE");
+
+        let (lifecycles, settings, _) = lifecycle_infos(env_getter).await;
+        assert!(lifecycles.is_empty());
+        assert!(settings.is_none());
+    }
+
+    #[rstest]
     fn parse_lifecycles_parses_compress_type() {
         let getter = TestEnvGetter::new(&[
             ("RS_LIFECYCLE_A_NAME", "compress-sensors-30d"),
