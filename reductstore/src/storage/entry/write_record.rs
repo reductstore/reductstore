@@ -78,6 +78,9 @@ impl Entry {
                 bm.start_new_block(time, settings.max_block_size).await?
             } else {
                 let block_id = *bm.index().tree().last().unwrap();
+                if bm.block_is_compressed(block_id) {
+                    bm.decompress_block(block_id).await?;
+                }
                 bm.load_block(block_id).await?
             };
             block_ref
@@ -106,9 +109,12 @@ impl Entry {
                     RecordType::BelatedFirst
                 } else {
                     block_ref = bm.find_block(time).await?;
+                    let block_id = block_ref.read().await?.block_id();
+                    if bm.block_is_compressed(block_id) {
+                        bm.decompress_block(block_id).await?;
+                    }
                     drop(bm); // drop the lock early to avoid blocking other operations
 
-                    let block_id = block_ref.read().await?.block_id();
                     debug!(
                         "Timestamp {} is belated for {}/{}. Writing to block {}",
                         time, self.bucket_name, self.name, block_id
@@ -216,6 +222,8 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use crate::cfg::Cfg;
+    use crate::storage::block_manager::compress::CompressionAlgorithm;
+    use crate::storage::block_manager::{COMPRESSED_DATA_FILE_EXT, COMPRESSED_DESCRIPTOR_FILE_EXT};
     use crate::storage::entry::tests::{entry, path, write_stub_record};
     use crate::storage::entry::{Entry, EntrySettings};
     use crate::storage::proto::{record, us_to_ts, Record};
@@ -583,6 +591,80 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
+    async fn test_write_to_compressed_latest_block_decompresses(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
+        write_stub_record(&entry, 1000000).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1000000, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        write_stub_record(&entry, 1000001).await;
+
+        let mut bm = entry.block_manager.write().await.unwrap();
+        let block = bm.load_block(1000000).await.unwrap();
+        let block = block.read().await.unwrap();
+        assert!(!bm.block_is_compressed(1000000));
+        assert_eq!(block.record_count(), 2);
+        assert!(block.get_record(1000000).is_some());
+        assert!(block.get_record(1000001).is_some());
+        assert!(!bm
+            .path()
+            .join(format!("{}{}", 1000000, COMPRESSED_DATA_FILE_EXT))
+            .exists());
+        assert!(!bm
+            .path()
+            .join(format!("{}{}", 1000000, COMPRESSED_DESCRIPTOR_FILE_EXT))
+            .exists());
+    }
+
+    #[rstest]
+    #[serial]
+    #[tokio::test]
+    async fn test_belated_write_to_compressed_block_decompresses(path: PathBuf) {
+        let entry = entry(
+            EntrySettings {
+                max_block_size: 30,
+                max_block_records: 10000,
+            },
+            path,
+        )
+        .await;
+        write_record_with_size(&entry, 1000000, 20).await;
+        write_record_with_size(&entry, 3000000, 20).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1000000, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        write_record_with_size(&entry, 2000000, 5).await;
+
+        let mut bm = entry.block_manager.write().await.unwrap();
+        let block = bm.load_block(1000000).await.unwrap();
+        let block = block.read().await.unwrap();
+        assert!(!bm.block_is_compressed(1000000));
+        assert_eq!(block.record_count(), 2);
+        assert!(block.get_record(1000000).is_some());
+        assert!(block.get_record(2000000).is_some());
+        assert!(!bm
+            .path()
+            .join(format!("{}{}", 1000000, COMPRESSED_DATA_FILE_EXT))
+            .exists());
+        assert!(!bm
+            .path()
+            .join(format!("{}{}", 1000000, COMPRESSED_DESCRIPTOR_FILE_EXT))
+            .exists());
+    }
+
+    #[rstest]
+    #[serial]
+    #[tokio::test]
     async fn test_meta_entry_requires_key_label(path: PathBuf) {
         let entry = Arc::new(
             Entry::try_build(
@@ -717,5 +799,18 @@ mod tests {
             )
         );
         assert!(entry.begin_read(1).await.is_ok());
+    }
+
+    async fn write_record_with_size(entry: &Arc<Entry>, time: u64, size: usize) {
+        let mut sender = entry
+            .clone()
+            .begin_write(time, size as u64, "text/plain".to_string(), Labels::new())
+            .await
+            .unwrap();
+        sender
+            .send(Ok(Some(Bytes::from(vec![0; size]))))
+            .await
+            .unwrap();
+        sender.send(Ok(None)).await.unwrap();
     }
 }

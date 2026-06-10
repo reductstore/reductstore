@@ -304,6 +304,12 @@ impl LifecycleRepository {
             ));
         }
 
+        if settings.lifecycle_type == LifecycleType::Compress && settings.when.is_some() {
+            return Err(unprocessable_entity!(
+                "Lifecycle type 'compress' does not support 'when' condition"
+            ));
+        }
+
         if let Some(when) = &settings.when {
             let (_, directives) = Parser::new().parse(when.clone()).map_err(|err| {
                 unprocessable_entity!("Invalid lifecycle condition: {}", err.message)
@@ -581,6 +587,14 @@ mod tests {
         },
         unprocessable_entity!("Lifecycle condition cannot use '#ext' directive")
     )]
+    #[case::compress_with_when(
+        LifecycleSettings {
+            lifecycle_type: LifecycleType::Compress,
+            when: Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y"]})),
+            ..settings_fixture()
+        },
+        unprocessable_entity!("Lifecycle type 'compress' does not support 'when' condition")
+    )]
     #[tokio::test]
     async fn rejects_invalid_settings(
         #[future] mut repo: LifecycleRepository,
@@ -590,6 +604,23 @@ mod tests {
         let mut repo = repo.await;
         assert_eq!(repo.create_lifecycle("test", settings).await, Err(expected));
         assert!(repo.lifecycles().await.unwrap().is_empty());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn creates_compress_lifecycle_without_when(#[future] mut repo: LifecycleRepository) {
+        let mut repo = repo.await;
+        let settings = LifecycleSettings {
+            lifecycle_type: LifecycleType::Compress,
+            when: None,
+            ..settings_fixture()
+        };
+
+        repo.create_lifecycle("test", settings.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), settings);
     }
 
     #[rstest]

@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 impl Bucket {
-    fn requested_entries(entries: &Option<Vec<String>>) -> Option<Vec<String>> {
+    pub(super) fn requested_entries(entries: &Option<Vec<String>>) -> Option<Vec<String>> {
         match entries {
             Some(entries) if entries.iter().any(|entry| entry == "*") => None,
             Some(entries) => Some(entries.clone()),
@@ -16,7 +16,7 @@ impl Bucket {
         }
     }
 
-    fn entry_matches_patterns(entry: &str, patterns: &[String]) -> bool {
+    pub(super) fn entry_matches_patterns(entry: &str, patterns: &[String]) -> bool {
         patterns.iter().any(|pattern| {
             if let Some(prefix) = pattern.strip_suffix('*') {
                 entry.starts_with(prefix)
@@ -26,7 +26,10 @@ impl Bucket {
         })
     }
 
-    fn is_requested_entry(entry_name: &str, requested_entries: &Option<Vec<String>>) -> bool {
+    pub(super) fn is_requested_entry(
+        entry_name: &str,
+        requested_entries: &Option<Vec<String>>,
+    ) -> bool {
         requested_entries
             .as_ref()
             .map(|patterns| Self::entry_matches_patterns(entry_name, patterns))
