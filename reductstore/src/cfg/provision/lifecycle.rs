@@ -105,9 +105,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             if let Some(max_age) =
                 env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_MAX_AGE", id))
             {
-                lifecycle.settings.max_age = max_age;
+                lifecycle.settings.older_than = max_age;
             } else {
-                error!("Lifecycle '{}' has no max age. Drop it.", name);
+                error!("Lifecycle '{}' has no older_than value. Drop it.", name);
                 unfinished_lifecycles.push(id.clone());
                 continue;
             }
@@ -279,7 +279,7 @@ mod tests {
             settings.entries,
             vec!["sensors/*", "env/temp", "env/humidity"]
         );
-        assert_eq!(settings.max_age, "30d");
+        assert_eq!(settings.older_than, "30d");
         assert_eq!(settings.interval, "10m");
         assert_eq!(settings.mode, LifecycleMode::Enabled);
         assert_eq!(
@@ -354,7 +354,7 @@ mod tests {
             lifecycle.settings.entries,
             vec!["sensors/*", "env/temp", "env/humidity"]
         );
-        assert_eq!(lifecycle.settings.max_age, "30d");
+        assert_eq!(lifecycle.settings.older_than, "30d");
         assert_eq!(lifecycle.settings.interval, "10m");
         assert_eq!(lifecycle.settings.mode, LifecycleMode::Enabled);
         assert_eq!(
@@ -439,7 +439,7 @@ mod tests {
                 lifecycle_type: LifecycleType::Delete,
                 bucket: "telemetry".to_string(),
                 entries: vec![],
-                max_age: "1d".to_string(),
+                older_than: "1d".to_string(),
                 interval: "1h".to_string(),
                 when: None,
                 mode: LifecycleMode::Enabled,
@@ -485,7 +485,7 @@ mod tests {
                 lifecycle_type: LifecycleType::Delete,
                 bucket: "telemetry".to_string(),
                 entries: vec![],
-                max_age: "1d".to_string(),
+                older_than: "1d".to_string(),
                 interval: "1h".to_string(),
                 when: None,
                 mode: LifecycleMode::Enabled,

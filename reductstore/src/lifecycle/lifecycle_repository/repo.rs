@@ -277,14 +277,18 @@ impl LifecycleRepository {
             ));
         }
 
-        let max_age_us = parse_duration_to_micros(&settings.max_age).map_err(|err| {
-            unprocessable_entity!("Invalid lifecycle max age '{}': {}", settings.max_age, err)
+        let max_age_us = parse_duration_to_micros(&settings.older_than).map_err(|err| {
+            unprocessable_entity!(
+                "Invalid lifecycle older_than '{}': {}",
+                settings.older_than,
+                err
+            )
         })?;
 
         if max_age_us < MIN_LIFECYCLE_MAX_AGE_US {
             return Err(unprocessable_entity!(
-                "Lifecycle max age '{}' is shorter than minimum allowed value of 1h",
-                settings.max_age
+                "Lifecycle older_than '{}' is shorter than minimum allowed value of 1h",
+                settings.older_than
             ));
         }
 
@@ -463,7 +467,7 @@ mod tests {
 
         let updated = LifecycleSettings {
             entries: vec!["entry-2".to_string()],
-            max_age: "2d".to_string(),
+            older_than: "2d".to_string(),
             when: Some(serde_json::json!({"$eq": ["&label", "value"]})),
             ..settings_fixture()
         };
@@ -552,19 +556,19 @@ mod tests {
     )]
     #[case::bad_max_age(
         LifecycleSettings {
-            max_age: "30days".to_string(),
+            older_than: "30days".to_string(),
             ..settings_fixture()
         },
         unprocessable_entity!(
-            "Invalid lifecycle max age '30days': [UnprocessableEntity] Invalid duration unit: days"
+            "Invalid lifecycle older_than '30days': [UnprocessableEntity] Invalid duration unit: days"
         )
     )]
     #[case::too_short_max_age(
         LifecycleSettings {
-            max_age: "30m".to_string(),
+            older_than: "30m".to_string(),
             ..settings_fixture()
         },
-        unprocessable_entity!("Lifecycle max age '30m' is shorter than minimum allowed value of 1h")
+        unprocessable_entity!("Lifecycle older_than '30m' is shorter than minimum allowed value of 1h")
     )]
     #[case::bad_when(
         LifecycleSettings {

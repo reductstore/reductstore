@@ -47,7 +47,7 @@ mod tests {
     ) {
         let keeper = keeper_with_policy.await;
         let components = keeper.get_anonymous().await.unwrap();
-        settings.max_age = "7d".to_string();
+        settings.older_than = "7d".to_string();
         settings.interval = "2h".to_string();
 
         update_lifecycle_policy(
@@ -67,7 +67,7 @@ mod tests {
             .get_lifecycle_settings("test-policy")
             .await
             .unwrap();
-        assert_eq!(settings.max_age, "7d");
+        assert_eq!(settings.older_than, "7d");
         assert_eq!(settings.interval, "2h");
     }
 

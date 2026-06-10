@@ -106,7 +106,7 @@ mod tests {
         LifecycleSettings {
             bucket: "bucket-1".to_string(),
             entries: vec![],
-            max_age: "1d".to_string(),
+            older_than: "1d".to_string(),
             interval: "1h".to_string(),
             when: None,
             mode: LifecycleMode::Enabled,
@@ -142,11 +142,21 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_settings_ok() {
+            let json = r#"{"type":"delete","bucket":"bucket-1","entries":["sensors/*"],"older_than":"P30D"}"#;
+            let req = Request::builder().body(Body::from(json)).unwrap();
+            let body = LifecycleSettingsAxum::from_request(req, &()).await.unwrap();
+            assert_eq!(body.0.older_than, "P30D");
+            assert_eq!(body.0.interval, "3600s");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_settings_legacy_max_age_alias() {
             let json =
                 r#"{"type":"delete","bucket":"bucket-1","entries":["sensors/*"],"max_age":"P30D"}"#;
             let req = Request::builder().body(Body::from(json)).unwrap();
             let body = LifecycleSettingsAxum::from_request(req, &()).await.unwrap();
-            assert_eq!(body.0.max_age, "P30D");
+            assert_eq!(body.0.older_than, "P30D");
             assert_eq!(body.0.interval, "3600s");
         }
 
