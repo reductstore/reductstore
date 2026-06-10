@@ -25,13 +25,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Rename lifecycle policy settings field `older_than` to `older_than`, [PR-1429](https://github.com/reductstore/reductstore/pull/1429)
 - Enforce SSDLC-style build/release input pinning by adding a repository Rust toolchain pin (`1.89.0`), lockfile-enforced cargo invocations, digest-pinned Docker base images, and checksum-verified external artifact downloads in CI/build actions, [PR-1400](https://github.com/reductstore/reductstore/pull/1400)
 - Pin third-party GitHub Actions to immutable commit SHAs in CI workflows and upgrade `actions/checkout` references to the Node 24-compatible `v6.0.2` commit to address deprecation warnings, [PR-1373](https://github.com/reductstore/reductstore/pull/1373)
 
 ### Fixed
 
 - Preserve attachment metadata (`entry/$meta`) during lifecycle delete cleanup by enforcing and documenting exclusion of system metadata entries from lifecycle matching, [PR-1395](https://github.com/reductstore/reductstore/pull/1395)
-- Fix lifecycle delete worker first-run failure (`422 Start time must be before stop time`) by ensuring delete queries use a valid initial time range even when all records are newer than `max_age`, [PR-1394](https://github.com/reductstore/reductstore/pull/1394)
+- Fix lifecycle delete worker first-run failure (`422 Start time must be before stop time`) by ensuring delete queries use a valid initial time range even when all records are newer than `older_than`, [PR-1394](https://github.com/reductstore/reductstore/pull/1394)
 - Fix runtime default for lifecycle interval by implementing manual Default for LifecycleSettings, [PR-1385](https://github.com/reductstore/reductstore/pull/1385)
 - Downgrade `write_batched` log severity for closed writer-channel handoff from error to warning to reduce noisy false-positive error bursts under expected stream abort/backpressure scenarios, [PR-1356](https://github.com/reductstore/reductstore/pull/1356)
 - Handle `--version` (`-V`) in `main` before server startup so version output remains clean and exits without initialization side effects, [PR-1365](https://github.com/reductstore/reductstore/pull/1365)
