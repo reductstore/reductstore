@@ -48,7 +48,6 @@ pub struct LifecycleSettings {
     #[serde(default)]
     pub entries: Vec<String>,
     /// Records older than this duration, e.g. "30d", "24h", or "3600s".
-    #[serde(alias = "max_age")]
     pub older_than: String,
     /// Interval between lifecycle runs, e.g. "30m", "1h", or "3600s".
     #[serde(default = "default_lifecycle_interval")]

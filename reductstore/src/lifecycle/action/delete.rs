@@ -23,13 +23,13 @@ impl LifecycleAction for DeleteLifecycleAction {
         settings: &LifecycleSettings,
         context: LifecycleContext,
     ) -> Result<LifecycleRunResult, ReductError> {
-        let max_age_us = parse_duration_to_micros(&settings.older_than)?;
+        let older_than_us = parse_duration_to_micros(&settings.older_than)?;
         let now_us = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_micros() as u64;
 
-        let cutoff = now_us.saturating_sub(max_age_us.max(0) as u64);
+        let cutoff = now_us.saturating_sub(older_than_us.max(0) as u64);
         let stop = Some(cutoff.saturating_add(1));
 
         let entries = if settings.entries.is_empty() {

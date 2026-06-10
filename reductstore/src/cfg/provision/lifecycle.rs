@@ -102,10 +102,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 continue;
             }
 
-            if let Some(max_age) =
-                env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_MAX_AGE", id))
+            if let Some(older_than) =
+                env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_OLDER_THAN", id))
             {
-                lifecycle.settings.older_than = max_age;
+                lifecycle.settings.older_than = older_than;
             } else {
                 error!("Lifecycle '{}' has no older_than value. Drop it.", name);
                 unfinished_lifecycles.push(id.clone());
@@ -232,7 +232,7 @@ mod tests {
                 "RS_LIFECYCLE_A_ENTRIES".to_string(),
                 "sensors/*, env/temp ,,env/humidity".to_string(),
             ),
-            ("RS_LIFECYCLE_A_MAX_AGE".to_string(), "30d".to_string()),
+            ("RS_LIFECYCLE_A_OLDER_THAN".to_string(), "30d".to_string()),
             ("RS_LIFECYCLE_A_INTERVAL".to_string(), "10m".to_string()),
             (
                 "RS_LIFECYCLE_A_WHEN".to_string(),
@@ -303,7 +303,7 @@ mod tests {
     #[tokio::test]
     async fn drops_lifecycle_without_older_than(path: PathBuf) {
         let mut env_getter = lifecycle_env(path, &[]);
-        env_getter.values.remove("RS_LIFECYCLE_A_MAX_AGE");
+        env_getter.values.remove("RS_LIFECYCLE_A_OLDER_THAN");
 
         let (lifecycles, settings, _) = lifecycle_infos(env_getter).await;
         assert!(lifecycles.is_empty());
@@ -316,7 +316,7 @@ mod tests {
             ("RS_LIFECYCLE_A_NAME", "compress-sensors-30d"),
             ("RS_LIFECYCLE_A_TYPE", "compress"),
             ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
-            ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
+            ("RS_LIFECYCLE_A_OLDER_THAN", "30d"),
         ]);
         let mut env = Env::new(getter);
         let lifecycles = CfgParser::<TestEnvGetter>::parse_lifecycles(&mut env);
@@ -351,7 +351,7 @@ mod tests {
                 "RS_LIFECYCLE_A_ENTRIES",
                 "sensors/*, env/temp ,,env/humidity",
             ),
-            ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
+            ("RS_LIFECYCLE_A_OLDER_THAN", "30d"),
             ("RS_LIFECYCLE_A_INTERVAL", "10m"),
             ("RS_LIFECYCLE_A_WHEN", r#"{"$eq":["&label","true"]}"#),
         ]);
@@ -380,7 +380,7 @@ mod tests {
             ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
             ("RS_LIFECYCLE_A_TYPE", "delete"),
             ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
-            ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
+            ("RS_LIFECYCLE_A_OLDER_THAN", "30d"),
             ("RS_LIFECYCLE_A_MODE", "disabled"),
         ]);
         let mut env = Env::new(getter);
@@ -397,7 +397,7 @@ mod tests {
             ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
             ("RS_LIFECYCLE_A_TYPE", "delete"),
             ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
-            ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
+            ("RS_LIFECYCLE_A_OLDER_THAN", "30d"),
             ("RS_LIFECYCLE_A_MODE", "dry_run"),
         ]);
         let mut env = Env::new(getter);
@@ -414,7 +414,7 @@ mod tests {
             ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
             ("RS_LIFECYCLE_A_TYPE", "delete"),
             ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
-            ("RS_LIFECYCLE_A_MAX_AGE", "30d"),
+            ("RS_LIFECYCLE_A_OLDER_THAN", "30d"),
         ]);
         let mut env = Env::new(getter);
         let lifecycles = CfgParser::<TestEnvGetter>::parse_lifecycles(&mut env);

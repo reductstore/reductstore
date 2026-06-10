@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const LIFECYCLE_REPO_FILE_NAME: &str = ".lifecycles";
-const MIN_LIFECYCLE_MAX_AGE_US: i64 = 60 * 60 * 1_000_000;
+const MIN_LIFECYCLE_OLDER_THAN_US: i64 = 60 * 60 * 1_000_000;
 #[cfg(any(debug_assertions, test))]
 const MIN_LIFECYCLE_INTERVAL_US: i64 = 10 * 1_000_000;
 #[cfg(not(any(debug_assertions, test)))]
@@ -277,7 +277,7 @@ impl LifecycleRepository {
             ));
         }
 
-        let max_age_us = parse_duration_to_micros(&settings.older_than).map_err(|err| {
+        let older_than_us = parse_duration_to_micros(&settings.older_than).map_err(|err| {
             unprocessable_entity!(
                 "Invalid lifecycle older_than '{}': {}",
                 settings.older_than,
@@ -285,7 +285,7 @@ impl LifecycleRepository {
             )
         })?;
 
-        if max_age_us < MIN_LIFECYCLE_MAX_AGE_US {
+        if older_than_us < MIN_LIFECYCLE_OLDER_THAN_US {
             return Err(unprocessable_entity!(
                 "Lifecycle older_than '{}' is shorter than minimum allowed value of 1h",
                 settings.older_than
