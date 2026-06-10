@@ -17,6 +17,7 @@ use crate::lock_file::BoxedLockFile;
 use crate::replication::ManageReplications;
 use crate::storage::engine::StorageEngine;
 use crate::syslog::LogSystemEvent;
+use crate::usage::UsageStatsTask;
 use axum::http::HeaderMap;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
@@ -40,6 +41,8 @@ pub struct Components {
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
     pub(crate) audit_logger: Arc<AsyncRwLock<Box<dyn LogSystemEvent + Send + Sync>>>,
     pub(crate) limits: BoxedLimits,
+    /// Periodic usage statistics task; `None` when system events are disabled.
+    pub(crate) usage_stats_task: AsyncRwLock<Option<UsageStatsTask>>,
 
     pub(crate) cfg: Cfg,
 }
@@ -155,6 +158,14 @@ impl StateKeeper {
         let components = self.wait_components().await?.clone();
         let mut repo = components.lifecycle_repo.write().await?;
         repo.stop().await;
+        Ok(())
+    }
+
+    pub async fn stop_usage_stats_task(&self) -> Result<(), ReductError> {
+        let components = self.wait_components().await?.clone();
+        if let Some(task) = components.usage_stats_task.write().await?.as_mut() {
+            task.stop().await;
+        }
         Ok(())
     }
 

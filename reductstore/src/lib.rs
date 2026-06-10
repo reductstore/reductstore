@@ -13,3 +13,4 @@ pub mod lock_file;
 pub mod replication;
 pub mod storage;
 pub mod syslog;
+pub mod usage;

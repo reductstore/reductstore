@@ -24,6 +24,7 @@ pub(crate) const SYSTEM_BUCKET_NAME: &str = "$system";
 pub(crate) const SYSTEM_AUDIT_ENTRY_PREFIX: &str = "audit";
 pub(crate) const SYSTEM_LIFECYCLE_ENTRY_PREFIX: &str = "lifecycle";
 pub(crate) const SYSTEM_REPLICATION_ENTRY_PREFIX: &str = "replications";
+pub(crate) const SYSTEM_USAGE_ENTRY_PREFIX: &str = "usage";
 
 pub(crate) type SystemEventFlushFuture =
     Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>;
@@ -187,6 +188,20 @@ pub(crate) async fn build_replication_system_logger(
         .with_entry_prefix(SYSTEM_REPLICATION_ENTRY_PREFIX)
         .build(cfg, storage)
         .expect("replication system logger must build")
+}
+
+pub(crate) async fn build_usage_system_logger(
+    cfg: &Cfg,
+    storage: Arc<StorageEngine>,
+) -> BoxedSystemLogger {
+    if !cfg.system_events_conf.enabled {
+        return Box::new(DisabledSystemLogger);
+    }
+
+    SystemLoggerBuilder::new(SYSTEM_BUCKET_NAME, system_bucket_settings(cfg))
+        .with_entry_prefix(SYSTEM_USAGE_ENTRY_PREFIX)
+        .build(cfg, storage)
+        .expect("usage system logger must build")
 }
 
 fn system_bucket_settings(cfg: &Cfg) -> BucketSettings {

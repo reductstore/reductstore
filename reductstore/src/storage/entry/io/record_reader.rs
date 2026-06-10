@@ -80,6 +80,8 @@ impl RecordReader {
             None
         };
 
+        bm.usage_counters().count_read(content_size);
+
         Ok(Self {
             meta,
             file_path,

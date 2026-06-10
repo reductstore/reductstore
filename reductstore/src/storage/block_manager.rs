@@ -16,6 +16,7 @@ use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
+use crate::usage::UsageCounters;
 use block_index::BlockIndex;
 use crc64fast::Digest;
 use log::{debug, error, info, trace, warn};
@@ -684,6 +685,10 @@ impl BlockManager {
 
     pub fn index(&self) -> &BlockIndex {
         &self.block_index
+    }
+
+    pub(in crate::storage) fn usage_counters(&self) -> &UsageCounters {
+        &self.cfg.usage_counters
     }
 
     pub fn bucket_name(&self) -> &String {

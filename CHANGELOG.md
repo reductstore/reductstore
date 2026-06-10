@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Write usage statistics every 60 seconds as system events to the `$system` bucket under `usage/<instance>/total`, counting read/write traffic at the storage engine level and snapshotting storage totals at each flush, [PR-NNNN](https://github.com/reductstore/reductstore/pull/NNNN) by @DibbayajyotiRoy
 - Periodically write aggregated replication diagnostics as system events to the `$system` bucket under `replications/<instance>/<replication-name>`, aggregated per status code and flushed on status change, idle window, or time cap, [PR-1417](https://github.com/reductstore/reductstore/pull/1417) by @DibbayajyotiRoy
 - Accept `x-reduct-content-length` as an alternative to `Content-Length` for browser streaming via the Fetch API, [PR-1411](https://github.com/reductstore/reductstore/pull/1411)
 - Pass attachment key-value maps to extensions instead of selecting a single attachment key, [PR-1383](https://github.com/reductstore/reductstore/pull/1383)

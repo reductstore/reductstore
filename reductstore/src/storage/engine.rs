@@ -9,6 +9,7 @@ use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use crate::storage::in_flight::InFlightIoLimiter;
+use crate::usage::UsageSnapshot;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
@@ -196,9 +197,39 @@ impl StorageEngine {
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_storage_limit(content_size).await?;
         let bucket = self.get_bucket(bucket_name).await?.upgrade()?;
-        bucket
+        let writer = bucket
             .begin_write(entry_name, time, content_size, content_type, labels)
-            .await
+            .await?;
+        self.cfg.usage_counters.count_write(content_size);
+        Ok(writer)
+    }
+
+    /// Collect point-in-time usage totals in a single walk over all buckets.
+    pub(crate) async fn usage_snapshot(&self) -> Result<UsageSnapshot, ReductError> {
+        let infos = {
+            let buckets = self.buckets.read().await?;
+            buckets
+                .values()
+                .map(|bucket| bucket.clone().info())
+                .collect::<Vec<_>>()
+        };
+
+        let mut snapshot = UsageSnapshot {
+            bucket_count: infos.len() as u64,
+            ..UsageSnapshot::default()
+        };
+        for task in infos {
+            let bucket = task.await?;
+            snapshot.storage_bytes += bucket.info.size;
+            snapshot.entry_count += bucket.info.entry_count;
+            snapshot.block_count += bucket
+                .entries
+                .iter()
+                .map(|entry| entry.block_count)
+                .sum::<u64>();
+        }
+
+        Ok(snapshot)
     }
 
     async fn total_usage(&self) -> Result<u64, ReductError> {
@@ -697,6 +728,80 @@ mod tests {
                 .await,
         );
         assert_eq!(storage.info().await.unwrap().license, Some(license));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_usage_snapshot(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        for bucket_name in ["snap-1", "snap-2"] {
+            let bucket = storage
+                .create_bucket(bucket_name, BucketSettings::default())
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut writer = bucket
+                .begin_write("entry", 1, 10, "text/plain".to_string(), Labels::new())
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(Bytes::from("0123456789"))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
+        let snapshot = storage.usage_snapshot().await.unwrap();
+        assert_eq!(snapshot.bucket_count, 2);
+        assert_eq!(snapshot.entry_count, 2);
+        assert_eq!(snapshot.block_count, 2);
+        assert!(snapshot.storage_bytes > 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_usage_counters_track_writes_and_reads(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        storage
+            .create_bucket("test", BucketSettings::default())
+            .await
+            .unwrap();
+
+        let mut writer = storage
+            .begin_write(
+                "test",
+                "entry",
+                1,
+                10,
+                "text/plain".to_string(),
+                Labels::new(),
+            )
+            .await
+            .unwrap();
+        writer
+            .send(Ok(Some(Bytes::from("0123456789"))))
+            .await
+            .unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let drained = storage.cfg.usage_counters.drain();
+        assert_eq!(drained.write_bytes, 10);
+        assert_eq!(drained.records_written, 1);
+        assert_eq!(drained.records_read, 0);
+
+        let _reader = storage
+            .get_bucket("test")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap()
+            .begin_read("entry", 1)
+            .await
+            .unwrap();
+
+        let drained = storage.cfg.usage_counters.drain();
+        assert_eq!(drained.read_bytes, 10);
+        assert_eq!(drained.records_read, 1);
+        assert_eq!(drained.records_written, 0);
     }
 
     mod recovery {
