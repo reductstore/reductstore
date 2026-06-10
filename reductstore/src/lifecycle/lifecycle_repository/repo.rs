@@ -26,7 +26,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const LIFECYCLE_REPO_FILE_NAME: &str = ".lifecycles";
-const MIN_LIFECYCLE_MAX_AGE_US: i64 = 60 * 60 * 1_000_000;
+const MIN_LIFECYCLE_OLDER_THAN_US: i64 = 60 * 60 * 1_000_000;
 #[cfg(any(debug_assertions, test))]
 const MIN_LIFECYCLE_INTERVAL_US: i64 = 10 * 1_000_000;
 #[cfg(not(any(debug_assertions, test)))]
@@ -277,14 +277,18 @@ impl LifecycleRepository {
             ));
         }
 
-        let max_age_us = parse_duration_to_micros(&settings.max_age).map_err(|err| {
-            unprocessable_entity!("Invalid lifecycle max age '{}': {}", settings.max_age, err)
+        let older_than_us = parse_duration_to_micros(&settings.older_than).map_err(|err| {
+            unprocessable_entity!(
+                "Invalid lifecycle older_than '{}': {}",
+                settings.older_than,
+                err
+            )
         })?;
 
-        if max_age_us < MIN_LIFECYCLE_MAX_AGE_US {
+        if older_than_us < MIN_LIFECYCLE_OLDER_THAN_US {
             return Err(unprocessable_entity!(
-                "Lifecycle max age '{}' is shorter than minimum allowed value of 1h",
-                settings.max_age
+                "Lifecycle older_than '{}' is shorter than minimum allowed value of 1h",
+                settings.older_than
             ));
         }
 
@@ -301,6 +305,12 @@ impl LifecycleRepository {
                 "Lifecycle interval '{}' is shorter than minimum allowed value of {}",
                 settings.interval,
                 MIN_LIFECYCLE_INTERVAL_LABEL
+            ));
+        }
+
+        if settings.lifecycle_type == LifecycleType::Compress && settings.when.is_some() {
+            return Err(unprocessable_entity!(
+                "Lifecycle type 'compress' does not support 'when' condition"
             ));
         }
 
@@ -457,7 +467,7 @@ mod tests {
 
         let updated = LifecycleSettings {
             entries: vec!["entry-2".to_string()],
-            max_age: "2d".to_string(),
+            older_than: "2d".to_string(),
             when: Some(serde_json::json!({"$eq": ["&label", "value"]})),
             ..settings_fixture()
         };
@@ -546,19 +556,19 @@ mod tests {
     )]
     #[case::bad_max_age(
         LifecycleSettings {
-            max_age: "30days".to_string(),
+            older_than: "30days".to_string(),
             ..settings_fixture()
         },
         unprocessable_entity!(
-            "Invalid lifecycle max age '30days': [UnprocessableEntity] Invalid duration unit: days"
+            "Invalid lifecycle older_than '30days': [UnprocessableEntity] Invalid duration unit: days"
         )
     )]
     #[case::too_short_max_age(
         LifecycleSettings {
-            max_age: "30m".to_string(),
+            older_than: "30m".to_string(),
             ..settings_fixture()
         },
-        unprocessable_entity!("Lifecycle max age '30m' is shorter than minimum allowed value of 1h")
+        unprocessable_entity!("Lifecycle older_than '30m' is shorter than minimum allowed value of 1h")
     )]
     #[case::bad_when(
         LifecycleSettings {
@@ -581,6 +591,14 @@ mod tests {
         },
         unprocessable_entity!("Lifecycle condition cannot use '#ext' directive")
     )]
+    #[case::compress_with_when(
+        LifecycleSettings {
+            lifecycle_type: LifecycleType::Compress,
+            when: Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y"]})),
+            ..settings_fixture()
+        },
+        unprocessable_entity!("Lifecycle type 'compress' does not support 'when' condition")
+    )]
     #[tokio::test]
     async fn rejects_invalid_settings(
         #[future] mut repo: LifecycleRepository,
@@ -590,6 +608,23 @@ mod tests {
         let mut repo = repo.await;
         assert_eq!(repo.create_lifecycle("test", settings).await, Err(expected));
         assert!(repo.lifecycles().await.unwrap().is_empty());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn creates_compress_lifecycle_without_when(#[future] mut repo: LifecycleRepository) {
+        let mut repo = repo.await;
+        let settings = LifecycleSettings {
+            lifecycle_type: LifecycleType::Compress,
+            when: None,
+            ..settings_fixture()
+        };
+
+        repo.create_lifecycle("test", settings.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), settings);
     }
 
     #[rstest]

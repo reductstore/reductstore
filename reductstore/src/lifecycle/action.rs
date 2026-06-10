@@ -5,7 +5,9 @@ use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{LifecycleSettings, LifecycleType};
 use std::sync::Arc;
+mod compress;
 mod delete;
+use compress::CompressLifecycleAction;
 use delete::DeleteLifecycleAction;
 
 use crate::storage::engine::StorageEngine;
@@ -43,5 +45,6 @@ pub(super) fn build_lifecycle_action(
 ) -> Arc<dyn LifecycleAction + Send + Sync> {
     match lifecycle_type {
         LifecycleType::Delete => Arc::new(DeleteLifecycleAction),
+        LifecycleType::Compress => Arc::new(CompressLifecycleAction),
     }
 }

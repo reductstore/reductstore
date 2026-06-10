@@ -9,4 +9,8 @@ __pycache__
 .vscode/settings.json
 __pycache__
 .image-build/
-.kilo
+.kilo/
+!.kilo/
+.kilo/*
+!.kilo/skills/
+!.kilo/skills/**

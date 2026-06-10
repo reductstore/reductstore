@@ -29,7 +29,7 @@ Create a PR using the standardized template from reductstore/.github, then recor
 Use the helper script to download the latest PR template from reductstore/.github:
 
 ```bash
-./.codex/skills/create-pr/scripts/fetch_pr_template.sh /tmp/pr_template.md
+./.kilo/skills/create-pr/scripts/fetch_pr_template.sh /tmp/pr_template.md
 ```
 
 Fill in the template file with the relevant summary, testing, and rationale derived from the diff and conversation context.

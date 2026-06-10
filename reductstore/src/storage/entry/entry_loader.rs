@@ -17,9 +17,11 @@ use crate::cfg::InstanceRole::Replica;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block_index::BlockIndex;
+use crate::storage::block_manager::compress::CompressionAlgorithm;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
-    BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
+    BlockManager, BLOCK_INDEX_FILE, COMPRESSED_DATA_FILE_EXT, COMPRESSED_DESCRIPTOR_FILE_EXT,
+    DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::entry::strategy_for_entry;
 use crate::storage::entry::{Entry, EntrySettings};
@@ -155,8 +157,16 @@ impl EntryLoader {
             warn!("Removing meta block {:?}", path);
             FILE_CACHE.remove(path).await?;
 
-            let mut data_path = path.clone();
-            data_path.set_extension(DATA_FILE_EXT[1..].to_string());
+            let name = path.file_name().unwrap().to_str().unwrap();
+            let data_file =
+                if let Some(block_id) = name.strip_suffix(COMPRESSED_DESCRIPTOR_FILE_EXT) {
+                    format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT)
+                } else if let Some(block_id) = name.strip_suffix(DESCRIPTOR_FILE_EXT) {
+                    format!("{}{}", block_id, DATA_FILE_EXT)
+                } else {
+                    return Ok(());
+                };
+            let data_path = path.parent().unwrap().join(data_file);
             warn!("Removing data block {:?}", data_path);
             FILE_CACHE.remove(&data_path).await?;
             Ok(())
@@ -169,7 +179,8 @@ impl EntryLoader {
             }
 
             let name = path.file_name().unwrap().to_str().unwrap();
-            if !name.ends_with(DESCRIPTOR_FILE_EXT) {
+            let compressed = name.ends_with(COMPRESSED_DESCRIPTOR_FILE_EXT);
+            if !compressed && !name.ends_with(DESCRIPTOR_FILE_EXT) {
                 continue;
             }
 
@@ -177,7 +188,17 @@ impl EntryLoader {
                 let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
                 let mut buf = vec![];
                 file.read_to_end(&mut buf)?;
-                buf
+                if compressed {
+                    zstd::decode_all(buf.as_slice()).map_err(|err| {
+                        internal_server_error!(
+                            "Failed to decompress block descriptor {:?}: {}",
+                            path,
+                            err
+                        )
+                    })?
+                } else {
+                    buf
+                }
             };
 
             let mut crc = Digest::new();
@@ -221,8 +242,8 @@ impl EntryLoader {
                 file.write_all(&buf)?;
             }
 
-            if let Some(begin_time) = block.begin_time {
-                ts_to_us(&begin_time)
+            let block_id = if let Some(begin_time) = block.begin_time.as_ref() {
+                ts_to_us(begin_time)
             } else {
                 warn!("Block {:?} has no begin time", path);
                 remove_block_files(&path).await?;
@@ -230,6 +251,36 @@ impl EntryLoader {
             };
 
             block_index.insert_or_update_with_crc(block, crc.sum64());
+            if compressed {
+                let compressed_data_path = path
+                    .parent()
+                    .unwrap()
+                    .join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT));
+                if !FILE_CACHE.try_exists(&compressed_data_path).await? {
+                    warn!(
+                        "Data block {:?} not found. Removing its descriptor",
+                        compressed_data_path
+                    );
+                    block_index.remove_block(block_id);
+                    remove_block_files(&path).await?;
+                    continue;
+                }
+
+                let data_size = FILE_CACHE
+                    .read(&compressed_data_path, SeekFrom::Start(0))
+                    .await?
+                    .metadata()?
+                    .len();
+                let metadata_size = FILE_CACHE
+                    .read(&path, SeekFrom::Start(0))
+                    .await?
+                    .metadata()?
+                    .len();
+                let index_block = block_index.get_block_mut(block_id).unwrap();
+                index_block.compression = Some(i32::from(CompressionAlgorithm::Zstd));
+                index_block.size = data_size;
+                index_block.metadata_size = metadata_size;
+            }
         }
 
         block_index.save().await?;
@@ -299,7 +350,11 @@ impl EntryLoader {
             .iter()
             .filter(|entry|
                 // path maybe a virtual from remote storage
-                entry.to_str().unwrap_or("").ends_with(DESCRIPTOR_FILE_EXT))
+                entry.to_str().unwrap_or("").ends_with(DESCRIPTOR_FILE_EXT)
+                    || entry
+                        .to_str()
+                        .unwrap_or("")
+                        .ends_with(COMPRESSED_DESCRIPTOR_FILE_EXT))
             .count();
 
         if number_of_descriptors != block_index.tree().len() {
@@ -323,9 +378,22 @@ impl EntryLoader {
     ) -> Result<(), ReductError> {
         let mut inconsistent_data = false;
         for block_id in block_index.tree().iter() {
-            let desc_path = path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT));
+            let block = block_index.get_block(*block_id).unwrap();
+            let compressed = block
+                .compression
+                .unwrap_or(i32::from(CompressionAlgorithm::None))
+                != i32::from(CompressionAlgorithm::None);
+            let desc_path = if compressed {
+                path.join(format!("{}{}", block_id, COMPRESSED_DESCRIPTOR_FILE_EXT))
+            } else {
+                path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT))
+            };
             if file_list.contains(&desc_path) {
-                let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
+                let data_path = if compressed {
+                    path.join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT))
+                } else {
+                    path.join(format!("{}{}", block_id, DATA_FILE_EXT))
+                };
                 if !file_list.contains(&data_path) {
                     warn!(
                         "Data block {:?} not found. Removing its descriptor",
@@ -721,6 +789,195 @@ mod tests {
         assert_eq!(block_index.blocks[0].block_id, 1);
         assert_eq!(block_index.blocks[0].size, 20);
         assert_eq!(block_index.blocks[0].record_count, 2);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_block_index_with_compressed_block(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        write_stub_record(&entry, 2000010).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
+        FILE_CACHE.remove(&block_index_path).await.unwrap();
+
+        let entry = EntryLoader::restore_entry(
+            path.join(entry.name()),
+            entry_settings,
+            Cfg::default().into(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let block_index =
+            BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
+        assert_eq!(block_index.blocks.len(), 1);
+        assert_eq!(block_index.blocks[0].block_id, 1);
+        assert_eq!(block_index.blocks[0].record_count, 2);
+        assert_eq!(
+            block_index.blocks[0].compression,
+            Some(i32::from(CompressionAlgorithm::Zstd))
+        );
+
+        let mut rec = entry.begin_read(2000010).await.unwrap();
+        assert_eq!(rec.meta().timestamp(), 2000010);
+        assert_eq!(
+            rec.read_chunk().unwrap().unwrap(),
+            Bytes::from_static(b"0123456789")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_restore_compressed_block_missing_data(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
+        FILE_CACHE.remove(&block_index_path).await.unwrap();
+        fs::remove_file(
+            path.join("entry")
+                .join(format!("1{}", COMPRESSED_DATA_FILE_EXT)),
+        )
+        .unwrap();
+
+        let err = match EntryLoader::restore_entry(
+            path.join("entry"),
+            entry_settings,
+            Cfg::default().into(),
+        )
+        .await
+        {
+            Ok(_) => panic!("restore should fail when compressed data file is missing"),
+            Err(err) => err,
+        };
+
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_integrity_check_compressed_block_missing_data(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        fs::remove_file(
+            path.join("entry")
+                .join(format!("1{}", COMPRESSED_DATA_FILE_EXT)),
+        )
+        .unwrap();
+
+        let entry =
+            EntryLoader::restore_entry(path.join("entry"), entry_settings, Cfg::default().into())
+                .await
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(entry.info().await.unwrap().record_count, 0);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_restore_compressed_block_with_corrupted_descriptor(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        FILE_CACHE
+            .remove(&path.join("entry").join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap();
+        fs::write(
+            path.join("entry")
+                .join(format!("1{}", COMPRESSED_DESCRIPTOR_FILE_EXT)),
+            b"not valid zstd",
+        )
+        .unwrap();
+
+        let err = match EntryLoader::restore_entry(
+            path.join("entry"),
+            entry_settings,
+            Cfg::default().into(),
+        )
+        .await
+        {
+            Ok(_) => panic!("restore should fail when descriptor is corrupted"),
+            Err(err) => err,
+        };
+
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_restore_block_without_begin_time(path: PathBuf, entry_settings: EntrySettings) {
+        let entry_path = path.join("entry");
+        FILE_CACHE.create_dir_all(&entry_path).await.unwrap();
+        let block = MinimalBlock {
+            begin_time: None,
+            latest_record_time: None,
+            size: 1,
+            record_count: 1,
+            metadata_size: 0,
+        };
+        fs::write(entry_path.join("1.meta"), block.encode_to_vec()).unwrap();
+        fs::write(entry_path.join("1.blk"), b"a").unwrap();
+
+        let entry =
+            EntryLoader::restore_entry(entry_path.clone(), entry_settings, Cfg::default().into())
+                .await
+                .unwrap()
+                .unwrap();
+
+        assert_eq!(entry.info().await.unwrap().record_count, 0);
+        assert!(!entry_path.join("1.meta").exists());
+        assert!(!entry_path.join("1.blk").exists());
     }
 
     #[rstest]

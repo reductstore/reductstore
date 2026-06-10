@@ -4,6 +4,8 @@
 pub(in crate::storage) mod block;
 mod block_cache;
 pub(in crate::storage) mod block_index;
+pub(in crate::storage) mod compress;
+pub(in crate::storage) mod decompress_cache;
 mod read_only;
 pub(in crate::storage) mod wal;
 
@@ -13,6 +15,8 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
+use crate::storage::block_manager::compress::CompressionAlgorithm;
+use crate::storage::block_manager::decompress_cache::{DecompressCache, DecompressedFileType};
 use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
@@ -46,6 +50,7 @@ pub(in crate::storage) struct BlockManager {
     entry: String,
     block_index: BlockIndex,
     block_cache: BlockCache,
+    decompress_cache: DecompressCache,
     wal: Box<dyn Wal + Sync + Send>,
     cfg: Arc<Cfg>,
     last_replica_sync: Instant,
@@ -53,6 +58,8 @@ pub(in crate::storage) struct BlockManager {
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
 pub const DATA_FILE_EXT: &str = ".blk";
+pub const COMPRESSED_DESCRIPTOR_FILE_EXT: &str = ".meta.zst";
+pub const COMPRESSED_DATA_FILE_EXT: &str = ".blk.zst";
 pub const BLOCK_INDEX_FILE: &str = "blocks.idx";
 
 // we need 2 to avoid double sync when start a new one but not yet saved the old one when the record is written
@@ -88,6 +95,7 @@ impl BlockManager {
                 READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
             ),
+            decompress_cache: DecompressCache::default(),
             wal: create_wal(path.clone()).await?,
             cfg,
             last_replica_sync: Instant::now(),
@@ -158,7 +166,7 @@ impl BlockManager {
         // first check if we have the block in write cache
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
-            let path = self.path_to_desc(block_id);
+            let path = self.resolve_desc_path(block_id).await?;
             let buf = match FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
                 Ok(mut file) => {
                     let mut buf = vec![];
@@ -412,6 +420,7 @@ impl BlockManager {
         block_id: u64,
         records: Vec<Record>,
     ) -> Result<(), ReductError> {
+        self.decompress_block(block_id).await?;
         let block_ref = self.load_block(block_id).await?;
 
         // First, append all WAL entries
@@ -450,6 +459,7 @@ impl BlockManager {
         block_id: u64,
         records: Vec<u64>,
     ) -> Result<(), ReductError> {
+        self.decompress_block(block_id).await?;
         let block_ref = self.load_block(block_id).await?;
 
         {
@@ -669,14 +679,57 @@ impl BlockManager {
     /// # Errors
     ///
     /// * `ReductError` - If file system operation failed.
-    pub(crate) fn begin_read_record(
+    pub(crate) async fn begin_read_record(
         &self,
         block: &Block,
         record_timestamp: u64,
     ) -> Result<(PathBuf, u64), ReductError> {
-        let path = self.path_to_data(block.block_id());
+        let path = self.resolve_data_path(block.block_id()).await?;
         let offset = block.get_record(record_timestamp).unwrap().begin;
         Ok((path, offset))
+    }
+
+    async fn resolve_desc_path(&self, block_id: u64) -> Result<PathBuf, ReductError> {
+        if self.block_is_compressed(block_id) {
+            let compressed_desc_path = self.path_to_compressed_desc(block_id);
+            if FILE_CACHE.try_exists(&compressed_desc_path).await? {
+                self.decompress_cache
+                    .get_or_decompress(
+                        &self.path,
+                        block_id,
+                        DecompressedFileType::Descriptor,
+                        &compressed_desc_path,
+                    )
+                    .await
+            } else {
+                Ok(self.path_to_desc(block_id))
+            }
+        } else {
+            Ok(self.path_to_desc(block_id))
+        }
+    }
+
+    async fn resolve_data_path(&self, block_id: u64) -> Result<PathBuf, ReductError> {
+        if self.block_is_compressed(block_id) {
+            self.decompress_cache
+                .get_or_decompress(
+                    &self.path,
+                    block_id,
+                    DecompressedFileType::Data,
+                    &self.path_to_compressed_data(block_id),
+                )
+                .await
+        } else {
+            Ok(self.path_to_data(block_id))
+        }
+    }
+
+    pub(in crate::storage) fn block_is_compressed(&self, block_id: u64) -> bool {
+        self.block_index
+            .get_block(block_id)
+            .and_then(|block| block.compression)
+            .unwrap_or(i32::from(CompressionAlgorithm::None))
+            != i32::from(CompressionAlgorithm::None)
     }
 
     pub fn index_mut(&mut self) -> &mut BlockIndex {
@@ -689,6 +742,10 @@ impl BlockManager {
 
     pub(in crate::storage) fn usage_counters(&self) -> &UsageCounters {
         &self.cfg.usage_counters
+    }
+
+    pub(in crate::storage) fn is_block_in_write_cache(&self, block_id: u64) -> bool {
+        self.block_cache.get_write(&block_id).is_some()
     }
 
     pub fn bucket_name(&self) -> &String {
@@ -715,6 +772,16 @@ impl BlockManager {
 
     fn path_to_data(&self, block_id: u64) -> PathBuf {
         self.path.join(format!("{}{}", block_id, DATA_FILE_EXT))
+    }
+
+    fn path_to_compressed_desc(&self, block_id: u64) -> PathBuf {
+        self.path
+            .join(format!("{}{}", block_id, COMPRESSED_DESCRIPTOR_FILE_EXT))
+    }
+
+    fn path_to_compressed_data(&self, block_id: u64) -> PathBuf {
+        self.path
+            .join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT))
     }
 
     async fn save_meta_on_disk(&mut self, block_ref: BlockRef) -> Result<(), ReductError> {
@@ -1191,6 +1258,41 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_update_records_decompresses_block(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let mut bm = block_manager.await;
+            let block_ref = block.await;
+            bm.compress_block(block_id, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+
+            let record = {
+                let block = block_ref.read().await.unwrap();
+                let mut record = block.get_record(0).unwrap().clone();
+                record.labels = vec![Label {
+                    name: "key".to_string(),
+                    value: "value".to_string(),
+                }];
+                record
+            };
+
+            bm.update_records(block_id, vec![record]).await.unwrap();
+
+            assert!(!bm.block_is_compressed(block_id));
+            assert!(bm.path_to_data(block_id).exists());
+            assert!(bm.path_to_desc(block_id).exists());
+            assert!(!bm.path_to_compressed_data(block_id).exists());
+            assert!(!bm.path_to_compressed_desc(block_id).exists());
+            let block_ref = bm.load_block(block_id).await.unwrap();
+            let block = block_ref.read().await.unwrap();
+            assert_eq!(block.get_record(0).unwrap().labels[0].value, "value");
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_update_index_when_remove_block(
             #[future] block_manager: BlockManager,
             block_id: u64,
@@ -1378,6 +1480,37 @@ mod tests {
                 WalEntry::RemoveRecord(1),
                 "wal must have the record"
             );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_remove_records_decompresses_block(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let block_manager = block_manager.await;
+            let block = block.await;
+            let block_manager = Arc::new(AsyncRwLock::new(block_manager));
+            write_record(1, 10, &block_manager, block.clone()).await;
+
+            {
+                let mut bm = block_manager.write().await.unwrap();
+                bm.compress_block(block_id, CompressionAlgorithm::Zstd)
+                    .await
+                    .unwrap();
+                bm.remove_records(block_id, vec![0]).await.unwrap();
+
+                assert!(!bm.block_is_compressed(block_id));
+                assert!(bm.path_to_data(block_id).exists());
+                assert!(bm.path_to_desc(block_id).exists());
+                assert!(!bm.path_to_compressed_data(block_id).exists());
+                assert!(!bm.path_to_compressed_desc(block_id).exists());
+            }
+
+            let block = block.read().await.unwrap();
+            assert_eq!(block.record_count(), 1);
+            assert!(block.get_record(1).is_some());
         }
     }
 

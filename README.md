@@ -13,31 +13,39 @@
   <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
 </p>
 
-ReductStore is a high-performance, time-series object storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT). It's designed to handle large volumes of unstructured data - images, sensor readings, logs, files, ROS bags - captured in raw form and stored with a precise time index (timestamp) and optional labels (e.g. device status, AI inference). This enables fast, efficient retrieval based on when the data was collected and how it's categorized, while also allowing control over data reduction strategies by replicating (streaming) only selected data from the edge to the cloud.
+ReductStore is a high-performance, multimodal time-series storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT).
+It's designed to handle large volumes of unstructured data - images, sensor readings, logs, files, ROS bags - captured in raw form and stored with a precise time index (timestamp) and optional labels (e.g. device status, AI inference).
+This enables fast, efficient retrieval based on when the data was collected and how it's categorized, while also allowing control over data reduction strategies by replicating (streaming) only selected data from the edge to the cloud.
 
 For more information, please visit https://www.reduct.store/.
 
-## Why Does It Exist?
+## When You Should Use It
 
-There are numerous time-series databases available in the market that provide remarkable functionality and scalability. However, all of them concentrate on numeric data and have limited support for unstructured data, which may be represented as strings.
+ReductStore is ideal for scenarios where you have a continuous stream of binary data and your application has metadata that can be attached to the data as labels.
+If you ingest binary data with labels into a ReductStore instance, you can use it to:
 
-On the other hand, S3-like object storage solutions could be the best place to keep blob objects, but they don't provide an API to work with data in the time domain.
+1. Query objects by time range and labels, e.g. "give me all the images from camera-1 over the last hour where the device status is 'error'".
+2. Replicate only selected data to another ReductStore instance, e.g. "replicate all the data from camera-1 where the device status is 'error' to the cloud instance for further analysis".
+3. Manage the data lifecycle with policies, e.g. "keep all the data from camera-1 for 30 days, then compress it and keep it for another 60 days before deleting it".
 
-There are many kinds of applications where we need to collect unstructured data such as images, high-frequency sensor data, binary packages, or huge text documents and provide access to their history.
-Many companies build a storage solution for these applications based on a combination of TSDB and Blob storage in-house. It might be a working solution; however, it is a challenging development task to keep data integrity in both databases, implement retention policies, and provide data access with good performance.
+In such scenarios, ReductStore can help you manage and transfer your data efficiently based on its metadata, without combining a TSDB and blob storage. This keeps your architecture simple and efficient.
 
-The ReductStore project aims to solve the problem of providing a complete solution for applications that require unstructured data to be stored and accessed at specific time intervals.
-It guarantees that your data will not overflow your hard disk and batches records to reduce the number of critical HTTP requests for networks with high latency.
+## When You Should Not Use It
 
-**All of these features make the database the right choice for edge computing and IoT applications if you want to avoid development costs for your in-house solution.**
+ReductStore is not the best fit for every data storage problem. You should consider another solution when:
+
+1. You have only numerical data that can be easily ingested into a time-series database.
+2. You have only blob data to store and do not need to access it as historical data. In this case, object storage or a file system may be a better fit.
+3. You need a message broker. Although ReductStore provides subscription and publishing functionality, it is designed for data storage and streaming, not message queueing.
 
 ## Features
 
-- Storing and accessing unstructured data as time series
+- Storing and accessing unstructured data as time series of objects
 - Labeling data for annotation and filtering
 - JSON-based query language for filtering data
-- Data replication
+- Conditional data replication
 - Real-time FIFO bucket quota based on size to avoid disk space shortage
+- Lifecycle management with data deletion and compression
 - Readonly replicas for horizontal scaling of read operations
 - Primary\Secondary mode for high availability
 
@@ -143,4 +151,3 @@ If you find ReductStore beneficial, give us a ⭐ on our GitHub repository.
 Your support fuels our passion and drives us to keep improving.
 
 Together, let's redefine the future of blob data storage! 🚀
-

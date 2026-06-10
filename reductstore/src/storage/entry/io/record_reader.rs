@@ -54,7 +54,7 @@ impl RecordReader {
         let bm = block_manager.read().await?;
         let block = block_ref.read().await?;
 
-        let (file_path, offset) = bm.begin_read_record(&block, record_timestamp)?;
+        let (file_path, offset) = bm.begin_read_record(&block, record_timestamp).await?;
 
         let record = block.get_record(record_timestamp).unwrap();
         let content_size = record.end - record.begin;
