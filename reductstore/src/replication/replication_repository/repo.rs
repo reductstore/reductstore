@@ -1580,4 +1580,151 @@ mod tests {
         let storage = storage.await;
         ReplicationRepository::load_or_create(storage, Cfg::default(), None).await
     }
+
+    mod proto_settings_migration {
+        use super::*;
+
+        #[test]
+        fn test_each_s_migrated_to_each_t_without_when() {
+            let proto_settings = ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n: 0,
+                each_s: 2.5,
+                when: None,
+                mode: ProtoReplicationMode::Enabled as i32,
+            };
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 2.5})));
+        }
+
+        #[test]
+        fn test_each_s_migrated_to_each_t_with_existing_when() {
+            let proto_settings = ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n: 0,
+                each_s: 2.0,
+                when: Some(r#"{"&label": {"$eq": 1}}"#.to_string()),
+                mode: ProtoReplicationMode::Enabled as i32,
+            };
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "&label": {"$eq": 1},
+                    "$each_t": 2.0
+                }))
+            );
+        }
+
+        #[test]
+        fn test_no_migration_when_each_s_is_zero() {
+            let proto_settings = ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n: 0,
+                each_s: 0.0,
+                when: Some(r#"{"&label": {"$eq": 1}}"#.to_string()),
+                mode: ProtoReplicationMode::Enabled as i32,
+            };
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(!migrated, "Should not mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"&label": {"$eq": 1}}))
+            );
+        }
+
+        #[test]
+        fn test_when_parsing_error_with_each_s() {
+            let proto_settings = ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n: 0,
+                each_s: 1.5,
+                when: Some("invalid json".to_string()),
+                mode: ProtoReplicationMode::Enabled as i32,
+            };
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            // When parsing fails, should use only $each_t
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 1.5})));
+        }
+
+        #[test]
+        fn test_when_parsing_error_without_each_s() {
+            let proto_settings = ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n: 0,
+                each_s: 0.0,
+                when: Some("invalid json".to_string()),
+                mode: ProtoReplicationMode::Enabled as i32,
+            };
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(!migrated, "Should not mark as migrated");
+            assert_eq!(settings.when, None);
+        }
+
+        #[test]
+        fn test_when_is_not_object_with_each_s() {
+            let proto_settings = ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n: 0,
+                each_s: 3.0,
+                when: Some(r#"["array", "not", "object"]"#.to_string()),
+                mode: ProtoReplicationMode::Enabled as i32,
+            };
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            // When existing condition is not an object, replace with $each_t
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 3.0})));
+        }
+    }
 }
