@@ -768,51 +768,45 @@ mod tests {
 
         #[log_test(rstest)]
         #[tokio::test]
-        async fn test_each_s_migrated_to_each_t_without_when(
-            mut env_for_each_s_tests: MockEnvGetter,
-        ) {
-            env_for_each_s_tests
-                .expect_get()
-                .with(eq("RS_REPLICATION_1_EACH_S"))
-                .return_const(Ok("2.5".to_string()));
-
-            // This must be added at last because it's a catch-all.
-            env_for_each_s_tests
-                .expect_get()
-                .return_const(Err(VarError::NotPresent));
-
-            let components = CfgParser::from_env(env_for_each_s_tests, "0.0.0")
-                .await
-                .build()
-                .await
-                .unwrap();
-
-            let repo = components.replication_repo.read().await.unwrap();
-            let replication = repo.get_replication_settings("replication1").await.unwrap();
-
-            assert_eq!(replication.when, Some(serde_json::json!({"$each_t": 2.5})));
+        async fn test_each_s_migrated_to_each_t_without_when() {
+            test_each_s_migration("2.5", None, serde_json::json!({"$each_t": 2.5})).await;
         }
 
         #[log_test(rstest)]
         #[tokio::test]
-        async fn test_each_s_migrated_to_each_t_with_existing_when(
-            mut env_for_each_s_tests: MockEnvGetter,
+        async fn test_each_s_migrated_to_each_t_with_existing_when() {
+            test_each_s_migration(
+                "2.0",
+                Some(r#"{"&label": {"$eq": 1}}"#),
+                serde_json::json!({
+                    "&label": {"$eq": 1},
+                    "$each_t": 2.0
+                }),
+            )
+            .await;
+        }
+
+        async fn test_each_s_migration(
+            each_s: &str,
+            when: Option<&str>,
+            expected: serde_json::Value,
         ) {
-            env_for_each_s_tests
-                .expect_get()
-                .with(eq("RS_REPLICATION_1_WHEN"))
-                .return_const(Ok(r#"{"&label": {"$eq": 1}}"#.to_string()));
+            let path = tempfile::tempdir().unwrap().keep();
+            let mut env = env_with_each_s(path);
 
-            env_for_each_s_tests
-                .expect_get()
+            if let Some(when_condition) = when {
+                env.expect_get()
+                    .with(eq("RS_REPLICATION_1_WHEN"))
+                    .return_const(Ok(when_condition.to_string()));
+            }
+
+            env.expect_get()
                 .with(eq("RS_REPLICATION_1_EACH_S"))
-                .return_const(Ok("2.0".to_string()));
+                .return_const(Ok(each_s.to_string()));
 
-            env_for_each_s_tests
-                .expect_get()
-                .return_const(Err(VarError::NotPresent));
+            env.expect_get().return_const(Err(VarError::NotPresent));
 
-            let components = CfgParser::from_env(env_for_each_s_tests, "0.0.0")
+            let components = CfgParser::from_env(env, "0.0.0")
                 .await
                 .build()
                 .await
@@ -820,18 +814,15 @@ mod tests {
             let repo = components.replication_repo.read().await.unwrap();
             let replication = repo.get_replication_settings("replication1").await.unwrap();
 
-            // The when condition should have both the original condition and $each_t at the top level
-            assert_eq!(
-                replication.when,
-                Some(serde_json::json!({
-                    "&label": {"$eq": 1},
-                    "$each_t": 2.0
-                }))
-            );
+            assert_eq!(replication.when, Some(expected));
         }
 
-        #[fixture]
-        fn env_for_each_s_tests(path: PathBuf) -> MockEnvGetter {
+        /// Creates a base MockEnvGetter for each_s migration tests.
+        /// Sets up minimal replication configuration without EACH_S or WHEN.
+        /// Caller must add:
+        /// - Specific EACH_S and/or WHEN expectations
+        /// - Catch-all expectation (last)
+        fn env_with_each_s(path: PathBuf) -> MockEnvGetter {
             let mut env = MockEnvGetter::new();
             env.expect_get()
                 .with(eq("RS_DATA_PATH"))
