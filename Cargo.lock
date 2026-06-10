@@ -3022,6 +3022,7 @@ dependencies = [
  "crc64fast",
  "crossbeam-channel",
  "dlopen2",
+ "either",
  "flate2",
  "futures",
  "futures-util",
@@ -3049,6 +3050,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "tokio",
+ "tokio-retry",
  "tower",
  "tower-http",
  "url",
@@ -4132,6 +4134,17 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 2.0.117",
+]
+
+[[package]]
+name = "tokio-retry"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a129d95275ebf4c493ec53bf0f8cd95f5ac161bc4f381700809a54f595d4470"
+dependencies = [
+ "pin-project-lite",
+ "rand 0.10.1",
+ "tokio",
 ]
 
 [[package]]

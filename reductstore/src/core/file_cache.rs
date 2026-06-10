@@ -33,14 +33,11 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
 
     #[cfg(test)]
     {
-        use futures::executor;
-
-        // Use an isolated filesystem backend for tests to avoid relying on
-        // other tests to initialise the global cache.
+        // Use an isolated filesystem backend for tests to avoid relying on other tests to initialise the global cache.
         let temp_dir = tempfile::tempdir()
             .expect("Failed to create temporary directory for FILE_CACHE")
             .keep();
-        executor::block_on(async {
+        futures::executor::block_on(async {
             let mut backend = cache.backend.write().await.unwrap();
             *backend = (Backend::builder().local_data_path(temp_dir).try_build())
                 .await
@@ -179,7 +176,7 @@ impl FileCache {
 
         // For scheduled synchronization we syn only a batch of files that are the most overdue for synchronization
         if !force {
-            files_to_sync.sort_by(|a, b| a.2.cmp(&b.2));
+            files_to_sync.sort_by_key(|a| a.2);
             files_to_sync.truncate(FILE_CACHE_SYNC_BATCH_SIZE);
         }
 

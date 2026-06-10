@@ -29,7 +29,6 @@ static RW_LOCK_SHUTDOWN_TIMEOUT: Duration = Duration::from_hours(1);
 
 pub fn maybe_print_version_and_exit() {
     if std::env::args()
-        .into_iter()
         .skip(1)
         .any(|arg| matches!(arg.as_ref(), "--version" | "-V"))
     {
@@ -38,7 +37,7 @@ pub fn maybe_print_version_and_exit() {
     }
 }
 
-pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pareser: Parser)
+pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>()
 where
     Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
 {
@@ -51,8 +50,7 @@ where
         env!("BUILD_TIME")
     );
 
-    let parser =
-        CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_pareser, version).await;
+    let parser = CfgParser::from_env_with_ext::<Parser>(StdEnvGetter::default(), version).await;
     let handle = Handle::new();
     let lock_file = Arc::new(parser.build_lock_file().unwrap());
 
@@ -155,17 +153,12 @@ where
         }};
     }
 
-    if cfg.cert_path.is_none() {
-        apply_http_settings!(axum_server::bind(addr))
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-            .await
-            .unwrap_or_else(|e| error!("Server error: {}", e));
-    } else {
+    if let Some(cert_path) = cfg.cert_path {
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
             .expect("Failed to install rustls crypto provider");
         let config = RustlsConfig::from_pem_file(
-            cfg.cert_path.expect("Cert path must be set"),
+            cert_path,
             cfg.cert_key_path.expect("Cert key path must be set"),
         )
         .await
@@ -174,7 +167,12 @@ where
             .serve(app.into_make_service_with_connect_info::<SocketAddr>())
             .await
             .unwrap_or_else(|e| error!("Server error: {}", e));
-    };
+    } else {
+        apply_http_settings!(axum_server::bind(addr))
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .unwrap_or_else(|e| error!("Server error: {}", e));
+    }
 
     // shutdown procedure
     #[cfg(feature = "zenoh-api")]
@@ -499,7 +497,7 @@ mod tests {
         let task = spawn(|| {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
                 *STOP_SERVER.lock().await = false;
-                launch_server(CoreExtCfgParser).await;
+                launch_server::<CoreExtCfgParser, _>().await;
             });
         });
 

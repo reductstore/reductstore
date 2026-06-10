@@ -24,11 +24,11 @@ pub(super) struct TransactionFilter {
 
 impl FilterRecord for TransactionNotification {
     fn timestamp(&self) -> u64 {
-        *self.event.timestamp()
+        self.event.timestamp()
     }
 
     fn labels(&self) -> HashMap<&String, &String> {
-        self.meta.labels().iter().map(|(k, v)| (k, v)).collect()
+        self.meta.labels().iter().collect()
     }
 
     fn set_labels(&mut self, labels: HashMap<String, String>) {
@@ -38,11 +38,7 @@ impl FilterRecord for TransactionNotification {
     }
 
     fn computed_labels(&self) -> HashMap<&String, &String> {
-        self.meta
-            .computed_labels()
-            .iter()
-            .map(|(k, v)| (k, v))
-            .collect()
+        self.meta.computed_labels().iter().collect()
     }
 
     fn state(&self) -> i32 {
@@ -480,7 +476,7 @@ mod tests {
         #[rstest]
         fn test_filter_record_impl(notification: TransactionNotification) {
             let record: Box<dyn FilterRecord> = Box::new(notification.clone());
-            assert_eq!(record.timestamp(), *notification.event.timestamp());
+            assert_eq!(record.timestamp(), notification.event.timestamp());
 
             for (key, value) in notification.meta.labels() {
                 assert_eq!(record.labels().get(key), Some(&value));

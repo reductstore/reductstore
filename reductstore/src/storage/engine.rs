@@ -279,15 +279,11 @@ impl StorageEngine {
         Ok(bucket.into())
     }
 
-    /// Get a bucket by name
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the bucket
-    ///
-    /// # Returns
-    ///
-    /// * `Bucket` - The bucket or an HTTPError
+    /// Get a bucket by name.
+    /// # Argument.
+    /// `name` - The name of the bucket.
+    /// # Returns.
+    /// `Bucket` - The bucket or an HTTPError.
     pub(crate) async fn get_bucket(&self, name: &str) -> Result<Weak<Bucket>, ReductError> {
         self.reload().await?;
         let buckets = self.buckets.read().await?;
@@ -404,8 +400,8 @@ impl StorageEngine {
         let infos = {
             let buckets = self.buckets.read().await?;
             buckets
-                .iter()
-                .map(|(_, bucket)| bucket.clone().info())
+                .values()
+                .map(|bucket| bucket.clone().info())
                 .collect::<Vec<_>>()
         };
 
@@ -447,7 +443,7 @@ impl StorageEngine {
             .read()
             .await?
             .values()
-            .map(|bucket| Arc::clone(bucket))
+            .map(Arc::clone)
             .collect::<Vec<_>>();
         for bucket in buckets {
             handlers.push(tokio::spawn(async move {

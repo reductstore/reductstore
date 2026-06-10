@@ -5,11 +5,9 @@ use crate::core::internal_client::{
     ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
 };
 use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucketConfig};
-use async_stream::stream;
 use async_trait::async_trait;
 use axum::http::HeaderName;
 use bytes::Bytes;
-use futures_util::Stream;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::unprocessable_entity;
@@ -149,11 +147,14 @@ impl BucketWrapper {
 
     fn prepare_batch_to_write(
         mut records: Vec<BoxedReadRecord>,
-    ) -> (HeaderMap, impl Stream<Item = Result<Bytes, ReductError>>) {
+    ) -> (
+        HeaderMap,
+        impl futures_util::Stream<Item = Result<Bytes, ReductError>>,
+    ) {
         Self::sort_by_timestamp(&mut records);
-        let headers = Self::build_headers(&mut records, false);
+        let headers = Self::build_headers(&records, false);
 
-        let stream = stream! {
+        let stream = async_stream::stream! {
             while let Some(mut record) = records.pop() {
                 while let Some(chunk) = record.read_chunk() {
                      yield chunk;
@@ -165,8 +166,7 @@ impl BucketWrapper {
     }
 
     fn prepare_batch_to_update(records: &Vec<BoxedReadRecord>) -> HeaderMap {
-        let headers = Self::build_headers(&records, true);
-        headers
+        Self::build_headers(records, true)
     }
 
     fn parse_record_errors(
@@ -218,7 +218,7 @@ impl ReductClientApi for ReductClient {
     async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
         let request = self.client_api.client().request(
             Method::GET,
-            &format!("{}{}/b/{}", self.server_url, API_PATH, bucket_name),
+            format!("{}{}/b/{}", self.server_url, API_PATH, bucket_name),
         );
 
         let resp = request.send().await;
@@ -246,7 +246,7 @@ impl ReductBucketApi for BucketWrapper {
         let (headers, stream) = Self::prepare_batch_to_write(records);
         let request = self.client.request(
             Method::POST,
-            &format!(
+            format!(
                 "{}{}/b/{}/{}/batch",
                 self.server_url, API_PATH, self.bucket_name, entry
             ),
@@ -269,7 +269,7 @@ impl ReductBucketApi for BucketWrapper {
         let headers = Self::prepare_batch_to_update(records);
         let request = self.client.request(
             Method::PATCH,
-            &format!(
+            format!(
                 "{}{}/b/{}/{}/batch",
                 self.server_url, API_PATH, self.bucket_name, entry
             ),

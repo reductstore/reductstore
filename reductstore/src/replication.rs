@@ -39,17 +39,10 @@ impl From<Transaction> for u8 {
 }
 
 impl Transaction {
-    pub fn timestamp(&self) -> &u64 {
+    pub fn timestamp(&self) -> u64 {
         match self {
-            Transaction::WriteRecord(ts) => ts,
-            Transaction::UpdateRecord(ts) => ts,
-        }
-    }
-
-    pub fn into_timestamp(self) -> u64 {
-        match self {
-            Transaction::WriteRecord(ts) => ts,
-            Transaction::UpdateRecord(ts) => ts,
+            Transaction::WriteRecord(ts) => *ts,
+            Transaction::UpdateRecord(ts) => *ts,
         }
     }
 }

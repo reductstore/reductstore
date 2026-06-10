@@ -190,7 +190,7 @@ impl ExtCfgBounds for CoreExtCfg {
     }
 }
 
-/// Database configuration
+/// Database configuration.
 pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: ExtCfgBounds = CoreExtCfg> {
     pub cfg: Cfg,
     pub license: Option<License>,
@@ -201,7 +201,7 @@ pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: ExtCfgBounds = Co
 #[async_trait]
 pub trait ExtCfgParser<EnvGetter: GetEnv> {
     type Cfg: ExtCfgBounds;
-    async fn from_env(&self, env: &mut Env<EnvGetter>, version: &str) -> Self::Cfg;
+    async fn from_env(env: &mut Env<EnvGetter>, version: &str) -> Self::Cfg;
 }
 
 #[derive(Default)]
@@ -211,7 +211,7 @@ pub struct CoreExtCfgParser;
 impl<EnvGetter: GetEnv + Send> ExtCfgParser<EnvGetter> for CoreExtCfgParser {
     type Cfg = CoreExtCfg;
 
-    async fn from_env(&self, env: &mut Env<EnvGetter>, _version: &str) -> Self::Cfg {
+    async fn from_env(env: &mut Env<EnvGetter>, _version: &str) -> Self::Cfg {
         let role = match env
             .get::<String>("RS_INSTANCE_ROLE", "STANDALONE".to_string())
             .to_lowercase()
@@ -235,16 +235,12 @@ impl<EnvGetter: GetEnv + Send> ExtCfgParser<EnvGetter> for CoreExtCfgParser {
 
 impl<EnvGetter: GetEnv + Send> CfgParser<EnvGetter, CoreExtCfg> {
     pub async fn from_env(env_getter: EnvGetter, version: &str) -> Self {
-        Self::from_env_with_ext(env_getter, &CoreExtCfgParser, version).await
+        Self::from_env_with_ext::<CoreExtCfgParser>(env_getter, version).await
     }
 }
 
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
-    pub async fn from_env_with_ext<ExtParser>(
-        env_getter: EnvGetter,
-        ext_parser: &ExtParser,
-        version: &str,
-    ) -> Self
+    pub async fn from_env_with_ext<ExtParser>(env_getter: EnvGetter, version: &str) -> Self
     where
         ExtParser: ExtCfgParser<EnvGetter, Cfg = ExtCfg>,
     {
@@ -259,11 +255,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let port = env.get("RS_PORT", DEFAULT_PORT);
         let cert_path = env
             .get_optional::<String>("RS_CERT_PATH")
-            .and_then(|p| if p.is_empty() { None } else { Some(p) })
+            .filter(|p| !p.is_empty())
             .map(PathBuf::from);
         let cert_key_path = env
             .get_optional::<String>("RS_CERT_KEY_PATH")
-            .and_then(|p| if p.is_empty() { None } else { Some(p) })
+            .filter(|p| !p.is_empty())
             .map(PathBuf::from);
 
         let protocol = if cert_path.is_none() { "http" } else { "https" };
@@ -279,7 +275,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             public_url.push('/');
         }
 
-        let ext_cfg = ext_parser.from_env(&mut env, version).await;
+        let ext_cfg = ExtParser::from_env(&mut env, version).await;
 
         let replications = Self::parse_replications(&mut env);
         let lifecycles = Self::parse_lifecycles(&mut env);
@@ -300,10 +296,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             role: ext_cfg.role(),
             primary_url: env
                 .get_optional::<String>("RS_PRIMARY_URL")
-                .and_then(|url| if url.is_empty() { None } else { Some(url) }),
+                .filter(|url| !url.is_empty()),
             secondary_url: env
                 .get_optional::<String>("RS_SECONDARY_URL")
-                .and_then(|url| if url.is_empty() { None } else { Some(url) }),
+                .filter(|url| !url.is_empty()),
             instance_name: resolve_instance_name(env.get_optional::<String>("RS_INSTANCE_NAME")),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
@@ -412,17 +408,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 },
             )
             .await?;
-        let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
-            Some(PathBuf::try_from(ext_path).map_err(|e| {
-                internal_server_error!(
-                    "Failed to resolve extension path {}: {}",
-                    ext_path.to_str().unwrap(),
-                    e
-                )
-            })?)
-        } else {
-            None
-        };
+        let ext_path = self.cfg.ext_path.as_ref().map(PathBuf::from);
 
         let server_info = storage.info().await?;
         let ext_settings = ExtSettings::builder()
@@ -556,7 +542,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> Display for CfgParser<EnvGetter, E
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures::FutureExt;
+    use futures_util::FutureExt;
 
     use mockall::mock;
     use mockall::predicate::eq;

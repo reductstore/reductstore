@@ -49,7 +49,6 @@ axum-extra = { version = "0.12.1", features = ["default", "typed-header"] }
 tokio = { version = "1.51.1", features = ["full"] }
 hyper = { version = "1.10.1", features = ["full"] }
 futures-util = "0.3.31"
-futures = "0.3"
 axum-server = { version = "0.8.0", features = ["tls-rustls"] }
 mime_guess = "2.0.5"
 bytesize = "2.3.1"
@@ -74,7 +73,8 @@ aes-siv = "0.8.0-rc.1"
 uuid = { version = "1.21.0", features = ["v4"] }
 parking_lot="0.12.5"
 zenoh = { version = "1.9.0", optional = true }
-
+tokio-retry = "0.3.2"
+either = "*"
 
 [build-dependencies]
 prost-build = "0.14.1"
@@ -89,6 +89,7 @@ serial_test = "3.2.0"
 test-log = "0.2.19"
 tower = "0.5.2"
 reqwest = { version = "0.12.24", default-features = false, features = ["rustls-tls", "blocking"] }
+futures = "0.3"
 
 [package.metadata.docs.rs]
 no-default-features = true
