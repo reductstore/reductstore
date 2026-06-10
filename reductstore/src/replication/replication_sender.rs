@@ -19,6 +19,8 @@ use tokio_retry::RetryIf;
 /// TODO just a guess, someone knowing the context should tune this, also shadowing this with global parameter would be nice
 pub const DEFAULT_CONCURRENCY_LIMIT: usize = 300;
 
+const EXPECTMSG: &str = "guarded in the end of the branch";
+
 /// Internal worker for replication to process a sole iteration of the replication loop.
 pub(super) struct ReplicationSender {
     log_map: TransactionLogMap,
@@ -63,12 +65,15 @@ impl ReplicationSender {
     pub async fn run(&mut self) -> Result<SyncState, ReductError> {
         let batch_max_size = self.io_config.batch_max_size;
         let batch_max_records = self.io_config.batch_max_records;
+        let src_bucket = self.settings.src_bucket.clone();
+        let storage = self.storage.clone();
 
         let log_map_lock = self.log_map.read().await?;
         let log_map = log_map_lock.clone();
         drop(log_map_lock);
 
-        let mut counter_aggregated = Vec::with_capacity(log_map.len()); // can be estimated slightly better
+        let capacity = log_map.len();
+        let mut counter_aggregated = Vec::with_capacity(capacity); // can be estimated slightly better
 
         let mut buffered = stream::iter(log_map)
             .map(|(entry_name, log)| async move {
@@ -87,8 +92,8 @@ impl ReplicationSender {
             .buffer_unordered(DEFAULT_CONCURRENCY_LIMIT)
             .try_filter(|(_, _, transactions)| future::ready(!transactions.is_empty()))
             .map_ok(|(entry_name, log, transactions)| {
-                let src_bucket = self.settings.src_bucket.clone();
-                let storage = self.storage.clone();
+                let src_bucket = src_bucket.as_str();
+                let storage = storage.clone();
                 async move {
                     let mut counter = Vec::with_capacity(1); // it will have at least `Ok()`
                     let entry_name_ref = entry_name.as_str();
@@ -110,7 +115,7 @@ impl ReplicationSender {
                                 .take(6),
                             async || {
                                 storage
-                                    .get_bucket(&src_bucket)
+                                    .get_bucket(src_bucket)
                                     .await?
                                     .upgrade()?
                                     .get_entry(entry_name_ref)
@@ -151,28 +156,40 @@ impl ReplicationSender {
                     }
 
                     Ok((
-                        entry_name,
-                        log,
-                        batch.len() as u64,
-                        batch,
-                        counter,
-                        processed_transactions,
+                        (entry_name, batch.len() as u64, batch, counter),
+                        (log, processed_transactions),
                     ))
                 }
             })
             .try_buffer_unordered(DEFAULT_CONCURRENCY_LIMIT);
-        while let Some(item) = buffered.next().await {
-            match item {
-                Err(Either::Left(e)) => return Err(e),
-                Err(Either::Right(ok)) => return Ok(ok),
-                Ok((entry_name, log, batch_size, batch, mut counter, processed_transactions)) => {
-                    match self.bucket.write_batch(entry_name.as_str(), batch).await {
+        let mut buffer_batch: Vec<(
+            String,
+            u64,
+            Vec<(Box<dyn ReadRecord + Send + Sync>, super::Transaction)>,
+            Vec<(Result<_, ReductError>, u64)>,
+        )> = Vec::with_capacity(capacity);
+        let mut buffer_log: Vec<(
+            Arc<crate::core::sync::AsyncRwLock<super::transaction_log::TransactionLog>>,
+            usize,
+        )> = Vec::with_capacity(capacity);
+        let self_lock = Arc::new(tokio::sync::Mutex::new(self));
+        loop {
+            tokio::select! {
+                biased;
+                _ = async {
+                    let (entry_name, batch_size, batch, mut counter) = buffer_batch.pop().expect(EXPECTMSG);
+
+                    let lock = self_lock.clone();
+                    let wrote = lock.lock().await.bucket.write_batch(entry_name.as_str(), batch).await;
+                    drop(lock);
+
+                    match wrote {
                         Ok(map) => {
                             counter.push((Ok(()), batch_size - map.len() as u64));
                             for (timestamp, err) in map.into_iter() {
                                 debug!(
                                     "Failed to replicate record {}/{}/{}: {:?}",
-                                    self.settings.src_bucket, entry_name, timestamp, err
+                                    src_bucket, entry_name, timestamp, err
                                 );
                                 counter.push((Err(err), 1));
                             }
@@ -180,29 +197,43 @@ impl ReplicationSender {
                         Err(err) => {
                             debug!(
                                 "Failed to replicate batch of records from {}/{} {:?}",
-                                self.settings.src_bucket, entry_name, err
+                                src_bucket, entry_name, err
                             );
 
                             counter.push((Err(err), batch_size));
                         }
                     }
 
-                    if self.bucket.is_active() {
+                    counter_aggregated.append(counter.as_mut());
+                }, if !buffer_batch.is_empty() => {}
+                res = async {
+                    let (log, processed_transactions) = buffer_log.pop().expect(EXPECTMSG);
+
+                    let lock = self_lock.clone();
+                    if self_lock.clone().lock().await.bucket.is_active() {
+                        drop(lock);
                         // remove processed transactions from the log
-                        if let Err(err) = log.write().await?.pop_front(processed_transactions).await
-                        {
+                        if let Err(err) = log.write().await?.pop_front(processed_transactions).await {
                             error!("Failed to remove transaction: {err:?}");
                         }
                     }
-
-                    counter_aggregated.append(counter.as_mut());
-                }
+                    Ok::<_, ReductError>(())
+                }, if !buffer_log.is_empty() => {res?}
+                Some(item) = buffered.next() => match item {
+                    Err(Either::Left(e)) => return Err(e),
+                    Err(Either::Right(ok)) => return Ok(ok),
+                    Ok((item_batch, item_log)) => {
+                        buffer_batch.push(item_batch);
+                        buffer_log.push(item_log);
+                    }
+                },
+                else => break
             }
         }
 
         Ok(if counter_aggregated.is_empty() {
             SyncState::NoTransactions
-        } else if self.bucket.is_active() {
+        } else if self_lock.lock().await.bucket.is_active() {
             SyncState::SyncedOrRemoved(counter_aggregated)
         } else {
             SyncState::NotAvailable(counter_aggregated)
