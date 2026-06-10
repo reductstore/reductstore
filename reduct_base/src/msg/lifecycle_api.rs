@@ -47,8 +47,8 @@ pub struct LifecycleSettings {
     /// System metadata entries (e.g. `entry/$meta`) are always excluded.
     #[serde(default)]
     pub entries: Vec<String>,
-    /// Maximum record age, e.g. "30d", "24h", or "3600s".
-    pub max_age: String,
+    /// Records older than this duration, e.g. "30d", "24h", or "3600s".
+    pub older_than: String,
     /// Interval between lifecycle runs, e.g. "30m", "1h", or "3600s".
     #[serde(default = "default_lifecycle_interval")]
     pub interval: String,
@@ -66,7 +66,7 @@ impl Default for LifecycleSettings {
             lifecycle_type: LifecycleType::default(),
             bucket: String::default(),
             entries: Vec::default(),
-            max_age: String::default(),
+            older_than: String::default(),
             interval: default_lifecycle_interval(),
             when: Option::default(),
             mode: LifecycleMode::default(),
@@ -159,7 +159,7 @@ mod tests {
                 "type": "delete",
                 "bucket": "bucket-1",
                 "entries": ["entry-1"],
-                "max_age": "1d",
+                "older_than": "1d",
                 "interval": "1h"
             }"#,
         )
@@ -173,7 +173,7 @@ mod tests {
         let err = serde_json::from_str::<LifecycleSettings>(
             r#"{
                 "bucket": "bucket-1",
-                "max_age": "1d"
+                "older_than": "1d"
             }"#,
         )
         .unwrap_err();

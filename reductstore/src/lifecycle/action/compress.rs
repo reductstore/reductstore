@@ -22,13 +22,13 @@ impl LifecycleAction for CompressLifecycleAction {
         settings: &LifecycleSettings,
         context: LifecycleContext,
     ) -> Result<LifecycleRunResult, ReductError> {
-        let max_age_us = parse_duration_to_micros(&settings.max_age)?;
+        let older_than_us = parse_duration_to_micros(&settings.older_than)?;
         let now_us = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()
             .as_micros() as u64;
 
-        let cutoff = now_us.saturating_sub(max_age_us.max(0) as u64);
+        let cutoff = now_us.saturating_sub(older_than_us.max(0) as u64);
         let start = Some(0u64);
         let stop = Some(cutoff.saturating_add(1));
         let entries = if settings.entries.is_empty() {
@@ -119,7 +119,7 @@ mod tests {
         test_bucket.sync_fs().await.unwrap();
         let (test_storage, test_bucket) = restore_storage(&test_storage).await;
         settings.lifecycle_type = LifecycleType::Compress;
-        settings.max_age = "0s".to_string();
+        settings.older_than = "0s".to_string();
 
         let result = action
             .run("test", &settings, LifecycleContext::new(test_storage))
@@ -152,7 +152,7 @@ mod tests {
         let (test_storage, test_bucket) = restore_storage(&test_storage).await;
         settings.lifecycle_type = LifecycleType::Compress;
         settings.mode = LifecycleMode::DryRun;
-        settings.max_age = "0s".to_string();
+        settings.older_than = "0s".to_string();
 
         let result = action
             .run("test", &settings, LifecycleContext::new(test_storage))
@@ -184,7 +184,7 @@ mod tests {
         test_bucket.sync_fs().await.unwrap();
         let (test_storage, _) = restore_storage(&test_storage).await;
         settings.lifecycle_type = LifecycleType::Compress;
-        settings.max_age = "0s".to_string();
+        settings.older_than = "0s".to_string();
 
         let context = LifecycleContext::new(test_storage);
         assert_eq!(
@@ -219,7 +219,7 @@ mod tests {
         test_bucket.sync_fs().await.unwrap();
         let (test_storage, _) = restore_storage(&test_storage).await;
         settings.lifecycle_type = LifecycleType::Compress;
-        settings.max_age = "0s".to_string();
+        settings.older_than = "0s".to_string();
         settings.entries = vec![];
 
         let result = action
@@ -250,7 +250,7 @@ mod tests {
         test_bucket.sync_fs().await.unwrap();
         let (test_storage, test_bucket) = restore_storage(&test_storage).await;
         settings.lifecycle_type = LifecycleType::Compress;
-        settings.max_age = "0s".to_string();
+        settings.older_than = "0s".to_string();
         settings.entries = vec!["entry-1/$meta".to_string()];
 
         let result = action

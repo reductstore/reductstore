@@ -575,7 +575,7 @@ pub(crate) mod tests {
                     "api-test",
                     LifecycleSettings {
                         bucket: "bucket-1".to_string(),
-                        max_age: "1d".to_string(),
+                        older_than: "1d".to_string(),
                         interval: "1h".to_string(),
                         ..LifecycleSettings::default()
                     },
