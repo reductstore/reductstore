@@ -156,6 +156,14 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 replication.settings.each_n = Some(each_n);
             }
 
+            // Parse the when condition first
+            if let Some(when) =
+                env.get_optional::<serde_json::Value>(&format!("RS_REPLICATION_{}_WHEN", id))
+            {
+                replication.settings.when = Some(when);
+            }
+
+            // Migrate deprecated each_s to $each_t by injecting it into the when condition
             if let Some(each_s) = env.get_optional::<f64>(&format!("RS_REPLICATION_{}_EACH_S", id))
             {
                 warn!(
@@ -163,26 +171,15 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     id, each_s
                 );
 
-                // Migrate each_s to $each_t in when condition
-                let each_t_condition = serde_json::json!({"$each_t": each_s});
-
-                // If there's already a when condition, combine them with $and
-                if let Some(existing_when) =
-                    env.get_optional::<serde_json::Value>(&format!("RS_REPLICATION_{}_WHEN", id))
-                {
-                    replication.settings.when = Some(serde_json::json!({
-                        "$and": [
-                            each_t_condition,
-                            existing_when
-                        ]
-                    }));
+                if let Some(when) = &mut replication.settings.when {
+                    // Inject $each_t into the existing when condition
+                    if let Some(obj) = when.as_object_mut() {
+                        obj.insert("$each_t".to_string(), serde_json::json!(each_s));
+                    }
                 } else {
-                    replication.settings.when = Some(each_t_condition);
+                    // No when condition exists, create one with just $each_t
+                    replication.settings.when = Some(serde_json::json!({"$each_t": each_s}));
                 }
-            } else if let Some(when) =
-                env.get_optional::<serde_json::Value>(&format!("RS_REPLICATION_{}_WHEN", id))
-            {
-                replication.settings.when = Some(when);
             }
 
             if let Some(mode) = env.get_optional::<String>(&format!("RS_REPLICATION_{}_MODE", id)) {
@@ -762,6 +759,131 @@ mod tests {
         let repo = components.replication_repo.read().await.unwrap();
         let info = repo.get_info("replication1").await.unwrap();
         assert_eq!(info.info.mode, ReplicationMode::Paused);
+    }
+
+    #[log_test(rstest)]
+    #[tokio::test]
+    async fn test_each_s_migrated_to_each_t_without_when() {
+        let path = tempfile::tempdir().unwrap().keep();
+        let mut env = MockEnvGetter::new();
+
+        env.expect_get()
+            .with(eq("RS_DATA_PATH"))
+            .return_const(Ok(path.to_str().unwrap().to_string()));
+
+        env.expect_get()
+            .with(eq("RS_BUCKET_1_NAME"))
+            .return_const(Ok("bucket1".to_string()));
+
+        env.expect_all().returning(|| {
+            let mut map = BTreeMap::new();
+            map.insert("RS_BUCKET_1_NAME".to_string(), "bucket1".to_string());
+            map.insert(
+                "RS_REPLICATION_1_NAME".to_string(),
+                "replication1".to_string(),
+            );
+            map
+        });
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_NAME"))
+            .return_const(Ok("replication1".to_string()));
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("bucket1".to_string()));
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("http://localhost".to_string()));
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_EACH_S"))
+            .return_const(Ok("2.5".to_string()));
+
+        env.expect_get().return_const(Err(VarError::NotPresent));
+
+        let components = CfgParser::from_env(env, "0.0.0")
+            .await
+            .build()
+            .await
+            .unwrap();
+        let repo = components.replication_repo.read().await.unwrap();
+        let replication = repo.get_replication_settings("replication1").await.unwrap();
+
+        assert_eq!(replication.when, Some(serde_json::json!({"$each_t": 2.5})));
+    }
+
+    #[log_test(rstest)]
+    #[tokio::test]
+    async fn test_each_s_migrated_to_each_t_with_existing_when() {
+        let path = tempfile::tempdir().unwrap().keep();
+        let mut env = MockEnvGetter::new();
+
+        env.expect_get()
+            .with(eq("RS_DATA_PATH"))
+            .return_const(Ok(path.to_str().unwrap().to_string()));
+
+        env.expect_get()
+            .with(eq("RS_BUCKET_1_NAME"))
+            .return_const(Ok("bucket1".to_string()));
+
+        env.expect_all().returning(|| {
+            let mut map = BTreeMap::new();
+            map.insert("RS_BUCKET_1_NAME".to_string(), "bucket1".to_string());
+            map.insert(
+                "RS_REPLICATION_1_NAME".to_string(),
+                "replication1".to_string(),
+            );
+            map
+        });
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_NAME"))
+            .return_const(Ok("replication1".to_string()));
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+            .return_const(Ok("bucket1".to_string()));
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+            .return_const(Ok("bucket2".to_string()));
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_DST_HOST"))
+            .return_const(Ok("http://localhost".to_string()));
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_WHEN"))
+            .return_const(Ok(r#"{"&label": {"$eq": 1}}"#.to_string()));
+
+        env.expect_get()
+            .with(eq("RS_REPLICATION_1_EACH_S"))
+            .return_const(Ok("2.0".to_string()));
+
+        env.expect_get().return_const(Err(VarError::NotPresent));
+
+        let components = CfgParser::from_env(env, "0.0.0")
+            .await
+            .build()
+            .await
+            .unwrap();
+        let repo = components.replication_repo.read().await.unwrap();
+        let replication = repo.get_replication_settings("replication1").await.unwrap();
+
+        // The when condition should have both the original condition and $each_t at the top level
+        assert_eq!(
+            replication.when,
+            Some(serde_json::json!({
+                "&label": {"$eq": 1},
+                "$each_t": 2.0
+            }))
+        );
     }
 
     #[fixture]
