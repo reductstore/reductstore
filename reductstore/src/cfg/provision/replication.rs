@@ -3,6 +3,7 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds, ProvisionedReplication};
 use crate::core::env::{Env, GetEnv};
+use crate::lifecycle::SystemEventSink;
 use crate::replication::{ManageReplications, ReplicationRepoBuilder};
 use crate::storage::engine::StorageEngine;
 use log::{error, info, warn};
@@ -16,8 +17,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(in crate::cfg) async fn provision_replication_repo(
         &self,
         storage: Arc<StorageEngine>,
+        system_event_sink: SystemEventSink,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
         let mut repo = ReplicationRepoBuilder::new(self.cfg.clone())
+            .with_system_event_sink(system_event_sink)
             .build(Arc::clone(&storage))
             .await;
         for (name, replication) in &self.cfg.replications {

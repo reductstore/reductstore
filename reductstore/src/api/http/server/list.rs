@@ -46,7 +46,7 @@ pub(super) async fn list(
 mod tests {
     use super::*;
     use crate::api::http::tests::{headers, keeper};
-    use crate::audit::AUDIT_BUCKET_NAME;
+    use crate::syslog::AUDIT_BUCKET_NAME;
     use axum::http::HeaderValue;
     use reduct_base::msg::bucket_api::BucketSettings;
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};

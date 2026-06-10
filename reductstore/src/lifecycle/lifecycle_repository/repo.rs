@@ -7,7 +7,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::lifecycle::action::{build_lifecycle_action, LifecycleContext};
 use crate::lifecycle::lifecycle_task::LifecycleTask;
-use crate::lifecycle::{LifecycleAuditSink, ManageLifecycles};
+use crate::lifecycle::{ManageLifecycles, SystemEventSink};
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
 use async_trait::async_trait;
@@ -59,7 +59,7 @@ pub(crate) struct LifecycleRepository {
     repo_path: PathBuf,
     started: bool,
     action_builder: LifecycleActionBuilder,
-    audit_sink: Option<LifecycleAuditSink>,
+    system_event_sink: Option<SystemEventSink>,
 }
 
 #[async_trait]
@@ -184,7 +184,7 @@ impl LifecycleRepository {
     pub(crate) async fn load_or_create(
         storage: Arc<StorageEngine>,
         _config: Cfg,
-        audit_sink: Option<LifecycleAuditSink>,
+        system_event_sink: Option<SystemEventSink>,
     ) -> Self {
         let repo_path = storage.data_path().join(LIFECYCLE_REPO_FILE_NAME);
         let mut repo = Self {
@@ -193,7 +193,7 @@ impl LifecycleRepository {
             repo_path,
             started: false,
             action_builder: Arc::new(build_lifecycle_action),
-            audit_sink,
+            system_event_sink,
         };
 
         let read_conf_file = async || {
@@ -328,7 +328,7 @@ impl LifecycleRepository {
             interval,
             action,
             LifecycleContext::new(Arc::clone(&self.storage)),
-            self.audit_sink.clone(),
+            self.system_event_sink.clone(),
         );
         if self.started {
             lifecycle.start();

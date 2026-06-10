@@ -11,6 +11,8 @@ use reduct_base::msg::replication_api::{
 mod diagnostics;
 pub mod proto;
 mod remote_bucket;
+mod replication_aggregator;
+mod replication_event_payload;
 mod replication_repository;
 mod replication_sender;
 mod replication_task;

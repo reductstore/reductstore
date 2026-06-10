@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
-pub(crate) struct LifecycleAuditPayload {
+pub(crate) struct LifecycleSystemEventPayload {
     pub policy_name: String,
     pub action_type: String,
     pub bucket: String,
@@ -18,7 +18,7 @@ pub(crate) struct LifecycleAuditPayload {
     pub error_message: Option<String>,
 }
 
-impl LifecycleAuditPayload {
+impl LifecycleSystemEventPayload {
     pub(crate) fn success(
         policy_name: &str,
         action_type: &str,

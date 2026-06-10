@@ -50,14 +50,14 @@ def _make_bucket_and_return_name(base_url, session, bucket_name) -> str:
     return bucket_name
 
 
-@pytest.fixture(name="audit_bucket")
-def _ensure_audit_bucket_exists(base_url, session) -> str:
+@pytest.fixture(name="system_bucket")
+def _ensure_system_bucket_exists(base_url, session) -> str:
     resp = session.get(f"{base_url}/info")
     assert resp.status_code == 200
 
     # Audit records are flushed after a short aggregation window.
     time.sleep(6)
-    return "$audit"
+    return "$system"
 
 
 @pytest.fixture(name="session")
@@ -140,11 +140,11 @@ def _make_token_read_wildcard(session, base_url, token_generator):
     )
 
 
-@pytest.fixture(name="token_read_audit")
-def _make_token_read_audit(session, base_url, token_generator):
+@pytest.fixture(name="token_read_system")
+def _make_token_read_system(session, base_url, token_generator):
     permissions = {
         "full_access": False,
-        "read": ["$audit"],
+        "read": ["$system"],
     }
     name = token_generator()
     resp = session.post(f"{base_url}/tokens/{name}", json=permissions)

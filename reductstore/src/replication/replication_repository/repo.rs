@@ -4,6 +4,7 @@
 use crate::cfg::{Cfg, DEFAULT_PORT};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
+use crate::lifecycle::SystemEventSink;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
     Label as ProtoLabel, ReplicationMode as ProtoReplicationMode,
@@ -146,6 +147,7 @@ pub(crate) struct ReplicationRepository {
     storage: Arc<StorageEngine>,
     repo_path: PathBuf,
     config: Cfg,
+    system_event_sink: Option<SystemEventSink>,
     started: bool,
     notification_tx: UnboundedSender<NotificationCommand>,
     notification_worker: Option<JoinHandle<()>>,
@@ -166,8 +168,7 @@ impl ManageReplications for ReplicationRepository {
             )));
         }
 
-        self.create_or_update_replication_task(&name, settings)
-            .await
+        self.create_or_update_replication_task(name, settings).await
     }
 
     async fn update_replication(
@@ -193,8 +194,7 @@ impl ManageReplications for ReplicationRepository {
             ))),
         }?;
 
-        self.create_or_update_replication_task(&name, settings)
-            .await
+        self.create_or_update_replication_task(name, settings).await
     }
 
     async fn replications(&self) -> Result<Vec<ReplicationInfo>, ReductError> {
@@ -321,7 +321,11 @@ impl ManageReplications for ReplicationRepository {
 }
 
 impl ReplicationRepository {
-    pub(crate) async fn load_or_create(storage: Arc<StorageEngine>, config: Cfg) -> Self {
+    pub(crate) async fn load_or_create(
+        storage: Arc<StorageEngine>,
+        config: Cfg,
+        system_event_sink: Option<SystemEventSink>,
+    ) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
         let replications = Arc::new(AsyncRwLock::new(HashMap::<String, ReplicationTask>::new()));
         let (notification_tx, mut notification_rx) = unbounded_channel::<NotificationCommand>();
@@ -358,6 +362,7 @@ impl ReplicationRepository {
             storage,
             repo_path,
             config,
+            system_event_sink,
             started: false,
             notification_tx,
             notification_worker: Some(notification_worker),
@@ -504,8 +509,13 @@ impl ReplicationRepository {
         let mut settings = settings;
         settings.dst_token = init_token;
 
-        let replication =
-            ReplicationTask::new(name.to_string(), settings, conf, Arc::clone(&self.storage))?;
+        let replication = ReplicationTask::new(
+            name.to_string(),
+            settings,
+            conf,
+            Arc::clone(&self.storage),
+            self.system_event_sink.clone(),
+        )?;
         let mut replication = replication;
         if self.started {
             replication.start();
@@ -681,13 +691,15 @@ mod tests {
         ) {
             let storage = storage.await;
             let mut repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
+                    .await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
 
             let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
+                    .await;
             assert_eq!(repo.replications().await.unwrap().len(), 1);
             assert_eq!(
                 repo.get_replication_settings("test").await.unwrap(),
@@ -894,7 +906,8 @@ mod tests {
 
             // check if replication is removed from file
             let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
+                    .await;
             assert_eq!(
                 repo.replications().await.unwrap().len(),
                 0,
@@ -1330,6 +1343,6 @@ mod tests {
     #[fixture]
     async fn repo(#[future] storage: Arc<StorageEngine>) -> ReplicationRepository {
         let storage = storage.await;
-        ReplicationRepository::load_or_create(storage, Cfg::default()).await
+        ReplicationRepository::load_or_create(storage, Cfg::default(), None).await
     }
 }
