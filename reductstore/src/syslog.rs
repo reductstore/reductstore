@@ -5,7 +5,10 @@ mod forward_system_logger;
 mod local_system_logger;
 
 use crate::cfg::Cfg;
+use crate::core::sync::AsyncRwLock;
+use crate::lifecycle::SystemEventSink;
 use crate::storage::engine::StorageEngine;
+use crate::storage::usage::UsageEventAggregator;
 use async_trait::async_trait;
 use forward_system_logger::ForwardSystemLogger;
 use local_system_logger::LocalSystemLogger;
@@ -202,6 +205,28 @@ pub(crate) async fn build_usage_system_logger(
         .with_entry_prefix(SYSTEM_USAGE_ENTRY_PREFIX)
         .build(cfg, storage)
         .expect("usage system logger must build")
+}
+
+/// Build the usage statistics logger: an aggregator owning the periodic task
+/// that writes usage events under `usage/<instance>/total`. Mirrors
+/// [`build_audit_logger`] — the worker lives inside the returned logger and is
+/// stopped when it is dropped. The traffic counters are shared with the
+/// storage engine, which owns them and increments them at its choke points.
+pub(crate) async fn build_usage_logger(
+    cfg: &Cfg,
+    storage: Arc<StorageEngine>,
+) -> BoxedSystemLogger {
+    if !cfg.system_events_conf.enabled {
+        return Box::new(DisabledSystemLogger);
+    }
+
+    let inner = build_usage_system_logger(cfg, Arc::clone(&storage)).await;
+    let sink = SystemEventSink {
+        system_logger: Arc::new(AsyncRwLock::new(inner)),
+        instance_name: cfg.instance_name.clone(),
+    };
+    let counters = Arc::clone(storage.usage_counters());
+    Box::new(UsageEventAggregator::new(sink, storage, counters))
 }
 
 fn system_bucket_settings(cfg: &Cfg) -> BucketSettings {

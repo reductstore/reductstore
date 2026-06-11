@@ -6,14 +6,14 @@
 //! Traffic is counted at the storage engine choke points — all writes in
 //! [`crate::storage::engine::StorageEngine::begin_write`] and all reads at
 //! `RecordReader` creation — so external, replication and Zenoh traffic
-//! count uniformly. A background task drains the counters every
-//! [`usage_task::USAGE_FLUSH_INTERVAL`] and writes one flat-JSON event per
-//! instance to `$system/usage/<instance>/total`.
+//! count uniformly. [`UsageEventAggregator`] owns a background task that
+//! drains the counters every [`usage_aggregator::USAGE_FLUSH_INTERVAL`] and
+//! writes one flat-JSON event per instance to `$system/usage/<instance>/total`.
 
+mod usage_aggregator;
 mod usage_event_payload;
-mod usage_task;
 
-pub(crate) use usage_task::UsageStatsTask;
+pub(crate) use usage_aggregator::UsageEventAggregator;
 
 use std::sync::atomic::{AtomicU64, Ordering};
 
@@ -24,7 +24,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 /// increments that race with a flush roll into the next interval instead of
 /// being lost.
 #[derive(Debug, Default)]
-pub struct UsageCounters {
+pub(crate) struct UsageCounters {
     write_bytes: AtomicU64,
     read_bytes: AtomicU64,
     records_written: AtomicU64,

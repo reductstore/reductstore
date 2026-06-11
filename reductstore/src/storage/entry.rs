@@ -22,6 +22,7 @@ use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
+use crate::storage::usage::UsageCounters;
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 use log::{debug, error};
@@ -87,9 +88,10 @@ impl Entry {
         path: PathBuf,
         settings: EntrySettings,
         cfg: Arc<Cfg>,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Self, ReductError> {
         let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
-        Self::try_build_with_limiter(name, path, settings, cfg, io_limiter).await
+        Self::try_build_with_limiter(name, path, settings, cfg, io_limiter, usage_counters).await
     }
 
     pub(crate) async fn try_build_with_limiter(
@@ -98,6 +100,7 @@ impl Entry {
         settings: EntrySettings,
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Self, ReductError> {
         let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
         let path = path.join(name);
@@ -121,6 +124,7 @@ impl Entry {
                     bucket_name.clone(),
                     name.to_string(),
                     cfg.clone(),
+                    usage_counters,
                 )
                 .await?,
             )),
@@ -140,9 +144,19 @@ impl Entry {
         bucket_name: String,
         options: EntrySettings,
         cfg: Arc<Cfg>,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Option<Entry>, ReductError> {
         let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
-        Self::restore_with_limiter(path, entry_name, bucket_name, options, cfg, io_limiter).await
+        Self::restore_with_limiter(
+            path,
+            entry_name,
+            bucket_name,
+            options,
+            cfg,
+            io_limiter,
+            usage_counters,
+        )
+        .await
     }
 
     pub(crate) async fn restore_with_limiter(
@@ -152,6 +166,7 @@ impl Entry {
         options: EntrySettings,
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Option<Entry>, ReductError> {
         let entry = EntryLoader::restore_entry_with_names(
             path,
@@ -160,6 +175,7 @@ impl Entry {
             options,
             cfg,
             io_limiter,
+            usage_counters,
         )
         .await?;
         Ok(entry)
@@ -576,6 +592,7 @@ mod tests {
                 "bucket".to_string(),
                 entry_settings,
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()
@@ -835,6 +852,7 @@ mod tests {
                     max_block_records: 10000,
                 },
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap(),
@@ -930,6 +948,7 @@ mod tests {
                         max_block_records: 2,
                     },
                     Cfg::default().into(),
+                    Default::default(),
                 )
                 .await
                 .unwrap(),
@@ -967,9 +986,15 @@ mod tests {
     #[fixture]
     pub(super) async fn entry(entry_settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
         Arc::new(
-            Entry::try_build("entry", path.clone(), entry_settings, Cfg::default().into())
-                .await
-                .unwrap(),
+            Entry::try_build(
+                "entry",
+                path.clone(),
+                entry_settings,
+                Cfg::default().into(),
+                Default::default(),
+            )
+            .await
+            .unwrap(),
         )
     }
 

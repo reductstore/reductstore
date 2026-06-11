@@ -504,7 +504,7 @@ mod tests {
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
-            Bucket::try_build("test", &path, settings, Cfg::default())
+            Bucket::try_build("test", &path, settings, Cfg::default(), Default::default())
                 .await
                 .unwrap(),
         )

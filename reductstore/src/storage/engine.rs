@@ -9,7 +9,7 @@ use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use crate::storage::in_flight::InFlightIoLimiter;
-use crate::usage::UsageSnapshot;
+use crate::storage::usage::{UsageCounters, UsageSnapshot};
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
@@ -52,6 +52,7 @@ impl StorageEngineBuilder {
         let cfg = self.cfg.expect("Config must be set");
         let data_path = self.data_path.expect("Data path must be set");
         let io_limiter = InFlightIoLimiter::from_cfg(&cfg);
+        let usage_counters = Arc::new(UsageCounters::default());
 
         if !FILE_CACHE.try_exists(&data_path).await.unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
@@ -70,7 +71,13 @@ impl StorageEngineBuilder {
             .await
             .expect("Failed to list folders")
         {
-            match Bucket::restore_with_limiter(path.clone(), cfg.clone(), io_limiter.clone()).await
+            match Bucket::restore_with_limiter(
+                path.clone(),
+                cfg.clone(),
+                io_limiter.clone(),
+                Arc::clone(&usage_counters),
+            )
+            .await
             {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
@@ -92,6 +99,7 @@ impl StorageEngineBuilder {
             cfg,
             folder_keeper: Arc::new(folder_keeper),
             io_limiter,
+            usage_counters,
         }
     }
 }
@@ -105,6 +113,9 @@ pub struct StorageEngine {
     cfg: Cfg,
     folder_keeper: Arc<FolderKeeper>,
     io_limiter: InFlightIoLimiter,
+    /// Usage traffic counters owned by the engine and shared with the usage
+    /// statistics logger, which drains them periodically.
+    usage_counters: Arc<UsageCounters>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -125,6 +136,10 @@ impl StorageEngine {
     #[cfg(test)]
     pub(crate) fn cfg(&self) -> &Cfg {
         &self.cfg
+    }
+
+    pub(crate) fn usage_counters(&self) -> &Arc<UsageCounters> {
+        &self.usage_counters
     }
 
     async fn reload(&self) -> Result<(), ReductError> {
@@ -200,7 +215,7 @@ impl StorageEngine {
         let writer = bucket
             .begin_write(entry_name, time, content_size, content_type, labels)
             .await?;
-        self.cfg.usage_counters.count_write(content_size);
+        self.usage_counters.count_write(content_size);
         Ok(writer)
     }
 
@@ -302,6 +317,7 @@ impl StorageEngine {
                 settings,
                 self.cfg.clone(),
                 self.io_limiter.clone(),
+                Arc::clone(&self.usage_counters),
             )
             .await?,
         );
@@ -422,7 +438,13 @@ impl StorageEngine {
         folder_keeper.rename_folder(&old_name, &new_name).await?;
 
         buckets.remove(&old_name);
-        let bucket = Bucket::restore_with_limiter(new_path, cfg, self.io_limiter.clone()).await?;
+        let bucket = Bucket::restore_with_limiter(
+            new_path,
+            cfg,
+            self.io_limiter.clone(),
+            Arc::clone(&self.usage_counters),
+        )
+        .await?;
         buckets.insert(new_name.to_string(), Arc::new(bucket));
         debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
         Ok(())
@@ -784,7 +806,7 @@ mod tests {
             .unwrap();
         writer.send(Ok(None)).await.unwrap();
 
-        let drained = storage.cfg.usage_counters.drain();
+        let drained = storage.usage_counters().drain();
         assert_eq!(drained.write_bytes, 10);
         assert_eq!(drained.records_written, 1);
         assert_eq!(drained.records_read, 0);
@@ -798,7 +820,7 @@ mod tests {
             .await
             .unwrap();
 
-        let drained = storage.cfg.usage_counters.drain();
+        let drained = storage.usage_counters().drain();
         assert_eq!(drained.read_bytes, 10);
         assert_eq!(drained.records_read, 1);
         assert_eq!(drained.records_written, 0);

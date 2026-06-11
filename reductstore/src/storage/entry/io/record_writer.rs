@@ -492,6 +492,7 @@ mod tests {
                 "bucket".to_string(),
                 "entry".to_string(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap();

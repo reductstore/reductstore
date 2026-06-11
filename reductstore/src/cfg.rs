@@ -35,8 +35,7 @@ use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use crate::syslog::build_audit_logger;
 use crate::syslog::build_replication_system_logger;
 use crate::syslog::build_system_logger;
-use crate::syslog::build_usage_system_logger;
-use crate::usage::{UsageCounters, UsageStatsTask};
+use crate::syslog::build_usage_logger;
 use async_trait::async_trait;
 use log::{info, warn};
 use reduct_base::error::ReductError;
@@ -112,9 +111,6 @@ pub struct Cfg {
     pub rw_lock_config: RwLockConfig,
     pub engine_config: StorageEngineConfig,
     pub(crate) limits_config: LimitsConfig,
-    /// Shared usage traffic counters; cloned `Cfg`s point to the same
-    /// counters, so the storage engine and the usage task see one tally.
-    pub(crate) usage_counters: Arc<UsageCounters>,
     #[cfg(feature = "zenoh-api")]
     pub zenoh_api: ZenohApiConfig,
 }
@@ -149,7 +145,6 @@ impl Default for Cfg {
             rw_lock_config: RwLockConfig::default(),
             engine_config: StorageEngineConfig::default(),
             limits_config: LimitsConfig::default(),
-            usage_counters: Arc::new(UsageCounters::default()),
             #[cfg(feature = "zenoh-api")]
             zenoh_api: ZenohApiConfig::default(),
         }
@@ -325,7 +320,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
             engine_config: Self::parse_storage_engine_config(&mut env),
             limits_config: Self::parse_limits_config(&mut env),
-            usage_counters: Arc::new(UsageCounters::default()),
             #[cfg(feature = "zenoh-api")]
             zenoh_api: Self::parse_zenoh_api_config(&mut env),
         };
@@ -452,20 +446,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             )
             .await?;
 
-        let usage_stats_task = if self.cfg.system_events_conf.enabled {
-            let usage_system_logger =
-                build_usage_system_logger(&self.cfg, Arc::clone(&storage)).await;
-            Some(UsageStatsTask::spawn(
-                SystemEventSink {
-                    system_logger: Arc::new(AsyncRwLock::new(usage_system_logger)),
-                    instance_name: self.cfg.instance_name.clone(),
-                },
-                Arc::clone(&storage),
-                Arc::clone(&self.cfg.usage_counters),
-            ))
-        } else {
-            None
-        };
+        let usage_stat_logger = build_usage_logger(&self.cfg, Arc::clone(&storage)).await;
+        let usage_stat_logger = Arc::new(AsyncRwLock::new(usage_stat_logger));
 
         Ok(Components {
             storage: Arc::clone(&storage),
@@ -489,7 +471,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             limits: LimitsBuilder::new()
                 .with_config(self.cfg.limits_config)
                 .build(),
-            usage_stats_task: AsyncRwLock::new(usage_stats_task),
+            usage_stat_logger,
             cfg: self.cfg.clone(),
         })
     }

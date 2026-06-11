@@ -675,6 +675,7 @@ mod tests {
                     max_block_records: 10000,
                 },
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap(),
@@ -706,6 +707,7 @@ mod tests {
                     max_block_records: 10000,
                 },
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap(),
@@ -758,6 +760,7 @@ mod tests {
                     max_block_records: 10000,
                 },
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap(),

@@ -194,6 +194,7 @@ mod tests {
                 max_block_records: 1024,
             },
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()

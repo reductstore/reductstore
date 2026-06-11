@@ -32,6 +32,7 @@ impl Bucket {
                 settings_for_entry(&entry_name, settings),
                 self.cfg.clone(),
                 self.io_limiter.clone(),
+                Arc::clone(&self.usage_counters),
             ));
         }
 
@@ -390,7 +391,7 @@ mod tests {
         bucket.sync_fs().await.unwrap();
         bucket.rename_entry("test-1", "test-2").await.unwrap();
 
-        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default(), Default::default())
             .await
             .unwrap();
         assert_eq!(
@@ -475,7 +476,7 @@ mod tests {
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
-            Bucket::try_build("test", &path, settings, Cfg::default())
+            Bucket::try_build("test", &path, settings, Cfg::default(), Default::default())
                 .await
                 .unwrap(),
         )

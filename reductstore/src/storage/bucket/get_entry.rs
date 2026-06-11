@@ -46,6 +46,7 @@ impl Bucket {
                         settings_for_entry(&prefix, &settings),
                         self.cfg.clone(),
                         self.io_limiter.clone(),
+                        Arc::clone(&self.usage_counters),
                     )
                     .await?,
                 );
@@ -215,7 +216,7 @@ mod tests {
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
-            Bucket::try_build("test", &path, settings, Cfg::default())
+            Bucket::try_build("test", &path, settings, Cfg::default(), Default::default())
                 .await
                 .unwrap(),
         )

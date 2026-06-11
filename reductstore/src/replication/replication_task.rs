@@ -637,6 +637,7 @@ mod tests {
                 &path,
                 BucketSettings::default(),
                 Cfg::default(),
+                Default::default(),
             )
             .await
             .unwrap();
