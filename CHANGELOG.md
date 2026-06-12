@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+<<<<<<< HEAD
 ### Breaking Changes
 
 - Send lifecycle run diagnostics and audit events to the `$system` bucket with configurable system event storage, [PR-1399](https://github.com/reductstore/reductstore/pull/1399)
@@ -37,6 +38,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix runtime default for lifecycle interval by implementing manual Default for LifecycleSettings, [PR-1385](https://github.com/reductstore/reductstore/pull/1385)
 - Downgrade `write_batched` log severity for closed writer-channel handoff from error to warning to reduce noisy false-positive error bursts under expected stream abort/backpressure scenarios, [PR-1356](https://github.com/reductstore/reductstore/pull/1356)
 - Handle `--version` (`-V`) in `main` before server startup so version output remains clean and exits without initialization side effects, [PR-1365](https://github.com/reductstore/reductstore/pull/1365)
+
+## 1.19.9 - 2026-06-12
+
+### Fixed
+
+- Return `422 Unprocessable Entity` for malformed/non-UTF8 write headers instead of panicking, [PR-1432](https://github.com/reductstore/reductstore/pull/1432)
 
 ## 1.19.8 - 2026-05-21
 
