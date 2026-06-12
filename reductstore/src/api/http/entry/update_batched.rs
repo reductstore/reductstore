@@ -9,7 +9,9 @@ use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
 
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time};
+use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
+use reduct_base::unprocessable_entity;
 use reduct_base::Labels;
 
 use crate::api::http::entry::common::err_to_batched_header;
@@ -42,7 +44,12 @@ pub(super) async fn update_batched_records(
     let mut records_to_update = Vec::new();
 
     for (time, v) in record_headers {
-        let header = parse_batched_header(v.to_str().unwrap())?;
+        let header = match v.to_str() {
+            Ok(raw_header) => parse_batched_header(raw_header)?,
+            Err(err) => {
+                return Err(unprocessable_entity!("Malformed header received: {}", err).into())
+            }
+        };
         let mut labels_to_update = Labels::new();
         let mut labels_to_remove = HashSet::new();
 
@@ -165,6 +172,32 @@ mod tests {
             err,
             HttpError::new(ErrorCode::UnprocessableEntity, "Invalid batched header")
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_update_batched_non_utf8_header(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        #[future] empty_body: Body,
+    ) {
+        headers.insert(
+            "x-reduct-time-1",
+            HeaderValue::from_bytes(b"10,text/plain,\xff").unwrap(),
+        );
+
+        let err = update_batched_records(
+            State(keeper.await),
+            headers,
+            path_to_entry_1,
+            empty_body.await,
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err.into_inner().status(), ErrorCode::UnprocessableEntity);
     }
 
     #[rstest]
