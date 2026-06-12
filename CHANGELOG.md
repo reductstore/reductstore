@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Return `422 Unprocessable Entity` for malformed/non-UTF8 write headers instead of panicking, [PR-1432](https://github.com/reductstore/reductstore/pull/1432)
+
 ## 1.19.8 - 2026-05-21
 
 ### Fixed

@@ -54,7 +54,13 @@ pub(super) async fn write_batched_records(
     let process_stream = async {
         let mut timed_headers: Vec<(u64, RecordHeader)> = Vec::new();
         for (time, v) in record_headers {
-            let header = parse_batched_header(v.to_str().unwrap())?;
+            let header = match v.to_str() {
+                Ok(raw_header) => parse_batched_header(raw_header)?,
+                Err(err) => {
+                    return Err(unprocessable_entity!("Malformed header received: {}", err));
+                }
+            };
+
             timed_headers.push((time, header));
         }
 
@@ -100,7 +106,7 @@ pub(super) async fn write_batched_records(
                 debug!("draining the stream");
                 while let Some(_) = stream.next().await {}
             }
-            Err::<HeaderMap, HttpError>(err)
+            Err::<HeaderMap, HttpError>(err.into())
         }
     }
 }
