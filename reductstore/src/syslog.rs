@@ -8,7 +8,7 @@ use crate::cfg::Cfg;
 use crate::core::sync::AsyncRwLock;
 use crate::lifecycle::SystemEventSink;
 use crate::storage::engine::StorageEngine;
-use crate::storage::usage::UsageEventAggregator;
+use crate::storage::usage::{UsageCounters, UsageEventAggregator};
 use async_trait::async_trait;
 use forward_system_logger::ForwardSystemLogger;
 use local_system_logger::LocalSystemLogger;
@@ -207,17 +207,18 @@ pub(crate) async fn build_usage_system_logger(
         .expect("usage system logger must build")
 }
 
-/// Build the usage statistics logger: an aggregator owning the periodic task
-/// that writes usage events under `usage/<instance>/total`. Mirrors
-/// [`build_audit_logger`] — the worker lives inside the returned logger and is
-/// stopped when it is dropped. The traffic counters are shared with the
-/// storage engine, which owns them and increments them at its choke points.
+/// Build the usage statistics aggregator: it owns the periodic task that drains
+/// the shared traffic `counters` (incremented by the storage engine) and writes
+/// usage events under `usage/<instance>/total`. Returns `None` when system
+/// events are disabled. The inner `$system` writer is built like the other
+/// loggers; the aggregator wraps it with the timer and snapshot logic.
 pub(crate) async fn build_usage_logger(
     cfg: &Cfg,
     storage: Arc<StorageEngine>,
-) -> BoxedSystemLogger {
+    counters: Arc<UsageCounters>,
+) -> Option<UsageEventAggregator> {
     if !cfg.system_events_conf.enabled {
-        return Box::new(DisabledSystemLogger);
+        return None;
     }
 
     let inner = build_usage_system_logger(cfg, Arc::clone(&storage)).await;
@@ -225,8 +226,7 @@ pub(crate) async fn build_usage_logger(
         system_logger: Arc::new(AsyncRwLock::new(inner)),
         instance_name: cfg.instance_name.clone(),
     };
-    let counters = Arc::clone(storage.usage_counters());
-    Box::new(UsageEventAggregator::new(sink, storage, counters))
+    Some(UsageEventAggregator::new(sink, storage, counters))
 }
 
 fn system_bucket_settings(cfg: &Cfg) -> BucketSettings {

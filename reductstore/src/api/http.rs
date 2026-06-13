@@ -306,7 +306,6 @@ pub(crate) mod tests {
     use crate::replication::ReplicationRepoBuilder;
     use crate::storage::engine::StorageEngine;
     use crate::syslog::build_audit_logger;
-    use crate::syslog::build_usage_logger;
     use axum::body::Body;
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
@@ -844,7 +843,6 @@ pub(crate) mod tests {
             .build_with_storage(cfg.data_path.clone(), Arc::clone(&storage))
             .await;
         let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
-        let usage_stat_logger = build_usage_logger(&cfg, Arc::clone(&storage)).await;
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -875,7 +873,7 @@ pub(crate) mod tests {
                 Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
-            usage_stat_logger: Arc::new(AsyncRwLock::new(usage_stat_logger)),
+            usage_stat_logger: AsyncRwLock::new(None),
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: crate::api::limits::LimitsBuilder::new().build(),
@@ -945,7 +943,6 @@ pub(crate) mod tests {
             .unwrap();
 
         let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
-        let usage_stat_logger = build_usage_logger(&cfg, Arc::clone(&storage)).await;
         let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -995,7 +992,7 @@ pub(crate) mod tests {
                 Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
-            usage_stat_logger: Arc::new(AsyncRwLock::new(usage_stat_logger)),
+            usage_stat_logger: AsyncRwLock::new(None),
             cfg: Cfg::default(),
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: LimitsBuilder::new().with_config(limits_config).build(),
@@ -1064,7 +1061,6 @@ pub(crate) mod tests {
             .build(Arc::clone(&storage))
             .await;
         let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
-        let usage_stat_logger = build_usage_logger(&cfg, Arc::clone(&storage)).await;
 
         #[cfg(feature = "web-console")]
         let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
@@ -1089,7 +1085,7 @@ pub(crate) mod tests {
             )
             .expect("Failed to create extension repo"),
             audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
-            usage_stat_logger: Arc::new(AsyncRwLock::new(usage_stat_logger)),
+            usage_stat_logger: AsyncRwLock::new(None),
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: crate::api::limits::LimitsBuilder::new().build(),

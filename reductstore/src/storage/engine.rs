@@ -30,11 +30,20 @@ pub struct StorageEngineBuilder {
     cfg: Option<Cfg>,
     license: Option<License>,
     data_path: Option<PathBuf>,
+    usage_counters: Option<Arc<UsageCounters>>,
 }
 
 impl StorageEngineBuilder {
     pub fn with_cfg(mut self, cfg: Cfg) -> Self {
         self.cfg = Some(cfg);
+        self
+    }
+
+    /// Share the usage traffic counters with the engine. The same `Arc` is
+    /// drained by the usage statistics aggregator. When unset (e.g. in tests),
+    /// the engine creates its own counters that nothing drains.
+    pub(crate) fn with_usage_counters(mut self, usage_counters: Arc<UsageCounters>) -> Self {
+        self.usage_counters = Some(usage_counters);
         self
     }
 
@@ -52,7 +61,9 @@ impl StorageEngineBuilder {
         let cfg = self.cfg.expect("Config must be set");
         let data_path = self.data_path.expect("Data path must be set");
         let io_limiter = InFlightIoLimiter::from_cfg(&cfg);
-        let usage_counters = Arc::new(UsageCounters::default());
+        let usage_counters = self
+            .usage_counters
+            .unwrap_or_else(|| Arc::new(UsageCounters::default()));
 
         if !FILE_CACHE.try_exists(&data_path).await.unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
@@ -130,6 +141,7 @@ impl StorageEngine {
             cfg: None,
             license: None,
             data_path: None,
+            usage_counters: None,
         }
     }
 
@@ -138,6 +150,7 @@ impl StorageEngine {
         &self.cfg
     }
 
+    #[cfg(test)]
     pub(crate) fn usage_counters(&self) -> &Arc<UsageCounters> {
         &self.usage_counters
     }
