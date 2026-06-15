@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -93,9 +94,9 @@ pub struct LifecycleInfo {
     /// Lifecycle mode.
     #[serde(default)]
     pub mode: LifecycleMode,
-    /// Last lifecycle run timestamp in microseconds since Unix epoch.
+    /// Last lifecycle run timestamp.
     #[serde(default)]
-    pub last_run: Option<u64>,
+    pub last_run: Option<DateTime<Utc>>,
 }
 
 /// Payload for updating lifecycle mode.

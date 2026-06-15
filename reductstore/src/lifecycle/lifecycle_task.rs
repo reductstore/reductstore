@@ -6,6 +6,7 @@ use crate::lifecycle::system_event_payload::LifecycleSystemEventPayload;
 use crate::syslog::SystemEvent;
 
 use crate::lifecycle::SystemEventSink;
+use chrono::{DateTime, Utc};
 use log::{debug, error};
 use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{
@@ -172,10 +173,10 @@ impl LifecycleTask {
         }
     }
 
-    fn load_last_run(&self) -> Option<u64> {
+    fn load_last_run(&self) -> Option<DateTime<Utc>> {
         match self.last_run.load(Ordering::Relaxed) {
             0 => None,
-            ts => Some(ts),
+            ts => DateTime::<Utc>::from_timestamp_micros(ts as i64),
         }
     }
 
