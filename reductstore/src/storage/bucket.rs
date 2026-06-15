@@ -223,15 +223,11 @@ impl Bucket {
         })
     }
 
-    /// Get an entry in the bucket
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the entry
-    ///
+    /// Get an entry in the bucket.
+    /// # Argument.
+    /// `name` - The name of the entry.
     /// # Returns
-    ///
-    /// * `&Entry` - The entry or an HTTPError
+    /// `&Entry` - The entry or an HTTPError.
     pub async fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
         self.reload().await?;
         let entries = self.entries.read().await?;
@@ -341,12 +337,7 @@ impl Bucket {
             self.get_or_create_entry(name).await?.upgrade()
         };
 
-        let entry = match get_entry().await {
-            Ok(entry) => entry,
-            Err(e) => {
-                return Err(e).into();
-            }
-        };
+        let entry = get_entry().await?;
 
         entry
             .begin_write(time, content_size, content_type, labels)

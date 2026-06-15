@@ -51,7 +51,7 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
 pub(crate) type FileLock = Arc<AsyncRwLock<File>>;
 pub(crate) type FileGuard = OwnedRwLockWriteGuard<File>;
 
-/// A cache to keep file descriptors open
+/// A cache to keep file descriptors open.
 ///
 /// This optimization is needed for network file systems because opening
 /// and closing files for writing causes synchronization overhead.
@@ -269,18 +269,18 @@ impl FileCache {
         Ok((discarded_count, synced_count))
     }
 
-    /// Set the storage backend
+    /// Set the storage backend.
     pub async fn set_storage_backend(&self, backpack: Backend) {
         let mut backend = self.backend.write().await.unwrap();
         *backend = backpack;
     }
 
-    /// Set sync interval
+    /// Set sync interval.
     pub fn set_sync_interval(&self, interval: Duration) {
         *self.sync_interval.write_blocking() = interval;
     }
 
-    /// Set read-only mode
+    /// Set read-only mode.
     pub fn set_read_only(&self, read_only: bool) {
         self.read_only.store(read_only, Ordering::Relaxed);
     }
@@ -296,7 +296,7 @@ impl FileCache {
     ///
     /// # Returns
     ///
-    /// A file reference
+    /// A file reference.
     pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileGuard, ReductError> {
         let file = {
             let file = self.cache.read().await?.get(path).cloned();
@@ -318,19 +318,16 @@ impl FileCache {
         Ok(lock)
     }
 
-    /// Get a file descriptor for writing
+    /// Get a file descriptor for writing.
     ///
     /// If the file is not in the cache, it will be opened or created and added to the cache.
     ///
-    /// # Arguments
+    /// # Arguments.
+    /// * `path` - The path to the file.
+    /// * `pos` - The position to write to.
     ///
-    /// * `path` - The path to the file
-    /// * `pos` - The position to write to
-    ///
-    ///
-    /// # Returns
-    ///
-    /// A file reference
+    /// # Returns.
+    /// A file reference.
     pub async fn write_or_create(
         &self,
         path: &PathBuf,

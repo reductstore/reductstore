@@ -88,7 +88,7 @@ impl ReplicationTask {
 
         let system_options = ReplicationSystemOptions {
             transaction_log_size: config.replication_conf.replication_log_size,
-            remote_bucket_unavailable_timeout: config.replication_conf.connection_timeout.clone(),
+            remote_bucket_unavailable_timeout: config.replication_conf.connection_timeout,
             ..Default::default()
         };
 
@@ -253,7 +253,7 @@ impl ReplicationTask {
                         .await;
                     }
                     Ok(SyncState::NoTransactions) => {
-                        // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available
+                        // NOTE: we don't want to spin the CPU when there is nothing to do or the bucket is not available.
                         thr_is_active.store(true, Ordering::Relaxed);
                         ReplicationTask::sleep_with_stop(
                             &thr_stop_flag,
@@ -318,7 +318,7 @@ impl ReplicationTask {
                                 diagnostics.count(result, count);
                             }
                         }
-                        Err(err) => error!("Failed to acquire hourly diagnostics lock: {:?}", err),
+                        Err(err) => error!("Failed to acquire hourly diagnostics lock: {err:?}"),
                     }
                 }
             }
@@ -343,7 +343,7 @@ impl ReplicationTask {
         if matches!(self.load_mode(), ReplicationMode::Disabled) {
             return Ok(());
         }
-        // We need to have a filter for each entry
+        // We need to have a filter for each entry.
         let entry_name = notification.entry.clone();
         let notifications = {
             if !self.filter_map.contains_key(&notification.entry) {
@@ -361,8 +361,7 @@ impl ReplicationTask {
             filter.filter(notification)
         };
 
-        // NOTE: very important not to lock the log_map for too long
-        // because it is used by the replication thread
+        // NOTE: very important not to lock the log_map for too long because it is used by the replication thread.
         let exists = { self.log_map.read().await?.contains_key(&entry_name) };
         if !exists {
             let log = TransactionLog::try_load_or_create(
@@ -421,7 +420,7 @@ impl ReplicationTask {
     }
 
     pub fn set_mode(&mut self, mode: ReplicationMode) {
-        self.settings.mode = mode.clone();
+        self.settings.mode = mode;
         self.mode.store(mode as u8, Ordering::Relaxed);
     }
 
@@ -431,14 +430,14 @@ impl ReplicationTask {
 
     pub async fn info(&self) -> Result<ReplicationInfo, ReductError> {
         let mut pending_records = 0;
-        for (_, log) in self.log_map.read().await?.iter() {
+        for log in self.log_map.read().await?.values() {
             pending_records += log.read().await?.len() as u64;
         }
 
         let mode = self.load_mode();
         Ok(ReplicationInfo {
             name: self.name.clone(),
-            mode: mode.clone(),
+            mode,
             is_active: matches!(mode, ReplicationMode::Enabled | ReplicationMode::Paused)
                 && self.is_active.load(Ordering::Relaxed),
             is_provisioned: self.is_provisioned,

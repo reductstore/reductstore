@@ -74,7 +74,6 @@ uuid = { version = "1.21.0", features = ["v4"] }
 parking_lot="0.12.5"
 zenoh = { version = "1.9.0", optional = true }
 tokio-retry = "0.3.2"
-either = "*"
 
 [build-dependencies]
 prost-build = "0.14.1"

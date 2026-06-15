@@ -166,8 +166,7 @@ impl ManageReplications for ReplicationRepository {
             )));
         }
 
-        self.create_or_update_replication_task(&name, settings)
-            .await
+        self.create_or_update_replication_task(name, settings).await
     }
 
     async fn update_replication(
@@ -193,14 +192,13 @@ impl ManageReplications for ReplicationRepository {
             ))),
         }?;
 
-        self.create_or_update_replication_task(&name, settings)
-            .await
+        self.create_or_update_replication_task(name, settings).await
     }
 
     async fn replications(&self) -> Result<Vec<ReplicationInfo>, ReductError> {
         let mut replications = Vec::new();
         let guard = self.replications.read().await?;
-        for (_, replication) in guard.iter() {
+        for replication in guard.values() {
             replications.push(replication.info().await?);
         }
         Ok(replications)
@@ -314,7 +312,7 @@ impl ManageReplications for ReplicationRepository {
         }
 
         let mut guard = self.replications.write().await.unwrap();
-        for (_, task) in guard.iter_mut() {
+        for task in guard.values_mut() {
             task.stop().await;
         }
     }
@@ -338,7 +336,7 @@ impl ReplicationRepository {
                             }
                         };
 
-                        for (_, replication) in replications.iter_mut() {
+                        for replication in replications.values_mut() {
                             if replication.settings().src_bucket != notification.bucket {
                                 continue;
                             }
@@ -487,7 +485,7 @@ impl ReplicationRepository {
             conf.io_conf = filer.io_config().clone();
         }
 
-        // remove old replication because before creating new one
+        // remove old replication before creating new one
         let mut removed = self.replications.write().await?.remove(name);
 
         // we keep the old token if the new one is empty (meaning not updated)
@@ -525,7 +523,7 @@ impl ReplicationRepository {
         }
 
         if let Some(mut replications) = self.replications.try_write() {
-            for (_, task) in replications.iter_mut() {
+            for task in replications.values_mut() {
                 task.start();
             }
         } else {
@@ -538,7 +536,7 @@ impl ReplicationRepository {
                         return;
                     }
                 };
-                for (_, task) in replications.iter_mut() {
+                for task in replications.values_mut() {
                     task.start();
                 }
             });

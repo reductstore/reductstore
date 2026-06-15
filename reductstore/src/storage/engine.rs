@@ -472,6 +472,19 @@ impl StorageEngine {
     pub fn data_path(&self) -> &PathBuf {
         &self.data_path
     }
+
+    pub(crate) async fn get_entry_strong(
+        &self,
+        bucket: &str,
+        entry: &str,
+    ) -> Result<Arc<super::entry::Entry>, ReductError> {
+        self.get_bucket(bucket)
+            .await?
+            .upgrade()?
+            .get_entry(entry)
+            .await?
+            .upgrade()
+    }
 }
 
 pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
