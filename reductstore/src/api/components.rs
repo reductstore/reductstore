@@ -16,6 +16,7 @@ use crate::lifecycle::ManageLifecycles;
 use crate::lock_file::BoxedLockFile;
 use crate::replication::ManageReplications;
 use crate::storage::engine::StorageEngine;
+use crate::storage::usage::UsageEventAggregator;
 use crate::syslog::LogSystemEvent;
 use axum::http::HeaderMap;
 use reduct_base::error::{ErrorCode, ReductError};
@@ -40,6 +41,12 @@ pub struct Components {
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
     pub(crate) audit_logger: Arc<AsyncRwLock<Box<dyn LogSystemEvent + Send + Sync>>>,
     pub(crate) limits: BoxedLimits,
+    /// Usage statistics aggregator; owns the 60s flush task and is stopped on
+    /// shutdown to flush the final interval (`None` when system events are
+    /// disabled). Unlike `audit_logger`, nothing logs to it — its events come
+    /// from its own timer — so it is held as the concrete task rather than a
+    /// boxed logger.
+    pub(crate) usage_stat_logger: AsyncRwLock<Option<UsageEventAggregator>>,
 
     pub(crate) cfg: Cfg,
 }
@@ -155,6 +162,16 @@ impl StateKeeper {
         let components = self.wait_components().await?.clone();
         let mut repo = components.lifecycle_repo.write().await?;
         repo.stop().await;
+        Ok(())
+    }
+
+    /// Stop the usage statistics task, flushing the final interval. Run before
+    /// `sync_storage` so the flushed event is persisted by the storage sync.
+    pub async fn stop_usage_stats_task(&self) -> Result<(), ReductError> {
+        let components = self.wait_components().await?.clone();
+        if let Some(aggregator) = components.usage_stat_logger.write().await?.as_mut() {
+            aggregator.stop().await;
+        }
         Ok(())
     }
 

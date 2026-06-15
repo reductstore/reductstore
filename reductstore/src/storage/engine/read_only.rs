@@ -42,6 +42,7 @@ impl StorageEngine {
                 path.clone(),
                 self.cfg.clone(),
                 self.io_limiter.clone(),
+                Arc::clone(&self.usage_counters),
             )
             .await
             {

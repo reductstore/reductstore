@@ -20,6 +20,7 @@ use crate::storage::block_manager::decompress_cache::{DecompressCache, Decompres
 use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
+use crate::storage::usage::UsageCounters;
 use block_index::BlockIndex;
 use crc64fast::Digest;
 use log::{debug, error, info, trace, warn};
@@ -52,6 +53,7 @@ pub(in crate::storage) struct BlockManager {
     decompress_cache: DecompressCache,
     wal: Box<dyn Wal + Sync + Send>,
     cfg: Arc<Cfg>,
+    usage_counters: Arc<UsageCounters>,
     last_replica_sync: Instant,
 }
 
@@ -76,12 +78,14 @@ impl BlockManager {
     /// * `bucket` - Bucket name.
     /// * `entry` - Full entry name.
     /// * `cfg` - Configuration.
+    /// * `usage_counters` - Shared usage traffic counters.
     pub(crate) async fn build(
         path: PathBuf,
         index: BlockIndex,
         bucket: String,
         entry: String,
         cfg: Arc<Cfg>,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Self, ReductError> {
         Ok(Self {
             path: path.clone(),
@@ -97,6 +101,7 @@ impl BlockManager {
             decompress_cache: DecompressCache::default(),
             wal: create_wal(path.clone()).await?,
             cfg,
+            usage_counters,
             last_replica_sync: Instant::now(),
         })
     }
@@ -739,6 +744,10 @@ impl BlockManager {
         &self.block_index
     }
 
+    pub(in crate::storage) fn usage_counters(&self) -> &UsageCounters {
+        &self.usage_counters
+    }
+
     pub(in crate::storage) fn is_block_in_write_cache(&self, block_id: u64) -> bool {
         self.block_cache.get_write(&block_id).is_some()
     }
@@ -868,6 +877,7 @@ mod tests {
                 "bucket".to_string(),
                 "entry".to_string(),
                 Arc::new(cfg),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -885,6 +895,7 @@ mod tests {
                 "bucket".to_string(),
                 "entry".to_string(),
                 Arc::new(cfg),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -932,6 +943,7 @@ mod tests {
                 "bucket".to_string(),
                 "entry".to_string(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -960,6 +972,7 @@ mod tests {
                 "bucket".to_string(),
                 "entry".to_string(),
                 Arc::new(cfg),
+                Default::default(),
             )
             .await
             .unwrap();
@@ -1576,6 +1589,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap();

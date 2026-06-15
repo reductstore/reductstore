@@ -28,6 +28,7 @@ use crate::storage::entry::{
 use crate::storage::folder_keeper::FolderKeeper;
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::BucketSettings as ProtoBucketSettings;
+use crate::storage::usage::UsageCounters;
 use log::{debug, error};
 use prost::bytes::Bytes;
 use prost::Message;
@@ -71,6 +72,7 @@ pub(crate) struct Bucket {
     #[allow(dead_code)]
     queries: AsyncRwLock<HashMap<u64, MultiEntryQuery>>,
     io_limiter: InFlightIoLimiter,
+    usage_counters: Arc<UsageCounters>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -113,9 +115,10 @@ impl Bucket {
         path: &PathBuf,
         settings: BucketSettings,
         cfg: Cfg,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Bucket, ReductError> {
         let io_limiter = InFlightIoLimiter::from_cfg(&cfg);
-        Self::try_build_with_limiter(name, path, settings, cfg, io_limiter).await
+        Self::try_build_with_limiter(name, path, settings, cfg, io_limiter, usage_counters).await
     }
 
     pub(crate) async fn try_build_with_limiter(
@@ -124,6 +127,7 @@ impl Bucket {
         settings: BucketSettings,
         cfg: Cfg,
         io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Bucket, ReductError> {
         let path = path.join(name);
         let settings = Self::fill_settings(settings, Self::defaults());
@@ -140,6 +144,7 @@ impl Bucket {
             folder_keeper: Arc::new(folder_keeper),
             queries: AsyncRwLock::new(HashMap::new()),
             io_limiter,
+            usage_counters,
         };
 
         bucket.save_settings().await?;
@@ -157,15 +162,20 @@ impl Bucket {
     ///
     /// * `Bucket` - The bucket or an HTTPError
     #[allow(dead_code)]
-    pub async fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
+    pub async fn restore(
+        path: PathBuf,
+        cfg: Cfg,
+        usage_counters: Arc<UsageCounters>,
+    ) -> Result<Bucket, ReductError> {
         let io_limiter = InFlightIoLimiter::from_cfg(&cfg);
-        Self::restore_with_limiter(path, cfg, io_limiter).await
+        Self::restore_with_limiter(path, cfg, io_limiter, usage_counters).await
     }
 
     pub async fn restore_with_limiter(
         path: PathBuf,
         cfg: Cfg,
         io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Bucket, ReductError> {
         let mut file = FILE_CACHE
             .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))
@@ -197,6 +207,7 @@ impl Bucket {
                 settings_for_entry(&entry_name, &settings),
                 cfg.clone(),
                 io_limiter.clone(),
+                Arc::clone(&usage_counters),
             );
 
             task_set.push(handler);
@@ -221,6 +232,7 @@ impl Bucket {
             folder_keeper: Arc::new(folder_keeper),
             queries: AsyncRwLock::new(HashMap::new()),
             io_limiter,
+            usage_counters,
         })
     }
 
@@ -564,6 +576,7 @@ pub(crate) mod tests {
                     bucket.path.clone(),
                     settings_for_entry("empty", &settings),
                     bucket.cfg.clone(),
+                    Default::default(),
                 )
                 .await
                 .unwrap(),
@@ -658,7 +671,7 @@ pub(crate) mod tests {
             write(&bucket, "entry/a", 1, b"test").await.unwrap();
             bucket.sync_fs().await.unwrap();
 
-            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default(), Default::default())
                 .await
                 .unwrap();
             let mut reader = bucket.begin_read("entry/a", 1).await.unwrap();
@@ -674,7 +687,7 @@ pub(crate) mod tests {
                 .unwrap();
             bucket.sync_fs().await.unwrap();
 
-            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default(), Default::default())
                 .await
                 .unwrap();
             let entry = bucket
@@ -792,7 +805,7 @@ pub(crate) mod tests {
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
-            Bucket::try_build("test", &path, settings, Cfg::default())
+            Bucket::try_build("test", &path, settings, Cfg::default(), Default::default())
                 .await
                 .unwrap(),
         )
@@ -801,7 +814,7 @@ pub(crate) mod tests {
     #[fixture]
     pub async fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
-        let bucket = Bucket::try_build("test", &path, settings, Cfg::default())
+        let bucket = Bucket::try_build("test", &path, settings, Cfg::default(), Default::default())
             .await
             .unwrap();
         bucket.set_provisioned(true);

@@ -119,6 +119,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg.clone()),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -161,6 +162,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg.clone()),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -205,6 +207,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg.clone()),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -248,6 +251,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -283,6 +287,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg),
+            Default::default(),
         )
         .await
         .unwrap();

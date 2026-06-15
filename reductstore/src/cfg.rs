@@ -32,9 +32,11 @@ use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLo
 use crate::ext::ext_repository::create_ext_repository;
 use crate::lifecycle::SystemEventSink;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
+use crate::storage::usage::UsageCounters;
 use crate::syslog::build_audit_logger;
 use crate::syslog::build_replication_system_logger;
 use crate::syslog::build_system_logger;
+use crate::syslog::build_usage_logger;
 use async_trait::async_trait;
 use log::{info, warn};
 use reduct_base::error::ReductError;
@@ -397,7 +399,13 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
     pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
-        let storage = Arc::new(self.provision_buckets(&data_path).await);
+        // One shared counters instance: the engine increments it at its choke
+        // points, the usage aggregator drains it.
+        let usage_counters = Arc::new(UsageCounters::default());
+        let storage = Arc::new(
+            self.provision_buckets(&data_path, Arc::clone(&usage_counters))
+                .await,
+        );
         let token_repo = self.provision_tokens(&data_path, Arc::clone(&storage));
         let console = create_asset_manager(load_console());
         let replication_system_logger =
@@ -445,6 +453,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             )
             .await?;
 
+        let usage_stat_logger =
+            build_usage_logger(&self.cfg, Arc::clone(&storage), usage_counters).await;
+
         Ok(Components {
             storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
@@ -467,6 +478,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             limits: LimitsBuilder::new()
                 .with_config(self.cfg.limits_config)
                 .build(),
+            usage_stat_logger: AsyncRwLock::new(usage_stat_logger),
             cfg: self.cfg.clone(),
         })
     }

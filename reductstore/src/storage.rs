@@ -10,3 +10,4 @@ mod folder_keeper;
 pub mod query;
 
 pub(crate) mod in_flight;
+pub(crate) mod usage;

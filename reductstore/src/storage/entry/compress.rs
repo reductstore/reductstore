@@ -364,9 +364,15 @@ mod tests {
 
     async fn entry(settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
         Arc::new(
-            Entry::try_build("entry", path.clone(), settings, Cfg::default().into())
-                .await
-                .unwrap(),
+            Entry::try_build(
+                "entry",
+                path.clone(),
+                settings,
+                Cfg::default().into(),
+                Default::default(),
+            )
+            .await
+            .unwrap(),
         )
     }
 
@@ -417,6 +423,7 @@ mod tests {
             entry.bucket_name().to_string(),
             settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()

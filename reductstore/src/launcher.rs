@@ -194,6 +194,10 @@ where
         .await
         .expect("Failed to stop replication tasks");
     state_keeper
+        .stop_usage_stats_task()
+        .await
+        .expect("Failed to stop usage statistics task");
+    state_keeper
         .sync_storage()
         .await
         .expect("Failed to shutdown storage");

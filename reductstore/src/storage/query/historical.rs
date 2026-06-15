@@ -427,9 +427,16 @@ mod tests {
 
         let index = BlockIndex::try_load(path.join("index")).await.unwrap();
         let block_manager = Arc::new(AsyncRwLock::new(
-            BlockManager::build(path, index, bucket, entry, Arc::new(cfg))
-                .await
-                .unwrap(),
+            BlockManager::build(
+                path,
+                index,
+                bucket,
+                entry,
+                Arc::new(cfg),
+                Default::default(),
+            )
+            .await
+            .unwrap(),
         ));
 
         let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
@@ -463,9 +470,16 @@ mod tests {
 
         let index = BlockIndex::try_load(path.join("index")).await.unwrap();
         let replica_block_manager = Arc::new(AsyncRwLock::new(
-            BlockManager::build(path, index, bucket, entry, Arc::new(cfg))
-                .await
-                .unwrap(),
+            BlockManager::build(
+                path,
+                index,
+                bucket,
+                entry,
+                Arc::new(cfg),
+                Default::default(),
+            )
+            .await
+            .unwrap(),
         ));
 
         // Simulate stale in-memory CRC while index on disk is already updated.

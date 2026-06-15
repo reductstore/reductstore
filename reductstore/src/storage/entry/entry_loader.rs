@@ -27,6 +27,7 @@ use crate::storage::entry::strategy_for_entry;
 use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
+use crate::storage::usage::UsageCounters;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use reduct_base::msg::status::ResourceStatus;
@@ -40,6 +41,7 @@ impl EntryLoader {
         path: PathBuf,
         options: EntrySettings,
         cfg: Arc<Cfg>,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Option<Entry>, ReductError> {
         let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
         let entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
@@ -51,8 +53,16 @@ impl EntryLoader {
             .to_str()
             .unwrap()
             .to_string();
-        Self::restore_entry_with_names(path, entry_name, bucket_name, options, cfg, io_limiter)
-            .await
+        Self::restore_entry_with_names(
+            path,
+            entry_name,
+            bucket_name,
+            options,
+            cfg,
+            io_limiter,
+            usage_counters,
+        )
+        .await
     }
 
     pub async fn restore_entry_with_names(
@@ -62,6 +72,7 @@ impl EntryLoader {
         options: EntrySettings,
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Option<Entry>, ReductError> {
         let start_time = Instant::now();
 
@@ -72,6 +83,7 @@ impl EntryLoader {
             options.clone(),
             cfg.clone(),
             io_limiter.clone(),
+            Arc::clone(&usage_counters),
         )
         .await
         {
@@ -93,6 +105,7 @@ impl EntryLoader {
                     options.clone(),
                     cfg.clone(),
                     io_limiter.clone(),
+                    Arc::clone(&usage_counters),
                 )
                 .await?
             }
@@ -124,6 +137,7 @@ impl EntryLoader {
                     options,
                     cfg.clone(),
                     io_limiter.clone(),
+                    Arc::clone(&usage_counters),
                 )
                 .await?;
             }
@@ -152,6 +166,7 @@ impl EntryLoader {
         options: EntrySettings,
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Entry, ReductError> {
         async fn remove_block_files(path: &PathBuf) -> Result<(), ReductError> {
             warn!("Removing meta block {:?}", path);
@@ -295,6 +310,7 @@ impl EntryLoader {
                     bucket_name.clone(),
                     entry_name.clone(),
                     cfg.clone(),
+                    usage_counters,
                 )
                 .await?,
             )),
@@ -315,6 +331,7 @@ impl EntryLoader {
         options: EntrySettings,
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
 
@@ -329,6 +346,7 @@ impl EntryLoader {
                     bucket_name.clone(),
                     entry_name.clone(),
                     cfg.clone(),
+                    usage_counters,
                 )
                 .await?,
             )),
@@ -578,6 +596,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -618,11 +637,15 @@ mod tests {
         let data_path = path.join("entry/1.blk");
         fs::write(data_path.clone(), b"bad data").unwrap();
 
-        let entry =
-            EntryLoader::restore_entry(path.join("entry"), entry_settings, Cfg::default().into())
-                .await
-                .unwrap()
-                .unwrap();
+        let entry = EntryLoader::restore_entry(
+            path.join("entry"),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let info = entry.info().await.unwrap();
         assert_eq!(info.name, "entry");
         assert_eq!(info.record_count, 0);
@@ -642,6 +665,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -688,10 +712,15 @@ mod tests {
         block_manager.clear_cache_for_test();
 
         // repack the block
-        let entry = EntryLoader::restore_entry(path.clone(), entry_settings, Cfg::default().into())
-            .await
-            .unwrap()
-            .unwrap();
+        let entry = EntryLoader::restore_entry(
+            path.clone(),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let info = entry.info().await.unwrap();
 
         assert_eq!(info.size, 88);
@@ -709,6 +738,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -747,6 +777,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -774,6 +805,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -815,6 +847,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -866,6 +899,7 @@ mod tests {
             path.join("entry"),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         {
@@ -901,11 +935,15 @@ mod tests {
         )
         .unwrap();
 
-        let entry =
-            EntryLoader::restore_entry(path.join("entry"), entry_settings, Cfg::default().into())
-                .await
-                .unwrap()
-                .unwrap();
+        let entry = EntryLoader::restore_entry(
+            path.join("entry"),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
 
         assert_eq!(entry.info().await.unwrap().record_count, 0);
     }
@@ -941,6 +979,7 @@ mod tests {
             path.join("entry"),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         {
@@ -969,11 +1008,15 @@ mod tests {
         fs::write(entry_path.join("1.meta"), block.encode_to_vec()).unwrap();
         fs::write(entry_path.join("1.blk"), b"a").unwrap();
 
-        let entry =
-            EntryLoader::restore_entry(entry_path.clone(), entry_settings, Cfg::default().into())
-                .await
-                .unwrap()
-                .unwrap();
+        let entry = EntryLoader::restore_entry(
+            entry_path.clone(),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
 
         assert_eq!(entry.info().await.unwrap().record_count, 0);
         assert!(!entry_path.join("1.meta").exists());
@@ -998,6 +1041,7 @@ mod tests {
             path.join(entry.name.clone()),
             entry_settings.clone(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1020,6 +1064,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -1049,6 +1094,7 @@ mod tests {
             path.join(entry.name.clone()),
             entry_settings.clone(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1072,6 +1118,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -1104,6 +1151,7 @@ mod tests {
             path.join(entry.name.clone()),
             entry.settings().await.unwrap(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -1150,6 +1198,7 @@ mod tests {
                 path.clone(),
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()
@@ -1198,6 +1247,7 @@ mod tests {
                 path.clone(),
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()
@@ -1236,6 +1286,7 @@ mod tests {
                 path,
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()
@@ -1267,6 +1318,7 @@ mod tests {
                 path,
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()
@@ -1293,6 +1345,7 @@ mod tests {
                 path.clone(),
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await;
             assert!(entry.is_ok());
@@ -1334,6 +1387,7 @@ mod tests {
                 path.clone(),
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()

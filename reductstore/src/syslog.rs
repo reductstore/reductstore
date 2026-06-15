@@ -5,7 +5,10 @@ mod forward_system_logger;
 mod local_system_logger;
 
 use crate::cfg::Cfg;
+use crate::core::sync::AsyncRwLock;
+use crate::lifecycle::SystemEventSink;
 use crate::storage::engine::StorageEngine;
+use crate::storage::usage::{UsageCounters, UsageEventAggregator};
 use async_trait::async_trait;
 use forward_system_logger::ForwardSystemLogger;
 use local_system_logger::LocalSystemLogger;
@@ -24,6 +27,7 @@ pub(crate) const SYSTEM_BUCKET_NAME: &str = "$system";
 pub(crate) const SYSTEM_AUDIT_ENTRY_PREFIX: &str = "audit";
 pub(crate) const SYSTEM_LIFECYCLE_ENTRY_PREFIX: &str = "lifecycle";
 pub(crate) const SYSTEM_REPLICATION_ENTRY_PREFIX: &str = "replications";
+pub(crate) const SYSTEM_USAGE_ENTRY_PREFIX: &str = "usage";
 
 pub(crate) type SystemEventFlushFuture =
     Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>;
@@ -187,6 +191,42 @@ pub(crate) async fn build_replication_system_logger(
         .with_entry_prefix(SYSTEM_REPLICATION_ENTRY_PREFIX)
         .build(cfg, storage)
         .expect("replication system logger must build")
+}
+
+pub(crate) async fn build_usage_system_logger(
+    cfg: &Cfg,
+    storage: Arc<StorageEngine>,
+) -> BoxedSystemLogger {
+    if !cfg.system_events_conf.enabled {
+        return Box::new(DisabledSystemLogger);
+    }
+
+    SystemLoggerBuilder::new(SYSTEM_BUCKET_NAME, system_bucket_settings(cfg))
+        .with_entry_prefix(SYSTEM_USAGE_ENTRY_PREFIX)
+        .build(cfg, storage)
+        .expect("usage system logger must build")
+}
+
+/// Build the usage statistics aggregator: it owns the periodic task that drains
+/// the shared traffic `counters` (incremented by the storage engine) and writes
+/// usage events under `usage/<instance>/total`. Returns `None` when system
+/// events are disabled. The inner `$system` writer is built like the other
+/// loggers; the aggregator wraps it with the timer and snapshot logic.
+pub(crate) async fn build_usage_logger(
+    cfg: &Cfg,
+    storage: Arc<StorageEngine>,
+    counters: Arc<UsageCounters>,
+) -> Option<UsageEventAggregator> {
+    if !cfg.system_events_conf.enabled {
+        return None;
+    }
+
+    let inner = build_usage_system_logger(cfg, Arc::clone(&storage)).await;
+    let sink = SystemEventSink {
+        system_logger: Arc::new(AsyncRwLock::new(inner)),
+        instance_name: cfg.instance_name.clone(),
+    };
+    Some(UsageEventAggregator::new(sink, storage, counters))
 }
 
 fn system_bucket_settings(cfg: &Cfg) -> BucketSettings {
