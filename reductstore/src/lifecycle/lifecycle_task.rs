@@ -11,7 +11,7 @@ use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{
     LifecycleInfo, LifecycleMode, LifecycleSettings, LifecycleType,
 };
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,6 +27,7 @@ pub(super) struct LifecycleTask {
     system_event_sink: Option<SystemEventSink>,
     stop_flag: Arc<AtomicBool>,
     mode: Arc<AtomicU8>,
+    last_run: Arc<AtomicU64>,
     worker_handle: Option<JoinHandle<()>>,
 }
 
@@ -50,6 +51,7 @@ impl LifecycleTask {
             system_event_sink,
             stop_flag: Arc::new(AtomicBool::new(false)),
             mode: Arc::new(AtomicU8::new(mode as u8)),
+            last_run: Arc::new(AtomicU64::new(0)),
             worker_handle: None,
         }
     }
@@ -68,6 +70,7 @@ impl LifecycleTask {
         let system_event_sink = self.system_event_sink.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
         let mode = Arc::clone(&self.mode);
+        let last_run = Arc::clone(&self.last_run);
 
         let handle = tokio::spawn(async move {
             debug!("Lifecycle worker '{}' started", name);
@@ -82,6 +85,7 @@ impl LifecycleTask {
                     break;
                 }
 
+                Self::mark_last_run(&last_run);
                 let started = std::time::Instant::now();
                 match action.run(&name, &settings, context.clone()).await {
                     Ok(result) => {
@@ -129,7 +133,9 @@ impl LifecycleTask {
             name: self.name.clone(),
             is_provisioned: self.is_provisioned,
             is_running: self.is_running(),
+            lifecycle_type: self.settings.lifecycle_type,
             mode: self.load_mode(),
+            last_run: self.load_last_run(),
         }
     }
 
@@ -164,6 +170,21 @@ impl LifecycleTask {
             x if x == LifecycleMode::DryRun as u8 => LifecycleMode::DryRun,
             _ => LifecycleMode::Enabled,
         }
+    }
+
+    fn load_last_run(&self) -> Option<u64> {
+        match self.last_run.load(Ordering::Relaxed) {
+            0 => None,
+            ts => Some(ts),
+        }
+    }
+
+    fn mark_last_run(last_run: &Arc<AtomicU64>) {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64;
+        last_run.store(timestamp, Ordering::Relaxed);
     }
 
     async fn sleep_with_stop(interval: Duration, stop_flag: Arc<AtomicBool>) {
@@ -362,7 +383,9 @@ pub(super) mod tests {
         assert_eq!(info.name, "test");
         assert!(info.is_provisioned);
         assert!(info.is_running);
+        assert_eq!(info.lifecycle_type, LifecycleType::Delete);
         assert_eq!(info.mode, LifecycleMode::Enabled);
+        assert_eq!(info.last_run, None);
 
         task.stop().await;
     }
@@ -413,6 +436,7 @@ pub(super) mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(call, "test");
+        assert!(task.info().last_run.is_some());
 
         task.stop().await;
     }

@@ -418,6 +418,8 @@ mod tests {
         assert_eq!(lifecycles[0].name, "test");
         assert!(!lifecycles[0].is_provisioned);
         assert!(!lifecycles[0].is_running);
+        assert_eq!(lifecycles[0].lifecycle_type, LifecycleType::Delete);
+        assert_eq!(lifecycles[0].last_run, None);
         assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), settings);
     }
 
