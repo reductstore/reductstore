@@ -27,6 +27,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Update Web Console to v1.15.0, [PR-1447](https://github.com/reductstore/reductstore/pull/1447)
 - Extend `LifecycleInfo` with lifecycle `type` and `last_run` timestamp, with `last_run` tracked directly by the lifecycle worker instead of system events, [PR-1442](https://github.com/reductstore/reductstore/pull/1442)
 - Clarify README guidance for when ReductStore should and should not be used, [PR-1430](https://github.com/reductstore/reductstore/pull/1430)
 - Rename lifecycle policy settings field `older_than` to `older_than`, [PR-1429](https://github.com/reductstore/reductstore/pull/1429)
