@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Avoid a historical query panic when a bounded query is exhausted after a block that also contains records beyond the query stop time, [PR-1446](https://github.com/reductstore/reductstore/pull/1446)
+
 ## 1.19.9 - 2026-06-12
 
 ### Fixed
