@@ -74,8 +74,14 @@ impl Parser {
                     match v {
                         JsonValue::Bool(value) => Ok(Value::Bool(*value)),
                         JsonValue::Number(value) => {
-                            if value.is_i64() || value.is_u64() {
-                                Ok(Value::Int(value.as_i64().unwrap()))
+                            if let Some(value) = value.as_i64() {
+                                Ok(Value::Int(value))
+                            } else if value.is_u64() {
+                                Err(unprocessable_entity!(
+                                    "Directive '{}' contains integer value out of range: {}",
+                                    key,
+                                    value
+                                ))
                             } else {
                                 Ok(Value::Float(value.as_f64().unwrap()))
                             }
@@ -584,6 +590,19 @@ mod tests {
             });
             let (_, directives) = parser.parse(json).unwrap();
             assert_eq!(directives["#ctx_before"], vec![expected]);
+        }
+
+        #[rstest]
+        fn test_parse_directive_unsigned_integer_overflow(parser: Parser) {
+            let json = json!({
+                "#batch_size": u64::MAX,
+            });
+
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                "[UnprocessableEntity] Directive '#batch_size' contains integer value out of range: 18446744073709551615"
+            );
         }
 
         #[rstest]
