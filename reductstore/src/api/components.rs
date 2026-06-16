@@ -19,6 +19,7 @@ use crate::storage::engine::StorageEngine;
 use crate::storage::usage::UsageEventAggregator;
 use crate::syslog::LogSystemEvent;
 use axum::http::HeaderMap;
+use log::error;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::service_unavailable;
@@ -151,23 +152,39 @@ impl StateKeeper {
         self.wait_components().await
     }
 
-    pub async fn stop_replication_tasks(&self) -> Result<(), ReductError> {
+    pub async fn shutdown(&self) {
+        if let Err(err) = self.stop_lifecycle_tasks().await {
+            error!("Failed to stop lifecycle policies: {}", err);
+        }
+
+        if let Err(err) = self.stop_replication_tasks().await {
+            error!("Failed to stop replication tasks: {}", err);
+        }
+
+        if let Err(err) = self.stop_usage_stats_task().await {
+            error!("Failed to stop usage statistics task: {}", err);
+        }
+
+        if let Err(err) = self.sync_storage().await {
+            error!("Failed to shutdown storage: {}", err);
+        }
+    }
+
+    async fn stop_replication_tasks(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
         let mut repo = components.replication_repo.write().await?;
         repo.stop().await;
         Ok(())
     }
 
-    pub async fn stop_lifecycle_tasks(&self) -> Result<(), ReductError> {
+    async fn stop_lifecycle_tasks(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
         let mut repo = components.lifecycle_repo.write().await?;
         repo.stop().await;
         Ok(())
     }
 
-    /// Stop the usage statistics task, flushing the final interval. Run before
-    /// `sync_storage` so the flushed event is persisted by the storage sync.
-    pub async fn stop_usage_stats_task(&self) -> Result<(), ReductError> {
+    async fn stop_usage_stats_task(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
         if let Some(aggregator) = components.usage_stat_logger.write().await?.as_mut() {
             aggregator.stop().await;
@@ -175,7 +192,7 @@ impl StateKeeper {
         Ok(())
     }
 
-    pub async fn sync_storage(&self) -> Result<(), ReductError> {
+    async fn sync_storage(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
         let storage = &components.storage;
         storage.sync_fs().await?;
