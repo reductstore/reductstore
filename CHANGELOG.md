@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Return `422 Unprocessable Entity` for unsupported nested directive values instead of panicking when parsing queries, [PR-1449](https://github.com/reductstore/reductstore/pull/1449)
 - Avoid a historical query panic when a bounded query is exhausted after a block that also contains records beyond the query stop time, [PR-1446](https://github.com/reductstore/reductstore/pull/1446)
 
 ## 1.19.9 - 2026-06-12
