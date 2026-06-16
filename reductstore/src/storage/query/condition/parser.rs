@@ -70,24 +70,28 @@ impl Parser {
                     ));
                 }
 
-                let parse_primitive = |v: &JsonValue| -> Value {
+                let parse_primitive = |v: &JsonValue| -> Result<Value, ReductError> {
                     match v {
-                        JsonValue::Bool(value) => Value::Bool(*value),
+                        JsonValue::Bool(value) => Ok(Value::Bool(*value)),
                         JsonValue::Number(value) => {
                             if value.is_i64() || value.is_u64() {
-                                Value::Int(value.as_i64().unwrap())
+                                Ok(Value::Int(value.as_i64().unwrap()))
                             } else {
-                                Value::Float(value.as_f64().unwrap())
+                                Ok(Value::Float(value.as_f64().unwrap()))
                             }
                         }
                         JsonValue::String(value) => {
                             if let Ok(duration) = parse_duration(value) {
-                                duration
+                                Ok(duration)
                             } else {
-                                Value::String(value.to_string())
+                                Ok(Value::String(value.to_string()))
                             }
                         }
-                        _ => panic!("Unsupported directive value type: {}", v), // panic because it's programming error
+                        _ => Err(unprocessable_entity!(
+                            "Directive '{}' contains unsupported value type: {}",
+                            key,
+                            v
+                        )),
                     }
                 };
 
@@ -100,10 +104,10 @@ impl Parser {
                     parsed_values.push(Value::String(value.to_string()));
                 } else if value.is_array() {
                     for item in value.as_array().unwrap() {
-                        parsed_values.push(parse_primitive(item));
+                        parsed_values.push(parse_primitive(item)?);
                     }
                 } else {
-                    parsed_values.push(parse_primitive(value))
+                    parsed_values.push(parse_primitive(value)?)
                 }
                 directives.insert(key.to_string(), parsed_values);
                 keys_to_remove.push(key.to_string());
@@ -618,6 +622,27 @@ mod tests {
             assert_eq!(
                 directives.get("#ext").unwrap(),
                 &vec![Value::String(r#"{"key":"value"}"#.to_string())]
+            );
+        }
+
+        #[rstest]
+        fn test_parse_array_directive_with_object(parser: Parser) {
+            let json = json!({
+                "#ext": [
+                    {
+                        "ros": {
+                            "extract": {
+                                "topic": "/rosout"
+                            }
+                        }
+                    }
+                ]
+            });
+
+            let result = parser.parse(json);
+            assert_eq!(
+                result.err().unwrap().to_string(),
+                r#"[UnprocessableEntity] Directive '#ext' contains unsupported value type: {"ros":{"extract":{"topic":"/rosout"}}}"#
             );
         }
 
