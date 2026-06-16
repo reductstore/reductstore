@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.19.10 - 2026-06-16
+
 ### Fixed
 
 - Return `422 Unprocessable Entity` for unsupported nested directive values instead of panicking when parsing queries, [PR-1449](https://github.com/reductstore/reductstore/pull/1449)
