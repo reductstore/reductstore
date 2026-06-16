@@ -35,6 +35,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Avoid panics during shutdown cleanup by logging individual shutdown step failures and continuing through storage sync, [PR-1444](https://github.com/reductstore/reductstore/pull/1444)
 - Preserve attachment metadata (`entry/$meta`) during lifecycle delete cleanup by enforcing and documenting exclusion of system metadata entries from lifecycle matching, [PR-1395](https://github.com/reductstore/reductstore/pull/1395)
 - Fix lifecycle delete worker first-run failure (`422 Start time must be before stop time`) by ensuring delete queries use a valid initial time range even when all records are newer than `older_than`, [PR-1394](https://github.com/reductstore/reductstore/pull/1394)
 - Fix runtime default for lifecycle interval by implementing manual Default for LifecycleSettings, [PR-1385](https://github.com/reductstore/reductstore/pull/1385)
