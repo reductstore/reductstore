@@ -7,7 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-<<<<<<< HEAD
 ### Breaking Changes
 
 - Send lifecycle run diagnostics and audit events to the `$system` bucket with configurable system event storage, [PR-1399](https://github.com/reductstore/reductstore/pull/1399)
@@ -42,6 +41,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Fix runtime default for lifecycle interval by implementing manual Default for LifecycleSettings, [PR-1385](https://github.com/reductstore/reductstore/pull/1385)
 - Downgrade `write_batched` log severity for closed writer-channel handoff from error to warning to reduce noisy false-positive error bursts under expected stream abort/backpressure scenarios, [PR-1356](https://github.com/reductstore/reductstore/pull/1356)
 - Handle `--version` (`-V`) in `main` before server startup so version output remains clean and exits without initialization side effects, [PR-1365](https://github.com/reductstore/reductstore/pull/1365)
+
+## 1.19.10 - 2026-06-16
+
+### Fixed
+
+- Return `422 Unprocessable Entity` for unsupported nested directive values instead of panicking when parsing queries, [PR-1449](https://github.com/reductstore/reductstore/pull/1449)
+- Avoid a historical query panic when a bounded query is exhausted after a block that also contains records beyond the query stop time, [PR-1446](https://github.com/reductstore/reductstore/pull/1446)
+
 
 ## 1.19.9 - 2026-06-12
 

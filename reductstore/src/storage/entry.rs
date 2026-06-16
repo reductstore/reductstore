@@ -29,7 +29,7 @@ use log::{debug, error};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;
-use reduct_base::{conflict, internal_server_error, not_found};
+use reduct_base::{conflict, internal_server_error, not_found, unprocessable_entity};
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -506,6 +506,10 @@ impl Entry {
             info.latest_record + 1
         };
 
+        if start > end && !query.continuous.unwrap_or(false) {
+            return Err(unprocessable_entity!("Start time must be before stop time"));
+        }
+
         Ok((start, end))
     }
 }
@@ -699,6 +703,28 @@ mod tests {
                     id
                 ))
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn reject_reversed_historical_query_range(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1000000).await;
+
+            let err = entry
+                .query(QueryEntry {
+                    start: Some(2000000),
+                    stop: Some(1000000),
+                    ..Default::default()
+                })
+                .await
+                .unwrap_err();
+
+            assert_eq!(
+                err,
+                ReductError::unprocessable_entity("Start time must be before stop time")
+            );
+            assert!(entry.queries.read().await.unwrap().is_empty());
         }
 
         #[rstest]

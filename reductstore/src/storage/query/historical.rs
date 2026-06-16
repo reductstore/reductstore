@@ -160,11 +160,15 @@ impl Query for HistoricalQuery {
                     }
                     Err(_) => 0,
                 };
-                bm.index()
-                    .tree()
-                    .range(first_block..self.stop_time)
-                    .map(|k| *k)
-                    .collect::<Vec<u64>>()
+                if first_block > self.stop_time {
+                    Vec::new()
+                } else {
+                    bm.index()
+                        .tree()
+                        .range(first_block..self.stop_time)
+                        .map(|k| *k)
+                        .collect::<Vec<u64>>()
+                }
             };
 
             for block_id in block_range {
@@ -445,6 +449,61 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.meta().timestamp(), 0);
         assert_eq!(records[1].0.meta().timestamp(), 5);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_stops_when_current_block_latest_time_reaches_next_block(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+
+        {
+            let block_ref = block_manager
+                .write()
+                .await
+                .unwrap()
+                .load_block(0)
+                .await
+                .unwrap();
+            block_ref
+                .write()
+                .await
+                .unwrap()
+                .insert_or_update_record(Record {
+                    timestamp: Some(us_to_ts(&1000)),
+                    begin: 0,
+                    end: 10,
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                    content_type: "".to_string(),
+                });
+        }
+
+        let mut query = build_query(0, 500, QueryOptions::default()).unwrap();
+
+        assert_eq!(
+            query
+                .next(block_manager.clone())
+                .await
+                .unwrap()
+                .meta()
+                .timestamp(),
+            0
+        );
+        assert_eq!(
+            query
+                .next(block_manager.clone())
+                .await
+                .unwrap()
+                .meta()
+                .timestamp(),
+            5
+        );
+        assert_eq!(
+            query.next(block_manager).await.err(),
+            Some(no_content!("No content"))
+        );
     }
 
     #[rstest]
