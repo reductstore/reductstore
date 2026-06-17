@@ -73,17 +73,27 @@ impl OpenOptions {
     }
 
     pub async fn open<P: AsRef<std::path::Path>>(&mut self, path: P) -> std::io::Result<File> {
+        let create = self.create && !self.ignore_write;
         if self.ignore_write {
             self.inner.write(false);
             self.inner.create(false);
         }
 
-        let full_path = self.backend.path().join(path.as_ref());
+        let backend_path = self.backend.path().clone();
+        let full_path = backend_path.join(path.as_ref());
+        if create {
+            if let Some(parent) = full_path.parent() {
+                if parent != backend_path.as_path() {
+                    self.backend.create_dir_all(parent).await?;
+                }
+            }
+        }
+
         if !full_path.exists() {
             // the call initiates downloading the file from remote storage if needed
             if self.backend.try_exists(&full_path).await? {
                 self.backend.download(&full_path).await?;
-            } else if !self.create {
+            } else if !create {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
                     format!("File {:?} does not exist", full_path),
@@ -281,6 +291,8 @@ mod tests {
             let path = mock_backend.path().to_path_buf();
             let copy_path = path.clone();
 
+            mock_backend.expect_create_dir_all().times(0);
+
             mock_backend
                 .expect_try_exists()
                 .times(1)
@@ -300,6 +312,40 @@ mod tests {
             assert_eq!(file.mode(), &AccessMode::ReadWrite);
             assert!(file.is_synced());
             assert_eq!(file.path(), &path.join("new_file.txt"));
+            assert_eq!(file.metadata().unwrap().len(), 0);
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_open_options_create_nested_parent_directory(mut mock_backend: MockBackend) {
+            let path = mock_backend.path().to_path_buf();
+            let copy_path = path.clone();
+
+            mock_backend
+                .expect_create_dir_all()
+                .times(1)
+                .returning(move |p| {
+                    fs::create_dir_all(p)?;
+                    Ok(())
+                });
+            mock_backend
+                .expect_try_exists()
+                .times(1)
+                .returning(move |p| {
+                    assert_eq!(p, copy_path.join("missing/parent/new_file.txt").as_path());
+                    Ok(false)
+                });
+            mock_backend.expect_download().times(0);
+
+            let file = OpenOptions::new(Arc::new(Box::new(mock_backend)))
+                .write(true)
+                .create(true)
+                .open("missing/parent/new_file.txt")
+                .await
+                .unwrap();
+
+            assert_eq!(file.mode(), &AccessMode::ReadWrite);
+            assert_eq!(file.path(), &path.join("missing/parent/new_file.txt"));
             assert_eq!(file.metadata().unwrap().len(), 0);
         }
     }

@@ -415,6 +415,35 @@ impl Bucket {
             .collect::<Vec<_>>();
         let mut count = 0usize;
         for entry in entries {
+            if entry.status().await? == ResourceStatus::Deleting {
+                debug!(
+                    "Skipping compact/sync for deleting entry '{}' in bucket '{}'",
+                    entry.name(),
+                    bucket_name
+                );
+                continue;
+            }
+
+            if !FILE_CACHE.try_exists(entry.path()).await? {
+                debug!(
+                    "Remove stale entry '{}' from bucket '{}' because its folder is missing",
+                    entry.name(),
+                    bucket_name
+                );
+                if let Err(err) = self.folder_keeper.remove_folder(entry.name()).await {
+                    if err.status() != reduct_base::error::ErrorCode::NotFound {
+                        error!(
+                            "Failed to remove stale folder map entry '{}' from bucket '{}': {}",
+                            entry.name(),
+                            bucket_name,
+                            err
+                        );
+                    }
+                }
+                self.entries.write().await?.remove(entry.name());
+                continue;
+            }
+
             let result = match mode {
                 EntryMaintenanceMode::Compact => entry.compact().await,
                 EntryMaintenanceMode::SyncFs => entry.sync_fs().await,
