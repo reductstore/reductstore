@@ -84,6 +84,7 @@ pub(super) struct ReplicationEventAggregator {
     sink: SystemEventSink,
     replication_name: String,
     active: Option<ReplicationAggregate>,
+    last_event_timestamp: u64,
 }
 
 impl ReplicationEventAggregator {
@@ -92,7 +93,14 @@ impl ReplicationEventAggregator {
             sink,
             replication_name,
             active: None,
+            last_event_timestamp: 0,
         }
+    }
+
+    fn next_event_timestamp(&mut self) -> u64 {
+        let timestamp = now_micros().max(self.last_event_timestamp + 1);
+        self.last_event_timestamp = timestamp;
+        timestamp
     }
 
     /// Record one replication pass as a list of `(result, records, data_size)`.
@@ -125,7 +133,6 @@ impl ReplicationEventAggregator {
             return;
         }
 
-        let timestamp = now_micros();
         let mut first = true;
         for (status, (records, data_size, message)) in per_status {
             let pass_duration = if first { duration } else { 0.0 };
@@ -157,6 +164,7 @@ impl ReplicationEventAggregator {
                     aggregate.flush_at = now + Duration::from_secs(AGGREGATION_WINDOW_SECS);
                 }
                 None => {
+                    let timestamp = self.next_event_timestamp();
                     let success = is_success(status);
                     self.active = Some(ReplicationAggregate {
                         status,
@@ -306,6 +314,26 @@ mod tests {
         assert_eq!(captured[1].payload["failed_records"], 4);
         assert_eq!(captured[1].payload["written_records"], 0);
         assert_eq!(captured[1].message, "missing");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn mixed_status_pass_uses_unique_event_timestamps(events: Arc<Mutex<Vec<SystemEvent>>>) {
+        let mut agg = aggregator(Arc::clone(&events), false);
+
+        agg.record_pass(
+            1,
+            0.1,
+            &[(Ok(()), 1, 10), (Err(not_found!("missing")), 1, 0)],
+        )
+        .await;
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
+
+        let captured = events.lock().unwrap();
+        assert_eq!(captured.len(), 2);
+        assert_eq!(captured[0].status, 200);
+        assert_eq!(captured[1].status, 404);
+        assert_ne!(captured[0].timestamp, captured[1].timestamp);
     }
 
     /// Schema invariant (#4): success and failure events carry the identical
