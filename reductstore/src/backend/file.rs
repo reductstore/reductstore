@@ -73,15 +73,19 @@ impl OpenOptions {
     }
 
     pub async fn open<P: AsRef<std::path::Path>>(&mut self, path: P) -> std::io::Result<File> {
+        let create = self.create && !self.ignore_write;
         if self.ignore_write {
             self.inner.write(false);
             self.inner.create(false);
         }
 
-        let full_path = self.backend.path().join(path.as_ref());
-        if self.create {
+        let backend_path = self.backend.path().clone();
+        let full_path = backend_path.join(path.as_ref());
+        if create {
             if let Some(parent) = full_path.parent() {
-                self.backend.create_dir_all(parent).await?;
+                if parent != backend_path.as_path() {
+                    self.backend.create_dir_all(parent).await?;
+                }
             }
         }
 
@@ -89,7 +93,7 @@ impl OpenOptions {
             // the call initiates downloading the file from remote storage if needed
             if self.backend.try_exists(&full_path).await? {
                 self.backend.download(&full_path).await?;
-            } else if !self.create {
+            } else if !create {
                 return Err(std::io::Error::new(
                     std::io::ErrorKind::NotFound,
                     format!("File {:?} does not exist", full_path),
@@ -287,13 +291,7 @@ mod tests {
             let path = mock_backend.path().to_path_buf();
             let copy_path = path.clone();
 
-            mock_backend
-                .expect_create_dir_all()
-                .times(1)
-                .returning(move |p| {
-                    fs::create_dir_all(p)?;
-                    Ok(())
-                });
+            mock_backend.expect_create_dir_all().times(0);
 
             mock_backend
                 .expect_try_exists()

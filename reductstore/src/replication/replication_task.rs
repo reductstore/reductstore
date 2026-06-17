@@ -978,13 +978,9 @@ mod tests {
             .unwrap();
         tokio_sleep(Duration::from_millis(100)).await;
 
-        assert!(
-                !path.exists(),
-                "We could not recover the transaction log, it was removed. However, the replication should continue"
-            );
-
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
         tokio_sleep(Duration::from_millis(200)).await;
+
+        assert!(path.exists(), "Transaction log was recovered");
 
         assert_eq!(
             get_entries_from_transaction_log(&mut replication, "test1").await,
