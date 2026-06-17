@@ -122,7 +122,7 @@ impl ReplicationSender {
                                     let mut counter = Vec::with_capacity(1); // it will have at least `Ok()`
                                     let mut batch = Vec::new();
 
-                                    /* *Note* that it's the *other* stream iterator -- folded/internal one. 
+                                    /* *Note* that it's *other* stream iterator -- nested one. 
                                     Which stresses importance of fine parameterization of `CONCURRENCY_LIMIT` stub. */
                                     let mut transactions = stream::iter(transactions)
                                     .map(async |transaction| {

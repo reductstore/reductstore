@@ -3022,7 +3022,6 @@ dependencies = [
  "crc64fast",
  "crossbeam-channel",
  "dlopen2",
- "either",
  "flate2",
  "futures",
  "futures-util",
