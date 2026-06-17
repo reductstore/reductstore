@@ -2,13 +2,19 @@
 // Licensed under the Apache License, Version 2.0
 
 use super::Bucket;
+use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
+use crate::core::sync::AsyncRwLock;
 use crate::storage::entry::is_system_meta_entry;
 use crate::storage::entry::Entry;
+use crate::storage::in_flight::InFlightIoLimiter;
+use crate::storage::usage::UsageCounters;
 use log::{debug, error, warn};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{conflict, not_found};
+use std::collections::BTreeMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::time::{sleep, Duration};
 
@@ -124,51 +130,17 @@ impl Bucket {
                 };
 
                 if !folder_removed {
-                    let recovered_entry = match entry.settings().await {
-                        Ok(settings) => {
-                            Entry::restore_with_limiter(
-                                path.clone(),
-                                entry_name.clone(),
-                                bucket_name.clone(),
-                                settings,
-                                cfg.clone(),
-                                io_limiter.clone(),
-                                Arc::clone(&usage_counters),
-                            )
-                            .await
-                        }
-                        Err(err) => Err(err),
-                    };
-
-                    match recovered_entry {
-                        Ok(Some(recovered_entry)) => {
-                            if let Err(err) = Self::replace_entry_in_map_with_retry(
-                                &entries_map,
-                                &entry_name,
-                                &bucket_name,
-                                Arc::new(recovered_entry),
-                            )
-                            .await
-                            {
-                                error!(
-                                    "Entry '{}' in bucket '{}' stays DELETING because recovery replacement failed: {}",
-                                    entry_name, bucket_name, err
-                                );
-                            }
-                        }
-                        Ok(None) => {
-                            error!(
-                                "Entry '{}' in bucket '{}' stays DELETING because it could not be restored",
-                                entry_name, bucket_name
-                            );
-                        }
-                        Err(err) => {
-                            error!(
-                                "Entry '{}' in bucket '{}' stays DELETING because recovery failed: {}",
-                                entry_name, bucket_name, err
-                            );
-                        }
-                    }
+                    Self::recover_entry_after_failed_removal(
+                        &entries_map,
+                        &entry_name,
+                        &bucket_name,
+                        path,
+                        &entry,
+                        cfg.clone(),
+                        io_limiter.clone(),
+                        Arc::clone(&usage_counters),
+                    )
+                    .await;
                     continue;
                 }
 
@@ -235,9 +207,7 @@ impl Bucket {
     }
 
     async fn remove_entry_from_map_with_retry(
-        entries_map: &Arc<
-            crate::core::sync::AsyncRwLock<std::collections::BTreeMap<String, Arc<Entry>>>,
-        >,
+        entries_map: &Arc<AsyncRwLock<BTreeMap<String, Arc<Entry>>>>,
         entry_name: &str,
         bucket_name: &str,
     ) {
@@ -265,9 +235,7 @@ impl Bucket {
     }
 
     async fn replace_entry_in_map_with_retry(
-        entries_map: &Arc<
-            crate::core::sync::AsyncRwLock<std::collections::BTreeMap<String, Arc<Entry>>>,
-        >,
+        entries_map: &Arc<AsyncRwLock<BTreeMap<String, Arc<Entry>>>>,
         entry_name: &str,
         bucket_name: &str,
         entry: Arc<Entry>,
@@ -297,18 +265,76 @@ impl Bucket {
 
         Ok(())
     }
+
+    async fn recover_entry_after_failed_removal(
+        entries_map: &Arc<AsyncRwLock<BTreeMap<String, Arc<Entry>>>>,
+        entry_name: &str,
+        bucket_name: &str,
+        path: PathBuf,
+        entry: &Arc<Entry>,
+        cfg: Arc<Cfg>,
+        io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
+    ) {
+        let recovered_entry = match entry.settings().await {
+            Ok(settings) => {
+                Entry::restore_with_limiter(
+                    path,
+                    entry_name.to_string(),
+                    bucket_name.to_string(),
+                    settings,
+                    cfg,
+                    io_limiter,
+                    usage_counters,
+                )
+                .await
+            }
+            Err(err) => Err(err),
+        };
+
+        match recovered_entry {
+            Ok(Some(recovered_entry)) => {
+                if let Err(err) = Self::replace_entry_in_map_with_retry(
+                    entries_map,
+                    entry_name,
+                    bucket_name,
+                    Arc::new(recovered_entry),
+                )
+                .await
+                {
+                    error!(
+                        "Entry '{}' in bucket '{}' stays DELETING because recovery replacement failed: {}",
+                        entry_name, bucket_name, err
+                    );
+                }
+            }
+            Ok(None) => {
+                error!(
+                    "Entry '{}' in bucket '{}' stays DELETING because it could not be restored",
+                    entry_name, bucket_name
+                );
+            }
+            Err(err) => {
+                error!(
+                    "Entry '{}' in bucket '{}' stays DELETING because recovery failed: {}",
+                    entry_name, bucket_name, err
+                );
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::Bucket;
-    use crate::cfg::Cfg;
+    use crate::cfg::{Cfg, InstanceRole};
     use crate::core::file_cache::FILE_CACHE;
     use prost::bytes::Bytes;
     use reduct_base::conflict;
     use reduct_base::error::ReductError;
     use reduct_base::internal_server_error;
     use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
+    use reduct_base::msg::status::ResourceStatus;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::path::PathBuf;
@@ -456,6 +482,136 @@ mod tests {
             Some(ReductError::not_found(
                 "Entry 'test-1' not found in bucket 'test'"
             ))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn sync_fs_removes_stale_entry_when_folder_is_missing(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+        let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+
+        FILE_CACHE.remove_dir(entry.path()).await.unwrap();
+        bucket.sync_fs().await.unwrap();
+
+        assert_eq!(
+            bucket.get_entry("test-1").await.err(),
+            Some(ReductError::not_found(
+                "Entry 'test-1' not found in bucket 'test'"
+            ))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn recover_entry_after_failed_removal_replaces_deleting_entry(
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+        let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        entry.mark_deleting().await.unwrap();
+
+        Bucket::recover_entry_after_failed_removal(
+            &bucket.entries,
+            "test-1",
+            &bucket.name,
+            entry.path().clone(),
+            &entry,
+            Arc::clone(&bucket.cfg),
+            bucket.io_limiter.clone(),
+            Arc::clone(&bucket.usage_counters),
+        )
+        .await;
+
+        let recovered_entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        assert!(!Arc::ptr_eq(&entry, &recovered_entry));
+        assert_eq!(entry.status().await.unwrap(), ResourceStatus::Deleting);
+        assert_eq!(
+            recovered_entry.status().await.unwrap(),
+            ResourceStatus::Ready
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn recover_entry_after_failed_removal_keeps_deleting_when_replica_cannot_restore(
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+        let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        entry.mark_deleting().await.unwrap();
+        FILE_CACHE.remove_dir(entry.path()).await.unwrap();
+
+        let cfg = Arc::new(Cfg {
+            role: InstanceRole::Replica,
+            ..Cfg::default()
+        });
+
+        Bucket::recover_entry_after_failed_removal(
+            &bucket.entries,
+            "test-1",
+            &bucket.name,
+            entry.path().clone(),
+            &entry,
+            cfg,
+            bucket.io_limiter.clone(),
+            Arc::clone(&bucket.usage_counters),
+        )
+        .await;
+
+        let stored_entry = bucket
+            .entries
+            .read()
+            .await
+            .unwrap()
+            .get("test-1")
+            .cloned()
+            .unwrap();
+        assert!(Arc::ptr_eq(&entry, &stored_entry));
+        assert_eq!(
+            stored_entry.status().await.unwrap(),
+            ResourceStatus::Deleting
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn recover_entry_after_failed_removal_keeps_deleting_when_recovery_fails(
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+        let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        entry.mark_deleting().await.unwrap();
+        FILE_CACHE.remove_dir(entry.path()).await.unwrap();
+
+        Bucket::recover_entry_after_failed_removal(
+            &bucket.entries,
+            "test-1",
+            &bucket.name,
+            entry.path().clone(),
+            &entry,
+            Arc::clone(&bucket.cfg),
+            bucket.io_limiter.clone(),
+            Arc::clone(&bucket.usage_counters),
+        )
+        .await;
+
+        let stored_entry = bucket
+            .entries
+            .read()
+            .await
+            .unwrap()
+            .get("test-1")
+            .cloned()
+            .unwrap();
+        assert!(Arc::ptr_eq(&entry, &stored_entry));
+        assert_eq!(
+            stored_entry.status().await.unwrap(),
+            ResourceStatus::Deleting
         );
     }
 
