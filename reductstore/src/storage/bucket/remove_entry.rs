@@ -211,27 +211,16 @@ impl Bucket {
         entry_name: &str,
         bucket_name: &str,
     ) {
-        for attempt in 1..=REMOVE_ENTRY_MAP_RETRIES {
-            match entries_map.write().await {
-                Ok(mut entries) => {
-                    entries.remove(entry_name);
-                    return;
-                }
-                Err(err) if attempt == REMOVE_ENTRY_MAP_RETRIES => {
-                    error!(
-                        "Failed to remove entry '{}' from bucket map '{}' after {} attempts: {}",
-                        entry_name, bucket_name, attempt, err
-                    );
-                }
-                Err(err) => {
-                    warn!(
-                        "Failed to remove entry '{}' from bucket map '{}' on attempt {}: {}",
-                        entry_name, bucket_name, attempt, err
-                    );
-                    sleep(REMOVE_ENTRY_MAP_RETRY_DELAY).await;
-                }
-            }
-        }
+        let _ = Self::write_entry_map_with_retry(
+            entries_map,
+            entry_name,
+            bucket_name,
+            "remove",
+            |entries| {
+                entries.remove(entry_name);
+            },
+        )
+        .await;
     }
 
     async fn replace_entry_in_map_with_retry(
@@ -240,23 +229,42 @@ impl Bucket {
         bucket_name: &str,
         entry: Arc<Entry>,
     ) -> Result<(), ReductError> {
+        Self::write_entry_map_with_retry(
+            entries_map,
+            entry_name,
+            bucket_name,
+            "recover",
+            |entries| {
+                entries.insert(entry_name.to_string(), Arc::clone(&entry));
+            },
+        )
+        .await
+    }
+
+    async fn write_entry_map_with_retry(
+        entries_map: &Arc<AsyncRwLock<BTreeMap<String, Arc<Entry>>>>,
+        entry_name: &str,
+        bucket_name: &str,
+        action: &str,
+        mut write_map: impl FnMut(&mut BTreeMap<String, Arc<Entry>>),
+    ) -> Result<(), ReductError> {
         for attempt in 1..=REMOVE_ENTRY_MAP_RETRIES {
             match entries_map.write().await {
                 Ok(mut entries) => {
-                    entries.insert(entry_name.to_string(), Arc::clone(&entry));
+                    write_map(&mut entries);
                     return Ok(());
                 }
                 Err(err) if attempt == REMOVE_ENTRY_MAP_RETRIES => {
                     error!(
-                        "Failed to recover entry '{}' in bucket map '{}' after {} attempts: {}",
-                        entry_name, bucket_name, attempt, err
+                        "Failed to {} entry '{}' in bucket map '{}' after {} attempts: {}",
+                        action, entry_name, bucket_name, attempt, err
                     );
                     return Err(err);
                 }
                 Err(err) => {
                     warn!(
-                        "Failed to recover entry '{}' in bucket map '{}' on attempt {}: {}",
-                        entry_name, bucket_name, attempt, err
+                        "Failed to {} entry '{}' in bucket map '{}' on attempt {}: {}",
+                        action, entry_name, bucket_name, attempt, err
                     );
                     sleep(REMOVE_ENTRY_MAP_RETRY_DELAY).await;
                 }
@@ -329,6 +337,7 @@ mod tests {
     use super::Bucket;
     use crate::cfg::{Cfg, InstanceRole};
     use crate::core::file_cache::FILE_CACHE;
+    use crate::core::sync::{reset_rwlock_config, set_rwlock_timeout};
     use prost::bytes::Bytes;
     use reduct_base::conflict;
     use reduct_base::error::ReductError;
@@ -337,6 +346,7 @@ mod tests {
     use reduct_base::msg::status::ResourceStatus;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
+    use serial_test::serial;
     use std::path::PathBuf;
     use std::sync::Arc;
     use tempfile::tempdir;
@@ -613,6 +623,70 @@ mod tests {
             stored_entry.status().await.unwrap(),
             ResourceStatus::Deleting
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn remove_entry_from_map_with_retry_removes_entry(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+
+        Bucket::remove_entry_from_map_with_retry(&bucket.entries, "test-1", &bucket.name).await;
+
+        assert!(!bucket.entries.read().await.unwrap().contains_key("test-1"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn replace_entry_in_map_with_retry_inserts_entry(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+        let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        bucket.entries.write().await.unwrap().remove("test-1");
+
+        Bucket::replace_entry_in_map_with_retry(&bucket.entries, "test-1", &bucket.name, entry)
+            .await
+            .unwrap();
+
+        assert!(bucket.entries.read().await.unwrap().contains_key("test-1"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn write_entry_map_with_retry_retries_after_lock_timeout(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+        let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        let entries_map = Arc::clone(&bucket.entries);
+
+        set_rwlock_timeout(Duration::from_millis(5));
+        let guard = entries_map.write().await.unwrap();
+        let retry_entries_map = Arc::clone(&entries_map);
+        let retry_task = tokio::spawn(async move {
+            Bucket::write_entry_map_with_retry(
+                &retry_entries_map,
+                "retry-entry",
+                "test",
+                "test",
+                |entries| {
+                    entries.insert("retry-entry".to_string(), Arc::clone(&entry));
+                },
+            )
+            .await
+        });
+
+        sleep(Duration::from_millis(20)).await;
+        drop(guard);
+        let result = retry_task.await.unwrap();
+        reset_rwlock_config();
+
+        result.unwrap();
+        assert!(entries_map
+            .read()
+            .await
+            .unwrap()
+            .contains_key("retry-entry"));
     }
 
     #[rstest]
