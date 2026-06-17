@@ -186,27 +186,12 @@ impl ReplicationTask {
                         &entry.name,
                         &replication_name,
                     );
-                    let log = match TransactionLog::try_load_or_create(
+                    let log = Self::load_or_recreate_transaction_log(
                         &path,
                         thr_system_options.transaction_log_size,
+                        &entry.name,
                     )
-                    .await
-                    {
-                        Ok(log) => log,
-                        Err(err) => {
-                            error!(
-                                "Failed to load transaction log for entry '{}': {:?}",
-                                entry.name, err
-                            );
-                            info!("Creating a new transaction log for entry '{}'", entry.name);
-                            FILE_CACHE.remove(&path).await?;
-                            TransactionLog::try_load_or_create(
-                                &path,
-                                thr_system_options.transaction_log_size,
-                            )
-                            .await?
-                        }
-                    };
+                    .await?;
 
                     logs.insert(entry.name, Arc::new(AsyncRwLock::new(log)));
                 }
@@ -398,14 +383,16 @@ impl ReplicationTask {
         // because it is used by the replication thread
         let exists = { self.log_map.read().await?.contains_key(&entry_name) };
         if !exists {
-            let log = TransactionLog::try_load_or_create(
-                &Self::build_path_to_transaction_log(
-                    self.storage.data_path(),
-                    &self.settings.src_bucket,
-                    &entry_name,
-                    &self.name,
-                ),
+            let path = Self::build_path_to_transaction_log(
+                self.storage.data_path(),
+                &self.settings.src_bucket,
+                &entry_name,
+                &self.name,
+            );
+            let log = Self::load_or_recreate_transaction_log(
+                &path,
                 self.system_options.transaction_log_size,
+                &entry_name,
             )
             .await?;
             let mut map = self.log_map.write().await?;
@@ -515,6 +502,25 @@ impl ReplicationTask {
         name: &str,
     ) -> PathBuf {
         storage_path.join(format!("{}/{}/{}.log", bucket, entry, name))
+    }
+
+    async fn load_or_recreate_transaction_log(
+        path: &PathBuf,
+        transaction_log_size: usize,
+        entry_name: &str,
+    ) -> Result<TransactionLog, ReductError> {
+        match TransactionLog::try_load_or_create(path, transaction_log_size).await {
+            Ok(log) => Ok(log),
+            Err(err) => {
+                error!(
+                    "Failed to load transaction log for entry '{}': {:?}",
+                    entry_name, err
+                );
+                info!("Creating a new transaction log for entry '{}'", entry_name);
+                FILE_CACHE.remove(path).await?;
+                TransactionLog::try_load_or_create(path, transaction_log_size).await
+            }
+        }
     }
 
     fn load_mode(&self) -> ReplicationMode {
@@ -699,6 +705,40 @@ mod tests {
                 is_provisioned: false,
                 pending_records: 0,
             }
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_add_meta_entry_with_broken_transaction_log(
+        mut remote_bucket: MockRmBucket,
+        mut notification: TransactionNotification,
+        settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        remote_bucket.expect_is_active().return_const(false);
+        let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
+
+        notification.entry = "test1/$meta".to_string();
+        let log_path = ReplicationTask::build_path_to_transaction_log(
+            replication.storage.data_path(),
+            &settings.src_bucket,
+            &notification.entry,
+            replication.name(),
+        );
+
+        fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        let mut log_file = fs::File::create(&log_path).unwrap();
+        log_file.write_all(&916usize.to_be_bytes()).unwrap();
+        log_file.write_all(&16usize.to_be_bytes()).unwrap();
+        log_file.set_len(916).unwrap();
+
+        replication.notify(notification).await.unwrap();
+
+        assert_eq!(fs::metadata(&log_path).unwrap().len(), 9016);
+        assert_eq!(
+            get_entries_from_transaction_log(&mut replication, "test1/$meta").await,
+            vec![Transaction::WriteRecord(10)]
         );
     }
 
