@@ -109,7 +109,7 @@ impl ReplicationSender {
                                 Err(err) => {
                                     error!("Failed to get the entry {src_bucket}/{entry_name_ref}. {err:?}");
                                     let transactions_len = transactions.len();
-                                    
+
                                     write_batches_send.send((
                                         entry_name,
                                         vec![],
@@ -145,16 +145,17 @@ impl ReplicationSender {
                                             transaction
                                         )
                                     }).buffer_unordered(DEFAULT_CONCURRENCY_LIMIT)
-                                    .scan(0u64, |total_size, record_and_transaction| {
-                                        if let (Ok(record_to_sync), _) = &record_and_transaction {
-                                            if *total_size >= batch_max_size {
-                                                return future::ready(None)
-                                            }
+                                    .scan(0u64, |total_size, record_and_transaction| {future::ready(
+                                        if *total_size >= batch_max_size { None }
+                                        else {
                                             // This backwards order is intentional. https://github.com/reductstore/reductstore/issues/1433#issuecomment-4700929658
-                                            *total_size += record_to_sync.meta().content_length();
+                                            if let (Ok(record_to_sync), _) = &record_and_transaction {
+                                                *total_size += record_to_sync.meta().content_length();
+                                            }
+
+                                            Some(record_and_transaction)
                                         }
-                                        future::ready(Some(record_and_transaction))
-                                    });
+                                    )});
 
                                     while let Some((record_to_sync, transaction)) = transactions.next().await {
                                         match record_to_sync {
@@ -172,7 +173,7 @@ impl ReplicationSender {
                                     }
                                     drop(transactions);
                                     let batch_len = batch.len();
-                                    
+
                                     write_batches_send.send((
                                         entry_name,
                                         batch,
@@ -184,7 +185,7 @@ impl ReplicationSender {
                             }
                         ))
                     }).try_buffer_unordered(DEFAULT_CONCURRENCY_LIMIT);
-                    
+
                     while let Some((log, processed_transactions)) = reading.try_next().await? {
                         let guard = self_mutex.lock().await;
                         if guard.bucket.is_active() {
@@ -196,7 +197,7 @@ impl ReplicationSender {
                         };
                     }
                     drop(reading);
-                    
+
                     log::trace!["concurrent part finished: communicating this to sequential"];
                     Ok(drop(write_batches_send))
                 },
