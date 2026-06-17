@@ -2,13 +2,18 @@
 // Licensed under the Apache License, Version 2.0
 
 use super::Bucket;
+use crate::core::file_cache::FILE_CACHE;
 use crate::storage::entry::is_system_meta_entry;
 use crate::storage::entry::Entry;
-use log::{debug, error};
-use reduct_base::conflict;
+use log::{debug, error, warn};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::status::ResourceStatus;
+use reduct_base::{conflict, not_found};
 use std::sync::Arc;
+use tokio::time::{sleep, Duration};
+
+const REMOVE_ENTRY_MAP_RETRIES: usize = 3;
+const REMOVE_ENTRY_MAP_RETRY_DELAY: Duration = Duration::from_millis(50);
 
 fn sort_entries_for_removal(entries: &mut [(String, Arc<Entry>)]) {
     // Remove system meta entries first to avoid removing a parent folder
@@ -57,7 +62,7 @@ impl Bucket {
         };
 
         if entries_to_remove.is_empty() {
-            return Err(ReductError::not_found(&format!(
+            return Err(not_found!(&format!(
                 "Entry '{}' not found in bucket '{}'",
                 name, self.name
             )));
@@ -73,50 +78,96 @@ impl Bucket {
         let entries_map = self.entries.clone();
         let bucket_name = self.name.clone();
         let folder_keeper = self.folder_keeper.clone();
+        let cfg = self.cfg.clone();
+        let io_limiter = self.io_limiter.clone();
+        let usage_counters = self.usage_counters.clone();
 
         tokio::spawn(async move {
             for (entry_name, entry) in entries_to_remove {
                 let path = entry.path().to_path_buf();
-                let mut failed = false;
 
-                if let Err(err) = entry.remove_all_blocks().await {
-                    error!(
-                        "Failed to remove blocks for entry '{}' in bucket '{}': {}",
-                        entry_name, bucket_name, err
-                    );
-                    failed = true;
-                }
-
-                if !failed {
-                    match crate::core::file_cache::FILE_CACHE.try_exists(&path).await {
-                        Ok(true) => {
-                            if let Err(err) = folder_keeper.remove_folder(&entry_name).await {
-                                if err.status() != ErrorCode::NotFound {
-                                    error!(
-                                        "Failed to remove folder for entry '{}' in bucket '{}': {}",
-                                        entry_name, bucket_name, err
-                                    );
-                                    failed = true;
-                                }
-                            }
-                        }
-                        Ok(false) => {}
-                        Err(err) => {
-                            error!(
-                                "Failed to check folder for entry '{}' in bucket '{}': {}",
+                match FILE_CACHE.try_exists(&path).await {
+                    Ok(true) => {
+                        if let Err(err) = entry.remove_all_blocks().await {
+                            warn!(
+                                "Failed to remove blocks for entry '{}' in bucket '{}', trying folder cleanup: {}",
                                 entry_name, bucket_name, err
                             );
-                            failed = true;
                         }
+                    }
+                    Ok(false) => {
+                        debug!(
+                            "Skip removing blocks for entry '{}' in bucket '{}' because folder '{}' is already missing",
+                            entry_name,
+                            bucket_name,
+                            path.display()
+                        );
+                    }
+                    Err(err) => {
+                        warn!(
+                            "Failed to check folder for entry '{}' in bucket '{}', trying folder cleanup: {}",
+                            entry_name, bucket_name, err
+                        );
                     }
                 }
 
-                if failed {
-                    if let Err(err) = entry.mark_ready().await {
+                let folder_removed = match folder_keeper.remove_folder(&entry_name).await {
+                    Ok(()) => true,
+                    Err(err) if err.status() == ErrorCode::NotFound => true,
+                    Err(err) => {
                         error!(
-                            "Failed to recover entry '{}' to READY in bucket '{}': {}",
+                            "Failed to remove folder for entry '{}' in bucket '{}': {}",
                             entry_name, bucket_name, err
                         );
+                        false
+                    }
+                };
+
+                if !folder_removed {
+                    let recovered_entry = match entry.settings().await {
+                        Ok(settings) => {
+                            Entry::restore_with_limiter(
+                                path.clone(),
+                                entry_name.clone(),
+                                bucket_name.clone(),
+                                settings,
+                                cfg.clone(),
+                                io_limiter.clone(),
+                                Arc::clone(&usage_counters),
+                            )
+                            .await
+                        }
+                        Err(err) => Err(err),
+                    };
+
+                    match recovered_entry {
+                        Ok(Some(recovered_entry)) => {
+                            if let Err(err) = Self::replace_entry_in_map_with_retry(
+                                &entries_map,
+                                &entry_name,
+                                &bucket_name,
+                                Arc::new(recovered_entry),
+                            )
+                            .await
+                            {
+                                error!(
+                                    "Entry '{}' in bucket '{}' stays DELETING because recovery replacement failed: {}",
+                                    entry_name, bucket_name, err
+                                );
+                            }
+                        }
+                        Ok(None) => {
+                            error!(
+                                "Entry '{}' in bucket '{}' stays DELETING because it could not be restored",
+                                entry_name, bucket_name
+                            );
+                        }
+                        Err(err) => {
+                            error!(
+                                "Entry '{}' in bucket '{}' stays DELETING because recovery failed: {}",
+                                entry_name, bucket_name, err
+                            );
+                        }
                     }
                     continue;
                 }
@@ -128,17 +179,8 @@ impl Bucket {
                     path.display()
                 );
 
-                match entries_map.write().await {
-                    Ok(mut entries) => {
-                        entries.remove(&entry_name);
-                    }
-                    Err(err) => {
-                        error!(
-                            "Failed to remove entry '{}' from bucket map '{}': {}",
-                            entry_name, bucket_name, err
-                        );
-                    }
-                }
+                Self::remove_entry_from_map_with_retry(&entries_map, &entry_name, &bucket_name)
+                    .await;
             }
         });
 
@@ -191,6 +233,70 @@ impl Bucket {
 
         Ok(())
     }
+
+    async fn remove_entry_from_map_with_retry(
+        entries_map: &Arc<
+            crate::core::sync::AsyncRwLock<std::collections::BTreeMap<String, Arc<Entry>>>,
+        >,
+        entry_name: &str,
+        bucket_name: &str,
+    ) {
+        for attempt in 1..=REMOVE_ENTRY_MAP_RETRIES {
+            match entries_map.write().await {
+                Ok(mut entries) => {
+                    entries.remove(entry_name);
+                    return;
+                }
+                Err(err) if attempt == REMOVE_ENTRY_MAP_RETRIES => {
+                    error!(
+                        "Failed to remove entry '{}' from bucket map '{}' after {} attempts: {}",
+                        entry_name, bucket_name, attempt, err
+                    );
+                }
+                Err(err) => {
+                    warn!(
+                        "Failed to remove entry '{}' from bucket map '{}' on attempt {}: {}",
+                        entry_name, bucket_name, attempt, err
+                    );
+                    sleep(REMOVE_ENTRY_MAP_RETRY_DELAY).await;
+                }
+            }
+        }
+    }
+
+    async fn replace_entry_in_map_with_retry(
+        entries_map: &Arc<
+            crate::core::sync::AsyncRwLock<std::collections::BTreeMap<String, Arc<Entry>>>,
+        >,
+        entry_name: &str,
+        bucket_name: &str,
+        entry: Arc<Entry>,
+    ) -> Result<(), ReductError> {
+        for attempt in 1..=REMOVE_ENTRY_MAP_RETRIES {
+            match entries_map.write().await {
+                Ok(mut entries) => {
+                    entries.insert(entry_name.to_string(), Arc::clone(&entry));
+                    return Ok(());
+                }
+                Err(err) if attempt == REMOVE_ENTRY_MAP_RETRIES => {
+                    error!(
+                        "Failed to recover entry '{}' in bucket map '{}' after {} attempts: {}",
+                        entry_name, bucket_name, attempt, err
+                    );
+                    return Err(err);
+                }
+                Err(err) => {
+                    warn!(
+                        "Failed to recover entry '{}' in bucket map '{}' on attempt {}: {}",
+                        entry_name, bucket_name, attempt, err
+                    );
+                    sleep(REMOVE_ENTRY_MAP_RETRY_DELAY).await;
+                }
+            }
+        }
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -203,7 +309,6 @@ mod tests {
     use reduct_base::error::ReductError;
     use reduct_base::internal_server_error;
     use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
-    use reduct_base::msg::status::ResourceStatus;
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use std::path::PathBuf;
@@ -318,7 +423,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove_entry_recovers_when_blocks_are_missing(#[future] bucket: Arc<Bucket>) {
+    async fn test_remove_entry_is_idempotent_when_folder_is_missing(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
@@ -327,14 +432,31 @@ mod tests {
         bucket.remove_entry("test-1").await.unwrap();
 
         for _ in 0..50 {
-            if entry.status().await.unwrap() == ResourceStatus::Ready {
+            if bucket.get_entry("test-1").await.is_err() {
                 break;
             }
             sleep(Duration::from_millis(20)).await;
         }
 
-        assert_eq!(entry.status().await.unwrap(), ResourceStatus::Ready);
-        assert!(bucket.get_entry("test-1").await.is_ok());
+        assert!(bucket.get_entry("test-1").await.is_err());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn compact_removes_stale_entry_when_folder_is_missing(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "test-1", 1, b"test").await.unwrap();
+        let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+
+        FILE_CACHE.remove_dir(entry.path()).await.unwrap();
+        bucket.compact().await.unwrap();
+
+        assert_eq!(
+            bucket.get_entry("test-1").await.err(),
+            Some(ReductError::not_found(
+                "Entry 'test-1' not found in bucket 'test'"
+            ))
+        );
     }
 
     #[rstest]

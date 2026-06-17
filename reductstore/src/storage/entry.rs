@@ -341,11 +341,6 @@ impl Entry {
         Ok(())
     }
 
-    pub(crate) async fn mark_ready(&self) -> Result<(), ReductError> {
-        *self.status.write().await? = ResourceStatus::Ready;
-        Ok(())
-    }
-
     pub(crate) async fn ensure_not_deleting(&self) -> Result<(), ReductError> {
         if self.status().await? == ResourceStatus::Deleting {
             Err(conflict!(
@@ -359,6 +354,10 @@ impl Entry {
     }
 
     pub(super) async fn remove_all_blocks(&self) -> Result<(), ReductError> {
+        if !FILE_CACHE.try_exists(&self.path).await? {
+            return Ok(());
+        }
+
         let block_ids = {
             let block_manager = self.block_manager.read().await?;
             Ok::<BTreeSet<u64>, ReductError>(block_manager.index().tree().clone())
@@ -366,7 +365,13 @@ impl Entry {
 
         for block_id in block_ids? {
             let mut block_manager = self.block_manager.write().await?;
-            block_manager.remove_block(block_id).await?;
+            if let Err(err) = block_manager.remove_block(block_id).await {
+                if !FILE_CACHE.try_exists(&self.path).await? {
+                    return Ok(());
+                }
+
+                return Err(err);
+            }
         }
         Ok(())
     }
@@ -415,6 +420,14 @@ impl Entry {
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
     pub async fn compact(&self) -> Result<(), ReductError> {
+        if !FILE_CACHE.try_exists(&self.path).await? {
+            debug!(
+                "Skipping compact for {}/{} because entry folder is missing",
+                self.bucket_name, self.name
+            );
+            return Ok(());
+        }
+
         if let Some(mut bm) = self.block_manager.try_write() {
             bm.save_cache_metadata_on_disk().await
         } else {
@@ -432,6 +445,14 @@ impl Entry {
     /// Unlike [`Self::compact`], this method waits for the block manager lock and
     /// must be used for strict sync points (e.g. graceful shutdown).
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        if !FILE_CACHE.try_exists(&self.path).await? {
+            debug!(
+                "Skipping sync for {}/{} because entry folder is missing",
+                self.bucket_name, self.name
+            );
+            return Ok(());
+        }
+
         let mut bm = self.block_manager.write().await?;
         bm.save_cache_metadata_on_disk().await
     }
