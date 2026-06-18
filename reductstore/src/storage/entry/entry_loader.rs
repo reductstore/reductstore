@@ -522,7 +522,6 @@ impl EntryLoader {
                 if block_removed {
                     block_manager.remove_block(block_id).await?;
                 } else {
-                    block_manager.save_block(block_ref.clone()).await?;
                     block_manager.finish_block(block_ref).await?;
                 }
             }
