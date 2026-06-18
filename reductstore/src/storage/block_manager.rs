@@ -806,6 +806,7 @@ impl BlockManager {
 
     // Method save descriptor and update index
     // Note: it calls local sync but not sync_all to avoid blocking entry during synchronization with remote backend
+    // the blocks must be synced with backed from FILE_CACHE sync loop
     async fn save_meta_on_disk(&mut self, block_ref: BlockRef) -> Result<(), ReductError> {
         // Take a snapshot under a short-lived write lock to avoid blocking readers
         let (block_id, block_snapshot) = {
