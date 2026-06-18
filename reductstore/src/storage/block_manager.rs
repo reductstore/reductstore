@@ -109,12 +109,11 @@ impl BlockManager {
     pub async fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
         let blocks = self.block_cache.write_values();
         for block in blocks.iter() {
-            let block_id = block.read().await?.block_id();
-            self.sync_data_block(block_id).await?;
-        }
-
-        for block in blocks {
-            self.save_meta_on_disk(block).await?;
+            {
+                let block_id = block.read().await?.block_id();
+                self.sync_data_block(block_id).await?;
+            }
+            self.save_meta_on_disk(block.clone()).await?;
         }
 
         Ok(())

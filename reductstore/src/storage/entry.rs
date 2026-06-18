@@ -454,7 +454,7 @@ impl Entry {
         }
 
         let mut bm = self.block_manager.write().await?;
-        bm.save_cache_metadata_on_disk().await
+        bm.save_cache_on_disk().await
     }
 
     pub fn name(&self) -> &str {
