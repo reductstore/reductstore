@@ -495,7 +495,7 @@ impl ReplicationTask {
         }
     }
 
-    fn build_path_to_transaction_log(
+    pub(super) fn build_path_to_transaction_log(
         storage_path: &PathBuf,
         bucket: &str,
         entry: &str,

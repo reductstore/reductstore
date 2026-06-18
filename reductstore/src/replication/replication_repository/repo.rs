@@ -19,7 +19,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use log::{debug, error, warn};
 use prost::Message;
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationInfo, ReplicationMode, ReplicationSettings,
 };
@@ -271,7 +271,8 @@ impl ManageReplications for ReplicationRepository {
         if let Some(mut repl) = removed {
             repl.stop().await;
         }
-        self.save_repo().await
+        self.save_repo().await?;
+        self.remove_transaction_logs_for_replication(name).await
     }
 
     async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
@@ -554,6 +555,43 @@ impl ReplicationRepository {
             });
         }
         self.started = true;
+    }
+
+    async fn remove_transaction_logs_for_replication(
+        &self,
+        replication_name: &str,
+    ) -> Result<(), ReductError> {
+        let log_file_name = format!("{}.log", replication_name);
+        let mut dirs = vec![self.storage.data_path().clone()];
+
+        while let Some(dir) = dirs.pop() {
+            let mut entries = match tokio::fs::read_dir(&dir).await {
+                Ok(entries) => entries,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => return Err(err.into()),
+            };
+
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+                let file_type = entry.file_type().await?;
+                if file_type.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+
+                if path.file_name().and_then(|name| name.to_str()) != Some(log_file_name.as_str()) {
+                    continue;
+                }
+
+                match FILE_CACHE.remove(&path).await {
+                    Ok(()) => {}
+                    Err(err) if err.status() == ErrorCode::NotFound => {}
+                    Err(err) => return Err(err),
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -871,9 +909,32 @@ mod tests {
             settings: ReplicationSettings,
         ) {
             let mut repo = repo.await;
+            let storage = Arc::clone(&repo.storage);
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
+
+            let bucket = storage
+                .get_bucket("bucket-1")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut writer = bucket
+                .begin_write("entry-1", 1, 4, "text/plain".to_string(), Labels::default())
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(bytes::Bytes::from_static(b"data"))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            let log_path = storage
+                .data_path()
+                .join("bucket-1")
+                .join("entry-1")
+                .join("test.log");
+            std::fs::write(&log_path, b"pending transactions").unwrap();
 
             let mut updated = settings;
             updated.dst_bucket = "bucket-3".to_string();
@@ -883,6 +944,10 @@ mod tests {
             let replication = repo.get_replication_settings("test").await.unwrap();
             assert_eq!(replication.dst_bucket, "bucket-3");
             assert_eq!(replication.dst_token, Some("token".to_string()));
+            assert!(
+                log_path.exists(),
+                "Should keep transaction log when replication settings change"
+            );
         }
     }
 
@@ -892,17 +957,39 @@ mod tests {
         #[tokio::test]
         async fn test_remove_replication(
             #[future] mut repo: ReplicationRepository,
-            #[future] storage: Arc<StorageEngine>,
             settings: ReplicationSettings,
         ) {
             let mut repo = repo.await;
-            let storage = storage.await;
+            let storage = Arc::clone(&repo.storage);
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
 
+            let bucket = storage
+                .get_bucket("bucket-1")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut writer = bucket
+                .begin_write("entry-1", 1, 4, "text/plain".to_string(), Labels::default())
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(bytes::Bytes::from_static(b"data"))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            let log_path = storage
+                .data_path()
+                .join("bucket-1")
+                .join("entry-1")
+                .join("test.log");
+            std::fs::write(&log_path, b"pending transactions").unwrap();
+
             repo.remove_replication("test").await.unwrap();
             assert_eq!(repo.replications().await.unwrap().len(), 0);
+            assert!(!log_path.exists(), "Should remove transaction log");
 
             // check if replication is removed from file
             let repo =
@@ -912,6 +999,119 @@ mod tests {
                 repo.replications().await.unwrap().len(),
                 0,
                 "Should remove replication permanently"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_transaction_logs_for_replication(
+            #[future] repo: ReplicationRepository,
+        ) {
+            let repo = repo.await;
+            let storage = Arc::clone(&repo.storage);
+            storage
+                .create_system_bucket("$system", BucketSettings::default())
+                .await
+                .unwrap();
+
+            let bucket = storage
+                .get_bucket("bucket-1")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut writer = bucket
+                .begin_write("entry-1", 1, 4, "text/plain".to_string(), Labels::default())
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(bytes::Bytes::from_static(b"data"))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            let log_path = storage
+                .data_path()
+                .join("bucket-1")
+                .join("entry-1")
+                .join("test.log");
+            std::fs::write(&log_path, b"pending transactions").unwrap();
+
+            let mut writer = storage
+                .begin_write(
+                    "$system",
+                    "replications/instance/test",
+                    1,
+                    4,
+                    "application/json".to_string(),
+                    Labels::default(),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(bytes::Bytes::from_static(b"data"))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            let system_transaction_log_paths = [
+                storage
+                    .data_path()
+                    .join("$system")
+                    .join("replications")
+                    .join("instance")
+                    .join("test")
+                    .join("test.log"),
+                storage
+                    .data_path()
+                    .join("$system")
+                    .join("usage")
+                    .join("instance")
+                    .join("total")
+                    .join("test.log"),
+                storage
+                    .data_path()
+                    .join("$system")
+                    .join("audit")
+                    .join("instance")
+                    .join("api")
+                    .join("test.log"),
+            ];
+            for path in &system_transaction_log_paths {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, b"pending transactions").unwrap();
+            }
+
+            let system_event_data_path = storage
+                .data_path()
+                .join("$system")
+                .join("usage")
+                .join("instance")
+                .join("total")
+                .join("1.blk");
+            std::fs::write(&system_event_data_path, b"system event").unwrap();
+
+            repo.remove_transaction_logs_for_replication("test")
+                .await
+                .unwrap();
+
+            assert!(!log_path.exists(), "Should remove transaction log");
+            for path in &system_transaction_log_paths {
+                assert!(!path.exists(), "Should remove diagnostics transaction log");
+            }
+            assert!(
+                system_event_data_path.exists(),
+                "Should keep diagnostics data"
+            );
+            assert!(
+                storage
+                    .get_bucket("$system")
+                    .await
+                    .unwrap()
+                    .upgrade_and_unwrap()
+                    .get_entry("replications/instance/test")
+                    .await
+                    .is_ok(),
+                "Should keep system event entry"
             );
         }
 
