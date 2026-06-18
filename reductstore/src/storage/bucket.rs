@@ -348,6 +348,9 @@ impl Bucket {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.check_mode()?;
+        crate::storage::engine::check_entry_name_convention(name)?;
+        self.ensure_not_deleting().await?;
+        self.ensure_entry_path_not_deleting(name).await?;
 
         let get_entry = async || {
             self.keep_quota_for(content_size).await?;
@@ -364,6 +367,22 @@ impl Bucket {
         entry
             .begin_write(time, content_size, content_type, labels)
             .await
+    }
+
+    async fn ensure_entry_path_not_deleting(&self, name: &str) -> Result<(), ReductError> {
+        let entries_in_path = {
+            let entries = self.entries.read().await?;
+            Self::parent_prefixes(name)
+                .into_iter()
+                .filter_map(|prefix| entries.get(&prefix).cloned())
+                .collect::<Vec<_>>()
+        };
+
+        for entry in entries_in_path {
+            entry.ensure_not_deleting().await?;
+        }
+
+        Ok(())
     }
 
     /// Starts a new record read with
@@ -543,6 +562,9 @@ pub(crate) mod tests {
 
     mod status {
         use super::*;
+        use crate::storage::bucket::update_records::UpdateLabelsMulti;
+        use reduct_base::msg::entry_api::QueryEntry;
+        use std::collections::HashSet;
 
         #[rstest]
         #[tokio::test]
@@ -646,6 +668,75 @@ pub(crate) mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn set_settings_returns_conflict_when_bucket_deleting(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
+
+            let err = bucket
+                .set_settings(BucketSettings::default())
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn update_labels_returns_conflict_when_bucket_deleting(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
+
+            let err = bucket
+                .update_labels(vec![UpdateLabelsMulti {
+                    entry_name: "entry".to_string(),
+                    time: 1,
+                    update: Labels::new(),
+                    remove: HashSet::new(),
+                }])
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn remove_records_returns_conflict_when_bucket_deleting(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
+
+            let err = bucket
+                .clone()
+                .remove_records(HashMap::from([("entry".to_string(), vec![1])]))
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn query_remove_records_returns_conflict_when_bucket_deleting(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
+
+            let err = bucket
+                .clone()
+                .query_remove_records(QueryEntry::default())
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn bucket_mark_deleting_returns_conflict_when_already_deleting(
             #[future] bucket: Arc<Bucket>,
         ) {
@@ -666,6 +757,36 @@ pub(crate) mod tests {
             entry.mark_deleting().await.unwrap();
 
             let err = bucket.begin_read("test-1", 1).await.err().unwrap();
+            assert_eq!(
+                err,
+                conflict!("Entry 'test-1' in bucket 'test' is being deleted")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn begin_write_returns_conflict_when_target_entry_deleting_before_quota(
+            path: PathBuf,
+        ) {
+            let bucket = bucket(
+                BucketSettings {
+                    quota_type: Some(QuotaType::HARD),
+                    quota_size: Some(100),
+                    ..BucketSettings::default()
+                },
+                path,
+            )
+            .await;
+            write(&bucket, "test-1", 1, b"test").await.unwrap();
+            let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+            entry.mark_deleting().await.unwrap();
+            *bucket.settings.write().await.unwrap() = BucketSettings {
+                quota_type: Some(QuotaType::HARD),
+                quota_size: Some(1),
+                ..BucketSettings::default()
+            };
+
+            let err = write(&bucket, "test-1", 2, b"x").await.err().unwrap();
             assert_eq!(
                 err,
                 conflict!("Entry 'test-1' in bucket 'test' is being deleted")

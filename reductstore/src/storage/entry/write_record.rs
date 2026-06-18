@@ -65,6 +65,7 @@ impl Entry {
         content_type: String,
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        self.ensure_not_deleting().await?;
         let permit = self.acquire_writer_slot().await?;
         // Strategy validates labels and can perform pre-write maintenance.
         self.system_behavior.prepare_write(self, &labels).await?;

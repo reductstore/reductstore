@@ -30,6 +30,7 @@ impl Entry {
         self: Arc<Self>,
         timestamps: Vec<u64>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
+        self.ensure_not_deleting().await?;
         let block_manager = self.block_manager.clone();
         Self::inner_remove_records(timestamps, block_manager, &self.bucket_name, &self.name).await
     }
@@ -50,6 +51,7 @@ impl Entry {
     ///
     /// * If the query fails.
     pub async fn query_remove_records(&self, mut options: QueryEntry) -> Result<u64, ReductError> {
+        self.ensure_not_deleting().await?;
         options.continuous = None; // force non-continuous query
 
         let rx = async || {
@@ -95,6 +97,7 @@ impl Entry {
             }
 
             // Send the records to remove
+            self.ensure_not_deleting().await?;
             total_records += records_to_remove.len() as u64;
             let copy_block_manager = block_manager.clone();
 

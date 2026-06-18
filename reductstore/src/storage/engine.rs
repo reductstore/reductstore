@@ -436,6 +436,7 @@ impl StorageEngine {
                     ));
                 }
 
+                bucket.ensure_not_deleting().await?;
                 bucket.sync_fs().await?;
             } else {
                 Err(not_found!("Bucket '{}' is not found", old_name))?;
@@ -1391,6 +1392,25 @@ mod tests {
                 result,
                 Err(conflict!("Can't rename provisioned bucket 'test'"))
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn rename_bucket_returns_conflict_when_bucket_deleting(
+            #[future] storage: Arc<StorageEngine>,
+        ) {
+            let storage = storage.await;
+            let bucket = storage
+                .create_bucket("test", BucketSettings::default())
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            bucket.mark_deleting().await.unwrap();
+
+            let result = storage
+                .rename_bucket("test".to_string(), "new".to_string())
+                .await;
+            assert_eq!(result, Err(conflict!("Bucket 'test' is being deleted")));
         }
     }
 

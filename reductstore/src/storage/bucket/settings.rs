@@ -82,6 +82,7 @@ impl Bucket {
     }
 
     pub async fn set_settings(&self, settings: BucketSettings) -> Result<(), ReductError> {
+        self.ensure_not_deleting().await?;
         if self
             .is_provisioned
             .load(std::sync::atomic::Ordering::Relaxed)
@@ -94,17 +95,21 @@ impl Bucket {
         }
 
         {
-            let mut my_settings = self.settings.write().await?;
-            let entries = self.entries.write().await?;
-
-            *my_settings = Self::fill_settings(settings, my_settings.clone());
+            let entries = self.entries.read().await?;
             for entry in entries.values() {
-                entry
-                    .set_settings(EntrySettings {
-                        max_block_size: my_settings.max_block_size.unwrap(),
-                        max_block_records: my_settings.max_block_records.unwrap(),
-                    })
-                    .await?;
+                entry.ensure_not_deleting().await?;
+            }
+
+            let mut my_settings = self.settings.write().await?;
+            let new_settings = Self::fill_settings(settings, my_settings.clone());
+            let entry_settings = EntrySettings {
+                max_block_size: new_settings.max_block_size.unwrap(),
+                max_block_records: new_settings.max_block_records.unwrap(),
+            };
+
+            *my_settings = new_settings;
+            for entry in entries.values() {
+                entry.set_settings(entry_settings.clone()).await?;
             }
         }
         self.save_settings().await
@@ -133,6 +138,8 @@ mod tests {
     use crate::cfg::Cfg;
     use crate::storage::bucket::tests::{bucket, settings};
     use crate::storage::bucket::Bucket;
+    use reduct_base::conflict;
+    use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::rstest;
     use std::sync::Arc;
@@ -209,6 +216,38 @@ mod tests {
             assert_eq!(entry_settings.max_block_size, 200);
             assert_eq!(entry_settings.max_block_records, 200);
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn set_settings_returns_conflict_and_keeps_settings_when_entry_deleting(
+        settings: BucketSettings,
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        let entry = bucket
+            .get_or_create_entry("entry-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        entry.mark_deleting().await.unwrap();
+
+        let err = bucket
+            .set_settings(BucketSettings {
+                max_block_size: Some(200),
+                max_block_records: Some(200),
+                ..settings.clone()
+            })
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(
+            err,
+            conflict!("Entry 'entry-1' in bucket 'test' is being deleted")
+        );
+        assert_eq!(bucket.settings().await.unwrap(), settings);
     }
 
     #[rstest]

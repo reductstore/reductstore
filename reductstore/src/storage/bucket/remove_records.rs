@@ -45,6 +45,7 @@ impl Bucket {
         self: Arc<Self>,
         record_ids: HashMap<String, Vec<u64>>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
+        self.ensure_not_deleting().await?;
         let mut results = BTreeMap::new();
 
         for (entry_name, ids) in record_ids {
@@ -77,6 +78,7 @@ impl Bucket {
         self: Arc<Self>,
         options: QueryEntry,
     ) -> Result<u64, ReductError> {
+        self.ensure_not_deleting().await?;
         let entries = self.entries.read().await?.clone();
         let requested_entries = Self::requested_entries(&options.entries);
         let mut total_removed = 0;
@@ -90,6 +92,7 @@ impl Bucket {
                 continue;
             }
 
+            entry.ensure_not_deleting().await?;
             let removed_records = entry.query_remove_records(options.clone()).await?;
             total_removed += removed_records;
         }
@@ -135,7 +138,7 @@ mod tests {
     use super::*;
     use crate::storage::bucket::tests::{bucket, write, write_meta};
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
-    use reduct_base::not_found;
+    use reduct_base::{conflict, not_found};
     use rstest::rstest;
     use std::collections::HashMap;
 
@@ -208,6 +211,41 @@ mod tests {
         );
         assert!(bucket.begin_read("entry-a", 4).await.is_ok());
         assert!(bucket.begin_read("entry-c", 2).await.is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_remove_records_returns_conflict_when_target_entry_deleting(
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        write(&bucket, "entry-a", 1, b"a1").await.unwrap();
+        let entry = bucket
+            .get_entry("entry-a")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        entry.mark_deleting().await.unwrap();
+
+        let request = QueryEntry {
+            query_type: QueryType::Remove,
+            entries: Some(vec!["entry-a".into()]),
+            start: Some(1),
+            stop: Some(2),
+            ..Default::default()
+        };
+
+        let err = bucket
+            .clone()
+            .query_remove_records(request)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            conflict!("Entry 'entry-a' in bucket 'test' is being deleted")
+        );
     }
 
     #[rstest]

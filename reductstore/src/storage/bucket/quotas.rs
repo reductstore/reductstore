@@ -21,11 +21,8 @@ impl Bucket {
             QuotaType::FIFO => self.remove_oldest_block(content_size, quota_size).await,
             QuotaType::HARD => {
                 let entries = self.entries.read().await?;
-                let entry_list: Vec<_> = entries.values().cloned().collect();
-                drop(entries);
-
                 let mut total_size = 0u64;
-                for entry in entry_list {
+                for entry in entries.values() {
                     total_size += entry.size().await?;
                 }
                 if total_size + content_size as u64 > quota_size {

@@ -486,6 +486,7 @@ impl Entry {
     }
 
     pub async fn set_settings(&self, settings: EntrySettings) -> Result<(), ReductError> {
+        self.ensure_not_deleting().await?;
         *self.settings.write().await? = settings;
         Ok(())
     }
@@ -547,20 +548,97 @@ mod tests {
 
     mod deleting {
         use super::*;
+        use crate::storage::entry::update_labels::UpdateLabels;
+        use std::collections::HashSet;
+
+        fn deleting_conflict(entry: &Entry) -> ReductError {
+            conflict!(
+                "Entry '{}' in bucket '{}' is being deleted",
+                entry.name(),
+                entry.bucket_name()
+            )
+        }
 
         #[rstest]
         #[tokio::test]
         async fn mark_deleting_returns_conflict_when_already_deleting(#[future] entry: Arc<Entry>) {
             let entry = entry.await;
             entry.mark_deleting().await.unwrap();
-            assert_eq!(
-                entry.mark_deleting().await,
-                Err(conflict!(
-                    "Entry '{}' in bucket '{}' is being deleted",
-                    entry.name(),
-                    entry.bucket_name()
-                ))
-            );
+            assert_eq!(entry.mark_deleting().await, Err(deleting_conflict(&entry)));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn begin_write_returns_conflict_when_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            entry.mark_deleting().await.unwrap();
+
+            let err = entry
+                .begin_write(1, 1, "text/plain".to_string(), Labels::new())
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, deleting_conflict(&entry));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn update_labels_returns_conflict_when_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            entry.mark_deleting().await.unwrap();
+
+            let err = entry
+                .clone()
+                .update_labels(vec![UpdateLabels {
+                    time: 1,
+                    update: Labels::new(),
+                    remove: HashSet::new(),
+                }])
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, deleting_conflict(&entry));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn remove_records_returns_conflict_when_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            entry.mark_deleting().await.unwrap();
+
+            let err = entry.clone().remove_records(vec![1]).await.err().unwrap();
+            assert_eq!(err, deleting_conflict(&entry));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn query_remove_records_returns_conflict_when_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            entry.mark_deleting().await.unwrap();
+
+            let err = entry
+                .query_remove_records(QueryEntry::default())
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, deleting_conflict(&entry));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn set_settings_returns_conflict_when_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            entry.mark_deleting().await.unwrap();
+
+            let err = entry
+                .set_settings(EntrySettings {
+                    max_block_size: 1,
+                    max_block_records: 1,
+                })
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, deleting_conflict(&entry));
         }
     }
 
