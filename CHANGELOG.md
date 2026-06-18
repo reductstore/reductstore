@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Remove replication transaction log files when deleting a replication while preserving system diagnostics entries, [PR-1458](https://github.com/reductstore/reductstore/pull/1458)
 - Reject storage mutations for buckets and entries that are already being deleted, including writes, settings updates, record updates/removals, query removals, and bucket renames, [PR-1456](https://github.com/reductstore/reductstore/pull/1456)
 - Prevent repeated compaction and sync failures for entries whose storage folders disappeared during deletion by making entry removal idempotent and cleaning up stale in-memory state, [PR-1454](https://github.com/reductstore/reductstore/pull/1454)
 - Fix replication diagnostics timestamp conflicts and recover corrupted transaction logs created on demand for `$meta` notifications, [PR-1452](https://github.com/reductstore/reductstore/pull/1452)
