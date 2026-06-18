@@ -6,6 +6,7 @@ use crate::storage::entry::Entry;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::QuotaType;
+use reduct_base::msg::status::ResourceStatus;
 use reduct_base::{bad_request, internal_server_error};
 use std::sync::Arc;
 
@@ -26,6 +27,9 @@ impl Bucket {
 
                 let mut total_size = 0u64;
                 for entry in entry_list {
+                    if entry.status().await? == ResourceStatus::Deleting {
+                        continue;
+                    }
                     total_size += entry.size().await?;
                 }
                 if total_size + content_size as u64 > quota_size {
@@ -47,6 +51,9 @@ impl Bucket {
 
             let mut total_size = 0u64;
             for entry in entries.values() {
+                if entry.status().await? == ResourceStatus::Deleting {
+                    continue;
+                }
                 total_size += entry.size().await?;
             }
             Ok::<u64, ReductError>(total_size)
@@ -65,6 +72,9 @@ impl Bucket {
                 let mut candidates: Vec<(u64, &Entry)> = vec![];
                 let entries = self.entries.read().await?;
                 for (_, entry) in entries.iter() {
+                    if entry.status().await? == ResourceStatus::Deleting {
+                        continue;
+                    }
                     if !entry.is_eligible_for_fifo_eviction() {
                         continue;
                     }
@@ -200,6 +210,32 @@ mod tests {
 
         let err = write(&bucket, "test-3", 2, blob).await.err().unwrap();
         assert_eq!(err, ReductError::bad_request("Quota of 'test' exceeded"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_hard_quota_ignores_deleting_entries(path: PathBuf) {
+        let bucket = bucket(
+            BucketSettings {
+                quota_type: Some(QuotaType::HARD),
+                quota_size: Some(50),
+                ..BucketSettings::default()
+            },
+            path,
+        )
+        .await;
+
+        let blob: &[u8] = &[0u8; 40];
+        write(&bucket, "deleting", 0, blob).await.unwrap();
+        let entry = bucket
+            .get_entry("deleting")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        entry.mark_deleting().await.unwrap();
+
+        write(&bucket, "active", 1, blob).await.unwrap();
     }
 
     #[rstest]

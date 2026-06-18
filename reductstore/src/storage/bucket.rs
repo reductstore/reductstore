@@ -348,6 +348,9 @@ impl Bucket {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.check_mode()?;
+        crate::storage::engine::check_entry_name_convention(name)?;
+        self.ensure_not_deleting().await?;
+        self.ensure_entry_path_not_deleting(name).await?;
 
         let get_entry = async || {
             self.keep_quota_for(content_size).await?;
@@ -364,6 +367,22 @@ impl Bucket {
         entry
             .begin_write(time, content_size, content_type, labels)
             .await
+    }
+
+    async fn ensure_entry_path_not_deleting(&self, name: &str) -> Result<(), ReductError> {
+        let entries_in_path = {
+            let entries = self.entries.read().await?;
+            Self::parent_prefixes(name)
+                .into_iter()
+                .filter_map(|prefix| entries.get(&prefix).cloned())
+                .collect::<Vec<_>>()
+        };
+
+        for entry in entries_in_path {
+            entry.ensure_not_deleting().await?;
+        }
+
+        Ok(())
     }
 
     /// Starts a new record read with
@@ -738,6 +757,36 @@ pub(crate) mod tests {
             entry.mark_deleting().await.unwrap();
 
             let err = bucket.begin_read("test-1", 1).await.err().unwrap();
+            assert_eq!(
+                err,
+                conflict!("Entry 'test-1' in bucket 'test' is being deleted")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn begin_write_returns_conflict_when_target_entry_deleting_before_quota(
+            path: PathBuf,
+        ) {
+            let bucket = bucket(
+                BucketSettings {
+                    quota_type: Some(QuotaType::HARD),
+                    quota_size: Some(100),
+                    ..BucketSettings::default()
+                },
+                path,
+            )
+            .await;
+            write(&bucket, "test-1", 1, b"test").await.unwrap();
+            let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+            entry.mark_deleting().await.unwrap();
+            *bucket.settings.write().await.unwrap() = BucketSettings {
+                quota_type: Some(QuotaType::HARD),
+                quota_size: Some(1),
+                ..BucketSettings::default()
+            };
+
+            let err = write(&bucket, "test-1", 2, b"x").await.err().unwrap();
             assert_eq!(
                 err,
                 conflict!("Entry 'test-1' in bucket 'test' is being deleted")
