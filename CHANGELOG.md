@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.20.1 - 2026-06-17
+
 ### Fixed
 
 - Remove replication transaction log files when deleting a replication while preserving system diagnostics entries, [PR-1458](https://github.com/reductstore/reductstore/pull/1458)
