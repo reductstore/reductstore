@@ -295,6 +295,8 @@ impl Entry {
     /// Returns stats about the entry.
     pub async fn info(&self) -> Result<EntryInfo, ReductError> {
         let name = self.name.clone();
+        let status_result = self.status();
+
         let bm = self.block_manager.read().await?;
         let index = bm.index();
         let oldest_record = index
@@ -316,6 +318,8 @@ impl Entry {
             })
             .unwrap_or(0);
 
+        let status = status_result.await?;
+
         Ok(EntryInfo {
             name,
             size: index.size(),
@@ -323,7 +327,7 @@ impl Entry {
             block_count: index.tree().len() as u64,
             oldest_record,
             latest_record,
-            status: self.status().await?,
+            status,
         })
     }
 
