@@ -454,7 +454,7 @@ impl Entry {
         }
 
         let mut bm = self.block_manager.write().await?;
-        bm.save_cache_metadata_on_disk().await
+        bm.save_cache_on_disk().await
     }
 
     pub fn name(&self) -> &str {
@@ -1086,7 +1086,7 @@ mod tests {
 
             assert_eq!(entry.info().await.unwrap().block_count, 2);
             assert_eq!(entry.info().await.unwrap().record_count, 4);
-            assert_eq!(entry.info().await.unwrap().size, 116);
+            assert_eq!(entry.info().await.unwrap().size, 138);
 
             entry.try_remove_oldest_block().await.unwrap();
             assert_eq!(entry.info().await.unwrap().block_count, 1);
