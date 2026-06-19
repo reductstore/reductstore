@@ -283,6 +283,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         let ext_cfg = ext_parser.from_env(&mut env, version).await;
 
+        let mut engine_config = Self::parse_storage_engine_config(&mut env);
+        if ext_cfg.role() == InstanceRole::Replica {
+            engine_config.enable_integrity_checks = false;
+        }
+
         let replications = Self::parse_replications(&mut env);
         let lifecycles = Self::parse_lifecycles(&mut env);
         let has_lifecycles = !lifecycles.is_empty();
@@ -319,7 +324,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             backend_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
-            engine_config: Self::parse_storage_engine_config(&mut env),
+            engine_config,
             limits_config: Self::parse_limits_config(&mut env),
             #[cfg(feature = "zenoh-api")]
             zenoh_api: Self::parse_zenoh_api_config(&mut env),
@@ -1076,6 +1081,29 @@ mod tests {
             .catch_unwind()
             .await;
             assert!(result.is_err());
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_replica_disables_integrity_checks(mut env_getter: MockEnvGetter) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_INSTANCE_ROLE"))
+                .times(1)
+                .return_const(Ok("REPLICA".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_ENGINE_ENABLE_INTEGRITY_CHECKS"))
+                .times(1)
+                .return_const(Ok("true".to_string()));
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let parser = CfgParser::from_env(env_getter, "0.0.0").await;
+
+            assert_eq!(parser.cfg.role, InstanceRole::Replica);
+            assert!(!parser.cfg.engine_config.enable_integrity_checks);
         }
 
         #[rstest]
