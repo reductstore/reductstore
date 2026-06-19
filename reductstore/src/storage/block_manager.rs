@@ -109,12 +109,11 @@ impl BlockManager {
     pub async fn save_cache_on_disk(&mut self) -> Result<(), ReductError> {
         let blocks = self.block_cache.write_values();
         for block in blocks.iter() {
-            let block_id = block.read().await?.block_id();
-            self.sync_data_block(block_id).await?;
-        }
-
-        for block in blocks {
-            self.save_meta_on_disk(block).await?;
+            {
+                let block_id = block.read().await?.block_id();
+                self.sync_data_block(block_id).await?;
+            }
+            self.save_meta_on_disk(block.clone()).await?;
         }
 
         Ok(())
@@ -321,6 +320,7 @@ impl BlockManager {
 
         let data_path = self.path_to_data(block_id);
         let desc_path = self.path_to_desc(block_id);
+        let index_path = self.path.join(BLOCK_INDEX_FILE);
 
         {
             // resize imminently for better testing.
@@ -329,6 +329,8 @@ impl BlockManager {
                 .await?;
             data_block.set_len(block_size)?;
         }
+
+        self.save_meta_on_disk(block.clone()).await?;
 
         let sync_block = async move {
             /* sync descriptor and data */
@@ -344,6 +346,20 @@ impl BlockManager {
                     .write_or_create(&desc_path, SeekFrom::Current(0))
                     .await?;
                 descr_block.sync_all().await?;
+            }
+
+            {
+                let mut descr_block = FILE_CACHE
+                    .write_or_create(&desc_path, SeekFrom::Current(0))
+                    .await?;
+                descr_block.sync_all().await?;
+            }
+
+            {
+                let mut index_file = FILE_CACHE
+                    .write_or_create(&index_path, SeekFrom::Current(0))
+                    .await?;
+                index_file.sync_all().await?;
             }
 
             Ok::<(), ReductError>(())
@@ -788,6 +804,9 @@ impl BlockManager {
             .join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT))
     }
 
+    // Method save descriptor and update index
+    // Note: it calls local sync but not sync_all to avoid blocking entry during synchronization with remote backend
+    // the blocks must be synced with backed from FILE_CACHE sync loop
     async fn save_meta_on_disk(&mut self, block_ref: BlockRef) -> Result<(), ReductError> {
         // Take a snapshot under a short-lived write lock to avoid blocking readers
         let (block_id, block_snapshot) = {
