@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Disable storage integrity checks for read-only replica instances so they do not attempt local index rebuilds, [PR-1461](https://github.com/reductstore/reductstore/pull/1461)
+
 ## 1.20.1 - 2026-06-17
 
 ### Fixed
