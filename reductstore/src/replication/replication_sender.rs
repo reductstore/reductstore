@@ -80,11 +80,11 @@ impl ReplicationSender {
             let (write_batches_send, mut write_batches_recv) = tokio::sync::mpsc::channel(capacity);
             let mut writing_results = Vec::with_capacity(capacity);
 
-            /* Writing the batches is naturally sequential so it's second here, fed by first when a batch is ready. (So first is referred
+            /* Writing the batches is currently sequential so it's second here, fed by first when a batch is ready. (So first is referred
             as 'reading' through this code for brevity despite it ends with popping / reading out processed lengthes from the logs). */
             match future::try_join(
                 async {
-                    let mut reading = stream::iter(log_map)
+                    stream::iter(log_map)
                     .map(async |(entry_name, log)| {
                         let transactions = log
                         .read()
@@ -100,7 +100,7 @@ impl ReplicationSender {
                         transactions.map(|transactions| (entry_name, log, transactions))
                     }).buffer_unordered(DEFAULT_CONCURRENCY_LIMIT)
                     .try_filter(|(_, _, transactions)| future::ready(!transactions.is_empty()))
-                    .map_ok(async |(entry_name, log, transactions)| {
+                    .and_then(async |(entry_name, log, transactions)| {
                         let entry_name_ref = entry_name.as_str();
                         Ok((
                             log,
@@ -184,9 +184,7 @@ impl ReplicationSender {
                                 }
                             }
                         ))
-                    }).try_buffer_unordered(DEFAULT_CONCURRENCY_LIMIT);
-
-                    while let Some((log, processed_transactions)) = reading.try_next().await? {
+                    }).try_for_each_concurrent(capacity, async |(log, processed_transactions)| {
                         let guard = self_mutex.lock().await;
                         if guard.bucket.is_active() {
                             drop(guard);
@@ -195,8 +193,8 @@ impl ReplicationSender {
                                 error!("Failed to remove transaction: {err:?}")
                             }
                         };
-                    }
-                    drop(reading);
+                        Ok(())
+                    }).await?;
 
                     log::trace!["concurrent part finished: communicating this to sequential"];
                     Ok(drop(write_batches_send))
