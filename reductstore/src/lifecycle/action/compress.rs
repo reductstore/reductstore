@@ -43,7 +43,7 @@ impl LifecycleAction for CompressLifecycleAction {
             .await?
             .upgrade()?;
 
-        let affected_records = if settings.mode == LifecycleMode::DryRun {
+        let stats = if settings.mode == LifecycleMode::DryRun {
             bucket
                 .count_compressible_blocks(entries, start, stop)
                 .await?
@@ -51,7 +51,10 @@ impl LifecycleAction for CompressLifecycleAction {
             bucket.compress_blocks(entries, start, stop).await?
         };
 
-        Ok(LifecycleRunResult { affected_records })
+        Ok(LifecycleRunResult {
+            affected_records: stats.records,
+            affected_blocks: Some(stats.blocks),
+        })
     }
 }
 
@@ -126,14 +129,15 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.affected_records, 1);
+        assert_eq!(result.affected_records, 2);
+        assert_eq!(result.affected_blocks, Some(1));
         assert_eq!(
             test_bucket
                 .clone()
                 .count_compressible_blocks(Some(vec!["entry-1".into()]), None, None)
                 .await
                 .unwrap(),
-            0
+            crate::storage::entry::CompressionStats::default()
         );
     }
 
@@ -159,14 +163,18 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.affected_records, 1);
+        assert_eq!(result.affected_records, 2);
+        assert_eq!(result.affected_blocks, Some(1));
         assert_eq!(
             test_bucket
                 .clone()
                 .count_compressible_blocks(Some(vec!["entry-1".into()]), None, None)
                 .await
                 .unwrap(),
-            1
+            crate::storage::entry::CompressionStats {
+                blocks: 1,
+                records: 2
+            }
         );
     }
 
@@ -193,7 +201,7 @@ mod tests {
                 .await
                 .unwrap()
                 .affected_records,
-            1
+            2
         );
         assert_eq!(
             action
@@ -227,7 +235,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.affected_records, 1);
+        assert_eq!(result.affected_records, 2);
+        assert_eq!(result.affected_blocks, Some(1));
     }
 
     #[rstest]
@@ -259,6 +268,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.affected_records, 0);
+        assert_eq!(result.affected_blocks, Some(0));
         assert!(test_bucket.begin_read("entry-1/$meta", 1).await.is_ok());
     }
 }

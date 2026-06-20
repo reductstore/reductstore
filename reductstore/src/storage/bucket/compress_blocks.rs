@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::is_system_meta_entry;
+use crate::storage::entry::{is_system_meta_entry, CompressionStats};
 use reduct_base::error::ReductError;
 use std::sync::Arc;
 
@@ -13,10 +13,10 @@ impl Bucket {
         entries_filter: Option<Vec<String>>,
         start: Option<u64>,
         stop: Option<u64>,
-    ) -> Result<u64, ReductError> {
+    ) -> Result<CompressionStats, ReductError> {
         let entries = self.entries.read().await?.clone();
         let requested_entries = Self::requested_entries(&entries_filter);
-        let mut total = 0;
+        let mut total = CompressionStats::default();
 
         for (entry_name, entry) in entries {
             if !Self::is_requested_entry(&entry_name, &requested_entries) {
@@ -27,7 +27,9 @@ impl Bucket {
                 continue;
             }
 
-            total += entry.compress_blocks(start, stop).await?;
+            let stats = entry.compress_blocks(start, stop).await?;
+            total.blocks += stats.blocks;
+            total.records += stats.records;
         }
 
         Ok(total)
@@ -39,10 +41,10 @@ impl Bucket {
         entries_filter: Option<Vec<String>>,
         start: Option<u64>,
         stop: Option<u64>,
-    ) -> Result<u64, ReductError> {
+    ) -> Result<CompressionStats, ReductError> {
         let entries = self.entries.read().await?.clone();
         let requested_entries = Self::requested_entries(&entries_filter);
-        let mut total = 0;
+        let mut total = CompressionStats::default();
 
         for (entry_name, entry) in entries {
             if !Self::is_requested_entry(&entry_name, &requested_entries) {
@@ -53,7 +55,9 @@ impl Bucket {
                 continue;
             }
 
-            total += entry.count_compressible_blocks(start, stop).await?;
+            let stats = entry.count_compressible_blocks(start, stop).await?;
+            total.blocks += stats.blocks;
+            total.records += stats.records;
         }
 
         Ok(total)
@@ -89,14 +93,23 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(compressed, 2);
+        assert_eq!(
+            compressed,
+            CompressionStats {
+                blocks: 2,
+                records: 2
+            }
+        );
         assert_eq!(
             bucket
                 .clone()
                 .count_compressible_blocks(None, None, None)
                 .await
                 .unwrap(),
-            1
+            CompressionStats {
+                blocks: 1,
+                records: 1
+            }
         );
         assert_eq!(
             bucket
@@ -104,7 +117,10 @@ mod tests {
                 .count_compressible_blocks(Some(vec!["entry-c".into()]), None, None)
                 .await
                 .unwrap(),
-            1
+            CompressionStats {
+                blocks: 1,
+                records: 1
+            }
         );
     }
 
@@ -129,14 +145,14 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(compressed, 0);
+        assert_eq!(compressed, CompressionStats::default());
         assert_eq!(
             bucket
                 .clone()
                 .count_compressible_blocks(Some(vec!["entry-a/$meta".into()]), None, None)
                 .await
                 .unwrap(),
-            0
+            CompressionStats::default()
         );
         assert!(bucket.begin_read("entry-a/$meta", 1).await.is_ok());
     }
