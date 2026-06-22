@@ -80,7 +80,8 @@ impl RecordReader {
             None
         };
 
-        bm.usage_counters().count_read(content_size);
+        bm.usage_counters()
+            .count_read(bm.bucket_name(), bm.entry_name(), content_size);
 
         Ok(Self {
             meta,
