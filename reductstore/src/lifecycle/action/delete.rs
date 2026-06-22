@@ -64,7 +64,10 @@ impl LifecycleAction for DeleteLifecycleAction {
             bucket.query_remove_records(query_entry).await?
         };
 
-        Ok(LifecycleRunResult { affected_records })
+        Ok(LifecycleRunResult {
+            affected_records,
+            ..Default::default()
+        })
     }
 }
 

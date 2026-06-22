@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::lifecycle::action::{LifecycleAction, LifecycleContext};
+use crate::lifecycle::action::{LifecycleAction, LifecycleContext, LifecycleRunResult};
 use crate::lifecycle::system_event_payload::LifecycleSystemEventPayload;
 use crate::syslog::SystemEvent;
 
@@ -96,7 +96,7 @@ impl LifecycleTask {
                             action.lifecycle_type(),
                             &settings.bucket,
                             started.elapsed().as_secs_f64(),
-                            Ok(result.affected_records),
+                            Ok(result),
                         )
                         .await;
                     }
@@ -205,7 +205,7 @@ impl LifecycleTask {
         action_type: LifecycleType,
         bucket: &str,
         duration: f64,
-        result: Result<u64, ReductError>,
+        result: Result<LifecycleRunResult, ReductError>,
     ) {
         let Some(sink) = system_event_sink else {
             debug!(
@@ -216,7 +216,7 @@ impl LifecycleTask {
         };
 
         let (status, message, payload) = match result {
-            Ok(processed_records) => (
+            Ok(result) => (
                 200u16,
                 "".to_string(),
                 LifecycleSystemEventPayload::success(
@@ -224,7 +224,8 @@ impl LifecycleTask {
                     &format!("{:?}", action_type).to_lowercase(),
                     bucket,
                     duration,
-                    processed_records,
+                    result.affected_records,
+                    result.affected_blocks,
                 )
                 .to_value(),
             ),
@@ -425,6 +426,7 @@ pub(super) mod tests {
             tx.send(name.to_string()).unwrap();
             Ok(LifecycleRunResult {
                 affected_records: 1,
+                ..Default::default()
             })
         });
 
@@ -453,6 +455,7 @@ pub(super) mod tests {
             tx.send(name.to_string()).unwrap();
             Ok(LifecycleRunResult {
                 affected_records: 1,
+                ..Default::default()
             })
         });
 
@@ -480,6 +483,7 @@ pub(super) mod tests {
             tx.send(name.to_string()).unwrap();
             Ok(LifecycleRunResult {
                 affected_records: 1,
+                ..Default::default()
             })
         });
 
@@ -528,7 +532,10 @@ pub(super) mod tests {
             LifecycleType::Delete,
             "bucket-1",
             0.25,
-            Ok(42),
+            Ok(LifecycleRunResult {
+                affected_records: 42,
+                ..Default::default()
+            }),
         )
         .await;
 
@@ -545,8 +552,41 @@ pub(super) mod tests {
         assert_eq!(event.payload["action_type"], "delete");
         assert_eq!(event.payload["bucket"], "bucket-1");
         assert_eq!(event.payload["processed_records"], 42);
+        assert!(event.payload.get("processed_blocks").is_none());
         assert!(event.payload.get("error_code").is_none());
         assert!(event.payload.get("error_message").is_none());
+    }
+
+    #[tokio::test]
+    async fn log_system_event_writes_compression_metrics() {
+        let captured = Arc::new(Mutex::new(Vec::<SystemEvent>::new()));
+        let sink = SystemEventSink {
+            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
+                events: Arc::clone(&captured),
+            })
+                as Box<dyn LogSystemEvent + Send + Sync>)),
+            instance_name: "instance-1".to_string(),
+        };
+
+        LifecycleTask::log_system_event(
+            Some(sink),
+            "policy-1",
+            LifecycleType::Compress,
+            "bucket-1",
+            0.25,
+            Ok(LifecycleRunResult {
+                affected_records: 42,
+                affected_blocks: Some(3),
+            }),
+        )
+        .await;
+
+        let events = captured.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+
+        assert_eq!(event.payload["processed_records"], 42);
+        assert_eq!(event.payload["processed_blocks"], 3);
     }
 
     #[tokio::test]
@@ -584,6 +624,7 @@ pub(super) mod tests {
         assert_eq!(event.payload["action_type"], "delete");
         assert_eq!(event.payload["bucket"], "bucket-1");
         assert_eq!(event.payload["processed_records"], serde_json::Value::Null);
+        assert!(event.payload.get("processed_blocks").is_none());
         assert_eq!(event.payload["error_code"], 422);
         assert_eq!(event.payload["error_message"], "failed to run");
     }

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Report both processed record and block counts for lifecycle compression events, [PR-1470](https://github.com/reductstore/reductstore/pull/1470) by @rohankumardubey
+
 ## 1.20.2 - 2026-06-18
 
 ### Changed
