@@ -69,8 +69,8 @@ impl Entry {
         Ok(stats)
     }
 
-    /// Count uncompressed blocks and their records whose block IDs fall within `[start, stop)`.
-    pub async fn count_compressible_blocks(
+    /// Estimate uncompressed blocks and records whose block IDs fall within `[start, stop)`.
+    pub async fn estimate_compressible_data(
         &self,
         start: Option<u64>,
         stop: Option<u64>,
@@ -286,13 +286,13 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_count_compressible_blocks_full_range(path: PathBuf) {
+    async fn test_estimate_compressible_data_full_range(path: PathBuf) {
         let entry = entry(multi_block_settings(), path.clone()).await;
         write_blocks(&entry, &[1_000_000, 2_000_000, 3_000_000]).await;
         let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
 
         assert_eq!(
-            entry.count_compressible_blocks(None, None).await.unwrap(),
+            entry.estimate_compressible_data(None, None).await.unwrap(),
             CompressionStats {
                 blocks: 3,
                 records: 3
@@ -300,7 +300,7 @@ mod tests {
         );
         assert_eq!(
             entry
-                .count_compressible_blocks(Some(2_000_000), Some(3_000_000))
+                .estimate_compressible_data(Some(2_000_000), Some(3_000_000))
                 .await
                 .unwrap(),
             CompressionStats {
@@ -313,14 +313,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_count_compressible_blocks_start_only(path: PathBuf) {
+    async fn test_estimate_compressible_data_start_only(path: PathBuf) {
         let entry = entry(multi_block_settings(), path.clone()).await;
         write_blocks(&entry, &[1_000_000, 2_000_000, 3_000_000]).await;
         let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
 
         assert_eq!(
             entry
-                .count_compressible_blocks(Some(2_000_000), None)
+                .estimate_compressible_data(Some(2_000_000), None)
                 .await
                 .unwrap(),
             CompressionStats {
@@ -333,14 +333,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_count_compressible_blocks_stop_only(path: PathBuf) {
+    async fn test_estimate_compressible_data_stop_only(path: PathBuf) {
         let entry = entry(multi_block_settings(), path.clone()).await;
         write_blocks(&entry, &[1_000_000, 2_000_000, 3_000_000]).await;
         let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
 
         assert_eq!(
             entry
-                .count_compressible_blocks(None, Some(3_000_000))
+                .estimate_compressible_data(None, Some(3_000_000))
                 .await
                 .unwrap(),
             CompressionStats {
@@ -353,7 +353,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_count_compressible_blocks_after_compression(path: PathBuf) {
+    async fn test_estimate_compressible_data_after_compression(path: PathBuf) {
         let entry = entry(multi_block_settings(), path.clone()).await;
         write_blocks(&entry, &[1_000_000, 2_000_000, 3_000_000]).await;
         let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
@@ -366,7 +366,7 @@ mod tests {
             }
         );
         assert_eq!(
-            entry.count_compressible_blocks(None, None).await.unwrap(),
+            entry.estimate_compressible_data(None, None).await.unwrap(),
             CompressionStats::default()
         );
     }

@@ -6,6 +6,11 @@ use crate::storage::entry::{is_system_meta_entry, CompressionStats};
 use reduct_base::error::ReductError;
 use std::sync::Arc;
 
+enum CompressionMode {
+    Compress,
+    Estimate,
+}
+
 impl Bucket {
     /// Compress blocks over a timestamp range across matching entries.
     pub async fn compress_blocks(
@@ -14,33 +19,27 @@ impl Bucket {
         start: Option<u64>,
         stop: Option<u64>,
     ) -> Result<CompressionStats, ReductError> {
-        let entries = self.entries.read().await?.clone();
-        let requested_entries = Self::requested_entries(&entries_filter);
-        let mut total = CompressionStats::default();
-
-        for (entry_name, entry) in entries {
-            if !Self::is_requested_entry(&entry_name, &requested_entries) {
-                continue;
-            }
-
-            if is_system_meta_entry(&entry_name) {
-                continue;
-            }
-
-            let stats = entry.compress_blocks(start, stop).await?;
-            total.blocks += stats.blocks;
-            total.records += stats.records;
-        }
-
-        Ok(total)
+        self.process_compressible_data(entries_filter, start, stop, CompressionMode::Compress)
+            .await
     }
 
-    /// Count blocks that would be compressed over a timestamp range.
-    pub async fn count_compressible_blocks(
+    /// Estimate blocks and records that would be compressed over a timestamp range.
+    pub async fn estimate_compressible_data(
         self: Arc<Self>,
         entries_filter: Option<Vec<String>>,
         start: Option<u64>,
         stop: Option<u64>,
+    ) -> Result<CompressionStats, ReductError> {
+        self.process_compressible_data(entries_filter, start, stop, CompressionMode::Estimate)
+            .await
+    }
+
+    async fn process_compressible_data(
+        self: Arc<Self>,
+        entries_filter: Option<Vec<String>>,
+        start: Option<u64>,
+        stop: Option<u64>,
+        mode: CompressionMode,
     ) -> Result<CompressionStats, ReductError> {
         let entries = self.entries.read().await?.clone();
         let requested_entries = Self::requested_entries(&entries_filter);
@@ -55,7 +54,10 @@ impl Bucket {
                 continue;
             }
 
-            let stats = entry.count_compressible_blocks(start, stop).await?;
+            let stats = match mode {
+                CompressionMode::Compress => entry.compress_blocks(start, stop).await?,
+                CompressionMode::Estimate => entry.estimate_compressible_data(start, stop).await?,
+            };
             total.blocks += stats.blocks;
             total.records += stats.records;
         }
@@ -103,7 +105,7 @@ mod tests {
         assert_eq!(
             bucket
                 .clone()
-                .count_compressible_blocks(None, None, None)
+                .estimate_compressible_data(None, None, None)
                 .await
                 .unwrap(),
             CompressionStats {
@@ -114,7 +116,7 @@ mod tests {
         assert_eq!(
             bucket
                 .clone()
-                .count_compressible_blocks(Some(vec!["entry-c".into()]), None, None)
+                .estimate_compressible_data(Some(vec!["entry-c".into()]), None, None)
                 .await
                 .unwrap(),
             CompressionStats {
@@ -149,7 +151,7 @@ mod tests {
         assert_eq!(
             bucket
                 .clone()
-                .count_compressible_blocks(Some(vec!["entry-a/$meta".into()]), None, None)
+                .estimate_compressible_data(Some(vec!["entry-a/$meta".into()]), None, None)
                 .await
                 .unwrap(),
             CompressionStats::default()

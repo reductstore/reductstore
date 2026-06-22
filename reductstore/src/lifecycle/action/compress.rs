@@ -45,7 +45,7 @@ impl LifecycleAction for CompressLifecycleAction {
 
         let stats = if settings.mode == LifecycleMode::DryRun {
             bucket
-                .count_compressible_blocks(entries, start, stop)
+                .estimate_compressible_data(entries, start, stop)
                 .await?
         } else {
             bucket.compress_blocks(entries, start, stop).await?
@@ -134,7 +134,7 @@ mod tests {
         assert_eq!(
             test_bucket
                 .clone()
-                .count_compressible_blocks(Some(vec!["entry-1".into()]), None, None)
+                .estimate_compressible_data(Some(vec!["entry-1".into()]), None, None)
                 .await
                 .unwrap(),
             crate::storage::entry::CompressionStats::default()
@@ -168,7 +168,7 @@ mod tests {
         assert_eq!(
             test_bucket
                 .clone()
-                .count_compressible_blocks(Some(vec!["entry-1".into()]), None, None)
+                .estimate_compressible_data(Some(vec!["entry-1".into()]), None, None)
                 .await
                 .unwrap(),
             crate::storage::entry::CompressionStats {
