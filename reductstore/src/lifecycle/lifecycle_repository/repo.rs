@@ -715,6 +715,7 @@ mod tests {
                 tx.send((name.to_string(), bucket_name)).unwrap();
                 Ok(LifecycleRunResult {
                     affected_records: 1,
+                    ..Default::default()
                 })
             });
         let action: Arc<dyn LifecycleAction + Send + Sync> = Arc::new(action);

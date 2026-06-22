@@ -13,6 +13,8 @@ pub(crate) struct LifecycleSystemEventPayload {
     #[serde(default)]
     pub processed_records: Option<u64>,
     #[serde(default)]
+    pub processed_blocks: Option<u64>,
+    #[serde(default)]
     pub error_code: Option<u16>,
     #[serde(default)]
     pub error_message: Option<String>,
@@ -25,6 +27,7 @@ impl LifecycleSystemEventPayload {
         bucket: &str,
         duration: f64,
         processed_records: u64,
+        processed_blocks: Option<u64>,
     ) -> Self {
         Self {
             policy_name: policy_name.to_string(),
@@ -32,6 +35,7 @@ impl LifecycleSystemEventPayload {
             bucket: bucket.to_string(),
             duration,
             processed_records: Some(processed_records),
+            processed_blocks,
             error_code: None,
             error_message: None,
         }
@@ -51,6 +55,7 @@ impl LifecycleSystemEventPayload {
             bucket: bucket.to_string(),
             duration,
             processed_records: None,
+            processed_blocks: None,
             error_code: Some(error_code),
             error_message: Some(error_message.to_string()),
         }
@@ -67,6 +72,10 @@ impl LifecycleSystemEventPayload {
 
         if let Some(error_code) = self.error_code {
             payload["error_code"] = json!(error_code);
+        }
+
+        if let Some(processed_blocks) = self.processed_blocks {
+            payload["processed_blocks"] = json!(processed_blocks);
         }
 
         if let Some(error_message) = &self.error_message {

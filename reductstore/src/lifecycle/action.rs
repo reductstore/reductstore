@@ -26,6 +26,7 @@ impl LifecycleContext {
 #[derive(Clone, Debug, Default)]
 pub(super) struct LifecycleRunResult {
     pub(super) affected_records: u64,
+    pub(super) affected_blocks: Option<u64>,
 }
 
 #[async_trait]
