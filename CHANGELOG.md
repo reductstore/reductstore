@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.20.3 - 2026-06-23
+
 ### Fixed
 
 - Throttle lifecycle delete and compression runs using progress persisted in existing lifecycle system event stats [PR-1475](https://github.com/reductstore/reductstore/pull/1475)
