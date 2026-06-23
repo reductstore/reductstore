@@ -8,6 +8,7 @@
 - Ops assets: `snap/`, `buildx.Dockerfile`, `.github/actions/`; sample certs/data in `misc/`.
 - Key modules: `reductstore/src/{api,asset,auth,backend,cfg,core,ext,proto,replication,storage}`;
   `reduct_base/src/{logging,msg,io,ext}`.
+- Lifecycle design notes: `reductstore/src/lifecycle/README.md`.
 
 ## Build, Test, and Development
 
