@@ -390,15 +390,15 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.affected_records, 1);
-        assert_eq!(result.affected_blocks, Some(1));
+        assert_eq!(result.affected_records, 2);
+        assert_eq!(result.affected_blocks, Some(2));
         assert_eq!(
             test_bucket
                 .estimate_compressible_data(Some(vec!["entry-1".into()]), None, None)
                 .await
                 .unwrap()
                 .records,
-            2
+            1
         );
     }
 

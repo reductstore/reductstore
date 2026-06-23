@@ -23,10 +23,13 @@ pub(crate) async fn processing_window(
     policy_name: &str,
     cutoff_stop: u64,
 ) -> Result<ProcessingWindow, ReductError> {
+    let first_record_start = first_record_start(settings, context, cutoff_stop).await?;
+
     if !context.system_events_enabled {
+        let stop = cutoff_stop;
         return Ok(ProcessingWindow {
-            start: Some(0),
-            stop: Some(cutoff_stop),
+            start: Some(first_record_start.min(stop)),
+            stop: Some(stop),
             last_processed_ts: None,
             caught_up: false,
         });
@@ -34,29 +37,78 @@ pub(crate) async fn processing_window(
 
     let interval_us = parse_duration_to_micros(&settings.interval)?.max(0) as u64;
     let data_window = interval_us.saturating_mul(24);
-    let window_start = read_progress(
+    let last_processed = read_progress(
         &context.storage,
         &context.system_event_instance,
         policy_name,
     )
     .await
-    .unwrap_or(0);
+    .unwrap_or(first_record_start);
 
-    if window_start >= cutoff_stop {
+    if last_processed >= cutoff_stop {
+        let stop = cutoff_stop;
         return Ok(ProcessingWindow {
-            start: Some(window_start),
-            stop: Some(window_start),
-            last_processed_ts: Some(window_start),
+            start: Some(first_record_start.min(stop)),
+            stop: Some(stop),
+            last_processed_ts: Some(last_processed),
             caught_up: true,
         });
     }
 
-    let window_stop = window_start.saturating_add(data_window).min(cutoff_stop);
+    let window_stop = last_processed.saturating_add(data_window).min(cutoff_stop);
     Ok(ProcessingWindow {
-        start: Some(window_start),
+        start: Some(first_record_start.min(window_stop)),
         stop: Some(window_stop),
         last_processed_ts: Some(window_stop),
         caught_up: false,
+    })
+}
+
+async fn first_record_start(
+    settings: &LifecycleSettings,
+    context: &LifecycleContext,
+    cutoff_stop: u64,
+) -> Result<u64, ReductError> {
+    let bucket = context
+        .storage
+        .get_bucket(&settings.bucket)
+        .await?
+        .upgrade()?;
+    let bucket_info = bucket.info().await?;
+    let requested_entries = requested_entries(&settings.entries);
+    let oldest_record = bucket_info
+        .entries
+        .into_iter()
+        .filter(|entry| entry.record_count > 0)
+        .filter(|entry| is_requested_entry(&entry.name, &requested_entries))
+        .map(|entry| entry.oldest_record)
+        .min()
+        .unwrap_or(cutoff_stop);
+
+    Ok(oldest_record.min(cutoff_stop))
+}
+
+fn requested_entries(entries: &[String]) -> Option<&[String]> {
+    if entries.is_empty() || entries.iter().any(|entry| entry == "*") {
+        None
+    } else {
+        Some(entries)
+    }
+}
+
+fn is_requested_entry(entry_name: &str, requested_entries: &Option<&[String]>) -> bool {
+    requested_entries
+        .map(|patterns| entry_matches_patterns(entry_name, patterns))
+        .unwrap_or(true)
+}
+
+fn entry_matches_patterns(entry_name: &str, patterns: &[String]) -> bool {
+    patterns.iter().any(|pattern| {
+        if let Some(prefix) = pattern.strip_suffix('*') {
+            entry_name.starts_with(prefix)
+        } else {
+            entry_name == pattern
+        }
     })
 }
 
@@ -119,7 +171,9 @@ fn sanitize_policy_name(name: &str) -> String {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::lifecycle::lifecycle_task::tests::storage;
+    use crate::lifecycle::action::LifecycleContext;
+    use crate::lifecycle::lifecycle_task::tests::{settings_fixture, storage};
+    use crate::storage::bucket::tests::write;
     use reduct_base::msg::bucket_api::BucketSettings;
 
     #[tokio::test]
@@ -175,6 +229,93 @@ pub(super) mod tests {
             read_progress(&storage, "instance-1", "policy-1").await,
             Some(67890)
         );
+    }
+
+    #[tokio::test]
+    async fn processing_window_uses_oldest_matching_record_as_start() {
+        let storage = storage().await;
+        let bucket = storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut settings = settings_fixture();
+        settings.entries = vec!["entry-a*".to_string()];
+        write(&bucket, "entry-a", 50, b"a").await.unwrap();
+        write(&bucket, "entry-b", 10, b"b").await.unwrap();
+
+        let window = processing_window(
+            &settings,
+            &LifecycleContext::new(storage, true, "instance-1".to_string()),
+            "policy-1",
+            100,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(window.start, Some(50));
+        assert_eq!(window.stop, Some(100));
+        assert_eq!(window.last_processed_ts, Some(100));
+        assert!(!window.caught_up);
+    }
+
+    #[tokio::test]
+    async fn processing_window_clamps_start_when_all_matching_records_are_newer_than_stop() {
+        let storage = storage().await;
+        let bucket = storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let settings = settings_fixture();
+        write(&bucket, "entry-1", 150, b"fresh").await.unwrap();
+
+        let window = processing_window(
+            &settings,
+            &LifecycleContext::new(storage, true, "instance-1".to_string()),
+            "policy-1",
+            100,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(window.start, Some(100));
+        assert_eq!(window.stop, Some(100));
+        assert_eq!(window.last_processed_ts, Some(100));
+        assert!(!window.caught_up);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn processing_window_clamps_start_to_window_stop_when_progress_lags_behind_data() {
+        let storage = storage().await;
+        let bucket = storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut settings = settings_fixture();
+        settings.interval = "0s".to_string();
+        write_lifecycle_stats(&storage, "instance-1", "policy-1", 1)
+            .await
+            .unwrap();
+        write(&bucket, "entry-1", 100, b"fresh").await.unwrap();
+
+        let window = processing_window(
+            &settings,
+            &LifecycleContext::new(storage, true, "instance-1".to_string()),
+            "policy-1",
+            1_000,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(window.start, Some(1));
+        assert_eq!(window.stop, Some(1));
+        assert_eq!(window.last_processed_ts, Some(1));
+        assert!(!window.caught_up);
     }
 
     pub(crate) async fn write_lifecycle_stats(

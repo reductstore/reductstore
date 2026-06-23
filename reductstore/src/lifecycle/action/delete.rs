@@ -59,8 +59,8 @@ impl LifecycleAction for DeleteLifecycleAction {
                 QueryType::Remove
             },
             entries,
-            // Use absolute range start to avoid invalid (start > stop) when
-            // an entry contains only fresh records newer than `cutoff`.
+            // Use the oldest matching record, clamped to stop, to keep the
+            // range valid even when an entry only contains fresher data.
             start: window.start,
             stop: window.stop,
             when: settings.when.clone(),
@@ -269,8 +269,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.affected_records, 1);
-        assert!(test_bucket.begin_read("entry-1", 23_999_999).await.is_ok());
+        assert_eq!(result.affected_records, 2);
+        assert!(test_bucket.begin_read("entry-1", 23_999_999).await.is_err());
         assert!(test_bucket.begin_read("entry-1", 24_000_000).await.is_err());
         assert!(test_bucket.begin_read("entry-1", 48_000_000).await.is_ok());
     }
