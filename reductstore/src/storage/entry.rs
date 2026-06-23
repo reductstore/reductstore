@@ -87,6 +87,12 @@ pub(crate) struct CompressionStats {
     pub(crate) records: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct RecordQueryStats {
+    pub(crate) blocks: u64,
+    pub(crate) records: u64,
+}
+
 impl Entry {
     #[allow(dead_code)]
     pub async fn try_build(

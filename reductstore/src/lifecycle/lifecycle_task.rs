@@ -534,7 +534,7 @@ pub(super) mod tests {
             0.25,
             Ok(LifecycleRunResult {
                 affected_records: 42,
-                ..Default::default()
+                affected_blocks: Some(3),
             }),
         )
         .await;
@@ -552,7 +552,7 @@ pub(super) mod tests {
         assert_eq!(event.payload["action_type"], "delete");
         assert_eq!(event.payload["bucket"], "bucket-1");
         assert_eq!(event.payload["processed_records"], 42);
-        assert!(event.payload.get("processed_blocks").is_none());
+        assert_eq!(event.payload["processed_blocks"], 3);
         assert!(event.payload.get("error_code").is_none());
         assert!(event.payload.get("error_message").is_none());
     }

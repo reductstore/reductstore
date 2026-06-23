@@ -58,15 +58,15 @@ impl LifecycleAction for DeleteLifecycleAction {
             ..Default::default()
         };
 
-        let affected_records = if settings.mode == LifecycleMode::DryRun {
-            bucket.query_count_records(query_entry).await?
+        let stats = if settings.mode == LifecycleMode::DryRun {
+            bucket.query_count_records_with_stats(query_entry).await?
         } else {
-            bucket.query_remove_records(query_entry).await?
+            bucket.query_remove_records_with_stats(query_entry).await?
         };
 
         Ok(LifecycleRunResult {
-            affected_records,
-            ..Default::default()
+            affected_records: stats.records,
+            affected_blocks: Some(stats.blocks),
         })
     }
 }
@@ -117,6 +117,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.affected_records, 2);
+        assert_eq!(result.affected_blocks, Some(1));
         assert!(test_bucket.begin_read("entry-1", 1).await.is_ok());
         assert!(test_bucket.begin_read("entry-1", 2).await.is_ok());
     }
@@ -145,6 +146,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.affected_records, 0);
+        assert_eq!(result.affected_blocks, Some(0));
         assert!(test_bucket.begin_read("entry-1", now_us).await.is_ok());
     }
 
@@ -172,6 +174,7 @@ mod tests {
             .unwrap();
 
         assert_eq!(result.affected_records, 1);
+        assert_eq!(result.affected_blocks, Some(1));
         assert!(test_bucket.begin_read("entry-1", 1).await.is_err());
         assert!(test_bucket.begin_read("entry-1/$meta", 1).await.is_ok());
     }

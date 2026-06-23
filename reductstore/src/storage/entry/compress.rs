@@ -4,6 +4,20 @@
 use super::{CompressionStats, Entry};
 use crate::storage::block_manager::compress::CompressionAlgorithm;
 use reduct_base::error::{ErrorCode, ReductError};
+use std::collections::BTreeSet;
+
+fn block_id_range<'a>(
+    index: &'a BTreeSet<u64>,
+    start: Option<u64>,
+    stop: Option<u64>,
+) -> Box<dyn Iterator<Item = &'a u64> + 'a> {
+    match (start, stop) {
+        (Some(start), Some(stop)) => Box::new(index.range(start..stop)),
+        (Some(start), None) => Box::new(index.range(start..)),
+        (None, Some(stop)) => Box::new(index.range(..stop)),
+        (None, None) => Box::new(index.iter()),
+    }
+}
 
 impl Entry {
     /// Compress uncompressed blocks whose block IDs fall within `[start, stop)`.
@@ -19,12 +33,7 @@ impl Entry {
             let bm = self.block_manager.read().await?;
             let index = bm.index();
 
-            let range: Box<dyn Iterator<Item = &u64> + '_> = match (start, stop) {
-                (Some(start), Some(stop)) => Box::new(index.tree().range(start..stop)),
-                (Some(start), None) => Box::new(index.tree().range(start..)),
-                (None, Some(stop)) => Box::new(index.tree().range(..stop)),
-                (None, None) => Box::new(index.tree().iter()),
-            };
+            let range = block_id_range(index.tree(), start, stop);
 
             range
                 .filter(|&&block_id| {
@@ -78,12 +87,7 @@ impl Entry {
         let bm = self.block_manager.read().await?;
         let index = bm.index();
 
-        let range: Box<dyn Iterator<Item = &u64> + '_> = match (start, stop) {
-            (Some(start), Some(stop)) => Box::new(index.tree().range(start..stop)),
-            (Some(start), None) => Box::new(index.tree().range(start..)),
-            (None, Some(stop)) => Box::new(index.tree().range(..stop)),
-            (None, None) => Box::new(index.tree().iter()),
-        };
+        let range = block_id_range(index.tree(), start, stop);
 
         let stats = range
             .filter(|&&block_id| {
