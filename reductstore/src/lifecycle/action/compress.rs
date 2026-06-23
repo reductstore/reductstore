@@ -32,14 +32,6 @@ impl LifecycleAction for CompressLifecycleAction {
         let cutoff = now_us.saturating_sub(older_than_us.max(0) as u64);
         let cutoff_stop = cutoff.saturating_add(1);
         let window = progress::processing_window(settings, &context, name, cutoff_stop).await?;
-        if window.caught_up {
-            return Ok(LifecycleRunResult {
-                affected_records: 0,
-                affected_blocks: Some(0),
-                last_processed_ts: window.last_processed_ts,
-                caught_up: true,
-            });
-        }
         let entries = if settings.entries.is_empty() {
             None
         } else {
@@ -406,7 +398,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
-    async fn compress_returns_zero_when_caught_up() {
+    async fn compress_still_processes_oldest_blocks_when_caught_up() {
         let (test_storage, test_bucket) = test_context_with_one_record_blocks().await;
         progress::tests::write_lifecycle_stats(&test_storage, "instance-1", "test", u64::MAX)
             .await
@@ -428,8 +420,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.affected_records, 0);
-        assert_eq!(result.affected_blocks, Some(0));
+        assert_eq!(result.affected_records, 1);
+        assert_eq!(result.affected_blocks, Some(1));
         assert!(result.caught_up);
         assert_eq!(
             test_bucket
@@ -437,7 +429,7 @@ mod tests {
                 .await
                 .unwrap()
                 .records,
-            1
+            0
         );
     }
 
@@ -469,8 +461,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.affected_records, 0);
-        assert_eq!(result.affected_blocks, Some(0));
+        assert_eq!(result.affected_records, 1);
+        assert_eq!(result.affected_blocks, Some(1));
         assert!(result.caught_up);
     }
 

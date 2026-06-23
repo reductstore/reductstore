@@ -33,14 +33,6 @@ impl LifecycleAction for DeleteLifecycleAction {
         let cutoff = now_us.saturating_sub(older_than_us.max(0) as u64);
         let cutoff_stop = cutoff.saturating_add(1);
         let window = progress::processing_window(settings, &context, name, cutoff_stop).await?;
-        if window.caught_up {
-            return Ok(LifecycleRunResult {
-                affected_records: 0,
-                affected_blocks: Some(0),
-                last_processed_ts: window.last_processed_ts,
-                caught_up: true,
-            });
-        }
 
         let entries = if settings.entries.is_empty() {
             None
@@ -279,7 +271,7 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[rstest]
-    async fn delete_returns_zero_when_caught_up(
+    async fn delete_still_processes_oldest_records_when_caught_up(
         #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
         action: DeleteLifecycleAction,
         mut settings: LifecycleSettings,
@@ -302,10 +294,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.affected_records, 0);
-        assert_eq!(result.affected_blocks, Some(0));
+        assert_eq!(result.affected_records, 1);
+        assert_eq!(result.affected_blocks, Some(1));
         assert!(result.caught_up);
-        assert!(test_bucket.begin_read("entry-1", 1).await.is_ok());
+        assert!(test_bucket.begin_read("entry-1", 1).await.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -337,8 +329,8 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.affected_records, 0);
-        assert_eq!(result.affected_blocks, Some(0));
+        assert_eq!(result.affected_records, 1);
+        assert_eq!(result.affected_blocks, Some(1));
         assert!(result.caught_up);
     }
 

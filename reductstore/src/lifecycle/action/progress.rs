@@ -14,7 +14,6 @@ pub(crate) struct ProcessingWindow {
     pub(crate) start: Option<u64>,
     pub(crate) stop: Option<u64>,
     pub(crate) last_processed_ts: Option<u64>,
-    pub(crate) caught_up: bool,
     pub(crate) reaches_cutoff: bool,
 }
 
@@ -33,7 +32,6 @@ pub(crate) async fn processing_window(
             start: Some(first_record_start.min(stop)),
             stop: Some(stop),
             last_processed_ts: None,
-            caught_up: false,
             reaches_cutoff: false,
         });
     }
@@ -54,7 +52,6 @@ pub(crate) async fn processing_window(
             start: Some(first_record_start.min(stop)),
             stop: Some(stop),
             last_processed_ts: Some(last_processed),
-            caught_up: true,
             reaches_cutoff: true,
         });
     }
@@ -66,7 +63,6 @@ pub(crate) async fn processing_window(
         start: Some(first_record_start.min(window_stop)),
         stop: Some(window_stop),
         last_processed_ts: Some(window_stop),
-        caught_up: false,
         reaches_cutoff: window_stop >= effective_cutoff_stop,
     })
 }
@@ -279,7 +275,7 @@ pub(super) mod tests {
         assert_eq!(window.start, Some(50));
         assert_eq!(window.stop, Some(51));
         assert_eq!(window.last_processed_ts, Some(51));
-        assert!(!window.caught_up);
+        assert!(window.reaches_cutoff);
     }
 
     #[tokio::test]
@@ -306,7 +302,7 @@ pub(super) mod tests {
         assert_eq!(window.start, Some(100));
         assert_eq!(window.stop, Some(100));
         assert_eq!(window.last_processed_ts, Some(100));
-        assert!(window.caught_up);
+        assert!(window.reaches_cutoff);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -337,7 +333,7 @@ pub(super) mod tests {
         assert_eq!(window.start, Some(1));
         assert_eq!(window.stop, Some(1));
         assert_eq!(window.last_processed_ts, Some(1));
-        assert!(!window.caught_up);
+        assert!(!window.reaches_cutoff);
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -367,7 +363,7 @@ pub(super) mod tests {
         assert_eq!(window.start, Some(100));
         assert_eq!(window.stop, Some(101));
         assert_eq!(window.last_processed_ts, Some(101));
-        assert!(window.caught_up);
+        assert!(window.reaches_cutoff);
     }
 
     pub(crate) async fn write_lifecycle_stats(
