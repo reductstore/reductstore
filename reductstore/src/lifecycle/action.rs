@@ -39,6 +39,7 @@ pub(super) struct LifecycleRunResult {
     pub(super) affected_records: u64,
     pub(super) affected_blocks: Option<u64>,
     pub(super) last_processed_ts: Option<u64>,
+    pub(super) caught_up: bool,
 }
 
 #[async_trait]

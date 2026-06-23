@@ -10,13 +10,10 @@ pub(crate) struct LifecycleSystemEventPayload {
     pub action_type: String,
     pub bucket: String,
     pub duration: f64,
-    #[serde(default)]
-    pub processed_records: Option<u64>,
-    #[serde(default)]
-    pub processed_blocks: Option<u64>,
-    #[serde(default)]
+    pub processed_records: u64,
+    pub processed_blocks: u64,
     pub last_processed_ts: Option<u64>,
-    #[serde(default)]
+    pub caught_up: bool,
     pub error_code: Option<u16>,
     #[serde(default)]
     pub error_message: Option<String>,
@@ -31,15 +28,17 @@ impl LifecycleSystemEventPayload {
         processed_records: u64,
         processed_blocks: Option<u64>,
         last_processed_ts: Option<u64>,
+        caught_up: bool,
     ) -> Self {
         Self {
             policy_name: policy_name.to_string(),
             action_type: action_type.to_string(),
             bucket: bucket.to_string(),
             duration,
-            processed_records: Some(processed_records),
-            processed_blocks,
+            processed_records,
+            processed_blocks: processed_blocks.unwrap_or(0),
             last_processed_ts,
+            caught_up,
             error_code: None,
             error_message: None,
         }
@@ -58,9 +57,10 @@ impl LifecycleSystemEventPayload {
             action_type: action_type.to_string(),
             bucket: bucket.to_string(),
             duration,
-            processed_records: None,
-            processed_blocks: None,
+            processed_records: 0,
+            processed_blocks: 0,
             last_processed_ts: None,
+            caught_up: false,
             error_code: Some(error_code),
             error_message: Some(error_message.to_string()),
         }
@@ -73,14 +73,12 @@ impl LifecycleSystemEventPayload {
             "bucket": self.bucket,
             "duration": self.duration,
             "processed_records": self.processed_records,
+            "processed_blocks": self.processed_blocks,
+            "caught_up": self.caught_up,
         });
 
         if let Some(error_code) = self.error_code {
             payload["error_code"] = json!(error_code);
-        }
-
-        if let Some(processed_blocks) = self.processed_blocks {
-            payload["processed_blocks"] = json!(processed_blocks);
         }
 
         if let Some(last_processed_ts) = self.last_processed_ts {

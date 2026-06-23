@@ -87,31 +87,48 @@ impl LifecycleTask {
                 }
 
                 Self::mark_last_run(&last_run);
-                let started = std::time::Instant::now();
-                match action.run(&name, &settings, context.clone()).await {
-                    Ok(result) => {
-                        Self::log_system_event(
-                            system_event_sink.clone(),
-                            &name,
-                            action.lifecycle_type(),
-                            &settings.bucket,
-                            started.elapsed().as_secs_f64(),
-                            Ok(result),
-                        )
-                        .await;
+                loop {
+                    let started = std::time::Instant::now();
+                    match action.run(&name, &settings, context.clone()).await {
+                        Ok(result) => {
+                            Self::log_system_event(
+                                system_event_sink.clone(),
+                                &name,
+                                action.lifecycle_type(),
+                                &settings.bucket,
+                                started.elapsed().as_secs_f64(),
+                                Ok(result.clone()),
+                            )
+                            .await;
+
+                            // in case we in the catching up state
+                            // we repeat the action until we catch up or we have affected records
+                            if !result.caught_up && result.affected_records == 0 {
+                                Self::sleep_with_stop(
+                                    Duration::from_millis(100),
+                                    Arc::clone(&stop_flag),
+                                )
+                                .await;
+                                if stop_flag.load(Ordering::Relaxed) {
+                                    break;
+                                }
+                                continue;
+                            }
+                        }
+                        Err(err) => {
+                            error!("Lifecycle worker '{}' failed: {}", name, err);
+                            Self::log_system_event(
+                                system_event_sink.clone(),
+                                &name,
+                                action.lifecycle_type(),
+                                &settings.bucket,
+                                started.elapsed().as_secs_f64(),
+                                Err(err),
+                            )
+                            .await;
+                        }
                     }
-                    Err(err) => {
-                        error!("Lifecycle worker '{}' failed: {}", name, err);
-                        Self::log_system_event(
-                            system_event_sink.clone(),
-                            &name,
-                            action.lifecycle_type(),
-                            &settings.bucket,
-                            started.elapsed().as_secs_f64(),
-                            Err(err),
-                        )
-                        .await;
-                    }
+                    break;
                 }
             }
             debug!("Lifecycle worker '{}' stopped", name);
@@ -227,6 +244,7 @@ impl LifecycleTask {
                     result.affected_records,
                     result.affected_blocks,
                     result.last_processed_ts,
+                    result.caught_up,
                 )
                 .to_value(),
             ),
@@ -537,6 +555,7 @@ pub(super) mod tests {
                 affected_records: 42,
                 affected_blocks: Some(3),
                 last_processed_ts: None,
+                caught_up: false,
             }),
         )
         .await;
@@ -555,6 +574,7 @@ pub(super) mod tests {
         assert_eq!(event.payload["bucket"], "bucket-1");
         assert_eq!(event.payload["processed_records"], 42);
         assert_eq!(event.payload["processed_blocks"], 3);
+        assert_eq!(event.payload["caught_up"], false);
         assert!(event.payload.get("error_code").is_none());
         assert!(event.payload.get("error_message").is_none());
     }
@@ -580,6 +600,7 @@ pub(super) mod tests {
                 affected_records: 42,
                 affected_blocks: Some(3),
                 last_processed_ts: Some(123),
+                caught_up: true,
             }),
         )
         .await;
@@ -591,6 +612,7 @@ pub(super) mod tests {
         assert_eq!(event.payload["processed_records"], 42);
         assert_eq!(event.payload["processed_blocks"], 3);
         assert_eq!(event.payload["last_processed_ts"], 123);
+        assert_eq!(event.payload["caught_up"], true);
     }
 
     #[tokio::test]
@@ -627,8 +649,9 @@ pub(super) mod tests {
         assert_eq!(event.payload["policy_name"], "policy-1");
         assert_eq!(event.payload["action_type"], "delete");
         assert_eq!(event.payload["bucket"], "bucket-1");
-        assert_eq!(event.payload["processed_records"], serde_json::Value::Null);
-        assert!(event.payload.get("processed_blocks").is_none());
+        assert_eq!(event.payload["processed_records"], 0);
+        assert_eq!(event.payload["processed_blocks"], 0);
+        assert_eq!(event.payload["caught_up"], false);
         assert_eq!(event.payload["error_code"], 422);
         assert_eq!(event.payload["error_message"], "failed to run");
     }

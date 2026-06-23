@@ -38,6 +38,7 @@ impl LifecycleAction for DeleteLifecycleAction {
                 affected_records: 0,
                 affected_blocks: Some(0),
                 last_processed_ts: window.last_processed_ts,
+                caught_up: true,
             });
         }
 
@@ -77,6 +78,7 @@ impl LifecycleAction for DeleteLifecycleAction {
             affected_records: stats.records,
             affected_blocks: Some(stats.blocks),
             last_processed_ts: window.last_processed_ts,
+            caught_up: window.reaches_cutoff,
         })
     }
 }
@@ -302,7 +304,42 @@ mod tests {
 
         assert_eq!(result.affected_records, 0);
         assert_eq!(result.affected_blocks, Some(0));
+        assert!(result.caught_up);
         assert!(test_bucket.begin_read("entry-1", 1).await.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[rstest]
+    async fn delete_marks_result_caught_up_when_progress_is_past_latest_data(
+        #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
+        action: DeleteLifecycleAction,
+        mut settings: LifecycleSettings,
+    ) {
+        let (test_storage, test_bucket) = test_context.await;
+        let now_us = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64;
+        progress::tests::write_lifecycle_stats(&test_storage, "instance-1", "test", now_us)
+            .await
+            .unwrap();
+        write(&test_bucket, "entry-1", 1, b"r1").await.unwrap();
+        settings.mode = LifecycleMode::Enabled;
+        settings.older_than = "0s".to_string();
+        settings.interval = "1s".to_string();
+
+        let result = action
+            .run(
+                "test",
+                &settings,
+                LifecycleContext::new(test_storage, true, "instance-1".to_string()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.affected_records, 0);
+        assert_eq!(result.affected_blocks, Some(0));
+        assert!(result.caught_up);
     }
 
     #[tokio::test]

@@ -37,6 +37,7 @@ impl LifecycleAction for CompressLifecycleAction {
                 affected_records: 0,
                 affected_blocks: Some(0),
                 last_processed_ts: window.last_processed_ts,
+                caught_up: true,
             });
         }
         let entries = if settings.entries.is_empty() {
@@ -65,6 +66,7 @@ impl LifecycleAction for CompressLifecycleAction {
             affected_records: stats.records,
             affected_blocks: Some(stats.blocks),
             last_processed_ts: window.last_processed_ts,
+            caught_up: window.reaches_cutoff,
         })
     }
 }
@@ -428,6 +430,7 @@ mod tests {
 
         assert_eq!(result.affected_records, 0);
         assert_eq!(result.affected_blocks, Some(0));
+        assert!(result.caught_up);
         assert_eq!(
             test_bucket
                 .estimate_compressible_data(Some(vec!["entry-1".into()]), None, None)
@@ -436,6 +439,39 @@ mod tests {
                 .records,
             1
         );
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn compress_marks_result_caught_up_when_progress_is_past_latest_data() {
+        let (test_storage, test_bucket) = test_context_with_one_record_blocks().await;
+        let now_us = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64;
+        progress::tests::write_lifecycle_stats(&test_storage, "instance-1", "test", now_us)
+            .await
+            .unwrap();
+        write(&test_bucket, "entry-1", 1, b"r1").await.unwrap();
+        test_bucket.sync_fs().await.unwrap();
+        let (test_storage, _test_bucket) = restore_storage(&test_storage).await;
+        let mut settings = settings_fixture();
+        settings.lifecycle_type = LifecycleType::Compress;
+        settings.older_than = "0s".to_string();
+        settings.interval = "1s".to_string();
+
+        let result = CompressLifecycleAction
+            .run(
+                "test",
+                &settings,
+                LifecycleContext::new(test_storage, true, "instance-1".to_string()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.affected_records, 0);
+        assert_eq!(result.affected_blocks, Some(0));
+        assert!(result.caught_up);
     }
 
     #[tokio::test]
