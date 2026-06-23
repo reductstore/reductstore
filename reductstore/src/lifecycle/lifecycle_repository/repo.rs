@@ -332,12 +332,21 @@ impl LifecycleRepository {
         }
 
         let interval = Duration::from_micros(interval_us.max(0) as u64);
+        let system_event_instance = self
+            .system_event_sink
+            .as_ref()
+            .map(|sink| sink.instance_name.clone())
+            .unwrap_or_else(|| "unknown".to_string());
         let mut lifecycle = LifecycleTask::new(
             name.to_string(),
             settings,
             interval,
             action,
-            LifecycleContext::new(Arc::clone(&self.storage)),
+            LifecycleContext::new(
+                Arc::clone(&self.storage),
+                self.system_event_sink.is_some(),
+                system_event_instance,
+            ),
             self.system_event_sink.clone(),
         );
         if self.started {

@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::storage::bucket::Bucket;
+use crate::storage::entry::RecordQueryStats;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
 use std::collections::{BTreeMap, HashMap};
@@ -78,10 +79,17 @@ impl Bucket {
         self: Arc<Self>,
         options: QueryEntry,
     ) -> Result<u64, ReductError> {
+        Ok(self.query_remove_records_with_stats(options).await?.records)
+    }
+
+    pub(crate) async fn query_remove_records_with_stats(
+        self: Arc<Self>,
+        options: QueryEntry,
+    ) -> Result<RecordQueryStats, ReductError> {
         self.ensure_not_deleting().await?;
         let entries = self.entries.read().await?.clone();
         let requested_entries = Self::requested_entries(&options.entries);
-        let mut total_removed = 0;
+        let mut total_removed = RecordQueryStats::default();
 
         for (entry_name, entry) in entries {
             if !Self::is_requested_entry(&entry_name, &requested_entries) {
@@ -93,8 +101,11 @@ impl Bucket {
             }
 
             entry.ensure_not_deleting().await?;
-            let removed_records = entry.query_remove_records(options.clone()).await?;
-            total_removed += removed_records;
+            let removed = entry
+                .query_remove_records_with_stats(options.clone())
+                .await?;
+            total_removed.records += removed.records;
+            total_removed.blocks += removed.blocks;
         }
 
         Ok(total_removed)
@@ -108,13 +119,21 @@ impl Bucket {
     ///
     /// # Returns
     /// The number of records matched by the query.
+    #[allow(dead_code)]
     pub async fn query_count_records(
         self: Arc<Self>,
         options: QueryEntry,
     ) -> Result<u64, ReductError> {
+        Ok(self.query_count_records_with_stats(options).await?.records)
+    }
+
+    pub(crate) async fn query_count_records_with_stats(
+        self: Arc<Self>,
+        options: QueryEntry,
+    ) -> Result<RecordQueryStats, ReductError> {
         let entries = self.entries.read().await?.clone();
         let requested_entries = Self::requested_entries(&options.entries);
-        let mut total_counted = 0;
+        let mut total_counted = RecordQueryStats::default();
 
         for (entry_name, entry) in entries {
             if !Self::is_requested_entry(&entry_name, &requested_entries) {
@@ -125,8 +144,11 @@ impl Bucket {
                 continue;
             }
 
-            let counted_records = entry.query_count_records(options.clone()).await?;
-            total_counted += counted_records;
+            let counted = entry
+                .query_count_records_with_stats(options.clone())
+                .await?;
+            total_counted.records += counted.records;
+            total_counted.blocks += counted.blocks;
         }
 
         Ok(total_counted)
