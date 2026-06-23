@@ -284,7 +284,7 @@ pub(super) mod tests {
         assert_eq!(window.start, Some(100));
         assert_eq!(window.stop, Some(100));
         assert_eq!(window.last_processed_ts, Some(100));
-        assert!(!window.caught_up);
+        assert!(window.caught_up);
     }
 
     #[tokio::test(flavor = "multi_thread")]

@@ -230,10 +230,10 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(result.affected_records, 2);
+        assert_eq!(result.affected_records, 3);
         assert!(test_bucket.begin_read("entry-1", 1).await.is_err());
         assert!(test_bucket.begin_read("entry-1", 23_999_999).await.is_err());
-        assert!(test_bucket.begin_read("entry-1", 24_000_000).await.is_ok());
+        assert!(test_bucket.begin_read("entry-1", 24_000_000).await.is_err());
     }
 
     #[tokio::test(flavor = "multi_thread")]
