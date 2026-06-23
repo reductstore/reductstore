@@ -7,6 +7,7 @@ use reduct_base::msg::lifecycle_api::{LifecycleSettings, LifecycleType};
 use std::sync::Arc;
 mod compress;
 mod delete;
+mod progress;
 use compress::CompressLifecycleAction;
 use delete::DeleteLifecycleAction;
 
@@ -15,11 +16,21 @@ use crate::storage::engine::StorageEngine;
 #[derive(Clone)]
 pub(super) struct LifecycleContext {
     pub(super) storage: Arc<StorageEngine>,
+    pub(super) system_events_enabled: bool,
+    pub(super) system_event_instance: String,
 }
 
 impl LifecycleContext {
-    pub(super) fn new(storage: Arc<StorageEngine>) -> Self {
-        Self { storage }
+    pub(super) fn new(
+        storage: Arc<StorageEngine>,
+        system_events_enabled: bool,
+        system_event_instance: String,
+    ) -> Self {
+        Self {
+            storage,
+            system_events_enabled,
+            system_event_instance,
+        }
     }
 }
 
@@ -27,6 +38,7 @@ impl LifecycleContext {
 pub(super) struct LifecycleRunResult {
     pub(super) affected_records: u64,
     pub(super) affected_blocks: Option<u64>,
+    pub(super) last_processed_ts: Option<u64>,
 }
 
 #[async_trait]

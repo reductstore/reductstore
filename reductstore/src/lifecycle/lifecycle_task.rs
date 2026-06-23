@@ -226,6 +226,7 @@ impl LifecycleTask {
                     duration,
                     result.affected_records,
                     result.affected_blocks,
+                    result.last_processed_ts,
                 )
                 .to_value(),
             ),
@@ -535,6 +536,7 @@ pub(super) mod tests {
             Ok(LifecycleRunResult {
                 affected_records: 42,
                 affected_blocks: Some(3),
+                last_processed_ts: None,
             }),
         )
         .await;
@@ -577,6 +579,7 @@ pub(super) mod tests {
             Ok(LifecycleRunResult {
                 affected_records: 42,
                 affected_blocks: Some(3),
+                last_processed_ts: Some(123),
             }),
         )
         .await;
@@ -587,6 +590,7 @@ pub(super) mod tests {
 
         assert_eq!(event.payload["processed_records"], 42);
         assert_eq!(event.payload["processed_blocks"], 3);
+        assert_eq!(event.payload["last_processed_ts"], 123);
     }
 
     #[tokio::test]
@@ -648,7 +652,7 @@ pub(super) mod tests {
             settings,
             Duration::from_millis(100),
             action,
-            LifecycleContext::new(storage().await),
+            LifecycleContext::new(storage().await, false, "unknown".to_string()),
             None,
         )
     }
