@@ -109,6 +109,7 @@ impl BlockManager {
         })?;
         block.compression = Some(i32::from(algorithm));
         self.block_index.save().await?;
+        self.block_index.sync_all().await?;
 
         let data_path = self.path_to_data(block_id);
         let desc_path = self.path_to_desc(block_id);
@@ -230,6 +231,18 @@ impl BlockManager {
                 err
             ));
         }
+        {
+            // we need to sync files after rename,
+            // which doesn't work for S3 storage
+            let mut file = FILE_CACHE
+                .write_or_create(&compressed_data_path, SeekFrom::Start(0))
+                .await?;
+            file.sync_all().await?;
+            let mut file = FILE_CACHE
+                .write_or_create(&compressed_desc_path, SeekFrom::Start(0))
+                .await?;
+            file.sync_all().await?;
+        }
 
         let compressed_data_size = tokio::fs::metadata(&compressed_data_path)
             .await
@@ -333,19 +346,11 @@ async fn decompress_file_zstd(
         internal_server_error!("Failed to decompress file {:?}: {}", compressed_path, err)
     })?;
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(output_path)
-        .map_err(|err| {
-            internal_server_error!("Failed to create file {:?}: {}", output_path, err)
-        })?;
-    out.write_all(&decompressed)
-        .map_err(|err| internal_server_error!("Failed to write file {:?}: {}", output_path, err))?;
-    out.sync_all()
-        .map_err(|err| internal_server_error!("Failed to sync file {:?}: {}", output_path, err))?;
-
+    let mut out = FILE_CACHE
+        .write_or_create(output_path, SeekFrom::Start(0))
+        .await?;
+    out.write_all(&decompressed)?;
+    out.sync_all().await?;
     Ok(())
 }
 

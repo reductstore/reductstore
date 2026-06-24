@@ -270,6 +270,14 @@ impl BlockIndex {
         &self.index_info
     }
 
+    pub async fn sync_all(&mut self) -> Result<(), ReductError> {
+        let mut lock = FILE_CACHE
+            .write_or_create(&self.path_buf, SeekFrom::Start(0))
+            .await?;
+        lock.sync_all().await?;
+        Ok(())
+    }
+
     fn insert(&mut self, block: BlockEntry) {
         self.index_info.insert(block.block_id, block);
         self.index.insert(block.block_id);
