@@ -117,7 +117,13 @@ impl UsageEventAggregator {
     ) {
         let duration = last_flush.elapsed().as_secs_f64();
         *last_flush = Instant::now();
-        let drained = counters.drain();
+        let drained = match counters.drain().await {
+            Ok(drained) => drained,
+            Err(err) => {
+                error!("Failed to drain usage counters: {}", err);
+                return;
+            }
+        };
 
         let (snapshot, bucket_snapshots) = match storage.usage_snapshot().await {
             Ok(snapshots) => snapshots,
@@ -479,6 +485,27 @@ mod tests {
         let working_sink = capturing_sink(Arc::clone(&events), false);
         UsageEventAggregator::flush(&working_sink, &storage, &counters, &mut last_flush).await;
         assert_eq!(events.lock().unwrap().len(), 1);
+    }
+
+    /// A failing sink with buckets present exercises the per-bucket emission
+    /// path too: each per-bucket failure is swallowed and the flush completes.
+    #[rstest]
+    #[tokio::test]
+    async fn per_bucket_emission_failure_does_not_break_flushing(
+        events: Arc<Mutex<Vec<SystemEvent>>>,
+        #[future] storage: Arc<StorageEngine>,
+    ) {
+        let storage = storage.await;
+        generate_traffic(&storage).await;
+        let counters = Arc::clone(storage.usage_counters());
+        let mut last_flush = Instant::now();
+
+        let failing_sink = capturing_sink(Arc::clone(&events), true);
+        UsageEventAggregator::flush(&failing_sink, &storage, &counters, &mut last_flush).await;
+
+        // Both the total and the bucket-1 emissions failed, but the flush ran to
+        // completion without propagating either error.
+        assert!(events.lock().unwrap().is_empty());
     }
 
     /// Shutdown flush: closing the channel (as dropping the aggregator does)

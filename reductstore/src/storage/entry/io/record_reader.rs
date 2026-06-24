@@ -81,7 +81,8 @@ impl RecordReader {
         };
 
         bm.usage_counters()
-            .count_read(bm.bucket_name(), bm.entry_name(), content_size);
+            .count_read(bm.bucket_name(), bm.entry_name(), content_size)
+            .await?;
 
         Ok(Self {
             meta,

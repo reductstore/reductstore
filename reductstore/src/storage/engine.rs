@@ -225,11 +225,11 @@ impl StorageEngine {
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_storage_limit(content_size).await?;
         let bucket = self.get_bucket(bucket_name).await?.upgrade()?;
+        // Write traffic is counted at `RecordWriter` creation, alongside reads
+        // at `RecordReader` creation.
         let writer = bucket
             .begin_write(entry_name, time, content_size, content_type, labels)
             .await?;
-        self.usage_counters
-            .count_write(bucket_name, entry_name, content_size);
         Ok(writer)
     }
 
@@ -851,7 +851,7 @@ mod tests {
             .unwrap();
         writer.send(Ok(None)).await.unwrap();
 
-        let drained = storage.usage_counters().drain();
+        let drained = storage.usage_counters().drain().await.unwrap();
         assert_eq!(drained.total.write_bytes, 10);
         assert_eq!(drained.total.records_written, 1);
         assert_eq!(drained.total.records_read, 0);
@@ -867,7 +867,7 @@ mod tests {
             .await
             .unwrap();
 
-        let drained = storage.usage_counters().drain();
+        let drained = storage.usage_counters().drain().await.unwrap();
         assert_eq!(drained.total.read_bytes, 10);
         assert_eq!(drained.total.records_read, 1);
         assert_eq!(drained.total.records_written, 0);
