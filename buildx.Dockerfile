@@ -23,6 +23,12 @@ COPY --from=builder /etc/gshadow /etc/gshadow
 COPY --chown=10001:10001 --from=builder /data /data
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 
+COPY --from=builder /etc/ssl/certs /etc/ssl/certs
+COPY --from=builder /usr/share/ca-certificates /usr/share/ca-certificates
+
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
+ENV SSL_CERT_DIR=/etc/ssl/certs
+
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 EXPOSE 8383
