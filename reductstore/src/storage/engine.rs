@@ -9,7 +9,7 @@ use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use crate::storage::in_flight::InFlightIoLimiter;
-use crate::storage::usage::{UsageCounters, UsageSnapshot};
+use crate::storage::usage::{BucketSnapshot, UsageCounters, UsageSnapshot};
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
@@ -18,7 +18,7 @@ use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo
 use reduct_base::{
     conflict, forbidden, internal_server_error, not_found, unprocessable_entity, Labels,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -225,20 +225,24 @@ impl StorageEngine {
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_storage_limit(content_size).await?;
         let bucket = self.get_bucket(bucket_name).await?.upgrade()?;
+        // Write traffic is counted at `RecordWriter` creation, alongside reads
+        // at `RecordReader` creation.
         let writer = bucket
             .begin_write(entry_name, time, content_size, content_type, labels)
             .await?;
-        self.usage_counters.count_write(content_size);
         Ok(writer)
     }
 
-    /// Collect point-in-time usage totals in a single walk over all buckets.
-    pub(crate) async fn usage_snapshot(&self) -> Result<UsageSnapshot, ReductError> {
+    /// Collect point-in-time usage totals in a single walk over all buckets,
+    /// returning the instance aggregate and a per-bucket breakdown.
+    pub(crate) async fn usage_snapshot(
+        &self,
+    ) -> Result<(UsageSnapshot, HashMap<String, BucketSnapshot>), ReductError> {
         let infos = {
             let buckets = self.buckets.read().await?;
             buckets
                 .values()
-                .map(|bucket| bucket.clone().info())
+                .map(|bucket| (bucket.name().to_string(), bucket.clone().info()))
                 .collect::<Vec<_>>()
         };
 
@@ -246,18 +250,37 @@ impl StorageEngine {
             bucket_count: infos.len() as u64,
             ..UsageSnapshot::default()
         };
-        for task in infos {
+        let mut bucket_snapshots = HashMap::new();
+        for (name, task) in infos {
             let bucket = task.await?;
-            snapshot.storage_bytes += bucket.info.size;
-            snapshot.entry_count += bucket.info.entry_count;
-            snapshot.block_count += bucket
+            let block_count = bucket
                 .entries
                 .iter()
                 .map(|entry| entry.block_count)
                 .sum::<u64>();
+            let record_count = bucket
+                .entries
+                .iter()
+                .map(|entry| entry.record_count)
+                .sum::<u64>();
+
+            snapshot.storage_bytes += bucket.info.size;
+            snapshot.entry_count += bucket.info.entry_count;
+            snapshot.block_count += block_count;
+            snapshot.record_count += record_count;
+
+            bucket_snapshots.insert(
+                name,
+                BucketSnapshot {
+                    storage_bytes: bucket.info.size,
+                    entry_count: bucket.info.entry_count,
+                    block_count,
+                    record_count,
+                },
+            );
         }
 
-        Ok(snapshot)
+        Ok((snapshot, bucket_snapshots))
     }
 
     async fn total_usage(&self) -> Result<u64, ReductError> {
@@ -787,11 +810,19 @@ mod tests {
             writer.send(Ok(None)).await.unwrap();
         }
 
-        let snapshot = storage.usage_snapshot().await.unwrap();
+        let (snapshot, bucket_snapshots) = storage.usage_snapshot().await.unwrap();
         assert_eq!(snapshot.bucket_count, 2);
         assert_eq!(snapshot.entry_count, 2);
         assert_eq!(snapshot.block_count, 2);
+        assert_eq!(snapshot.record_count, 2);
         assert!(snapshot.storage_bytes > 0);
+
+        assert_eq!(bucket_snapshots.len(), 2);
+        let snap_1 = bucket_snapshots.get("snap-1").unwrap();
+        assert_eq!(snap_1.entry_count, 1);
+        assert_eq!(snap_1.block_count, 1);
+        assert_eq!(snap_1.record_count, 1);
+        assert!(snap_1.storage_bytes > 0);
     }
 
     #[rstest]
@@ -820,10 +851,12 @@ mod tests {
             .unwrap();
         writer.send(Ok(None)).await.unwrap();
 
-        let drained = storage.usage_counters().drain();
-        assert_eq!(drained.write_bytes, 10);
-        assert_eq!(drained.records_written, 1);
-        assert_eq!(drained.records_read, 0);
+        let drained = storage.usage_counters().drain().await.unwrap();
+        assert_eq!(drained.total.write_bytes, 10);
+        assert_eq!(drained.total.records_written, 1);
+        assert_eq!(drained.total.records_read, 0);
+        assert_eq!(drained.total.written_entries, 1);
+        assert_eq!(drained.buckets.get("test").unwrap().write_bytes, 10);
 
         let _reader = storage
             .get_bucket("test")
@@ -834,10 +867,12 @@ mod tests {
             .await
             .unwrap();
 
-        let drained = storage.usage_counters().drain();
-        assert_eq!(drained.read_bytes, 10);
-        assert_eq!(drained.records_read, 1);
-        assert_eq!(drained.records_written, 0);
+        let drained = storage.usage_counters().drain().await.unwrap();
+        assert_eq!(drained.total.read_bytes, 10);
+        assert_eq!(drained.total.records_read, 1);
+        assert_eq!(drained.total.records_written, 0);
+        assert_eq!(drained.total.read_entries, 1);
+        assert_eq!(drained.buckets.get("test").unwrap().read_bytes, 10);
     }
 
     mod recovery {

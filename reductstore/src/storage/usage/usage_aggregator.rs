@@ -6,9 +6,10 @@
 use crate::lifecycle::SystemEventSink;
 use crate::storage::engine::StorageEngine;
 use crate::storage::usage::usage_event_payload::UsageSystemEventPayload;
-use crate::storage::usage::{DrainedUsageCounters, UsageCounters, UsageSnapshot};
+use crate::storage::usage::UsageCounters;
 use crate::syslog::SystemEvent;
 use log::error;
+use std::collections::BTreeSet;
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::mpsc;
@@ -29,25 +30,7 @@ fn now_micros() -> u64 {
         .as_micros() as u64
 }
 
-fn make_event(
-    instance: &str,
-    entry_name: &str,
-    duration: f64,
-    counters: DrainedUsageCounters,
-    snapshot: UsageSnapshot,
-) -> SystemEvent {
-    let payload = UsageSystemEventPayload {
-        duration,
-        write_bytes: counters.write_bytes,
-        read_bytes: counters.read_bytes,
-        records_written: counters.records_written,
-        records_read: counters.records_read,
-        storage_bytes: snapshot.storage_bytes,
-        bucket_count: snapshot.bucket_count,
-        entry_count: snapshot.entry_count,
-        block_count: snapshot.block_count,
-    };
-
+fn make_event(instance: &str, entry_name: &str, payload: UsageSystemEventPayload) -> SystemEvent {
     SystemEvent {
         event_type: USAGE_EVENT_TYPE.to_string(),
         timestamp: now_micros(),
@@ -134,30 +117,96 @@ impl UsageEventAggregator {
     ) {
         let duration = last_flush.elapsed().as_secs_f64();
         *last_flush = Instant::now();
-        let drained = counters.drain();
+        let drained = match counters.drain().await {
+            Ok(drained) => drained,
+            Err(err) => {
+                error!("Failed to drain usage counters: {}", err);
+                return;
+            }
+        };
 
-        let snapshot = match storage.usage_snapshot().await {
-            Ok(snapshot) => snapshot,
+        let (snapshot, bucket_snapshots) = match storage.usage_snapshot().await {
+            Ok(snapshots) => snapshots,
             Err(err) => {
                 error!("Failed to collect usage snapshot: {}", err);
                 return;
             }
         };
 
-        let event = make_event(
-            &sink.instance_name,
-            USAGE_TOTAL_ENTRY_NAME,
+        let total_payload = UsageSystemEventPayload {
             duration,
-            drained,
-            snapshot,
-        );
-        match sink.system_logger.write().await {
-            Ok(mut logger) => {
-                if let Err(err) = logger.log_event(event).await {
-                    error!("Failed to persist usage statistics: {}", err);
-                }
+            write_bytes: drained.total.write_bytes,
+            read_bytes: drained.total.read_bytes,
+            records_written: drained.total.records_written,
+            records_read: drained.total.records_read,
+            written_entries: drained.total.written_entries,
+            read_entries: drained.total.read_entries,
+            storage_bytes: snapshot.storage_bytes,
+            bucket_count: snapshot.bucket_count,
+            entry_count: snapshot.entry_count,
+            block_count: snapshot.block_count,
+            record_count: snapshot.record_count,
+        };
+
+        // Hold the logger lock once for the whole interval. Per-event errors are
+        // logged but never abort the loop, so telemetry can't break the server.
+        let mut logger = match sink.system_logger.write().await {
+            Ok(logger) => logger,
+            Err(err) => {
+                error!("Failed to lock system logger for usage statistics: {}", err);
+                return;
             }
-            Err(err) => error!("Failed to lock system logger for usage statistics: {}", err),
+        };
+
+        // Emit the instance total exactly as before.
+        let total_event = make_event(&sink.instance_name, USAGE_TOTAL_ENTRY_NAME, total_payload);
+        if let Err(err) = logger.log_event(total_event).await {
+            error!("Failed to persist usage statistics: {}", err);
+        }
+
+        // Then one event per bucket with traffic or storage this interval,
+        // excluding the `$`-prefixed system buckets (their names are not valid
+        // entry-path segments and we do not report telemetry on telemetry).
+        let mut bucket_names: BTreeSet<&str> = BTreeSet::new();
+        bucket_names.extend(drained.buckets.keys().map(String::as_str));
+        bucket_names.extend(bucket_snapshots.keys().map(String::as_str));
+
+        for bucket_name in bucket_names {
+            if bucket_name.starts_with('$') {
+                continue;
+            }
+
+            let traffic = drained
+                .buckets
+                .get(bucket_name)
+                .copied()
+                .unwrap_or_default();
+            let bucket_snapshot = bucket_snapshots
+                .get(bucket_name)
+                .copied()
+                .unwrap_or_default();
+            let payload = UsageSystemEventPayload {
+                duration,
+                write_bytes: traffic.write_bytes,
+                read_bytes: traffic.read_bytes,
+                records_written: traffic.records_written,
+                records_read: traffic.records_read,
+                written_entries: traffic.written_entries,
+                read_entries: traffic.read_entries,
+                storage_bytes: bucket_snapshot.storage_bytes,
+                bucket_count: 1,
+                entry_count: bucket_snapshot.entry_count,
+                block_count: bucket_snapshot.block_count,
+                record_count: bucket_snapshot.record_count,
+            };
+
+            let event = make_event(&sink.instance_name, bucket_name, payload);
+            if let Err(err) = logger.log_event(event).await {
+                error!(
+                    "Failed to persist usage statistics for bucket {}: {}",
+                    bucket_name, err
+                );
+            }
         }
     }
 }
@@ -259,7 +308,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn flush_emits_event_with_all_nine_payload_fields(
+    async fn flush_emits_total_and_per_bucket_events(
         events: Arc<Mutex<Vec<SystemEvent>>>,
         #[future] storage: Arc<StorageEngine>,
     ) {
@@ -272,15 +321,24 @@ mod tests {
         UsageEventAggregator::flush(&sink, &storage, &counters, &mut last_flush).await;
 
         let captured = events.lock().unwrap();
-        assert_eq!(captured.len(), 1);
-        let event = &captured[0];
-        assert_eq!(event.event_type, "usage_stats");
-        assert_eq!(event.instance, "instance-1");
-        assert_eq!(event.entry_name, "total");
-        assert_eq!(event.status, 200);
+        // One instance total plus one event for the single bucket.
+        assert_eq!(captured.len(), 2);
 
-        let payload = event.payload.as_object().unwrap();
-        let mut keys = payload.keys().cloned().collect::<Vec<_>>();
+        let total = captured
+            .iter()
+            .find(|event| event.entry_name == "total")
+            .expect("total event must be emitted");
+        assert_eq!(total.event_type, "usage_stats");
+        assert_eq!(total.instance, "instance-1");
+        assert_eq!(total.status, 200);
+
+        let mut keys = total
+            .payload
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
         keys.sort();
         assert_eq!(
             keys,
@@ -290,21 +348,92 @@ mod tests {
                 "duration",
                 "entry_count",
                 "read_bytes",
+                "read_entries",
+                "record_count",
                 "records_read",
                 "records_written",
                 "storage_bytes",
                 "write_bytes",
+                "written_entries",
             ]
         );
-        assert!(event.payload["duration"].as_f64().unwrap() >= 0.0);
-        assert_eq!(event.payload["write_bytes"], 20);
-        assert_eq!(event.payload["read_bytes"], 10);
-        assert_eq!(event.payload["records_written"], 2);
-        assert_eq!(event.payload["records_read"], 1);
-        assert!(event.payload["storage_bytes"].as_u64().unwrap() > 0);
-        assert_eq!(event.payload["bucket_count"], 1);
-        assert_eq!(event.payload["entry_count"], 1);
-        assert_eq!(event.payload["block_count"], 1);
+        assert!(total.payload["duration"].as_f64().unwrap() >= 0.0);
+        assert_eq!(total.payload["write_bytes"], 20);
+        assert_eq!(total.payload["read_bytes"], 10);
+        assert_eq!(total.payload["records_written"], 2);
+        assert_eq!(total.payload["records_read"], 1);
+        assert_eq!(total.payload["written_entries"], 1);
+        assert_eq!(total.payload["read_entries"], 1);
+        assert!(total.payload["storage_bytes"].as_u64().unwrap() > 0);
+        assert_eq!(total.payload["bucket_count"], 1);
+        assert_eq!(total.payload["entry_count"], 1);
+        assert_eq!(total.payload["block_count"], 1);
+        assert_eq!(total.payload["record_count"], 2);
+
+        let bucket = captured
+            .iter()
+            .find(|event| event.entry_name == "bucket-1")
+            .expect("per-bucket event must be emitted");
+        assert_eq!(bucket.payload["write_bytes"], 20);
+        assert_eq!(bucket.payload["read_bytes"], 10);
+        assert_eq!(bucket.payload["records_written"], 2);
+        assert_eq!(bucket.payload["records_read"], 1);
+        assert_eq!(bucket.payload["written_entries"], 1);
+        assert_eq!(bucket.payload["read_entries"], 1);
+        assert_eq!(bucket.payload["bucket_count"], 1);
+        assert_eq!(bucket.payload["entry_count"], 1);
+        assert_eq!(bucket.payload["block_count"], 1);
+        assert_eq!(bucket.payload["record_count"], 2);
+        assert!(bucket.payload["storage_bytes"].as_u64().unwrap() > 0);
+    }
+
+    /// `$`-prefixed system buckets must never get a per-bucket event (their
+    /// names are not valid entry-path segments).
+    #[rstest]
+    #[tokio::test]
+    async fn flush_excludes_system_buckets_from_per_bucket_events(
+        events: Arc<Mutex<Vec<SystemEvent>>>,
+        #[future] storage: Arc<StorageEngine>,
+    ) {
+        let storage = storage.await;
+        generate_traffic(&storage).await;
+
+        // A system bucket with traffic this interval.
+        storage
+            .create_system_bucket("$system", BucketSettings::default())
+            .await
+            .unwrap();
+        let mut writer = storage
+            .begin_write(
+                "$system",
+                "entry-1",
+                1,
+                10,
+                "application/json".to_string(),
+                Labels::new(),
+            )
+            .await
+            .unwrap();
+        writer
+            .send(Ok(Some(Bytes::from("0123456789"))))
+            .await
+            .unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let sink = capturing_sink(Arc::clone(&events), false);
+        let counters = Arc::clone(storage.usage_counters());
+        let mut last_flush = Instant::now();
+        UsageEventAggregator::flush(&sink, &storage, &counters, &mut last_flush).await;
+
+        let captured = events.lock().unwrap();
+        assert!(
+            captured
+                .iter()
+                .all(|event| !event.entry_name.starts_with('$')),
+            "system buckets must be excluded from per-bucket events"
+        );
+        assert!(captured.iter().any(|event| event.entry_name == "total"));
+        assert!(captured.iter().any(|event| event.entry_name == "bucket-1"));
     }
 
     #[rstest]
@@ -323,10 +452,15 @@ mod tests {
         UsageEventAggregator::flush(&sink, &storage, &counters, &mut last_flush).await;
 
         let captured = events.lock().unwrap();
-        assert_eq!(captured.len(), 2);
-        let second = &captured[1];
+        let totals = captured
+            .iter()
+            .filter(|event| event.entry_name == "total")
+            .collect::<Vec<_>>();
+        assert_eq!(totals.len(), 2);
+        let second = totals[1];
         assert_eq!(second.payload["write_bytes"], 0);
         assert_eq!(second.payload["records_written"], 0);
+        assert_eq!(second.payload["written_entries"], 0);
         assert_eq!(
             second.payload["bucket_count"], 1,
             "snapshot fields must still be populated"
@@ -351,6 +485,27 @@ mod tests {
         let working_sink = capturing_sink(Arc::clone(&events), false);
         UsageEventAggregator::flush(&working_sink, &storage, &counters, &mut last_flush).await;
         assert_eq!(events.lock().unwrap().len(), 1);
+    }
+
+    /// A failing sink with buckets present exercises the per-bucket emission
+    /// path too: each per-bucket failure is swallowed and the flush completes.
+    #[rstest]
+    #[tokio::test]
+    async fn per_bucket_emission_failure_does_not_break_flushing(
+        events: Arc<Mutex<Vec<SystemEvent>>>,
+        #[future] storage: Arc<StorageEngine>,
+    ) {
+        let storage = storage.await;
+        generate_traffic(&storage).await;
+        let counters = Arc::clone(storage.usage_counters());
+        let mut last_flush = Instant::now();
+
+        let failing_sink = capturing_sink(Arc::clone(&events), true);
+        UsageEventAggregator::flush(&failing_sink, &storage, &counters, &mut last_flush).await;
+
+        // Both the total and the bucket-1 emissions failed, but the flush ran to
+        // completion without propagating either error.
+        assert!(events.lock().unwrap().is_empty());
     }
 
     /// Shutdown flush: closing the channel (as dropping the aggregator does)
@@ -402,14 +557,17 @@ mod tests {
         aggregator.stop().await;
 
         let captured = events.lock().unwrap();
-        assert_eq!(captured.len(), 1);
-        assert_eq!(captured[0].event_type, "usage_stats");
-        assert_eq!(captured[0].payload["write_bytes"], 20);
-        assert_eq!(captured[0].payload["read_bytes"], 10);
+        let total = captured
+            .iter()
+            .find(|event| event.entry_name == "total")
+            .expect("total event must be emitted on shutdown");
+        assert_eq!(total.event_type, "usage_stats");
+        assert_eq!(total.payload["write_bytes"], 20);
+        assert_eq!(total.payload["read_bytes"], 10);
     }
 
-    /// Entry path: events land at `$system/usage/<instance>/total` as flat
-    /// JSON with the 9 payload fields.
+    /// Entry path: the total lands at `$system/usage/<instance>/total` and each
+    /// bucket at `$system/usage/<instance>/<bucket>`, as flat JSON.
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn writes_event_to_usage_entry_path() {
@@ -471,6 +629,34 @@ mod tests {
         assert_eq!(event["bucket_count"], 1);
         assert_eq!(event["entry_count"], 1);
         assert_eq!(event["block_count"], 1);
+        assert_eq!(event["record_count"], 2);
+        assert_eq!(event["written_entries"], 1);
+        assert_eq!(event["read_entries"], 1);
         assert!(event["duration"].as_f64().unwrap() >= 0.0);
+
+        // The per-bucket event lands at usage/<instance>/<bucket>.
+        let bucket_entry_path = "usage/instance-1/bucket-1";
+        let latest_bucket_record = Arc::clone(&bucket)
+            .info()
+            .await
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|entry| entry.name == bucket_entry_path)
+            .expect("per-bucket usage entry must exist")
+            .latest_record;
+        let mut bucket_reader = bucket
+            .begin_read(bucket_entry_path, latest_bucket_record)
+            .await
+            .unwrap();
+        let bucket_record = bucket_reader.read_chunk().unwrap().unwrap();
+        let bucket_event: serde_json::Value = serde_json::from_slice(&bucket_record).unwrap();
+        assert_eq!(bucket_event["instance"], "instance-1");
+        assert_eq!(bucket_event["write_bytes"], 20);
+        assert_eq!(bucket_event["read_bytes"], 10);
+        assert_eq!(bucket_event["records_written"], 2);
+        assert_eq!(bucket_event["written_entries"], 1);
+        assert_eq!(bucket_event["record_count"], 2);
+        assert_eq!(bucket_event["bucket_count"], 1);
     }
 }
