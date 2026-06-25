@@ -177,6 +177,20 @@ impl BlockManager {
         block_size: u64,
     ) -> Result<(u64, u64), ReductError> {
         let data_path = self.path_to_data(block_id);
+        let data_size = FILE_CACHE
+            .read(&data_path, SeekFrom::Start(0))
+            .await?
+            .metadata()?
+            .len();
+        if data_size != block_size {
+            return Err(internal_server_error!(
+                "Block data file {:?} size mismatch: index expects {} bytes, actual file size is {} bytes",
+                data_path,
+                block_size,
+                data_size
+            ));
+        }
+
         let compressed_data_path = self.path_to_compressed_data(block_id);
         let compressed_data_tmp_path = self
             .path
@@ -529,6 +543,31 @@ mod tests {
             .path()
             .join(format!("{}{}.tmp", block_id, COMPRESSED_DATA_FILE_EXT))
             .exists());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_compress_block_rejects_data_file_size_mismatch() {
+        let (mut block_manager, block_id, original_data, _) =
+            block_manager_with_data(b"short data".to_vec()).await;
+        block_manager
+            .index_mut()
+            .get_block_mut(block_id)
+            .unwrap()
+            .size = original_data.len() as u64 + 1;
+
+        let err = block_manager
+            .compress_block(block_id, CompressionAlgorithm::Zstd)
+            .await
+            .err()
+            .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(err.message.contains("Block data file"));
+        assert!(err.message.contains("size mismatch"));
+        assert!(block_manager.path_to_data(block_id).exists());
+        assert!(!block_manager.path_to_compressed_data(block_id).exists());
     }
 
     #[rstest]

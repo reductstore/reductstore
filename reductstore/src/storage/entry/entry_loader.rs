@@ -401,11 +401,13 @@ impl EntryLoader {
                 .compression
                 .unwrap_or(i32::from(CompressionAlgorithm::None))
                 != i32::from(CompressionAlgorithm::None);
+
             let desc_path = if compressed {
                 path.join(format!("{}{}", block_id, COMPRESSED_DESCRIPTOR_FILE_EXT))
             } else {
                 path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT))
             };
+
             if file_list.contains(&desc_path) {
                 let data_path = if compressed {
                     path.join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT))
