@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Emit per-bucket usage statistics as system events under `usage/<instance>/<bucket>` alongside the existing instance total, and add `written_entries`, `read_entries`, and `record_count` fields to usage events, [PR-NNNN](https://github.com/reductstore/reductstore/pull/NNNN) by @DibbayajyotiRoy
+
 ## 1.20.4 - 2026-06-25
 
 ### Fixed
@@ -19,10 +23,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Throttle lifecycle delete and compression runs using progress persisted in existing lifecycle system event stats [PR-1475](https://github.com/reductstore/reductstore/pull/1475)
 - Report both processed record and block counts for lifecycle compression events, [PR-1470](https://github.com/reductstore/reductstore/pull/1470) by @rohankumardubey
-
-### Added
-
-- Emit per-bucket usage statistics as system events under `usage/<instance>/<bucket>` alongside the existing instance total, and add `written_entries`, `read_entries`, and `record_count` fields to usage events, [PR-NNNN](https://github.com/reductstore/reductstore/pull/NNNN) by @DibbayajyotiRoy
 
 ## 1.20.2 - 2026-06-18
 
