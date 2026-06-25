@@ -11,6 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Emit per-bucket usage statistics as system events under `usage/<instance>/<bucket>` alongside the existing instance total, and add `written_entries`, `read_entries`, and `record_count` fields to usage events, [PR-NNNN](https://github.com/reductstore/reductstore/pull/NNNN) by @DibbayajyotiRoy
 
+## 1.20.5 - 2026-06-25
+
+### Fixed
+
+- Install CA certificates in the build image to prevent TLS validation failures for HTTPS clients, [PR-1478](https://github.com/reductstore/reductstore/pull/1478)
+
 ## 1.20.4 - 2026-06-25
 
 ### Fixed
