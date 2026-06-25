@@ -89,7 +89,7 @@ impl ReplicationSender {
                     if vec.is_empty() {
                         continue;
                     }
-                    let mut batch = Vec::new();
+                    let mut batch = Vec::with_capacity(vec.len());
                     let mut batch_sizes: BTreeMap<u64, u64> = BTreeMap::new();
                     let mut total_size = 0;
                     let mut processed_transactions = 0;
