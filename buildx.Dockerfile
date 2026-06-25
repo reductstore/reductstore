@@ -3,6 +3,7 @@ FROM --platform=${BUILDPLATFORM} ubuntu:24.04@sha256:c4a8d5503dfb2a3eb8ab5f807da
 ARG BUILDPLATFORM
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 10001 reduct \
