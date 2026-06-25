@@ -148,6 +148,8 @@ impl File {
             return Ok(());
         }
 
+        self.is_synced = false;
+
         Self::run_blocking_io(|| self.inner.sync_all())?;
         Ok(())
     }

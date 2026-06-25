@@ -56,7 +56,7 @@ impl BlockManager {
         block_id: u64,
         algorithm: CompressionAlgorithm,
     ) -> Result<(), ReductError> {
-        let block_size = {
+        {
             let block = self.block_index.get_block(block_id).ok_or_else(|| {
                 not_found!(
                     "Block {} not found in entry {}/{}",
@@ -78,14 +78,12 @@ impl BlockManager {
                     block_id
                 ));
             }
-
-            block.size
-        };
+        }
 
         match algorithm {
             CompressionAlgorithm::None => return Ok(()),
             CompressionAlgorithm::Zstd => {
-                let (data_size, desc_size) = self.compress_block_zstd(block_id, block_size).await?;
+                let (data_size, desc_size) = self.compress_block_zstd(block_id).await?;
                 let block = self.block_index.get_block_mut(block_id).ok_or_else(|| {
                     not_found!(
                         "Block {} not found in entry {}/{}",
@@ -109,6 +107,7 @@ impl BlockManager {
         })?;
         block.compression = Some(i32::from(algorithm));
         self.block_index.save().await?;
+        self.block_index.sync_all().await?;
 
         let data_path = self.path_to_data(block_id);
         let desc_path = self.path_to_desc(block_id);
@@ -170,12 +169,14 @@ impl BlockManager {
         Ok(())
     }
 
-    async fn compress_block_zstd(
-        &self,
-        block_id: u64,
-        block_size: u64,
-    ) -> Result<(u64, u64), ReductError> {
+    async fn compress_block_zstd(&self, block_id: u64) -> Result<(u64, u64), ReductError> {
         let data_path = self.path_to_data(block_id);
+        let data_size = FILE_CACHE
+            .read(&data_path, SeekFrom::Start(0))
+            .await?
+            .metadata()?
+            .len();
+
         let compressed_data_path = self.path_to_compressed_data(block_id);
         let compressed_data_tmp_path = self
             .path
@@ -188,8 +189,7 @@ impl BlockManager {
             block_id, COMPRESSED_DESCRIPTOR_FILE_EXT
         ));
 
-        if let Err(err) =
-            compress_file_zstd(&data_path, &compressed_data_tmp_path, block_size).await
+        if let Err(err) = compress_file_zstd(&data_path, &compressed_data_tmp_path, data_size).await
         {
             cleanup_tmp(&compressed_data_tmp_path);
             return Err(err);
@@ -229,6 +229,20 @@ impl BlockManager {
                 compressed_desc_path,
                 err
             ));
+        }
+        {
+            // we need to sync files after rename,
+            // which doesn't work for S3 storage
+            let mut file = FILE_CACHE
+                .write_or_create(&compressed_data_path, SeekFrom::Start(0))
+                .await?;
+            file.flush_local().await?;
+            file.sync_all().await?;
+            let mut file = FILE_CACHE
+                .write_or_create(&compressed_desc_path, SeekFrom::Start(0))
+                .await?;
+            file.flush_local().await?;
+            file.sync_all().await?;
         }
 
         let compressed_data_size = tokio::fs::metadata(&compressed_data_path)
@@ -333,19 +347,11 @@ async fn decompress_file_zstd(
         internal_server_error!("Failed to decompress file {:?}: {}", compressed_path, err)
     })?;
 
-    let mut out = OpenOptions::new()
-        .create(true)
-        .truncate(true)
-        .write(true)
-        .open(output_path)
-        .map_err(|err| {
-            internal_server_error!("Failed to create file {:?}: {}", output_path, err)
-        })?;
-    out.write_all(&decompressed)
-        .map_err(|err| internal_server_error!("Failed to write file {:?}: {}", output_path, err))?;
-    out.sync_all()
-        .map_err(|err| internal_server_error!("Failed to sync file {:?}: {}", output_path, err))?;
-
+    let mut out = FILE_CACHE
+        .write_or_create(output_path, SeekFrom::Start(0))
+        .await?;
+    out.write_all(&decompressed)?;
+    out.sync_all().await?;
     Ok(())
 }
 
@@ -529,6 +535,31 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
+    async fn test_compress_block_uses_data_file_size() {
+        let (mut block_manager, block_id, original_data, _) =
+            block_manager_with_data(b"short data".to_vec()).await;
+        block_manager
+            .index_mut()
+            .get_block_mut(block_id)
+            .unwrap()
+            .size = original_data.len() as u64 + 1;
+
+        block_manager
+            .compress_block(block_id, CompressionAlgorithm::Zstd)
+            .await
+            .unwrap();
+
+        let decompressed_data = zstd::decode_all(
+            std::fs::File::open(block_manager.path_to_compressed_data(block_id)).unwrap(),
+        )
+        .unwrap();
+
+        assert_eq!(decompressed_data, original_data);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
     async fn test_decompress_block_restores_files() {
         let data = b"decompress me".to_vec();
         let (mut block_manager, block_id, original_data, original_descriptor) =
@@ -704,7 +735,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_decompress_file_zstd_missing_output_parent() {
+    async fn test_decompress_file_zstd_creates_output_parent() {
         let dir = tempdir().unwrap().keep();
         let compressed_path = dir.join("source.blk.zst");
         let output_path = dir.join("missing").join("source.blk");
@@ -714,12 +745,11 @@ mod tests {
         )
         .unwrap();
 
-        let err = decompress_file_zstd(&compressed_path, &output_path)
+        decompress_file_zstd(&compressed_path, &output_path)
             .await
-            .err()
             .unwrap();
 
-        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert_eq!(std::fs::read(output_path).unwrap(), b"data");
     }
 
     #[rstest]

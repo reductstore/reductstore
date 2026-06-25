@@ -3,6 +3,7 @@
 
 use super::{CompressionStats, Entry};
 use crate::storage::block_manager::compress::CompressionAlgorithm;
+use log::error;
 use reduct_base::error::{ErrorCode, ReductError};
 use std::collections::BTreeSet;
 
@@ -67,9 +68,16 @@ impl Entry {
                         stats.blocks += 1;
                         stats.records += record_count;
                     }
-                    Err(err)
-                        if matches!(err.status(), ErrorCode::Conflict | ErrorCode::NotFound) => {}
-                    Err(err) => return Err(err),
+                    Err(err) if matches!(err.status(), ErrorCode::Conflict) => {}
+                    Err(err) => {
+                        error!(
+                            "Failed to compress block {}/{}/{}: {}",
+                            bm.bucket_name(),
+                            bm.entry_name(),
+                            block_id,
+                            err
+                        );
+                    }
                 }
             }
             tokio::task::yield_now().await;
@@ -406,7 +414,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_compress_blocks_returns_internal_error(path: PathBuf) {
+    async fn test_compress_blocks_logs_and_continues_on_internal_error(path: PathBuf) {
         let entry = entry(multi_block_settings(), path.clone()).await;
         write_blocks(&entry, &[1_000_000]).await;
         let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
@@ -418,9 +426,10 @@ mod tests {
                 .unwrap();
         }
 
-        let err = entry.compress_blocks(None, None).await.err().unwrap();
-
-        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert_eq!(
+            entry.compress_blocks(None, None).await.unwrap(),
+            CompressionStats::default()
+        );
     }
 
     #[fixture]
