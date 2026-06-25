@@ -251,10 +251,12 @@ impl BlockManager {
             let mut file = FILE_CACHE
                 .write_or_create(&compressed_data_path, SeekFrom::Start(0))
                 .await?;
+            file.flush_local().await?;
             file.sync_all().await?;
             let mut file = FILE_CACHE
                 .write_or_create(&compressed_desc_path, SeekFrom::Start(0))
                 .await?;
+            file.flush_local().await?;
             file.sync_all().await?;
         }
 
