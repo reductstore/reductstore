@@ -40,9 +40,6 @@ pub struct ReplicationSettings {
     /// Prefix to add to destination entry names
     #[serde(default)]
     pub dst_prefix: String,
-    /// Labels to include
-    #[serde(default)]
-    pub include: Labels,
     /// Labels to exclude
     #[serde(default)]
     pub exclude: Labels,

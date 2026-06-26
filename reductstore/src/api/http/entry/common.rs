@@ -59,7 +59,7 @@ pub(super) fn parse_query_params(
 
     // filter parameters in order of priority
     let (start, stop) = parse_time_range(&params)?;
-    let (include, exclude) = parse_include_exclude_filters(&params);
+    let exclude = parse_include_exclude_filters(&params);
     let each_s = parse_each_s(&params)?;
     let each_n = parse_each_n(&params)?;
     let limit = parse_limit(params)?;
@@ -69,7 +69,7 @@ pub(super) fn parse_query_params(
         entries: None,
         start,
         stop,
-        include: Some(include),
+        include: None,
         exclude: Some(exclude),
         each_s,
         each_n,
@@ -180,20 +180,15 @@ fn parse_each_s(params: &HashMap<String, String>) -> Result<Option<f64>, HttpErr
     Ok(each_s)
 }
 
-fn parse_include_exclude_filters(
-    params: &HashMap<String, String>,
-) -> (HashMap<String, String>, HashMap<String, String>) {
-    let mut include = HashMap::new();
+fn parse_include_exclude_filters(params: &HashMap<String, String>) -> HashMap<String, String> {
     let mut exclude = HashMap::new();
 
     for (k, v) in params.iter() {
-        if k.starts_with("include-") {
-            include.insert(k[8..].to_string(), v.to_string());
-        } else if k.starts_with("exclude-") {
+        if k.starts_with("exclude-") {
             exclude.insert(k[8..].to_string(), v.to_string());
         }
     }
-    (include, exclude)
+    exclude
 }
 
 pub(super) fn check_and_extract_ts_or_query_id(
@@ -387,11 +382,7 @@ mod tests {
                 ("include-key".to_string(), "value".to_string()),
                 ("exclude-key".to_string(), "value".to_string()),
             ]);
-            let (include, exclude) = parse_include_exclude_filters(&params);
-            assert_eq!(
-                include,
-                HashMap::from_iter(vec![("key".to_string(), "value".to_string())])
-            );
+            let exclude = parse_include_exclude_filters(&params);
             assert_eq!(
                 exclude,
                 HashMap::from_iter(vec![("key".to_string(), "value".to_string())])
@@ -401,8 +392,7 @@ mod tests {
         #[rstest]
         fn test_no_filters() {
             let params = HashMap::new();
-            let (include, exclude) = parse_include_exclude_filters(&params);
-            assert_eq!(include, HashMap::new());
+            let exclude = parse_include_exclude_filters(&params);
             assert_eq!(exclude, HashMap::new());
         }
     }

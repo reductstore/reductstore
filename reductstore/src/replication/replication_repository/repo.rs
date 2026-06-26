@@ -45,11 +45,7 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
             dst_token: settings.dst_token.unwrap_or_default(),
             entries: settings.entries,
             dst_prefix: settings.dst_prefix,
-            include: settings
-                .include
-                .into_iter()
-                .map(|(k, v)| ProtoLabel { name: k, value: v })
-                .collect(),
+            include: Vec::new(),
             exclude: settings
                 .exclude
                 .into_iter()
@@ -76,11 +72,6 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
             },
             entries: settings.entries,
             dst_prefix: settings.dst_prefix,
-            include: settings
-                .include
-                .into_iter()
-                .map(|label| (label.name, label.value))
-                .collect(),
             exclude: settings
                 .exclude
                 .into_iter()
@@ -1513,7 +1504,6 @@ mod tests {
             dst_token: Some("token".to_string()),
             entries: vec!["entry-1".to_string()],
             dst_prefix: String::new(),
-            include: Labels::default(),
             exclude: Labels::default(),
             each_n: None,
             each_s: None,
