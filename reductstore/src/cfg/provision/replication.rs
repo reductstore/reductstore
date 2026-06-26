@@ -68,7 +68,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     dst_token: None,
                     entries: vec![],
                     dst_prefix: String::new(),
-                    include: Labels::default(),
                     exclude: Labels::default(),
                     each_n: None,
                     when: None,
@@ -138,14 +137,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 replication.settings.dst_prefix = dst_prefix;
             }
 
-            for (key, value) in env.matches(&format!("RS_REPLICATION_{}_INCLUDE_(.*)", id)) {
-                warn!(
-                    "The include parameter is deprecated. Use 'RS_REPLICATION_{}_WHEN' instead.",
-                    id
-                );
-                replication.settings.include.insert(key, value);
-            }
-
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id)) {
                 warn!(
                     "The exclude parameter is deprecated. Use 'RS_REPLICATION_{}_WHEN' instead.",
@@ -182,6 +173,46 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 } else {
                     // No when condition exists, create one with just $each_t
                     replication.settings.when = Some(serde_json::json!({"$each_t": each_s}));
+                }
+            }
+
+            // Migrate deprecated include to $in by injecting it into the when condition
+            for (key, value) in
+                env.matches::<String>(&format!("RS_REPLICATION_{}_INCLUDE_(.*)", id))
+            {
+                warn!(
+                    "The include parameter is deprecated. Use 'RS_REPLICATION_{}_WHEN' instead.",
+                    id
+                );
+
+                if let Some(when) = &mut replication.settings.when {
+                    if let Some(obj) = when.as_object_mut() {
+                        obj.insert("$in".to_string(), serde_json::json!([&key, &value]));
+                    }
+                } else {
+                    // No when condition exists, create one with just $in
+                    replication.settings.when =
+                        Some(serde_json::json!({"$in": serde_json::json!([&key, &value])}));
+                }
+            }
+
+            // Migrate deprecated exclude to $nin by injecting it into the when condition
+            for (key, value) in
+                env.matches::<String>(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id))
+            {
+                warn!(
+                    "The exclude parameter is deprecated. Use 'RS_REPLICATION_{}_WHEN' instead.",
+                    id
+                );
+
+                if let Some(when) = &mut replication.settings.when {
+                    if let Some(obj) = when.as_object_mut() {
+                        obj.insert("$nin".to_string(), serde_json::json!([&key, &value]));
+                    }
+                } else {
+                    // No when condition exists, create one with just $nin
+                    replication.settings.when =
+                        Some(serde_json::json!({"$nin": serde_json::json!([&key, &value])}));
                 }
             }
 
@@ -563,7 +594,6 @@ mod tests {
                 dst_token: None,
                 entries: vec![],
                 dst_prefix: String::new(),
-                include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
                 when: None,
@@ -653,7 +683,6 @@ mod tests {
                 dst_token: None,
                 entries: vec![],
                 dst_prefix: String::new(),
-                include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
                 when: None,
@@ -738,7 +767,6 @@ mod tests {
                 dst_token: None,
                 entries: vec![],
                 dst_prefix: String::new(),
-                include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
                 when: None,

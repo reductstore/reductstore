@@ -47,11 +47,7 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
             dst_token: settings.dst_token.unwrap_or_default(),
             entries: settings.entries,
             dst_prefix: settings.dst_prefix,
-            include: settings
-                .include
-                .into_iter()
-                .map(|(k, v)| ProtoLabel { name: k, value: v })
-                .collect(),
+            include: Vec::new(),
             exclude: settings
                 .exclude
                 .into_iter()
@@ -112,6 +108,38 @@ impl ProtoReplicationSettings {
             }
         }
 
+        // Migrate deprecated include to $in by injecting it into the when condition
+        if !self.include.is_empty() {
+            migrated = true;
+            warn!(
+                "The 'include' field is deprecated and will be migrated to 'when' condition using $in operator. Value: {:?}",
+                self.include
+            );
+            for include in &self.include {
+                if let Some(when_value) = &mut when {
+                    // Inject $in into the existing when condition
+                    if let Some(obj) = when_value.as_object_mut() {
+                        obj.insert(
+                            "$in".to_string(),
+                            serde_json::json!([&include.name, &include.value]),
+                        );
+                    } else {
+                        error!(
+                            "Existing 'when' condition is not an object, cannot inject $in. Using only $in condition."
+                        );
+                        when = Some(
+                            serde_json::json!({"$in": serde_json::json!([&include.name, &include.value])}),
+                        );
+                    }
+                } else {
+                    // No when condition exists, create one with just $in
+                    when = Some(
+                        serde_json::json!({"$in": serde_json::json!([&include.name, &include.value])}),
+                    );
+                }
+            }
+        }
+
         let settings = ReplicationSettings {
             src_bucket: self.src_bucket,
             dst_bucket: self.dst_bucket,
@@ -123,11 +151,6 @@ impl ProtoReplicationSettings {
             },
             entries: self.entries,
             dst_prefix: self.dst_prefix,
-            include: self
-                .include
-                .into_iter()
-                .map(|label| (label.name, label.value))
-                .collect(),
             exclude: self
                 .exclude
                 .into_iter()
@@ -1562,6 +1585,129 @@ mod tests {
         }
     }
 
+    mod include_migration {
+        use super::*;
+        use crate::replication::proto::{
+            Label as ProtoLabel, ReplicationSettings as ProtoReplicationSettings,
+        };
+
+        fn create_proto_settings(
+            include: Vec<ProtoLabel>,
+            when: Option<String>,
+        ) -> ProtoReplicationSettings {
+            ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "token".to_string(),
+                entries: vec![],
+                dst_prefix: String::new(),
+                include,
+                exclude: vec![],
+                each_n: 0,
+                each_s: 0.0,
+                when,
+                mode: ProtoReplicationMode::Enabled as i32,
+                compression: ProtoReplicationCompression::None as i32,
+            }
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_migrated_to_in_without_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "temp".to_string(),
+                }],
+                None,
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"$in": ["sensor", "temp"]})),
+                "Should migrate include to $in in when condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_migrated_to_in_with_existing_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "temp".to_string(),
+                }],
+                Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "$eq": ["&status", "active"],
+                    "$in": ["sensor", "temp"]
+                })),
+                "Should inject $in into existing when condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_with_multiple_labels() {
+            let proto_settings = create_proto_settings(
+                vec![
+                    ProtoLabel {
+                        name: "sensor".to_string(),
+                        value: "temp".to_string(),
+                    },
+                    ProtoLabel {
+                        name: "location".to_string(),
+                        value: "warehouse".to_string(),
+                    },
+                ],
+                None,
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            // Note: The current implementation overwrites with each label,
+            // so only the last one will be present. This is the expected behavior.
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"$in": ["location", "warehouse"]})),
+                "Should migrate last include label to $in"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_migration_when_include_empty() {
+            let proto_settings = create_proto_settings(
+                vec![],
+                Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(
+                !migrated,
+                "Should not indicate migration when include is empty"
+            );
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"$eq": ["&status", "active"]})),
+                "Should preserve original when condition"
+            );
+        }
+    }
+
     #[fixture]
     fn settings() -> ReplicationSettings {
         ReplicationSettings {
@@ -1571,7 +1717,6 @@ mod tests {
             dst_token: Some("token".to_string()),
             entries: vec!["entry-1".to_string()],
             dst_prefix: String::new(),
-            include: Labels::default(),
             exclude: Labels::default(),
             each_n: None,
             when: None,

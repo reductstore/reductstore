@@ -1175,7 +1175,6 @@ mod tests {
             dst_token: Some("token".to_string()),
             entries: vec!["test".to_string()],
             dst_prefix: String::new(),
-            include: Labels::new(),
             exclude: Labels::new(),
             each_n: None,
             when: None,
