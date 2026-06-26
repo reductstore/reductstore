@@ -3,6 +3,8 @@
 
 mod forward_system_logger;
 mod local_system_logger;
+mod log_capture;
+mod log_event_payload;
 
 use crate::cfg::Cfg;
 use crate::core::sync::AsyncRwLock;
@@ -28,6 +30,9 @@ pub(crate) const SYSTEM_AUDIT_ENTRY_PREFIX: &str = "audit";
 pub(crate) const SYSTEM_LIFECYCLE_ENTRY_PREFIX: &str = "lifecycle";
 pub(crate) const SYSTEM_REPLICATION_ENTRY_PREFIX: &str = "replications";
 pub(crate) const SYSTEM_USAGE_ENTRY_PREFIX: &str = "usage";
+pub(crate) const SYSTEM_LOGS_ENTRY_PREFIX: &str = "logs";
+
+pub(crate) use log_capture::LogCapture;
 
 pub(crate) type SystemEventFlushFuture =
     Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>;
@@ -227,6 +232,45 @@ pub(crate) async fn build_usage_logger(
         instance_name: cfg.instance_name.clone(),
     };
     Some(UsageEventAggregator::new(sink, storage, counters))
+}
+
+pub(crate) async fn build_logs_system_logger(
+    cfg: &Cfg,
+    storage: Arc<StorageEngine>,
+) -> BoxedSystemLogger {
+    if !cfg.system_events_conf.enabled {
+        return Box::new(DisabledSystemLogger);
+    }
+
+    SystemLoggerBuilder::new(SYSTEM_BUCKET_NAME, system_bucket_settings(cfg))
+        .with_entry_prefix(SYSTEM_LOGS_ENTRY_PREFIX)
+        .build(cfg, storage)
+        .expect("logs system logger must build")
+}
+
+/// Build the log-capture component: it registers a global log sink and owns the
+/// consumer task that writes captured records under `logs/<instance>/messages`.
+/// Returns `None` when system events are disabled, no persist level is
+/// configured, or the instance is a replica (logs are node-local to avoid the
+/// replica forward-failure loop).
+pub(crate) async fn build_log_capture(
+    cfg: &Cfg,
+    storage: Arc<StorageEngine>,
+) -> Option<LogCapture> {
+    if !cfg.system_events_conf.enabled {
+        return None;
+    }
+    let persist_level = cfg.system_events_conf.log_level?;
+    if cfg.role == crate::cfg::InstanceRole::Replica {
+        return None;
+    }
+
+    let inner = build_logs_system_logger(cfg, Arc::clone(&storage)).await;
+    let sink = SystemEventSink {
+        system_logger: Arc::new(AsyncRwLock::new(inner)),
+        instance_name: cfg.instance_name.clone(),
+    };
+    Some(LogCapture::new(sink, persist_level))
 }
 
 fn system_bucket_settings(cfg: &Cfg) -> BucketSettings {
