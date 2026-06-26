@@ -270,7 +270,7 @@ pub(crate) async fn build_log_capture(
         system_logger: Arc::new(AsyncRwLock::new(inner)),
         instance_name: cfg.instance_name.clone(),
     };
-    Some(LogCapture::new(sink, persist_level))
+    Some(LogCapture::new(sink, persist_level, &cfg.log_level))
 }
 
 fn system_bucket_settings(cfg: &Cfg) -> BucketSettings {

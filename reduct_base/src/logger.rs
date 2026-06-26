@@ -8,9 +8,21 @@ use std::sync::{Arc, LazyLock, RwLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use thread_id;
 
-static LOGGER: Logger = Logger;
+static LOGGER: Logger = Logger {
+    sink: RwLock::new(None),
+};
 
-pub struct Logger;
+/// A registered log sink: receives an owned [`LogSnapshot`] for every record
+/// that reaches the logger. It must be non-blocking and must not panic.
+pub type LogSink = Arc<dyn Fn(LogSnapshot) + Send + Sync>;
+
+pub struct Logger {
+    /// Optional capture sink, installed via [`Logger::init_with_sink`]. Held as
+    /// interior-mutable state on the single static logger rather than as a
+    /// separate global.
+    sink: RwLock<Option<LogSink>>,
+}
+
 static PATHS: LazyLock<RwLock<BTreeMap<String, Level>>> =
     LazyLock::new(|| RwLock::new(BTreeMap::new()));
 
@@ -32,8 +44,8 @@ pub struct LogSnapshot {
     pub message: String,
 }
 
-impl LogSnapshot {
-    fn from_record(record: &Record) -> Self {
+impl From<&Record<'_>> for LogSnapshot {
+    fn from(record: &Record) -> Self {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .map(|d| d.as_micros() as u64)
@@ -47,23 +59,6 @@ impl LogSnapshot {
             message: format!("{}", record.args()),
         }
     }
-}
-
-/// A registered log sink: receives an owned [`LogSnapshot`] for every record
-/// that reaches the logger. It must be non-blocking and must not panic.
-pub type LogSink = Arc<dyn Fn(LogSnapshot) + Send + Sync>;
-
-static LOG_SINK: RwLock<Option<LogSink>> = RwLock::new(None);
-
-/// Register (or replace) the global log sink. Called once at startup by the
-/// component that persists logs; `reduct_base` itself never inspects the sink.
-pub fn set_log_sink(sink: LogSink) {
-    *LOG_SINK.write().unwrap() = Some(sink);
-}
-
-/// Remove the global log sink (used on shutdown and in tests).
-pub fn clear_log_sink() {
-    *LOG_SINK.write().unwrap() = None;
 }
 
 /// Parse a single log level name (case-insensitive) into a [`Level`].
@@ -138,9 +133,9 @@ impl Log for Logger {
         // AFTER console output and is fully abstract: this crate knows nothing
         // about what the sink does. Any reentrancy guarding lives inside the
         // registered sink, never here, so console output is never suppressed.
-        let sink = LOG_SINK.read().unwrap().clone();
+        let sink = self.sink.read().unwrap().clone();
         if let Some(sink) = sink {
-            sink(LogSnapshot::from_record(record));
+            sink(LogSnapshot::from(record));
         }
     }
 
@@ -148,12 +143,25 @@ impl Log for Logger {
 }
 
 impl Logger {
-    /// Initialize the logger.
+    /// Initialize the logger with no capture sink (clearing any previously
+    /// installed one).
     ///
     /// # Arguments
     ///
     /// * `level` - The log level to use. Can be one of TRACE, DEBUG, INFO, WARN, ERROR.
     pub fn init(levels: &str) {
+        Self::setup(levels);
+        *LOGGER.sink.write().unwrap() = None;
+    }
+
+    /// Initialize the logger and install a capture [`LogSink`]. The sink is
+    /// invoked for every record after console output (see [`Logger::log`]).
+    pub fn init_with_sink(levels: &str, sink: LogSink) {
+        Self::setup(levels);
+        *LOGGER.sink.write().unwrap() = Some(sink);
+    }
+
+    fn setup(levels: &str) {
         let mut max_level = Level::Trace;
         {
             let mut paths = PATHS.write().unwrap();
@@ -241,18 +249,19 @@ mod tests {
     #[serial]
     fn sink_receives_owned_snapshot() {
         use std::sync::Mutex;
-        Logger::init("TRACE");
-        clear_log_sink();
         test_support::clear_console();
 
         let captured: Arc<Mutex<Vec<LogSnapshot>>> = Arc::new(Mutex::new(Vec::new()));
         let sink_captured = Arc::clone(&captured);
-        set_log_sink(Arc::new(move |snapshot| {
-            sink_captured.lock().unwrap().push(snapshot);
-        }));
+        Logger::init_with_sink(
+            "TRACE",
+            Arc::new(move |snapshot| {
+                sink_captured.lock().unwrap().push(snapshot);
+            }),
+        );
 
         log::warn!("hello sink");
-        clear_log_sink();
+        Logger::init("INFO"); // clears the sink
 
         let snapshots = captured.lock().unwrap();
         assert!(snapshots
@@ -267,23 +276,24 @@ mod tests {
     #[serial]
     fn console_prints_even_when_sink_reenters() {
         use std::sync::atomic::{AtomicBool, Ordering};
-        Logger::init("TRACE");
-        clear_log_sink();
         test_support::clear_console();
 
         // The sink simulates "a log happens during a capture write": the first
         // time it sees the outer message it logs again (once, to stay bounded).
         let reentered = Arc::new(AtomicBool::new(false));
         let guard = Arc::clone(&reentered);
-        set_log_sink(Arc::new(move |snapshot: LogSnapshot| {
-            if snapshot.message == "outer-message" && !guard.swap(true, Ordering::SeqCst) {
-                log::error!("inner-during-capture");
-            }
-        }));
+        Logger::init_with_sink(
+            "TRACE",
+            Arc::new(move |snapshot: LogSnapshot| {
+                if snapshot.message == "outer-message" && !guard.swap(true, Ordering::SeqCst) {
+                    log::error!("inner-during-capture");
+                }
+            }),
+        );
 
         log::warn!("outer-message");
         let console = test_support::captured_console();
-        clear_log_sink();
+        Logger::init("INFO"); // clears the sink
 
         assert!(
             console.iter().any(|line| line.contains("outer-message")),

@@ -42,7 +42,12 @@ impl LocalSystemLogger {
             Some(prefix) => format!("{}/{}/{}", prefix, instance, event.entry_name),
             None => format!("{}/{}", instance, event.entry_name),
         };
-        let labels = Labels::from([("status".to_string(), event.status.to_string())]);
+        let mut labels = Labels::from([("status".to_string(), event.status.to_string())]);
+        // Expose a record's severity as a queryable label when present (log
+        // events carry `level` in their payload).
+        if let Some(level) = event.payload.get("level").and_then(|value| value.as_str()) {
+            labels.insert("level".to_string(), level.to_string());
+        }
         let payload = event.to_flat_json()?;
         let mut writer = match self
             .storage

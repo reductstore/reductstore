@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 const DEFAULT_SYSTEM_EVENTS_ENABLED: bool = true;
+const DEFAULT_SYSTEM_EVENTS_LOG_LEVEL: Level = Level::Warn;
 const DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL: bool = true;
 const DEFAULT_SYSTEM_EVENTS_REMOTE_TIMEOUT_S: u64 = 5;
 
@@ -17,7 +18,8 @@ const DEFAULT_SYSTEM_EVENTS_REMOTE_TIMEOUT_S: u64 = 5;
 pub struct SystemEventsConfig {
     pub enabled: bool,
     /// Minimum level for persisting the instance's own log messages to
-    /// `$system/logs/<instance>`. `None` (unset / `OFF`) disables log capture.
+    /// `$system/logs/<instance>`. Defaults to `WARN`; set `RS_SYSTEM_EVENTS_LOG_LEVEL`
+    /// to `OFF` (or an invalid value) for `None`, which disables log capture.
     pub log_level: Option<Level>,
     pub quota_size: Option<u64>,
     pub remote_verify_ssl: bool,
@@ -29,7 +31,7 @@ impl Default for SystemEventsConfig {
     fn default() -> Self {
         Self {
             enabled: DEFAULT_SYSTEM_EVENTS_ENABLED,
-            log_level: None,
+            log_level: Some(DEFAULT_SYSTEM_EVENTS_LOG_LEVEL),
             quota_size: None,
             remote_verify_ssl: DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL,
             remote_ca_path: None,
@@ -50,7 +52,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             ),
             log_level: env
                 .get_optional::<String>("RS_SYSTEM_EVENTS_LOG_LEVEL")
-                .and_then(|level| parse_log_level(&level)),
+                .map_or(Some(DEFAULT_SYSTEM_EVENTS_LOG_LEVEL), |level| {
+                    parse_log_level(&level)
+                }),
             quota_size: env
                 .get_optional::<ByteSize>("RS_SYSTEM_EVENTS_QUOTA_SIZE")
                 .map(|size| size.as_u64()),
@@ -143,7 +147,7 @@ mod tests {
             config,
             SystemEventsConfig {
                 enabled: true,
-                log_level: None,
+                log_level: Some(Level::Warn),
                 quota_size: None,
                 remote_verify_ssl: true,
                 remote_ca_path: None,
@@ -165,7 +169,7 @@ mod tests {
             config,
             SystemEventsConfig {
                 enabled: true,
-                log_level: None,
+                log_level: Some(Level::Warn),
                 quota_size: None,
                 remote_verify_ssl: true,
                 remote_ca_path: None,

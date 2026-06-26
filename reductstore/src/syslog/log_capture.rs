@@ -13,7 +13,7 @@ use crate::lifecycle::SystemEventSink;
 use crate::syslog::log_event_payload::LogSystemEventPayload;
 use crate::syslog::SystemEvent;
 use log::{error, warn, Level};
-use reduct_base::logger::{clear_log_sink, set_log_sink, LogSnapshot};
+use reduct_base::logger::{LogSink, LogSnapshot, Logger};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
@@ -32,15 +32,10 @@ tokio::task_local! {
     static IN_CAPTURE_WRITE: bool;
 }
 
-fn level_code(level: Level) -> u16 {
-    match level {
-        Level::Error => 1,
-        Level::Warn => 2,
-        Level::Info => 3,
-        Level::Debug => 4,
-        Level::Trace => 5,
-    }
-}
+/// Status carried by every `log_message` event: the record was persisted
+/// successfully, so it is HTTP OK. Severity is exposed via the `level` payload
+/// field and the per-record `level` label instead.
+const LOG_EVENT_STATUS: u16 = 200;
 
 fn make_event(instance: &str, snapshot: LogSnapshot) -> SystemEvent {
     let LogSnapshot {
@@ -62,7 +57,7 @@ fn make_event(instance: &str, snapshot: LogSnapshot) -> SystemEvent {
         timestamp,
         instance: instance.to_string(),
         entry_name: LOG_ENTRY_NAME.to_string(),
-        status: level_code(level),
+        status: LOG_EVENT_STATUS,
         message,
         payload: payload.to_value(),
     }
@@ -96,11 +91,12 @@ fn enqueue(
     }
 }
 
-/// Owns the log-capture consumer task and the global sink registration.
+/// Owns the log-capture consumer task. The global capture sink is installed in
+/// [`LogCapture::new`] via [`Logger::init_with_sink`].
 ///
 /// Mirrors [`UsageEventAggregator`](crate::storage::usage::UsageEventAggregator):
-/// a bounded channel feeds a worker that drains it. [`stop`](Self::stop)
-/// unregisters the sink and joins the worker.
+/// a bounded channel feeds a worker that drains it. [`stop`](Self::stop) joins
+/// the worker.
 pub(crate) struct LogCapture {
     // Dropping (or `take`-ing in `stop`) closes the channel, signalling the
     // worker to drain the backlog and exit.
@@ -110,16 +106,24 @@ pub(crate) struct LogCapture {
 }
 
 impl LogCapture {
-    pub(crate) fn new(sink: SystemEventSink, persist_level: Level) -> Self {
+    /// `console_log_level` is the console level string (`RS_LOG_LEVEL`): the
+    /// logger is (re)initialized with it via [`Logger::init_with_sink`] so the
+    /// capture sink is installed without a separate accessor.
+    pub(crate) fn new(
+        sink: SystemEventSink,
+        persist_level: Level,
+        console_log_level: &str,
+    ) -> Self {
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let (data_tx, data_rx) = mpsc::channel(LOG_CHANNEL_SIZE);
         let dropped = Arc::new(AtomicU64::new(0));
 
         // `data_tx` is the only sender; it is moved into the global sink.
         let sink_dropped = Arc::clone(&dropped);
-        set_log_sink(Arc::new(move |snapshot: LogSnapshot| {
+        let log_sink: LogSink = Arc::new(move |snapshot: LogSnapshot| {
             enqueue(&data_tx, persist_level, &sink_dropped, snapshot);
-        }));
+        });
+        Logger::init_with_sink(console_log_level, log_sink);
 
         let worker_handle = tokio::spawn(Self::run_worker(shutdown_rx, data_rx, sink));
         Self {
@@ -129,10 +133,11 @@ impl LogCapture {
         }
     }
 
-    /// Unregister the sink and stop the worker, draining any buffered records.
-    /// Telemetry must never break shutdown, so a failed join is logged only.
+    /// Stop the worker, draining any buffered records. The installed sink is
+    /// left in place (the channel it feeds is closed once the worker exits, so
+    /// further records are dropped harmlessly). Telemetry must never break
+    /// shutdown, so a failed join is logged only.
     pub(crate) async fn stop(&mut self) {
-        clear_log_sink();
         // Drop the sender so the worker observes shutdown and drains.
         self.shutdown_tx.take();
         if let Some(handle) = self.worker_handle.take() {
@@ -248,7 +253,7 @@ mod tests {
         assert_eq!(event.entry_name, "messages");
         assert_eq!(event.instance, "instance-1");
         assert_eq!(event.timestamp, 1_000);
-        assert_eq!(event.status, 2); // WARN
+        assert_eq!(event.status, 200); // HTTP OK; severity is in `level`
         assert_eq!(event.message, "disk almost full");
         assert_eq!(event.payload["level"], "WARN");
         assert_eq!(event.payload["target"], "reductstore::test");
@@ -368,7 +373,7 @@ mod tests {
     }
 
     /// A captured record lands at `$system/logs/<instance>/messages` with the
-    /// expected flat schema and `status` (level code) label.
+    /// expected flat schema (status 200), plus a `level` severity label.
     #[tokio::test(flavor = "multi_thread")]
     async fn persist_writes_to_logs_entry_path() {
         use crate::cfg::Cfg;
@@ -406,11 +411,16 @@ mod tests {
             .begin_read("logs/instance-1/messages", 1_000)
             .await
             .unwrap();
+        // Severity is exposed as a per-record label for filtering.
+        assert_eq!(
+            reader.meta().labels().get("level").map(String::as_str),
+            Some("WARN")
+        );
         let record = reader.read_chunk().unwrap().unwrap();
         let event: serde_json::Value = serde_json::from_slice(&record).unwrap();
 
         assert_eq!(event["instance"], "instance-1");
-        assert_eq!(event["status"], 2);
+        assert_eq!(event["status"], 200);
         assert_eq!(event["message"], "disk almost full");
         assert_eq!(event["level"], "WARN");
         assert_eq!(event["target"], "reductstore::test");
