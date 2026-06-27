@@ -22,6 +22,7 @@ message  ReplicationSettings {
   double each_s = 10;         // replicate each record every N seconds
   optional string when = 11;           // condition to replicate
   ReplicationMode mode = 12;  // replication mode
+  string prefix = 13;         // prefix to add to destination entry names
 }
 
 enum ReplicationMode {

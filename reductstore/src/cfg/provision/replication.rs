@@ -65,6 +65,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     dst_host: "http://localhost".to_string(),
                     dst_token: None,
                     entries: vec![],
+                    prefix: String::new(),
                     include: Labels::default(),
                     exclude: Labels::default(),
                     each_n: None,
@@ -127,6 +128,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_ENTRIES", id))
             {
                 replication.settings.entries = entries.split(",").map(|s| s.to_string()).collect();
+            }
+
+            if let Some(prefix) =
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_PREFIX", id))
+            {
+                replication.settings.prefix = prefix;
             }
 
             for (key, value) in env.matches(&format!("RS_REPLICATION_{}_INCLUDE_(.*)", id)) {
@@ -246,6 +253,7 @@ mod tests {
         assert_eq!(replication.dst_host, "http://localhost/");
         assert_eq!(replication.dst_token, Some("TOKEN".to_string()));
         assert_eq!(replication.entries, vec!["entry1", "entry2"]);
+        assert_eq!(replication.prefix, "robot-1");
         assert_eq!(replication.each_n, Some(10));
         assert_eq!(replication.each_s, Some(0.5));
         assert_eq!(
@@ -520,6 +528,7 @@ mod tests {
                 dst_host: "http://localhost".to_string(),
                 dst_token: None,
                 entries: vec![],
+                prefix: String::new(),
                 include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
@@ -609,6 +618,7 @@ mod tests {
                 dst_host: "http://localhost".to_string(),
                 dst_token: None,
                 entries: vec![],
+                prefix: String::new(),
                 include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
@@ -693,6 +703,7 @@ mod tests {
                 dst_host: "http://localhost".to_string(),
                 dst_token: None,
                 entries: vec![],
+                prefix: String::new(),
                 include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
@@ -790,6 +801,10 @@ mod tests {
             .expect_get()
             .with(eq("RS_REPLICATION_1_ENTRIES"))
             .return_const(Ok("entry1,entry2".to_string()));
+        mock_getter
+            .expect_get()
+            .with(eq("RS_REPLICATION_1_PREFIX"))
+            .return_const(Ok("robot-1".to_string()));
 
         mock_getter
             .expect_get()
