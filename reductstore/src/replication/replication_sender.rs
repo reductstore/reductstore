@@ -127,7 +127,9 @@ impl ReplicationSender {
                     }
 
                     let batch_size = batch.len() as u64;
-                    match self.bucket.write_batch(entry_name, batch).await {
+                    let dst_entry_name =
+                        Self::destination_entry_name(&self.settings.dst_prefix, entry_name);
+                    match self.bucket.write_batch(&dst_entry_name, batch).await {
                         Ok(map) => {
                             // Bytes successfully replicated are those whose
                             // timestamp is not reported as failed.
@@ -229,6 +231,44 @@ impl ReplicationSender {
             Err(err) => Err(err),
         }
     }
+
+    fn destination_entry_name(prefix: &str, entry_name: &str) -> String {
+        let prefix = prefix.trim_matches('/');
+        if prefix.is_empty() {
+            entry_name.to_string()
+        } else {
+            format!("{}/{}", prefix, entry_name.trim_start_matches('/'))
+        }
+    }
+}
+
+#[cfg(test)]
+mod destination_entry_name_tests {
+    use super::ReplicationSender;
+
+    #[test]
+    fn keeps_entry_name_when_prefix_is_empty() {
+        assert_eq!(
+            ReplicationSender::destination_entry_name("", "camera/front"),
+            "camera/front"
+        );
+    }
+
+    #[test]
+    fn prepends_destination_prefix() {
+        assert_eq!(
+            ReplicationSender::destination_entry_name("robot-1", "camera/front"),
+            "robot-1/camera/front"
+        );
+    }
+
+    #[test]
+    fn avoids_duplicate_slashes() {
+        assert_eq!(
+            ReplicationSender::destination_entry_name("/robot-1/", "/camera/front"),
+            "robot-1/camera/front"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -246,7 +286,7 @@ mod tests {
     use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
     use async_trait::async_trait;
     use bytes::Bytes;
-    use mockall::mock;
+    use mockall::{mock, predicate};
     use reduct_base::error::ErrorCode;
     use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -305,6 +345,29 @@ mod tests {
                 .front(1)
                 .await,
             Ok(vec![]),
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replication_applies_destination_prefix(
+        mut remote_bucket: MockRmBucket,
+        mut settings: ReplicationSettings,
+    ) {
+        settings.dst_prefix = "robot-1".to_string();
+        remote_bucket
+            .expect_write_batch()
+            .with(predicate::eq("robot-1/test"), predicate::always())
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+        let mut sender = build_sender(remote_bucket, settings).await;
+
+        let transaction = Transaction::WriteRecord(10);
+        imitate_write_record(&sender, &transaction, 5).await;
+
+        assert_eq!(
+            sender.run().await.unwrap(),
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5)])
         );
     }
 
@@ -756,6 +819,7 @@ mod tests {
             dst_host: "http://localhost:8383".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec!["test".to_string()],
+            dst_prefix: String::new(),
             include: Labels::new(),
             exclude: Labels::new(),
             each_n: None,

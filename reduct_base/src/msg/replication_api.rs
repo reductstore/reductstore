@@ -37,6 +37,9 @@ pub struct ReplicationSettings {
     /// Entries to replicate. If empty, all entries are replicated. Wildcards are supported.
     #[serde(default)]
     pub entries: Vec<String>,
+    /// Prefix to add to destination entry names
+    #[serde(default)]
+    pub dst_prefix: String,
     /// Labels to include
     #[serde(default)]
     pub include: Labels,

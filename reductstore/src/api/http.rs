@@ -870,6 +870,7 @@ pub(crate) mod tests {
                     dst_host: "http://localhost:8080".to_string(),
                     dst_token: None,
                     entries: vec![],
+                    dst_prefix: String::new(),
                     include: Default::default(),
                     exclude: Default::default(),
                     each_n: None,
