@@ -9,9 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Emit per-bucket usage statistics as system events under `usage/<instance>/<bucket>` alongside the existing instance total, and add `written_entries`, `read_entries`, and `record_count` fields to usage events, [PR-NNNN](https://github.com/reductstore/reductstore/pull/NNNN) by @DibbayajyotiRoy
-- Add a replication `dst_prefix` setting to write replicated records under a destination entry prefix, [PR-NNNN](https://github.com/reductstore/reductstore/pull/NNNN) by @rohankumardubey
-- Capture the instance's own log messages to `$system/logs/<instance>/messages` as system events with a `level` severity label, configurable via `RS_SYSTEM_EVENTS_LOG_LEVEL` (default `WARN`, `OFF` to disable), [PR-NNNN](https://github.com/reductstore/reductstore/pull/NNNN) by @DibbayajyotiRoy
+- Emit per-bucket usage statistics as system events under `usage/<instance>/<bucket>` alongside the existing instance total, and add `written_entries`, `read_entries`, and `record_count` fields to usage events, [PR-1474](https://github.com/reductstore/reductstore/pull/1474) by @DibbayajyotiRoy
+- Add a replication `dst_prefix` setting to write replicated records under a destination entry prefix, [PR-1486](https://github.com/reductstore/reductstore/pull/1486) by @rohankumardubey
+- Capture the instance's own log messages to `$system/logs/<instance>/messages` as system events with a `level` severity label, configurable via `RS_SYSTEM_EVENTS_LOG_LEVEL` (default `WARN`, `OFF` to disable), [PR-1481](https://github.com/reductstore/reductstore/pull/1481) by @DibbayajyotiRoy
 
 ## 1.20.6 - 2026-06-25
 
