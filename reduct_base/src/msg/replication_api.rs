@@ -39,7 +39,7 @@ pub struct ReplicationSettings {
     pub entries: Vec<String>,
     /// Prefix to add to destination entry names
     #[serde(default)]
-    pub prefix: String,
+    pub dst_prefix: String,
     /// Labels to include
     #[serde(default)]
     pub include: Labels,

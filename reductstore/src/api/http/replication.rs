@@ -107,7 +107,7 @@ mod tests {
             dst_host: "http://localhost".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec![],
-            prefix: String::new(),
+            dst_prefix: String::new(),
             include: Labels::default(),
             exclude: Labels::default(),
             each_n: None,
@@ -173,7 +173,7 @@ mod tests {
         async fn test_replication_settings_ok() {
             use crate::api::http::replication::ReplicationSettingsAxum;
 
-            let json = r#"{"src_bucket":"b1","dst_bucket":"b2","dst_host":"http://localhost","prefix":"robot-1"}"#;
+            let json = r#"{"src_bucket":"b1","dst_bucket":"b2","dst_host":"http://localhost","dst_prefix":"robot-1"}"#;
             let req = Request::builder().body(Body::from(json)).unwrap();
 
             let payload = ReplicationSettingsAxum::from_request(req, &())
@@ -181,7 +181,7 @@ mod tests {
                 .expect("parse settings");
             assert_eq!(payload.0.src_bucket, "b1");
             assert_eq!(payload.0.dst_bucket, "b2");
-            assert_eq!(payload.0.prefix, "robot-1");
+            assert_eq!(payload.0.dst_prefix, "robot-1");
         }
 
         #[rstest]

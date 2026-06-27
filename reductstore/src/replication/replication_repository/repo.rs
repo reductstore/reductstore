@@ -44,7 +44,7 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
             dst_host: settings.dst_host,
             dst_token: settings.dst_token.unwrap_or_default(),
             entries: settings.entries,
-            prefix: settings.prefix,
+            dst_prefix: settings.dst_prefix,
             include: settings
                 .include
                 .into_iter()
@@ -75,7 +75,7 @@ impl From<ProtoReplicationSettings> for ReplicationSettings {
                 Some(settings.dst_token)
             },
             entries: settings.entries,
-            prefix: settings.prefix,
+            dst_prefix: settings.dst_prefix,
             include: settings
                 .include
                 .into_iter()
@@ -729,7 +729,7 @@ mod tests {
             #[future] storage: Arc<StorageEngine>,
             mut settings: ReplicationSettings,
         ) {
-            settings.prefix = "robot-1".to_string();
+            settings.dst_prefix = "robot-1".to_string();
             let storage = storage.await;
             let mut repo =
                 ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
@@ -1512,7 +1512,7 @@ mod tests {
             dst_host: "http://localhost".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec!["entry-1".to_string()],
-            prefix: String::new(),
+            dst_prefix: String::new(),
             include: Labels::default(),
             exclude: Labels::default(),
             each_n: None,

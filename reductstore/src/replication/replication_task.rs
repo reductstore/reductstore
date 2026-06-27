@@ -1271,7 +1271,7 @@ mod tests {
             dst_host: "http://localhost:8383".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec!["test1".to_string(), "test2".to_string()],
-            prefix: String::new(),
+            dst_prefix: String::new(),
             include: Labels::new(),
             exclude: Labels::new(),
             each_n: None,

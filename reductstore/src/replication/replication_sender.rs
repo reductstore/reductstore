@@ -128,7 +128,7 @@ impl ReplicationSender {
 
                     let batch_size = batch.len() as u64;
                     let dst_entry_name =
-                        Self::destination_entry_name(&self.settings.prefix, entry_name);
+                        Self::destination_entry_name(&self.settings.dst_prefix, entry_name);
                     match self.bucket.write_batch(&dst_entry_name, batch).await {
                         Ok(map) => {
                             // Bytes successfully replicated are those whose
@@ -354,7 +354,7 @@ mod tests {
         mut remote_bucket: MockRmBucket,
         mut settings: ReplicationSettings,
     ) {
-        settings.prefix = "robot-1".to_string();
+        settings.dst_prefix = "robot-1".to_string();
         remote_bucket
             .expect_write_batch()
             .with(predicate::eq("robot-1/test"), predicate::always())
@@ -819,7 +819,7 @@ mod tests {
             dst_host: "http://localhost:8383".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec!["test".to_string()],
-            prefix: String::new(),
+            dst_prefix: String::new(),
             include: Labels::new(),
             exclude: Labels::new(),
             each_n: None,
