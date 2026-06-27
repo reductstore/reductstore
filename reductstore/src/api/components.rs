@@ -17,7 +17,7 @@ use crate::lock_file::BoxedLockFile;
 use crate::replication::ManageReplications;
 use crate::storage::engine::StorageEngine;
 use crate::storage::usage::UsageEventAggregator;
-use crate::syslog::LogSystemEvent;
+use crate::syslog::{LogCapture, LogSystemEvent};
 use axum::http::HeaderMap;
 use log::error;
 use reduct_base::error::{ErrorCode, ReductError};
@@ -48,6 +48,11 @@ pub struct Components {
     /// from its own timer — so it is held as the concrete task rather than a
     /// boxed logger.
     pub(crate) usage_stat_logger: AsyncRwLock<Option<UsageEventAggregator>>,
+    /// Log-capture component: owns the consumer task that persists the
+    /// instance's own log messages under `$system/logs/<instance>/messages` and
+    /// the global log-sink registration. `None` when system events are disabled,
+    /// no persist level is configured, or on a replica. Stopped on shutdown.
+    pub(crate) log_capture: AsyncRwLock<Option<LogCapture>>,
 
     pub(crate) cfg: Cfg,
 }
@@ -165,6 +170,10 @@ impl StateKeeper {
             error!("Failed to stop usage statistics task: {}", err);
         }
 
+        if let Err(err) = self.stop_log_capture().await {
+            error!("Failed to stop log capture task: {}", err);
+        }
+
         if let Err(err) = self.sync_storage().await {
             error!("Failed to shutdown storage: {}", err);
         }
@@ -188,6 +197,14 @@ impl StateKeeper {
         let components = self.wait_components().await?.clone();
         if let Some(aggregator) = components.usage_stat_logger.write().await?.as_mut() {
             aggregator.stop().await;
+        }
+        Ok(())
+    }
+
+    async fn stop_log_capture(&self) -> Result<(), ReductError> {
+        let components = self.wait_components().await?.clone();
+        if let Some(capture) = components.log_capture.write().await?.as_mut() {
+            capture.stop().await;
         }
         Ok(())
     }

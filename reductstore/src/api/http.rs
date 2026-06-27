@@ -788,6 +788,7 @@ pub(crate) mod tests {
             )
             .expect("Failed to create extension repo"),
             usage_stat_logger: AsyncRwLock::new(None),
+            log_capture: AsyncRwLock::new(None),
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: crate::api::limits::LimitsBuilder::new().build(),
@@ -908,6 +909,7 @@ pub(crate) mod tests {
             )
             .expect("Failed to create extension repo"),
             usage_stat_logger: AsyncRwLock::new(None),
+            log_capture: AsyncRwLock::new(None),
             cfg: Cfg::default(),
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: LimitsBuilder::new().with_config(limits_config).build(),
@@ -1001,6 +1003,7 @@ pub(crate) mod tests {
             .expect("Failed to create extension repo"),
             audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
             usage_stat_logger: AsyncRwLock::new(None),
+            log_capture: AsyncRwLock::new(None),
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: crate::api::limits::LimitsBuilder::new().build(),

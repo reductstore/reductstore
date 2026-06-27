@@ -34,6 +34,7 @@ use crate::lifecycle::SystemEventSink;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use crate::storage::usage::UsageCounters;
 use crate::syslog::build_audit_logger;
+use crate::syslog::build_log_capture;
 use crate::syslog::build_replication_system_logger;
 use crate::syslog::build_system_logger;
 use crate::syslog::build_usage_logger;
@@ -461,6 +462,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let usage_stat_logger =
             build_usage_logger(&self.cfg, Arc::clone(&storage), usage_counters).await;
 
+        let log_capture = build_log_capture(&self.cfg, Arc::clone(&storage)).await;
+
         Ok(Components {
             storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
@@ -484,6 +487,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 .with_config(self.cfg.limits_config)
                 .build(),
             usage_stat_logger: AsyncRwLock::new(usage_stat_logger),
+            log_capture: AsyncRwLock::new(log_capture),
             cfg: self.cfg.clone(),
         })
     }
