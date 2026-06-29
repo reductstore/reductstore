@@ -150,8 +150,9 @@ Error payload fields:
 - `processed_records = 0`
 - `processed_blocks = 0`
 - `caught_up = false`
-- `error_code`
-- `error_message`
+
+Failure details live in the shared top-level `SystemEvent.status` and `SystemEvent.message`
+fields, which are the canonical error metadata for lifecycle diagnostics.
 
 The same event stream is also used as the source of persisted lifecycle progress.
 

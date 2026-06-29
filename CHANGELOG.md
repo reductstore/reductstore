@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Remove redundant `error_code` and `error_message` fields from newly written `lifecycle_run` diagnostics and keep top-level `status` / `message` as the canonical failure metadata
+
 ## 1.20.6 - 2026-06-25
 
 ### Fixed
