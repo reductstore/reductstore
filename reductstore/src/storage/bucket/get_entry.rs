@@ -40,15 +40,15 @@ impl Bucket {
             } else {
                 self.folder_keeper.add_folder(&prefix).await?;
                 let entry = Arc::new(
-                    Entry::try_build_with_limiter(
-                        &prefix,
-                        self.path.clone(),
-                        settings_for_entry(&prefix, &settings),
-                        self.cfg.clone(),
-                        self.io_limiter.clone(),
-                        Arc::clone(&self.usage_counters),
-                    )
-                    .await?,
+                    Entry::builder()
+                        .name(&prefix)
+                        .bucket_path(self.path.clone())
+                        .settings(settings_for_entry(&prefix, &settings))
+                        .cfg(self.cfg.clone())
+                        .io_limiter(self.io_limiter.clone())
+                        .usage_counters(Arc::clone(&self.usage_counters))
+                        .build()
+                        .await?,
                 );
                 let mut entries = self.entries.write().await?;
                 entries
@@ -216,7 +216,13 @@ mod tests {
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
-            Bucket::try_build("test", &path, settings, Cfg::default(), Default::default())
+            Bucket::builder()
+                .name("test")
+                .data_path(path)
+                .settings(settings)
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .build()
                 .await
                 .unwrap(),
         )

@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Keep read-only replica buckets visible when transient cached block state prevents entry restore or reads, [PR-1492](https://github.com/reductstore/reductstore/pull/1492)
 - Remove redundant `error_code` and `error_message` fields from newly written `lifecycle_run` diagnostics and keep top-level `status` / `message` as the canonical failure metadata, [PR-1491](https://github.com/reductstore/reductstore/pull/1491)
 
 ## 1.20.6 - 2026-06-25

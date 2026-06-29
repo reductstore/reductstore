@@ -95,6 +95,7 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::{Cfg, InstanceRole};
     use crate::core::file_cache::FILE_CACHE;
     use crate::storage::block_manager::DATA_FILE_EXT;
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
@@ -246,6 +247,56 @@ mod tests {
         assert_eq!(
             reader.err(),
             Some(not_found!("Data block {} not found", data_path.display()))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_missing_data_file_on_replica_returns_too_early(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1000000).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let data_path = {
+            let bm = entry.block_manager.read().await.unwrap();
+            let block_id = *bm.index().tree().first().unwrap();
+            bm.path().join(format!("{}{}", block_id, DATA_FILE_EXT))
+        };
+        FILE_CACHE.remove(&data_path).await.unwrap();
+
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            ..Default::default()
+        };
+        let replica_entry = Entry::builder()
+            .path(path.join("entry"))
+            .name("entry")
+            .bucket_name("bucket")
+            .settings(entry_settings)
+            .cfg(Arc::new(cfg))
+            .usage_counters(Default::default())
+            .restore()
+            .await
+            .unwrap()
+            .unwrap();
+
+        let reader = replica_entry.begin_read(1000000).await;
+        assert_eq!(
+            reader.err(),
+            Some(too_early!(
+                "Data block {} is not available on replica yet",
+                data_path.display()
+            ))
         );
     }
 
