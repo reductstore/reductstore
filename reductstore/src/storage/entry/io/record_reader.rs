@@ -10,7 +10,7 @@ use async_trait::async_trait;
 use bytes::Bytes;
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
-use reduct_base::{internal_server_error, not_found};
+use reduct_base::{internal_server_error, not_found, too_early};
 use std::cmp::min;
 use std::io;
 use std::io::Read;
@@ -73,6 +73,13 @@ impl RecordReader {
 
         let file_path = if content_size > 0 {
             if !FILE_CACHE.try_exists(&file_path).await? {
+                if bm.is_replica() {
+                    return Err(too_early!(
+                        "Data block {} is not available on replica yet",
+                        file_path.display()
+                    ));
+                }
+
                 return Err(not_found!("Data block {} not found", file_path.display()));
             }
             Some(file_path)

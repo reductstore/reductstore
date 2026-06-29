@@ -764,6 +764,10 @@ impl BlockManager {
         &self.usage_counters
     }
 
+    pub(in crate::storage) fn is_replica(&self) -> bool {
+        self.cfg.role == InstanceRole::Replica
+    }
+
     pub(in crate::storage) fn is_block_in_write_cache(&self, block_id: u64) -> bool {
         self.block_cache.get_write(&block_id).is_some()
     }
