@@ -90,6 +90,10 @@ impl EntryLoader {
             Ok(entry) => entry,
             Err(err) => {
                 if cfg.role == Replica {
+                    error!(
+                        "Failed to restore replica entry from block index {:?}: {}",
+                        path, err.message
+                    );
                     return Ok(None);
                 }
 
@@ -111,9 +115,11 @@ impl EntryLoader {
             }
         };
 
-        Self::restore_uncommitted_changes(path.clone(), &mut entry).await?;
+        if cfg.role != Replica {
+            Self::restore_uncommitted_changes(path.clone(), &mut entry).await?;
+        }
 
-        if cfg.engine_config.enable_integrity_checks {
+        if cfg.role != Replica && cfg.engine_config.enable_integrity_checks {
             let needs_rebuild = {
                 let file_list = FILE_CACHE
                     .read_dir(&path)
@@ -537,7 +543,7 @@ impl EntryLoader {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::block_manager::wal::WalEntry;
+    use crate::storage::block_manager::wal::{create_wal, WalEntry};
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
     use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
     use std::fs;
@@ -626,6 +632,107 @@ mod tests {
             rec.read_chunk().unwrap().unwrap(),
             Bytes::from_static(b"0123456789")
         );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_restore_replica_skips_wal_recovery(entry_settings: EntrySettings, path: PathBuf) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let entry_path = path.join(entry.name());
+        let mut wal = create_wal(entry_path.clone()).await.unwrap();
+        wal.append(
+            1,
+            WalEntry::WriteRecord(Record {
+                timestamp: Some(us_to_ts(&2)),
+                begin: 10,
+                end: 20,
+                content_type: "text/plain".to_string(),
+                state: record::State::Finished as i32,
+                labels: vec![],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(wal.list().await.unwrap(), vec![1]);
+
+        let mut cfg = Cfg {
+            role: Replica,
+            ..Default::default()
+        };
+        cfg.engine_config.enable_integrity_checks = true;
+
+        let entry = EntryLoader::restore_entry(
+            entry_path.clone(),
+            entry_settings,
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let info = entry.info().await.unwrap();
+        assert_eq!(info.record_count, 1);
+        assert!(entry.begin_read(2).await.is_err());
+
+        let wal = create_wal(entry_path).await.unwrap();
+        assert_eq!(wal.list().await.unwrap(), vec![1]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_restore_replica_ignores_entry_when_index_fails(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let entry_path = path.join(entry.name());
+        {
+            let mut block_file_index = FILE_CACHE
+                .write_or_create(&entry_path.join(BLOCK_INDEX_FILE), SeekFrom::Start(0))
+                .await
+                .unwrap();
+            block_file_index.set_len(0).unwrap();
+            block_file_index.write_all(b"bad index").unwrap();
+            block_file_index.sync_all().await.unwrap();
+        }
+
+        let mut cfg = Cfg {
+            role: Replica,
+            ..Default::default()
+        };
+        cfg.engine_config.enable_integrity_checks = true;
+
+        let entry = EntryLoader::restore_entry(
+            entry_path,
+            entry_settings,
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+
+        assert!(entry.is_none());
     }
 
     #[rstest]
