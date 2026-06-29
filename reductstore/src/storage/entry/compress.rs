@@ -446,15 +446,15 @@ mod tests {
 
     async fn entry(settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
         Arc::new(
-            Entry::try_build(
-                "entry",
-                path.clone(),
-                settings,
-                Cfg::default().into(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+            Entry::builder()
+                .name("entry")
+                .bucket_path(path.clone())
+                .settings(settings)
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap(),
         )
     }
 
@@ -499,17 +499,17 @@ mod tests {
             .await
             .unwrap();
 
-        Entry::restore(
-            bucket_path.join(entry.name()),
-            entry.name().to_string(),
-            entry.bucket_name().to_string(),
-            settings,
-            Cfg::default().into(),
-            Default::default(),
-        )
-        .await
-        .unwrap()
-        .unwrap()
+        Entry::builder()
+            .path(bucket_path.join(entry.name()))
+            .name(entry.name())
+            .bucket_name(entry.bucket_name())
+            .settings(settings)
+            .cfg(Cfg::default().into())
+            .usage_counters(Default::default())
+            .restore()
+            .await
+            .unwrap()
+            .unwrap()
     }
 
     async fn assert_compressed(entry: &Entry, block_id: u64, expected: bool) {

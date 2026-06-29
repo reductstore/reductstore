@@ -278,17 +278,17 @@ mod tests {
             role: InstanceRole::Replica,
             ..Default::default()
         };
-        let replica_entry = Entry::restore(
-            path.join("entry"),
-            "entry".to_string(),
-            "bucket".to_string(),
-            entry_settings,
-            Arc::new(cfg),
-            Default::default(),
-        )
-        .await
-        .unwrap()
-        .unwrap();
+        let replica_entry = Entry::builder()
+            .path(path.join("entry"))
+            .name("entry")
+            .bucket_name("bucket")
+            .settings(entry_settings)
+            .cfg(Arc::new(cfg))
+            .usage_counters(Default::default())
+            .restore()
+            .await
+            .unwrap()
+            .unwrap();
 
         let reader = replica_entry.begin_read(1000000).await;
         assert_eq!(

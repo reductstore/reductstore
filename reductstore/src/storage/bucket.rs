@@ -485,15 +485,15 @@ pub(crate) mod tests {
             let bucket = bucket.await;
             let settings = bucket.settings().await.unwrap();
             let empty_entry = Arc::new(
-                Entry::try_build(
-                    "empty",
-                    bucket.path.clone(),
-                    settings_for_entry("empty", &settings),
-                    bucket.cfg.clone(),
-                    Default::default(),
-                )
-                .await
-                .unwrap(),
+                Entry::builder()
+                    .name("empty")
+                    .bucket_path(bucket.path.clone())
+                    .settings(settings_for_entry("empty", &settings))
+                    .cfg(bucket.cfg.clone())
+                    .usage_counters(Default::default())
+                    .build()
+                    .await
+                    .unwrap(),
             );
             bucket
                 .entries

@@ -668,18 +668,18 @@ mod tests {
     #[tokio::test]
     async fn test_meta_entry_requires_key_label(path: PathBuf) {
         let entry = Arc::new(
-            Entry::try_build(
-                "entry/$meta",
-                path,
-                EntrySettings {
+            Entry::builder()
+                .name("entry/$meta")
+                .bucket_path(path)
+                .settings(EntrySettings {
                     max_block_size: 10000,
                     max_block_records: 10000,
-                },
-                Cfg::default().into(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+                })
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap(),
         );
 
         let err = entry
@@ -700,18 +700,18 @@ mod tests {
     #[tokio::test]
     async fn test_meta_entry_replaces_previous_record_with_same_key(path: PathBuf) {
         let entry = Arc::new(
-            Entry::try_build(
-                "entry/$meta",
-                path,
-                EntrySettings {
+            Entry::builder()
+                .name("entry/$meta")
+                .bucket_path(path)
+                .settings(EntrySettings {
                     max_block_size: 10000,
                     max_block_records: 10000,
-                },
-                Cfg::default().into(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+                })
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap(),
         );
 
         let mut sender = entry
@@ -753,18 +753,18 @@ mod tests {
     #[tokio::test]
     async fn test_meta_entry_remove_true_is_rejected(path: PathBuf) {
         let entry = Arc::new(
-            Entry::try_build(
-                "entry/$meta",
-                path,
-                EntrySettings {
+            Entry::builder()
+                .name("entry/$meta")
+                .bucket_path(path)
+                .settings(EntrySettings {
                     max_block_size: 10000,
                     max_block_records: 10000,
-                },
-                Cfg::default().into(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+                })
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap(),
         );
 
         let mut sender = entry

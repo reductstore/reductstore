@@ -45,15 +45,15 @@ impl Bucket {
                     .strip_prefix(self.path())
                     .unwrap_or(entry_path.as_path()),
             );
-            let handler = Entry::restore_with_limiter(
-                entry_path,
-                entry_name.clone(),
-                self.name().to_string(),
-                settings_for_entry(&entry_name, &settings),
-                self.cfg.clone(),
-                self.io_limiter.clone(),
-                Arc::clone(&self.usage_counters),
-            );
+            let handler = Entry::builder()
+                .path(entry_path)
+                .name(entry_name.clone())
+                .bucket_name(self.name().to_string())
+                .settings(settings_for_entry(&entry_name, &settings))
+                .cfg(self.cfg.clone())
+                .io_limiter(self.io_limiter.clone())
+                .usage_counters(Arc::clone(&self.usage_counters))
+                .restore();
 
             task_set.push((entry_name, handler));
         }

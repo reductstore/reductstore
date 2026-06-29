@@ -286,16 +286,16 @@ impl Bucket {
     ) {
         let recovered_entry = match entry.settings().await {
             Ok(settings) => {
-                Entry::restore_with_limiter(
-                    path,
-                    entry_name.to_string(),
-                    bucket_name.to_string(),
-                    settings,
-                    cfg,
-                    io_limiter,
-                    usage_counters,
-                )
-                .await
+                Entry::builder()
+                    .path(path)
+                    .name(entry_name)
+                    .bucket_name(bucket_name)
+                    .settings(settings)
+                    .cfg(cfg)
+                    .io_limiter(io_limiter)
+                    .usage_counters(usage_counters)
+                    .restore()
+                    .await
             }
             Err(err) => Err(err),
         };

@@ -136,15 +136,15 @@ impl BucketBuilder {
                     .strip_prefix(&path)
                     .unwrap_or(entry_path.as_path()),
             );
-            let handler = Entry::restore_with_limiter(
-                entry_path,
-                entry_name.clone(),
-                bucket_name.clone(),
-                settings_for_entry(&entry_name, &settings),
-                cfg.clone(),
-                io_limiter.clone(),
-                Arc::clone(&usage_counters),
-            );
+            let handler = Entry::builder()
+                .path(entry_path)
+                .name(entry_name.clone())
+                .bucket_name(bucket_name.clone())
+                .settings(settings_for_entry(&entry_name, &settings))
+                .cfg(cfg.clone())
+                .io_limiter(io_limiter.clone())
+                .usage_counters(Arc::clone(&usage_counters))
+                .restore();
 
             task_set.push((entry_name, handler));
         }
