@@ -1681,6 +1681,7 @@ mod tests {
                 dst_bucket: "bucket-2".to_string(),
                 dst_host: "http://localhost".to_string(),
                 dst_token: "".to_string(),
+                dst_prefix: "".to_string(),
                 entries: vec![],
                 include: vec![],
                 exclude: vec![],
