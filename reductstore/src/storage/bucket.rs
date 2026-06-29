@@ -210,12 +210,21 @@ impl Bucket {
                 Arc::clone(&usage_counters),
             );
 
-            task_set.push(handler);
+            task_set.push((entry_name, handler));
         }
 
-        for task in task_set {
-            if let Some(entry) = task.await? {
-                entries.insert(entry.name().to_string(), entry);
+        for (entry_name, task) in task_set {
+            match task.await {
+                Ok(Some(entry)) => {
+                    entries.insert(entry.name().to_string(), entry);
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    error!(
+                        "Failed to restore entry '{}' in bucket '{}': {}",
+                        entry_name, bucket_name, err
+                    );
+                }
             }
         }
 
