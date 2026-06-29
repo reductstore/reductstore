@@ -121,13 +121,13 @@ mod tests {
         let mut cfg = primary_bucket.cfg().clone();
         cfg.role = InstanceRole::Replica;
         let read_only_bucket = Arc::new(
-            Bucket::restore(
-                primary_bucket.path().clone(),
-                cfg.clone(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+            Bucket::builder()
+                .path(primary_bucket.path().clone())
+                .cfg(cfg.clone())
+                .usage_counters(Default::default())
+                .restore()
+                .await
+                .unwrap(),
         );
         // Initially, read-only bucket has one entry
         {
@@ -170,13 +170,13 @@ mod tests {
         let mut cfg = primary_bucket.cfg().clone();
         cfg.role = InstanceRole::Replica;
         let read_only_bucket = Arc::new(
-            Bucket::restore(
-                primary_bucket.path().clone(),
-                cfg.clone(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+            Bucket::builder()
+                .path(primary_bucket.path().clone())
+                .cfg(cfg.clone())
+                .usage_counters(Default::default())
+                .restore()
+                .await
+                .unwrap(),
         );
         // Initially, read-only bucket has one entry
         {
@@ -224,13 +224,13 @@ mod tests {
         let mut cfg = primary_bucket.cfg().clone();
         cfg.role = InstanceRole::Replica;
         let read_only_bucket = Arc::new(
-            Bucket::restore(
-                primary_bucket.path().clone(),
-                cfg.clone(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+            Bucket::builder()
+                .path(primary_bucket.path().clone())
+                .cfg(cfg.clone())
+                .usage_counters(Default::default())
+                .restore()
+                .await
+                .unwrap(),
         );
 
         write(&primary_bucket, "test-1", 2, b"new data")
@@ -265,13 +265,13 @@ mod tests {
 
         let mut cfg = primary_bucket.cfg().clone();
         cfg.role = InstanceRole::Replica;
-        let read_only_bucket = Bucket::restore(
-            primary_bucket.path().clone(),
-            cfg.clone(),
-            Default::default(),
-        )
-        .await
-        .unwrap();
+        let read_only_bucket = Bucket::builder()
+            .path(primary_bucket.path().clone())
+            .cfg(cfg.clone())
+            .usage_counters(Default::default())
+            .restore()
+            .await
+            .unwrap();
 
         let entries = read_only_bucket.entries.read().await.unwrap();
         assert!(entries.contains_key("test-1"));
@@ -284,13 +284,13 @@ mod tests {
         let primary_bucket = primary_bucket.await;
         create_entry_with_broken_wal(primary_bucket.path().join("broken-entry")).await;
 
-        let read_write_bucket = Bucket::restore(
-            primary_bucket.path().clone(),
-            primary_bucket.cfg().clone(),
-            Default::default(),
-        )
-        .await
-        .unwrap();
+        let read_write_bucket = Bucket::builder()
+            .path(primary_bucket.path().clone())
+            .cfg(primary_bucket.cfg().clone())
+            .usage_counters(Default::default())
+            .restore()
+            .await
+            .unwrap();
 
         let entries = read_write_bucket.entries.read().await.unwrap();
         assert!(entries.contains_key("test-1"));
@@ -304,13 +304,13 @@ mod tests {
         let mut cfg = primary_bucket.cfg().clone();
         cfg.role = InstanceRole::Replica;
         let read_only_bucket = Arc::new(
-            Bucket::restore(
-                primary_bucket.path().clone(),
-                cfg.clone(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+            Bucket::builder()
+                .path(primary_bucket.path().clone())
+                .cfg(cfg.clone())
+                .usage_counters(Default::default())
+                .restore()
+                .await
+                .unwrap(),
         );
 
         create_entry_with_broken_wal(primary_bucket.path().join("broken-entry")).await;
@@ -349,13 +349,13 @@ mod tests {
             let mut cfg = primary_bucket.cfg().clone();
             cfg.role = InstanceRole::Replica;
             let read_only_bucket = Arc::new(
-                Bucket::restore(
-                    primary_bucket.path().clone(),
-                    cfg.clone(),
-                    Default::default(),
-                )
-                .await
-                .unwrap(),
+                Bucket::builder()
+                    .path(primary_bucket.path().clone())
+                    .cfg(cfg.clone())
+                    .usage_counters(Default::default())
+                    .restore()
+                    .await
+                    .unwrap(),
             );
 
             let err = forbidden!("Cannot perform this operation in read-only mode");
@@ -380,13 +380,13 @@ mod tests {
             let mut cfg = primary_bucket.cfg().clone();
             cfg.role = InstanceRole::Replica;
             let read_only_bucket = Arc::new(
-                Bucket::restore(
-                    primary_bucket.path().clone(),
-                    cfg.clone(),
-                    Default::default(),
-                )
-                .await
-                .unwrap(),
+                Bucket::builder()
+                    .path(primary_bucket.path().clone())
+                    .cfg(cfg.clone())
+                    .usage_counters(Default::default())
+                    .restore()
+                    .await
+                    .unwrap(),
             );
 
             read_only_bucket.compact().await.unwrap();
@@ -405,13 +405,13 @@ mod tests {
             let mut cfg = primary_bucket.cfg().clone();
             cfg.role = InstanceRole::Replica;
             let read_only_bucket = Arc::new(
-                Bucket::restore(
-                    primary_bucket.path().clone(),
-                    cfg.clone(),
-                    Default::default(),
-                )
-                .await
-                .unwrap(),
+                Bucket::builder()
+                    .path(primary_bucket.path().clone())
+                    .cfg(cfg.clone())
+                    .usage_counters(Default::default())
+                    .restore()
+                    .await
+                    .unwrap(),
             );
 
             {
@@ -445,13 +445,13 @@ mod tests {
             let mut cfg = primary_bucket.cfg().clone();
             cfg.role = InstanceRole::Replica;
             let read_only_bucket = Arc::new(
-                Bucket::restore(
-                    primary_bucket.path().clone(),
-                    cfg.clone(),
-                    Default::default(),
-                )
-                .await
-                .unwrap(),
+                Bucket::builder()
+                    .path(primary_bucket.path().clone())
+                    .cfg(cfg.clone())
+                    .usage_counters(Default::default())
+                    .restore()
+                    .await
+                    .unwrap(),
             );
 
             write(&primary_bucket, "test-2", 1, b"test data")
@@ -496,15 +496,15 @@ mod tests {
             .await
             .unwrap();
         let bucket = Arc::new(
-            Bucket::try_build(
-                "bucket",
-                &cfg.data_path.clone(),
-                BucketSettings::default(),
-                cfg,
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+            Bucket::builder()
+                .name("bucket")
+                .data_path(cfg.data_path.clone())
+                .settings(BucketSettings::default())
+                .cfg(cfg)
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap(),
         );
         write(&bucket, "test-1", 1, b"test data").await.unwrap();
         bucket.sync_fs().await.unwrap();

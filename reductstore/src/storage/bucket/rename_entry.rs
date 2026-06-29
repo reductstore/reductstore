@@ -391,7 +391,11 @@ mod tests {
         bucket.sync_fs().await.unwrap();
         bucket.rename_entry("test-1", "test-2").await.unwrap();
 
-        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default(), Default::default())
+        let bucket = Bucket::builder()
+            .path(bucket.path.clone())
+            .cfg(Cfg::default())
+            .usage_counters(Default::default())
+            .restore()
             .await
             .unwrap();
         assert_eq!(
@@ -476,7 +480,13 @@ mod tests {
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
-            Bucket::try_build("test", &path, settings, Cfg::default(), Default::default())
+            Bucket::builder()
+                .name("test")
+                .data_path(path)
+                .settings(settings)
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .build()
                 .await
                 .unwrap(),
         )

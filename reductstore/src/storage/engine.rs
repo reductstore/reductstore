@@ -82,13 +82,13 @@ impl StorageEngineBuilder {
             .await
             .expect("Failed to list folders")
         {
-            match Bucket::restore_with_limiter(
-                path.clone(),
-                cfg.clone(),
-                io_limiter.clone(),
-                Arc::clone(&usage_counters),
-            )
-            .await
+            match Bucket::builder()
+                .path(path.clone())
+                .cfg(cfg.clone())
+                .io_limiter(io_limiter.clone())
+                .usage_counters(Arc::clone(&usage_counters))
+                .restore()
+                .await
             {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
@@ -324,15 +324,15 @@ impl StorageEngine {
 
         self.folder_keeper.add_folder(name).await?;
         let bucket = Arc::new(
-            Bucket::try_build_with_limiter(
-                name,
-                &self.data_path,
-                settings,
-                self.cfg.clone(),
-                self.io_limiter.clone(),
-                Arc::clone(&self.usage_counters),
-            )
-            .await?,
+            Bucket::builder()
+                .name(name)
+                .data_path(self.data_path.clone())
+                .settings(settings)
+                .cfg(self.cfg.clone())
+                .io_limiter(self.io_limiter.clone())
+                .usage_counters(Arc::clone(&self.usage_counters))
+                .build()
+                .await?,
         );
         buckets.insert(name.to_string(), Arc::clone(&bucket));
 
@@ -452,13 +452,13 @@ impl StorageEngine {
         folder_keeper.rename_folder(&old_name, &new_name).await?;
 
         buckets.remove(&old_name);
-        let bucket = Bucket::restore_with_limiter(
-            new_path,
-            cfg,
-            self.io_limiter.clone(),
-            Arc::clone(&self.usage_counters),
-        )
-        .await?;
+        let bucket = Bucket::builder()
+            .path(new_path)
+            .cfg(cfg)
+            .io_limiter(self.io_limiter.clone())
+            .usage_counters(Arc::clone(&self.usage_counters))
+            .restore()
+            .await?;
         buckets.insert(new_name.to_string(), Arc::new(bucket));
         debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
         Ok(())

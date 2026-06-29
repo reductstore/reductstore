@@ -638,15 +638,16 @@ mod tests {
                 .create_dir_all(&path.join(&settings.src_bucket))
                 .await
                 .unwrap();
-            Bucket::try_build(
-                &settings.src_bucket,
-                &path,
-                BucketSettings::default(),
-                Cfg::default(),
-                Default::default(),
-            )
-            .await
-            .unwrap();
+            Bucket::builder()
+                .name(&settings.src_bucket)
+                .data_path(path.clone())
+                .settings(BucketSettings::default())
+                .cfg(Cfg::default())
+                .io_limiter(Default::default())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap();
 
             fs::create_dir_all(log_path.parent().unwrap()).unwrap();
             let mut log_file = fs::File::create(&log_path).unwrap();
