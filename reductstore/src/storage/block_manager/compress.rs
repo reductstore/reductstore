@@ -699,7 +699,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_decompress_block_missing_compressed_file() {
+    async fn test_decompress_block_missing_compressed_data_marks_corrupted() {
         let (mut block_manager, block_id, _, _) =
             block_manager_with_data(b"missing file".to_vec()).await;
 
@@ -708,7 +708,10 @@ mod tests {
             .await
             .unwrap();
 
-        std::fs::remove_file(block_manager.path_to_compressed_data(block_id)).unwrap();
+        FILE_CACHE
+            .remove(&block_manager.path_to_compressed_data(block_id))
+            .await
+            .unwrap();
 
         let err = block_manager
             .decompress_block(block_id)
@@ -716,6 +719,35 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(block_manager.is_block_corrupted(block_id));
+        assert!(!block_manager.index().active_tree().contains(&block_id));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_decompress_block_missing_compressed_descriptor_marks_corrupted() {
+        let (mut block_manager, block_id, _, _) =
+            block_manager_with_data(b"missing descriptor".to_vec()).await;
+
+        block_manager
+            .compress_block(block_id, CompressionAlgorithm::Zstd)
+            .await
+            .unwrap();
+
+        FILE_CACHE
+            .remove(&block_manager.path_to_compressed_desc(block_id))
+            .await
+            .unwrap();
+
+        let err = block_manager
+            .decompress_block(block_id)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(block_manager.is_block_corrupted(block_id));
+        assert!(!block_manager.index().active_tree().contains(&block_id));
     }
 
     #[rstest]
