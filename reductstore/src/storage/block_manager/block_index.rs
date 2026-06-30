@@ -35,7 +35,8 @@ impl Into<BlockEntry> for MinimalBlock {
             latest_record_time: self.latest_record_time,
             crc64: None,
             compression: None,
-            corrupted: None,
+            corrupted: self.corrupted,
+            version: self.version,
         }
     }
 }
@@ -50,7 +51,8 @@ impl Into<BlockEntry> for BlockProto {
             latest_record_time: self.latest_record_time,
             crc64: None,
             compression: None,
-            corrupted: None,
+            corrupted: self.corrupted,
+            version: self.version,
         }
     }
 }
@@ -66,6 +68,7 @@ impl Into<BlockEntry> for Block {
             crc64: None,
             compression: None,
             corrupted: None,
+            version: None,
         }
     }
 }
@@ -224,6 +227,10 @@ impl BlockIndex {
                 crc.write(&(corrupted as u8).to_be_bytes());
             }
 
+            if let Some(version) = block.version {
+                crc.write(&version.to_be_bytes());
+            }
+
             block_index.index.insert(block.block_id);
             block_index.index_info.insert(block.block_id, block);
         });
@@ -257,6 +264,7 @@ impl BlockIndex {
                 block_entry.crc64 = block.crc64;
                 block_entry.compression = block.compression;
                 block_entry.corrupted = block.corrupted;
+                block_entry.version = block.version;
                 block_entry
             })
             .collect();
@@ -275,6 +283,10 @@ impl BlockIndex {
 
             if let Some(corrupted) = block.corrupted {
                 crc.write(&(corrupted as u8).to_be_bytes());
+            }
+
+            if let Some(version) = block.version {
+                crc.write(&version.to_be_bytes());
             }
         });
 
@@ -358,6 +370,7 @@ mod tests {
                     crc64: None,
                     compression: None,
                     corrupted: None,
+                    version: None,
                 }],
                 crc64: 294433432134063049,
             };
@@ -396,6 +409,7 @@ mod tests {
                     crc64: None,
                     compression: None,
                     corrupted: None,
+                    version: None,
                 }],
                 crc64: 0,
             };
@@ -437,6 +451,7 @@ mod tests {
                 crc64: None,
                 compression: None,
                 corrupted: None,
+                version: None,
             });
 
             block_index.save().await.unwrap();
@@ -462,6 +477,7 @@ mod tests {
                 crc64: None,
                 compression: None,
                 corrupted: None,
+                version: None,
             });
             block_index.mark_corrupted(1);
 

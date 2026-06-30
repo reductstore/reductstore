@@ -50,6 +50,8 @@ impl From<Block> for BlockProto {
             record_count: block.record_count,
             metadata_size: block.metadata_size,
             records,
+            version: None,
+            corrupted: None,
         }
     }
 }
@@ -255,6 +257,8 @@ mod tests {
             record_count: 1,
             metadata_size: 4,
             records: vec![record],
+            version: None,
+            corrupted: None,
         }
     }
 }

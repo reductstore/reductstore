@@ -9,7 +9,9 @@ use crate::storage::block_manager::{
 };
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::block_index::CompressionAlgorithm as ProtoCompressionAlgorithm;
+use crate::storage::proto::Block as BlockProto;
 use crc64fast::Digest;
+use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::{conflict, internal_server_error, not_found};
 use std::cmp::min;
@@ -171,6 +173,9 @@ impl BlockManager {
         let desc_size = desc.len() as u64;
         let mut crc = Digest::new();
         crc.write(&desc);
+        let desc_proto = BlockProto::decode(desc.as_slice()).map_err(|err| {
+            internal_server_error!("Failed to decode descriptor file {:?}: {}", desc_path, err)
+        })?;
 
         let block = self.block_index.get_block_mut(block_id).ok_or_else(|| {
             not_found!(
@@ -184,6 +189,8 @@ impl BlockManager {
         block.size = data_size;
         block.metadata_size = desc_size;
         block.crc64 = Some(crc.sum64());
+        block.version = desc_proto.version;
+        block.corrupted = desc_proto.corrupted;
         self.block_index.save().await?;
 
         self.decompress_cache.invalidate(&self.path, block_id).await;
