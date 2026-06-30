@@ -90,6 +90,10 @@ impl EntryLoader {
             Ok(entry) => entry,
             Err(err) => {
                 if cfg.role == Replica {
+                    error!(
+                        "Failed to restore replica entry from block index {:?}: {}",
+                        path, err.message
+                    );
                     return Ok(None);
                 }
 
@@ -111,9 +115,11 @@ impl EntryLoader {
             }
         };
 
-        Self::restore_uncommitted_changes(path.clone(), &mut entry).await?;
+        if cfg.role != Replica {
+            Self::restore_uncommitted_changes(path.clone(), &mut entry).await?;
+        }
 
-        if cfg.engine_config.enable_integrity_checks {
+        if cfg.role != Replica && cfg.engine_config.enable_integrity_checks {
             let needs_rebuild = {
                 let file_list = FILE_CACHE
                     .read_dir(&path)
@@ -145,6 +151,17 @@ impl EntryLoader {
 
         {
             let bm = entry.block_manager.read().await?;
+            let corrupted_blocks = bm.index().corrupted_block_ids();
+            if !corrupted_blocks.is_empty() {
+                warn!(
+                    "Entry `{}/{}` has {} corrupted block(s): {:?}. Run diagnostics or allow FIFO quota to reclaim space.",
+                    entry.bucket_name,
+                    entry.name,
+                    bm.index().corrupted_block_count(),
+                    corrupted_blocks
+                );
+            }
+
             debug!(
                 "Restored entry `{}` in {}ms: size={}, records={}",
                 entry.name,
@@ -537,9 +554,9 @@ impl EntryLoader {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::block_manager::wal::WalEntry;
+    use crate::storage::block_manager::wal::{create_wal, WalEntry};
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
-    use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
+    use crate::storage::proto::{record, us_to_ts, Block, BlockIndex as BlockIndexProto, Record};
     use std::fs;
     use std::io::SeekFrom;
 
@@ -605,7 +622,7 @@ mod tests {
         let info = entry.info().await.unwrap();
         assert_eq!(entry.name, "entry");
         assert_eq!(info.record_count, 2);
-        assert_eq!(info.size, 88);
+        assert_eq!(info.size, 90);
 
         let mut rec = entry.begin_read(1).await.unwrap();
         assert_eq!(rec.meta().timestamp(), 1);
@@ -626,6 +643,107 @@ mod tests {
             rec.read_chunk().unwrap().unwrap(),
             Bytes::from_static(b"0123456789")
         );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_restore_replica_skips_wal_recovery(entry_settings: EntrySettings, path: PathBuf) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let entry_path = path.join(entry.name());
+        let mut wal = create_wal(entry_path.clone()).await.unwrap();
+        wal.append(
+            1,
+            WalEntry::WriteRecord(Record {
+                timestamp: Some(us_to_ts(&2)),
+                begin: 10,
+                end: 20,
+                content_type: "text/plain".to_string(),
+                state: record::State::Finished as i32,
+                labels: vec![],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(wal.list().await.unwrap(), vec![1]);
+
+        let mut cfg = Cfg {
+            role: Replica,
+            ..Default::default()
+        };
+        cfg.engine_config.enable_integrity_checks = true;
+
+        let entry = EntryLoader::restore_entry(
+            entry_path.clone(),
+            entry_settings,
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let info = entry.info().await.unwrap();
+        assert_eq!(info.record_count, 1);
+        assert!(entry.begin_read(2).await.is_err());
+
+        let wal = create_wal(entry_path).await.unwrap();
+        assert_eq!(wal.list().await.unwrap(), vec![1]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_restore_replica_ignores_entry_when_index_fails(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let entry_path = path.join(entry.name());
+        {
+            let mut block_file_index = FILE_CACHE
+                .write_or_create(&entry_path.join(BLOCK_INDEX_FILE), SeekFrom::Start(0))
+                .await
+                .unwrap();
+            block_file_index.set_len(0).unwrap();
+            block_file_index.write_all(b"bad index").unwrap();
+            block_file_index.sync_all().await.unwrap();
+        }
+
+        let mut cfg = Cfg {
+            role: Replica,
+            ..Default::default()
+        };
+        cfg.engine_config.enable_integrity_checks = true;
+
+        let entry = EntryLoader::restore_entry(
+            entry_path,
+            entry_settings,
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+
+        assert!(entry.is_none());
     }
 
     #[rstest]
@@ -818,10 +936,57 @@ mod tests {
             BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
 
         assert_eq!(block_index.blocks.len(), 1);
-        assert_eq!(block_index.crc64, 4579043244124502122);
+        assert_eq!(block_index.crc64, 14511237322380062442);
         assert_eq!(block_index.blocks[0].block_id, 1);
         assert_eq!(block_index.blocks[0].size, 20);
         assert_eq!(block_index.blocks[0].record_count, 2);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_restore_carries_descriptor_version_and_corrupted_flag(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let entry_path = path.join(entry.name());
+        FILE_CACHE
+            .remove(&entry_path.join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap();
+
+        let meta_path = entry_path.join("1.meta");
+        let mut block = Block::decode(Bytes::from(fs::read(&meta_path).unwrap())).unwrap();
+        block.version = Some(5);
+        block.corrupted = Some(true);
+        fs::write(&meta_path, block.encode_to_vec()).unwrap();
+
+        EntryLoader::restore_entry(
+            entry_path.clone(),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let block_index = BlockIndexProto::decode(Bytes::from(
+            fs::read(entry_path.join(BLOCK_INDEX_FILE)).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(block_index.blocks[0].version, Some(5));
+        assert_eq!(block_index.blocks[0].corrupted, Some(true));
     }
 
     #[rstest]
@@ -1005,6 +1170,8 @@ mod tests {
             size: 1,
             record_count: 1,
             metadata_size: 0,
+            version: None,
+            corrupted: None,
         };
         fs::write(entry_path.join("1.meta"), block.encode_to_vec()).unwrap();
         fs::write(entry_path.join("1.blk"), b"a").unwrap();

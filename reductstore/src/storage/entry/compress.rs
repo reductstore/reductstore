@@ -33,8 +33,9 @@ impl Entry {
         let blocks = {
             let bm = self.block_manager.read().await?;
             let index = bm.index();
+            let active_tree = index.active_tree();
 
-            let range = block_id_range(index.tree(), start, stop);
+            let range = block_id_range(&active_tree, start, stop);
 
             range
                 .filter(|&&block_id| {
@@ -94,8 +95,9 @@ impl Entry {
     ) -> Result<CompressionStats, ReductError> {
         let bm = self.block_manager.read().await?;
         let index = bm.index();
+        let active_tree = index.active_tree();
 
-        let range = block_id_range(index.tree(), start, stop);
+        let range = block_id_range(&active_tree, start, stop);
 
         let stats = range
             .filter(|&&block_id| {
@@ -238,6 +240,36 @@ mod tests {
             entry.compress_blocks(None, None).await.unwrap(),
             CompressionStats::default()
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_compress_blocks_skips_corrupted(path: PathBuf) {
+        let entry = entry(multi_block_settings(), path.clone()).await;
+        write_blocks(&entry, &[1_000_000, 2_000_000, 3_000_000]).await;
+        let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
+
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .mark_block_corrupted(2_000_000)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            entry.compress_blocks(None, None).await.unwrap(),
+            CompressionStats {
+                blocks: 2,
+                records: 2
+            }
+        );
+
+        assert_compressed(&entry, 1_000_000, true).await;
+        assert_compressed(&entry, 2_000_000, false).await;
+        assert_compressed(&entry, 3_000_000, true).await;
     }
 
     #[rstest]
@@ -446,15 +478,15 @@ mod tests {
 
     async fn entry(settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
         Arc::new(
-            Entry::try_build(
-                "entry",
-                path.clone(),
-                settings,
-                Cfg::default().into(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+            Entry::builder()
+                .name("entry")
+                .bucket_path(path.clone())
+                .settings(settings)
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap(),
         )
     }
 
@@ -499,17 +531,17 @@ mod tests {
             .await
             .unwrap();
 
-        Entry::restore(
-            bucket_path.join(entry.name()),
-            entry.name().to_string(),
-            entry.bucket_name().to_string(),
-            settings,
-            Cfg::default().into(),
-            Default::default(),
-        )
-        .await
-        .unwrap()
-        .unwrap()
+        Entry::builder()
+            .path(bucket_path.join(entry.name()))
+            .name(entry.name())
+            .bucket_name(entry.bucket_name())
+            .settings(settings)
+            .cfg(Cfg::default().into())
+            .usage_counters(Default::default())
+            .restore()
+            .await
+            .unwrap()
+            .unwrap()
     }
 
     async fn assert_compressed(entry: &Entry, block_id: u64, expected: bool) {

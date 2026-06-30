@@ -256,8 +256,6 @@ impl LifecycleTask {
                     &format!("{:?}", action_type).to_lowercase(),
                     bucket,
                     duration,
-                    err.status as u16,
-                    &err.message,
                 )
                 .to_value(),
             ),
@@ -653,8 +651,8 @@ pub(super) mod tests {
         assert_eq!(event.payload["processed_records"], 0);
         assert_eq!(event.payload["processed_blocks"], 0);
         assert_eq!(event.payload["caught_up"], false);
-        assert_eq!(event.payload["error_code"], 422);
-        assert_eq!(event.payload["error_message"], "failed to run");
+        assert!(event.payload.get("error_code").is_none());
+        assert!(event.payload.get("error_message").is_none());
     }
 
     async fn new_task(

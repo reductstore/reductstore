@@ -9,7 +9,9 @@ use crate::storage::block_manager::{
 };
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::block_index::CompressionAlgorithm as ProtoCompressionAlgorithm;
+use crate::storage::proto::Block as BlockProto;
 use crc64fast::Digest;
+use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::{conflict, internal_server_error, not_found};
 use std::cmp::min;
@@ -129,8 +131,30 @@ impl BlockManager {
         let data_path = self.path_to_data(block_id);
         let desc_path = self.path_to_desc(block_id);
 
-        decompress_file_zstd(&compressed_data_path, &data_path).await?;
-        decompress_file_zstd(&compressed_desc_path, &desc_path).await?;
+        if let Err(err) = decompress_file_zstd(&compressed_data_path, &data_path).await {
+            if let Err(mark_err) = self.mark_block_corrupted(block_id).await {
+                log::error!(
+                    "Failed to mark block {}/{}/{} as corrupted after decompression error: {}",
+                    self.bucket_name(),
+                    self.entry_name(),
+                    block_id,
+                    mark_err
+                );
+            }
+            return Err(err);
+        }
+        if let Err(err) = decompress_file_zstd(&compressed_desc_path, &desc_path).await {
+            if let Err(mark_err) = self.mark_block_corrupted(block_id).await {
+                log::error!(
+                    "Failed to mark block {}/{}/{} as corrupted after decompression error: {}",
+                    self.bucket_name(),
+                    self.entry_name(),
+                    block_id,
+                    mark_err
+                );
+            }
+            return Err(err);
+        }
 
         FILE_CACHE.remove(&compressed_data_path).await?;
         FILE_CACHE.remove(&compressed_desc_path).await?;
@@ -149,6 +173,9 @@ impl BlockManager {
         let desc_size = desc.len() as u64;
         let mut crc = Digest::new();
         crc.write(&desc);
+        let desc_proto = BlockProto::decode(desc.as_slice()).map_err(|err| {
+            internal_server_error!("Failed to decode descriptor file {:?}: {}", desc_path, err)
+        })?;
 
         let block = self.block_index.get_block_mut(block_id).ok_or_else(|| {
             not_found!(
@@ -162,6 +189,8 @@ impl BlockManager {
         block.size = data_size;
         block.metadata_size = desc_size;
         block.crc64 = Some(crc.sum64());
+        block.version = desc_proto.version;
+        block.corrupted = desc_proto.corrupted;
         self.block_index.save().await?;
 
         self.decompress_cache.invalidate(&self.path, block_id).await;
@@ -677,7 +706,7 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn test_decompress_block_missing_compressed_file() {
+    async fn test_decompress_block_missing_compressed_data_marks_corrupted() {
         let (mut block_manager, block_id, _, _) =
             block_manager_with_data(b"missing file".to_vec()).await;
 
@@ -686,7 +715,10 @@ mod tests {
             .await
             .unwrap();
 
-        std::fs::remove_file(block_manager.path_to_compressed_data(block_id)).unwrap();
+        FILE_CACHE
+            .remove(&block_manager.path_to_compressed_data(block_id))
+            .await
+            .unwrap();
 
         let err = block_manager
             .decompress_block(block_id)
@@ -694,6 +726,35 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(block_manager.is_block_corrupted(block_id));
+        assert!(!block_manager.index().active_tree().contains(&block_id));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_decompress_block_missing_compressed_descriptor_marks_corrupted() {
+        let (mut block_manager, block_id, _, _) =
+            block_manager_with_data(b"missing descriptor".to_vec()).await;
+
+        block_manager
+            .compress_block(block_id, CompressionAlgorithm::Zstd)
+            .await
+            .unwrap();
+
+        FILE_CACHE
+            .remove(&block_manager.path_to_compressed_desc(block_id))
+            .await
+            .unwrap();
+
+        let err = block_manager
+            .decompress_block(block_id)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(block_manager.is_block_corrupted(block_id));
+        assert!(!block_manager.index().active_tree().contains(&block_id));
     }
 
     #[rstest]

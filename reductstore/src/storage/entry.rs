@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+mod builder;
 mod compress;
 mod entry_loader;
 pub(crate) mod io;
@@ -15,14 +16,11 @@ use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
-use crate::storage::block_manager::block_index::BlockIndex;
-use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
-use crate::storage::entry::entry_loader::EntryLoader;
+use crate::storage::block_manager::BlockManager;
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
-use crate::storage::usage::UsageCounters;
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 use log::{debug, error};
@@ -40,6 +38,8 @@ pub(crate) use system::{
 };
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::task::JoinHandle;
+
+pub(crate) use builder::EntryBuilder;
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,
@@ -94,103 +94,8 @@ pub(crate) struct RecordQueryStats {
 }
 
 impl Entry {
-    #[allow(dead_code)]
-    pub async fn try_build(
-        name: &str,
-        path: PathBuf,
-        settings: EntrySettings,
-        cfg: Arc<Cfg>,
-        usage_counters: Arc<UsageCounters>,
-    ) -> Result<Self, ReductError> {
-        let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
-        Self::try_build_with_limiter(name, path, settings, cfg, io_limiter, usage_counters).await
-    }
-
-    pub(crate) async fn try_build_with_limiter(
-        name: &str,
-        path: PathBuf,
-        settings: EntrySettings,
-        cfg: Arc<Cfg>,
-        io_limiter: InFlightIoLimiter,
-        usage_counters: Arc<UsageCounters>,
-    ) -> Result<Self, ReductError> {
-        let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let path = path.join(name);
-        let block_index_path = path.join(BLOCK_INDEX_FILE);
-        let block_index = BlockIndex::new(block_index_path.clone());
-
-        // create block index file if it doesn't exist.
-        if !FILE_CACHE.try_exists(&block_index_path).await? {
-            FILE_CACHE.create_dir_all(&path).await?;
-            block_index.save().await?;
-        }
-
-        Ok(Self {
-            name: name.to_string(),
-            bucket_name: bucket_name.clone(),
-            settings: AsyncRwLock::new(settings),
-            block_manager: Arc::new(AsyncRwLock::new(
-                BlockManager::build(
-                    path.clone(),
-                    block_index,
-                    bucket_name.clone(),
-                    name.to_string(),
-                    cfg.clone(),
-                    usage_counters,
-                )
-                .await?,
-            )),
-            system_behavior: strategy_for_entry(name),
-            queries: Arc::new(AsyncRwLock::new(HashMap::new())),
-            status: AsyncRwLock::new(ResourceStatus::Ready),
-            path,
-            cfg,
-            io_limiter,
-        })
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn restore(
-        path: PathBuf,
-        entry_name: String,
-        bucket_name: String,
-        options: EntrySettings,
-        cfg: Arc<Cfg>,
-        usage_counters: Arc<UsageCounters>,
-    ) -> Result<Option<Entry>, ReductError> {
-        let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
-        Self::restore_with_limiter(
-            path,
-            entry_name,
-            bucket_name,
-            options,
-            cfg,
-            io_limiter,
-            usage_counters,
-        )
-        .await
-    }
-
-    pub(crate) async fn restore_with_limiter(
-        path: PathBuf,
-        entry_name: String,
-        bucket_name: String,
-        options: EntrySettings,
-        cfg: Arc<Cfg>,
-        io_limiter: InFlightIoLimiter,
-        usage_counters: Arc<UsageCounters>,
-    ) -> Result<Option<Entry>, ReductError> {
-        let entry = EntryLoader::restore_entry_with_names(
-            path,
-            entry_name,
-            bucket_name,
-            options,
-            cfg,
-            io_limiter,
-            usage_counters,
-        )
-        .await?;
-        Ok(entry)
+    pub(crate) fn builder() -> EntryBuilder {
+        EntryBuilder::default()
     }
 
     pub(crate) async fn acquire_writer_slot(
@@ -311,16 +216,15 @@ impl Entry {
 
         let bm = self.block_manager.read().await?;
         let index = bm.index();
-        let oldest_record = index
-            .tree()
+        let active_tree = index.active_tree();
+        let oldest_record = active_tree
             .iter()
             .find_map(|block_id| {
                 let block = index.get_block(*block_id)?;
                 (block.record_count > 0).then_some(*block_id)
             })
             .unwrap_or(0);
-        let latest_record = index
-            .tree()
+        let latest_record = active_tree
             .iter()
             .rev()
             .find_map(|block_id| {
@@ -701,21 +605,21 @@ mod tests {
             );
 
             bm.save_cache_on_disk().await.unwrap();
-            let entry = Entry::restore(
-                path.join(entry.name()),
-                "entry".to_string(),
-                "bucket".to_string(),
-                entry_settings,
-                Cfg::default().into(),
-                Default::default(),
-            )
-            .await
-            .unwrap()
-            .unwrap();
+            let entry = Entry::builder()
+                .path(path.join(entry.name()))
+                .name("entry")
+                .bucket_name("bucket")
+                .settings(entry_settings)
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .restore()
+                .await
+                .unwrap()
+                .unwrap();
             let info = entry.info().await.unwrap();
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
-            assert_eq!(info.size, 88);
+            assert_eq!(info.size, 90);
         }
     }
 
@@ -981,18 +885,18 @@ mod tests {
         use reduct_base::io::ReadRecord;
 
         let entry = Arc::new(
-            Entry::try_build(
-                "x/y/z",
-                path.clone(),
-                EntrySettings {
+            Entry::builder()
+                .name("x/y/z")
+                .bucket_path(path.clone())
+                .settings(EntrySettings {
                     max_block_size: 10000,
                     max_block_records: 10000,
-                },
-                Cfg::default().into(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+                })
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap(),
         );
 
         write_stub_record(&entry, 1000000).await;
@@ -1077,18 +981,18 @@ mod tests {
         #[tokio::test]
         async fn test_size_counting(path: PathBuf) {
             let entry = Arc::new(
-                Entry::try_build(
-                    "entry",
-                    path.clone(),
-                    EntrySettings {
+                Entry::builder()
+                    .name("entry")
+                    .bucket_path(path.clone())
+                    .settings(EntrySettings {
                         max_block_size: 100000,
                         max_block_records: 2,
-                    },
-                    Cfg::default().into(),
-                    Default::default(),
-                )
-                .await
-                .unwrap(),
+                    })
+                    .cfg(Cfg::default().into())
+                    .usage_counters(Default::default())
+                    .build()
+                    .await
+                    .unwrap(),
             );
 
             write_stub_record(&entry, 1000000).await;
@@ -1098,7 +1002,7 @@ mod tests {
 
             assert_eq!(entry.info().await.unwrap().block_count, 2);
             assert_eq!(entry.info().await.unwrap().record_count, 4);
-            assert_eq!(entry.info().await.unwrap().size, 138);
+            assert_eq!(entry.info().await.unwrap().size, 140);
 
             entry.try_remove_oldest_block().await.unwrap();
             assert_eq!(entry.info().await.unwrap().block_count, 1);
@@ -1123,15 +1027,15 @@ mod tests {
     #[fixture]
     pub(super) async fn entry(entry_settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
         Arc::new(
-            Entry::try_build(
-                "entry",
-                path.clone(),
-                entry_settings,
-                Cfg::default().into(),
-                Default::default(),
-            )
-            .await
-            .unwrap(),
+            Entry::builder()
+                .name("entry")
+                .bucket_path(path.clone())
+                .settings(entry_settings)
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap(),
         )
     }
 

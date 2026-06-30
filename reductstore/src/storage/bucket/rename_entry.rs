@@ -25,15 +25,17 @@ impl Bucket {
                     .strip_prefix(&self.path)
                     .unwrap_or(entry_path.as_path()),
             );
-            task_set.push(Entry::restore_with_limiter(
-                entry_path,
-                entry_name.clone(),
-                self.name.clone(),
-                settings_for_entry(&entry_name, settings),
-                self.cfg.clone(),
-                self.io_limiter.clone(),
-                Arc::clone(&self.usage_counters),
-            ));
+            task_set.push(
+                Entry::builder()
+                    .path(entry_path)
+                    .name(entry_name.clone())
+                    .bucket_name(self.name.clone())
+                    .settings(settings_for_entry(&entry_name, settings))
+                    .cfg(self.cfg.clone())
+                    .io_limiter(self.io_limiter.clone())
+                    .usage_counters(Arc::clone(&self.usage_counters))
+                    .restore(),
+            );
         }
 
         for task in task_set {
@@ -391,7 +393,11 @@ mod tests {
         bucket.sync_fs().await.unwrap();
         bucket.rename_entry("test-1", "test-2").await.unwrap();
 
-        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default(), Default::default())
+        let bucket = Bucket::builder()
+            .path(bucket.path.clone())
+            .cfg(Cfg::default())
+            .usage_counters(Default::default())
+            .restore()
             .await
             .unwrap();
         assert_eq!(
@@ -476,7 +482,13 @@ mod tests {
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
-            Bucket::try_build("test", &path, settings, Cfg::default(), Default::default())
+            Bucket::builder()
+                .name("test")
+                .data_path(path)
+                .settings(settings)
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .build()
                 .await
                 .unwrap(),
         )
