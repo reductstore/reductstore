@@ -23,7 +23,7 @@ use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Rec
 use crate::storage::usage::UsageCounters;
 use block_index::BlockIndex;
 use crc64fast::Digest;
-use log::{debug, error, info, trace, warn};
+use log::{debug, error, trace, warn};
 use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use reduct_base::error::ReductError;
@@ -137,30 +137,27 @@ impl BlockManager {
     }
 
     pub async fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
-        let start_block_id = self.block_index.tree().range(start..).next();
-        let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
-            start_block_id.unwrap().clone()
-        } else {
-            if let Some(block_id) = self.block_index.tree().range(..start).rev().next() {
-                block_id.clone()
-            } else {
-                return Err(ReductError::not_found(&format!(
-                    "Record {} not found in entry {}/{}",
-                    start, self.bucket, self.entry
-                )));
-            }
-        };
-
+        let id = self.find_block_id(start)?;
         self.load_block(id).await
     }
 
-    pub fn find_cached_block(&self, start: u64) -> Option<BlockRef> {
-        let start_block_id = self.block_index.tree().range(start..).next();
-        let id = if start_block_id.is_some() && start >= *start_block_id.unwrap() {
-            *start_block_id.unwrap()
+    fn find_block_id(&self, start: u64) -> Result<u64, ReductError> {
+        let active_tree = self.block_index.active_tree();
+        let start_block_id = active_tree.range(start..).next();
+        if start_block_id.is_some() && start >= *start_block_id.unwrap() {
+            Ok(*start_block_id.unwrap())
+        } else if let Some(block_id) = active_tree.range(..start).rev().next() {
+            Ok(*block_id)
         } else {
-            *self.block_index.tree().range(..start).rev().next()?
-        };
+            Err(ReductError::not_found(&format!(
+                "Record {} not found in entry {}/{}",
+                start, self.bucket, self.entry
+            )))
+        }
+    }
+
+    pub fn find_cached_block(&self, start: u64) -> Option<BlockRef> {
+        let id = self.find_block_id(start).ok()?;
 
         self.block_cache.get_read(&id)
     }
@@ -191,16 +188,9 @@ impl BlockManager {
                     }
 
                     // here we can't read the block descriptor, it might be corrupted or not exist
-                    // we should remove it from the index
                     let err_msg = format!("Block descriptor {:?} can't be read: {}", path, err);
                     error!("{}", &err_msg);
-                    info!(
-                        "Remove block {} from the index. The block {} must be removed manually",
-                        block_id,
-                        self.path_to_data(block_id).display()
-                    );
-                    self.block_index.remove_block(block_id);
-                    self.block_index.save().await?;
+                    self.mark_block_corrupted(block_id).await?;
                     return Err(internal_server_error!(&err_msg));
                 }
             };
@@ -228,10 +218,9 @@ impl BlockManager {
                             ));
                         }
 
-                        error!("Block descriptor {:?} is corrupted: index CRC {} mismatch with calculated CRC {}.\
-                     Remove it and its data block, then restart the database", path, block_crc, crc.sum64());
+                        error!("Block descriptor {:?} is corrupted: index CRC {} mismatch with calculated CRC {}", path, block_crc, crc.sum64());
 
-                        self.block_index.remove_block(block_id);
+                        self.mark_block_corrupted(block_id).await?;
                         return Err(internal_server_error!(
                             "Block descriptor {:?} is corrupted",
                             path
@@ -246,9 +235,17 @@ impl BlockManager {
             }
 
             // parse the block descriptor
-            let mut block_from_disk = BlockProto::decode(Bytes::from(buf)).map_err(|e| {
-                internal_server_error!("Failed to decode block descriptor {:?}: {}", path, e)
-            })?;
+            let mut block_from_disk = match BlockProto::decode(Bytes::from(buf)) {
+                Ok(block) => block,
+                Err(e) => {
+                    self.mark_block_corrupted(block_id).await?;
+                    return Err(internal_server_error!(
+                        "Failed to decode block descriptor {:?}: {}",
+                        path,
+                        e
+                    ));
+                }
+            };
 
             if block_from_disk.begin_time.is_none() {
                 warn!(
@@ -409,6 +406,27 @@ impl BlockManager {
 
         self.wal.remove(block_id).await?;
         Ok(())
+    }
+
+    pub async fn mark_block_corrupted(&mut self, block_id: u64) -> Result<(), ReductError> {
+        if self.cfg.role == InstanceRole::Replica {
+            return Ok(());
+        }
+
+        self.block_index.mark_corrupted(block_id);
+        self.block_cache.remove(&block_id);
+        self.block_index.save().await?;
+
+        error!(
+            "Marked block {}/{}/{} as corrupted",
+            self.bucket, self.entry, block_id
+        );
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn is_block_corrupted(&self, block_id: u64) -> bool {
+        self.block_index.is_corrupted(block_id)
     }
 
     /// Check if a block exists on disk.
@@ -1055,6 +1073,24 @@ mod tests {
             let err = block_manager.load_block(block_id).await.err().unwrap();
             assert_eq!(err.status(), ErrorCode::InternalServerError);
             assert!(err.to_string().contains("corrupted"));
+            assert!(block_manager.index().get_block(block_id).is_some());
+            assert!(block_manager.is_block_corrupted(block_id));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_mark_block_corrupted_removes_cache(
+            #[future] block_manager: BlockManager,
+            block_id: u64,
+        ) {
+            let mut block_manager = block_manager.await;
+            block_manager.load_block(block_id).await.unwrap();
+            assert!(block_manager.block_cache.get_read(&block_id).is_some());
+
+            block_manager.mark_block_corrupted(block_id).await.unwrap();
+
+            assert!(block_manager.is_block_corrupted(block_id));
+            assert!(block_manager.block_cache.get_read(&block_id).is_none());
         }
 
         #[rstest]
@@ -1398,9 +1434,10 @@ mod tests {
                 ErrorCode::InternalServerError
             );
             assert!(
-                block_manager.index().get_block(block_id).is_none(),
-                "we removed the block descriptor file"
+                block_manager.index().get_block(block_id).is_some(),
+                "corrupted blocks remain in the index for quota cleanup"
             );
+            assert!(block_manager.is_block_corrupted(block_id));
         }
     }
 

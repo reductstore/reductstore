@@ -6,7 +6,6 @@ use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::Record;
-use async_trait::async_trait;
 use bytes::Bytes;
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
@@ -182,7 +181,6 @@ impl Seek for RecordReader {
     }
 }
 
-#[async_trait]
 impl ReadRecord for RecordReader {
     fn read_chunk(&mut self) -> ReadChunk {
         let mut buf =
@@ -260,6 +258,7 @@ pub(crate) mod tests {
 
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::tests::{entry, write_record, write_stub_record};
+    use async_trait::async_trait;
     use mockall::mock;
     use rstest::{fixture, rstest};
 

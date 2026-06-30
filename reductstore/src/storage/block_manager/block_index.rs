@@ -35,6 +35,7 @@ impl Into<BlockEntry> for MinimalBlock {
             latest_record_time: self.latest_record_time,
             crc64: None,
             compression: None,
+            corrupted: None,
         }
     }
 }
@@ -49,6 +50,7 @@ impl Into<BlockEntry> for BlockProto {
             latest_record_time: self.latest_record_time,
             crc64: None,
             compression: None,
+            corrupted: None,
         }
     }
 }
@@ -63,6 +65,7 @@ impl Into<BlockEntry> for Block {
             latest_record_time: Some(us_to_ts(&self.latest_record_time())),
             crc64: None,
             compression: None,
+            corrupted: None,
         }
     }
 }
@@ -122,6 +125,38 @@ impl BlockIndex {
         self.index.remove(&block_id);
 
         block
+    }
+
+    pub fn is_corrupted(&self, block_id: u64) -> bool {
+        self.index_info
+            .get(&block_id)
+            .is_some_and(|block| block.corrupted == Some(true))
+    }
+
+    pub fn mark_corrupted(&mut self, block_id: u64) {
+        if let Some(block) = self.index_info.get_mut(&block_id) {
+            block.corrupted = Some(true);
+        }
+    }
+
+    pub fn corrupted_block_count(&self) -> usize {
+        self.corrupted_block_ids().len()
+    }
+
+    pub fn corrupted_block_ids(&self) -> Vec<u64> {
+        self.index
+            .iter()
+            .copied()
+            .filter(|block_id| self.is_corrupted(*block_id))
+            .collect()
+    }
+
+    pub fn active_tree(&self) -> BTreeSet<u64> {
+        self.index
+            .iter()
+            .copied()
+            .filter(|block_id| !self.is_corrupted(*block_id))
+            .collect()
     }
 
     pub async fn try_load(path: PathBuf) -> Result<Self, ReductError> {
@@ -185,6 +220,10 @@ impl BlockIndex {
                 crc.write(&crc64.to_be_bytes());
             }
 
+            if let Some(corrupted) = block.corrupted {
+                crc.write(&(corrupted as u8).to_be_bytes());
+            }
+
             block_index.index.insert(block.block_id);
             block_index.index_info.insert(block.block_id, block);
         });
@@ -217,6 +256,7 @@ impl BlockIndex {
                 block_entry.latest_record_time = block.latest_record_time;
                 block_entry.crc64 = block.crc64;
                 block_entry.compression = block.compression;
+                block_entry.corrupted = block.corrupted;
                 block_entry
             })
             .collect();
@@ -231,6 +271,10 @@ impl BlockIndex {
 
             if let Some(crc64) = block.crc64 {
                 crc.write(&crc64.to_be_bytes());
+            }
+
+            if let Some(corrupted) = block.corrupted {
+                crc.write(&(corrupted as u8).to_be_bytes());
             }
         });
 
@@ -313,6 +357,7 @@ mod tests {
                     latest_record_time: Some(Timestamp::default()),
                     crc64: None,
                     compression: None,
+                    corrupted: None,
                 }],
                 crc64: 294433432134063049,
             };
@@ -350,6 +395,7 @@ mod tests {
                     latest_record_time: Some(Timestamp::default()),
                     crc64: None,
                     compression: None,
+                    corrupted: None,
                 }],
                 crc64: 0,
             };
@@ -390,6 +436,7 @@ mod tests {
                 latest_record_time: Some(Timestamp::default()),
                 crc64: None,
                 compression: None,
+                corrupted: None,
             });
 
             block_index.save().await.unwrap();
@@ -398,6 +445,36 @@ mod tests {
             assert_eq!(block_index_proto.size(), 2);
             assert_eq!(block_index_proto.record_count(), 1);
             assert_eq!(block_index_proto.tree().len(), 1);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_corrupted_round_trip() {
+            let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
+
+            let mut block_index = BlockIndex::new(path.clone());
+            block_index.insert_or_update(BlockEntry {
+                block_id: 1,
+                size: 1,
+                record_count: 1,
+                metadata_size: 1,
+                latest_record_time: Some(Timestamp::default()),
+                crc64: None,
+                compression: None,
+                corrupted: None,
+            });
+            block_index.mark_corrupted(1);
+
+            assert!(block_index.is_corrupted(1));
+            assert_eq!(block_index.corrupted_block_count(), 1);
+            assert_eq!(block_index.corrupted_block_ids(), vec![1]);
+
+            block_index.save().await.unwrap();
+
+            let block_index = BlockIndex::try_load(path).await.unwrap();
+            assert!(block_index.is_corrupted(1));
+            assert_eq!(block_index.corrupted_block_count(), 1);
+            assert_eq!(block_index.corrupted_block_ids(), vec![1]);
         }
     }
 }

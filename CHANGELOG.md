@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Persist corrupted blocks in the storage index and skip them during active lifecycle, query, read, write, and compression operations, [PR-1494](https://github.com/reductstore/reductstore/pull/1494)
 - Keep read-only replica buckets visible when transient cached block state prevents entry restore or reads, [PR-1492](https://github.com/reductstore/reductstore/pull/1492)
 - Remove redundant `error_code` and `error_message` fields from newly written `lifecycle_run` diagnostics and keep top-level `status` / `message` as the canonical failure metadata, [PR-1491](https://github.com/reductstore/reductstore/pull/1491)
 

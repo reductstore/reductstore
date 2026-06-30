@@ -86,6 +86,7 @@ message BlockIndex {
     google.protobuf.Timestamp latest_record_time = 5;  // the timestamp of the latest record
     optional uint64 crc64 = 6;  // integrity check for a block
     optional CompressionAlgorithm compression = 7;  // compression algorithm for data and descriptor files
+    optional bool corrupted = 8;  // block data/descriptor is damaged
   }
 
   repeated Block blocks = 1;

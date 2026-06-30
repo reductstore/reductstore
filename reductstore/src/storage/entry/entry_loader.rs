@@ -151,6 +151,17 @@ impl EntryLoader {
 
         {
             let bm = entry.block_manager.read().await?;
+            let corrupted_blocks = bm.index().corrupted_block_ids();
+            if !corrupted_blocks.is_empty() {
+                warn!(
+                    "Entry `{}/{}` has {} corrupted block(s): {:?}. Run diagnostics or allow FIFO quota to reclaim space.",
+                    entry.bucket_name,
+                    entry.name,
+                    bm.index().corrupted_block_count(),
+                    corrupted_blocks
+                );
+            }
+
             debug!(
                 "Restored entry `{}` in {}ms: size={}, records={}",
                 entry.name,

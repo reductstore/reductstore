@@ -216,16 +216,15 @@ impl Entry {
 
         let bm = self.block_manager.read().await?;
         let index = bm.index();
-        let oldest_record = index
-            .tree()
+        let active_tree = index.active_tree();
+        let oldest_record = active_tree
             .iter()
             .find_map(|block_id| {
                 let block = index.get_block(*block_id)?;
                 (block.record_count > 0).then_some(*block_id)
             })
             .unwrap_or(0);
-        let latest_record = index
-            .tree()
+        let latest_record = active_tree
             .iter()
             .rev()
             .find_map(|block_id| {
