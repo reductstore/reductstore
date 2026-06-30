@@ -619,7 +619,7 @@ mod tests {
             let info = entry.info().await.unwrap();
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
-            assert_eq!(info.size, 88);
+            assert_eq!(info.size, 90);
         }
     }
 
@@ -1002,7 +1002,7 @@ mod tests {
 
             assert_eq!(entry.info().await.unwrap().block_count, 2);
             assert_eq!(entry.info().await.unwrap().record_count, 4);
-            assert_eq!(entry.info().await.unwrap().size, 138);
+            assert_eq!(entry.info().await.unwrap().size, 140);
 
             entry.try_remove_oldest_block().await.unwrap();
             assert_eq!(entry.info().await.unwrap().block_count, 1);

@@ -556,7 +556,7 @@ impl EntryLoader {
 mod tests {
     use crate::storage::block_manager::wal::{create_wal, WalEntry};
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
-    use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
+    use crate::storage::proto::{record, us_to_ts, Block, BlockIndex as BlockIndexProto, Record};
     use std::fs;
     use std::io::SeekFrom;
 
@@ -622,7 +622,7 @@ mod tests {
         let info = entry.info().await.unwrap();
         assert_eq!(entry.name, "entry");
         assert_eq!(info.record_count, 2);
-        assert_eq!(info.size, 88);
+        assert_eq!(info.size, 90);
 
         let mut rec = entry.begin_read(1).await.unwrap();
         assert_eq!(rec.meta().timestamp(), 1);
@@ -936,10 +936,57 @@ mod tests {
             BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
 
         assert_eq!(block_index.blocks.len(), 1);
-        assert_eq!(block_index.crc64, 4579043244124502122);
+        assert_eq!(block_index.crc64, 14511237322380062442);
         assert_eq!(block_index.blocks[0].block_id, 1);
         assert_eq!(block_index.blocks[0].size, 20);
         assert_eq!(block_index.blocks[0].record_count, 2);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_restore_carries_descriptor_version_and_corrupted_flag(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let entry_path = path.join(entry.name());
+        FILE_CACHE
+            .remove(&entry_path.join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap();
+
+        let meta_path = entry_path.join("1.meta");
+        let mut block = Block::decode(Bytes::from(fs::read(&meta_path).unwrap())).unwrap();
+        block.version = Some(5);
+        block.corrupted = Some(true);
+        fs::write(&meta_path, block.encode_to_vec()).unwrap();
+
+        EntryLoader::restore_entry(
+            entry_path.clone(),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let block_index = BlockIndexProto::decode(Bytes::from(
+            fs::read(entry_path.join(BLOCK_INDEX_FILE)).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(block_index.blocks[0].version, Some(5));
+        assert_eq!(block_index.blocks[0].corrupted, Some(true));
     }
 
     #[rstest]
@@ -1123,6 +1170,8 @@ mod tests {
             size: 1,
             record_count: 1,
             metadata_size: 0,
+            version: None,
+            corrupted: None,
         };
         fs::write(entry_path.join("1.meta"), block.encode_to_vec()).unwrap();
         fs::write(entry_path.join("1.blk"), b"a").unwrap();

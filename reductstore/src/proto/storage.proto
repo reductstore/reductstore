@@ -58,6 +58,8 @@ message Block {
   // bool invalid = 5;                               // DEPRECATED: mark block as invalid if some IO happened
   uint64 record_count = 6;                       // number of records in the block
   uint64 metadata_size = 7;                       // size of metadata in bytes
+  optional uint64 version = 8;                    // logical version counter, incremented on every save
+  optional bool corrupted = 9;                    // block data/descriptor is damaged
 }
 
 // Represents a minimal block of records with no records
@@ -69,6 +71,8 @@ message MinimalBlock {
   // bool invalid = 5;                               // DEPRECATED: mark block as invalid if some IO happened
   uint64 record_count = 6;                       // number of records in the block
   uint64 metadata_size = 7;                       // size of metadata in bytes
+  optional uint64 version = 8;                    // logical version counter, incremented on every save
+  optional bool corrupted = 9;                    // block data/descriptor is damaged
 }
 
 // Represents a block index for an entry
@@ -87,6 +91,7 @@ message BlockIndex {
     optional uint64 crc64 = 6;  // integrity check for a block
     optional CompressionAlgorithm compression = 7;  // compression algorithm for data and descriptor files
     optional bool corrupted = 8;  // block data/descriptor is damaged
+    optional uint64 version = 9;  // version counter from descriptor
   }
 
   repeated Block blocks = 1;
