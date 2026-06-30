@@ -286,16 +286,16 @@ impl Bucket {
     ) {
         let recovered_entry = match entry.settings().await {
             Ok(settings) => {
-                Entry::restore_with_limiter(
-                    path,
-                    entry_name.to_string(),
-                    bucket_name.to_string(),
-                    settings,
-                    cfg,
-                    io_limiter,
-                    usage_counters,
-                )
-                .await
+                Entry::builder()
+                    .path(path)
+                    .name(entry_name)
+                    .bucket_name(bucket_name)
+                    .settings(settings)
+                    .cfg(cfg)
+                    .io_limiter(io_limiter)
+                    .usage_counters(usage_counters)
+                    .restore()
+                    .await
             }
             Err(err) => Err(err),
         };
@@ -856,7 +856,13 @@ mod tests {
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
-            Bucket::try_build("test", &path, settings, Cfg::default(), Default::default())
+            Bucket::builder()
+                .name("test")
+                .data_path(path)
+                .settings(settings)
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .build()
                 .await
                 .unwrap(),
         )

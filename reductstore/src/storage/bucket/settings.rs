@@ -153,7 +153,11 @@ mod tests {
         let bucket = bucket.await;
         assert_eq!(bucket.settings().await.unwrap(), settings);
 
-        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default(), Default::default())
+        let bucket = Bucket::builder()
+            .path(bucket.path.clone())
+            .cfg(Cfg::default())
+            .usage_counters(Default::default())
+            .restore()
             .await
             .unwrap();
         assert_eq!(bucket.name(), "test");
@@ -264,7 +268,11 @@ mod tests {
             .await
             .unwrap();
         bucket.set_settings(Bucket::defaults()).await.unwrap();
-        let bucket = Bucket::restore(bucket.path.clone(), Cfg::default(), Default::default())
+        let bucket = Bucket::builder()
+            .path(bucket.path.clone())
+            .cfg(Cfg::default())
+            .usage_counters(Default::default())
+            .restore()
             .await
             .unwrap();
         assert_eq!(bucket.settings().await.unwrap(), Bucket::defaults());

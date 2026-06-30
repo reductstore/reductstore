@@ -13,6 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add a replication `dst_prefix` setting to write replicated records under a destination entry prefix, [PR-1486](https://github.com/reductstore/reductstore/pull/1486) by @rohankumardubey
 - Capture the instance's own log messages to `$system/logs/<instance>/messages` as system events with a `level` severity label, configurable via `RS_SYSTEM_EVENTS_LOG_LEVEL` (default `WARN`, `OFF` to disable), [PR-1481](https://github.com/reductstore/reductstore/pull/1481) by @DibbayajyotiRoy
 
+## 1.20.7 - 2026-06-30
+
+### Fixed
+
+- Distinguish stale block indexes from corrupted descriptors by persisting block descriptor versions and corruption flags, [PR-1495](https://github.com/reductstore/reductstore/pull/1495)
+- Persist corrupted blocks in the storage index and skip them during active lifecycle, query, read, write, and compression operations, [PR-1494](https://github.com/reductstore/reductstore/pull/1494)
+- Keep read-only replica buckets visible when transient cached block state prevents entry restore or reads, [PR-1492](https://github.com/reductstore/reductstore/pull/1492)
+- Remove redundant `error_code` and `error_message` fields from newly written `lifecycle_run` diagnostics and keep top-level `status` / `message` as the canonical failure metadata, [PR-1491](https://github.com/reductstore/reductstore/pull/1491)
+
 ## 1.20.6 - 2026-06-25
 
 ### Fixed

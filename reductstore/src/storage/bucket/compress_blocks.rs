@@ -84,7 +84,11 @@ mod tests {
         write(&bucket, "entry-c", 3, b"c1").await.unwrap();
         bucket.sync_fs().await.unwrap();
         let bucket = Arc::new(
-            Bucket::restore(bucket.path.clone(), Cfg::default(), Default::default())
+            Bucket::builder()
+                .path(bucket.path.clone())
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .restore()
                 .await
                 .unwrap(),
         );
@@ -136,7 +140,11 @@ mod tests {
             .unwrap();
         bucket.sync_fs().await.unwrap();
         let bucket = Arc::new(
-            Bucket::restore(bucket.path.clone(), Cfg::default(), Default::default())
+            Bucket::builder()
+                .path(bucket.path.clone())
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .restore()
                 .await
                 .unwrap(),
         );
