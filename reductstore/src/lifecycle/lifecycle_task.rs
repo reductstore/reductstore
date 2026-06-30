@@ -2,10 +2,10 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::lifecycle::action::{LifecycleAction, LifecycleContext, LifecycleRunResult};
-use crate::lifecycle::system_event_payload::LifecycleSystemEventPayload;
-use crate::syslog::SystemEvent;
+use crate::syslog::payload::lifecycle::LifecycleSystemEventPayload;
+use crate::syslog::{SystemEvent, SystemEventKind};
 
-use crate::lifecycle::SystemEventSink;
+use crate::syslog::SystemEventSink;
 use chrono::{DateTime, Utc};
 use log::{debug, error};
 use reduct_base::error::ReductError;
@@ -264,6 +264,7 @@ impl LifecycleTask {
         };
 
         let event = SystemEvent {
+            kind: SystemEventKind::Lifecycle,
             event_type: "lifecycle_run".to_string(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)

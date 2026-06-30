@@ -1,22 +1,66 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::audit::ApiAuditPayload;
+use super::{AGGREGATION_WINDOW_SECS, FORCE_FLUSH_TIMEOUT_SECS};
 use crate::core::sync::AsyncRwLock;
-use crate::syslog::{SystemEvent, SystemEventAggregator, SystemEventHandler};
+use crate::syslog::payload::audit::ApiAuditPayload;
+use crate::syslog::{BoxedSystemLogger, LogSystemEvent, SystemEvent, SystemEventKind};
+use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::collections::HashMap;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Mutex};
 use tokio::time::{Duration, Instant};
 
-#[cfg(not(test))]
-pub(crate) const AGGREGATION_WINDOW_SECS: u64 = 5;
-#[cfg(test)]
-pub(crate) const AGGREGATION_WINDOW_SECS: u64 = 1;
-pub(crate) const FORCE_FLUSH_TIMEOUT_SECS: u64 = 60;
 pub(crate) const AUDIT_CHANNEL_SIZE: usize = 1024;
+
+/// Future returned by a [`SystemEventHandler`] flush callback.
+pub(crate) type SystemEventFlushFuture =
+    Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>;
+/// Callback the audit aggregator invokes to persist a flushed event through the
+/// shared system logger.
+pub(crate) type SystemEventHandler =
+    Arc<dyn Fn(SystemEvent) -> SystemEventFlushFuture + Send + Sync>;
+
+/// The aggregating front-end an audit producer logs into. Only the API audit
+/// aggregator implements it: it batches `api_call` events in a background
+/// worker and flushes them through the handler.
+#[async_trait]
+pub(crate) trait SystemEventAggregator: Send + Sync {
+    async fn log_event(&self, event: SystemEvent) -> Result<(), ReductError>;
+}
+
+pub(crate) type BoxedSystemEventAggregator = Box<dyn SystemEventAggregator + Send + Sync>;
+
+/// Wrap an already-built `$system` writer into the aggregated audit logger: a
+/// `LogSystemEvent` that funnels `api_call` events through the batching worker
+/// and persists flushed events through `inner`.
+pub(crate) fn aggregated_audit_logger(inner: BoxedSystemLogger) -> BoxedSystemLogger {
+    let system_logger = Arc::new(Mutex::new(inner));
+    let handler: SystemEventHandler = Arc::new(move |event| {
+        let system_logger = Arc::clone(&system_logger);
+        Box::pin(async move { system_logger.lock().await.log_event(event).await })
+    });
+
+    Box::new(AggregatedAuditLogger {
+        aggregator: Box::new(ApiAuditEventAggregator::new(handler)),
+    })
+}
+
+/// `LogSystemEvent` adapter over the audit aggregator.
+struct AggregatedAuditLogger {
+    aggregator: BoxedSystemEventAggregator,
+}
+
+#[async_trait]
+impl LogSystemEvent for AggregatedAuditLogger {
+    async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError> {
+        self.aggregator.log_event(event).await
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) struct AuditAggregateKey {
@@ -55,6 +99,7 @@ pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> S
     };
 
     SystemEvent {
+        kind: SystemEventKind::Audit,
         event_type: "api_call".to_string(),
         timestamp: aggregate.first_timestamp,
         instance: key.instance,
@@ -265,6 +310,7 @@ mod tests {
         };
 
         SystemEvent {
+            kind: SystemEventKind::Audit,
             event_type: "api_call".to_string(),
             timestamp,
             instance: "instance-a".to_string(),
@@ -583,6 +629,7 @@ mod tests {
         let (tx, rx) = mpsc::channel(4);
 
         tx.send(SystemEvent {
+            kind: SystemEventKind::Lifecycle,
             event_type: "lifecycle_run".to_string(),
             timestamp: 1,
             instance: "instance-a".to_string(),

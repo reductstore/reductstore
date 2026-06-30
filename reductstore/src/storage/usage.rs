@@ -1,19 +1,14 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-//! Periodic usage statistics emitted as `$system` events.
+//! Usage traffic counters, snapshots and the drain API.
 //!
 //! Traffic is counted at the storage IO choke points — all writes at
 //! `RecordWriter` creation and all reads at `RecordReader` creation — so
-//! external, replication and Zenoh traffic count uniformly.
-//! [`UsageEventAggregator`] owns a background task that drains the counters
-//! every [`usage_aggregator::USAGE_FLUSH_INTERVAL`] and writes one flat-JSON
-//! event per instance to `$system/usage/<instance>/total`.
-
-mod usage_aggregator;
-mod usage_event_payload;
-
-pub(crate) use usage_aggregator::UsageEventAggregator;
+//! external, replication and Zenoh traffic count uniformly. The counters live
+//! here (next to the choke points that increment them); the periodic flush
+//! worker that drains them and emits `$system` events lives in
+//! `crate::syslog::aggregate::usage`.
 
 use crate::core::sync::AsyncRwLock;
 use reduct_base::error::ReductError;

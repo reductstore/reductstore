@@ -3,8 +3,9 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds, ProvisionedLifecycle};
 use crate::core::env::{Env, GetEnv};
-use crate::lifecycle::{LifecycleRepoBuilder, ManageLifecycles, SystemEventSink};
+use crate::lifecycle::{LifecycleRepoBuilder, ManageLifecycles};
 use crate::storage::engine::StorageEngine;
+use crate::syslog::SystemEventSink;
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::lifecycle_api::{LifecycleMode, LifecycleSettings, LifecycleType};

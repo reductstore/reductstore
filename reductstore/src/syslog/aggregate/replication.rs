@@ -15,10 +15,9 @@
 //! the single-threaded replication worker loop. It emits straight through the
 //! [`SystemEventSink`], the same way the lifecycle module does.
 
-use crate::api::audit::aggregator::{AGGREGATION_WINDOW_SECS, FORCE_FLUSH_TIMEOUT_SECS};
-use crate::lifecycle::SystemEventSink;
-use crate::replication::replication_event_payload::ReplicationSystemEventPayload;
-use crate::syslog::SystemEvent;
+use super::{AGGREGATION_WINDOW_SECS, FORCE_FLUSH_TIMEOUT_SECS};
+use crate::syslog::payload::replication::ReplicationSystemEventPayload;
+use crate::syslog::{SystemEvent, SystemEventKind, SystemEventSink};
 use log::error;
 use reduct_base::error::ReductError;
 use std::collections::BTreeMap;
@@ -69,6 +68,7 @@ fn make_event(
     };
 
     SystemEvent {
+        kind: SystemEventKind::Replication,
         event_type: REPLICATION_EVENT_TYPE.to_string(),
         timestamp: aggregate.first_timestamp,
         instance: instance.to_string(),
@@ -80,7 +80,7 @@ fn make_event(
 }
 
 /// Per-task replication diagnostics aggregator.
-pub(super) struct ReplicationEventAggregator {
+pub(crate) struct ReplicationEventAggregator {
     sink: SystemEventSink,
     replication_name: String,
     active: Option<ReplicationAggregate>,
@@ -88,7 +88,7 @@ pub(super) struct ReplicationEventAggregator {
 }
 
 impl ReplicationEventAggregator {
-    pub(super) fn new(sink: SystemEventSink, replication_name: String) -> Self {
+    pub(crate) fn new(sink: SystemEventSink, replication_name: String) -> Self {
         Self {
             sink,
             replication_name,
@@ -109,7 +109,7 @@ impl ReplicationEventAggregator {
     /// swallowed and logged. The pass `duration` is attributed once, to the
     /// lowest-status observation, so it is never double-counted when a single
     /// pass produces several status codes.
-    pub(super) async fn record_pass(
+    pub(crate) async fn record_pass(
         &mut self,
         pending_records: u64,
         duration: f64,
@@ -189,7 +189,7 @@ impl ReplicationEventAggregator {
     /// Flush the open bucket if its idle window elapsed (condition 2) or it hit
     /// the time cap (condition 3). Called every worker iteration so an idle
     /// bucket is flushed even when no new records arrive.
-    pub(super) async fn flush_if_due(&mut self) {
+    pub(crate) async fn flush_if_due(&mut self) {
         let now = Instant::now();
         if self
             .active
@@ -201,7 +201,7 @@ impl ReplicationEventAggregator {
     }
 
     /// Emit the open bucket (if any) as a `$system` event and clear it.
-    pub(super) async fn flush(&mut self) {
+    pub(crate) async fn flush(&mut self) {
         let Some(aggregate) = self.active.take() else {
             return;
         };
