@@ -129,8 +129,30 @@ impl BlockManager {
         let data_path = self.path_to_data(block_id);
         let desc_path = self.path_to_desc(block_id);
 
-        decompress_file_zstd(&compressed_data_path, &data_path).await?;
-        decompress_file_zstd(&compressed_desc_path, &desc_path).await?;
+        if let Err(err) = decompress_file_zstd(&compressed_data_path, &data_path).await {
+            if let Err(mark_err) = self.mark_block_corrupted(block_id).await {
+                log::error!(
+                    "Failed to mark block {}/{}/{} as corrupted after decompression error: {}",
+                    self.bucket_name(),
+                    self.entry_name(),
+                    block_id,
+                    mark_err
+                );
+            }
+            return Err(err);
+        }
+        if let Err(err) = decompress_file_zstd(&compressed_desc_path, &desc_path).await {
+            if let Err(mark_err) = self.mark_block_corrupted(block_id).await {
+                log::error!(
+                    "Failed to mark block {}/{}/{} as corrupted after decompression error: {}",
+                    self.bucket_name(),
+                    self.entry_name(),
+                    block_id,
+                    mark_err
+                );
+            }
+            return Err(err);
+        }
 
         FILE_CACHE.remove(&compressed_data_path).await?;
         FILE_CACHE.remove(&compressed_desc_path).await?;

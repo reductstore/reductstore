@@ -75,10 +75,11 @@ impl Entry {
             let mut bm = self.block_manager.write().await?;
             // When we write, the likely case is that we are writing the latest record
             // in the entry. In this case, we can just append to the latest block.
-            let block_ref = if bm.index().tree().is_empty() {
+            let active_index_tree = bm.index().active_tree();
+            let block_ref = if active_index_tree.is_empty() {
                 bm.start_new_block(time, settings.max_block_size).await?
             } else {
-                let block_id = *bm.index().tree().last().unwrap();
+                let block_id = *active_index_tree.last().unwrap();
                 if bm.block_is_compressed(block_id) {
                     bm.decompress_block(block_id).await?;
                 }
@@ -99,7 +100,7 @@ impl Entry {
                 );
                 // The timestamp is belated. We need to find the proper block to write to.
                 let mut bm = self.block_manager.write().await?;
-                let index_tree = bm.index().tree();
+                let index_tree = bm.index().active_tree();
                 let record_type = if *index_tree.first().unwrap() > time {
                     // The timestamp is the earliest. We need to create a new block.
                     debug!(

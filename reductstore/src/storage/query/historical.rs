@@ -164,7 +164,7 @@ impl Query for HistoricalQuery {
                     Vec::new()
                 } else {
                     bm.index()
-                        .tree()
+                        .active_tree()
                         .range(first_block..self.stop_time)
                         .map(|k| *k)
                         .collect::<Vec<u64>>()
@@ -449,6 +449,27 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.meta().timestamp(), 0);
         assert_eq!(records[1].0.meta().timestamp(), 5);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_skips_corrupted_block(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        block_manager
+            .write()
+            .await
+            .unwrap()
+            .mark_block_corrupted(0)
+            .await
+            .unwrap();
+
+        let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
+        let records = read_to_vector(&mut query, block_manager).await;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].0.meta().timestamp(), 1000);
     }
 
     #[rstest]
