@@ -325,7 +325,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_read_chunk_marks_block_corrupted_on_eof(#[future] entry: Arc<Entry>) {
+    async fn test_read_chunk_eof_does_not_mark_block_corrupted(#[future] entry: Arc<Entry>) {
         let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         let mut reader = entry.begin_read(1000000).await.unwrap();
@@ -346,7 +346,7 @@ mod tests {
             err.status(),
             reduct_base::error::ErrorCode::InternalServerError
         );
-        assert!(entry
+        assert!(!entry
             .block_manager
             .read()
             .await

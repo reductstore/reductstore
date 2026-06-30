@@ -6,9 +6,7 @@ use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::Record;
-use async_trait::async_trait;
 use bytes::Bytes;
-use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
 use reduct_base::{internal_server_error, not_found, too_early};
@@ -27,8 +25,6 @@ pub(crate) struct RecordReader {
     offset: u64,
     content_size: u64,
     pos: u64,
-    block_manager: Option<Arc<AsyncRwLock<BlockManager>>>,
-    block_id: Option<u64>,
     _permit: Option<OwnedSemaphorePermit>,
 }
 
@@ -57,7 +53,6 @@ impl RecordReader {
         let bm = block_manager.read().await?;
         let block = block_ref.read().await?;
 
-        let block_id = block.block_id();
         let (file_path, offset) = bm.begin_read_record(&block, record_timestamp).await?;
 
         let record = block.get_record(record_timestamp).unwrap();
@@ -99,8 +94,6 @@ impl RecordReader {
             offset,
             content_size,
             pos: 0,
-            block_manager: Some(Arc::clone(&block_manager)),
-            block_id: Some(block_id),
             _permit: permit,
         })
     }
@@ -127,30 +120,7 @@ impl RecordReader {
             offset: 0,
             content_size: 0,
             pos: 0,
-            block_manager: None,
-            block_id: None,
             _permit: None,
-        }
-    }
-
-    fn mark_current_block_corrupted(&self) {
-        let (Some(block_manager), Some(block_id)) = (&self.block_manager, self.block_id) else {
-            return;
-        };
-
-        let block_manager = Arc::clone(block_manager);
-        let result = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(async move {
-                block_manager
-                    .write()
-                    .await?
-                    .mark_block_corrupted(block_id)
-                    .await
-            })
-        });
-
-        if let Err(err) = result {
-            error!("Failed to mark block {} as corrupted: {}", block_id, err);
         }
     }
 
@@ -211,7 +181,6 @@ impl Seek for RecordReader {
     }
 }
 
-#[async_trait]
 impl ReadRecord for RecordReader {
     fn read_chunk(&mut self) -> ReadChunk {
         let mut buf =
@@ -221,23 +190,17 @@ impl ReadRecord for RecordReader {
         }
 
         match self.read(&mut buf) {
-            Ok(0) => {
-                self.mark_current_block_corrupted();
-                Some(Err(internal_server_error!(
-                    "Failed to read record chunk: EOF"
-                )))
-            }
+            Ok(0) => Some(Err(internal_server_error!(
+                "Failed to read record chunk: EOF"
+            ))),
             Ok(n) => {
                 buf.truncate(n);
                 Some(Ok(Bytes::from(buf)))
             }
-            Err(e) => {
-                self.mark_current_block_corrupted();
-                Some(Err(internal_server_error!(
-                    "Failed to read record chunk: {}",
-                    e
-                )))
-            }
+            Err(e) => Some(Err(internal_server_error!(
+                "Failed to read record chunk: {}",
+                e
+            ))),
         }
     }
 
@@ -295,6 +258,7 @@ pub(crate) mod tests {
 
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::tests::{entry, write_record, write_stub_record};
+    use async_trait::async_trait;
     use mockall::mock;
     use rstest::{fixture, rstest};
 
