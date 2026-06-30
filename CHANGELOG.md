@@ -7,6 +7,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+## 1.20.7 - 2026-06-30
+
 ### Fixed
 
 - Distinguish stale block indexes from corrupted descriptors by persisting block descriptor versions and corruption flags, [PR-1495](https://github.com/reductstore/reductstore/pull/1495)
