@@ -378,10 +378,7 @@ mod tests {
 
         #[rstest]
         fn test_ok() {
-            let params = HashMap::from_iter(vec![
-                ("include-key".to_string(), "value".to_string()),
-                ("exclude-key".to_string(), "value".to_string()),
-            ]);
+            let params = HashMap::from_iter(vec![("exclude-key".to_string(), "value".to_string())]);
             let exclude = parse_include_exclude_filters(&params);
             assert_eq!(
                 exclude,
