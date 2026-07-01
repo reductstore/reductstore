@@ -539,8 +539,10 @@ mod tests {
         assert!(!object.contains_key("error_message"));
     }
 
-    /// CHARACTERIZATION: the error-path lifecycle record. `error_code` and
-    /// `error_message` are present and `last_processed_ts` is absent.
+    /// CHARACTERIZATION: the error-path lifecycle record. Failure metadata is
+    /// carried by the top-level `status`/`message` (per PR-1491); the payload
+    /// no longer carries `error_code`/`error_message`, and `last_processed_ts`
+    /// is absent.
     #[tokio::test(flavor = "multi_thread")]
     async fn lifecycle_error_persisted_record_keyset() {
         use crate::syslog::payload::lifecycle::LifecycleSystemEventPayload;
@@ -549,8 +551,7 @@ mod tests {
         let mut logger = build_system_logger(&cfg, Arc::clone(&storage)).await;
 
         let payload =
-            LifecycleSystemEventPayload::error("policy-1", "delete", "bucket-1", 0.25, 404, "boom")
-                .to_value();
+            LifecycleSystemEventPayload::error("policy-1", "delete", "bucket-1", 0.25).to_value();
         logger
             .log_event(lifecycle_system_event(payload, 404, "boom"))
             .await
@@ -577,8 +578,6 @@ mod tests {
                 "bucket",
                 "caught_up",
                 "duration",
-                "error_code",
-                "error_message",
                 "instance",
                 "message",
                 "policy_name",
@@ -594,10 +593,11 @@ mod tests {
         assert_eq!(event["processed_records"], 0);
         assert_eq!(event["processed_blocks"], 0);
         assert_eq!(event["caught_up"], false);
+        // Failure metadata is now the top-level status/message.
         assert_eq!(event["status"], 404);
-        assert_eq!(event["error_code"], 404);
-        assert_eq!(event["error_message"], "boom");
         assert_eq!(event["message"], "boom");
+        assert!(!object.contains_key("error_code"));
+        assert!(!object.contains_key("error_message"));
         assert!(!object.contains_key("last_processed_ts"));
     }
 }
