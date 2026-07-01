@@ -145,12 +145,5 @@ async fn write_audit_event(
         payload: payload.to_value(),
     };
 
-    match components.audit_logger.write().await {
-        Ok(mut audit_logger) => {
-            if let Err(err) = audit_logger.log_event(event).await {
-                debug!("Failed to persist audit event: {}", err);
-            }
-        }
-        Err(err) => debug!("Failed to lock audit repository: {}", err),
-    }
+    components.system_events.capture_audit_event(event).await;
 }

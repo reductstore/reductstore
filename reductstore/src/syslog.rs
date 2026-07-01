@@ -16,10 +16,13 @@ use crate::cfg::Cfg;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::engine::StorageEngine;
 use crate::storage::usage::UsageCounters;
+use aggregate::audit::BoxedSystemEventAggregator;
 use async_trait::async_trait;
+use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 pub(crate) use aggregate::usage::UsageEventAggregator;
 pub(crate) use event::{SystemEvent, SystemEventKind};
@@ -36,6 +39,9 @@ pub(crate) const SYSTEM_LOGS_ENTRY_PREFIX: &str = "logs";
 
 pub(crate) use capture::logs::LogCapture;
 
+/// Test-only: build a standalone aggregated audit logger. Production routes
+/// audit events through the single [`SystemEventLogger`] collector.
+#[cfg(test)]
 pub(crate) async fn build_audit_logger(
     cfg: &Cfg,
     storage: Arc<StorageEngine>,
@@ -52,6 +58,9 @@ pub(crate) async fn build_audit_logger(
     }
 }
 
+/// Build the generic `$system` writer (local on primary/standalone, forward on
+/// a read-only replica). This is the one shared writer the collector fans every
+/// family through; also used directly by the lifecycle characterization tests.
 pub(crate) async fn build_system_logger(
     cfg: &Cfg,
     storage: Arc<StorageEngine>,
@@ -65,6 +74,8 @@ pub(crate) async fn build_system_logger(
         .expect("system logger must build")
 }
 
+/// Test-only: standalone replication `$system` writer.
+#[cfg(test)]
 pub(crate) async fn build_replication_system_logger(
     cfg: &Cfg,
     storage: Arc<StorageEngine>,
@@ -78,6 +89,8 @@ pub(crate) async fn build_replication_system_logger(
         .expect("replication system logger must build")
 }
 
+/// Test-only: standalone usage `$system` writer.
+#[cfg(test)]
 pub(crate) async fn build_usage_system_logger(
     cfg: &Cfg,
     storage: Arc<StorageEngine>,
@@ -91,28 +104,8 @@ pub(crate) async fn build_usage_system_logger(
         .expect("usage system logger must build")
 }
 
-/// Build the usage statistics aggregator: it owns the periodic task that drains
-/// the shared traffic `counters` (incremented by the storage engine) and writes
-/// usage events under `usage/<instance>/total`. Returns `None` when system
-/// events are disabled. The inner `$system` writer is built like the other
-/// loggers; the aggregator wraps it with the timer and snapshot logic.
-pub(crate) async fn build_usage_logger(
-    cfg: &Cfg,
-    storage: Arc<StorageEngine>,
-    counters: Arc<UsageCounters>,
-) -> Option<UsageEventAggregator> {
-    if !cfg.system_events_conf.enabled {
-        return None;
-    }
-
-    let inner = build_usage_system_logger(cfg, Arc::clone(&storage)).await;
-    let sink = SystemEventSink {
-        system_logger: Arc::new(AsyncRwLock::new(inner)),
-        instance_name: cfg.instance_name.clone(),
-    };
-    Some(UsageEventAggregator::new(sink, storage, counters))
-}
-
+/// Test-only: standalone logs `$system` writer.
+#[cfg(test)]
 pub(crate) async fn build_logs_system_logger(
     cfg: &Cfg,
     storage: Arc<StorageEngine>,
@@ -124,31 +117,6 @@ pub(crate) async fn build_logs_system_logger(
     SystemEventLoggerBuilder::new(SYSTEM_BUCKET_NAME, system_bucket_settings(cfg))
         .build(cfg, storage)
         .expect("logs system logger must build")
-}
-
-/// Build the log-capture component: it registers a global log sink and owns the
-/// consumer task that writes captured records under `logs/<instance>/messages`.
-/// Returns `None` when system events are disabled, no persist level is
-/// configured, or the instance is a replica (logs are node-local to avoid the
-/// replica forward-failure loop).
-pub(crate) async fn build_log_capture(
-    cfg: &Cfg,
-    storage: Arc<StorageEngine>,
-) -> Option<LogCapture> {
-    if !cfg.system_events_conf.enabled {
-        return None;
-    }
-    let persist_level = cfg.system_events_conf.log_level?;
-    if cfg.role == crate::cfg::InstanceRole::Replica {
-        return None;
-    }
-
-    let inner = build_logs_system_logger(cfg, Arc::clone(&storage)).await;
-    let sink = SystemEventSink {
-        system_logger: Arc::new(AsyncRwLock::new(inner)),
-        instance_name: cfg.instance_name.clone(),
-    };
-    Some(LogCapture::new(sink, persist_level, &cfg.log_level))
 }
 
 fn system_bucket_settings(cfg: &Cfg) -> BucketSettings {
@@ -163,8 +131,10 @@ fn system_bucket_settings(cfg: &Cfg) -> BucketSettings {
     }
 }
 
+#[cfg(test)]
 struct DisabledAuditLogger;
 
+#[cfg(test)]
 #[async_trait]
 impl LogSystemEvent for DisabledAuditLogger {
     async fn log_event(&mut self, _event: SystemEvent) -> Result<(), ReductError> {
@@ -179,6 +149,140 @@ impl LogSystemEvent for DisabledSystemLogger {
     async fn log_event(&mut self, _event: SystemEvent) -> Result<(), ReductError> {
         Ok(())
     }
+}
+
+/// The single system-event collector held by `Components`. It encapsulates
+/// every event producer (audit aggregator, usage timer, log capture) and the
+/// one shared `$system` writer they all fan through — local on a
+/// primary/standalone instance, forward on a read-only replica. A disabled
+/// instance is a no-op, so callers never need an `Option`.
+#[async_trait]
+pub(crate) trait SystemEventLogger: Send + Sync {
+    /// Capture one API audit event (batched and flushed in the background).
+    async fn capture_audit_event(&self, event: SystemEvent);
+
+    /// A writer handle over the shared logger, for the lifecycle and
+    /// replication producers that build their events inline. Points at the same
+    /// underlying writer as every other family.
+    fn sink(&self) -> SystemEventSink;
+
+    /// Stop the owned background tasks (usage timer, log capture), draining
+    /// their final events. Telemetry must never break shutdown.
+    async fn stop(&self);
+}
+
+/// No-op collector used when system events are disabled.
+struct DisabledSystemEventLogger {
+    instance_name: String,
+}
+
+#[async_trait]
+impl SystemEventLogger for DisabledSystemEventLogger {
+    async fn capture_audit_event(&self, _event: SystemEvent) {}
+
+    fn sink(&self) -> SystemEventSink {
+        SystemEventSink {
+            system_logger: Arc::new(AsyncRwLock::new(
+                Box::new(DisabledSystemLogger) as BoxedSystemLogger
+            )),
+            instance_name: self.instance_name.clone(),
+        }
+    }
+
+    async fn stop(&self) {}
+}
+
+/// The live collector: owns the shared writer and every aggregator/task.
+struct EnabledSystemEventLogger {
+    /// The one `$system` writer shared by every family.
+    writer: Arc<AsyncRwLock<BoxedSystemLogger>>,
+    instance_name: String,
+    /// Audit batching worker; its flush handler writes through `writer`.
+    audit: BoxedSystemEventAggregator,
+    /// Usage traffic timer (drops/drains on `stop`).
+    usage: Mutex<Option<UsageEventAggregator>>,
+    /// Log capture consumer + global sink registration. `None` on a replica or
+    /// when no persist level is configured.
+    log_capture: Mutex<Option<LogCapture>>,
+}
+
+#[async_trait]
+impl SystemEventLogger for EnabledSystemEventLogger {
+    async fn capture_audit_event(&self, event: SystemEvent) {
+        if let Err(err) = self.audit.log_event(event).await {
+            debug!("Failed to capture audit event: {}", err);
+        }
+    }
+
+    fn sink(&self) -> SystemEventSink {
+        SystemEventSink {
+            system_logger: Arc::clone(&self.writer),
+            instance_name: self.instance_name.clone(),
+        }
+    }
+
+    async fn stop(&self) {
+        if let Some(mut usage) = self.usage.lock().await.take() {
+            usage.stop().await;
+        }
+        if let Some(mut capture) = self.log_capture.lock().await.take() {
+            capture.stop().await;
+        }
+    }
+}
+
+/// Build the single system-event collector. When system events are disabled it
+/// is a no-op; otherwise it builds the one shared writer and wires every
+/// family's aggregator/task onto it.
+pub(crate) async fn build_system_event_logger(
+    cfg: &Cfg,
+    storage: Arc<StorageEngine>,
+    counters: Arc<UsageCounters>,
+) -> Arc<dyn SystemEventLogger + Send + Sync> {
+    if !cfg.system_events_conf.enabled {
+        return Arc::new(DisabledSystemEventLogger {
+            instance_name: cfg.instance_name.clone(),
+        });
+    }
+
+    let instance_name = cfg.instance_name.clone();
+    // One shared writer for every family.
+    let writer = Arc::new(AsyncRwLock::new(
+        build_system_logger(cfg, Arc::clone(&storage)).await,
+    ));
+
+    let audit = aggregate::audit::build_audit_aggregator(Arc::clone(&writer));
+
+    // Usage timer drains the shared traffic counters and writes through `writer`.
+    let usage = UsageEventAggregator::new(
+        SystemEventSink {
+            system_logger: Arc::clone(&writer),
+            instance_name: instance_name.clone(),
+        },
+        Arc::clone(&storage),
+        counters,
+    );
+
+    // Log capture is node-local: skip it on a replica (avoids the forward loop)
+    // and when no persist level is configured.
+    let log_capture = match cfg.system_events_conf.log_level {
+        Some(persist_level) if cfg.role != crate::cfg::InstanceRole::Replica => {
+            let sink = SystemEventSink {
+                system_logger: Arc::clone(&writer),
+                instance_name: instance_name.clone(),
+            };
+            Some(LogCapture::new(sink, persist_level, &cfg.log_level))
+        }
+        _ => None,
+    };
+
+    Arc::new(EnabledSystemEventLogger {
+        writer,
+        instance_name,
+        audit,
+        usage: Mutex::new(Some(usage)),
+        log_capture: Mutex::new(log_capture),
+    })
 }
 
 #[cfg(test)]

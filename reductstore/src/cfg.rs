@@ -32,12 +32,7 @@ use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLo
 use crate::ext::ext_repository::create_ext_repository;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use crate::storage::usage::UsageCounters;
-use crate::syslog::build_audit_logger;
-use crate::syslog::build_log_capture;
-use crate::syslog::build_replication_system_logger;
-use crate::syslog::build_system_logger;
-use crate::syslog::build_usage_logger;
-use crate::syslog::SystemEventSink;
+use crate::syslog::build_system_event_logger;
 use async_trait::async_trait;
 use log::{info, warn};
 use reduct_base::error::ReductError;
@@ -414,17 +409,13 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         );
         let token_repo = self.provision_tokens(&data_path, Arc::clone(&storage));
         let console = create_asset_manager(load_console());
-        let replication_system_logger =
-            build_replication_system_logger(&self.cfg, Arc::clone(&storage)).await;
-        let replication_system_logger = Arc::new(AsyncRwLock::new(replication_system_logger));
+        // One collector owns every aggregator/task and the single shared
+        // `$system` writer; lifecycle and replication emit through a handle
+        // (`sink()`) over that same writer.
+        let system_events =
+            build_system_event_logger(&self.cfg, Arc::clone(&storage), usage_counters).await;
         let replication_engine = self
-            .provision_replication_repo(
-                Arc::clone(&storage),
-                SystemEventSink {
-                    system_logger: Arc::clone(&replication_system_logger),
-                    instance_name: self.cfg.instance_name.clone(),
-                },
-            )
+            .provision_replication_repo(Arc::clone(&storage), system_events.sink())
             .await?;
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
@@ -444,25 +435,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .server_info(server_info.clone())
             .build();
         let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
-        let audit_logger = build_audit_logger(&self.cfg, Arc::clone(&storage)).await;
-        let audit_logger = Arc::new(AsyncRwLock::new(audit_logger));
-        let system_logger = build_system_logger(&self.cfg, Arc::clone(&storage)).await;
-        let system_logger = Arc::new(AsyncRwLock::new(system_logger));
 
         let lifecycle_engine = self
-            .provision_lifecycle_repo(
-                Arc::clone(&storage),
-                SystemEventSink {
-                    system_logger: Arc::clone(&system_logger),
-                    instance_name: self.cfg.instance_name.clone(),
-                },
-            )
+            .provision_lifecycle_repo(Arc::clone(&storage), system_events.sink())
             .await?;
-
-        let usage_stat_logger =
-            build_usage_logger(&self.cfg, Arc::clone(&storage), usage_counters).await;
-
-        let log_capture = build_log_capture(&self.cfg, Arc::clone(&storage)).await;
 
         Ok(Components {
             storage: Arc::clone(&storage),
@@ -482,12 +458,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),
-            audit_logger,
             limits: LimitsBuilder::new()
                 .with_config(self.cfg.limits_config)
                 .build(),
-            usage_stat_logger: AsyncRwLock::new(usage_stat_logger),
-            log_capture: AsyncRwLock::new(log_capture),
+            system_events,
             cfg: self.cfg.clone(),
         })
     }

@@ -4,7 +4,9 @@
 use super::{AGGREGATION_WINDOW_SECS, FORCE_FLUSH_TIMEOUT_SECS};
 use crate::core::sync::AsyncRwLock;
 use crate::syslog::payload::audit::ApiAuditPayload;
-use crate::syslog::{BoxedSystemLogger, LogSystemEvent, SystemEvent, SystemEventKind};
+#[cfg(test)]
+use crate::syslog::LogSystemEvent;
+use crate::syslog::{BoxedSystemLogger, SystemEvent, SystemEventKind};
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
@@ -12,7 +14,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
-use tokio::sync::{mpsc, Mutex};
+use tokio::sync::mpsc;
 use tokio::time::{Duration, Instant};
 
 pub(crate) const AUDIT_CHANNEL_SIZE: usize = 1024;
@@ -35,26 +37,37 @@ pub(crate) trait SystemEventAggregator: Send + Sync {
 
 pub(crate) type BoxedSystemEventAggregator = Box<dyn SystemEventAggregator + Send + Sync>;
 
-/// Wrap an already-built `$system` writer into the aggregated audit logger: a
-/// `LogSystemEvent` that funnels `api_call` events through the batching worker
-/// and persists flushed events through `inner`.
-pub(crate) fn aggregated_audit_logger(inner: BoxedSystemLogger) -> BoxedSystemLogger {
-    let system_logger = Arc::new(Mutex::new(inner));
+/// Build the audit aggregator that batches `api_call` events in a background
+/// worker and flushes them through the shared `$system` `writer`.
+pub(crate) fn build_audit_aggregator(
+    writer: Arc<AsyncRwLock<BoxedSystemLogger>>,
+) -> BoxedSystemEventAggregator {
     let handler: SystemEventHandler = Arc::new(move |event| {
-        let system_logger = Arc::clone(&system_logger);
-        Box::pin(async move { system_logger.lock().await.log_event(event).await })
+        let writer = Arc::clone(&writer);
+        Box::pin(async move { writer.write().await?.log_event(event).await })
     });
+    Box::new(ApiAuditEventAggregator::new(handler))
+}
 
+/// Wrap an already-built `$system` writer into an aggregated audit logger: a
+/// `LogSystemEvent` that funnels `api_call` events through the batching worker
+/// and persists flushed events through `inner`. Test-only helper — production
+/// uses [`build_audit_aggregator`] against the shared writer.
+#[cfg(test)]
+pub(crate) fn aggregated_audit_logger(inner: BoxedSystemLogger) -> BoxedSystemLogger {
     Box::new(AggregatedAuditLogger {
-        aggregator: Box::new(ApiAuditEventAggregator::new(handler)),
+        aggregator: build_audit_aggregator(Arc::new(AsyncRwLock::new(inner))),
     })
 }
 
-/// `LogSystemEvent` adapter over the audit aggregator.
+/// `LogSystemEvent` adapter over the audit aggregator (test-only, see
+/// [`aggregated_audit_logger`]).
+#[cfg(test)]
 struct AggregatedAuditLogger {
     aggregator: BoxedSystemEventAggregator,
 }
 
+#[cfg(test)]
 #[async_trait]
 impl LogSystemEvent for AggregatedAuditLogger {
     async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError> {

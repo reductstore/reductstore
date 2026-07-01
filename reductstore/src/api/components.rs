@@ -16,7 +16,7 @@ use crate::lifecycle::ManageLifecycles;
 use crate::lock_file::BoxedLockFile;
 use crate::replication::ManageReplications;
 use crate::storage::engine::StorageEngine;
-use crate::syslog::{LogCapture, LogSystemEvent, UsageEventAggregator};
+use crate::syslog::SystemEventLogger;
 use axum::http::HeaderMap;
 use log::error;
 use reduct_base::error::{ErrorCode, ReductError};
@@ -39,19 +39,12 @@ pub struct Components {
     pub(crate) lifecycle_repo: AsyncRwLock<Box<dyn ManageLifecycles + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
-    pub(crate) audit_logger: Arc<AsyncRwLock<Box<dyn LogSystemEvent + Send + Sync>>>,
     pub(crate) limits: BoxedLimits,
-    /// Usage statistics aggregator; owns the 60s flush task and is stopped on
-    /// shutdown to flush the final interval (`None` when system events are
-    /// disabled). Unlike `audit_logger`, nothing logs to it — its events come
-    /// from its own timer — so it is held as the concrete task rather than a
-    /// boxed logger.
-    pub(crate) usage_stat_logger: AsyncRwLock<Option<UsageEventAggregator>>,
-    /// Log-capture component: owns the consumer task that persists the
-    /// instance's own log messages under `$system/logs/<instance>/messages` and
-    /// the global log-sink registration. `None` when system events are disabled,
-    /// no persist level is configured, or on a replica. Stopped on shutdown.
-    pub(crate) log_capture: AsyncRwLock<Option<LogCapture>>,
+    /// The single system-event collector: owns every aggregator/task (audit
+    /// batching, usage timer, log capture) and the one shared `$system` writer
+    /// they fan through. A no-op when system events are disabled, so no `Option`
+    /// is needed. Stopped on shutdown to drain the final events.
+    pub(crate) system_events: Arc<dyn SystemEventLogger + Send + Sync>,
 
     pub(crate) cfg: Cfg,
 }
@@ -165,12 +158,8 @@ impl StateKeeper {
             error!("Failed to stop replication tasks: {}", err);
         }
 
-        if let Err(err) = self.stop_usage_stats_task().await {
-            error!("Failed to stop usage statistics task: {}", err);
-        }
-
-        if let Err(err) = self.stop_log_capture().await {
-            error!("Failed to stop log capture task: {}", err);
+        if let Err(err) = self.stop_system_events().await {
+            error!("Failed to stop system events: {}", err);
         }
 
         if let Err(err) = self.sync_storage().await {
@@ -192,19 +181,9 @@ impl StateKeeper {
         Ok(())
     }
 
-    async fn stop_usage_stats_task(&self) -> Result<(), ReductError> {
+    async fn stop_system_events(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
-        if let Some(aggregator) = components.usage_stat_logger.write().await?.as_mut() {
-            aggregator.stop().await;
-        }
-        Ok(())
-    }
-
-    async fn stop_log_capture(&self) -> Result<(), ReductError> {
-        let components = self.wait_components().await?.clone();
-        if let Some(capture) = components.log_capture.write().await?.as_mut() {
-            capture.stop().await;
-        }
+        components.system_events.stop().await;
         Ok(())
     }
 
