@@ -108,7 +108,6 @@ mod tests {
             dst_token: Some("token".to_string()),
             entries: vec![],
             dst_prefix: String::new(),
-            include: Labels::default(),
             exclude: Labels::default(),
             each_n: None,
             each_s: None,

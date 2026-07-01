@@ -871,7 +871,6 @@ pub(crate) mod tests {
                     dst_token: None,
                     entries: vec![],
                     dst_prefix: String::new(),
-                    include: Default::default(),
                     exclude: Default::default(),
                     each_n: None,
                     each_s: None,
