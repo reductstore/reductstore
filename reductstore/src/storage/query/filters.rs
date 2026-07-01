@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0
 
 pub(crate) mod each_n;
-pub(crate) mod each_s;
 pub(crate) mod exclude;
 pub(crate) mod include;
 pub(crate) mod record_state;
@@ -10,7 +9,6 @@ pub(crate) mod time_range;
 pub(crate) mod when;
 
 pub(crate) use each_n::EachNFilter;
-pub(crate) use each_s::EachSecondFilter;
 pub(crate) use exclude::ExcludeLabelFilter;
 pub(crate) use include::IncludeLabelFilter;
 pub(crate) use record_state::RecordStateFilter;

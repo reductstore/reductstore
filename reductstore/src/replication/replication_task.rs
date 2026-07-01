@@ -1276,7 +1276,6 @@ mod tests {
             include: Labels::new(),
             exclude: Labels::new(),
             each_n: None,
-            each_s: None,
             when: None,
             mode: ReplicationMode::Enabled,
         }

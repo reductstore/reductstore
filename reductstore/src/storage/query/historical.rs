@@ -9,9 +9,13 @@ use crate::storage::proto::record;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::condition::Parser;
+// use crate::storage::query::filters::{
+//     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
+//     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
+// };
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
-    IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
+    apply_filters_recursively, EachNFilter, ExcludeLabelFilter, FilterRecord, IncludeLabelFilter,
+    RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
 use async_trait::async_trait;
 use log::debug;
@@ -87,10 +91,6 @@ impl HistoricalQuery {
 
         if !options.exclude.is_empty() {
             filters.push(Box::new(ExcludeLabelFilter::new(options.exclude.clone())));
-        }
-
-        if let Some(each_s) = options.each_s {
-            filters.push(Box::new(EachSecondFilter::new(each_s)));
         }
 
         if let Some(each_n) = options.each_n {
@@ -671,26 +671,6 @@ mod tests {
             query.next(block_manager.clone()).await.err(),
             Some(no_content!("No content"))
         );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_each_s_filter(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(
-            0,
-            1001,
-            QueryOptions {
-                each_s: Some(0.00001),
-                ..QueryOptions::default()
-            },
-        )
-        .unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.meta().timestamp(), 0);
-        assert_eq!(records[1].0.meta().timestamp(), 1000);
     }
 
     #[rstest]

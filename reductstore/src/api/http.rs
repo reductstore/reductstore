@@ -874,7 +874,6 @@ pub(crate) mod tests {
                     include: Default::default(),
                     exclude: Default::default(),
                     each_n: None,
-                    each_s: None,
                     when: None,
                     mode: ReplicationMode::Enabled,
                 },

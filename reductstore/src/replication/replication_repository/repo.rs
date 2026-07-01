@@ -55,65 +55,99 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
                 .into_iter()
                 .map(|(k, v)| ProtoLabel { name: k, value: v })
                 .collect(),
-            each_s: settings.each_s.unwrap_or(0.0),
             each_n: settings.each_n.unwrap_or(0),
+            each_s: 0.0, // Deprecated field, always set to 0.0 (migration to $each_t in when condition)
             when: settings.when.map(|value| value.to_string()),
             mode: ProtoReplicationMode::from(&settings.mode) as i32,
         }
     }
 }
 
-impl From<ProtoReplicationSettings> for ReplicationSettings {
-    fn from(settings: ProtoReplicationSettings) -> Self {
-        Self {
-            src_bucket: settings.src_bucket,
-            dst_bucket: settings.dst_bucket,
-            dst_host: settings.dst_host,
-            dst_token: if settings.dst_token.is_empty() {
+impl ProtoReplicationSettings {
+    /// Convert ProtoReplicationSettings to ReplicationSettings with migration support
+    /// Returns (ReplicationSettings, migrated: bool)
+    fn into_settings(self) -> (ReplicationSettings, bool) {
+        let mut migrated = false;
+
+        // Parse the when condition first
+        let mut when: Option<serde_json::Value> = if let Some(when_str) = self.when {
+            match serde_json::from_str(&when_str) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    error!(
+                        "Failed to parse 'when' field: {} in replication settings: {}",
+                        err, when_str
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Migrate deprecated each_s to $each_t by injecting it into the when condition
+        if self.each_s > 0.0 {
+            migrated = true;
+            warn!(
+                "The 'each_s' field is deprecated and will be migrated to 'when' condition using $each_t operator. Value: {}",
+                self.each_s
+            );
+
+            if let Some(when_value) = &mut when {
+                // Inject $each_t into the existing when condition
+                if let Some(obj) = when_value.as_object_mut() {
+                    obj.insert("$each_t".to_string(), serde_json::json!(self.each_s));
+                } else {
+                    error!(
+                        "Existing 'when' condition is not an object, cannot inject $each_t. Using only $each_t condition."
+                    );
+                    when = Some(serde_json::json!({"$each_t": self.each_s}));
+                }
+            } else {
+                // No when condition exists, create one with just $each_t
+                when = Some(serde_json::json!({"$each_t": self.each_s}));
+            }
+        }
+
+        let settings = ReplicationSettings {
+            src_bucket: self.src_bucket,
+            dst_bucket: self.dst_bucket,
+            dst_host: self.dst_host,
+            dst_token: if self.dst_token.is_empty() {
                 None
             } else {
-                Some(settings.dst_token)
+                Some(self.dst_token)
             },
-            entries: settings.entries,
-            dst_prefix: settings.dst_prefix,
-            include: settings
+            entries: self.entries,
+            dst_prefix: self.dst_prefix,
+            include: self
                 .include
                 .into_iter()
                 .map(|label| (label.name, label.value))
                 .collect(),
-            exclude: settings
+            exclude: self
                 .exclude
                 .into_iter()
                 .map(|label| (label.name, label.value))
                 .collect(),
-            each_s: if settings.each_s > 0.0 {
-                Some(settings.each_s)
+            each_n: if self.each_n > 0 {
+                Some(self.each_n)
             } else {
                 None
             },
-            each_n: if settings.each_n > 0 {
-                Some(settings.each_n)
-            } else {
-                None
-            },
-            when: if let Some(when) = settings.when {
-                match serde_json::from_str(&when) {
-                    Ok(value) => Some(value),
-                    Err(err) => {
-                        error!(
-                            "Failed to parse 'when' field: {} in replication settings: {}",
-                            err, when
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            },
-            mode: ProtoReplicationMode::try_from(settings.mode)
+            when,
+            mode: ProtoReplicationMode::try_from(self.mode)
                 .unwrap_or(ProtoReplicationMode::Enabled)
                 .into(),
-        }
+        };
+
+        (settings, migrated)
+    }
+}
+
+impl From<ProtoReplicationSettings> for ReplicationSettings {
+    fn from(settings: ProtoReplicationSettings) -> Self {
+        settings.into_settings().0
     }
 }
 
@@ -390,10 +424,8 @@ impl ReplicationRepository {
                 let proto_repo = ProtoReplicationRepo::decode(&mut Bytes::from(buf))
                     .expect("Error decoding replication repository");
                 for item in proto_repo.replications {
-                    if let Err(err) = repo
-                        .create_replication(&item.name, item.settings.unwrap().into())
-                        .await
-                    {
+                    let (settings, _migrated) = item.settings.unwrap().into_settings();
+                    if let Err(err) = repo.create_replication(&item.name, settings).await {
                         error!("Failed to load replication '{}': {}", item.name, err);
                     }
                 }
@@ -1516,7 +1548,6 @@ mod tests {
             include: Labels::default(),
             exclude: Labels::default(),
             each_n: None,
-            each_s: None,
             when: None,
             mode: ReplicationMode::Enabled,
         }
@@ -1548,5 +1579,117 @@ mod tests {
     async fn repo(#[future] storage: Arc<StorageEngine>) -> ReplicationRepository {
         let storage = storage.await;
         ReplicationRepository::load_or_create(storage, Cfg::default(), None).await
+    }
+
+    mod each_s_migration {
+
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_s_migrated_to_each_t_without_when() {
+            let proto_settings = get_proto_replication_settings(2.5, None).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 2.5})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_s_migrated_to_each_t_with_existing_when() {
+            let proto_settings =
+                get_proto_replication_settings(2.0, Some(r#"{"&label": {"$eq": 1}}"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "&label": {"$eq": 1},
+                    "$each_t": 2.0
+                }))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_migration_when_each_s_is_zero() {
+            let proto_settings =
+                get_proto_replication_settings(0.0, Some(r#"{"&label": {"$eq": 1}}"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(!migrated, "Should not mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"&label": {"$eq": 1}}))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_parsing_error_with_each_s() {
+            let proto_settings =
+                get_proto_replication_settings(1.5, Some("invalid json".to_string())).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            // When parsing fails, should use only $each_t
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 1.5})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_parsing_error_without_each_s() {
+            let proto_settings =
+                get_proto_replication_settings(0.0, Some("invalid json".to_string())).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(!migrated, "Should not mark as migrated");
+            assert_eq!(settings.when, None);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_is_not_object_with_each_s() {
+            let proto_settings = get_proto_replication_settings(
+                3.0,
+                Some(r#"["array", "not", "object"]"#.to_string()),
+            )
+            .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            // When existing condition is not an object, replace with $each_t
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 3.0})));
+        }
+
+        async fn get_proto_replication_settings(
+            each_s: f64,
+            when: ::core::option::Option<::prost::alloc::string::String>,
+        ) -> ProtoReplicationSettings {
+            ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                dst_prefix: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n: 0,
+                each_s: each_s,
+                when: when,
+                mode: ProtoReplicationMode::Enabled as i32,
+            }
+        }
     }
 }
