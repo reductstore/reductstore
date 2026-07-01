@@ -149,50 +149,7 @@ impl ProtoReplicationSettings {
 
 impl From<ProtoReplicationSettings> for ReplicationSettings {
     fn from(settings: ProtoReplicationSettings) -> Self {
-        Self {
-            src_bucket: settings.src_bucket,
-            dst_bucket: settings.dst_bucket,
-            dst_host: settings.dst_host,
-            dst_token: if settings.dst_token.is_empty() {
-                None
-            } else {
-                Some(settings.dst_token)
-            },
-            entries: settings.entries,
-            dst_prefix: settings.dst_prefix,
-            exclude: settings
-                .exclude
-                .into_iter()
-                .map(|label| (label.name, label.value))
-                .collect(),
-            each_s: if settings.each_s > 0.0 {
-                Some(settings.each_s)
-            } else {
-                None
-            },
-            each_n: if settings.each_n > 0 {
-                Some(settings.each_n)
-            } else {
-                None
-            },
-            when: if let Some(when) = settings.when {
-                match serde_json::from_str(&when) {
-                    Ok(value) => Some(value),
-                    Err(err) => {
-                        error!(
-                            "Failed to parse 'when' field: {} in replication settings: {}",
-                            err, when
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            },
-            mode: ProtoReplicationMode::try_from(settings.mode)
-                .unwrap_or(ProtoReplicationMode::Enabled)
-                .into(),
-        }
+        settings.into_settings().0
     }
 }
 
@@ -469,10 +426,8 @@ impl ReplicationRepository {
                 let proto_repo = ProtoReplicationRepo::decode(&mut Bytes::from(buf))
                     .expect("Error decoding replication repository");
                 for item in proto_repo.replications {
-                    if let Err(err) = repo
-                        .create_replication(&item.name, item.settings.unwrap().into())
-                        .await
-                    {
+                    let (settings, _migrated) = item.settings.unwrap().into_settings();
+                    if let Err(err) = repo.create_replication(&item.name, settings).await {
                         error!("Failed to load replication '{}': {}", item.name, err);
                     }
                 }

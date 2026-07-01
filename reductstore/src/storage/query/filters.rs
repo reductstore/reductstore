@@ -12,7 +12,6 @@ pub(crate) mod when;
 pub(crate) use each_n::EachNFilter;
 pub(crate) use each_s::EachSecondFilter;
 pub(crate) use exclude::ExcludeLabelFilter;
-pub(crate) use include::IncludeLabelFilter;
 pub(crate) use record_state::RecordStateFilter;
 use reduct_base::error::ReductError;
 use std::collections::HashMap;

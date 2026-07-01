@@ -7,7 +7,7 @@ use crate::storage::entry::{is_system_meta_entry, meta_entry_parent};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
-    IncludeLabelFilter, RecordFilter, WhenFilter,
+    RecordFilter, WhenFilter,
 };
 use log::warn;
 use reduct_base::error::ReductError;

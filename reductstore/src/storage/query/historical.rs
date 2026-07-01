@@ -11,7 +11,7 @@ use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
-    IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
+    RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
 use async_trait::async_trait;
 use log::debug;
@@ -80,10 +80,6 @@ impl HistoricalQuery {
             Box::new(TimeRangeFilter::new(start_time, stop_time)),
             Box::new(RecordStateFilter::new(RecordState::Finished)),
         ];
-
-        if !options.include.is_empty() {
-            filters.push(Box::new(IncludeLabelFilter::new(options.include.clone())));
-        }
 
         if !options.exclude.is_empty() {
             filters.push(Box::new(ExcludeLabelFilter::new(options.exclude.clone())));
@@ -573,36 +569,6 @@ mod tests {
         let err = query.next(replica_block_manager).await.err().unwrap();
 
         assert_eq!(err.status(), ErrorCode::NoContent);
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_include(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(
-            0,
-            1001,
-            QueryOptions {
-                include: HashMap::from([
-                    ("block".to_string(), "2".to_string()),
-                    ("record".to_string(), "1".to_string()),
-                ]),
-                ..QueryOptions::default()
-            },
-        )
-        .unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-
-        assert_eq!(records.len(), 1);
-        assert_eq!(records[0].0.meta().timestamp(), 1000);
-        assert_eq!(
-            records[0].0.meta().labels(),
-            &HashMap::from([
-                ("block".to_string(), "2".to_string()),
-                ("record".to_string(), "1".to_string()),
-            ])
-        );
-        assert_eq!(records[0].1, "0123456789");
     }
 
     #[rstest]
