@@ -4,7 +4,6 @@
 pub(crate) mod each_n;
 pub(crate) mod each_s;
 pub(crate) mod exclude;
-pub(crate) mod include;
 pub(crate) mod record_state;
 pub(crate) mod time_range;
 pub(crate) mod when;

@@ -53,8 +53,6 @@ pub(in crate::storage) trait Query {
 pub(crate) struct QueryOptions {
     /// The time to live of the query.
     pub ttl: Duration,
-    /// Only include the records that match the key-value pairs.
-    pub include: HashMap<String, String>,
     /// Exclude the records that match the key-value pairs.
     pub exclude: HashMap<String, String>,
     /// If true, the query will never be done
@@ -81,7 +79,6 @@ impl From<QueryEntry> for QueryOptions {
     fn from(query: QueryEntry) -> QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(query.ttl.unwrap_or(Self::default().ttl.as_secs())),
-            include: query.include.unwrap_or_default(),
             exclude: query.exclude.unwrap_or_default(),
             continuous: query.continuous.unwrap_or(false),
             limit: query.limit,
@@ -99,7 +96,6 @@ impl Default for QueryOptions {
     fn default() -> QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(60),
-            include: HashMap::new(),
             exclude: HashMap::new(),
             continuous: false,
             limit: None,
