@@ -59,6 +59,94 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
     }
 }
 
+impl ProtoReplicationSettings {
+    fn into_settings(self) -> (ReplicationSettings, bool) {
+        let mut migrated = false;
+
+        // Parse the when condition first
+        let mut when: Option<serde_json::Value> = if let Some(when_str) = self.when {
+            match serde_json::from_str(&when_str) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    error!(
+                        "Failed to parse 'when' field: {} in replication settings: {}",
+                        err, when_str
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Migrate deprecated include to $in by injecting it into the when condition
+        if !self.include.is_empty() {
+            migrated = true;
+            warn!(
+                "The 'include' field is deprecated and will be migrated to 'when' condition using $in operator. Value: {:?}",
+                self.include
+            );
+            for include in &self.include {
+                if let Some(when_value) = &mut when {
+                    // Inject $in into the existing when condition
+                    if let Some(obj) = when_value.as_object_mut() {
+                        obj.insert(
+                            "$in".to_string(),
+                            serde_json::json!([&include.name, &include.value]),
+                        );
+                    } else {
+                        error!(
+                            "Existing 'when' condition is not an object, cannot inject $in. Using only $in condition."
+                        );
+                        when = Some(
+                            serde_json::json!({"$in": serde_json::json!([&include.name, &include.value])}),
+                        );
+                    }
+                } else {
+                    // No when condition exists, create one with just $in
+                    when = Some(
+                        serde_json::json!({"$in": serde_json::json!([&include.name, &include.value])}),
+                    );
+                }
+            }
+        }
+
+        let settings = ReplicationSettings {
+            src_bucket: self.src_bucket,
+            dst_bucket: self.dst_bucket,
+            dst_host: self.dst_host,
+            dst_token: if self.dst_token.is_empty() {
+                None
+            } else {
+                Some(self.dst_token)
+            },
+            entries: self.entries,
+            dst_prefix: self.dst_prefix,
+            exclude: self
+                .exclude
+                .into_iter()
+                .map(|label| (label.name, label.value))
+                .collect(),
+            each_s: if self.each_s > 0.0 {
+                Some(self.each_s)
+            } else {
+                None
+            },
+            each_n: if self.each_n > 0 {
+                Some(self.each_n)
+            } else {
+                None
+            },
+            when,
+            mode: ProtoReplicationMode::try_from(self.mode)
+                .unwrap_or(ProtoReplicationMode::Enabled)
+                .into(),
+        };
+
+        (settings, migrated)
+    }
+}
+
 impl From<ProtoReplicationSettings> for ReplicationSettings {
     fn from(settings: ProtoReplicationSettings) -> Self {
         Self {
