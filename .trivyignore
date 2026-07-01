@@ -1,0 +1,3 @@
+# Trivy ignore file
+# Add accepted CVE IDs here, one per line, to suppress known false positives or risks.
+# Example: CVE-2024-XXXXX

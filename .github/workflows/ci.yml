@@ -33,6 +33,20 @@ jobs:
       - name: Check code
         run: cargo fmt --all -- --check
 
+  # Scans Cargo.lock for RustSec advisories. This job reports dependency
+  # findings independently without blocking test jobs from running.
+  dependency_audit:
+    runs-on: ubuntu-latest
+    name: Dependency Audit
+    needs:
+      - rust_fmt
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.21.2 --locked
+      - name: Run cargo audit
+        run: cargo audit
+
   build_binaries:
     name: Build Binaries
     runs-on: ${{ matrix.os }}
@@ -158,6 +172,29 @@ jobs:
         with:
           name: image
           path: /tmp/image.tar
+
+  # Scans the amd64 test image before publishing. CRITICAL/HIGH fixed
+  # vulnerabilities fail the job; accepted false positives can go in .trivyignore.
+  container_scan:
+    runs-on: ubuntu-latest
+    name: Container Image Scan
+    needs:
+      - build_test_docker_image
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: image
+          path: /tmp/
+      - name: Load Docker image
+        run: docker load --input /tmp/image.tar
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@915b19bbe73b92a6cf82a1bc12b087c9a19a5fe2 # v0.28.0
+        with:
+          image-ref: ${{ github.repository }}
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
 
   http_api_tests:
     name: HTTP API Tests
@@ -518,6 +555,7 @@ jobs:
       - replication_test
       - read_only_replica_test
       - primary_secondary_test
+      - container_scan
     if: github.event_name != 'pull_request'
     strategy:
       matrix:
