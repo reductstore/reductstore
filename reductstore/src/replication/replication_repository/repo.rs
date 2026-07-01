@@ -1544,26 +1544,36 @@ mod tests {
             Label as ProtoLabel, ReplicationSettings as ProtoReplicationSettings,
         };
 
-        #[rstest]
-        #[tokio::test]
-        async fn test_include_migrated_to_in_without_when() {
-            let proto_settings = ProtoReplicationSettings {
+        fn create_proto_settings(
+            include: Vec<ProtoLabel>,
+            when: Option<String>,
+        ) -> ProtoReplicationSettings {
+            ProtoReplicationSettings {
                 src_bucket: "bucket-1".to_string(),
                 dst_bucket: "bucket-2".to_string(),
                 dst_host: "http://localhost".to_string(),
                 dst_token: "token".to_string(),
                 entries: vec![],
                 dst_prefix: String::new(),
-                include: vec![ProtoLabel {
-                    name: "sensor".to_string(),
-                    value: "temp".to_string(),
-                }],
+                include,
                 exclude: vec![],
                 each_n: 0,
                 each_s: 0.0,
-                when: None,
+                when,
                 mode: 0,
-            };
+            }
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_migrated_to_in_without_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "temp".to_string(),
+                }],
+                None,
+            );
 
             let (settings, migrated) = proto_settings.into_settings();
 
@@ -1578,23 +1588,13 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_include_migrated_to_in_with_existing_when() {
-            let proto_settings = ProtoReplicationSettings {
-                src_bucket: "bucket-1".to_string(),
-                dst_bucket: "bucket-2".to_string(),
-                dst_host: "http://localhost".to_string(),
-                dst_token: "token".to_string(),
-                entries: vec![],
-                dst_prefix: String::new(),
-                include: vec![ProtoLabel {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
                     name: "sensor".to_string(),
                     value: "temp".to_string(),
                 }],
-                exclude: vec![],
-                each_n: 0,
-                each_s: 0.0,
-                when: Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
-                mode: 0,
-            };
+                Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
+            );
 
             let (settings, migrated) = proto_settings.into_settings();
 
@@ -1612,14 +1612,8 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_include_with_multiple_labels() {
-            let proto_settings = ProtoReplicationSettings {
-                src_bucket: "bucket-1".to_string(),
-                dst_bucket: "bucket-2".to_string(),
-                dst_host: "http://localhost".to_string(),
-                dst_token: "token".to_string(),
-                entries: vec![],
-                dst_prefix: String::new(),
-                include: vec![
+            let proto_settings = create_proto_settings(
+                vec![
                     ProtoLabel {
                         name: "sensor".to_string(),
                         value: "temp".to_string(),
@@ -1629,12 +1623,8 @@ mod tests {
                         value: "warehouse".to_string(),
                     },
                 ],
-                exclude: vec![],
-                each_n: 0,
-                each_s: 0.0,
-                when: None,
-                mode: 0,
-            };
+                None,
+            );
 
             let (settings, migrated) = proto_settings.into_settings();
 
@@ -1651,20 +1641,10 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_no_migration_when_include_empty() {
-            let proto_settings = ProtoReplicationSettings {
-                src_bucket: "bucket-1".to_string(),
-                dst_bucket: "bucket-2".to_string(),
-                dst_host: "http://localhost".to_string(),
-                dst_token: "token".to_string(),
-                entries: vec![],
-                dst_prefix: String::new(),
-                include: vec![],
-                exclude: vec![],
-                each_n: 0,
-                each_s: 0.0,
-                when: Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
-                mode: 0,
-            };
+            let proto_settings = create_proto_settings(
+                vec![],
+                Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
+            );
 
             let (settings, migrated) = proto_settings.into_settings();
 
