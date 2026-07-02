@@ -145,5 +145,13 @@ async fn write_audit_event(
         payload: payload.to_value(),
     };
 
-    components.system_events.capture_audit_event(event).await;
+    let sink = components.system_events.sink();
+    match sink.system_logger.write().await {
+        Ok(mut logger) => {
+            if let Err(err) = logger.log_event(event).await {
+                debug!("Failed to persist audit event: {}", err);
+            }
+        }
+        Err(err) => debug!("Failed to lock system event logger: {}", err),
+    };
 }
