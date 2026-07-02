@@ -5,6 +5,7 @@ use crate::cfg::Cfg;
 use crate::core::internal_client::{
     ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
 };
+use crate::syslog::path::entry_path;
 use crate::syslog::{LogSystemEvent, SystemEvent};
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -17,16 +18,11 @@ use url::form_urlencoded;
 
 pub(super) struct ForwardSystemLogger {
     bucket_name: &'static str,
-    entry_prefix: Option<&'static str>,
     client_api: InternalClientApi,
 }
 
 impl ForwardSystemLogger {
-    pub(super) fn new(
-        bucket_name: &'static str,
-        entry_prefix: Option<&'static str>,
-        cfg: &Cfg,
-    ) -> Result<Self, ReductError> {
+    pub(super) fn new(bucket_name: &'static str, cfg: &Cfg) -> Result<Self, ReductError> {
         let (remote_verify_ssl, remote_ca_path, remote_timeout) = (
             cfg.system_events_conf.remote_verify_ssl,
             cfg.system_events_conf.remote_ca_path.as_ref(),
@@ -47,7 +43,6 @@ impl ForwardSystemLogger {
 
         Ok(Self {
             bucket_name,
-            entry_prefix,
             client_api: InternalClientApi::new(
                 client,
                 cfg.primary_url.clone(),
@@ -59,12 +54,10 @@ impl ForwardSystemLogger {
     #[cfg(test)]
     pub(super) fn new_with_client_api(
         bucket_name: &'static str,
-        entry_prefix: Option<&'static str>,
         client_api: InternalClientApi,
     ) -> Self {
         Self {
             bucket_name,
-            entry_prefix,
             client_api,
         }
     }
@@ -79,12 +72,7 @@ impl ForwardSystemLogger {
                 |client, base_url| {
                     let event = event.clone();
                     async move {
-                        let url = build_write_url(
-                            base_url.as_str(),
-                            self.bucket_name,
-                            self.entry_prefix,
-                            &event,
-                        );
+                        let url = build_write_url(base_url.as_str(), self.bucket_name, &event);
                         let payload = event.to_flat_json()?;
                         let headers = build_headers(&event, payload.len())?;
 
@@ -146,24 +134,11 @@ fn build_headers(event: &SystemEvent, payload_len: usize) -> Result<HeaderMap, R
     Ok(headers)
 }
 
-fn build_write_url(
-    base_url: &str,
-    bucket_name: &str,
-    entry_prefix: Option<&str>,
-    event: &SystemEvent,
-) -> String {
-    let instance_name = if event.instance.is_empty() {
-        "unknown"
-    } else {
-        &event.instance
-    };
+fn build_write_url(base_url: &str, bucket_name: &str, event: &SystemEvent) -> String {
     let mut query = form_urlencoded::Serializer::new(String::new());
     query.append_pair("ts", &event.timestamp.to_string());
     let query = query.finish();
-    let entry_path = match entry_prefix {
-        Some(prefix) => format!("{}/{}/{}", prefix, instance_name, event.entry_name),
-        None => format!("{}/{}", instance_name, event.entry_name),
-    };
+    let entry_path = entry_path(event);
 
     format!(
         "{}api/v1/b/{}/{}?{}",
@@ -174,6 +149,7 @@ fn build_write_url(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::syslog::SystemEventKind;
     use axum::extract::{Request, State};
     use axum::http::StatusCode;
     use axum::response::{IntoResponse, Response};
@@ -200,6 +176,7 @@ mod tests {
 
     fn make_event() -> SystemEvent {
         SystemEvent {
+            kind: SystemEventKind::Audit,
             event_type: "api_call".to_string(),
             timestamp: 42,
             instance: "replica-a".to_string(),
@@ -283,7 +260,6 @@ mod tests {
         let primary_url = start_mock_server(primary_status, primary_requests).await;
         ForwardSystemLogger::new_with_client_api(
             "$system",
-            Some("audit"),
             test_client_api(Some(primary_url), secondary_url),
         )
     }
@@ -370,7 +346,6 @@ mod tests {
             start_mock_server(StatusCode::OK, Arc::clone(&secondary_requests)).await;
         let mut logger = ForwardSystemLogger::new_with_client_api(
             "$system",
-            Some("audit"),
             test_client_api(Some("http://127.0.0.1:1/".to_string()), Some(secondary_url)),
         );
 
@@ -381,11 +356,8 @@ mod tests {
 
     #[tokio::test]
     async fn test_no_urls_configured_returns_error() {
-        let mut logger = ForwardSystemLogger::new_with_client_api(
-            "$system",
-            Some("audit"),
-            test_client_api(None, None),
-        );
+        let mut logger =
+            ForwardSystemLogger::new_with_client_api("$system", test_client_api(None, None));
 
         let err = logger.log_event(make_event()).await.err().unwrap();
 
@@ -464,7 +436,7 @@ mod tests {
     fn test_build_write_url_formats_correctly() {
         let event = make_event();
 
-        let url = build_write_url("http://127.0.0.1:8383/", "$system", Some("audit"), &event);
+        let url = build_write_url("http://127.0.0.1:8383/", "$system", &event);
 
         assert_eq!(
             url,
@@ -477,7 +449,7 @@ mod tests {
         let mut event = make_event();
         event.instance.clear();
 
-        let url = build_write_url("http://127.0.0.1:8383/", "$system", Some("audit"), &event);
+        let url = build_write_url("http://127.0.0.1:8383/", "$system", &event);
 
         assert_eq!(
             url,

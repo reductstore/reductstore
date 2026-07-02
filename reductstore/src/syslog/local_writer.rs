@@ -2,18 +2,17 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::storage::engine::StorageEngine;
+use crate::syslog::path::{entry_path, record_labels};
 use crate::syslog::{LogSystemEvent, SystemEvent};
 use async_trait::async_trait;
 use bytes::Bytes;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::BucketSettings;
-use reduct_base::Labels;
 use std::sync::Arc;
 
 pub(super) struct LocalSystemLogger {
     bucket_name: &'static str,
     bucket_settings: BucketSettings,
-    entry_prefix: Option<&'static str>,
     storage: Arc<StorageEngine>,
 }
 
@@ -21,33 +20,18 @@ impl LocalSystemLogger {
     pub(super) fn new(
         bucket_name: &'static str,
         bucket_settings: BucketSettings,
-        entry_prefix: Option<&'static str>,
         storage: Arc<StorageEngine>,
     ) -> Self {
         Self {
             bucket_name,
             bucket_settings,
-            entry_prefix,
             storage,
         }
     }
 
     async fn log_local(&self, event: SystemEvent) -> Result<(), ReductError> {
-        let instance = if event.instance.is_empty() {
-            "unknown".to_string()
-        } else {
-            event.instance.clone()
-        };
-        let entry_name = match self.entry_prefix {
-            Some(prefix) => format!("{}/{}/{}", prefix, instance, event.entry_name),
-            None => format!("{}/{}", instance, event.entry_name),
-        };
-        let mut labels = Labels::from([("status".to_string(), event.status.to_string())]);
-        // Expose a record's severity as a queryable label when present (log
-        // events carry `level` in their payload).
-        if let Some(level) = event.payload.get("level").and_then(|value| value.as_str()) {
-            labels.insert("level".to_string(), level.to_string());
-        }
+        let entry_name = entry_path(&event);
+        let labels = record_labels(&event);
         let payload = event.to_flat_json()?;
         let mut writer = match self
             .storage

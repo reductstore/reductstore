@@ -4,7 +4,6 @@
 use crate::cfg::{Cfg, DEFAULT_PORT};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
-use crate::lifecycle::SystemEventSink;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
     Label as ProtoLabel, ReplicationMode as ProtoReplicationMode,
@@ -15,6 +14,7 @@ use crate::replication::{ManageReplications, TransactionNotification};
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::WhenFilter;
+use crate::syslog::SystemEventSink;
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::{debug, error, warn};

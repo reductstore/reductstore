@@ -9,9 +9,8 @@
 //! event. The hook is non-blocking (`try_send`, drop-on-overflow) so logging
 //! never blocks the server.
 
-use crate::lifecycle::SystemEventSink;
-use crate::syslog::log_event_payload::LogSystemEventPayload;
-use crate::syslog::SystemEvent;
+use crate::syslog::payload::log::LogSystemEventPayload;
+use crate::syslog::{SystemEvent, SystemEventKind, SystemEventSink};
 use log::{error, warn, Level};
 use reduct_base::logger::{LogSink, LogSnapshot, Logger};
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -53,6 +52,7 @@ fn make_event(instance: &str, snapshot: LogSnapshot) -> SystemEvent {
         line,
     };
     SystemEvent {
+        kind: SystemEventKind::Log,
         event_type: LOG_EVENT_TYPE.to_string(),
         timestamp,
         instance: instance.to_string(),

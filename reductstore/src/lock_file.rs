@@ -436,6 +436,28 @@ mod tests {
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_secondary_instance_waits(lock_file_path: PathBuf) {
+        let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(500),
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
+            .build();
+
+        // Wait for the primary to acquire the lock
+        let primary_acquired = wait_new_state(&primary_lock_file).await;
+        assert!(
+            primary_acquired.is_ok(),
+            "Primary lock file was acquired in time"
+        );
+        assert!(primary_lock_file.is_locked().await.unwrap());
+
+        // Build the secondary only once the primary holds the lock, so its
+        // startup existence check deterministically sees the lock file. (Built
+        // earlier, its grace window can expire before a slow primary creates
+        // the file, and it acquires the lock instead of waiting.)
         let secondary_lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
                 LockFileConfig {
@@ -446,34 +468,15 @@ mod tests {
             ))
             .build();
 
-        {
-            let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
-                .with_config(test_cfg(
-                    LockFileConfig {
-                        polling_interval: Duration::from_millis(500),
-                        ..Default::default()
-                    },
-                    InstanceRole::Primary,
-                ))
-                .build();
+        // Secondary should wait while primary lock exists.
+        let secondary_acquired = wait_new_state(&secondary_lock_file).await;
+        assert!(
+            secondary_acquired.is_err(),
+            "Secondary lock file was not acquired in time"
+        );
+        assert!(secondary_lock_file.is_waiting().await.unwrap());
 
-            // Wait for the primary to acquire the lock
-            let primary_acquired = wait_new_state(&primary_lock_file).await;
-            assert!(
-                primary_acquired.is_ok(),
-                "Primary lock file was acquired in time"
-            );
-            assert!(primary_lock_file.is_locked().await.unwrap());
-
-            // Secondary should wait while primary lock exists.
-            let secondary_acquired = wait_new_state(&secondary_lock_file).await;
-            assert!(
-                secondary_acquired.is_err(),
-                "Secondary lock file was not acquired in time"
-            );
-            assert!(secondary_lock_file.is_waiting().await.unwrap());
-        }
-
+        drop(primary_lock_file);
         wait_for_lock_file_cleanup(&lock_file_path).await;
 
         let secondary_acquired = wait_new_state(&secondary_lock_file).await;

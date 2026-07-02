@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Add a replication `dst_prefix` setting to write replicated records under a destination entry prefix, [PR-1486](https://github.com/reductstore/reductstore/pull/1486) by @rohankumardubey
 - Capture the instance's own log messages to `$system/logs/<instance>/messages` as system events with a `level` severity label, configurable via `RS_SYSTEM_EVENTS_LOG_LEVEL` (default `WARN`, `OFF` to disable), [PR-1481](https://github.com/reductstore/reductstore/pull/1481) by @DibbayajyotiRoy
 
+### Changed
+
+- Unify `$system` event handling under `syslog`: move all event production (audit, usage, lifecycle, replication, logs) into the module behind a single system event logger with one shared writer and sink (no change to the stored record format), [PR-1496](https://github.com/reductstore/reductstore/pull/1496) by @DibbayajyotiRoy
+
 ## 1.20.7 - 2026-06-30
 
 ### Fixed

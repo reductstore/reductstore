@@ -3,9 +3,9 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds, ProvisionedReplication};
 use crate::core::env::{Env, GetEnv};
-use crate::lifecycle::SystemEventSink;
 use crate::replication::{ManageReplications, ReplicationRepoBuilder};
 use crate::storage::engine::StorageEngine;
+use crate::syslog::SystemEventSink;
 use log::{error, info, warn};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};

@@ -3,11 +3,10 @@
 
 //! Aggregates usage statistics into periodic `$system` events.
 
-use crate::lifecycle::SystemEventSink;
 use crate::storage::engine::StorageEngine;
-use crate::storage::usage::usage_event_payload::UsageSystemEventPayload;
 use crate::storage::usage::UsageCounters;
-use crate::syslog::SystemEvent;
+use crate::syslog::payload::usage::UsageSystemEventPayload;
+use crate::syslog::{SystemEvent, SystemEventKind, SystemEventSink};
 use log::error;
 use std::collections::BTreeSet;
 use std::sync::Arc;
@@ -32,6 +31,7 @@ fn now_micros() -> u64 {
 
 fn make_event(instance: &str, entry_name: &str, payload: UsageSystemEventPayload) -> SystemEvent {
     SystemEvent {
+        kind: SystemEventKind::Usage,
         event_type: USAGE_EVENT_TYPE.to_string(),
         timestamp: now_micros(),
         instance: instance.to_string(),
@@ -256,18 +256,24 @@ mod tests {
     }
 
     #[fixture]
-    async fn storage() -> Arc<StorageEngine> {
+    async fn storage() -> (Arc<StorageEngine>, Arc<UsageCounters>) {
         let cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
             ..Cfg::default()
         };
-        Arc::new(
+        // Inject the shared counters explicitly (as the server does in
+        // `cfg::build`) so the engine increments the same instance the test
+        // drains; the engine's own accessor is storage-private.
+        let counters = Arc::new(UsageCounters::default());
+        let storage = Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())
                 .with_cfg(cfg)
+                .with_usage_counters(Arc::clone(&counters))
                 .build()
                 .await,
-        )
+        );
+        (storage, counters)
     }
 
     /// Write two 10-byte records and read one back through the engine choke
@@ -310,13 +316,12 @@ mod tests {
     #[tokio::test]
     async fn flush_emits_total_and_per_bucket_events(
         events: Arc<Mutex<Vec<SystemEvent>>>,
-        #[future] storage: Arc<StorageEngine>,
+        #[future] storage: (Arc<StorageEngine>, Arc<UsageCounters>),
     ) {
-        let storage = storage.await;
+        let (storage, counters) = storage.await;
         generate_traffic(&storage).await;
 
         let sink = capturing_sink(Arc::clone(&events), false);
-        let counters = Arc::clone(storage.usage_counters());
         let mut last_flush = Instant::now();
         UsageEventAggregator::flush(&sink, &storage, &counters, &mut last_flush).await;
 
@@ -393,9 +398,9 @@ mod tests {
     #[tokio::test]
     async fn flush_excludes_system_buckets_from_per_bucket_events(
         events: Arc<Mutex<Vec<SystemEvent>>>,
-        #[future] storage: Arc<StorageEngine>,
+        #[future] storage: (Arc<StorageEngine>, Arc<UsageCounters>),
     ) {
-        let storage = storage.await;
+        let (storage, counters) = storage.await;
         generate_traffic(&storage).await;
 
         // A system bucket with traffic this interval.
@@ -421,7 +426,6 @@ mod tests {
         writer.send(Ok(None)).await.unwrap();
 
         let sink = capturing_sink(Arc::clone(&events), false);
-        let counters = Arc::clone(storage.usage_counters());
         let mut last_flush = Instant::now();
         UsageEventAggregator::flush(&sink, &storage, &counters, &mut last_flush).await;
 
@@ -440,13 +444,12 @@ mod tests {
     #[tokio::test]
     async fn flush_drains_counters_between_intervals(
         events: Arc<Mutex<Vec<SystemEvent>>>,
-        #[future] storage: Arc<StorageEngine>,
+        #[future] storage: (Arc<StorageEngine>, Arc<UsageCounters>),
     ) {
-        let storage = storage.await;
+        let (storage, counters) = storage.await;
         generate_traffic(&storage).await;
 
         let sink = capturing_sink(Arc::clone(&events), false);
-        let counters = Arc::clone(storage.usage_counters());
         let mut last_flush = Instant::now();
         UsageEventAggregator::flush(&sink, &storage, &counters, &mut last_flush).await;
         UsageEventAggregator::flush(&sink, &storage, &counters, &mut last_flush).await;
@@ -472,10 +475,9 @@ mod tests {
     #[tokio::test]
     async fn emission_failure_does_not_break_flushing(
         events: Arc<Mutex<Vec<SystemEvent>>>,
-        #[future] storage: Arc<StorageEngine>,
+        #[future] storage: (Arc<StorageEngine>, Arc<UsageCounters>),
     ) {
-        let storage = storage.await;
-        let counters = Arc::clone(storage.usage_counters());
+        let (storage, counters) = storage.await;
         let mut last_flush = Instant::now();
 
         let failing_sink = capturing_sink(Arc::clone(&events), true);
@@ -493,11 +495,10 @@ mod tests {
     #[tokio::test]
     async fn per_bucket_emission_failure_does_not_break_flushing(
         events: Arc<Mutex<Vec<SystemEvent>>>,
-        #[future] storage: Arc<StorageEngine>,
+        #[future] storage: (Arc<StorageEngine>, Arc<UsageCounters>),
     ) {
-        let storage = storage.await;
+        let (storage, counters) = storage.await;
         generate_traffic(&storage).await;
-        let counters = Arc::clone(storage.usage_counters());
         let mut last_flush = Instant::now();
 
         let failing_sink = capturing_sink(Arc::clone(&events), true);
@@ -514,10 +515,9 @@ mod tests {
     #[tokio::test]
     async fn shutdown_flushes_partial_interval(
         events: Arc<Mutex<Vec<SystemEvent>>>,
-        #[future] storage: Arc<StorageEngine>,
+        #[future] storage: (Arc<StorageEngine>, Arc<UsageCounters>),
     ) {
-        let storage = storage.await;
-        let counters = Arc::clone(storage.usage_counters());
+        let (storage, counters) = storage.await;
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
         let worker = tokio::spawn(UsageEventAggregator::run_worker(
@@ -543,11 +543,10 @@ mod tests {
     #[tokio::test]
     async fn stop_flushes_and_joins(
         events: Arc<Mutex<Vec<SystemEvent>>>,
-        #[future] storage: Arc<StorageEngine>,
+        #[future] storage: (Arc<StorageEngine>, Arc<UsageCounters>),
     ) {
-        let storage = storage.await;
+        let (storage, counters) = storage.await;
         generate_traffic(&storage).await;
-        let counters = Arc::clone(storage.usage_counters());
 
         let mut aggregator = UsageEventAggregator::new(
             capturing_sink(Arc::clone(&events), false),
@@ -582,10 +581,12 @@ mod tests {
         cfg.system_events_conf.enabled = true;
         cfg.instance_name = "instance-1".to_string();
 
+        let counters = Arc::new(UsageCounters::default());
         let storage = Arc::new(
             StorageEngine::builder()
                 .with_data_path(cfg.data_path.clone())
                 .with_cfg(cfg.clone())
+                .with_usage_counters(Arc::clone(&counters))
                 .build()
                 .await,
         );
@@ -596,7 +597,6 @@ mod tests {
             system_logger: Arc::new(AsyncRwLock::new(logger)),
             instance_name: "instance-1".to_string(),
         };
-        let counters = Arc::clone(storage.usage_counters());
         let mut last_flush = Instant::now();
         UsageEventAggregator::flush(&sink, &storage, &counters, &mut last_flush).await;
 
