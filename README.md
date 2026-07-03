@@ -107,6 +107,7 @@ async def main():
             "camera-1",
             start="2024-01-01T10:00:00Z",
             stop="2024-01-01T10:00:01Z",
+            when={"&device": {"$eq": "camera-1"}},
         ):
             print((await record.read_all()).decode())
 
