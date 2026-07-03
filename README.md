@@ -13,22 +13,22 @@
   <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
 </p>
 
-ReductStore is a high-performance, multimodal time-series storage and streaming solution for robotics and industrial IoT teams that need to store binary data with a real time axis.
+ReductStore makes robotics and industrial data queryable.
 
-Instead of stitching together a TSDB, object storage, and custom retention jobs, you can ingest images, sensor readings, logs, files, and ROS bags into one system, query them by time range and labels, and replicate only the data that matters from the edge to the cloud.
+Store images, sensor readings, logs, files, and ROS bags with timestamps and labels in one system, then query them by time range and context instead of stitching together a TSDB, object storage, and custom retention jobs.
 
 ## Why Teams Pick ReductStore
 
-- Built for binary-first time-series workloads such as camera frames, sensor payloads, logs, files, and ROS bags
-- Query by time range and labels instead of building custom metadata indexes around blob storage
+- Make binary-first robotics and industrial data queryable by time range and labels
+- Built for workloads such as camera frames, sensor payloads, logs, files, and ROS bags
 - Replicate only selected records to the cloud to reduce bandwidth and storage cost
 - Apply quotas and lifecycle policies in the same system that stores the data
 
 ## Proof Points
 
-- `60k+` downloads
-- `100+` production deployments
-- `1 PB+` of managed data
+- `60k+` downloads across packages and release artifacts
+- `100+` production deployments in robotics and IIoT environments
+- `1 PB+` of managed data in live systems
 
 ## Start Here
 
