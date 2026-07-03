@@ -26,9 +26,25 @@ Store terabytes of images, sensor readings, logs, files, and ROS bags with times
 
 ## Proof Points
 
-- 🚀 `60k+` downloads across packages and release artifacts
-- 🏭 `100+` production deployments in robotics and IIoT environments
-- 📦 `1 PB+` of managed data in live systems
+<table>
+  <tr>
+    <td align="center">
+      🚀<br />
+      <strong>60k+</strong><br />
+      downloads
+    </td>
+    <td align="center">
+      🏭<br />
+      <strong>100+</strong><br />
+      production deployments
+    </td>
+    <td align="center">
+      📦<br />
+      <strong>1 PB+</strong><br />
+      managed data
+    </td>
+  </tr>
+</table>
 
 ## Start Here
 
