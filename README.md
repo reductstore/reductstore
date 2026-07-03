@@ -40,14 +40,6 @@ Store terabytes of images, sensor readings, logs, files, and ROS bags with times
   <strong>👥 13</strong> contributors
 </p>
 
-## Start Here
-
-- [Getting Started](https://www.reduct.store/docs/)
-- [Download](https://www.reduct.store/download)
-- [Client SDKs](#client-sdks)
-- [Community Forum](https://community.reduct.store)
-- [Good First Issues](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)
-
 ## When You Should Use It
 
 ReductStore is ideal for scenarios where you have a continuous stream of binary data and your application has metadata that can be attached to the data as labels.
@@ -101,7 +93,7 @@ RS_DATA_PATH=./data reductstore
 
 For a more in-depth guide, visit the **[Getting Started](https://reduct.store/docs/)** and **[Download](https://www.reduct.store/download)** sections.
 
-After initializing the instance, dive in with one of our **[Client SDKs](#client-sdks)** to write or retrieve data. To illustrate, here's a Python sample:
+After initializing the instance, you can start writing and querying data immediately. Here's a Python sample:
 
 ```python
 from reduct import Client, BucketSettings, QuotaType
@@ -139,25 +131,22 @@ if __name__ == "__main__":
     asyncio.run(main())
 ```
 
-## Client SDKs
+## Next Steps
 
-ReductStore is built with adaptability in mind. While it comes with a straightforward HTTP API that can be integrated into virtually any environment, we understand that not everyone wants to interact with the API directly.
-To streamline your development process and make integrations smoother, we've developed a series of client SDKs tailored for different programming languages and environments. These SDKs wrap around the core API, offering a more intuitive and language-native way to interact with ReductStore, thus accelerating your development cycle.
-Here are the client SDKs available:
+Learn more and pick the next piece you need:
 
 - [Rust Client SDK](https://github.com/reductstore/reduct-rs)
 - [Python Client SDK](https://github.com/reductstore/reduct-py)
 - [JavaScript Client SDK](https://github.com/reductstore/reduct-js)
 - [C++ Client SDK](https://github.com/reductstore/reduct-cpp)
 - [Go Client SDK](https://github.com/reductstore/reduct-go)
-
-## Tools
-
-ReductStore is not just about data storage; it's about simplifying and enhancing your data management experience. Along with its robust core features, ReductStore offers a suite of tools to streamline administration, monitoring, and optimization. Here are the key tools you can leverage:
-
 - [CLI Client](https://github.com/reductstore/reduct-cli) - a command-line interface for direct interactions with ReductStore
 - [Web Console](https://github.com/reductstore/web-console) - a web interface to administrate a ReductStore instance
 - [ReductBridge](https://github.com/reductstore/reduct-bridge) - a data collector to get data from various sources and write it to ReductStore
+- [Documentation](https://www.reduct.store/docs/)
+- [Download](https://www.reduct.store/download)
+- [Community Forum](https://community.reduct.store)
+- [Good First Issues](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)
 
 ## **Feedback & Contribution**
 
