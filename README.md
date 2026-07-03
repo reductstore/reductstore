@@ -37,6 +37,8 @@ Store terabytes of images, sensor readings, logs, files, and ROS bags with times
 <p align="center">
   <strong>⭐ 350+</strong> GitHub stars
   &nbsp;&nbsp;•&nbsp;&nbsp;
+  <strong>🛠️ 4+</strong> years of active development
+  &nbsp;&nbsp;•&nbsp;&nbsp;
   <strong>👥 13</strong> contributors
 </p>
 
