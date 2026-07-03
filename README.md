@@ -26,9 +26,9 @@ Store images, sensor readings, logs, files, and ROS bags with timestamps and lab
 
 ## Proof Points
 
-- `60k+` downloads across packages and release artifacts
-- `100+` production deployments in robotics and IIoT environments
-- `1 PB+` of managed data in live systems
+- 🚀 `60k+` downloads across packages and release artifacts
+- 🏭 `100+` production deployments in robotics and IIoT environments
+- 📦 `1 PB+` of managed data in live systems
 
 ## Start Here
 
