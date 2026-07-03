@@ -26,19 +26,19 @@ Store terabytes of images, sensor readings, logs, files, and ROS bags with times
 
 ## Proof Points
 
-<table>
+<table width="100%">
   <tr>
-    <td align="center">
+    <td width="33%" align="center">
       🚀<br />
       <strong>60k+</strong><br />
       downloads
     </td>
-    <td align="center">
+    <td width="33%" align="center">
       🏭<br />
       <strong>100+</strong><br />
       production deployments
     </td>
-    <td align="center">
+    <td width="33%" align="center">
       📦<br />
       <strong>1 PB+</strong><br />
       managed data
