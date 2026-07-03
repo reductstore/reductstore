@@ -15,7 +15,7 @@
 
 ReductStore makes robotics and industrial data queryable.
 
-Store images, sensor readings, logs, files, and ROS bags with timestamps and labels in one system, then query them by time range and context instead of stitching together a TSDB, object storage, and custom retention jobs.
+Store terabytes of images, sensor readings, logs, files, and ROS bags with timestamps and labels in one system, then query them by time range and context instead of stitching together a TSDB, object storage, and custom retention jobs.
 
 ## Why Teams Pick ReductStore
 
