@@ -13,11 +13,30 @@
   <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
 </p>
 
-ReductStore is a high-performance, multimodal time-series storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT).
-It's designed to handle large volumes of unstructured data - images, sensor readings, logs, files, ROS bags - captured in raw form and stored with a precise time index (timestamp) and optional labels (e.g. device status, AI inference).
-This enables fast, efficient retrieval based on when the data was collected and how it's categorized, while also allowing control over data reduction strategies by replicating (streaming) only selected data from the edge to the cloud.
+ReductStore is a high-performance, multimodal time-series storage and streaming solution for robotics and industrial IoT teams that need to store binary data with a real time axis.
 
-For more information, please visit https://www.reduct.store/.
+Instead of stitching together a TSDB, object storage, and custom retention jobs, you can ingest images, sensor readings, logs, files, and ROS bags into one system, query them by time range and labels, and replicate only the data that matters from the edge to the cloud.
+
+## Why Teams Pick ReductStore
+
+- Built for binary-first time-series workloads such as camera frames, sensor payloads, logs, files, and ROS bags
+- Query by time range and labels instead of building custom metadata indexes around blob storage
+- Replicate only selected records to the cloud to reduce bandwidth and storage cost
+- Apply quotas and lifecycle policies in the same system that stores the data
+
+## Proof Points
+
+- `60k+` downloads
+- `100+` production deployments
+- `1 PB+` of managed data
+
+## Start Here
+
+- [Getting Started](https://www.reduct.store/docs/)
+- [Download](https://www.reduct.store/download)
+- [Client SDKs](#client-sdks)
+- [Community Forum](https://community.reduct.store)
+- [Good First Issues](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)
 
 ## When You Should Use It
 
@@ -29,6 +48,12 @@ If you ingest binary data with labels into a ReductStore instance, you can use i
 3. Manage the data lifecycle with policies, e.g. "keep all the data from camera-1 for 30 days, then compress it and keep it for another 60 days before deleting it".
 
 In such scenarios, ReductStore can help you manage and transfer your data efficiently based on its metadata, without combining a TSDB and blob storage. This keeps your architecture simple and efficient.
+
+## Who It Is For
+
+- Robotics platforms that need to replay camera frames, telemetry, and logs around incidents or model failures
+- Industrial IoT pipelines that collect binary payloads at the edge and forward only filtered data upstream
+- Edge AI systems that need retention, labeling, and historical retrieval without building a custom storage stack
 
 ## When You Should Not Use It
 
@@ -141,10 +166,11 @@ Your input is invaluable to us! 🌟 If you've found a bug, have suggestions for
 
 - **Questions and Ideas**: Join our [**Discourse community**](https://community.reduct.store) to ask questions, share ideas, and collaborate with fellow ReductStore users.
 - **Bug Reports**: Open an issue on our **[GitHub repository](https://github.com/reductstore/reductstore/issues)**. Please provide as much detail as possible so we can address it effectively.
+- **First Contributions**: Pick a task from [**good first issues**](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22) or [**help wanted**](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22).
 
 ## **Get Involved**
 
-We believe in the power of community and collaboration. If you've built something amazing with ReductStore, we'd love to hear about it! Share your projects, experiences, and insights on our [Discourse community](https://community.reduct.store).
+We believe in the power of community and collaboration. If you've built something amazing with ReductStore, we'd love to hear about it. Share your projects, benchmarks, and lessons learned on our [Discourse community](https://community.reduct.store).
 
 If you find ReductStore beneficial, give us a ⭐ on our GitHub repository.
 
