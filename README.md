@@ -44,6 +44,11 @@ Store terabytes of images, sensor readings, logs, files, and ROS bags with times
         <strong>1 PB+</strong><br />
         managed data
       </td>
+      <td align="center">
+        ⭐<br />
+        <strong>350+</strong><br />
+        GitHub stars
+      </td>
     </tr>
   </table>
 </div>
