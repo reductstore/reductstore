@@ -38,8 +38,6 @@ Store terabytes of images, sensor readings, logs, files, and ROS bags with times
   <strong>⭐ 350+</strong> GitHub stars
   &nbsp;&nbsp;•&nbsp;&nbsp;
   <strong>🛠️ 4+</strong> years of active development
-  &nbsp;&nbsp;•&nbsp;&nbsp;
-  <strong>👥 13</strong> contributors
 </p>
 
 ## When You Should Use It
@@ -58,14 +56,6 @@ In such scenarios, ReductStore can help you manage and transfer your data effici
 - Robotics platforms that need to replay camera frames, telemetry, and logs around incidents or model failures
 - Industrial IoT pipelines that collect binary payloads at the edge and forward only filtered data upstream
 - Edge AI systems that need retention, labeling, and historical retrieval without building a custom storage stack
-
-## When You Should Not Use It
-
-ReductStore is not the best fit for every data storage problem. You should consider another solution when:
-
-1. You have only numerical data that can be easily ingested into a time-series database.
-2. You have only blob data to store and do not need to access it as historical data. In this case, object storage or a file system may be a better fit.
-3. You need a message broker. Although ReductStore provides subscription and publishing functionality, it is designed for data storage and streaming, not message queueing.
 
 ## Get Started
 
@@ -98,39 +88,29 @@ For a more in-depth guide, visit the **[Getting Started](https://reduct.store/do
 After initializing the instance, you can start writing and querying data immediately. Here's a Python sample:
 
 ```python
-from reduct import Client, BucketSettings, QuotaType
+import asyncio
+
+from reduct import Client
 
 async def main():
-    # 1. Create a ReductStore client
-    async with Client("http://localhost:8383", api_token="my-token") as client:
-        # 2. Get or create a bucket with 1Gb quota
-        bucket = await client.create_bucket(
-            "my-bucket",
-            BucketSettings(quota_type=QuotaType.FIFO, quota_size=1_000_000_000),
-            exist_ok=True,
+    async with Client("http://localhost:8383") as client:
+        bucket = await client.create_bucket("my-bucket", exist_ok=True)
+
+        await bucket.write(
+            "camera-1",
+            b"hello, reductstore",
+            timestamp="2024-01-01T10:00:00Z",
+            labels={"device": "camera-1"},
         )
 
-        # 3. Write some data with timestamps and labels to the 'entry-1' entry
-        await bucket.write("/telemetry/sensor-1", b"<Blob data>", timestamp="2024-01-01T10:00:00Z",
-                           labels={"score": 10})
-        await bucket.write("/telemetry/sensor-2", b"<Blob data>", timestamp="2024-01-01T10:00:01Z",
-                           labels={"score": 20})
+        async for record in bucket.query(
+            "camera-1",
+            start="2024-01-01T10:00:00Z",
+            stop="2024-01-01T10:00:01Z",
+        ):
+            print((await record.read_all()).decode())
 
-        # 4. Query the data by time range and condition
-        async for record in bucket.query("/telemetry/*",
-                                         start="2024-01-01T10:00:00Z",
-                                         stop="2024-01-01T10:00:02Z",
-                                         when={"&score": {"$gt": 20}}):
-            print(f"Entry name: {record.entry}")
-            print(f"Record timestamp: {record.timestamp}")
-            print(f"Record size: {record.size}")
-            print(await record.read_all())
-
-
-# 5. Run the main function
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+asyncio.run(main())
 ```
 
 ## Next Steps
@@ -142,19 +122,23 @@ Learn more and pick the next piece you need:
 - **[Community Forum](https://community.reduct.store)**
 - **[Good First Issues](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)**
 
-## **Feedback & Contribution**
+## When You Should Not Use It
 
-Your input is invaluable to us! 🌟 If you've found a bug, have suggestions for improvements, or want to contribute directly to the codebase, here's how you can help:
+ReductStore is not the best fit for every data storage problem. You should consider another solution when:
+
+1. You have only numerical data that can be easily ingested into a time-series database.
+2. You have only blob data to store and do not need to access it as historical data. In this case, object storage or a file system may be a better fit.
+3. You need a message broker. Although ReductStore provides subscription and publishing functionality, it is designed for data storage and streaming, not message queueing.
+
+## Community & Contribution
+
+If you've found a bug, have ideas, built something with ReductStore, or want to contribute directly, here are the best places to jump in:
 
 - **Questions and Ideas**: Join our [**Discourse community**](https://community.reduct.store) to ask questions, share ideas, and collaborate with fellow ReductStore users.
 - **Bug Reports**: Open an issue on our **[GitHub repository](https://github.com/reductstore/reductstore/issues)**. Please provide as much detail as possible so we can address it effectively.
 - **First Contributions**: Pick a task from [**good first issues**](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22) or [**help wanted**](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22).
-
-## **Get Involved**
-
-We believe in the power of community and collaboration. If you've built something amazing with ReductStore, we'd love to hear about it. Share your projects, benchmarks, and lessons learned on our [Discourse community](https://community.reduct.store).
-
-If you find ReductStore beneficial, give us a ⭐ on our GitHub repository.
+- **Show Your Work**: Share your projects, benchmarks, and lessons learned on our [**Discourse community**](https://community.reduct.store).
+- **Support the Project**: If ReductStore is useful to you, give us a ⭐ on GitHub.
 
 ## Contributors
 
