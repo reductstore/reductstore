@@ -26,32 +26,19 @@ Store terabytes of images, sensor readings, logs, files, and ROS bags with times
 
 ## Proof Points
 
-<div align="center">
-  <table>
-    <tr>
-      <td align="center">
-        🚀<br />
-        <strong>60k+</strong><br />
-        downloads
-      </td>
-      <td align="center">
-        🏭<br />
-        <strong>100+</strong><br />
-        production deployments
-      </td>
-      <td align="center">
-        📦<br />
-        <strong>1 PB+</strong><br />
-        managed data
-      </td>
-      <td align="center">
-        ⭐<br />
-        <strong>350+</strong><br />
-        GitHub stars
-      </td>
-    </tr>
-  </table>
-</div>
+<p align="center">
+  <strong>🚀 60k+</strong> downloads
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <strong>🏭 100+</strong> production deployments
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <strong>📦 1 PB+</strong> managed data
+</p>
+
+<p align="center">
+  <strong>⭐ 350+</strong> GitHub stars
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <strong>👥 13</strong> contributors
+</p>
 
 ## Start Here
 
