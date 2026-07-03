@@ -135,18 +135,10 @@ if __name__ == "__main__":
 
 Learn more and pick the next piece you need:
 
-- [Rust Client SDK](https://github.com/reductstore/reduct-rs)
-- [Python Client SDK](https://github.com/reductstore/reduct-py)
-- [JavaScript Client SDK](https://github.com/reductstore/reduct-js)
-- [C++ Client SDK](https://github.com/reductstore/reduct-cpp)
-- [Go Client SDK](https://github.com/reductstore/reduct-go)
-- [CLI Client](https://github.com/reductstore/reduct-cli) - a command-line interface for direct interactions with ReductStore
-- [Web Console](https://github.com/reductstore/web-console) - a web interface to administrate a ReductStore instance
-- [ReductBridge](https://github.com/reductstore/reduct-bridge) - a data collector to get data from various sources and write it to ReductStore
-- [Documentation](https://www.reduct.store/docs/)
-- [Download](https://www.reduct.store/download)
-- [Community Forum](https://community.reduct.store)
-- [Good First Issues](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)
+- **[Documentation](https://www.reduct.store/docs/)**
+- **[Download](https://www.reduct.store/download)**
+- **[Community Forum](https://community.reduct.store)**
+- **[Good First Issues](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)**
 
 ## **Feedback & Contribution**
 
