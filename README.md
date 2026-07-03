@@ -63,17 +63,6 @@ ReductStore is not the best fit for every data storage problem. You should consi
 2. You have only blob data to store and do not need to access it as historical data. In this case, object storage or a file system may be a better fit.
 3. You need a message broker. Although ReductStore provides subscription and publishing functionality, it is designed for data storage and streaming, not message queueing.
 
-## Features
-
-- Storing and accessing unstructured data as time series of objects
-- Labeling data for annotation and filtering
-- JSON-based query language for filtering data
-- Conditional data replication
-- Real-time FIFO bucket quota based on size to avoid disk space shortage
-- Lifecycle management with data deletion and compression
-- Readonly replicas for horizontal scaling of read operations
-- Primary\Secondary mode for high availability
-
 ## Get Started
 
 The quickest way to get up and running is with our Docker image:
