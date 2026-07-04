@@ -76,16 +76,6 @@ mkdir -p ./data
 RS_DATA_PATH=./data ./reductstore
 ```
 
-If you prefer to build from source:
-
-```bash
-# Install Rust via the official rustup instructions:
-# https://www.rust-lang.org/tools/install
-apt install protobuf-compiler
-cargo install --locked reductstore
-RS_DATA_PATH=./data reductstore
-```
-
 For a more in-depth guide, visit the **[Getting Started](https://reduct.store/docs/)** and **[Download](https://www.reduct.store/download)** sections.
 
 After initializing the instance, you can start writing and querying data immediately. Here's a Python sample:
