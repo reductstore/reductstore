@@ -178,7 +178,6 @@ fn build_query_entry(
         stop,
         include: None,
         exclude: None,
-        each_s: None,
         each_n: None,
         limit: None,
         continuous: None,

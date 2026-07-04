@@ -24,7 +24,6 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "include": {"key1": "value1"},
             "exclude": {"key2": "value2"},
             "each_n": 10,
-            "each_s": 0.5,
             "when": {"$eq": ["&key1", "value1"]},
         },
     )
@@ -52,7 +51,6 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "exclude": {"key2": "value2"},
             "include": {"key1": "value1"},
             "each_n": 10,
-            "each_s": 0.5,
             "when": {"$eq": ["&key1", "value1"]},
             "mode": "enabled",
         },
@@ -123,7 +121,6 @@ def test__update_replication_ok(base_url, session, bucket_name, replication_name
             "exclude": {},
             "include": {},
             "each_n": None,
-            "each_s": None,
             "src_bucket": bucket_name,
             "when": None,
             "mode": "enabled",
