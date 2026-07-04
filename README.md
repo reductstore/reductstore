@@ -59,13 +59,7 @@ In such scenarios, ReductStore can help you manage and transfer your data effici
 
 ## Get Started
 
-The quickest way to get up and running is with our Docker image:
-
-```
-docker run -p 8383:8383 -v reduct-data:/data reduct/store:latest
-```
-
-If you prefer a bind mount instead of a Docker volume:
+The quickest way to get up and running is with Docker:
 
 ```bash
 mkdir -p ./data
@@ -73,7 +67,16 @@ sudo chown -R 10001:10001 ./data
 docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
 ```
 
-Alternatively, you can opt for Cargo:
+Or download a Linux binary directly from the latest release:
+
+```bash
+curl -LO https://github.com/reductstore/reductstore/releases/latest/download/reductstore.x86_64-unknown-linux-gnu.tar.gz
+tar -xzf reductstore.x86_64-unknown-linux-gnu.tar.gz
+mkdir -p ./data
+RS_DATA_PATH=./data ./reductstore
+```
+
+If you prefer to build from source:
 
 ```bash
 # Install Rust via the official rustup instructions:
@@ -120,6 +123,7 @@ Learn more and pick the next piece you need:
 
 - **[Documentation](https://www.reduct.store/docs/)**
 - **[Download](https://www.reduct.store/download)**
+- **[Contributing Guide](./CONTRIBUTING.md)**
 - **[Community Forum](https://community.reduct.store)**
 - **[Good First Issues](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)**
 
@@ -138,6 +142,7 @@ If you've found a bug, have ideas, built something with ReductStore, or want to 
 - **Questions and Ideas**: Join our [**Discourse community**](https://community.reduct.store) to ask questions, share ideas, and collaborate with fellow ReductStore users.
 - **Bug Reports**: Open an issue on our **[GitHub repository](https://github.com/reductstore/reductstore/issues)**. Please provide as much detail as possible so we can address it effectively.
 - **First Contributions**: Pick a task from [**good first issues**](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22) or [**help wanted**](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22).
+- **Pull Requests**: Open PRs only for an existing issue. Comment on the issue and get assigned before you start work. If you want to propose a new feature or workflow, open an issue first or start the discussion on the [**community forum**](https://community.reduct.store) before writing code.
 - **Show Your Work**: Share your projects, benchmarks, and lessons learned on our [**Discourse community**](https://community.reduct.store).
 - **Support the Project**: If ReductStore is useful to you, give us a ⭐ on GitHub.
 
@@ -147,14 +152,13 @@ Thanks to everyone who has contributed to ReductStore.
 
 <p align="center">
   <a href="https://github.com/atimin"><img src="https://avatars.githubusercontent.com/u/67068?v=4" width="48" height="48" alt="@atimin" /></a>
-  <a href="https://github.com/apps/dependabot"><img src="https://avatars.githubusercontent.com/in/29110?v=4" width="48" height="48" alt="@dependabot[bot]" /></a>
   <a href="https://github.com/mother-6000"><img src="https://avatars.githubusercontent.com/u/270019311?v=4" width="48" height="48" alt="@mother-6000" /></a>
   <a href="https://github.com/AnthonyCvn"><img src="https://avatars.githubusercontent.com/u/26444489?v=4" width="48" height="48" alt="@AnthonyCvn" /></a>
   <a href="https://github.com/DibbayajyotiRoy"><img src="https://avatars.githubusercontent.com/u/125145390?v=4" width="48" height="48" alt="@DibbayajyotiRoy" /></a>
   <a href="https://github.com/rtadepalli"><img src="https://avatars.githubusercontent.com/u/105760760?v=4" width="48" height="48" alt="@rtadepalli" /></a>
   <a href="https://github.com/rohankumardubey"><img src="https://avatars.githubusercontent.com/u/82864904?v=4" width="48" height="48" alt="@rohankumardubey" /></a>
   <a href="https://github.com/tuanhungngyn"><img src="https://avatars.githubusercontent.com/u/165829382?v=4" width="48" height="48" alt="@tuanhungngyn" /></a>
-  <a href="https://github.com/apps/copilot-swe-agent"><img src="https://avatars.githubusercontent.com/in/1143301?v=4" width="48" height="48" alt="@Copilot" /></a>
+  <a href="https://github.com/vbmade2000"><img src="https://avatars.githubusercontent.com/u/1904995?v=4" width="48" height="48" alt="@vbmade2000" /></a>
   <a href="https://github.com/mambaz"><img src="https://avatars.githubusercontent.com/u/3928782?v=4" width="48" height="48" alt="@mambaz" /></a>
   <a href="https://github.com/victor1234"><img src="https://avatars.githubusercontent.com/u/1102205?v=4" width="48" height="48" alt="@victor1234" /></a>
   <a href="https://github.com/aschenbecherwespe"><img src="https://avatars.githubusercontent.com/u/94011659?v=4" width="48" height="48" alt="@aschenbecherwespe" /></a>
