@@ -35,7 +35,8 @@ Contributors should run the code from their branch, not only the published Docke
 For most changes, build and run ReductStore locally:
 
 ```bash
-cargo run -p reductstore --features "fs-backend web-console" -- --data-path ./data
+mkdir -p ./data
+RS_DATA_PATH=./data cargo run -p reductstore --features "fs-backend web-console"
 ```
 
 If you prefer building a binary first:
@@ -43,7 +44,7 @@ If you prefer building a binary first:
 ```bash
 cargo build -p reductstore --features "fs-backend web-console"
 mkdir -p ./data
-./target/debug/reductstore --data-path ./data
+RS_DATA_PATH=./data ./target/debug/reductstore
 ```
 
 Use the published Docker image only for dependency-free smoke checks or to compare released behavior:
