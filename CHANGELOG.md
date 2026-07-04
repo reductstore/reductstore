@@ -88,7 +88,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414)
+- `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414) by @vbmade2000
 
 ### Changed
 
