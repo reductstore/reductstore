@@ -190,3 +190,167 @@ impl BlockManager {
         Ok(FILE_CACHE.try_exists(&path).await?)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::block_manager::block::Block;
+    use crate::storage::block_manager::block_index::BlockIndex;
+    use crate::storage::block_manager::test_utils::{block_id, block_manager};
+    use crate::storage::block_manager::{
+        BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
+    };
+    use crate::storage::proto::Block as BlockProto;
+    use prost::bytes::Bytes;
+    use prost::Message;
+    use rstest::rstest;
+    use std::sync::Arc;
+    use std::time::Duration;
+    use tempfile::tempdir;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_starting_block(#[future] block_manager: BlockManager) {
+        let mut block_manager = block_manager.await;
+        let block_id = 1_000_005;
+
+        let block_ref = block_manager.start_new_block(block_id, 1024).await.unwrap();
+        assert_eq!(block_ref.read().await.unwrap().block_id(), block_id,);
+
+        // Create an empty block
+        block_manager.save_cache_on_disk().await.unwrap();
+        let file = std::fs::File::open(
+            block_manager
+                .path
+                .join(format!("{}{}", block_id, DATA_FILE_EXT)),
+        )
+        .unwrap();
+        assert_eq!(file.metadata().unwrap().len(), 1024);
+
+        // Create a block descriptor
+        let buf = std::fs::read(
+            block_manager
+                .path
+                .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT)),
+        )
+        .unwrap();
+
+        let block_from_file: Block = BlockProto::decode(Bytes::from(buf)).unwrap().into();
+        assert_eq!(block_from_file, block_ref.read().await.unwrap().to_owned());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_starting_block_no_preallocation_for_remote_backend() {
+        let path = tempdir().unwrap().keep().join("bucket").join("entry");
+        let mut cfg = Cfg::default();
+        cfg.backend_config.backend_type = BackendType::Remote;
+
+        let mut block_manager = BlockManager::build(
+            path.clone(),
+            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            "bucket".to_string(),
+            "entry".to_string(),
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+
+        let block_id = 2_000_005;
+        block_manager.start_new_block(block_id, 1024).await.unwrap();
+        block_manager.save_cache_on_disk().await.unwrap();
+
+        let file = std::fs::File::open(
+            block_manager
+                .path
+                .join(format!("{}{}", block_id, DATA_FILE_EXT)),
+        )
+        .unwrap();
+        assert_eq!(file.metadata().unwrap().len(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_mark_block_corrupted_removes_cache(
+        #[future] block_manager: BlockManager,
+        block_id: u64,
+    ) {
+        let mut block_manager = block_manager.await;
+        block_manager.load_block(block_id).await.unwrap();
+        assert!(block_manager.block_cache.get_read(&block_id).is_some());
+
+        block_manager.mark_block_corrupted(block_id).await.unwrap();
+
+        assert!(block_manager.is_block_corrupted(block_id));
+        assert!(block_manager.block_cache.get_read(&block_id).is_none());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_mark_block_corrupted_persists_in_descriptor(
+        #[future] block_manager: BlockManager,
+        block_id: u64,
+    ) {
+        let mut block_manager = block_manager.await;
+
+        block_manager.mark_block_corrupted(block_id).await.unwrap();
+
+        let block_proto = BlockProto::decode(
+            std::fs::read(block_manager.path_to_desc(block_id))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+        assert_eq!(block_proto.corrupted, Some(true));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_finish_block(#[future] block_manager: BlockManager, block_id: u64) {
+        let mut block_manager = block_manager.await;
+        let block = block_manager
+            .start_new_block(block_id + 1, 1024)
+            .await
+            .unwrap();
+        let block_id = block.read().await.unwrap().block_id();
+        let loaded_block = block_manager.load_block(block_id).await.unwrap();
+        assert_eq!(loaded_block.read().await.unwrap().block_id(), block_id);
+
+        block_manager.finish_block(loaded_block).await.unwrap();
+
+        let path = block_manager
+            .path
+            .join(format!("{}{}", block_id, DATA_FILE_EXT));
+        for _ in 0..100 {
+            if std::fs::metadata(&path).unwrap().len() == 0 {
+                return;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+
+        assert_eq!(std::fs::metadata(path).unwrap().len(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_remove_non_existing_block(#[future] block_manager: BlockManager) {
+        let mut block_manager = block_manager.await;
+        block_manager.remove_block(999999).await.expect("No error");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_update_index_when_remove_block(
+        #[future] block_manager: BlockManager,
+        block_id: u64,
+    ) {
+        let mut bm = block_manager.await;
+        bm.remove_block(block_id).await.unwrap();
+
+        let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap();
+        assert!(index.get_block(block_id).is_none(), "index updated");
+    }
+}

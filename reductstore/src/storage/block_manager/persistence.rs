@@ -124,3 +124,119 @@ impl BlockManager {
         Ok(())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::block_manager::block_index::BlockIndex;
+    use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE, DESCRIPTOR_FILE_EXT};
+    use crate::storage::proto::Block as BlockProto;
+    use prost::Message;
+    use rstest::rstest;
+    use std::sync::Arc;
+    use tempfile::tempdir;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_sync_data_block_ok_for_replica() {
+        let path = tempdir().unwrap().keep().join("bucket").join("entry");
+        let mut cfg = Cfg::default();
+        cfg.role = InstanceRole::Replica;
+        let block_manager = BlockManager::build(
+            path.clone(),
+            BlockIndex::new(path.clone()),
+            "bucket".to_string(),
+            "entry".to_string(),
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        block_manager.sync_data_block(1).await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_sync_data_block_ok_for_missing_path() {
+        let path = tempdir().unwrap().keep().join("bucket").join("entry");
+        let cfg = Cfg::default();
+        let block_manager = BlockManager::build(
+            path.clone(),
+            BlockIndex::new(path.clone()),
+            "bucket".to_string(),
+            "entry".to_string(),
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        block_manager.sync_data_block(999).await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_save_meta_stores_version_in_descriptor() {
+        let path = tempdir().unwrap().keep().join("bucket").join("entry");
+        FILE_CACHE.create_dir_all(&path).await.unwrap();
+        let mut block_manager = BlockManager::build(
+            path.clone(),
+            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            "bucket".to_string(),
+            "entry".to_string(),
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+        let block_id = 1;
+        let block_ref = block_manager.start_new_block(block_id, 1024).await.unwrap();
+        block_manager
+            .save_meta_on_disk(block_ref.clone())
+            .await
+            .unwrap();
+
+        let block_proto = BlockProto::decode(
+            std::fs::read(block_manager.path_to_desc(block_id))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+        assert_eq!(block_proto.version, Some(1));
+
+        block_manager.save_meta_on_disk(block_ref).await.unwrap();
+
+        let block_proto = BlockProto::decode(
+            std::fs::read(block_manager.path_to_desc(block_id))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap();
+        assert_eq!(block_proto.version, Some(2));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_save_cache_metadata_skips_blocks_without_wal() {
+        let path = tempdir().unwrap().keep().join("bucket").join("entry");
+        let mut block_manager = BlockManager::build(
+            path.clone(),
+            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            "bucket".to_string(),
+            "entry".to_string(),
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+
+        let block_id = 1_000_005;
+        block_manager.start_new_block(block_id, 1024).await.unwrap();
+
+        block_manager.save_cache_metadata_on_disk().await.unwrap();
+
+        assert!(!path
+            .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT))
+            .exists());
+        assert!(!path.join(BLOCK_INDEX_FILE).exists());
+    }
+}

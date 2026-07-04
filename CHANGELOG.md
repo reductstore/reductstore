@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Split block manager storage logic into smaller modules by responsibility, [PR-1503](https://github.com/reductstore/reductstore/pull/1503) by @rohankumardubey
 - Unify `$system` event handling under `syslog`: move all event production (audit, usage, lifecycle, replication, logs) into the module behind a single system event logger with one shared writer and sink (no change to the stored record format), [PR-1496](https://github.com/reductstore/reductstore/pull/1496) by @DibbayajyotiRoy
 
 ## 1.20.7 - 2026-06-30

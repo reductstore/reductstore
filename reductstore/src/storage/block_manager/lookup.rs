@@ -170,3 +170,152 @@ impl BlockManager {
         Ok(cached_block)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::block_manager::test_utils::{block_id, block_manager};
+    use crate::storage::block_manager::BlockManager;
+    use crate::storage::proto::Block as BlockProto;
+    use prost::Message;
+    use reduct_base::error::ErrorCode;
+    use rstest::rstest;
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_loading_block(#[future] block_manager: BlockManager, block_id: u64) {
+        let mut block_manager = block_manager.await;
+        block_manager.start_new_block(block_id, 1024).await.unwrap();
+        let block_ref = block_manager.start_new_block(20000005, 1024).await.unwrap();
+        let block = block_ref.read().await.unwrap();
+        let loaded_block = block_manager.load_block(block.block_id()).await.unwrap();
+        assert_eq!(
+            loaded_block.read().await.unwrap().block_id(),
+            block.block_id()
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_loading_corrupted_block(#[future] block_manager: BlockManager, block_id: u64) {
+        let mut block_manager = block_manager.await;
+        block_manager.start_new_block(block_id, 1024).await.unwrap();
+        block_manager.save_cache_on_disk().await.unwrap();
+        block_manager.block_cache.remove(&block_id);
+
+        let path = block_manager.path_to_desc(block_id);
+        std::fs::write(&path, b"corrupted").unwrap();
+
+        let err = block_manager.load_block(block_id).await.err().unwrap();
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(err.to_string().contains("corrupted"));
+        assert!(block_manager.index().get_block(block_id).is_some());
+        assert!(block_manager.is_block_corrupted(block_id));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_load_block_stale_index_self_heals(#[future] block_manager: BlockManager) {
+        let mut block_manager = block_manager.await;
+        let block_id = 1;
+
+        let block_ref = block_manager.load_block(block_id).await.unwrap();
+        block_manager.save_meta_on_disk(block_ref).await.unwrap();
+        block_manager.block_cache.remove(&block_id);
+        let desc_version = BlockProto::decode(
+            std::fs::read(block_manager.path_to_desc(block_id))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap()
+        .version
+        .unwrap();
+
+        let index_block = block_manager.index_mut().get_block_mut(block_id).unwrap();
+        index_block.version = Some(desc_version - 1);
+        index_block.crc64 = Some(0);
+        block_manager.index_mut().save().await.unwrap();
+
+        let loaded = block_manager.load_block(block_id).await;
+
+        assert!(loaded.is_ok());
+        let index_block = block_manager.index().get_block(block_id).unwrap();
+        assert_eq!(index_block.version, Some(desc_version));
+        assert_ne!(index_block.crc64, Some(0));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_load_block_corrupted_descriptor_detected(#[future] block_manager: BlockManager) {
+        let mut block_manager = block_manager.await;
+        let block_id = 1;
+        block_manager.block_cache.remove(&block_id);
+
+        let path = block_manager.path_to_desc(block_id);
+        let mut block_proto = BlockProto::decode(std::fs::read(&path).unwrap().as_slice()).unwrap();
+        block_proto.record_count += 1;
+        std::fs::write(&path, block_proto.encode_to_vec()).unwrap();
+
+        let err = block_manager.load_block(block_id).await.err().unwrap();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(block_manager.is_block_corrupted(block_id));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_recover_being_time_from_id(#[future] block_manager: BlockManager, block_id: u64) {
+        let mut block_manager = block_manager.await;
+        block_manager.start_new_block(block_id, 1024).await.unwrap();
+        block_manager.block_cache.remove(&block_id);
+
+        let path = block_manager.path_to_desc(block_id);
+        std::fs::write(&path, b"").unwrap();
+
+        let result = block_manager.load_block(block_id).await;
+        assert!(
+            result.is_ok(),
+            "It's ok to recover begin time from block id for blocks which aren't synced yet"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_start_reading(#[future] block_manager: BlockManager, block_id: u64) {
+        let mut block_manager = block_manager.await;
+        let block = block_manager.start_new_block(block_id, 1024).await.unwrap();
+        let block_id = block.read().await.unwrap().block_id();
+        let loaded_block = block_manager.load_block(block_id).await.unwrap();
+        assert_eq!(loaded_block.read().await.unwrap().block_id(), block_id);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_recovering_index_if_no_meta_file(
+        #[future] block_manager: BlockManager,
+        block_id: u64,
+    ) {
+        let mut block_manager = block_manager.await;
+        assert!(block_manager.index().get_block(block_id).is_some());
+
+        FILE_CACHE
+            .remove(&block_manager.path_to_desc(block_id))
+            .await
+            .unwrap();
+        block_manager.block_cache.remove(&block_id); // remove block from cache to load it from disk
+        assert_eq!(
+            block_manager
+                .load_block(block_id)
+                .await
+                .err()
+                .unwrap()
+                .status(),
+            ErrorCode::InternalServerError
+        );
+        assert!(
+            block_manager.index().get_block(block_id).is_some(),
+            "corrupted blocks remain in the index for quota cleanup"
+        );
+        assert!(block_manager.is_block_corrupted(block_id));
+    }
+}

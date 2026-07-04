@@ -39,68 +39,6 @@ impl BlockManager {
         }
     }
 
-    pub(in crate::storage) fn block_is_compressed(&self, block_id: u64) -> bool {
-        self.block_index
-            .get_block(block_id)
-            .and_then(|block| block.compression)
-            .unwrap_or(i32::from(CompressionAlgorithm::None))
-            != i32::from(CompressionAlgorithm::None)
-    }
-
-    pub fn index_mut(&mut self) -> &mut BlockIndex {
-        &mut self.block_index
-    }
-
-    pub fn index(&self) -> &BlockIndex {
-        &self.block_index
-    }
-
-    pub(in crate::storage) fn usage_counters(&self) -> &UsageCounters {
-        &self.usage_counters
-    }
-
-    pub(in crate::storage) fn usage_counters_arc(&self) -> Arc<UsageCounters> {
-        Arc::clone(&self.usage_counters)
-    }
-
-    pub(in crate::storage) fn is_replica(&self) -> bool {
-        self.cfg.role == InstanceRole::Replica
-    }
-
-    pub(super) async fn invalidate_replica_block_cache(
-        &self,
-        block_id: u64,
-    ) -> Result<(), ReductError> {
-        FILE_CACHE
-            .invalidate_local_cache_file(&self.path_to_desc(block_id))
-            .await?;
-        FILE_CACHE
-            .invalidate_local_cache_file(&self.path_to_data(block_id))
-            .await?;
-        Ok(())
-    }
-
-    pub(in crate::storage) fn is_block_in_write_cache(&self, block_id: u64) -> bool {
-        self.block_cache.get_write(&block_id).is_some()
-    }
-
-    pub fn bucket_name(&self) -> &String {
-        &self.bucket
-    }
-
-    pub fn entry_name(&self) -> &String {
-        &self.entry
-    }
-
-    pub fn path(&self) -> &PathBuf {
-        &self.path
-    }
-
-    #[cfg(test)]
-    pub(crate) fn clear_cache_for_test(&self) {
-        self.block_cache.clear();
-    }
-
     pub(super) fn path_to_desc(&self, block_id: u64) -> PathBuf {
         self.path
             .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT))
