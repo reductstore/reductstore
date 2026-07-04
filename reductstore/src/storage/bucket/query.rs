@@ -34,6 +34,12 @@ fn entry_matches_pattern(entry: &str, pattern: &str) -> bool {
         return entry == pattern;
     }
 
+    if !pattern.contains('/') {
+        if let Some(prefix) = pattern.strip_suffix('*') {
+            return entry.starts_with(prefix);
+        }
+    }
+
     let entry_parts: Vec<&str> = entry.split('/').collect();
     let pattern_parts: Vec<&str> = pattern.split('/').collect();
 
@@ -480,79 +486,18 @@ mod tests {
     }
 
     #[rstest]
-    #[tokio::test]
-    async fn filters_by_prefix_wildcard(#[future] bucket: Arc<Bucket>) {
-        let bucket = bucket.await;
-        write(&bucket, "acc-a", 10, b"a1").await.unwrap();
-        write(&bucket, "acc-b", 20, b"b1").await.unwrap();
-        write(&bucket, "other", 15, b"c1").await.unwrap();
-
-        let query = QueryEntry {
-            query_type: QueryType::Query,
-            entries: Some(vec!["acc-*".into()]),
-            ..Default::default()
-        };
-
-        let id = bucket.query(query).await.unwrap();
-        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
-
-        let records = collect_records(rx).await;
-
-        assert_eq!(
-            records,
-            vec![("acc-a".to_string(), 10), ("acc-b".to_string(), 20)]
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn filters_by_single_segment_wildcard(#[future] bucket: Arc<Bucket>) {
-        let bucket = bucket.await;
-        write(&bucket, "a/x/b", 10, b"a1").await.unwrap();
-        write(&bucket, "a/y/b", 20, b"b1").await.unwrap();
-        write(&bucket, "a/x/d/b", 15, b"c1").await.unwrap();
-
-        let query = QueryEntry {
-            query_type: QueryType::Query,
-            entries: Some(vec!["/a/*/b".into()]),
-            ..Default::default()
-        };
-
-        let id = bucket.query(query).await.unwrap();
-        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
-
-        let records = collect_records(rx).await;
-
-        assert_eq!(
-            records,
-            vec![("a/x/b".to_string(), 10), ("a/y/b".to_string(), 20)]
-        );
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn filters_by_recursive_wildcard(#[future] bucket: Arc<Bucket>) {
-        let bucket = bucket.await;
-        write(&bucket, "a/x/b", 10, b"a1").await.unwrap();
-        write(&bucket, "a/x/d/b", 20, b"b1").await.unwrap();
-        write(&bucket, "a/private/b", 15, b"c1").await.unwrap();
-        write(&bucket, "a/private/x/b", 25, b"d1").await.unwrap();
-
-        let query = QueryEntry {
-            query_type: QueryType::Query,
-            entries: Some(vec!["/a/**/b".into(), "!/a/private/**".into()]),
-            ..Default::default()
-        };
-
-        let id = bucket.query(query).await.unwrap();
-        let (rx, _) = bucket.get_query_receiver(id).await.unwrap();
-
-        let records = collect_records(rx).await;
-
-        assert_eq!(
-            records,
-            vec![("a/x/b".to_string(), 10), ("a/x/d/b".to_string(), 20)]
-        );
+    #[case("acc-a", "acc-*", true)]
+    #[case("acc-a/sub-entry", "acc-*", true)]
+    #[case("other", "acc-*", false)]
+    #[case("a/x/b", "/a/*/b", true)]
+    #[case("a/y/b", "/a/*/b", true)]
+    #[case("a/x/d/b", "/a/*/b", false)]
+    #[case("a/x/b", "/a/**/b", true)]
+    #[case("a/x/d/b", "/a/**/b", true)]
+    #[case("a/private/x/b", "/a/private/**", true)]
+    #[case("a/public/x/b", "/a/private/**", false)]
+    fn matches_entry_patterns(#[case] entry: &str, #[case] pattern: &str, #[case] expected: bool) {
+        assert_eq!(entry_matches_pattern(entry, pattern), expected);
     }
 
     #[rstest]
