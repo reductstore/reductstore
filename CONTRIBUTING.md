@@ -29,18 +29,29 @@ If possible, start the branch name with the issue ID, for example `1469-docs-con
 
 If your change affects runtime behavior, start a real ReductStore instance and test it yourself when possible.
 
-Please validate the changed path against a live server, not only with unit tests. For most changes, one of these is enough:
+Please validate the changed path against a live server, not only with unit tests.
+Contributors should run the code from their branch, not only the published Docker image, so the instance actually includes their changes.
+
+For most changes, build and run ReductStore locally:
+
+```bash
+cargo run -p reductstore --features "fs-backend web-console" -- --data-path ./data
+```
+
+If you prefer building a binary first:
+
+```bash
+cargo build -p reductstore --features "fs-backend web-console"
+mkdir -p ./data
+./target/debug/reductstore --data-path ./data
+```
+
+Use the published Docker image only for dependency-free smoke checks or to compare released behavior:
 
 ```bash
 mkdir -p ./data
 sudo chown -R 10001:10001 ./data
 docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
-```
-
-or
-
-```bash
-RS_DATA_PATH=./data cargo run -p reductstore --features "fs-backend web-console"
 ```
 
 Then exercise the API, replication flow, query behavior, lifecycle policy, or UI path that your change touches.
