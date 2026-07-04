@@ -132,7 +132,7 @@ If you've found a bug, have ideas, built something with ReductStore, or want to 
 - **Questions and Ideas**: Join our [**Discourse community**](https://community.reduct.store) to ask questions, share ideas, and collaborate with fellow ReductStore users.
 - **Bug Reports**: Open an issue on our **[GitHub repository](https://github.com/reductstore/reductstore/issues)**. Please provide as much detail as possible so we can address it effectively.
 - **First Contributions**: Pick a task from [**good first issues**](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22) or [**help wanted**](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22).
-- **Pull Requests**: Open PRs only for an existing issue. Comment on the issue and get assigned before you start work. If you want to propose a new feature or workflow, open an issue first or start the discussion on the [**community forum**](https://community.reduct.store) before writing code.
+- **Pull Requests**: Open PRs only for an existing issue. Comment on the issue and get assigned before you start work. Use the repository pull request template when you open the PR. If you want to propose a new feature or workflow, open an issue first or start the discussion on the [**community forum**](https://community.reduct.store) before writing code.
 - **Show Your Work**: Share your projects, benchmarks, and lessons learned on our [**Discourse community**](https://community.reduct.store).
 - **Support the Project**: If ReductStore is useful to you, give us a ⭐ on GitHub.
 

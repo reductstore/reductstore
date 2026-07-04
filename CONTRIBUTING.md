@@ -80,6 +80,7 @@ Human judgment is required. "The AI wrote it" is not enough.
 When you open the PR:
 
 - Link the issue it resolves.
+- Use the repository pull request template.
 - Explain the user or maintainer problem you fixed.
 - List the validation you ran, including manual runtime checks when applicable.
 - Mention config or environment changes such as new `RS_*` variables or feature flags.
