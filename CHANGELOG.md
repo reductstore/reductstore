@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Support glob-like entry patterns in query entry filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1506](https://github.com/reductstore/reductstore/pull/1506) by @gitcommit90
 - Add CI vulnerability scanning for Rust dependencies and Docker images, gating image publishing on fixed high-severity container findings, [PR-1500](https://github.com/reductstore/reductstore/pull/1500)
 - Emit per-bucket usage statistics as system events under `usage/<instance>/<bucket>` alongside the existing instance total, and add `written_entries`, `read_entries`, and `record_count` fields to usage events, [PR-1474](https://github.com/reductstore/reductstore/pull/1474) by @DibbayajyotiRoy
 - Add a replication `dst_prefix` setting to write replicated records under a destination entry prefix, [PR-1486](https://github.com/reductstore/reductstore/pull/1486) by @rohankumardubey
