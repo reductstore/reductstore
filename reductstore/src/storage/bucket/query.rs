@@ -27,6 +27,75 @@ pub(super) struct MultiEntryQuery {
     last_access: Instant,
 }
 
+fn entry_matches_pattern(entry: &str, pattern: &str) -> bool {
+    let pattern = pattern.trim_start_matches('/');
+
+    if !pattern.contains('*') {
+        return entry == pattern;
+    }
+
+    if !pattern.contains('/') {
+        if let Some(prefix) = pattern.strip_suffix('*') {
+            return entry.starts_with(prefix);
+        }
+    }
+
+    let entry_parts: Vec<&str> = entry.split('/').collect();
+    let pattern_parts: Vec<&str> = pattern.split('/').collect();
+
+    fn segment_matches(entry: &str, pattern: &str) -> bool {
+        if pattern == "**" {
+            return true;
+        }
+
+        let mut rest = entry;
+        let mut parts = pattern.split('*').peekable();
+
+        if let Some(first) = parts.next() {
+            if !first.is_empty() {
+                let Some(stripped) = rest.strip_prefix(first) else {
+                    return false;
+                };
+                rest = stripped;
+            }
+        }
+
+        while let Some(part) = parts.next() {
+            if part.is_empty() {
+                continue;
+            }
+
+            if parts.peek().is_none() {
+                return rest.ends_with(part);
+            }
+
+            let Some(index) = rest.find(part) else {
+                return false;
+            };
+            rest = &rest[index + part.len()..];
+        }
+
+        pattern.ends_with('*') || rest.is_empty()
+    }
+
+    fn matches_from(entry_parts: &[&str], pattern_parts: &[&str]) -> bool {
+        match pattern_parts.split_first() {
+            None => entry_parts.is_empty(),
+            Some((&"**", tail)) => {
+                matches_from(entry_parts, tail)
+                    || (!entry_parts.is_empty() && matches_from(&entry_parts[1..], pattern_parts))
+            }
+            Some((pattern, tail)) => {
+                !entry_parts.is_empty()
+                    && segment_matches(entry_parts[0], pattern)
+                    && matches_from(&entry_parts[1..], tail)
+            }
+        }
+    }
+
+    matches_from(&entry_parts, &pattern_parts)
+}
+
 impl Bucket {
     /// Initiate a query across multiple entries in the bucket.
     ///
@@ -99,34 +168,53 @@ impl Bucket {
     ) -> Result<Vec<(String, Arc<Entry>)>, ReductError> {
         let entries = self.entries.read().await?;
         let requested_entries = match &request.entries {
-            Some(entries) if entries.iter().any(|entry| entry == "*") => None,
-            Some(entries) => Some(entries.clone()),
-            None => None,
+            Some(entries) => entries,
+            None => {
+                let results = entries
+                    .iter()
+                    .filter(|(_, entry)| entry.is_queryable_by_wildcard())
+                    .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
+                    .collect();
+                return Ok(results);
+            }
         };
 
-        let matches_pattern = |entry: &str, patterns: &[String]| {
-            patterns.iter().any(|pattern| {
-                if let Some(prefix) = pattern.strip_suffix('*') {
-                    entry.starts_with(prefix)
+        let include_patterns: Vec<&str> = requested_entries
+            .iter()
+            .filter_map(|pattern| {
+                if pattern.starts_with('!') && pattern.len() > 1 {
+                    None
                 } else {
-                    entry == pattern
+                    Some(pattern.as_str())
                 }
             })
-        };
+            .collect();
+        let exclude_patterns: Vec<&str> = requested_entries
+            .iter()
+            .filter_map(|pattern| pattern.strip_prefix('!'))
+            .filter(|pattern| !pattern.is_empty())
+            .collect();
 
         let results: Vec<(String, Arc<Entry>)> = entries
             .iter()
             .filter(|(name, entry)| {
-                if requested_entries.is_none() {
-                    return entry.is_queryable_by_wildcard();
-                }
+                let included = if include_patterns.iter().any(|pattern| *pattern == "*") {
+                    entry.is_queryable_by_wildcard()
+                } else if include_patterns.is_empty() {
+                    entry.is_queryable_by_wildcard()
+                } else if include_patterns.iter().any(|pattern| pattern == name) {
+                    true
+                } else {
+                    include_patterns
+                        .iter()
+                        .any(|pattern| entry_matches_pattern(name, pattern))
+                        && entry.is_queryable_by_wildcard()
+                };
 
-                let patterns = requested_entries.as_ref().unwrap();
-                if patterns.iter().any(|pattern| pattern == *name) {
-                    return true;
-                }
-
-                matches_pattern(name, patterns) && entry.is_queryable_by_wildcard()
+                included
+                    && !exclude_patterns
+                        .iter()
+                        .any(|pattern| pattern == name || entry_matches_pattern(name, pattern))
             })
             .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
             .collect();
@@ -398,16 +486,31 @@ mod tests {
     }
 
     #[rstest]
+    #[case("acc-a", "acc-*", true)]
+    #[case("acc-a/sub-entry", "acc-*", true)]
+    #[case("other", "acc-*", false)]
+    #[case("a/x/b", "/a/*/b", true)]
+    #[case("a/y/b", "/a/*/b", true)]
+    #[case("a/x/d/b", "/a/*/b", false)]
+    #[case("a/x/b", "/a/**/b", true)]
+    #[case("a/x/d/b", "/a/**/b", true)]
+    #[case("a/private/x/b", "/a/private/**", true)]
+    #[case("a/public/x/b", "/a/private/**", false)]
+    fn matches_entry_patterns(#[case] entry: &str, #[case] pattern: &str, #[case] expected: bool) {
+        assert_eq!(entry_matches_pattern(entry, pattern), expected);
+    }
+
+    #[rstest]
     #[tokio::test]
-    async fn filters_by_prefix_wildcard(#[future] bucket: Arc<Bucket>) {
+    async fn filters_by_exclusion_only(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
-        write(&bucket, "acc-a", 10, b"a1").await.unwrap();
-        write(&bucket, "acc-b", 20, b"b1").await.unwrap();
-        write(&bucket, "other", 15, b"c1").await.unwrap();
+        write(&bucket, "a/public/b", 10, b"a1").await.unwrap();
+        write(&bucket, "a/private/b", 20, b"b1").await.unwrap();
+        write(&bucket, "cam-1", 15, b"c1").await.unwrap();
 
         let query = QueryEntry {
             query_type: QueryType::Query,
-            entries: Some(vec!["acc-*".into()]),
+            entries: Some(vec!["!/a/private/**".into()]),
             ..Default::default()
         };
 
@@ -418,7 +521,7 @@ mod tests {
 
         assert_eq!(
             records,
-            vec![("acc-a".to_string(), 10), ("acc-b".to_string(), 20)]
+            vec![("a/public/b".to_string(), 10), ("cam-1".to_string(), 15)]
         );
     }
 

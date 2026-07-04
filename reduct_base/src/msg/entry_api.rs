@@ -74,8 +74,6 @@ pub struct QueryEntry {
     pub include: Option<HashMap<String, String>>,
     /// Exclude records with label
     pub exclude: Option<HashMap<String, String>>,
-    /// Return a record every S seconds
-    pub each_s: Option<f64>,
     /// Return a record every N records
     pub each_n: Option<u64>,
     /// Limit the number of records returned

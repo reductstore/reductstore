@@ -13,11 +13,32 @@
   <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
 </p>
 
-ReductStore is a high-performance, multimodal time-series storage and streaming solution for ELT-based data acquisition (DAQ) systems in robotics and industrial IoT (IIoT).
-It's designed to handle large volumes of unstructured data - images, sensor readings, logs, files, ROS bags - captured in raw form and stored with a precise time index (timestamp) and optional labels (e.g. device status, AI inference).
-This enables fast, efficient retrieval based on when the data was collected and how it's categorized, while also allowing control over data reduction strategies by replicating (streaming) only selected data from the edge to the cloud.
+ReductStore makes robotics and industrial data queryable.
 
-For more information, please visit https://www.reduct.store/.
+Store terabytes of images, sensor readings, logs, files, and ROS bags with timestamps and labels in one system, then query them by time range and context instead of stitching together a TSDB, object storage, and custom retention jobs.
+
+## Why Teams Pick ReductStore
+
+- Make binary-first robotics and industrial data queryable by time range and labels
+- Built for workloads such as camera frames, sensor payloads, logs, files, and ROS bags
+- Replicate only selected records to the cloud to reduce bandwidth and storage cost
+- Apply quotas and lifecycle policies in the same system that stores the data
+
+## Proof Points
+
+<p align="center">
+  <strong>🚀 60k+</strong> downloads
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <strong>🏭 100+</strong> production deployments
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <strong>📦 1 PB+</strong> managed data
+</p>
+
+<p align="center">
+  <strong>⭐ 350+</strong> GitHub stars
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <strong>🛠️ 4+</strong> years of active development
+</p>
 
 ## When You Should Use It
 
@@ -30,6 +51,72 @@ If you ingest binary data with labels into a ReductStore instance, you can use i
 
 In such scenarios, ReductStore can help you manage and transfer your data efficiently based on its metadata, without combining a TSDB and blob storage. This keeps your architecture simple and efficient.
 
+## Who It Is For
+
+- Robotics platforms that need to replay camera frames, telemetry, and logs around incidents or model failures
+- Industrial IoT pipelines that collect binary payloads at the edge and forward only filtered data upstream
+- Edge AI systems that need retention, labeling, and historical retrieval without building a custom storage stack
+
+## Get Started
+
+The quickest way to get up and running is with Docker:
+
+```bash
+mkdir -p ./data
+sudo chown -R 10001:10001 ./data
+docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
+```
+
+Or download a Linux binary directly from the latest release:
+
+```bash
+curl -LO https://github.com/reductstore/reductstore/releases/latest/download/reductstore.x86_64-unknown-linux-gnu.tar.gz
+tar -xzf reductstore.x86_64-unknown-linux-gnu.tar.gz
+mkdir -p ./data
+RS_DATA_PATH=./data ./reductstore
+```
+
+For a more in-depth guide, visit the **[Getting Started](https://reduct.store/docs/)** and **[Download](https://www.reduct.store/download)** sections.
+
+After initializing the instance, you can start writing and querying data immediately. Here's a Python sample:
+
+```python
+import asyncio
+
+from reduct import Client
+
+async def main():
+    async with Client("http://localhost:8383") as client:
+        bucket = await client.create_bucket("my-bucket", exist_ok=True)
+
+        await bucket.write(
+            "camera-1",
+            b"hello, reductstore",
+            timestamp="2024-01-01T10:00:00Z",
+            labels={"device": "camera-1"},
+        )
+
+        async for record in bucket.query(
+            "camera-1",
+            start="2024-01-01T10:00:00Z",
+            stop="2024-01-01T10:00:01Z",
+            when={"&device": {"$eq": "camera-1"}},
+        ):
+            print((await record.read_all()).decode())
+
+asyncio.run(main())
+```
+
+## Next Steps
+
+Learn more and pick the next piece you need:
+
+- **[Documentation](https://www.reduct.store/docs/)**
+- **[Download](https://www.reduct.store/download)**
+- **[Contributing Guide](./CONTRIBUTING.md)**
+- **[Community Forum](https://community.reduct.store)**
+- **[Good First Issues](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)**
+
 ## When You Should Not Use It
 
 ReductStore is not the best fit for every data storage problem. You should consider another solution when:
@@ -38,115 +125,36 @@ ReductStore is not the best fit for every data storage problem. You should consi
 2. You have only blob data to store and do not need to access it as historical data. In this case, object storage or a file system may be a better fit.
 3. You need a message broker. Although ReductStore provides subscription and publishing functionality, it is designed for data storage and streaming, not message queueing.
 
-## Features
+## Community & Contribution
 
-- Storing and accessing unstructured data as time series of objects
-- Labeling data for annotation and filtering
-- JSON-based query language for filtering data
-- Conditional data replication
-- Real-time FIFO bucket quota based on size to avoid disk space shortage
-- Lifecycle management with data deletion and compression
-- Readonly replicas for horizontal scaling of read operations
-- Primary\Secondary mode for high availability
-
-## Get Started
-
-The quickest way to get up and running is with our Docker image:
-
-```
-docker run -p 8383:8383 -v reduct-data:/data reduct/store:latest
-```
-
-If you prefer a bind mount instead of a Docker volume:
-
-```bash
-mkdir -p ./data
-sudo chown -R 10001:10001 ./data
-docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
-```
-
-Alternatively, you can opt for Cargo:
-
-```bash
-# Install Rust via the official rustup instructions:
-# https://www.rust-lang.org/tools/install
-apt install protobuf-compiler
-cargo install --locked reductstore
-RS_DATA_PATH=./data reductstore
-```
-
-For a more in-depth guide, visit the **[Getting Started](https://reduct.store/docs/)** and **[Download](https://www.reduct.store/download)** sections.
-
-After initializing the instance, dive in with one of our **[Client SDKs](#client-sdks)** to write or retrieve data. To illustrate, here's a Python sample:
-
-```python
-from reduct import Client, BucketSettings, QuotaType
-
-async def main():
-    # 1. Create a ReductStore client
-    async with Client("http://localhost:8383", api_token="my-token") as client:
-        # 2. Get or create a bucket with 1Gb quota
-        bucket = await client.create_bucket(
-            "my-bucket",
-            BucketSettings(quota_type=QuotaType.FIFO, quota_size=1_000_000_000),
-            exist_ok=True,
-        )
-
-        # 3. Write some data with timestamps and labels to the 'entry-1' entry
-        await bucket.write("/telemetry/sensor-1", b"<Blob data>", timestamp="2024-01-01T10:00:00Z",
-                           labels={"score": 10})
-        await bucket.write("/telemetry/sensor-2", b"<Blob data>", timestamp="2024-01-01T10:00:01Z",
-                           labels={"score": 20})
-
-        # 4. Query the data by time range and condition
-        async for record in bucket.query("/telemetry/*",
-                                         start="2024-01-01T10:00:00Z",
-                                         stop="2024-01-01T10:00:02Z",
-                                         when={"&score": {"$gt": 20}}):
-            print(f"Entry name: {record.entry}")
-            print(f"Record timestamp: {record.timestamp}")
-            print(f"Record size: {record.size}")
-            print(await record.read_all())
-
-
-# 5. Run the main function
-if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
-```
-
-## Client SDKs
-
-ReductStore is built with adaptability in mind. While it comes with a straightforward HTTP API that can be integrated into virtually any environment, we understand that not everyone wants to interact with the API directly.
-To streamline your development process and make integrations smoother, we've developed a series of client SDKs tailored for different programming languages and environments. These SDKs wrap around the core API, offering a more intuitive and language-native way to interact with ReductStore, thus accelerating your development cycle.
-Here are the client SDKs available:
-
-- [Rust Client SDK](https://github.com/reductstore/reduct-rs)
-- [Python Client SDK](https://github.com/reductstore/reduct-py)
-- [JavaScript Client SDK](https://github.com/reductstore/reduct-js)
-- [C++ Client SDK](https://github.com/reductstore/reduct-cpp)
-- [Go Client SDK](https://github.com/reductstore/reduct-go)
-
-## Tools
-
-ReductStore is not just about data storage; it's about simplifying and enhancing your data management experience. Along with its robust core features, ReductStore offers a suite of tools to streamline administration, monitoring, and optimization. Here are the key tools you can leverage:
-
-- [CLI Client](https://github.com/reductstore/reduct-cli) - a command-line interface for direct interactions with ReductStore
-- [Web Console](https://github.com/reductstore/web-console) - a web interface to administrate a ReductStore instance
-- [ReductBridge](https://github.com/reductstore/reduct-bridge) - a data collector to get data from various sources and write it to ReductStore
-
-## **Feedback & Contribution**
-
-Your input is invaluable to us! 🌟 If you've found a bug, have suggestions for improvements, or want to contribute directly to the codebase, here's how you can help:
+If you've found a bug, have ideas, built something with ReductStore, or want to contribute directly, here are the best places to jump in:
 
 - **Questions and Ideas**: Join our [**Discourse community**](https://community.reduct.store) to ask questions, share ideas, and collaborate with fellow ReductStore users.
 - **Bug Reports**: Open an issue on our **[GitHub repository](https://github.com/reductstore/reductstore/issues)**. Please provide as much detail as possible so we can address it effectively.
+- **First Contributions**: Pick a task from [**good first issues**](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22) or [**help wanted**](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22).
+- **Pull Requests**: Open PRs only for an existing issue. Comment on the issue and get assigned before you start work. Use the repository pull request template when you open the PR, and update `CHANGELOG.md` for user-visible changes. If you want to propose a new feature or workflow, open an issue first or start the discussion on the [**community forum**](https://community.reduct.store) before writing code.
+- **Show Your Work**: Share your projects, benchmarks, and lessons learned on our [**Discourse community**](https://community.reduct.store).
+- **Support the Project**: If ReductStore is useful to you, give us a ⭐ on GitHub.
 
-## **Get Involved**
+## Contributors
 
-We believe in the power of community and collaboration. If you've built something amazing with ReductStore, we'd love to hear about it! Share your projects, experiences, and insights on our [Discourse community](https://community.reduct.store).
+Thanks to everyone who has contributed to ReductStore.
 
-If you find ReductStore beneficial, give us a ⭐ on our GitHub repository.
+<p align="center">
+  <a href="https://github.com/atimin"><img src="https://avatars.githubusercontent.com/u/67068?v=4" width="48" height="48" alt="@atimin" /></a>
+  <a href="https://github.com/mother-6000"><img src="https://avatars.githubusercontent.com/u/270019311?v=4" width="48" height="48" alt="@mother-6000" /></a>
+  <a href="https://github.com/AnthonyCvn"><img src="https://avatars.githubusercontent.com/u/26444489?v=4" width="48" height="48" alt="@AnthonyCvn" /></a>
+  <a href="https://github.com/DibbayajyotiRoy"><img src="https://avatars.githubusercontent.com/u/125145390?v=4" width="48" height="48" alt="@DibbayajyotiRoy" /></a>
+  <a href="https://github.com/rtadepalli"><img src="https://avatars.githubusercontent.com/u/105760760?v=4" width="48" height="48" alt="@rtadepalli" /></a>
+  <a href="https://github.com/rohankumardubey"><img src="https://avatars.githubusercontent.com/u/82864904?v=4" width="48" height="48" alt="@rohankumardubey" /></a>
+  <a href="https://github.com/tuanhungngyn"><img src="https://avatars.githubusercontent.com/u/165829382?v=4" width="48" height="48" alt="@tuanhungngyn" /></a>
+  <a href="https://github.com/gitcommit90"><img src="https://avatars.githubusercontent.com/u/294273268?v=4" width="48" height="48" alt="@gitcommit90" /></a>
+  <a href="https://github.com/vbmade2000"><img src="https://avatars.githubusercontent.com/u/1904995?v=4" width="48" height="48" alt="@vbmade2000" /></a>
+  <a href="https://github.com/mambaz"><img src="https://avatars.githubusercontent.com/u/3928782?v=4" width="48" height="48" alt="@mambaz" /></a>
+  <a href="https://github.com/victor1234"><img src="https://avatars.githubusercontent.com/u/1102205?v=4" width="48" height="48" alt="@victor1234" /></a>
+  <a href="https://github.com/aschenbecherwespe"><img src="https://avatars.githubusercontent.com/u/94011659?v=4" width="48" height="48" alt="@aschenbecherwespe" /></a>
+  <a href="https://github.com/renghen"><img src="https://avatars.githubusercontent.com/u/271285?v=4" width="48" height="48" alt="@renghen" /></a>
+</p>
 
 Your support fuels our passion and drives us to keep improving.
 

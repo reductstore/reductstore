@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Support glob-like entry patterns in query entry filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1506](https://github.com/reductstore/reductstore/pull/1506) by @gitcommit90
 - Add CI vulnerability scanning for Rust dependencies and Docker images, gating image publishing on fixed high-severity container findings, [PR-1500](https://github.com/reductstore/reductstore/pull/1500)
 - Emit per-bucket usage statistics as system events under `usage/<instance>/<bucket>` alongside the existing instance total, and add `written_entries`, `read_entries`, and `record_count` fields to usage events, [PR-1474](https://github.com/reductstore/reductstore/pull/1474) by @DibbayajyotiRoy
 - Add a replication `dst_prefix` setting to write replicated records under a destination entry prefix, [PR-1486](https://github.com/reductstore/reductstore/pull/1486) by @rohankumardubey
@@ -17,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Split block manager storage logic into smaller modules by responsibility, [PR-1503](https://github.com/reductstore/reductstore/pull/1503) by @rohankumardubey
+- Refresh contributor onboarding docs to validate branch builds locally and add `@gitcommit90` to the README contributor wall, [PR-1511](https://github.com/reductstore/reductstore/pull/1511)
 - Unify `$system` event handling under `syslog`: move all event production (audit, usage, lifecycle, replication, logs) into the module behind a single system event logger with one shared writer and sink (no change to the stored record format), [PR-1496](https://github.com/reductstore/reductstore/pull/1496) by @DibbayajyotiRoy
 
 ## 1.20.7 - 2026-06-30
@@ -91,6 +93,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support object shorthand for unconditional `#ext` pipelines by expanding multi-extension objects into ordered execution steps, while keeping array-based pipeline syntax unchanged, [PR-1367](https://github.com/reductstore/reductstore/pull/1367)
 - Support strict extension pipelines in `#ext` directives with ordered step execution and backward compatibility for legacy `"#ext": { ... }` object format, [PR-1351](https://github.com/reductstore/reductstore/pull/1351)
 - Add `--version` (`-V`) CLI option to the `reductstore` server binary to print the version and exit successfully from shared launcher code, [PR-1343](https://github.com/reductstore/reductstore/pull/1343)
+
+### Removed
+
+- `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414) by @vbmade2000
 
 ### Changed
 

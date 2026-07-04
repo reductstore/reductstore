@@ -69,7 +69,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     include: Labels::default(),
                     exclude: Labels::default(),
                     each_n: None,
-                    each_s: None,
                     when: None,
                     mode: ReplicationMode::Enabled,
                 },
@@ -157,15 +156,30 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 replication.settings.each_n = Some(each_n);
             }
 
-            if let Some(each_s) = env.get_optional::<f64>(&format!("RS_REPLICATION_{}_EACH_S", id))
-            {
-                replication.settings.each_s = Some(each_s);
-            }
-
+            // Parse the when condition first
             if let Some(when) =
                 env.get_optional::<serde_json::Value>(&format!("RS_REPLICATION_{}_WHEN", id))
             {
                 replication.settings.when = Some(when);
+            }
+
+            // Migrate deprecated each_s to $each_t by injecting it into the when condition
+            if let Some(each_s) = env.get_optional::<f64>(&format!("RS_REPLICATION_{}_EACH_S", id))
+            {
+                warn!(
+                    "The 'RS_REPLICATION_{}_EACH_S' environment variable is deprecated and will be migrated to 'when' condition using $each_t operator. Value: {}",
+                    id, each_s
+                );
+
+                if let Some(when) = &mut replication.settings.when {
+                    // Inject $each_t into the existing when condition
+                    if let Some(obj) = when.as_object_mut() {
+                        obj.insert("$each_t".to_string(), serde_json::json!(each_s));
+                    }
+                } else {
+                    // No when condition exists, create one with just $each_t
+                    replication.settings.when = Some(serde_json::json!({"$each_t": each_s}));
+                }
             }
 
             if let Some(mode) = env.get_optional::<String>(&format!("RS_REPLICATION_{}_MODE", id)) {
@@ -255,7 +269,6 @@ mod tests {
         assert_eq!(replication.entries, vec!["entry1", "entry2"]);
         assert_eq!(replication.dst_prefix, "robot-1");
         assert_eq!(replication.each_n, Some(10));
-        assert_eq!(replication.each_s, Some(0.5));
         assert_eq!(
             replication.when,
             Some(serde_json::json!({"$and": [true, false]}))
@@ -532,7 +545,6 @@ mod tests {
                 include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
-                each_s: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
             },
@@ -622,7 +634,6 @@ mod tests {
                 include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
-                each_s: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
             },
@@ -707,7 +718,6 @@ mod tests {
                 include: Labels::default(),
                 exclude: Labels::default(),
                 each_n: None,
-                each_s: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
             },
@@ -749,6 +759,107 @@ mod tests {
         let repo = components.replication_repo.read().await.unwrap();
         let info = repo.get_info("replication1").await.unwrap();
         assert_eq!(info.info.mode, ReplicationMode::Paused);
+    }
+
+    #[cfg(test)]
+    mod each_s {
+
+        use super::*;
+
+        #[log_test(rstest)]
+        #[tokio::test]
+        async fn test_each_s_migrated_to_each_t_without_when() {
+            test_each_s_migration("2.5", None, serde_json::json!({"$each_t": 2.5})).await;
+        }
+
+        #[log_test(rstest)]
+        #[tokio::test]
+        async fn test_each_s_migrated_to_each_t_with_existing_when() {
+            test_each_s_migration(
+                "2.0",
+                Some(r#"{"&label": {"$eq": 1}}"#),
+                serde_json::json!({
+                    "&label": {"$eq": 1},
+                    "$each_t": 2.0
+                }),
+            )
+            .await;
+        }
+
+        async fn test_each_s_migration(
+            each_s: &str,
+            when: Option<&str>,
+            expected: serde_json::Value,
+        ) {
+            let path = tempfile::tempdir().unwrap().keep();
+            let mut env = env_with_each_s(path);
+
+            if let Some(when_condition) = when {
+                env.expect_get()
+                    .with(eq("RS_REPLICATION_1_WHEN"))
+                    .return_const(Ok(when_condition.to_string()));
+            }
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_EACH_S"))
+                .return_const(Ok(each_s.to_string()));
+
+            env.expect_get().return_const(Err(VarError::NotPresent));
+
+            let components = CfgParser::from_env(env, "0.0.0")
+                .await
+                .build()
+                .await
+                .unwrap();
+            let repo = components.replication_repo.read().await.unwrap();
+            let replication = repo.get_replication_settings("replication1").await.unwrap();
+
+            assert_eq!(replication.when, Some(expected));
+        }
+
+        /// Creates a base MockEnvGetter for each_s migration tests.
+        /// Sets up minimal replication configuration without EACH_S or WHEN.
+        /// Caller must add:
+        /// - Specific EACH_S and/or WHEN expectations
+        /// - Catch-all expectation (last)
+        fn env_with_each_s(path: PathBuf) -> MockEnvGetter {
+            let mut env = MockEnvGetter::new();
+            env.expect_get()
+                .with(eq("RS_DATA_PATH"))
+                .return_const(Ok(path.to_str().unwrap().to_string()));
+
+            env.expect_get()
+                .with(eq("RS_BUCKET_1_NAME"))
+                .return_const(Ok("bucket1".to_string()));
+
+            env.expect_all().returning(|| {
+                let mut map = BTreeMap::new();
+                map.insert("RS_BUCKET_1_NAME".to_string(), "bucket1".to_string());
+                map.insert(
+                    "RS_REPLICATION_1_NAME".to_string(),
+                    "replication1".to_string(),
+                );
+                map
+            });
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_NAME"))
+                .return_const(Ok("replication1".to_string()));
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+                .return_const(Ok("bucket1".to_string()));
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+                .return_const(Ok("bucket2".to_string()));
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
+                .return_const(Ok("http://localhost".to_string()));
+
+            env
+        }
     }
 
     #[fixture]
@@ -810,10 +921,7 @@ mod tests {
             .expect_get()
             .with(eq("RS_REPLICATION_1_EACH_N"))
             .return_const(Ok("10".to_string()));
-        mock_getter
-            .expect_get()
-            .with(eq("RS_REPLICATION_1_EACH_S"))
-            .return_const(Ok("0.5".to_string()));
+
         mock_getter
             .expect_get()
             .with(eq("RS_REPLICATION_1_WHEN"))
