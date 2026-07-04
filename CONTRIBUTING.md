@@ -18,11 +18,12 @@ Open a pull request only for an existing issue.
 
 Before you start coding:
 
-1. Update your local `main` branch from `origin/main`.
+1. Sync your fork with the latest `upstream/main` (or update your local `main` from `origin/main` if you work directly in the repository).
 2. Create a fresh branch from the latest `main`.
 3. Keep the branch focused on one issue.
 
 This repository expects every PR to be based on the newest default branch commit.
+If possible, start the branch name with the issue ID, for example `1469-docs-contributing-guide`. It helps keep PRs easier to organize and review.
 
 ## Run ReductStore Locally
 
