@@ -85,7 +85,18 @@ When you open the PR:
 - Explain the user or maintainer problem you fixed.
 - List the validation you ran, including manual runtime checks when applicable.
 - Mention config or environment changes such as new `RS_*` variables or feature flags.
+- Update `CHANGELOG.md` when the change affects users, operators, or client-visible behavior.
 - Keep screenshots, logs, or request examples when they help reviewers verify behavior quickly.
+
+## Update the Changelog
+
+If your PR changes behavior that users may notice, add an entry to `CHANGELOG.md`.
+
+- Add the entry in the relevant unreleased section.
+- Keep it short and factual.
+- Focus on what changed for users or operators, not on internal refactoring details.
+- Include the pull request number if the surrounding entries already follow that style.
+- Skip changelog noise for purely internal changes with no user-facing effect.
 
 ## Review Expectations
 
