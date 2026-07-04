@@ -2,7 +2,8 @@
 
 Thanks for contributing.
 
-This guide is intentionally practical. It reflects how work is reviewed in this repository today, including recent community PRs and the repository workflow notes in `AGENTS.md`.
+We want ReductStore to be easy to contribute to, especially for people joining the project for the first time.
+This guide keeps the workflow clear so you can spend more time building and less time guessing what reviewers expect.
 
 ## Start with an Issue
 
@@ -27,7 +28,7 @@ This repository expects every PR to be based on the newest default branch commit
 
 If your change affects runtime behavior, start a real ReductStore instance and test it yourself when possible.
 
-The maintainers expect contributors to validate the changed path against a live server, not only with unit tests. For most changes, one of these is enough:
+Please validate the changed path against a live server, not only with unit tests. For most changes, one of these is enough:
 
 ```bash
 mkdir -p ./data
@@ -93,7 +94,7 @@ Recent contributor PRs in this repository show a consistent pattern:
 - Ambiguous feature additions usually need issue discussion before code review starts.
 - Maintainers may ask for behavior changes, test updates, or smaller scope before merge.
 
-Treat review as collaboration, not a formality.
+Treat review as collaboration. The goal is to help each other land solid changes with as little friction as possible.
 
 ## Need Help?
 
