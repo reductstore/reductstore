@@ -84,7 +84,7 @@ chrono = "0.4.41"
 serde_json = "1.0.150"
 
 [dev-dependencies]
-mockall = "0.14.0"
+mockall = "0.15.0"
 rstest = "0.26.1"
 serial_test = "3.2.0"
 test-log = "0.2.19"
