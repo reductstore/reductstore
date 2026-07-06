@@ -87,6 +87,13 @@ mod tests {
     #[case("a/private/x/b", "/a/private/**", true)]
     #[case("a/public/x/b", "/a/private/**", false)]
     #[case("a/x/b", "/**/**/", false)]
+    #[case("sensor-alpha-temp/b", "/camera-*/b", false)]
+    #[case("sensor-alpha-temp", "sensor-*temp", true)]
+    #[case("sensor-alpha-temp", "sensor-*humidity", false)]
+    #[case("a/sensor-alpha-temp/b", "/a/sensor-*alpha-*/b", true)]
+    #[case("a/sensor-alpha-temp/b", "/a/sensor-*beta-*/b", false)]
+    #[case("sensor-alpha-temp", "sensor-*", true)]
+    #[case("a/sensor-alpha-temp/b", "/a/*alpha*/b", true)]
     fn matches_entry_patterns(#[case] entry: &str, #[case] pattern: &str, #[case] expected: bool) {
         assert_eq!(entry_matches_pattern(entry, pattern), expected);
     }
