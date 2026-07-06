@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Add source field to `ReductError` and improve error handling in `BlockManager::remove_records` to detect and mark corrupted blocks, [PR-1519](https://github.com/reductstore/reductstore/pull/1519)
+
 
 ## 1.20.7 - 2026-06-30
 
