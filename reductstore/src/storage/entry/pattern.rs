@@ -84,6 +84,7 @@ mod tests {
     #[case("a/x/d/b", "/a/*/b", false)]
     #[case("a/x/b", "/a/**/b", true)]
     #[case("a/x/d/b", "/a/**/b", true)]
+    #[case("a/b", "/a/**", true)]
     #[case("a/private/x/b", "/a/private/**", true)]
     #[case("a/public/x/b", "/a/private/**", false)]
     #[case("a/x/b", "/**/**/", false)]
