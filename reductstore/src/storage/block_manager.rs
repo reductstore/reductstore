@@ -1797,6 +1797,39 @@ mod tests {
             assert_eq!(block.record_count(), 1);
             assert!(block.get_record(1).is_some());
         }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_remove_records_marks_corrupted_on_eof(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let block_manager = block_manager.await;
+            let block = block.await;
+            let block_manager = Arc::new(AsyncRwLock::new(block_manager));
+            write_record(1, 10, &block_manager, block.clone()).await;
+
+            {
+                let bm = block_manager.write().await.unwrap();
+                let data_path = bm.path_to_data(block_id);
+                FILE_CACHE.remove(&data_path).await.unwrap();
+
+                // Write a truncated record to simulate EOF during read
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&data_path)
+                    .unwrap();
+                file.write_all(&vec![0; 100]).unwrap(); // Write a small record to simulate truncation
+            }
+
+            let mut bm = block_manager.write().await.unwrap();
+            let _ = bm.remove_records(block_id, vec![0]).await;
+
+            assert!(bm.is_block_corrupted(block_id));
+        }
     }
 
     async fn write_record(

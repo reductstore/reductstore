@@ -159,18 +159,6 @@ impl<T> From<PoisonError<T>> for ReductError<PoisonError<T>> {
     }
 }
 
-type BoxedAny = Box<dyn std::any::Any + Send>;
-impl From<BoxedAny> for ReductError<BoxedAny> {
-    fn from(err: BoxedAny) -> Self {
-        // A box error is an internal reductstore error
-        ReductError {
-            status: ErrorCode::InternalServerError,
-            message: format!("{:?}", err),
-            source: Some(err),
-        }
-    }
-}
-
 #[cfg(feature = "io")]
 impl<T> From<SendError<T>> for ReductError<SendError<T>> {
     fn from(err: SendError<T>) -> Self {
@@ -305,6 +293,12 @@ impl ReductError {
 }
 
 // Macros for creating errors with a message.
+#[macro_export]
+macro_rules! ok {
+    () => {
+        ReductError::ok()
+    };
+}
 
 #[macro_export]
 macro_rules! timeout {
@@ -508,6 +502,13 @@ mod tests {
 
     mod macros {
         use super::*;
+
+        #[test]
+        fn test_ok_macro() {
+            let error = ok!();
+            assert_eq!(error.status, ErrorCode::OK);
+            assert_eq!(error.message, "");
+        }
 
         #[test]
         fn test_timeout_macro() {
