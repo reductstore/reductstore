@@ -30,6 +30,7 @@ use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use reduct_base::too_early;
 use std::fs::OpenOptions;
+use std::io::ErrorKind::UnexpectedEof;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -620,8 +621,31 @@ impl BlockManager {
         for (record_time, begin, record_size) in record_info {
             let mut read_bytes = 0;
             while read_bytes < record_size {
-                let (buf, read) =
-                    read_in_chunks(&src_block_path, begin, record_size, read_bytes).await?;
+                let (buf, read) = match read_in_chunks(
+                    &src_block_path,
+                    begin,
+                    record_size,
+                    read_bytes,
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        let _ = std::fs::remove_file(&temp_block_path);
+                        if let Some(source) = &e.source {
+                            if source.kind() == UnexpectedEof {
+                                warn!(
+                                        "Unexpected EOF while reading record {}/{} from block {}. Marking block as corrupted.",
+                                        block_id,
+                                        record_time,
+                                        src_block_path.display()
+                                    );
+                                self.mark_block_corrupted(block_id).await?;
+                            }
+                        }
+                        return Err(e.without_source());
+                    }
+                };
 
                 read_bytes += read as u64;
                 temp_block.write_all(&buf)?;
