@@ -3,12 +3,8 @@
 
 use crate::cfg::io::IoConfig;
 use crate::replication::TransactionNotification;
-use crate::storage::entry::{is_system_meta_entry, meta_entry_parent};
+use crate::storage::entry::{entry_matches_pattern, is_system_meta_entry, meta_entry_parent};
 use crate::storage::query::condition::Parser;
-// use crate::storage::query::filters::{
-//     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
-//     IncludeLabelFilter, RecordFilter, WhenFilter,
-// };
 use crate::storage::query::filters::{
     apply_filters_recursively, EachNFilter, ExcludeLabelFilter, FilterRecord, IncludeLabelFilter,
     RecordFilter, WhenFilter,
@@ -119,17 +115,8 @@ impl TransactionFilter {
             return vec![];
         }
 
-        if !self.entries.is_empty() {
-            let mut found = false;
-            for entry in self.entries.iter() {
-                if Self::entry_matches(entry, &notification.entry) {
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                return vec![];
-            }
+        if !Self::entry_is_selected(&self.entries, &notification.entry) {
+            return vec![];
         }
 
         if is_system_meta_entry(&notification.entry) {
@@ -160,13 +147,44 @@ impl TransactionFilter {
         notifications
     }
 
-    fn entry_matches(entry_filter: &str, entry_name: &str) -> bool {
-        if entry_filter.contains('*') {
-            let prefix = entry_filter.replace('*', "");
-            return entry_name.starts_with(&prefix);
+    fn entry_is_selected(entries: &[String], entry_name: &str) -> bool {
+        if entries.is_empty() {
+            return true;
         }
 
-        entry_name == entry_filter || meta_entry_parent(entry_name) == Some(entry_filter)
+        let include_patterns: Vec<&str> = entries
+            .iter()
+            .filter_map(|pattern| {
+                if pattern.starts_with('!') && pattern.len() > 1 {
+                    None
+                } else {
+                    Some(pattern.as_str())
+                }
+            })
+            .collect();
+        let exclude_patterns: Vec<&str> = entries
+            .iter()
+            .filter_map(|pattern| pattern.strip_prefix('!'))
+            .filter(|pattern| !pattern.is_empty())
+            .collect();
+
+        let included = include_patterns.is_empty()
+            || include_patterns
+                .iter()
+                .any(|pattern| Self::entry_matches(pattern, entry_name));
+
+        included
+            && !exclude_patterns
+                .iter()
+                .any(|pattern| Self::entry_matches(pattern, entry_name))
+    }
+
+    fn entry_matches(entry_filter: &str, entry_name: &str) -> bool {
+        let entry_filter = entry_filter.trim_start_matches('/');
+
+        entry_matches_pattern(entry_name, entry_filter)
+            || meta_entry_parent(entry_name)
+                .is_some_and(|parent| entry_matches_pattern(parent, entry_filter))
     }
 }
 
@@ -208,16 +226,29 @@ mod tests {
     }
 
     #[rstest]
-    #[case(vec ! ["entry".to_string()], true)]
-    #[case(vec ! ["other".to_string(), "entry".to_string()], true)]
-    #[case(vec ! ["ent*".to_string()], true)]
-    #[case(vec ! ["other".to_string()], false)]
-    #[case(vec ! ["oth*".to_string()], false)]
+    #[case("entry", vec ! ["entry".to_string()], true)]
+    #[case("entry", vec ! ["other".to_string(), "entry".to_string()], true)]
+    #[case("entry", vec ! ["ent*".to_string()], true)]
+    #[case("entry", vec ! ["*".to_string()], true)]
+    #[case("entry", vec ! ["other".to_string()], false)]
+    #[case("entry", vec ! ["oth*".to_string()], false)]
+    #[case("cam-1", vec ! ["cam-*".to_string()], true)]
+    #[case("cam-1/nested", vec ! ["cam-*".to_string()], true)]
+    #[case("a/x/b", vec ! ["/a/*/b".to_string()], true)]
+    #[case("a/x/d/b", vec ! ["/a/*/b".to_string()], false)]
+    #[case("a/x/b", vec ! ["/a/**/b".to_string()], true)]
+    #[case("a/x/d/b", vec ! ["/a/**/b".to_string()], true)]
+    #[case("a/private/x/b", vec ! ["!/a/private/**".to_string()], false)]
+    #[case("a/public/x/b", vec ! ["!/a/private/**".to_string()], true)]
+    #[case("a/private/x/b", vec ! ["/a/**/b".to_string(), "!/a/private/**".to_string()], false)]
+    #[case("a/public/x/b", vec ! ["/a/**/b".to_string(), "!/a/private/**".to_string()], true)]
     fn test_transaction_filter_entries(
+        #[case] entry: String,
         #[case] entries: Vec<String>,
         #[case] expected: bool,
-        notification: TransactionNotification,
+        mut notification: TransactionNotification,
     ) {
+        notification.entry = entry;
         let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
@@ -251,6 +282,32 @@ mod tests {
         .unwrap();
 
         assert_eq!(filter.filter(notification).len(), 1);
+    }
+
+    #[rstest]
+    #[case("a/x/$meta", vec ! ["/a/*".to_string()], true)]
+    #[case("a/private/$meta", vec ! ["/a/**".to_string(), "!/a/private".to_string()], false)]
+    fn test_transaction_filter_entries_match_meta_parent(
+        #[case] entry: String,
+        #[case] entries: Vec<String>,
+        #[case] expected: bool,
+        mut notification: TransactionNotification,
+    ) {
+        notification.entry = entry;
+
+        let mut filter = TransactionFilter::try_new(
+            "test",
+            ReplicationSettings {
+                src_bucket: "bucket".to_string(),
+                entries,
+                include: HashMap::from([("must".to_string(), "match".to_string())]),
+                ..ReplicationSettings::default()
+            },
+            IoConfig::default(),
+        )
+        .unwrap();
+
+        assert_eq!(filter.filter(notification).is_empty(), !expected);
     }
 
     #[rstest]
