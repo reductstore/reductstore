@@ -6,7 +6,7 @@ use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::replication::diagnostics::DiagnosticsCounter;
-use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketBuilder};
+use crate::replication::remote_bucket::{BucketFactory, RemoteBucket, RemoteBucketBuilder};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::{TransactionLog, TransactionLogMap, TransactionLogRef};
@@ -49,6 +49,7 @@ pub struct ReplicationTask {
     mode: Arc<AtomicU8>,
     worker_handle: Option<JoinHandle<()>>,
     worker_bucket: Option<Box<dyn RemoteBucket + Send + Sync>>,
+    bucket_factory: BucketFactory,
 }
 
 impl Default for ReplicationSystemOptions {
@@ -89,6 +90,7 @@ impl ReplicationTask {
         }
 
         let remote_bucket = remote_bucket_builder.build()?;
+        let bucket_factory: BucketFactory = Arc::new(move || remote_bucket_builder.build());
 
         let system_options = ReplicationSystemOptions {
             transaction_log_size: config.replication_conf.replication_log_size,
@@ -102,17 +104,20 @@ impl ReplicationTask {
             system_options,
             config.io_conf,
             remote_bucket,
+            bucket_factory,
             storage,
             system_event_sink,
         ))
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn build(
         name: String,
         settings: ReplicationSettings,
         system_options: ReplicationSystemOptions,
         io_config: IoConfig,
         remote_bucket: Box<dyn RemoteBucket + Send + Sync>,
+        bucket_factory: BucketFactory,
         storage: Arc<StorageEngine>,
         system_event_sink: Option<SystemEventSink>,
     ) -> Self {
@@ -143,6 +148,7 @@ impl ReplicationTask {
             mode,
             worker_handle: None,
             worker_bucket: Some(remote_bucket),
+            bucket_factory,
         }
     }
 
@@ -152,6 +158,7 @@ impl ReplicationTask {
         }
 
         let remote_bucket = self.worker_bucket.take().unwrap();
+        let thr_bucket_factory = Arc::clone(&self.bucket_factory);
         let replication_name = self.name.clone();
         let thr_settings = self.settings.clone();
         let thr_io_config = self.io_config.clone();
@@ -209,6 +216,7 @@ impl ReplicationTask {
                 thr_settings.clone(),
                 thr_io_config.clone(),
                 remote_bucket,
+                thr_bucket_factory,
             );
 
             while !thr_stop_flag.load(Ordering::Relaxed) {
@@ -1239,6 +1247,11 @@ mod tests {
             },
             IoConfig::default(),
             Box::new(remote_bucket),
+            Arc::new(|| {
+                Err(ReductError::internal_server_error(
+                    "no bucket rebuild in tests",
+                ))
+            }),
             storage,
             system_event_sink,
         );

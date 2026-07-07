@@ -11,6 +11,12 @@ use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+
+/// Rebuilds a remote bucket from its configuration, e.g. after a panicked
+/// send task lost the previous instance.
+pub(super) type BucketFactory =
+    Arc<dyn Fn() -> Result<Box<dyn RemoteBucket + Send + Sync>, ReductError> + Send + Sync>;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct RemoteBucketConfig {
@@ -60,12 +66,13 @@ impl RemoteBucketBuilder {
         self
     }
 
+    #[cfg(test)]
     fn build_config(self) -> RemoteBucketConfig {
         self.config
     }
 
-    pub fn build(self) -> Result<Box<dyn RemoteBucket + Send + Sync>, ReductError> {
-        Ok(Box::new(RemoteBucketImpl::new(self.build_config())?))
+    pub fn build(&self) -> Result<Box<dyn RemoteBucket + Send + Sync>, ReductError> {
+        Ok(Box::new(RemoteBucketImpl::new(self.config.clone())?))
     }
 }
 
