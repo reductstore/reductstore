@@ -22,6 +22,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Refresh contributor onboarding docs to validate branch builds locally and add `@gitcommit90` to the README contributor wall, [PR-1511](https://github.com/reductstore/reductstore/pull/1511)
 - Unify `$system` event handling under `syslog`: move all event production (audit, usage, lifecycle, replication, logs) into the module behind a single system event logger with one shared writer and sink (no change to the stored record format), [PR-1496](https://github.com/reductstore/reductstore/pull/1496) by @DibbayajyotiRoy
 
+## 1.20.8 - 2026-07-07
+
+### Fixed
+
+- Add source field to `ReductError` and improve error handling in `BlockManager::remove_records` to detect and mark corrupted blocks, [PR-1519](https://github.com/reductstore/reductstore/pull/1519)
+- Fix read-only replica block reads when compressed index state arrives before compressed block files and make replica cache invalidation for block variants fault-tolerant, [PR-1523](https://github.com/reductstore/reductstore/pull/1523)
+
 ## 1.20.7 - 2026-06-30
 
 ### Fixed

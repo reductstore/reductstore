@@ -56,7 +56,6 @@ impl Query for LimitedQuery {
 mod tests {
     use super::*;
     use crate::storage::query::base::tests::block_manager;
-    use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use rstest::rstest;
 
@@ -81,10 +80,7 @@ mod tests {
 
         assert_eq!(
             query.next(block_manager).await.err(),
-            Some(ReductError {
-                status: ErrorCode::NoContent,
-                message: "No content".to_string(),
-            })
+            Some(no_content!("No content"))
         );
     }
 }
