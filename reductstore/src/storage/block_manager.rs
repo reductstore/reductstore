@@ -815,38 +815,62 @@ impl BlockManager {
     }
 
     async fn resolve_desc_path(&self, block_id: u64) -> Result<PathBuf, ReductError> {
-        if self.block_is_compressed(block_id) {
-            let compressed_desc_path = self.path_to_compressed_desc(block_id);
-            if FILE_CACHE.try_exists(&compressed_desc_path).await? {
-                self.decompress_cache
-                    .get_or_decompress(
-                        &self.path,
-                        block_id,
-                        DecompressedFileType::Descriptor,
-                        &compressed_desc_path,
-                    )
-                    .await
-            } else {
-                Ok(self.path_to_desc(block_id))
-            }
-        } else {
-            Ok(self.path_to_desc(block_id))
-        }
+        self.resolve_block_file_path(
+            block_id,
+            DecompressedFileType::Descriptor,
+            self.path_to_compressed_desc(block_id),
+            self.path_to_desc(block_id),
+            false,
+            "descriptor",
+        )
+        .await
     }
 
     async fn resolve_data_path(&self, block_id: u64) -> Result<PathBuf, ReductError> {
-        if self.block_is_compressed(block_id) {
-            self.decompress_cache
-                .get_or_decompress(
-                    &self.path,
-                    block_id,
-                    DecompressedFileType::Data,
-                    &self.path_to_compressed_data(block_id),
-                )
-                .await
-        } else {
-            Ok(self.path_to_data(block_id))
+        self.resolve_block_file_path(
+            block_id,
+            DecompressedFileType::Data,
+            self.path_to_compressed_data(block_id),
+            self.path_to_data(block_id),
+            true,
+            "data",
+        )
+        .await
+    }
+
+    async fn resolve_block_file_path(
+        &self,
+        block_id: u64,
+        file_type: DecompressedFileType,
+        compressed_path: PathBuf,
+        uncompressed_path: PathBuf,
+        return_too_early_if_missing_on_replica: bool,
+        file_kind: &'static str,
+    ) -> Result<PathBuf, ReductError> {
+        if !self.block_is_compressed(block_id) {
+            return Ok(uncompressed_path);
         }
+
+        if FILE_CACHE.try_exists(&compressed_path).await? {
+            return self
+                .decompress_cache
+                .get_or_decompress(&self.path, block_id, file_type, &compressed_path)
+                .await;
+        }
+
+        if FILE_CACHE.try_exists(&uncompressed_path).await? {
+            return Ok(uncompressed_path);
+        }
+
+        if return_too_early_if_missing_on_replica && self.cfg.role == InstanceRole::Replica {
+            return Err(too_early!(
+                "Compressed {} block {:?} is not available on replica yet. Reload index and retry",
+                file_kind,
+                compressed_path
+            ));
+        }
+
+        Ok(uncompressed_path)
     }
 
     pub(in crate::storage) fn block_is_compressed(&self, block_id: u64) -> bool {
@@ -874,13 +898,32 @@ impl BlockManager {
     }
 
     async fn invalidate_replica_block_cache(&self, block_id: u64) -> Result<(), ReductError> {
-        FILE_CACHE
-            .invalidate_local_cache_file(&self.path_to_desc(block_id))
-            .await?;
-        FILE_CACHE
-            .invalidate_local_cache_file(&self.path_to_data(block_id))
-            .await?;
-        Ok(())
+        let paths = [
+            self.path_to_desc(block_id),
+            self.path_to_data(block_id),
+            self.path_to_compressed_desc(block_id),
+            self.path_to_compressed_data(block_id),
+        ];
+
+        let mut first_err = None;
+        for path in paths {
+            if let Err(err) = FILE_CACHE.invalidate_local_cache_file(&path).await {
+                warn!(
+                    "Failed to invalidate replica cache file {:?} for {}/{}: {}",
+                    path, self.bucket, self.entry, err
+                );
+                if first_err.is_none() {
+                    first_err = Some(err);
+                }
+            }
+        }
+
+        self.decompress_cache.invalidate(&self.path, block_id).await;
+        if let Some(err) = first_err {
+            Err(err)
+        } else {
+            Ok(())
+        }
     }
 
     pub(in crate::storage) fn is_block_in_write_cache(&self, block_id: u64) -> bool {
@@ -1046,6 +1089,66 @@ mod tests {
             .await
             .unwrap();
             block_manager.sync_data_block(999).await.unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_resolve_data_path_falls_back_to_uncompressed_on_replica() {
+            let path = tempdir().unwrap().keep().join("bucket").join("entry");
+            FILE_CACHE.create_dir_all(&path).await.unwrap();
+
+            let mut cfg = Cfg::default();
+            cfg.role = InstanceRole::Replica;
+
+            let mut index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
+            index.insert_or_update(Block::new(1));
+            index.get_block_mut(1).unwrap().compression =
+                Some(i32::from(CompressionAlgorithm::Zstd));
+
+            std::fs::write(path.join("1.blk"), b"data").unwrap();
+
+            let block_manager = BlockManager::build(
+                path.clone(),
+                index,
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(cfg),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+
+            let data_path = block_manager.resolve_data_path(1).await.unwrap();
+            assert_eq!(data_path, path.join("1.blk"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_resolve_data_path_replica_returns_too_early_when_missing() {
+            let path = tempdir().unwrap().keep().join("bucket").join("entry");
+            FILE_CACHE.create_dir_all(&path).await.unwrap();
+
+            let mut cfg = Cfg::default();
+            cfg.role = InstanceRole::Replica;
+
+            let mut index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
+            index.insert_or_update(Block::new(1));
+            index.get_block_mut(1).unwrap().compression =
+                Some(i32::from(CompressionAlgorithm::Zstd));
+
+            let block_manager = BlockManager::build(
+                path,
+                index,
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(cfg),
+                Default::default(),
+            )
+            .await
+            .unwrap();
+
+            let err = block_manager.resolve_data_path(1).await.err().unwrap();
+            assert_eq!(err.status(), ErrorCode::TooEarly);
         }
 
         #[rstest]
