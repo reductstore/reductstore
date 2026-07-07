@@ -34,7 +34,8 @@ pub struct ReplicationSettings {
     pub dst_host: String,
     /// Destination access token
     pub dst_token: Option<String>,
-    /// Entries to replicate. If empty, all entries are replicated. Wildcards are supported.
+    /// Entries to replicate. If empty, all entries are replicated. Supports exact names,
+    /// glob-like `*` and `**` wildcards, and `!` exclusion patterns.
     #[serde(default)]
     pub entries: Vec<String>,
     /// Prefix to add to destination entry names
