@@ -12,7 +12,7 @@ use std::path::PathBuf;
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block::Block;
-use crate::storage::block_manager::DESCRIPTOR_FILE_EXT;
+use crate::storage::block_manager::{COMPRESSED_DESCRIPTOR_FILE_EXT, DESCRIPTOR_FILE_EXT};
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
     ts_to_us, us_to_ts, Block as BlockProto, BlockIndex as BlockIndexProto, MinimalBlock,
@@ -34,6 +34,9 @@ impl Into<BlockEntry> for MinimalBlock {
             metadata_size: self.metadata_size,
             latest_record_time: self.latest_record_time,
             crc64: None,
+            compression: None,
+            corrupted: self.corrupted,
+            version: self.version,
         }
     }
 }
@@ -47,6 +50,9 @@ impl Into<BlockEntry> for BlockProto {
             metadata_size: self.metadata_size,
             latest_record_time: self.latest_record_time,
             crc64: None,
+            compression: None,
+            corrupted: self.corrupted,
+            version: self.version,
         }
     }
 }
@@ -60,6 +66,9 @@ impl Into<BlockEntry> for Block {
             metadata_size: self.metadata_size(),
             latest_record_time: Some(us_to_ts(&self.latest_record_time())),
             crc64: None,
+            compression: None,
+            corrupted: None,
+            version: None,
         }
     }
 }
@@ -110,11 +119,47 @@ impl BlockIndex {
         self.index_info.get(&block_id)
     }
 
+    pub fn get_block_mut(&mut self, block_id: u64) -> Option<&mut BlockEntry> {
+        self.index_info.get_mut(&block_id)
+    }
+
     pub fn remove_block(&mut self, block_id: u64) -> Option<BlockEntry> {
         let block = self.index_info.remove(&block_id);
         self.index.remove(&block_id);
 
         block
+    }
+
+    pub fn is_corrupted(&self, block_id: u64) -> bool {
+        self.index_info
+            .get(&block_id)
+            .is_some_and(|block| block.corrupted == Some(true))
+    }
+
+    pub fn mark_corrupted(&mut self, block_id: u64) {
+        if let Some(block) = self.index_info.get_mut(&block_id) {
+            block.corrupted = Some(true);
+        }
+    }
+
+    pub fn corrupted_block_count(&self) -> usize {
+        self.corrupted_block_ids().len()
+    }
+
+    pub fn corrupted_block_ids(&self) -> Vec<u64> {
+        self.index
+            .iter()
+            .copied()
+            .filter(|block_id| self.is_corrupted(*block_id))
+            .collect()
+    }
+
+    pub fn active_tree(&self) -> BTreeSet<u64> {
+        self.index
+            .iter()
+            .copied()
+            .filter(|block_id| !self.is_corrupted(*block_id))
+            .collect()
     }
 
     pub async fn try_load(path: PathBuf) -> Result<Self, ReductError> {
@@ -139,7 +184,10 @@ impl BlockIndex {
                 .read_dir(&path.parent().unwrap().into())
                 .await?
                 .iter()
-                .any(|path| path.ends_with(DESCRIPTOR_FILE_EXT));
+                .any(|path| {
+                    path.ends_with(DESCRIPTOR_FILE_EXT)
+                        || path.ends_with(COMPRESSED_DESCRIPTOR_FILE_EXT)
+                });
 
             if has_block_descriptors {
                 return Err(internal_server_error!("Block index {:?} is empty", path));
@@ -163,18 +211,24 @@ impl BlockIndex {
 
         let mut crc = Digest::new();
         value.blocks.into_iter().for_each(|block| {
-            // Count total numbers
-            block_index.index_info.insert(block.block_id, block);
+            let latest_record_time = ts_to_us(block.latest_record_time.as_ref().unwrap());
 
-            // Update CRC
             crc.write(&block.block_id.to_be_bytes());
             crc.write(&block.size.to_be_bytes());
             crc.write(&block.record_count.to_be_bytes());
             crc.write(&block.metadata_size.to_be_bytes());
-            crc.write(&ts_to_us(&block.latest_record_time.unwrap()).to_be_bytes());
+            crc.write(&latest_record_time.to_be_bytes());
 
             if let Some(crc64) = block.crc64 {
                 crc.write(&crc64.to_be_bytes());
+            }
+
+            if let Some(corrupted) = block.corrupted {
+                crc.write(&(corrupted as u8).to_be_bytes());
+            }
+
+            if let Some(version) = block.version {
+                crc.write(&version.to_be_bytes());
             }
 
             block_index.index.insert(block.block_id);
@@ -208,6 +262,9 @@ impl BlockIndex {
                 block_entry.metadata_size = block.metadata_size;
                 block_entry.latest_record_time = block.latest_record_time;
                 block_entry.crc64 = block.crc64;
+                block_entry.compression = block.compression;
+                block_entry.corrupted = block.corrupted;
+                block_entry.version = block.version;
                 block_entry
             })
             .collect();
@@ -222,6 +279,14 @@ impl BlockIndex {
 
             if let Some(crc64) = block.crc64 {
                 crc.write(&crc64.to_be_bytes());
+            }
+
+            if let Some(corrupted) = block.corrupted {
+                crc.write(&(corrupted as u8).to_be_bytes());
+            }
+
+            if let Some(version) = block.version {
+                crc.write(&version.to_be_bytes());
             }
         });
 
@@ -261,6 +326,14 @@ impl BlockIndex {
         &self.index_info
     }
 
+    pub async fn sync_all(&mut self) -> Result<(), ReductError> {
+        let mut lock = FILE_CACHE
+            .write_or_create(&self.path_buf, SeekFrom::Start(0))
+            .await?;
+        lock.sync_all().await?;
+        Ok(())
+    }
+
     fn insert(&mut self, block: BlockEntry) {
         self.index_info.insert(block.block_id, block);
         self.index.insert(block.block_id);
@@ -295,6 +368,9 @@ mod tests {
                     metadata_size: 1,
                     latest_record_time: Some(Timestamp::default()),
                     crc64: None,
+                    compression: None,
+                    corrupted: None,
+                    version: None,
                 }],
                 crc64: 294433432134063049,
             };
@@ -331,6 +407,9 @@ mod tests {
                     metadata_size: 1,
                     latest_record_time: Some(Timestamp::default()),
                     crc64: None,
+                    compression: None,
+                    corrupted: None,
+                    version: None,
                 }],
                 crc64: 0,
             };
@@ -370,6 +449,9 @@ mod tests {
                 metadata_size: 1,
                 latest_record_time: Some(Timestamp::default()),
                 crc64: None,
+                compression: None,
+                corrupted: None,
+                version: None,
             });
 
             block_index.save().await.unwrap();
@@ -378,6 +460,37 @@ mod tests {
             assert_eq!(block_index_proto.size(), 2);
             assert_eq!(block_index_proto.record_count(), 1);
             assert_eq!(block_index_proto.tree().len(), 1);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_corrupted_round_trip() {
+            let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
+
+            let mut block_index = BlockIndex::new(path.clone());
+            block_index.insert_or_update(BlockEntry {
+                block_id: 1,
+                size: 1,
+                record_count: 1,
+                metadata_size: 1,
+                latest_record_time: Some(Timestamp::default()),
+                crc64: None,
+                compression: None,
+                corrupted: None,
+                version: None,
+            });
+            block_index.mark_corrupted(1);
+
+            assert!(block_index.is_corrupted(1));
+            assert_eq!(block_index.corrupted_block_count(), 1);
+            assert_eq!(block_index.corrupted_block_ids(), vec![1]);
+
+            block_index.save().await.unwrap();
+
+            let block_index = BlockIndex::try_load(path).await.unwrap();
+            assert!(block_index.is_corrupted(1));
+            assert_eq!(block_index.corrupted_block_count(), 1);
+            assert_eq!(block_index.corrupted_block_ids(), vec![1]);
         }
     }
 }

@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-pub(crate) mod aggregator;
+//! Payload carried by an API audit (`api_call`) system event.
 
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};

@@ -38,7 +38,7 @@ pub fn maybe_print_version_and_exit() {
     }
 }
 
-pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_pareser: Parser)
+pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_parser: Parser)
 where
     Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
 {
@@ -52,7 +52,7 @@ where
     );
 
     let parser =
-        CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_pareser, version).await;
+        CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_parser, version).await;
     let handle = Handle::new();
     let lock_file = Arc::new(parser.build_lock_file().unwrap());
 
@@ -185,18 +185,7 @@ where
     // remote synchronization can lock resources for a long time,
     // so we set rwlock timeout to 1 hour to avoid panics during shutdown
     set_rwlock_timeout(RW_LOCK_SHUTDOWN_TIMEOUT);
-    state_keeper
-        .stop_lifecycle_tasks()
-        .await
-        .expect("Failed to stop lifecycle policies");
-    state_keeper
-        .stop_replication_tasks()
-        .await
-        .expect("Failed to stop replication tasks");
-    state_keeper
-        .sync_storage()
-        .await
-        .expect("Failed to shutdown storage");
+    state_keeper.shutdown().await;
     FILE_CACHE.stop_sync_worker();
     drop(lock_file);
     info!("Server has been shut down.");

@@ -1,6 +1,8 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+mod builder;
+mod compress_blocks;
 mod get_entry;
 mod query;
 mod quotas;
@@ -18,29 +20,26 @@ use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
 pub use crate::storage::block_manager::RecordTx;
 use crate::storage::bucket::query::MultiEntryQuery;
-use crate::storage::bucket::settings::{
-    DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS, SETTINGS_NAME,
-};
+use crate::storage::bucket::settings::{DEFAULT_MAX_BLOCK_SIZE, DEFAULT_MAX_RECORDS};
 use crate::storage::entry::{
     is_system_meta_entry, Entry, EntrySettings, META_ENTRY_MAX_BLOCK_SIZE,
 };
 use crate::storage::folder_keeper::FolderKeeper;
 use crate::storage::in_flight::InFlightIoLimiter;
-use crate::storage::proto::BucketSettings as ProtoBucketSettings;
+use crate::storage::usage::UsageCounters;
 use log::{debug, error};
-use prost::bytes::Bytes;
-use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::status::ResourceStatus;
-use reduct_base::{conflict, forbidden, internal_server_error, Labels};
+use reduct_base::{conflict, forbidden, Labels};
 use std::collections::{BTreeMap, HashMap};
-use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+
+pub(crate) use builder::BucketBuilder;
 
 fn normalize_entry_name(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
@@ -70,6 +69,7 @@ pub(crate) struct Bucket {
     #[allow(dead_code)]
     queries: AsyncRwLock<HashMap<u64, MultiEntryQuery>>,
     io_limiter: InFlightIoLimiter,
+    usage_counters: Arc<UsageCounters>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -79,6 +79,10 @@ enum EntryMaintenanceMode {
 }
 
 impl Bucket {
+    pub(crate) fn builder() -> BucketBuilder {
+        BucketBuilder::default()
+    }
+
     #[cfg(test)]
     pub(crate) fn cfg(&self) -> &Cfg {
         &self.cfg
@@ -92,135 +96,6 @@ impl Bucket {
         }
 
         Ok(())
-    }
-
-    /// Create a new Bucket
-    ///
-    /// # Arguments
-    ///
-    /// * `name` - The name of the bucket
-    /// * `path` - The path to folder with buckets
-    /// * `settings` - The settings for the bucket
-    /// * `repl_agent_builder` - The replica agent builder
-    ///
-    /// # Returns
-    ///
-    /// * `Bucket` - The bucket or an HTTPError
-    #[allow(dead_code)]
-    pub(crate) async fn try_build(
-        name: &str,
-        path: &PathBuf,
-        settings: BucketSettings,
-        cfg: Cfg,
-    ) -> Result<Bucket, ReductError> {
-        let io_limiter = InFlightIoLimiter::from_cfg(&cfg);
-        Self::try_build_with_limiter(name, path, settings, cfg, io_limiter).await
-    }
-
-    pub(crate) async fn try_build_with_limiter(
-        name: &str,
-        path: &PathBuf,
-        settings: BucketSettings,
-        cfg: Cfg,
-        io_limiter: InFlightIoLimiter,
-    ) -> Result<Bucket, ReductError> {
-        let path = path.join(name);
-        let settings = Self::fill_settings(settings, Self::defaults());
-        let folder_keeper = FolderKeeper::new(path.clone(), &cfg).await;
-
-        let bucket = Bucket {
-            name: name.to_string(),
-            path,
-            entries: Arc::new(AsyncRwLock::new(BTreeMap::new())),
-            settings: AsyncRwLock::new(settings),
-            is_provisioned: AtomicBool::new(false),
-            status: AsyncRwLock::new(ResourceStatus::Ready),
-            cfg: Arc::new(cfg),
-            folder_keeper: Arc::new(folder_keeper),
-            queries: AsyncRwLock::new(HashMap::new()),
-            io_limiter,
-        };
-
-        bucket.save_settings().await?;
-        Ok(bucket)
-    }
-
-    /// Restore a Bucket from disk
-    ///
-    /// # Arguments
-    ///
-    /// * `path` - The path to the bucket
-    /// * `cfg` - The global configuration
-    ///
-    /// # Returns
-    ///
-    /// * `Bucket` - The bucket or an HTTPError
-    #[allow(dead_code)]
-    pub async fn restore(path: PathBuf, cfg: Cfg) -> Result<Bucket, ReductError> {
-        let io_limiter = InFlightIoLimiter::from_cfg(&cfg);
-        Self::restore_with_limiter(path, cfg, io_limiter).await
-    }
-
-    pub async fn restore_with_limiter(
-        path: PathBuf,
-        cfg: Cfg,
-        io_limiter: InFlightIoLimiter,
-    ) -> Result<Bucket, ReductError> {
-        let mut file = FILE_CACHE
-            .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))
-            .await?;
-        let mut buf = Vec::new();
-        file.read_to_end(&mut buf)?;
-
-        let cfg = Arc::new(cfg);
-        let settings = ProtoBucketSettings::decode(&mut Bytes::from(buf))
-            .map_err(|e| internal_server_error!("Failed to decode settings: {}", e))?;
-
-        let settings = Self::fill_settings(settings.into(), Self::defaults());
-        let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
-
-        let mut entries = BTreeMap::new();
-        let mut task_set = Vec::new();
-        let folder_keeper = FolderKeeper::new(path.clone(), cfg.as_ref()).await;
-
-        for entry_path in folder_keeper.list_folders().await? {
-            let entry_name = normalize_entry_name(
-                entry_path
-                    .strip_prefix(&path)
-                    .unwrap_or(entry_path.as_path()),
-            );
-            let handler = Entry::restore_with_limiter(
-                entry_path,
-                entry_name.clone(),
-                bucket_name.clone(),
-                settings_for_entry(&entry_name, &settings),
-                cfg.clone(),
-                io_limiter.clone(),
-            );
-
-            task_set.push(handler);
-        }
-
-        for task in task_set {
-            if let Some(entry) = task.await? {
-                entries.insert(entry.name().to_string(), entry);
-            }
-        }
-
-        Ok(Bucket {
-            name: bucket_name,
-            path,
-            entries: Arc::new(AsyncRwLock::new(
-                entries.into_iter().map(|(k, v)| (k, Arc::new(v))).collect(),
-            )),
-            settings: AsyncRwLock::new(settings),
-            is_provisioned: AtomicBool::new(false),
-            status: AsyncRwLock::new(ResourceStatus::Ready),
-            cfg,
-            folder_keeper: Arc::new(folder_keeper),
-            queries: AsyncRwLock::new(HashMap::new()),
-            io_limiter,
-        })
     }
 
     /// Get an entry in the bucket
@@ -335,6 +210,9 @@ impl Bucket {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.check_mode()?;
+        crate::storage::engine::check_entry_name_convention(name)?;
+        self.ensure_not_deleting().await?;
+        self.ensure_entry_path_not_deleting(name).await?;
 
         let get_entry = async || {
             self.keep_quota_for(content_size).await?;
@@ -351,6 +229,22 @@ impl Bucket {
         entry
             .begin_write(time, content_size, content_type, labels)
             .await
+    }
+
+    async fn ensure_entry_path_not_deleting(&self, name: &str) -> Result<(), ReductError> {
+        let entries_in_path = {
+            let entries = self.entries.read().await?;
+            Self::parent_prefixes(name)
+                .into_iter()
+                .filter_map(|prefix| entries.get(&prefix).cloned())
+                .collect::<Vec<_>>()
+        };
+
+        for entry in entries_in_path {
+            entry.ensure_not_deleting().await?;
+        }
+
+        Ok(())
     }
 
     /// Starts a new record read with
@@ -402,6 +296,35 @@ impl Bucket {
             .collect::<Vec<_>>();
         let mut count = 0usize;
         for entry in entries {
+            if entry.status().await? == ResourceStatus::Deleting {
+                debug!(
+                    "Skipping compact/sync for deleting entry '{}' in bucket '{}'",
+                    entry.name(),
+                    bucket_name
+                );
+                continue;
+            }
+
+            if !FILE_CACHE.try_exists(entry.path()).await? {
+                debug!(
+                    "Remove stale entry '{}' from bucket '{}' because its folder is missing",
+                    entry.name(),
+                    bucket_name
+                );
+                if let Err(err) = self.folder_keeper.remove_folder(entry.name()).await {
+                    if err.status() != reduct_base::error::ErrorCode::NotFound {
+                        error!(
+                            "Failed to remove stale folder map entry '{}' from bucket '{}': {}",
+                            entry.name(),
+                            bucket_name,
+                            err
+                        );
+                    }
+                }
+                self.entries.write().await?.remove(entry.name());
+                continue;
+            }
+
             let result = match mode {
                 EntryMaintenanceMode::Compact => entry.compact().await,
                 EntryMaintenanceMode::SyncFs => entry.sync_fs().await,
@@ -491,16 +414,20 @@ impl Bucket {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
-    use reduct_base::conflict;
+    use bytes::Bytes;
     use reduct_base::io::ReadRecord;
     use reduct_base::msg::bucket_api::QuotaType;
     use reduct_base::msg::status::ResourceStatus;
+    use reduct_base::{conflict, internal_server_error};
     use rstest::{fixture, rstest};
     use std::sync::Arc;
     use tempfile::tempdir;
 
     mod status {
         use super::*;
+        use crate::storage::bucket::update_records::UpdateLabelsMulti;
+        use reduct_base::msg::entry_api::QueryEntry;
+        use std::collections::HashSet;
 
         #[rstest]
         #[tokio::test]
@@ -558,14 +485,15 @@ pub(crate) mod tests {
             let bucket = bucket.await;
             let settings = bucket.settings().await.unwrap();
             let empty_entry = Arc::new(
-                Entry::try_build(
-                    "empty",
-                    bucket.path.clone(),
-                    settings_for_entry("empty", &settings),
-                    bucket.cfg.clone(),
-                )
-                .await
-                .unwrap(),
+                Entry::builder()
+                    .name("empty")
+                    .bucket_path(bucket.path.clone())
+                    .settings(settings_for_entry("empty", &settings))
+                    .cfg(bucket.cfg.clone())
+                    .usage_counters(Default::default())
+                    .build()
+                    .await
+                    .unwrap(),
             );
             bucket
                 .entries
@@ -603,6 +531,75 @@ pub(crate) mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn set_settings_returns_conflict_when_bucket_deleting(#[future] bucket: Arc<Bucket>) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
+
+            let err = bucket
+                .set_settings(BucketSettings::default())
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn update_labels_returns_conflict_when_bucket_deleting(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
+
+            let err = bucket
+                .update_labels(vec![UpdateLabelsMulti {
+                    entry_name: "entry".to_string(),
+                    time: 1,
+                    update: Labels::new(),
+                    remove: HashSet::new(),
+                }])
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn remove_records_returns_conflict_when_bucket_deleting(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
+
+            let err = bucket
+                .clone()
+                .remove_records(HashMap::from([("entry".to_string(), vec![1])]))
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn query_remove_records_returns_conflict_when_bucket_deleting(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            bucket.mark_deleting().await.unwrap();
+
+            let err = bucket
+                .clone()
+                .query_remove_records(QueryEntry::default())
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn bucket_mark_deleting_returns_conflict_when_already_deleting(
             #[future] bucket: Arc<Bucket>,
         ) {
@@ -623,6 +620,36 @@ pub(crate) mod tests {
             entry.mark_deleting().await.unwrap();
 
             let err = bucket.begin_read("test-1", 1).await.err().unwrap();
+            assert_eq!(
+                err,
+                conflict!("Entry 'test-1' in bucket 'test' is being deleted")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn begin_write_returns_conflict_when_target_entry_deleting_before_quota(
+            path: PathBuf,
+        ) {
+            let bucket = bucket(
+                BucketSettings {
+                    quota_type: Some(QuotaType::HARD),
+                    quota_size: Some(100),
+                    ..BucketSettings::default()
+                },
+                path,
+            )
+            .await;
+            write(&bucket, "test-1", 1, b"test").await.unwrap();
+            let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+            entry.mark_deleting().await.unwrap();
+            *bucket.settings.write().await.unwrap() = BucketSettings {
+                quota_type: Some(QuotaType::HARD),
+                quota_size: Some(1),
+                ..BucketSettings::default()
+            };
+
+            let err = write(&bucket, "test-1", 2, b"x").await.err().unwrap();
             assert_eq!(
                 err,
                 conflict!("Entry 'test-1' in bucket 'test' is being deleted")
@@ -657,7 +684,11 @@ pub(crate) mod tests {
             write(&bucket, "entry/a", 1, b"test").await.unwrap();
             bucket.sync_fs().await.unwrap();
 
-            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+            let bucket = Bucket::builder()
+                .path(bucket.path.clone())
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .restore()
                 .await
                 .unwrap();
             let mut reader = bucket.begin_read("entry/a", 1).await.unwrap();
@@ -673,7 +704,11 @@ pub(crate) mod tests {
                 .unwrap();
             bucket.sync_fs().await.unwrap();
 
-            let bucket = Bucket::restore(bucket.path.clone(), Cfg::default())
+            let bucket = Bucket::builder()
+                .path(bucket.path.clone())
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .restore()
                 .await
                 .unwrap();
             let entry = bucket
@@ -791,7 +826,13 @@ pub(crate) mod tests {
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
-            Bucket::try_build("test", &path, settings, Cfg::default())
+            Bucket::builder()
+                .name("test")
+                .data_path(path)
+                .settings(settings)
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .build()
                 .await
                 .unwrap(),
         )
@@ -800,7 +841,13 @@ pub(crate) mod tests {
     #[fixture]
     pub async fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
         FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
-        let bucket = Bucket::try_build("test", &path, settings, Cfg::default())
+        let bucket = Bucket::builder()
+            .name("test")
+            .data_path(path)
+            .settings(settings)
+            .cfg(Cfg::default())
+            .usage_counters(Default::default())
+            .build()
             .await
             .unwrap();
         bucket.set_provisioned(true);

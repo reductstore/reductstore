@@ -1,6 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -11,6 +12,8 @@ pub enum LifecycleType {
     /// Delete records matched by lifecycle settings.
     #[default]
     Delete,
+    /// Compress blocks matched by lifecycle settings.
+    Compress,
 }
 
 /// Lifecycle mode.
@@ -37,7 +40,7 @@ impl Default for LifecycleMode {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 pub struct LifecycleSettings {
     /// Lifecycle policy action type.
-    #[serde(default, rename = "type")]
+    #[serde(rename = "type")]
     pub lifecycle_type: LifecycleType,
     /// Bucket to apply the lifecycle policy to.
     pub bucket: String,
@@ -45,8 +48,8 @@ pub struct LifecycleSettings {
     /// System metadata entries (e.g. `entry/$meta`) are always excluded.
     #[serde(default)]
     pub entries: Vec<String>,
-    /// Maximum record age, e.g. "30d", "24h", or "3600s".
-    pub max_age: String,
+    /// Records older than this duration, e.g. "30d", "24h", or "3600s".
+    pub older_than: String,
     /// Interval between lifecycle runs, e.g. "30m", "1h", or "3600s".
     #[serde(default = "default_lifecycle_interval")]
     pub interval: String,
@@ -64,7 +67,7 @@ impl Default for LifecycleSettings {
             lifecycle_type: LifecycleType::default(),
             bucket: String::default(),
             entries: Vec::default(),
-            max_age: String::default(),
+            older_than: String::default(),
             interval: default_lifecycle_interval(),
             when: Option::default(),
             mode: LifecycleMode::default(),
@@ -85,9 +88,15 @@ pub struct LifecycleInfo {
     pub is_provisioned: bool,
     /// Lifecycle worker is running.
     pub is_running: bool,
+    /// Lifecycle policy action type.
+    #[serde(default, rename = "type")]
+    pub lifecycle_type: LifecycleType,
     /// Lifecycle mode.
     #[serde(default)]
     pub mode: LifecycleMode,
+    /// Last lifecycle run timestamp.
+    #[serde(default)]
+    pub last_run: Option<DateTime<Utc>>,
 }
 
 /// Payload for updating lifecycle mode.
@@ -157,13 +166,26 @@ mod tests {
                 "type": "delete",
                 "bucket": "bucket-1",
                 "entries": ["entry-1"],
-                "max_age": "1d",
+                "older_than": "1d",
                 "interval": "1h"
             }"#,
         )
         .unwrap();
 
         assert_eq!(settings.mode, LifecycleMode::Enabled);
+    }
+
+    #[test]
+    fn lifecycle_settings_type_is_required() {
+        let err = serde_json::from_str::<LifecycleSettings>(
+            r#"{
+                "bucket": "bucket-1",
+                "older_than": "1d"
+            }"#,
+        )
+        .unwrap_err();
+
+        assert!(err.to_string().contains("missing field `type`"));
     }
 
     #[test]
@@ -183,7 +205,9 @@ mod tests {
         )
         .unwrap();
 
+        assert_eq!(info.lifecycle_type, LifecycleType::Delete);
         assert_eq!(info.mode, LifecycleMode::Enabled);
+        assert_eq!(info.last_run, None);
     }
 
     #[test]

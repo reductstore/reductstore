@@ -7,12 +7,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Support glob-like entry patterns in replication filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1507](https://github.com/reductstore/reductstore/issues/1507) by @rohankumardubey
+- Support glob-like entry patterns in query entry filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1506](https://github.com/reductstore/reductstore/pull/1506) by @gitcommit90
+- Add CI vulnerability scanning for Rust dependencies and Docker images, gating image publishing on fixed high-severity container findings, [PR-1500](https://github.com/reductstore/reductstore/pull/1500)
+- Emit per-bucket usage statistics as system events under `usage/<instance>/<bucket>` alongside the existing instance total, and add `written_entries`, `read_entries`, and `record_count` fields to usage events, [PR-1474](https://github.com/reductstore/reductstore/pull/1474) by @DibbayajyotiRoy
+- Add a replication `dst_prefix` setting to write replicated records under a destination entry prefix, [PR-1486](https://github.com/reductstore/reductstore/pull/1486) by @rohankumardubey
+- Capture the instance's own log messages to `$system/logs/<instance>/messages` as system events with a `level` severity label, configurable via `RS_SYSTEM_EVENTS_LOG_LEVEL` (default `WARN`, `OFF` to disable), [PR-1481](https://github.com/reductstore/reductstore/pull/1481) by @DibbayajyotiRoy
+
+### Changed
+
+- Split block manager storage logic into smaller modules by responsibility, [PR-1503](https://github.com/reductstore/reductstore/pull/1503) by @rohankumardubey
+- Refresh contributor onboarding docs to validate branch builds locally and add `@gitcommit90` to the README contributor wall, [PR-1511](https://github.com/reductstore/reductstore/pull/1511)
+- Unify `$system` event handling under `syslog`: move all event production (audit, usage, lifecycle, replication, logs) into the module behind a single system event logger with one shared writer and sink (no change to the stored record format), [PR-1496](https://github.com/reductstore/reductstore/pull/1496) by @DibbayajyotiRoy
+
+## 1.20.8 - 2026-07-07
+
+### Fixed
+
+- Add source field to `ReductError` and improve error handling in `BlockManager::remove_records` to detect and mark corrupted blocks, [PR-1519](https://github.com/reductstore/reductstore/pull/1519)
+- Fix read-only replica block reads when compressed index state arrives before compressed block files and make replica cache invalidation for block variants fault-tolerant, [PR-1523](https://github.com/reductstore/reductstore/pull/1523)
+
+## 1.20.7 - 2026-06-30
+
+### Fixed
+
+- Distinguish stale block indexes from corrupted descriptors by persisting block descriptor versions and corruption flags, [PR-1495](https://github.com/reductstore/reductstore/pull/1495)
+- Persist corrupted blocks in the storage index and skip them during active lifecycle, query, read, write, and compression operations, [PR-1494](https://github.com/reductstore/reductstore/pull/1494)
+- Keep read-only replica buckets visible when transient cached block state prevents entry restore or reads, [PR-1492](https://github.com/reductstore/reductstore/pull/1492)
+- Remove redundant `error_code` and `error_message` fields from newly written `lifecycle_run` diagnostics and keep top-level `status` / `message` as the canonical failure metadata, [PR-1491](https://github.com/reductstore/reductstore/pull/1491)
+
+## 1.20.6 - 2026-06-25
+
+### Fixed
+
+- Copy CA certificates into the runtime image so HTTPS clients can validate TLS certificates, [PR-1479](https://github.com/reductstore/reductstore/pull/1479)
+
+## 1.20.5 - 2026-06-25
+
+### Fixed
+
+- Install CA certificates in the build image to prevent TLS validation failures for HTTPS clients, [PR-1478](https://github.com/reductstore/reductstore/pull/1478)
+
+## 1.20.4 - 2026-06-25
+
+### Fixed
+
+- Keep lifecycle compression running when individual blocks fail and sync compressed block files and indexes to avoid inconsistent restores, [PR-1477](https://github.com/reductstore/reductstore/pull/1477)
+
+## 1.20.3 - 2026-06-23
+
+### Fixed
+
+- Throttle lifecycle delete and compression runs using progress persisted in existing lifecycle system event stats [PR-1475](https://github.com/reductstore/reductstore/pull/1475)
+- Report both processed record and block counts for lifecycle compression events, [PR-1470](https://github.com/reductstore/reductstore/pull/1470) by @rohankumardubey
+
+## 1.20.2 - 2026-06-18
+
+### Changed
+
+- Update Web Console to v1.15.1, [PR-1462](https://github.com/reductstore/reductstore/pull/1462)
+
+### Fixed
+
+- Disable storage integrity checks for read-only replica instances so they do not attempt local index rebuilds, [PR-1461](https://github.com/reductstore/reductstore/pull/1461)
+- Force synchronization of cache during shutdown to ensure data consistency, [PR-1459](https://github.com/reductstore/reductstore/pull/1459)
+
+## 1.20.1 - 2026-06-17
+
+### Fixed
+
+- Remove replication transaction log files when deleting a replication while preserving system diagnostics entries, [PR-1458](https://github.com/reductstore/reductstore/pull/1458)
+- Reject storage mutations for buckets and entries that are already being deleted, including writes, settings updates, record updates/removals, query removals, and bucket renames, [PR-1456](https://github.com/reductstore/reductstore/pull/1456)
+- Prevent repeated compaction and sync failures for entries whose storage folders disappeared during deletion by making entry removal idempotent and cleaning up stale in-memory state, [PR-1454](https://github.com/reductstore/reductstore/pull/1454)
+- Fix replication diagnostics timestamp conflicts and recover corrupted transaction logs created on demand for `$meta` notifications, [PR-1452](https://github.com/reductstore/reductstore/pull/1452)
+
+## 1.20.0 - 2026-06-16
+
 ### Breaking Changes
 
 - Send lifecycle run diagnostics and audit events to the `$system` bucket with configurable system event storage, [PR-1399](https://github.com/reductstore/reductstore/pull/1399)
 
 ### Added
 
+- Write usage statistics every 60 seconds as system events to the `$system` bucket under `usage/<instance>/total`, counting read/write traffic at the storage engine level and snapshotting storage totals at each flush, [PR-1431](https://github.com/reductstore/reductstore/pull/1431) by @DibbayajyotiRoy
+- Add lifecycle compression action to compress old persisted blocks before deletion, including transparent compressed-block reads and decompression on writes, [PR-1427](https://github.com/reductstore/reductstore/pull/1427)
+- Periodically write aggregated replication diagnostics as system events to the `$system` bucket under `replications/<instance>/<replication-name>`, aggregated per status code and flushed on status change, idle window, or time cap, [PR-1417](https://github.com/reductstore/reductstore/pull/1417) by @DibbayajyotiRoy
 - Accept `x-reduct-content-length` as an alternative to `Content-Length` for browser streaming via the Fetch API, [PR-1411](https://github.com/reductstore/reductstore/pull/1411)
 - Pass attachment key-value maps to extensions instead of selecting a single attachment key, [PR-1383](https://github.com/reductstore/reductstore/pull/1383)
 - Add HTTP CRUD endpoints for lifecycle policies, [PR-1382](https://github.com/reductstore/reductstore/pull/1382)
@@ -21,19 +102,41 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support strict extension pipelines in `#ext` directives with ordered step execution and backward compatibility for legacy `"#ext": { ... }` object format, [PR-1351](https://github.com/reductstore/reductstore/pull/1351)
 - Add `--version` (`-V`) CLI option to the `reductstore` server binary to print the version and exit successfully from shared launcher code, [PR-1343](https://github.com/reductstore/reductstore/pull/1343)
 
+### Removed
+
+- `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414) by @vbmade2000
+
 ### Changed
 
+- Update Web Console to v1.15.0, [PR-1447](https://github.com/reductstore/reductstore/pull/1447)
+- Extend `LifecycleInfo` with lifecycle `type` and `last_run` timestamp, with `last_run` tracked directly by the lifecycle worker instead of system events, [PR-1442](https://github.com/reductstore/reductstore/pull/1442)
+- Clarify README guidance for when ReductStore should and should not be used, [PR-1430](https://github.com/reductstore/reductstore/pull/1430)
+- Rename lifecycle policy settings field `older_than` to `older_than`, [PR-1429](https://github.com/reductstore/reductstore/pull/1429)
 - Enforce SSDLC-style build/release input pinning by adding a repository Rust toolchain pin (`1.89.0`), lockfile-enforced cargo invocations, digest-pinned Docker base images, and checksum-verified external artifact downloads in CI/build actions, [PR-1400](https://github.com/reductstore/reductstore/pull/1400)
 - Pin third-party GitHub Actions to immutable commit SHAs in CI workflows and upgrade `actions/checkout` references to the Node 24-compatible `v6.0.2` commit to address deprecation warnings, [PR-1373](https://github.com/reductstore/reductstore/pull/1373)
-- Pipelined replication batch sending to overlap preparing the next entry’s batch with sending the current batch.
 
 ### Fixed
 
+- Avoid panics during shutdown cleanup by logging individual shutdown step failures and continuing through storage sync, [PR-1444](https://github.com/reductstore/reductstore/pull/1444)
 - Preserve attachment metadata (`entry/$meta`) during lifecycle delete cleanup by enforcing and documenting exclusion of system metadata entries from lifecycle matching, [PR-1395](https://github.com/reductstore/reductstore/pull/1395)
-- Fix lifecycle delete worker first-run failure (`422 Start time must be before stop time`) by ensuring delete queries use a valid initial time range even when all records are newer than `max_age`, [PR-1394](https://github.com/reductstore/reductstore/pull/1394)
+- Fix lifecycle delete worker first-run failure (`422 Start time must be before stop time`) by ensuring delete queries use a valid initial time range even when all records are newer than `older_than`, [PR-1394](https://github.com/reductstore/reductstore/pull/1394)
 - Fix runtime default for lifecycle interval by implementing manual Default for LifecycleSettings, [PR-1385](https://github.com/reductstore/reductstore/pull/1385)
 - Downgrade `write_batched` log severity for closed writer-channel handoff from error to warning to reduce noisy false-positive error bursts under expected stream abort/backpressure scenarios, [PR-1356](https://github.com/reductstore/reductstore/pull/1356)
 - Handle `--version` (`-V`) in `main` before server startup so version output remains clean and exits without initialization side effects, [PR-1365](https://github.com/reductstore/reductstore/pull/1365)
+
+## 1.19.10 - 2026-06-16
+
+### Fixed
+
+- Return `422 Unprocessable Entity` for unsupported nested directive values instead of panicking when parsing queries, [PR-1449](https://github.com/reductstore/reductstore/pull/1449)
+- Avoid a historical query panic when a bounded query is exhausted after a block that also contains records beyond the query stop time, [PR-1446](https://github.com/reductstore/reductstore/pull/1446)
+
+
+## 1.19.9 - 2026-06-12
+
+### Fixed
+
+- Return `422 Unprocessable Entity` for malformed/non-UTF8 write headers instead of panicking, [PR-1432](https://github.com/reductstore/reductstore/pull/1432)
 
 ## 1.19.8 - 2026-05-21
 

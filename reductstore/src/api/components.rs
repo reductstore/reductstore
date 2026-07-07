@@ -16,8 +16,9 @@ use crate::lifecycle::ManageLifecycles;
 use crate::lock_file::BoxedLockFile;
 use crate::replication::ManageReplications;
 use crate::storage::engine::StorageEngine;
-use crate::syslog::LogSystemEvent;
+use crate::syslog::SystemEventLogger;
 use axum::http::HeaderMap;
+use log::error;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::service_unavailable;
@@ -38,8 +39,12 @@ pub struct Components {
     pub(crate) lifecycle_repo: AsyncRwLock<Box<dyn ManageLifecycles + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
-    pub(crate) audit_logger: Arc<AsyncRwLock<Box<dyn LogSystemEvent + Send + Sync>>>,
     pub(crate) limits: BoxedLimits,
+    /// The single system-event collector: owns every aggregator/task (audit
+    /// batching, usage timer, log capture) and the one shared `$system` writer
+    /// they fan through. A no-op when system events are disabled, so no `Option`
+    /// is needed. Stopped on shutdown to drain the final events.
+    pub(crate) system_events: Arc<dyn SystemEventLogger + Send + Sync>,
 
     pub(crate) cfg: Cfg,
 }
@@ -144,21 +149,45 @@ impl StateKeeper {
         self.wait_components().await
     }
 
-    pub async fn stop_replication_tasks(&self) -> Result<(), ReductError> {
+    pub async fn shutdown(&self) {
+        if let Err(err) = self.stop_lifecycle_tasks().await {
+            error!("Failed to stop lifecycle policies: {}", err);
+        }
+
+        if let Err(err) = self.stop_replication_tasks().await {
+            error!("Failed to stop replication tasks: {}", err);
+        }
+
+        if let Err(err) = self.stop_system_events().await {
+            error!("Failed to stop system events: {}", err);
+        }
+
+        if let Err(err) = self.sync_storage().await {
+            error!("Failed to shutdown storage: {}", err);
+        }
+    }
+
+    async fn stop_replication_tasks(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
         let mut repo = components.replication_repo.write().await?;
         repo.stop().await;
         Ok(())
     }
 
-    pub async fn stop_lifecycle_tasks(&self) -> Result<(), ReductError> {
+    async fn stop_lifecycle_tasks(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
         let mut repo = components.lifecycle_repo.write().await?;
         repo.stop().await;
         Ok(())
     }
 
-    pub async fn sync_storage(&self) -> Result<(), ReductError> {
+    async fn stop_system_events(&self) -> Result<(), ReductError> {
+        let components = self.wait_components().await?.clone();
+        components.system_events.stop().await;
+        Ok(())
+    }
+
+    async fn sync_storage(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
         let storage = &components.storage;
         storage.sync_fs().await?;
@@ -249,7 +278,119 @@ impl From<ComponentError> for ReductError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::http::tests::{keeper, not_ready_keeper};
+    use crate::core::sync::{reset_rwlock_config, set_rwlock_timeout};
+    use bytes::Bytes;
+    use reduct_base::msg::lifecycle_api::LifecycleSettings;
     use rstest::rstest;
+    use serial_test::serial;
+    use std::collections::HashMap;
+    use std::sync::Arc;
+    use std::time::Duration;
+
+    struct ResetRwLockConfig;
+
+    impl Drop for ResetRwLockConfig {
+        fn drop(&mut self) {
+            reset_rwlock_config();
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_stop_replication_tasks(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+
+        {
+            let mut repo = components.replication_repo.write().await.unwrap();
+            repo.start();
+            assert!(repo.is_replication_running("api-test").await.unwrap());
+        }
+
+        keeper.stop_replication_tasks().await.unwrap();
+
+        let components = keeper.get_anonymous().await.unwrap();
+        let repo = components.replication_repo.read().await.unwrap();
+        assert!(!repo.is_replication_running("api-test").await.unwrap());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_stop_lifecycle_tasks(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+
+        {
+            let mut repo = components.lifecycle_repo.write().await.unwrap();
+            repo.create_lifecycle(
+                "api-test",
+                LifecycleSettings {
+                    bucket: "bucket-1".to_string(),
+                    older_than: "1d".to_string(),
+                    interval: "1h".to_string(),
+                    ..LifecycleSettings::default()
+                },
+            )
+            .await
+            .unwrap();
+            repo.start().await.unwrap();
+            assert!(repo.is_lifecycle_running("api-test").await.unwrap());
+        }
+
+        keeper.stop_lifecycle_tasks().await.unwrap();
+
+        let components = keeper.get_anonymous().await.unwrap();
+        let repo = components.lifecycle_repo.read().await.unwrap();
+        assert!(!repo.is_lifecycle_running("api-test").await.unwrap());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_sync_storage(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        let mut writer = bucket
+            .begin_write("entry-sync", 1, 4, "text/plain".to_string(), HashMap::new())
+            .await
+            .unwrap();
+        writer.send(Ok(Some(Bytes::from("test")))).await.unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        keeper.sync_storage().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_stop_replication_tasks_not_ready(#[future] not_ready_keeper: Arc<StateKeeper>) {
+        let err = not_ready_keeper
+            .await
+            .stop_replication_tasks()
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(err.status, ErrorCode::ServiceUnavailable);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_shutdown_continues_when_all_steps_fail(#[future] keeper: Arc<StateKeeper>) {
+        let _reset = ResetRwLockConfig;
+        set_rwlock_timeout(Duration::from_millis(10));
+
+        let keeper = keeper.await;
+        let _components_guard = keeper.components.read().await.unwrap();
+
+        keeper.shutdown().await;
+    }
 
     #[rstest]
     fn test_component_error_new_and_accessors() {

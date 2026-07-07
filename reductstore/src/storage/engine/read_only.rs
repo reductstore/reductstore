@@ -38,12 +38,13 @@ impl StorageEngine {
             }
 
             // Restore new bucket
-            match Bucket::restore_with_limiter(
-                path.clone(),
-                self.cfg.clone(),
-                self.io_limiter.clone(),
-            )
-            .await
+            match Bucket::builder()
+                .path(path.clone())
+                .cfg(self.cfg.clone())
+                .io_limiter(self.io_limiter.clone())
+                .usage_counters(Arc::clone(&self.usage_counters))
+                .restore()
+                .await
             {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);

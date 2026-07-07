@@ -4,18 +4,25 @@
 use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use crate::storage::engine::StorageEngine;
+use crate::storage::usage::UsageCounters;
 use bytesize::ByteSize;
 use log::{error, info};
 use reduct_base::error::ErrorCode;
 use reduct_base::msg::bucket_api::BucketSettings;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
-    pub(in crate::cfg) async fn provision_buckets(&self, data_path: &PathBuf) -> StorageEngine {
+    pub(in crate::cfg) async fn provision_buckets(
+        &self,
+        data_path: &PathBuf,
+        usage_counters: Arc<UsageCounters>,
+    ) -> StorageEngine {
         let builder = StorageEngine::builder()
             .with_cfg(self.cfg.clone())
-            .with_data_path(data_path.clone());
+            .with_data_path(data_path.clone())
+            .with_usage_counters(usage_counters);
 
         let storage = if let Some(license) = self.license.clone() {
             builder.with_license(license).build().await

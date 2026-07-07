@@ -5,9 +5,11 @@ use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{
-    BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
+    BlockManager, BLOCK_INDEX_FILE, COMPRESSED_DATA_FILE_EXT, COMPRESSED_DESCRIPTOR_FILE_EXT,
+    DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::proto::block_index::Block as BlockEntry;
+use log::warn;
 use reduct_base::error::ReductError;
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -27,28 +29,39 @@ impl ReplicaIndexReload {
 
         let updated_index = BlockIndex::try_load(self.index_path.clone()).await?;
 
+        let mut first_err = None;
+
         for (block_id, new_block_info) in updated_index.info().iter() {
             if let Some(previous_block_info) = self.previous_state.get(block_id) {
                 if previous_block_info.crc64 != new_block_info.crc64 {
-                    FILE_CACHE
-                        .invalidate_local_cache_file(
-                            &self
-                                .entry_path
-                                .join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT)),
-                        )
-                        .await?;
-                    FILE_CACHE
-                        .invalidate_local_cache_file(
-                            &self
-                                .entry_path
-                                .join(format!("{}{}", block_id, DATA_FILE_EXT)),
-                        )
-                        .await?;
+                    let extensions = [
+                        DESCRIPTOR_FILE_EXT,
+                        DATA_FILE_EXT,
+                        COMPRESSED_DESCRIPTOR_FILE_EXT,
+                        COMPRESSED_DATA_FILE_EXT,
+                    ];
+
+                    for ext in extensions {
+                        let path = self.entry_path.join(format!("{}{}", block_id, ext));
+                        if let Err(err) = FILE_CACHE.invalidate_local_cache_file(&path).await {
+                            warn!(
+                                "Failed to invalidate replica cache file {:?}: {}",
+                                path, err
+                            );
+                            if first_err.is_none() {
+                                first_err = Some(err);
+                            }
+                        }
+                    }
                 }
             }
         }
 
-        Ok(updated_index)
+        if let Some(err) = first_err {
+            Err(err)
+        } else {
+            Ok(updated_index)
+        }
     }
 }
 
@@ -119,6 +132,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg.clone()),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -161,6 +175,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg.clone()),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -205,6 +220,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg.clone()),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -221,6 +237,82 @@ mod tests {
             block_manager.block_index.info().get(&1).unwrap().crc64,
             Some(2)
         );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_reload_if_readonly_discards_compressed_cache_on_crc_change(
+        #[future] path: PathBuf,
+    ) {
+        let path = path.await;
+        let entry_path = path.join("bucket").join("entry");
+
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            data_path: path.clone(),
+            engine_config: StorageEngineConfig {
+                replica_update_interval: Duration::from_millis(50),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
+
+        let index_path = entry_path.join(BLOCK_INDEX_FILE);
+        let mut index = BlockIndex::new(index_path.clone());
+        index.insert_or_update_with_crc(Block::new(1), 1);
+        index.save().await.unwrap();
+
+        std::fs::write(entry_path.join("1.meta.zst"), b"old-meta").unwrap();
+        std::fs::write(entry_path.join("1.blk.zst"), b"old-data").unwrap();
+
+        FILE_CACHE
+            .read(&entry_path.join("1.meta.zst"), std::io::SeekFrom::Start(0))
+            .await
+            .unwrap();
+        FILE_CACHE
+            .read(&entry_path.join("1.blk.zst"), std::io::SeekFrom::Start(0))
+            .await
+            .unwrap();
+
+        let mut block_manager = BlockManager::build(
+            entry_path.clone(),
+            index,
+            "bucket".to_string(),
+            "entry".to_string(),
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+
+        let mut updated_index = BlockIndex::new(index_path.clone());
+        updated_index.insert_or_update_with_crc(Block::new(1), 2);
+        updated_index.save().await.unwrap();
+
+        std::fs::write(entry_path.join("1.meta.zst"), b"new-meta").unwrap();
+        std::fs::write(entry_path.join("1.blk.zst"), b"new-data").unwrap();
+
+        let reload = block_manager.prepare_replica_index_reload().unwrap();
+        let updated_index = reload.load_updated_index().await.unwrap();
+        block_manager.apply_replica_index_reload(updated_index);
+
+        let mut meta = FILE_CACHE
+            .read(&entry_path.join("1.meta.zst"), std::io::SeekFrom::Start(0))
+            .await
+            .unwrap();
+        let mut meta_content = vec![];
+        use std::io::Read;
+        meta.read_to_end(&mut meta_content).unwrap();
+
+        let mut data = FILE_CACHE
+            .read(&entry_path.join("1.blk.zst"), std::io::SeekFrom::Start(0))
+            .await
+            .unwrap();
+        let mut data_content = vec![];
+        data.read_to_end(&mut data_content).unwrap();
+
+        assert_eq!(meta_content, b"new-meta");
+        assert_eq!(data_content, b"new-data");
     }
 
     #[rstest]
@@ -248,6 +340,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -283,6 +376,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg),
+            Default::default(),
         )
         .await
         .unwrap();

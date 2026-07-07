@@ -1,0 +1,8 @@
+[advisories]
+ignore = [
+    # Transitive dependency of zenoh-transport 1.9.0. zenoh 1.9.0 is the
+    # latest available release and still constrains lz4_flex to ^0.10.0.
+    "RUSTSEC-2026-0041",
+    # Transitive dependency of zenoh-transport 1.9.0 with no fixed rsa release.
+    "RUSTSEC-2023-0071",
+]

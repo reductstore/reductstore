@@ -6,11 +6,10 @@ use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::Record;
-use async_trait::async_trait;
 use bytes::Bytes;
 use reduct_base::error::ReductError;
 use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
-use reduct_base::{internal_server_error, not_found};
+use reduct_base::{internal_server_error, not_found, too_early};
 use std::cmp::min;
 use std::io;
 use std::io::Read;
@@ -54,7 +53,7 @@ impl RecordReader {
         let bm = block_manager.read().await?;
         let block = block_ref.read().await?;
 
-        let (file_path, offset) = bm.begin_read_record(&block, record_timestamp)?;
+        let (file_path, offset) = bm.begin_read_record(&block, record_timestamp).await?;
 
         let record = block.get_record(record_timestamp).unwrap();
         let content_size = record.end - record.begin;
@@ -73,12 +72,23 @@ impl RecordReader {
 
         let file_path = if content_size > 0 {
             if !FILE_CACHE.try_exists(&file_path).await? {
+                if bm.is_replica() {
+                    return Err(too_early!(
+                        "Data block {} is not available on replica yet",
+                        file_path.display()
+                    ));
+                }
+
                 return Err(not_found!("Data block {} not found", file_path.display()));
             }
             Some(file_path)
         } else {
             None
         };
+
+        bm.usage_counters()
+            .count_read(bm.bucket_name(), bm.entry_name(), content_size)
+            .await?;
 
         Ok(Self {
             meta,
@@ -173,7 +183,6 @@ impl Seek for RecordReader {
     }
 }
 
-#[async_trait]
 impl ReadRecord for RecordReader {
     fn read_chunk(&mut self) -> ReadChunk {
         let mut buf =
@@ -223,23 +232,33 @@ pub(in crate::storage) async fn read_in_chunks(
     offset: u64,
     content_size: u64,
     read_bytes: u64,
-) -> Result<(Vec<u8>, usize), ReductError> {
+) -> Result<(Vec<u8>, usize), ReductError<io::Error>> {
     let chunk_size = min(content_size - read_bytes, MAX_IO_BUFFER_SIZE as u64);
     let mut buf = vec![0; chunk_size as usize];
 
     let mut file = FILE_CACHE
         .read(&file_path, SeekFrom::Start(offset + read_bytes))
-        .await?;
+        .await
+        .map_err(|e| e.with_source(io::Error::new(io::ErrorKind::Deadlock, "")))?;
 
     let read = match file.read(&mut buf) {
         Ok(read) => read,
         Err(e) => {
-            return Err(internal_server_error!("Failed to read record chunk: {}", e));
+            return Err(internal_server_error!(
+                "Failed to read record chunk from {:?}: {}",
+                file_path,
+                e
+            )
+            .with_source(e));
         }
     };
 
     if read == 0 {
-        return Err(internal_server_error!("Failed to read record chunk: EOF"));
+        return Err(internal_server_error!(
+            "Failed to read record chunk from {:?}: EOF",
+            file_path
+        )
+        .with_source(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF")));
     }
 
     Ok((buf, read))
@@ -251,6 +270,7 @@ pub(crate) mod tests {
 
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::tests::{entry, write_record, write_stub_record};
+    use async_trait::async_trait;
     use mockall::mock;
     use rstest::{fixture, rstest};
 
@@ -285,8 +305,11 @@ pub(crate) mod tests {
                 .err()
                 .unwrap();
             assert_eq!(
-                err,
-                internal_server_error!("Failed to read record chunk: EOF")
+                err.to_string(),
+                format!(
+                    "[InternalServerError] Failed to read record chunk from {:?}: EOF",
+                    file_to_read
+                ),
             );
         }
 

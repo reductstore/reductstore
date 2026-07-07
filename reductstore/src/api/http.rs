@@ -305,7 +305,7 @@ pub(crate) mod tests {
     use crate::lock_file::{LockFile, LockFileBuilder};
     use crate::replication::ReplicationRepoBuilder;
     use crate::storage::engine::StorageEngine;
-    use crate::syslog::build_audit_logger;
+    use crate::syslog::{build_system_event_logger, SystemEventLogger};
     use axum::body::Body;
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
@@ -313,7 +313,6 @@ pub(crate) mod tests {
     use reduct_base::error::ReductError as BaseHttpError;
     use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::lifecycle_api::LifecycleSettings;
     use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
@@ -428,7 +427,7 @@ pub(crate) mod tests {
             assert!(debug.contains("BadRequest"));
             assert_eq!(
                 format!("{err}"),
-                "ReductError { status: BadRequest, message: \"boom\" }"
+                "ReductError { status: BadRequest, message: \"boom\", source: None }"
             );
             assert!(StdError::source(&err).is_none());
         }
@@ -542,91 +541,6 @@ pub(crate) mod tests {
             let keeper = keeper.await;
             let components = keeper.get_anonymous().await.unwrap();
             assert!(components.storage.info().await.is_ok());
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_stop_replication_tasks(#[future] keeper: Arc<StateKeeper>) {
-            let keeper = keeper.await;
-            let components = keeper.get_anonymous().await.unwrap();
-
-            {
-                let mut repo = components.replication_repo.write().await.unwrap();
-                repo.start();
-                assert!(repo.is_replication_running("api-test").await.unwrap());
-            }
-
-            keeper.stop_replication_tasks().await.unwrap();
-
-            let components = keeper.get_anonymous().await.unwrap();
-            let repo = components.replication_repo.read().await.unwrap();
-            assert!(!repo.is_replication_running("api-test").await.unwrap());
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_stop_lifecycle_tasks(#[future] keeper: Arc<StateKeeper>) {
-            let keeper = keeper.await;
-            let components = keeper.get_anonymous().await.unwrap();
-
-            {
-                let mut repo = components.lifecycle_repo.write().await.unwrap();
-                repo.create_lifecycle(
-                    "api-test",
-                    LifecycleSettings {
-                        bucket: "bucket-1".to_string(),
-                        max_age: "1d".to_string(),
-                        interval: "1h".to_string(),
-                        ..LifecycleSettings::default()
-                    },
-                )
-                .await
-                .unwrap();
-                repo.start().await.unwrap();
-                assert!(repo.is_lifecycle_running("api-test").await.unwrap());
-            }
-
-            keeper.stop_lifecycle_tasks().await.unwrap();
-
-            let components = keeper.get_anonymous().await.unwrap();
-            let repo = components.lifecycle_repo.read().await.unwrap();
-            assert!(!repo.is_lifecycle_running("api-test").await.unwrap());
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_sync_storage(#[future] keeper: Arc<StateKeeper>) {
-            let keeper = keeper.await;
-            let components = keeper.get_anonymous().await.unwrap();
-            let bucket = components
-                .storage
-                .get_bucket("bucket-1")
-                .await
-                .unwrap()
-                .upgrade_and_unwrap();
-
-            let mut writer = bucket
-                .begin_write("entry-sync", 1, 4, "text/plain".to_string(), HashMap::new())
-                .await
-                .unwrap();
-            writer.send(Ok(Some(Bytes::from("test")))).await.unwrap();
-            writer.send(Ok(None)).await.unwrap();
-
-            keeper.sync_storage().await.unwrap();
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_stop_replication_tasks_not_ready(
-            #[future] not_ready_keeper: Arc<StateKeeper>,
-        ) {
-            let err = not_ready_keeper
-                .await
-                .stop_replication_tasks()
-                .await
-                .err()
-                .unwrap();
-            assert_eq!(err.status, ErrorCode::ServiceUnavailable);
         }
 
         #[rstest]
@@ -829,6 +743,23 @@ pub(crate) mod tests {
         }
     }
 
+    /// Build the system-event collector for tests: audit/usage per the cfg, but
+    /// with log capture forced off so we never register the process-global log
+    /// sink from a test.
+    async fn test_system_events(
+        cfg: &Cfg,
+        storage: &Arc<StorageEngine>,
+    ) -> Arc<dyn SystemEventLogger + Send + Sync> {
+        let mut cfg = cfg.clone();
+        cfg.system_events_conf.log_level = None;
+        build_system_event_logger(
+            &cfg,
+            Arc::clone(storage),
+            Arc::new(crate::storage::usage::UsageCounters::default()),
+        )
+        .await
+    }
+
     async fn test_components(cfg: Cfg) -> Components {
         let cfg_for_storage = cfg.clone();
         let storage = Arc::new(
@@ -842,7 +773,6 @@ pub(crate) mod tests {
         let token_repo = TokenRepositoryBuilder::new(cfg.clone())
             .build_with_storage(cfg.data_path.clone(), Arc::clone(&storage))
             .await;
-        let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -855,6 +785,7 @@ pub(crate) mod tests {
         #[cfg(not(feature = "web-console"))]
         let console_bytes: &[u8] = &[];
 
+        let system_events = test_system_events(&cfg, &storage).await;
         Components {
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("init-token"),
@@ -862,7 +793,7 @@ pub(crate) mod tests {
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
-            audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
+            system_events,
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -941,7 +872,6 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-        let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
         let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -954,10 +884,10 @@ pub(crate) mod tests {
                     dst_host: "http://localhost:8080".to_string(),
                     dst_token: None,
                     entries: vec![],
+                    dst_prefix: String::new(),
                     include: Default::default(),
                     exclude: Default::default(),
                     each_n: None,
-                    each_s: None,
                     when: None,
                     mode: ReplicationMode::Enabled,
                 },
@@ -973,6 +903,7 @@ pub(crate) mod tests {
         #[cfg(not(feature = "web-console"))]
         let console_bytes: &[u8] = &[];
 
+        let system_events = test_system_events(&cfg, &storage).await;
         let components = Components {
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("init-token"),
@@ -980,7 +911,7 @@ pub(crate) mod tests {
             console: create_asset_manager(console_bytes),
             replication_repo: AsyncRwLock::new(replication_repo),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
-            audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
+            system_events,
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -1058,13 +989,13 @@ pub(crate) mod tests {
         let lifecycle_repo = LifecycleRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
-        let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
 
         #[cfg(feature = "web-console")]
         let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
         #[cfg(not(feature = "web-console"))]
         let console_bytes: &[u8] = &[];
 
+        let system_events = test_system_events(&cfg, &storage).await;
         let components = Components {
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("init-token"),
@@ -1082,7 +1013,7 @@ pub(crate) mod tests {
                 Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
-            audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
+            system_events,
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: crate::api::limits::LimitsBuilder::new().build(),

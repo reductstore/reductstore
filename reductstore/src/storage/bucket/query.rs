@@ -5,7 +5,7 @@ use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::{Entry, RecordReader};
+use crate::storage::entry::{entry_matches_pattern, Entry, RecordReader};
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{next_query_id, QueryRx};
 use log::debug;
@@ -99,34 +99,53 @@ impl Bucket {
     ) -> Result<Vec<(String, Arc<Entry>)>, ReductError> {
         let entries = self.entries.read().await?;
         let requested_entries = match &request.entries {
-            Some(entries) if entries.iter().any(|entry| entry == "*") => None,
-            Some(entries) => Some(entries.clone()),
-            None => None,
+            Some(entries) => entries,
+            None => {
+                let results = entries
+                    .iter()
+                    .filter(|(_, entry)| entry.is_queryable_by_wildcard())
+                    .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
+                    .collect();
+                return Ok(results);
+            }
         };
 
-        let matches_pattern = |entry: &str, patterns: &[String]| {
-            patterns.iter().any(|pattern| {
-                if let Some(prefix) = pattern.strip_suffix('*') {
-                    entry.starts_with(prefix)
+        let include_patterns: Vec<&str> = requested_entries
+            .iter()
+            .filter_map(|pattern| {
+                if pattern.starts_with('!') && pattern.len() > 1 {
+                    None
                 } else {
-                    entry == pattern
+                    Some(pattern.as_str())
                 }
             })
-        };
+            .collect();
+        let exclude_patterns: Vec<&str> = requested_entries
+            .iter()
+            .filter_map(|pattern| pattern.strip_prefix('!'))
+            .filter(|pattern| !pattern.is_empty())
+            .collect();
 
         let results: Vec<(String, Arc<Entry>)> = entries
             .iter()
             .filter(|(name, entry)| {
-                if requested_entries.is_none() {
-                    return entry.is_queryable_by_wildcard();
-                }
+                let included = if include_patterns.iter().any(|pattern| *pattern == "*") {
+                    entry.is_queryable_by_wildcard()
+                } else if include_patterns.is_empty() {
+                    entry.is_queryable_by_wildcard()
+                } else if include_patterns.iter().any(|pattern| pattern == name) {
+                    true
+                } else {
+                    include_patterns
+                        .iter()
+                        .any(|pattern| entry_matches_pattern(name, pattern))
+                        && entry.is_queryable_by_wildcard()
+                };
 
-                let patterns = requested_entries.as_ref().unwrap();
-                if patterns.iter().any(|pattern| pattern == *name) {
-                    return true;
-                }
-
-                matches_pattern(name, patterns) && entry.is_queryable_by_wildcard()
+                included
+                    && !exclude_patterns
+                        .iter()
+                        .any(|pattern| pattern == name || entry_matches_pattern(name, pattern))
             })
             .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
             .collect();
@@ -398,16 +417,31 @@ mod tests {
     }
 
     #[rstest]
+    #[case("acc-a", "acc-*", true)]
+    #[case("acc-a/sub-entry", "acc-*", true)]
+    #[case("other", "acc-*", false)]
+    #[case("a/x/b", "/a/*/b", true)]
+    #[case("a/y/b", "/a/*/b", true)]
+    #[case("a/x/d/b", "/a/*/b", false)]
+    #[case("a/x/b", "/a/**/b", true)]
+    #[case("a/x/d/b", "/a/**/b", true)]
+    #[case("a/private/x/b", "/a/private/**", true)]
+    #[case("a/public/x/b", "/a/private/**", false)]
+    fn matches_entry_patterns(#[case] entry: &str, #[case] pattern: &str, #[case] expected: bool) {
+        assert_eq!(entry_matches_pattern(entry, pattern), expected);
+    }
+
+    #[rstest]
     #[tokio::test]
-    async fn filters_by_prefix_wildcard(#[future] bucket: Arc<Bucket>) {
+    async fn filters_by_exclusion_only(#[future] bucket: Arc<Bucket>) {
         let bucket = bucket.await;
-        write(&bucket, "acc-a", 10, b"a1").await.unwrap();
-        write(&bucket, "acc-b", 20, b"b1").await.unwrap();
-        write(&bucket, "other", 15, b"c1").await.unwrap();
+        write(&bucket, "a/public/b", 10, b"a1").await.unwrap();
+        write(&bucket, "a/private/b", 20, b"b1").await.unwrap();
+        write(&bucket, "cam-1", 15, b"c1").await.unwrap();
 
         let query = QueryEntry {
             query_type: QueryType::Query,
-            entries: Some(vec!["acc-*".into()]),
+            entries: Some(vec!["!/a/private/**".into()]),
             ..Default::default()
         };
 
@@ -418,7 +452,7 @@ mod tests {
 
         assert_eq!(
             records,
-            vec![("acc-a".to_string(), 10), ("acc-b".to_string(), 20)]
+            vec![("a/public/b".to_string(), 10), ("cam-1".to_string(), 15)]
         );
     }
 

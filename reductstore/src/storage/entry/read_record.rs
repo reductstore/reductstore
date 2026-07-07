@@ -1,8 +1,9 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::storage::block_manager::BlockRef;
 use crate::storage::entry::{Entry, RecordReader};
-use crate::storage::proto::record;
+use crate::storage::proto::{record, Record};
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::{internal_server_error, not_found, too_early};
@@ -34,40 +35,10 @@ impl Entry {
                 drop(block);
                 (block_ref, record)
             } else {
-                let mut bm = self.block_manager.write().await?;
-                let block_ref = bm.find_block(time).await?;
-                let block = block_ref.read().await?;
-                let record = block
-                    .get_record(time)
-                    .ok_or_else(|| {
-                        not_found!(
-                            "Record {} not found in block {}/{}/{}",
-                            time,
-                            self.bucket_name,
-                            self.name,
-                            block.block_id(),
-                        )
-                    })?
-                    .clone();
-                (block_ref.clone(), record)
+                self.find_record_for_read(time).await?
             }
         } else {
-            let mut bm = self.block_manager.write().await?;
-            let block_ref = bm.find_block(time).await?;
-            let block = block_ref.read().await?;
-            let record = block
-                .get_record(time)
-                .ok_or_else(|| {
-                    not_found!(
-                        "Record {} not found in block {}/{}/{}",
-                        time,
-                        self.bucket_name,
-                        self.name,
-                        block.block_id(),
-                    )
-                })?
-                .clone();
-            (block_ref.clone(), record)
+            self.find_record_for_read(time).await?
         };
 
         if record.state == record::State::Started as i32 {
@@ -90,11 +61,33 @@ impl Entry {
 
         RecordReader::try_new(self.block_manager.clone(), block_ref, time, None, None).await
     }
+
+    async fn find_record_for_read(&self, time: u64) -> Result<(BlockRef, Record), ReductError> {
+        let mut bm = self.block_manager.write().await?;
+        let block_ref = bm.find_block(time).await?;
+        let block = block_ref.read().await?;
+        let record = block
+            .get_record(time)
+            .ok_or_else(|| {
+                not_found!(
+                    "Record {} not found in block {}/{}/{}",
+                    time,
+                    self.bucket_name,
+                    self.name,
+                    block.block_id(),
+                )
+            })?
+            .clone();
+
+        drop(block);
+        Ok((block_ref, record))
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cfg::{Cfg, InstanceRole};
     use crate::core::file_cache::FILE_CACHE;
     use crate::storage::block_manager::DATA_FILE_EXT;
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
@@ -251,11 +244,114 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_ignores_already_corrupted_block(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
+        write_stub_record(&entry, 1000000).await;
+
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .mark_block_corrupted(1000000)
+            .await
+            .unwrap();
+
+        let reader = entry.begin_read(1000000).await;
+        assert_eq!(
+            reader.err(),
+            Some(not_found!("Record 1000000 not found in entry bucket/entry"))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_begin_read_missing_data_file_on_replica_returns_too_early(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1000000).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let data_path = {
+            let bm = entry.block_manager.read().await.unwrap();
+            let block_id = *bm.index().tree().first().unwrap();
+            bm.path().join(format!("{}{}", block_id, DATA_FILE_EXT))
+        };
+        FILE_CACHE.remove(&data_path).await.unwrap();
+
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            ..Default::default()
+        };
+        let replica_entry = Entry::builder()
+            .path(path.join("entry"))
+            .name("entry")
+            .bucket_name("bucket")
+            .settings(entry_settings)
+            .cfg(Arc::new(cfg))
+            .usage_counters(Default::default())
+            .restore()
+            .await
+            .unwrap()
+            .unwrap();
+
+        let reader = replica_entry.begin_read(1000000).await;
+        assert_eq!(
+            reader.err(),
+            Some(too_early!(
+                "Data block {} is not available on replica yet",
+                data_path.display()
+            ))
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_begin_read_ok1(#[future] entry: Arc<Entry>) {
         let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
         let mut reader = entry.begin_read(1000000).await.unwrap();
         assert_eq!(reader.read_chunk().unwrap(), Ok(Bytes::from("0123456789")));
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_read_chunk_eof_does_not_mark_block_corrupted(#[future] entry: Arc<Entry>) {
+        let entry = entry.await;
+        write_stub_record(&entry, 1000000).await;
+        let mut reader = entry.begin_read(1000000).await.unwrap();
+
+        let data_path = {
+            let bm = entry.block_manager.read().await.unwrap();
+            bm.path().join(format!("1000000{}", DATA_FILE_EXT))
+        };
+        FILE_CACHE
+            .write_or_create(&data_path, std::io::SeekFrom::Start(0))
+            .await
+            .unwrap()
+            .set_len(0)
+            .unwrap();
+
+        let err = reader.read_chunk().unwrap().err().unwrap();
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        assert!(!entry
+            .block_manager
+            .read()
+            .await
+            .unwrap()
+            .is_block_corrupted(1000000));
     }
 
     #[rstest]

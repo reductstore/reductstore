@@ -2,13 +2,14 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::storage::bucket::Bucket;
+use crate::storage::entry::RecordQueryStats;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
 impl Bucket {
-    fn requested_entries(entries: &Option<Vec<String>>) -> Option<Vec<String>> {
+    pub(super) fn requested_entries(entries: &Option<Vec<String>>) -> Option<Vec<String>> {
         match entries {
             Some(entries) if entries.iter().any(|entry| entry == "*") => None,
             Some(entries) => Some(entries.clone()),
@@ -16,7 +17,7 @@ impl Bucket {
         }
     }
 
-    fn entry_matches_patterns(entry: &str, patterns: &[String]) -> bool {
+    pub(super) fn entry_matches_patterns(entry: &str, patterns: &[String]) -> bool {
         patterns.iter().any(|pattern| {
             if let Some(prefix) = pattern.strip_suffix('*') {
                 entry.starts_with(prefix)
@@ -26,7 +27,10 @@ impl Bucket {
         })
     }
 
-    fn is_requested_entry(entry_name: &str, requested_entries: &Option<Vec<String>>) -> bool {
+    pub(super) fn is_requested_entry(
+        entry_name: &str,
+        requested_entries: &Option<Vec<String>>,
+    ) -> bool {
         requested_entries
             .as_ref()
             .map(|patterns| Self::entry_matches_patterns(entry_name, patterns))
@@ -42,6 +46,7 @@ impl Bucket {
         self: Arc<Self>,
         record_ids: HashMap<String, Vec<u64>>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
+        self.ensure_not_deleting().await?;
         let mut results = BTreeMap::new();
 
         for (entry_name, ids) in record_ids {
@@ -74,9 +79,17 @@ impl Bucket {
         self: Arc<Self>,
         options: QueryEntry,
     ) -> Result<u64, ReductError> {
+        Ok(self.query_remove_records_with_stats(options).await?.records)
+    }
+
+    pub(crate) async fn query_remove_records_with_stats(
+        self: Arc<Self>,
+        options: QueryEntry,
+    ) -> Result<RecordQueryStats, ReductError> {
+        self.ensure_not_deleting().await?;
         let entries = self.entries.read().await?.clone();
         let requested_entries = Self::requested_entries(&options.entries);
-        let mut total_removed = 0;
+        let mut total_removed = RecordQueryStats::default();
 
         for (entry_name, entry) in entries {
             if !Self::is_requested_entry(&entry_name, &requested_entries) {
@@ -87,8 +100,12 @@ impl Bucket {
                 continue;
             }
 
-            let removed_records = entry.query_remove_records(options.clone()).await?;
-            total_removed += removed_records;
+            entry.ensure_not_deleting().await?;
+            let removed = entry
+                .query_remove_records_with_stats(options.clone())
+                .await?;
+            total_removed.records += removed.records;
+            total_removed.blocks += removed.blocks;
         }
 
         Ok(total_removed)
@@ -102,13 +119,21 @@ impl Bucket {
     ///
     /// # Returns
     /// The number of records matched by the query.
+    #[allow(dead_code)]
     pub async fn query_count_records(
         self: Arc<Self>,
         options: QueryEntry,
     ) -> Result<u64, ReductError> {
+        Ok(self.query_count_records_with_stats(options).await?.records)
+    }
+
+    pub(crate) async fn query_count_records_with_stats(
+        self: Arc<Self>,
+        options: QueryEntry,
+    ) -> Result<RecordQueryStats, ReductError> {
         let entries = self.entries.read().await?.clone();
         let requested_entries = Self::requested_entries(&options.entries);
-        let mut total_counted = 0;
+        let mut total_counted = RecordQueryStats::default();
 
         for (entry_name, entry) in entries {
             if !Self::is_requested_entry(&entry_name, &requested_entries) {
@@ -119,8 +144,11 @@ impl Bucket {
                 continue;
             }
 
-            let counted_records = entry.query_count_records(options.clone()).await?;
-            total_counted += counted_records;
+            let counted = entry
+                .query_count_records_with_stats(options.clone())
+                .await?;
+            total_counted.records += counted.records;
+            total_counted.blocks += counted.blocks;
         }
 
         Ok(total_counted)
@@ -132,7 +160,7 @@ mod tests {
     use super::*;
     use crate::storage::bucket::tests::{bucket, write, write_meta};
     use reduct_base::msg::entry_api::{QueryEntry, QueryType};
-    use reduct_base::not_found;
+    use reduct_base::{conflict, not_found};
     use rstest::rstest;
     use std::collections::HashMap;
 
@@ -205,6 +233,41 @@ mod tests {
         );
         assert!(bucket.begin_read("entry-a", 4).await.is_ok());
         assert!(bucket.begin_read("entry-c", 2).await.is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_remove_records_returns_conflict_when_target_entry_deleting(
+        #[future] bucket: Arc<Bucket>,
+    ) {
+        let bucket = bucket.await;
+        write(&bucket, "entry-a", 1, b"a1").await.unwrap();
+        let entry = bucket
+            .get_entry("entry-a")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        entry.mark_deleting().await.unwrap();
+
+        let request = QueryEntry {
+            query_type: QueryType::Remove,
+            entries: Some(vec!["entry-a".into()]),
+            start: Some(1),
+            stop: Some(2),
+            ..Default::default()
+        };
+
+        let err = bucket
+            .clone()
+            .query_remove_records(request)
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(
+            err,
+            conflict!("Entry 'entry-a' in bucket 'test' is being deleted")
+        );
     }
 
     #[rstest]

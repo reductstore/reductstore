@@ -10,7 +10,7 @@ use crate::storage::proto::folder_map::Item;
 use crate::storage::proto::FolderMap;
 use log::warn;
 use prost::Message;
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::internal_server_error;
 use std::io::SeekFrom::Start;
 use std::io::{Read, Write};
@@ -146,7 +146,11 @@ impl FolderKeeper {
 
     pub async fn remove_folder(&self, folder_name: &str) -> Result<(), ReductError> {
         let folder_path = self.path.join(folder_name);
-        FILE_CACHE.remove_dir(&folder_path).await?;
+        if let Err(err) = FILE_CACHE.remove_dir(&folder_path).await {
+            if err.status() != ErrorCode::NotFound {
+                return Err(err);
+            }
+        }
         {
             let mut map = self.map.write().await?;
             map.items.retain(|item| {

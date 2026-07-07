@@ -12,6 +12,8 @@ use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::{TransactionLog, TransactionLogMap, TransactionLogRef};
 use crate::replication::TransactionNotification;
 use crate::storage::engine::StorageEngine;
+use crate::syslog::aggregate::replication::ReplicationEventAggregator;
+use crate::syslog::SystemEventSink;
 use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;
@@ -20,7 +22,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 
 #[derive(Clone)]
@@ -41,6 +43,7 @@ pub struct ReplicationTask {
     log_map: TransactionLogMap,
     storage: Arc<StorageEngine>,
     hourly_diagnostics: Arc<AsyncRwLock<DiagnosticsCounter>>,
+    system_event_sink: Option<SystemEventSink>,
     stop_flag: Arc<AtomicBool>,
     is_active: Arc<AtomicBool>,
     mode: Arc<AtomicU8>,
@@ -66,6 +69,7 @@ impl ReplicationTask {
         settings: ReplicationSettings,
         config: Cfg,
         storage: Arc<StorageEngine>,
+        system_event_sink: Option<SystemEventSink>,
     ) -> Result<Self, ReductError> {
         let ReplicationSettings {
             dst_bucket: remote_bucket,
@@ -88,7 +92,7 @@ impl ReplicationTask {
 
         let system_options = ReplicationSystemOptions {
             transaction_log_size: config.replication_conf.replication_log_size,
-            remote_bucket_unavailable_timeout: config.replication_conf.connection_timeout.clone(),
+            remote_bucket_unavailable_timeout: config.replication_conf.connection_timeout,
             ..Default::default()
         };
 
@@ -99,6 +103,7 @@ impl ReplicationTask {
             config.io_conf,
             remote_bucket,
             storage,
+            system_event_sink,
         ))
     }
 
@@ -109,6 +114,7 @@ impl ReplicationTask {
         io_config: IoConfig,
         remote_bucket: Box<dyn RemoteBucket + Send + Sync>,
         storage: Arc<StorageEngine>,
+        system_event_sink: Option<SystemEventSink>,
     ) -> Self {
         let log_map: TransactionLogMap =
             Arc::new(AsyncRwLock::new(HashMap::<String, TransactionLogRef>::new()));
@@ -131,6 +137,7 @@ impl ReplicationTask {
             filter_map: HashMap::new(),
             log_map,
             hourly_diagnostics,
+            system_event_sink,
             stop_flag,
             is_active,
             mode,
@@ -152,11 +159,17 @@ impl ReplicationTask {
         let thr_storage = Arc::clone(&self.storage);
         let thr_hourly_diagnostics = Arc::clone(&self.hourly_diagnostics);
         let thr_system_options = self.system_options.clone();
+        let thr_system_event_sink = self.system_event_sink.clone();
         let thr_stop_flag = Arc::clone(&self.stop_flag);
         let thr_is_active = Arc::clone(&self.is_active);
         let thr_mode = Arc::clone(&self.mode);
 
         let handle = tokio::spawn(async move {
+            // Aggregates replication diagnostics into periodic $system events,
+            // driven inline by this worker loop (flushed on idle/cap each
+            // iteration and on loop exit).
+            let mut diagnostics_aggregator = thr_system_event_sink
+                .map(|sink| ReplicationEventAggregator::new(sink, replication_name.clone()));
             let init_transaction_logs = async || {
                 let mut logs = thr_log_map.write().await?;
                 for entry in thr_storage
@@ -173,27 +186,12 @@ impl ReplicationTask {
                         &entry.name,
                         &replication_name,
                     );
-                    let log = match TransactionLog::try_load_or_create(
+                    let log = Self::load_or_recreate_transaction_log(
                         &path,
                         thr_system_options.transaction_log_size,
+                        &entry.name,
                     )
-                    .await
-                    {
-                        Ok(log) => log,
-                        Err(err) => {
-                            error!(
-                                "Failed to load transaction log for entry '{}': {:?}",
-                                entry.name, err
-                            );
-                            info!("Creating a new transaction log for entry '{}'", entry.name);
-                            FILE_CACHE.remove(&path).await?;
-                            TransactionLog::try_load_or_create(
-                                &path,
-                                thr_system_options.transaction_log_size,
-                            )
-                            .await?
-                        }
-                    };
+                    .await?;
 
                     logs.insert(entry.name, Arc::new(AsyncRwLock::new(log)));
                 }
@@ -214,6 +212,11 @@ impl ReplicationTask {
             );
 
             while !thr_stop_flag.load(Ordering::Relaxed) {
+                // Flush an idle/capped diagnostics bucket regardless of mode.
+                if let Some(aggregator) = &mut diagnostics_aggregator {
+                    aggregator.flush_if_due().await;
+                }
+
                 match ReplicationTask::load_mode_from(&thr_mode) {
                     ReplicationMode::Disabled => {
                         thr_is_active.store(false, Ordering::Relaxed);
@@ -238,7 +241,10 @@ impl ReplicationTask {
                 }
 
                 let mut counter = None;
-                match sender.run().await {
+                let pass_started = Instant::now();
+                let sync_result = sender.run().await;
+                let pass_duration = pass_started.elapsed().as_secs_f64();
+                match sync_result {
                     Ok(SyncState::SyncedOrRemoved(c)) => {
                         thr_is_active.store(true, Ordering::Relaxed);
                         counter = Some(c);
@@ -314,13 +320,25 @@ impl ReplicationTask {
                 if let Some(c) = counter {
                     match thr_hourly_diagnostics.write().await {
                         Ok(mut diagnostics) => {
-                            for (result, count) in c.into_iter() {
-                                diagnostics.count(result, count);
+                            for (result, count, _size) in c.iter() {
+                                diagnostics.count(result.clone(), *count);
                             }
                         }
                         Err(err) => error!("Failed to acquire hourly diagnostics lock: {:?}", err),
                     }
+
+                    if let Some(aggregator) = &mut diagnostics_aggregator {
+                        let pending_records = Self::count_pending_records(&thr_log_map).await;
+                        aggregator
+                            .record_pass(pending_records, pass_duration, &c)
+                            .await;
+                    }
                 }
+            }
+
+            // Flush the last open bucket before the worker exits.
+            if let Some(mut aggregator) = diagnostics_aggregator {
+                aggregator.flush().await;
             }
         });
 
@@ -365,14 +383,16 @@ impl ReplicationTask {
         // because it is used by the replication thread
         let exists = { self.log_map.read().await?.contains_key(&entry_name) };
         if !exists {
-            let log = TransactionLog::try_load_or_create(
-                &Self::build_path_to_transaction_log(
-                    self.storage.data_path(),
-                    &self.settings.src_bucket,
-                    &entry_name,
-                    &self.name,
-                ),
+            let path = Self::build_path_to_transaction_log(
+                self.storage.data_path(),
+                &self.settings.src_bucket,
+                &entry_name,
+                &self.name,
+            );
+            let log = Self::load_or_recreate_transaction_log(
+                &path,
                 self.system_options.transaction_log_size,
+                &entry_name,
             )
             .await?;
             let mut map = self.log_map.write().await?;
@@ -421,7 +441,7 @@ impl ReplicationTask {
     }
 
     pub fn set_mode(&mut self, mode: ReplicationMode) {
-        self.settings.mode = mode.clone();
+        self.settings.mode = mode;
         self.mode.store(mode as u8, Ordering::Relaxed);
     }
 
@@ -438,7 +458,7 @@ impl ReplicationTask {
         let mode = self.load_mode();
         Ok(ReplicationInfo {
             name: self.name.clone(),
-            mode: mode.clone(),
+            mode,
             is_active: matches!(mode, ReplicationMode::Enabled | ReplicationMode::Paused)
                 && self.is_active.load(Ordering::Relaxed),
             is_provisioned: self.is_provisioned,
@@ -452,6 +472,19 @@ impl ReplicationTask {
         })
     }
 
+    /// Sum pending (not-yet-replicated) records across all transaction logs.
+    async fn count_pending_records(log_map: &TransactionLogMap) -> u64 {
+        let mut pending_records = 0;
+        if let Ok(logs) = log_map.read().await {
+            for (_, log) in logs.iter() {
+                if let Ok(log) = log.read().await {
+                    pending_records += log.len() as u64;
+                }
+            }
+        }
+        pending_records
+    }
+
     async fn sleep_with_stop(stop_flag: &Arc<AtomicBool>, duration: Duration) {
         const SLICE: Duration = Duration::from_millis(50);
         let mut remaining = duration;
@@ -462,13 +495,32 @@ impl ReplicationTask {
         }
     }
 
-    fn build_path_to_transaction_log(
+    pub(super) fn build_path_to_transaction_log(
         storage_path: &PathBuf,
         bucket: &str,
         entry: &str,
         name: &str,
     ) -> PathBuf {
         storage_path.join(format!("{}/{}/{}.log", bucket, entry, name))
+    }
+
+    async fn load_or_recreate_transaction_log(
+        path: &PathBuf,
+        transaction_log_size: usize,
+        entry_name: &str,
+    ) -> Result<TransactionLog, ReductError> {
+        match TransactionLog::try_load_or_create(path, transaction_log_size).await {
+            Ok(log) => Ok(log),
+            Err(err) => {
+                error!(
+                    "Failed to load transaction log for entry '{}': {:?}",
+                    entry_name, err
+                );
+                info!("Creating a new transaction log for entry '{}'", entry_name);
+                FILE_CACHE.remove(path).await?;
+                TransactionLog::try_load_or_create(path, transaction_log_size).await
+            }
+        }
     }
 
     fn load_mode(&self) -> ReplicationMode {
@@ -586,14 +638,16 @@ mod tests {
                 .create_dir_all(&path.join(&settings.src_bucket))
                 .await
                 .unwrap();
-            Bucket::try_build(
-                &settings.src_bucket,
-                &path,
-                BucketSettings::default(),
-                Cfg::default(),
-            )
-            .await
-            .unwrap();
+            Bucket::builder()
+                .name(&settings.src_bucket)
+                .data_path(path.clone())
+                .settings(BucketSettings::default())
+                .cfg(Cfg::default())
+                .io_limiter(Default::default())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap();
 
             fs::create_dir_all(log_path.parent().unwrap()).unwrap();
             let mut log_file = fs::File::create(&log_path).unwrap();
@@ -652,6 +706,40 @@ mod tests {
                 is_provisioned: false,
                 pending_records: 0,
             }
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_add_meta_entry_with_broken_transaction_log(
+        mut remote_bucket: MockRmBucket,
+        mut notification: TransactionNotification,
+        settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        remote_bucket.expect_is_active().return_const(false);
+        let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
+
+        notification.entry = "test1/$meta".to_string();
+        let log_path = ReplicationTask::build_path_to_transaction_log(
+            replication.storage.data_path(),
+            &settings.src_bucket,
+            &notification.entry,
+            replication.name(),
+        );
+
+        fs::create_dir_all(log_path.parent().unwrap()).unwrap();
+        let mut log_file = fs::File::create(&log_path).unwrap();
+        log_file.write_all(&916usize.to_be_bytes()).unwrap();
+        log_file.write_all(&16usize.to_be_bytes()).unwrap();
+        log_file.set_len(916).unwrap();
+
+        replication.notify(notification).await.unwrap();
+
+        assert_eq!(fs::metadata(&log_path).unwrap().len(), 9016);
+        assert_eq!(
+            get_entries_from_transaction_log(&mut replication, "test1/$meta").await,
+            vec![Transaction::WriteRecord(10)]
         );
     }
 
@@ -891,13 +979,9 @@ mod tests {
             .unwrap();
         tokio_sleep(Duration::from_millis(100)).await;
 
-        assert!(
-                !path.exists(),
-                "We could not recover the transaction log, it was removed. However, the replication should continue"
-            );
-
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
         tokio_sleep(Duration::from_millis(200)).await;
+
+        assert!(path.exists(), "Transaction log was recovered");
 
         assert_eq!(
             get_entries_from_transaction_log(&mut replication, "test1").await,
@@ -984,10 +1068,129 @@ mod tests {
         );
     }
 
+    #[derive(Clone)]
+    struct CapturingSystemLogger {
+        events: Arc<std::sync::Mutex<Vec<crate::syslog::SystemEvent>>>,
+        fail: bool,
+    }
+
+    #[async_trait]
+    impl crate::syslog::LogSystemEvent for CapturingSystemLogger {
+        async fn log_event(
+            &mut self,
+            event: crate::syslog::SystemEvent,
+        ) -> Result<(), ReductError> {
+            if self.fail {
+                return Err(ReductError::internal_server_error(
+                    "diagnostics sink is down",
+                ));
+            }
+            self.events.lock().unwrap().push(event);
+            Ok(())
+        }
+    }
+
+    fn capturing_sink(
+        events: Arc<std::sync::Mutex<Vec<crate::syslog::SystemEvent>>>,
+        fail: bool,
+    ) -> SystemEventSink {
+        SystemEventSink {
+            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
+                events,
+                fail,
+            })
+                as Box<dyn crate::syslog::LogSystemEvent + Send + Sync>)),
+            instance_name: "instance-1".to_string(),
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_emits_replication_diagnostics(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut replication = build_replication_with_sink(
+            path,
+            remote_bucket,
+            settings,
+            Some(capturing_sink(Arc::clone(&captured), false)),
+        )
+        .await;
+
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(200)).await; // let a sync pass run and feed the aggregator
+        replication.stop().await; // dropping the aggregator flushes the open bucket
+        tokio_sleep(Duration::from_millis(100)).await; // let the aggregator worker emit
+
+        let events = captured.lock().unwrap();
+        let event = events
+            .iter()
+            .find(|event| event.event_type == "replication_sync")
+            .expect("a replication_sync diagnostics event must be emitted");
+        assert_eq!(event.instance, "instance-1");
+        assert_eq!(event.entry_name, "test");
+        assert_eq!(event.status, 200);
+        assert!(
+            event.payload["written_records"].as_u64().unwrap() >= 1,
+            "successful pass should report written_records"
+        );
+    }
+
+    // Safety: a diagnostics sink that always errors must not break replication.
+    #[rstest]
+    #[tokio::test]
+    async fn test_replication_continues_when_diagnostics_logger_errors(
+        mut remote_bucket: MockRmBucket,
+        notification: TransactionNotification,
+        settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        remote_bucket
+            .expect_write_batch()
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+
+        let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let mut replication = build_replication_with_sink(
+            path,
+            remote_bucket,
+            settings,
+            Some(capturing_sink(Arc::clone(&captured), true)),
+        )
+        .await;
+
+        replication.notify(notification).await.unwrap();
+        tokio_sleep(Duration::from_millis(200)).await;
+
+        // Replication keeps draining the log despite the failing diagnostics sink.
+        assert!(transaction_log_is_empty(&replication).await);
+        let info = replication.info().await.unwrap();
+        assert_eq!(info.pending_records, 0);
+        assert!(captured.lock().unwrap().is_empty());
+    }
+
     async fn build_replication(
         path: PathBuf,
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
+    ) -> ReplicationTask {
+        build_replication_with_sink(path, remote_bucket, settings, None).await
+    }
+
+    async fn build_replication_with_sink(
+        path: PathBuf,
+        remote_bucket: MockRmBucket,
+        settings: ReplicationSettings,
+        system_event_sink: Option<SystemEventSink>,
     ) -> ReplicationTask {
         let cfg = Cfg {
             data_path: path.clone(),
@@ -1037,6 +1240,7 @@ mod tests {
             IoConfig::default(),
             Box::new(remote_bucket),
             storage,
+            system_event_sink,
         );
 
         repl.start();
@@ -1068,10 +1272,10 @@ mod tests {
             dst_host: "http://localhost:8383".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec!["test1".to_string(), "test2".to_string()],
+            dst_prefix: String::new(),
             include: Labels::new(),
             exclude: Labels::new(),
             each_n: None,
-            each_s: None,
             when: None,
             mode: ReplicationMode::Enabled,
         }

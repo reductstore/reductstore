@@ -3,14 +3,19 @@
 
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
-use crate::storage::entry::Entry;
+use crate::storage::entry::{Entry, RecordQueryStats};
 use log::warn;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::not_found;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
+
+struct RemoveRecordsResult {
+    errors: BTreeMap<u64, ReductError>,
+    block_ids: Vec<u64>,
+}
 
 impl Entry {
     /// Remove multiple records.
@@ -30,8 +35,13 @@ impl Entry {
         self: Arc<Self>,
         timestamps: Vec<u64>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
+        self.ensure_not_deleting().await?;
         let block_manager = self.block_manager.clone();
-        Self::inner_remove_records(timestamps, block_manager, &self.bucket_name, &self.name).await
+        Ok(
+            Self::inner_remove_records(timestamps, block_manager, &self.bucket_name, &self.name)
+                .await?
+                .errors,
+        )
     }
 
     /// Query and remove multiple records over a range of timestamps.
@@ -49,7 +59,15 @@ impl Entry {
     /// # Errors
     ///
     /// * If the query fails.
-    pub async fn query_remove_records(&self, mut options: QueryEntry) -> Result<u64, ReductError> {
+    pub async fn query_remove_records(&self, options: QueryEntry) -> Result<u64, ReductError> {
+        Ok(self.query_remove_records_with_stats(options).await?.records)
+    }
+
+    pub(crate) async fn query_remove_records_with_stats(
+        &self,
+        mut options: QueryEntry,
+    ) -> Result<RecordQueryStats, ReductError> {
+        self.ensure_not_deleting().await?;
         options.continuous = None; // force non-continuous query
 
         let rx = async || {
@@ -68,7 +86,8 @@ impl Entry {
 
         // Loop until the query is done
         let mut continue_query = true;
-        let mut total_records = 0;
+        let mut stats = RecordQueryStats::default();
+        let mut affected_blocks = BTreeSet::new();
 
         while continue_query {
             let mut records_to_remove = vec![];
@@ -95,7 +114,8 @@ impl Entry {
             }
 
             // Send the records to remove
-            total_records += records_to_remove.len() as u64;
+            self.ensure_not_deleting().await?;
+            stats.records += records_to_remove.len() as u64;
             let copy_block_manager = block_manager.clone();
 
             match Self::inner_remove_records(
@@ -106,22 +126,24 @@ impl Entry {
             )
             .await
             {
-                Ok(error_map) => {
-                    for (timestamp, error) in error_map {
+                Ok(result) => {
+                    affected_blocks.extend(result.block_ids);
+                    for (timestamp, error) in result.errors {
                         // TODO: send the error to the client
                         warn!(
                             "Failed to remove record with timestamp {}: {}",
                             timestamp, error
                         );
 
-                        total_records -= 1;
+                        stats.records -= 1;
                     }
                 }
                 Err(e) => return Err(e),
             }
         }
 
-        Ok(total_records)
+        stats.blocks = affected_blocks.len() as u64;
+        Ok(stats)
     }
 
     /// Query and count multiple records over a range of timestamps.
@@ -137,7 +159,15 @@ impl Entry {
     /// # Errors
     ///
     /// * If the query fails.
-    pub async fn query_count_records(&self, mut options: QueryEntry) -> Result<u64, ReductError> {
+    #[allow(dead_code)]
+    pub async fn query_count_records(&self, options: QueryEntry) -> Result<u64, ReductError> {
+        Ok(self.query_count_records_with_stats(options).await?.records)
+    }
+
+    pub(crate) async fn query_count_records_with_stats(
+        &self,
+        mut options: QueryEntry,
+    ) -> Result<RecordQueryStats, ReductError> {
         options.continuous = None; // force non-continuous query
 
         let rx = async || {
@@ -152,13 +182,21 @@ impl Entry {
         };
 
         let mut continue_query = true;
-        let mut total_records = 0;
+        let mut stats = RecordQueryStats::default();
+        let mut affected_blocks = BTreeSet::new();
 
         while continue_query {
             let result = &mut rx.upgrade()?.write().await?.recv().await;
             match result {
-                Some(Ok(_)) => {
-                    total_records += 1;
+                Some(Ok(rec)) => {
+                    stats.records += 1;
+                    let block_ref = self
+                        .block_manager
+                        .write()
+                        .await?
+                        .find_block(rec.meta().timestamp())
+                        .await?;
+                    affected_blocks.insert(block_ref.read().await?.block_id());
                 }
                 Some(Err(ReductError {
                     status: ErrorCode::NoContent,
@@ -173,7 +211,8 @@ impl Entry {
             }
         }
 
-        Ok(total_records)
+        stats.blocks = affected_blocks.len() as u64;
+        Ok(stats)
     }
 
     async fn inner_remove_records(
@@ -181,7 +220,7 @@ impl Entry {
         block_manager: Arc<AsyncRwLock<BlockManager>>,
         bucket_name: &str,
         entry_name: &str,
-    ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
+    ) -> Result<RemoveRecordsResult, ReductError> {
         let mut error_map = BTreeMap::new();
         let mut records_per_block = BTreeMap::new();
 
@@ -219,7 +258,9 @@ impl Entry {
 
         // Remove the records
         let mut handlers = vec![];
+        let mut block_ids = vec![];
         for (block_id, timestamps) in records_per_block {
+            block_ids.push(block_id);
             let local_block_manager = block_manager.clone();
             let handler = tokio::spawn(async move {
                 // TODO: we don't parallelize the removal of records in different blocks
@@ -234,7 +275,10 @@ impl Entry {
             handler.await.unwrap()?;
         }
 
-        Ok(error_map)
+        Ok(RemoveRecordsResult {
+            errors: error_map,
+            block_ids,
+        })
     }
 }
 

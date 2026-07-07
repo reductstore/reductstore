@@ -6,8 +6,9 @@ mod repo;
 
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole::Replica;
-use crate::lifecycle::{ManageLifecycles, SystemEventSink};
+use crate::lifecycle::ManageLifecycles;
 use crate::storage::engine::StorageEngine;
+use crate::syslog::SystemEventSink;
 use read_only::ReadOnlyLifecycleRepository;
 use repo::LifecycleRepository;
 use std::sync::Arc;

@@ -1,25 +1,15 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::sync::AsyncRwLock;
-use crate::syslog::LogSystemEvent;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{
     FullLifecycleInfo, LifecycleInfo, LifecycleMode, LifecycleSettings,
 };
-use std::sync::Arc;
 
 mod action;
 mod lifecycle_repository;
 mod lifecycle_task;
-pub(crate) mod system_event_payload;
-
-#[derive(Clone)]
-pub struct SystemEventSink {
-    pub(crate) system_logger: Arc<AsyncRwLock<Box<dyn LogSystemEvent + Send + Sync>>>,
-    pub(crate) instance_name: String,
-}
 
 #[async_trait]
 pub trait ManageLifecycles {

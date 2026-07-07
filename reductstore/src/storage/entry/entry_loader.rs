@@ -17,14 +17,17 @@ use crate::cfg::InstanceRole::Replica;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block_index::BlockIndex;
+use crate::storage::block_manager::compress::CompressionAlgorithm;
 use crate::storage::block_manager::wal::{create_wal, WalEntry};
 use crate::storage::block_manager::{
-    BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
+    BlockManager, BLOCK_INDEX_FILE, COMPRESSED_DATA_FILE_EXT, COMPRESSED_DESCRIPTOR_FILE_EXT,
+    DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::entry::strategy_for_entry;
 use crate::storage::entry::{Entry, EntrySettings};
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
+use crate::storage::usage::UsageCounters;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use reduct_base::msg::status::ResourceStatus;
@@ -38,6 +41,7 @@ impl EntryLoader {
         path: PathBuf,
         options: EntrySettings,
         cfg: Arc<Cfg>,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Option<Entry>, ReductError> {
         let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
         let entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
@@ -49,8 +53,16 @@ impl EntryLoader {
             .to_str()
             .unwrap()
             .to_string();
-        Self::restore_entry_with_names(path, entry_name, bucket_name, options, cfg, io_limiter)
-            .await
+        Self::restore_entry_with_names(
+            path,
+            entry_name,
+            bucket_name,
+            options,
+            cfg,
+            io_limiter,
+            usage_counters,
+        )
+        .await
     }
 
     pub async fn restore_entry_with_names(
@@ -60,6 +72,7 @@ impl EntryLoader {
         options: EntrySettings,
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Option<Entry>, ReductError> {
         let start_time = Instant::now();
 
@@ -70,12 +83,17 @@ impl EntryLoader {
             options.clone(),
             cfg.clone(),
             io_limiter.clone(),
+            Arc::clone(&usage_counters),
         )
         .await
         {
             Ok(entry) => entry,
             Err(err) => {
                 if cfg.role == Replica {
+                    error!(
+                        "Failed to restore replica entry from block index {:?}: {}",
+                        path, err.message
+                    );
                     return Ok(None);
                 }
 
@@ -91,14 +109,17 @@ impl EntryLoader {
                     options.clone(),
                     cfg.clone(),
                     io_limiter.clone(),
+                    Arc::clone(&usage_counters),
                 )
                 .await?
             }
         };
 
-        Self::restore_uncommitted_changes(path.clone(), &mut entry).await?;
+        if cfg.role != Replica {
+            Self::restore_uncommitted_changes(path.clone(), &mut entry).await?;
+        }
 
-        if cfg.engine_config.enable_integrity_checks {
+        if cfg.role != Replica && cfg.engine_config.enable_integrity_checks {
             let needs_rebuild = {
                 let file_list = FILE_CACHE
                     .read_dir(&path)
@@ -122,6 +143,7 @@ impl EntryLoader {
                     options,
                     cfg.clone(),
                     io_limiter.clone(),
+                    Arc::clone(&usage_counters),
                 )
                 .await?;
             }
@@ -129,6 +151,17 @@ impl EntryLoader {
 
         {
             let bm = entry.block_manager.read().await?;
+            let corrupted_blocks = bm.index().corrupted_block_ids();
+            if !corrupted_blocks.is_empty() {
+                warn!(
+                    "Entry `{}/{}` has {} corrupted block(s): {:?}. Run diagnostics or allow FIFO quota to reclaim space.",
+                    entry.bucket_name,
+                    entry.name,
+                    bm.index().corrupted_block_count(),
+                    corrupted_blocks
+                );
+            }
+
             debug!(
                 "Restored entry `{}` in {}ms: size={}, records={}",
                 entry.name,
@@ -150,13 +183,22 @@ impl EntryLoader {
         options: EntrySettings,
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Entry, ReductError> {
         async fn remove_block_files(path: &PathBuf) -> Result<(), ReductError> {
             warn!("Removing meta block {:?}", path);
             FILE_CACHE.remove(path).await?;
 
-            let mut data_path = path.clone();
-            data_path.set_extension(DATA_FILE_EXT[1..].to_string());
+            let name = path.file_name().unwrap().to_str().unwrap();
+            let data_file =
+                if let Some(block_id) = name.strip_suffix(COMPRESSED_DESCRIPTOR_FILE_EXT) {
+                    format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT)
+                } else if let Some(block_id) = name.strip_suffix(DESCRIPTOR_FILE_EXT) {
+                    format!("{}{}", block_id, DATA_FILE_EXT)
+                } else {
+                    return Ok(());
+                };
+            let data_path = path.parent().unwrap().join(data_file);
             warn!("Removing data block {:?}", data_path);
             FILE_CACHE.remove(&data_path).await?;
             Ok(())
@@ -169,7 +211,8 @@ impl EntryLoader {
             }
 
             let name = path.file_name().unwrap().to_str().unwrap();
-            if !name.ends_with(DESCRIPTOR_FILE_EXT) {
+            let compressed = name.ends_with(COMPRESSED_DESCRIPTOR_FILE_EXT);
+            if !compressed && !name.ends_with(DESCRIPTOR_FILE_EXT) {
                 continue;
             }
 
@@ -177,7 +220,17 @@ impl EntryLoader {
                 let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
                 let mut buf = vec![];
                 file.read_to_end(&mut buf)?;
-                buf
+                if compressed {
+                    zstd::decode_all(buf.as_slice()).map_err(|err| {
+                        internal_server_error!(
+                            "Failed to decompress block descriptor {:?}: {}",
+                            path,
+                            err
+                        )
+                    })?
+                } else {
+                    buf
+                }
             };
 
             let mut crc = Digest::new();
@@ -221,8 +274,8 @@ impl EntryLoader {
                 file.write_all(&buf)?;
             }
 
-            if let Some(begin_time) = block.begin_time {
-                ts_to_us(&begin_time)
+            let block_id = if let Some(begin_time) = block.begin_time.as_ref() {
+                ts_to_us(begin_time)
             } else {
                 warn!("Block {:?} has no begin time", path);
                 remove_block_files(&path).await?;
@@ -230,6 +283,36 @@ impl EntryLoader {
             };
 
             block_index.insert_or_update_with_crc(block, crc.sum64());
+            if compressed {
+                let compressed_data_path = path
+                    .parent()
+                    .unwrap()
+                    .join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT));
+                if !FILE_CACHE.try_exists(&compressed_data_path).await? {
+                    warn!(
+                        "Data block {:?} not found. Removing its descriptor",
+                        compressed_data_path
+                    );
+                    block_index.remove_block(block_id);
+                    remove_block_files(&path).await?;
+                    continue;
+                }
+
+                let data_size = FILE_CACHE
+                    .read(&compressed_data_path, SeekFrom::Start(0))
+                    .await?
+                    .metadata()?
+                    .len();
+                let metadata_size = FILE_CACHE
+                    .read(&path, SeekFrom::Start(0))
+                    .await?
+                    .metadata()?
+                    .len();
+                let index_block = block_index.get_block_mut(block_id).unwrap();
+                index_block.compression = Some(i32::from(CompressionAlgorithm::Zstd));
+                index_block.size = data_size;
+                index_block.metadata_size = metadata_size;
+            }
         }
 
         block_index.save().await?;
@@ -244,6 +327,7 @@ impl EntryLoader {
                     bucket_name.clone(),
                     entry_name.clone(),
                     cfg.clone(),
+                    usage_counters,
                 )
                 .await?,
             )),
@@ -264,6 +348,7 @@ impl EntryLoader {
         options: EntrySettings,
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
+        usage_counters: Arc<UsageCounters>,
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
 
@@ -278,6 +363,7 @@ impl EntryLoader {
                     bucket_name.clone(),
                     entry_name.clone(),
                     cfg.clone(),
+                    usage_counters,
                 )
                 .await?,
             )),
@@ -299,7 +385,11 @@ impl EntryLoader {
             .iter()
             .filter(|entry|
                 // path maybe a virtual from remote storage
-                entry.to_str().unwrap_or("").ends_with(DESCRIPTOR_FILE_EXT))
+                entry.to_str().unwrap_or("").ends_with(DESCRIPTOR_FILE_EXT)
+                    || entry
+                        .to_str()
+                        .unwrap_or("")
+                        .ends_with(COMPRESSED_DESCRIPTOR_FILE_EXT))
             .count();
 
         if number_of_descriptors != block_index.tree().len() {
@@ -323,9 +413,24 @@ impl EntryLoader {
     ) -> Result<(), ReductError> {
         let mut inconsistent_data = false;
         for block_id in block_index.tree().iter() {
-            let desc_path = path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT));
+            let block = block_index.get_block(*block_id).unwrap();
+            let compressed = block
+                .compression
+                .unwrap_or(i32::from(CompressionAlgorithm::None))
+                != i32::from(CompressionAlgorithm::None);
+
+            let desc_path = if compressed {
+                path.join(format!("{}{}", block_id, COMPRESSED_DESCRIPTOR_FILE_EXT))
+            } else {
+                path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT))
+            };
+
             if file_list.contains(&desc_path) {
-                let data_path = path.join(format!("{}{}", block_id, DATA_FILE_EXT));
+                let data_path = if compressed {
+                    path.join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT))
+                } else {
+                    path.join(format!("{}{}", block_id, DATA_FILE_EXT))
+                };
                 if !file_list.contains(&data_path) {
                     warn!(
                         "Data block {:?} not found. Removing its descriptor",
@@ -436,7 +541,6 @@ impl EntryLoader {
                 if block_removed {
                     block_manager.remove_block(block_id).await?;
                 } else {
-                    block_manager.save_block(block_ref.clone()).await?;
                     block_manager.finish_block(block_ref).await?;
                 }
             }
@@ -450,9 +554,9 @@ impl EntryLoader {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::block_manager::wal::WalEntry;
+    use crate::storage::block_manager::wal::{create_wal, WalEntry};
     use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
-    use crate::storage::proto::{record, us_to_ts, BlockIndex as BlockIndexProto, Record};
+    use crate::storage::proto::{record, us_to_ts, Block, BlockIndex as BlockIndexProto, Record};
     use std::fs;
     use std::io::SeekFrom;
 
@@ -510,6 +614,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -517,7 +622,7 @@ mod tests {
         let info = entry.info().await.unwrap();
         assert_eq!(entry.name, "entry");
         assert_eq!(info.record_count, 2);
-        assert_eq!(info.size, 88);
+        assert_eq!(info.size, 90);
 
         let mut rec = entry.begin_read(1).await.unwrap();
         assert_eq!(rec.meta().timestamp(), 1);
@@ -541,6 +646,107 @@ mod tests {
     }
 
     #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_restore_replica_skips_wal_recovery(entry_settings: EntrySettings, path: PathBuf) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let entry_path = path.join(entry.name());
+        let mut wal = create_wal(entry_path.clone()).await.unwrap();
+        wal.append(
+            1,
+            WalEntry::WriteRecord(Record {
+                timestamp: Some(us_to_ts(&2)),
+                begin: 10,
+                end: 20,
+                content_type: "text/plain".to_string(),
+                state: record::State::Finished as i32,
+                labels: vec![],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(wal.list().await.unwrap(), vec![1]);
+
+        let mut cfg = Cfg {
+            role: Replica,
+            ..Default::default()
+        };
+        cfg.engine_config.enable_integrity_checks = true;
+
+        let entry = EntryLoader::restore_entry(
+            entry_path.clone(),
+            entry_settings,
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let info = entry.info().await.unwrap();
+        assert_eq!(info.record_count, 1);
+        assert!(entry.begin_read(2).await.is_err());
+
+        let wal = create_wal(entry_path).await.unwrap();
+        assert_eq!(wal.list().await.unwrap(), vec![1]);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_restore_replica_ignores_entry_when_index_fails(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let entry_path = path.join(entry.name());
+        {
+            let mut block_file_index = FILE_CACHE
+                .write_or_create(&entry_path.join(BLOCK_INDEX_FILE), SeekFrom::Start(0))
+                .await
+                .unwrap();
+            block_file_index.set_len(0).unwrap();
+            block_file_index.write_all(b"bad index").unwrap();
+            block_file_index.sync_all().await.unwrap();
+        }
+
+        let mut cfg = Cfg {
+            role: Replica,
+            ..Default::default()
+        };
+        cfg.engine_config.enable_integrity_checks = true;
+
+        let entry = EntryLoader::restore_entry(
+            entry_path,
+            entry_settings,
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+
+        assert!(entry.is_none());
+    }
+
+    #[rstest]
     #[tokio::test]
     async fn test_restore_bad_block(entry_settings: EntrySettings, path: PathBuf) {
         fs::create_dir_all(path.join("entry")).unwrap();
@@ -550,11 +756,15 @@ mod tests {
         let data_path = path.join("entry/1.blk");
         fs::write(data_path.clone(), b"bad data").unwrap();
 
-        let entry =
-            EntryLoader::restore_entry(path.join("entry"), entry_settings, Cfg::default().into())
-                .await
-                .unwrap()
-                .unwrap();
+        let entry = EntryLoader::restore_entry(
+            path.join("entry"),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let info = entry.info().await.unwrap();
         assert_eq!(info.name, "entry");
         assert_eq!(info.record_count, 0);
@@ -574,6 +784,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -620,10 +831,15 @@ mod tests {
         block_manager.clear_cache_for_test();
 
         // repack the block
-        let entry = EntryLoader::restore_entry(path.clone(), entry_settings, Cfg::default().into())
-            .await
-            .unwrap()
-            .unwrap();
+        let entry = EntryLoader::restore_entry(
+            path.clone(),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
         let info = entry.info().await.unwrap();
 
         assert_eq!(info.size, 88);
@@ -641,6 +857,7 @@ mod tests {
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -679,6 +896,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -706,6 +924,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -717,10 +936,259 @@ mod tests {
             BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
 
         assert_eq!(block_index.blocks.len(), 1);
-        assert_eq!(block_index.crc64, 4579043244124502122);
+        assert_eq!(block_index.crc64, 14511237322380062442);
         assert_eq!(block_index.blocks[0].block_id, 1);
         assert_eq!(block_index.blocks[0].size, 20);
         assert_eq!(block_index.blocks[0].record_count, 2);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_restore_carries_descriptor_version_and_corrupted_flag(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        entry
+            .block_manager
+            .write()
+            .await
+            .unwrap()
+            .save_cache_on_disk()
+            .await
+            .unwrap();
+
+        let entry_path = path.join(entry.name());
+        FILE_CACHE
+            .remove(&entry_path.join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap();
+
+        let meta_path = entry_path.join("1.meta");
+        let mut block = Block::decode(Bytes::from(fs::read(&meta_path).unwrap())).unwrap();
+        block.version = Some(5);
+        block.corrupted = Some(true);
+        fs::write(&meta_path, block.encode_to_vec()).unwrap();
+
+        EntryLoader::restore_entry(
+            entry_path.clone(),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let block_index = BlockIndexProto::decode(Bytes::from(
+            fs::read(entry_path.join(BLOCK_INDEX_FILE)).unwrap(),
+        ))
+        .unwrap();
+        assert_eq!(block_index.blocks[0].version, Some(5));
+        assert_eq!(block_index.blocks[0].corrupted, Some(true));
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_create_block_index_with_compressed_block(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        write_stub_record(&entry, 2000010).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
+        FILE_CACHE.remove(&block_index_path).await.unwrap();
+
+        let entry = EntryLoader::restore_entry(
+            path.join(entry.name()),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let block_index =
+            BlockIndexProto::decode(Bytes::from(fs::read(block_index_path).unwrap())).unwrap();
+        assert_eq!(block_index.blocks.len(), 1);
+        assert_eq!(block_index.blocks[0].block_id, 1);
+        assert_eq!(block_index.blocks[0].record_count, 2);
+        assert_eq!(
+            block_index.blocks[0].compression,
+            Some(i32::from(CompressionAlgorithm::Zstd))
+        );
+
+        let mut rec = entry.begin_read(2000010).await.unwrap();
+        assert_eq!(rec.meta().timestamp(), 2000010);
+        assert_eq!(
+            rec.read_chunk().unwrap().unwrap(),
+            Bytes::from_static(b"0123456789")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_restore_compressed_block_missing_data(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
+        FILE_CACHE.remove(&block_index_path).await.unwrap();
+        fs::remove_file(
+            path.join("entry")
+                .join(format!("1{}", COMPRESSED_DATA_FILE_EXT)),
+        )
+        .unwrap();
+
+        let err = match EntryLoader::restore_entry(
+            path.join("entry"),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(_) => panic!("restore should fail when compressed data file is missing"),
+            Err(err) => err,
+        };
+
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_integrity_check_compressed_block_missing_data(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        fs::remove_file(
+            path.join("entry")
+                .join(format!("1{}", COMPRESSED_DATA_FILE_EXT)),
+        )
+        .unwrap();
+
+        let entry = EntryLoader::restore_entry(
+            path.join("entry"),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(entry.info().await.unwrap().record_count, 0);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_restore_compressed_block_with_corrupted_descriptor(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone()).await;
+        write_stub_record(&entry, 1).await;
+        {
+            let mut bm = entry.block_manager.write().await.unwrap();
+            bm.save_cache_on_disk().await.unwrap();
+            bm.compress_block(1, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+        }
+
+        FILE_CACHE
+            .remove(&path.join("entry").join(BLOCK_INDEX_FILE))
+            .await
+            .unwrap();
+        fs::write(
+            path.join("entry")
+                .join(format!("1{}", COMPRESSED_DESCRIPTOR_FILE_EXT)),
+            b"not valid zstd",
+        )
+        .unwrap();
+
+        let err = match EntryLoader::restore_entry(
+            path.join("entry"),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        {
+            Ok(_) => panic!("restore should fail when descriptor is corrupted"),
+            Err(err) => err,
+        };
+
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_restore_block_without_begin_time(path: PathBuf, entry_settings: EntrySettings) {
+        let entry_path = path.join("entry");
+        FILE_CACHE.create_dir_all(&entry_path).await.unwrap();
+        let block = MinimalBlock {
+            begin_time: None,
+            latest_record_time: None,
+            size: 1,
+            record_count: 1,
+            metadata_size: 0,
+            version: None,
+            corrupted: None,
+        };
+        fs::write(entry_path.join("1.meta"), block.encode_to_vec()).unwrap();
+        fs::write(entry_path.join("1.blk"), b"a").unwrap();
+
+        let entry = EntryLoader::restore_entry(
+            entry_path.clone(),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(entry.info().await.unwrap().record_count, 0);
+        assert!(!entry_path.join("1.meta").exists());
+        assert!(!entry_path.join("1.blk").exists());
     }
 
     #[rstest]
@@ -741,6 +1209,7 @@ mod tests {
             path.join(entry.name.clone()),
             entry_settings.clone(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -763,6 +1232,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -792,6 +1262,7 @@ mod tests {
             path.join(entry.name.clone()),
             entry_settings.clone(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -815,6 +1286,7 @@ mod tests {
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap();
@@ -847,6 +1319,7 @@ mod tests {
             path.join(entry.name.clone()),
             entry.settings().await.unwrap(),
             Cfg::default().into(),
+            Default::default(),
         )
         .await
         .unwrap()
@@ -893,6 +1366,7 @@ mod tests {
                 path.clone(),
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()
@@ -941,6 +1415,7 @@ mod tests {
                 path.clone(),
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()
@@ -979,6 +1454,7 @@ mod tests {
                 path,
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()
@@ -1010,6 +1486,7 @@ mod tests {
                 path,
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()
@@ -1036,6 +1513,7 @@ mod tests {
                 path.clone(),
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await;
             assert!(entry.is_ok());
@@ -1077,6 +1555,7 @@ mod tests {
                 path.clone(),
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
+                Default::default(),
             )
             .await
             .unwrap()

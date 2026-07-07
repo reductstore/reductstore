@@ -10,6 +10,7 @@ use crate::storage::query::historical::HistoricalQuery;
 use async_trait::async_trait;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::ReadRecord;
+use reduct_base::no_content;
 use std::sync::Arc;
 
 pub struct ContinuousQuery {
@@ -72,10 +73,7 @@ impl Query for ContinuousQuery {
                     self.options.clone(),
                     self.io_defaults.clone(),
                 )?;
-                Err(ReductError {
-                    status: ErrorCode::NoContent,
-                    message: "No content".to_string(),
-                })
+                Err(no_content!("No content"))
             }
             Err(err) => Err(err),
         }
@@ -90,10 +88,9 @@ impl Query for ContinuousQuery {
 mod tests {
     use super::*;
 
-    use reduct_base::error::ErrorCode;
-    use rstest::rstest;
-
     use crate::storage::query::base::tests::block_manager;
+    use reduct_base::no_content;
+    use rstest::rstest;
 
     #[rstest]
     #[tokio::test]
@@ -116,17 +113,11 @@ mod tests {
         }
         assert_eq!(
             query.next(block_manager.clone()).await.err(),
-            Some(ReductError {
-                status: ErrorCode::NoContent,
-                message: "No content".to_string(),
-            })
+            Some(no_content!("No content"))
         );
         assert_eq!(
             query.next(block_manager).await.err(),
-            Some(ReductError {
-                status: ErrorCode::NoContent,
-                message: "No content".to_string(),
-            })
+            Some(no_content!("No content"))
         );
     }
 }

@@ -186,17 +186,18 @@ mod tests {
 
     async fn build_entry(name: &str) -> Entry {
         let path = tempdir().unwrap().keep();
-        Entry::try_build(
-            name,
-            path,
-            EntrySettings {
+        Entry::builder()
+            .name(name)
+            .bucket_path(path)
+            .settings(EntrySettings {
                 max_block_size: 1024 * 1024,
                 max_block_records: 1024,
-            },
-            Cfg::default().into(),
-        )
-        .await
-        .unwrap()
+            })
+            .cfg(Cfg::default().into())
+            .usage_counters(Default::default())
+            .build()
+            .await
+            .unwrap()
     }
 
     async fn write_record(entry: &Entry, ts: u64, labels: Labels) {

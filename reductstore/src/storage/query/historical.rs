@@ -9,9 +9,13 @@ use crate::storage::proto::record;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::condition::Parser;
+// use crate::storage::query::filters::{
+//     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
+//     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
+// };
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
-    IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
+    apply_filters_recursively, EachNFilter, ExcludeLabelFilter, FilterRecord, IncludeLabelFilter,
+    RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
 };
 use async_trait::async_trait;
 use log::debug;
@@ -89,10 +93,6 @@ impl HistoricalQuery {
             filters.push(Box::new(ExcludeLabelFilter::new(options.exclude.clone())));
         }
 
-        if let Some(each_s) = options.each_s {
-            filters.push(Box::new(EachSecondFilter::new(each_s)));
-        }
-
         if let Some(each_n) = options.each_n {
             filters.push(Box::new(EachNFilter::new(each_n)));
         }
@@ -160,11 +160,15 @@ impl Query for HistoricalQuery {
                     }
                     Err(_) => 0,
                 };
-                bm.index()
-                    .tree()
-                    .range(first_block..self.stop_time)
-                    .map(|k| *k)
-                    .collect::<Vec<u64>>()
+                if first_block > self.stop_time {
+                    Vec::new()
+                } else {
+                    bm.index()
+                        .active_tree()
+                        .range(first_block..self.stop_time)
+                        .map(|k| *k)
+                        .collect::<Vec<u64>>()
+                }
             };
 
             for block_id in block_range {
@@ -427,9 +431,16 @@ mod tests {
 
         let index = BlockIndex::try_load(path.join("index")).await.unwrap();
         let block_manager = Arc::new(AsyncRwLock::new(
-            BlockManager::build(path, index, bucket, entry, Arc::new(cfg))
-                .await
-                .unwrap(),
+            BlockManager::build(
+                path,
+                index,
+                bucket,
+                entry,
+                Arc::new(cfg),
+                Default::default(),
+            )
+            .await
+            .unwrap(),
         ));
 
         let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
@@ -438,6 +449,82 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(records[0].0.meta().timestamp(), 0);
         assert_eq!(records[1].0.meta().timestamp(), 5);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_skips_corrupted_block(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        block_manager
+            .write()
+            .await
+            .unwrap()
+            .mark_block_corrupted(0)
+            .await
+            .unwrap();
+
+        let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
+        let records = read_to_vector(&mut query, block_manager).await;
+
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].0.meta().timestamp(), 1000);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_query_stops_when_current_block_latest_time_reaches_next_block(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+
+        {
+            let block_ref = block_manager
+                .write()
+                .await
+                .unwrap()
+                .load_block(0)
+                .await
+                .unwrap();
+            block_ref
+                .write()
+                .await
+                .unwrap()
+                .insert_or_update_record(Record {
+                    timestamp: Some(us_to_ts(&1000)),
+                    begin: 0,
+                    end: 10,
+                    state: record::State::Finished as i32,
+                    labels: vec![],
+                    content_type: "".to_string(),
+                });
+        }
+
+        let mut query = build_query(0, 500, QueryOptions::default()).unwrap();
+
+        assert_eq!(
+            query
+                .next(block_manager.clone())
+                .await
+                .unwrap()
+                .meta()
+                .timestamp(),
+            0
+        );
+        assert_eq!(
+            query
+                .next(block_manager.clone())
+                .await
+                .unwrap()
+                .meta()
+                .timestamp(),
+            5
+        );
+        assert_eq!(
+            query.next(block_manager).await.err(),
+            Some(no_content!("No content"))
+        );
     }
 
     #[rstest]
@@ -463,9 +550,16 @@ mod tests {
 
         let index = BlockIndex::try_load(path.join("index")).await.unwrap();
         let replica_block_manager = Arc::new(AsyncRwLock::new(
-            BlockManager::build(path, index, bucket, entry, Arc::new(cfg))
-                .await
-                .unwrap(),
+            BlockManager::build(
+                path,
+                index,
+                bucket,
+                entry,
+                Arc::new(cfg),
+                Default::default(),
+            )
+            .await
+            .unwrap(),
         ));
 
         // Simulate stale in-memory CRC while index on disk is already updated.
@@ -577,26 +671,6 @@ mod tests {
             query.next(block_manager.clone()).await.err(),
             Some(no_content!("No content"))
         );
-    }
-
-    #[rstest]
-    #[tokio::test(flavor = "multi_thread")]
-    async fn test_each_s_filter(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let mut query = build_query(
-            0,
-            1001,
-            QueryOptions {
-                each_s: Some(0.00001),
-                ..QueryOptions::default()
-            },
-        )
-        .unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
-
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.meta().timestamp(), 0);
-        assert_eq!(records[1].0.meta().timestamp(), 1000);
     }
 
     #[rstest]

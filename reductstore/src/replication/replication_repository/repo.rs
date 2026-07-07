@@ -14,11 +14,12 @@ use crate::replication::{ManageReplications, TransactionNotification};
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::WhenFilter;
+use crate::syslog::SystemEventSink;
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::{debug, error, warn};
 use prost::Message;
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationInfo, ReplicationMode, ReplicationSettings,
 };
@@ -43,6 +44,7 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
             dst_host: settings.dst_host,
             dst_token: settings.dst_token.unwrap_or_default(),
             entries: settings.entries,
+            dst_prefix: settings.dst_prefix,
             include: settings
                 .include
                 .into_iter()
@@ -53,64 +55,99 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
                 .into_iter()
                 .map(|(k, v)| ProtoLabel { name: k, value: v })
                 .collect(),
-            each_s: settings.each_s.unwrap_or(0.0),
             each_n: settings.each_n.unwrap_or(0),
+            each_s: 0.0, // Deprecated field, always set to 0.0 (migration to $each_t in when condition)
             when: settings.when.map(|value| value.to_string()),
             mode: ProtoReplicationMode::from(&settings.mode) as i32,
         }
     }
 }
 
-impl From<ProtoReplicationSettings> for ReplicationSettings {
-    fn from(settings: ProtoReplicationSettings) -> Self {
-        Self {
-            src_bucket: settings.src_bucket,
-            dst_bucket: settings.dst_bucket,
-            dst_host: settings.dst_host,
-            dst_token: if settings.dst_token.is_empty() {
+impl ProtoReplicationSettings {
+    /// Convert ProtoReplicationSettings to ReplicationSettings with migration support
+    /// Returns (ReplicationSettings, migrated: bool)
+    fn into_settings(self) -> (ReplicationSettings, bool) {
+        let mut migrated = false;
+
+        // Parse the when condition first
+        let mut when: Option<serde_json::Value> = if let Some(when_str) = self.when {
+            match serde_json::from_str(&when_str) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    error!(
+                        "Failed to parse 'when' field: {} in replication settings: {}",
+                        err, when_str
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Migrate deprecated each_s to $each_t by injecting it into the when condition
+        if self.each_s > 0.0 {
+            migrated = true;
+            warn!(
+                "The 'each_s' field is deprecated and will be migrated to 'when' condition using $each_t operator. Value: {}",
+                self.each_s
+            );
+
+            if let Some(when_value) = &mut when {
+                // Inject $each_t into the existing when condition
+                if let Some(obj) = when_value.as_object_mut() {
+                    obj.insert("$each_t".to_string(), serde_json::json!(self.each_s));
+                } else {
+                    error!(
+                        "Existing 'when' condition is not an object, cannot inject $each_t. Using only $each_t condition."
+                    );
+                    when = Some(serde_json::json!({"$each_t": self.each_s}));
+                }
+            } else {
+                // No when condition exists, create one with just $each_t
+                when = Some(serde_json::json!({"$each_t": self.each_s}));
+            }
+        }
+
+        let settings = ReplicationSettings {
+            src_bucket: self.src_bucket,
+            dst_bucket: self.dst_bucket,
+            dst_host: self.dst_host,
+            dst_token: if self.dst_token.is_empty() {
                 None
             } else {
-                Some(settings.dst_token)
+                Some(self.dst_token)
             },
-            entries: settings.entries,
-            include: settings
+            entries: self.entries,
+            dst_prefix: self.dst_prefix,
+            include: self
                 .include
                 .into_iter()
                 .map(|label| (label.name, label.value))
                 .collect(),
-            exclude: settings
+            exclude: self
                 .exclude
                 .into_iter()
                 .map(|label| (label.name, label.value))
                 .collect(),
-            each_s: if settings.each_s > 0.0 {
-                Some(settings.each_s)
+            each_n: if self.each_n > 0 {
+                Some(self.each_n)
             } else {
                 None
             },
-            each_n: if settings.each_n > 0 {
-                Some(settings.each_n)
-            } else {
-                None
-            },
-            when: if let Some(when) = settings.when {
-                match serde_json::from_str(&when) {
-                    Ok(value) => Some(value),
-                    Err(err) => {
-                        error!(
-                            "Failed to parse 'when' field: {} in replication settings: {}",
-                            err, when
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            },
-            mode: ProtoReplicationMode::try_from(settings.mode)
+            when,
+            mode: ProtoReplicationMode::try_from(self.mode)
                 .unwrap_or(ProtoReplicationMode::Enabled)
                 .into(),
-        }
+        };
+
+        (settings, migrated)
+    }
+}
+
+impl From<ProtoReplicationSettings> for ReplicationSettings {
+    fn from(settings: ProtoReplicationSettings) -> Self {
+        settings.into_settings().0
     }
 }
 
@@ -146,6 +183,7 @@ pub(crate) struct ReplicationRepository {
     storage: Arc<StorageEngine>,
     repo_path: PathBuf,
     config: Cfg,
+    system_event_sink: Option<SystemEventSink>,
     started: bool,
     notification_tx: UnboundedSender<NotificationCommand>,
     notification_worker: Option<JoinHandle<()>>,
@@ -166,8 +204,7 @@ impl ManageReplications for ReplicationRepository {
             )));
         }
 
-        self.create_or_update_replication_task(&name, settings)
-            .await
+        self.create_or_update_replication_task(name, settings).await
     }
 
     async fn update_replication(
@@ -193,8 +230,7 @@ impl ManageReplications for ReplicationRepository {
             ))),
         }?;
 
-        self.create_or_update_replication_task(&name, settings)
-            .await
+        self.create_or_update_replication_task(name, settings).await
     }
 
     async fn replications(&self) -> Result<Vec<ReplicationInfo>, ReductError> {
@@ -271,7 +307,8 @@ impl ManageReplications for ReplicationRepository {
         if let Some(mut repl) = removed {
             repl.stop().await;
         }
-        self.save_repo().await
+        self.save_repo().await?;
+        self.remove_transaction_logs_for_replication(name).await
     }
 
     async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
@@ -321,7 +358,11 @@ impl ManageReplications for ReplicationRepository {
 }
 
 impl ReplicationRepository {
-    pub(crate) async fn load_or_create(storage: Arc<StorageEngine>, config: Cfg) -> Self {
+    pub(crate) async fn load_or_create(
+        storage: Arc<StorageEngine>,
+        config: Cfg,
+        system_event_sink: Option<SystemEventSink>,
+    ) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
         let replications = Arc::new(AsyncRwLock::new(HashMap::<String, ReplicationTask>::new()));
         let (notification_tx, mut notification_rx) = unbounded_channel::<NotificationCommand>();
@@ -358,6 +399,7 @@ impl ReplicationRepository {
             storage,
             repo_path,
             config,
+            system_event_sink,
             started: false,
             notification_tx,
             notification_worker: Some(notification_worker),
@@ -382,10 +424,8 @@ impl ReplicationRepository {
                 let proto_repo = ProtoReplicationRepo::decode(&mut Bytes::from(buf))
                     .expect("Error decoding replication repository");
                 for item in proto_repo.replications {
-                    if let Err(err) = repo
-                        .create_replication(&item.name, item.settings.unwrap().into())
-                        .await
-                    {
+                    let (settings, _migrated) = item.settings.unwrap().into_settings();
+                    if let Err(err) = repo.create_replication(&item.name, settings).await {
                         error!("Failed to load replication '{}': {}", item.name, err);
                     }
                 }
@@ -504,8 +544,13 @@ impl ReplicationRepository {
         let mut settings = settings;
         settings.dst_token = init_token;
 
-        let replication =
-            ReplicationTask::new(name.to_string(), settings, conf, Arc::clone(&self.storage))?;
+        let replication = ReplicationTask::new(
+            name.to_string(),
+            settings,
+            conf,
+            Arc::clone(&self.storage),
+            self.system_event_sink.clone(),
+        )?;
         let mut replication = replication;
         if self.started {
             replication.start();
@@ -544,6 +589,43 @@ impl ReplicationRepository {
             });
         }
         self.started = true;
+    }
+
+    async fn remove_transaction_logs_for_replication(
+        &self,
+        replication_name: &str,
+    ) -> Result<(), ReductError> {
+        let log_file_name = format!("{}.log", replication_name);
+        let mut dirs = vec![self.storage.data_path().clone()];
+
+        while let Some(dir) = dirs.pop() {
+            let mut entries = match tokio::fs::read_dir(&dir).await {
+                Ok(entries) => entries,
+                Err(err) if err.kind() == std::io::ErrorKind::NotFound => continue,
+                Err(err) => return Err(err.into()),
+            };
+
+            while let Some(entry) = entries.next_entry().await? {
+                let path = entry.path();
+                let file_type = entry.file_type().await?;
+                if file_type.is_dir() {
+                    dirs.push(path);
+                    continue;
+                }
+
+                if path.file_name().and_then(|name| name.to_str()) != Some(log_file_name.as_str()) {
+                    continue;
+                }
+
+                match FILE_CACHE.remove(&path).await {
+                    Ok(()) => {}
+                    Err(err) if err.status() == ErrorCode::NotFound => {}
+                    Err(err) => return Err(err),
+                }
+            }
+        }
+
+        Ok(())
     }
 }
 
@@ -677,17 +759,20 @@ mod tests {
         #[tokio::test]
         async fn create_and_load_replications(
             #[future] storage: Arc<StorageEngine>,
-            settings: ReplicationSettings,
+            mut settings: ReplicationSettings,
         ) {
+            settings.dst_prefix = "robot-1".to_string();
             let storage = storage.await;
             let mut repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
+                    .await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
 
             let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
+                    .await;
             assert_eq!(repo.replications().await.unwrap().len(), 1);
             assert_eq!(
                 repo.get_replication_settings("test").await.unwrap(),
@@ -859,9 +944,32 @@ mod tests {
             settings: ReplicationSettings,
         ) {
             let mut repo = repo.await;
+            let storage = Arc::clone(&repo.storage);
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
+
+            let bucket = storage
+                .get_bucket("bucket-1")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut writer = bucket
+                .begin_write("entry-1", 1, 4, "text/plain".to_string(), Labels::default())
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(bytes::Bytes::from_static(b"data"))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            let log_path = storage
+                .data_path()
+                .join("bucket-1")
+                .join("entry-1")
+                .join("test.log");
+            std::fs::write(&log_path, b"pending transactions").unwrap();
 
             let mut updated = settings;
             updated.dst_bucket = "bucket-3".to_string();
@@ -871,6 +979,10 @@ mod tests {
             let replication = repo.get_replication_settings("test").await.unwrap();
             assert_eq!(replication.dst_bucket, "bucket-3");
             assert_eq!(replication.dst_token, Some("token".to_string()));
+            assert!(
+                log_path.exists(),
+                "Should keep transaction log when replication settings change"
+            );
         }
     }
 
@@ -880,25 +992,161 @@ mod tests {
         #[tokio::test]
         async fn test_remove_replication(
             #[future] mut repo: ReplicationRepository,
-            #[future] storage: Arc<StorageEngine>,
             settings: ReplicationSettings,
         ) {
             let mut repo = repo.await;
-            let storage = storage.await;
+            let storage = Arc::clone(&repo.storage);
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
 
+            let bucket = storage
+                .get_bucket("bucket-1")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut writer = bucket
+                .begin_write("entry-1", 1, 4, "text/plain".to_string(), Labels::default())
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(bytes::Bytes::from_static(b"data"))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            let log_path = storage
+                .data_path()
+                .join("bucket-1")
+                .join("entry-1")
+                .join("test.log");
+            std::fs::write(&log_path, b"pending transactions").unwrap();
+
             repo.remove_replication("test").await.unwrap();
             assert_eq!(repo.replications().await.unwrap().len(), 0);
+            assert!(!log_path.exists(), "Should remove transaction log");
 
             // check if replication is removed from file
             let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default()).await;
+                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
+                    .await;
             assert_eq!(
                 repo.replications().await.unwrap().len(),
                 0,
                 "Should remove replication permanently"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_transaction_logs_for_replication(
+            #[future] repo: ReplicationRepository,
+        ) {
+            let repo = repo.await;
+            let storage = Arc::clone(&repo.storage);
+            storage
+                .create_system_bucket("$system", BucketSettings::default())
+                .await
+                .unwrap();
+
+            let bucket = storage
+                .get_bucket("bucket-1")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut writer = bucket
+                .begin_write("entry-1", 1, 4, "text/plain".to_string(), Labels::default())
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(bytes::Bytes::from_static(b"data"))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            let log_path = storage
+                .data_path()
+                .join("bucket-1")
+                .join("entry-1")
+                .join("test.log");
+            std::fs::write(&log_path, b"pending transactions").unwrap();
+
+            let mut writer = storage
+                .begin_write(
+                    "$system",
+                    "replications/instance/test",
+                    1,
+                    4,
+                    "application/json".to_string(),
+                    Labels::default(),
+                )
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(bytes::Bytes::from_static(b"data"))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+
+            let system_transaction_log_paths = [
+                storage
+                    .data_path()
+                    .join("$system")
+                    .join("replications")
+                    .join("instance")
+                    .join("test")
+                    .join("test.log"),
+                storage
+                    .data_path()
+                    .join("$system")
+                    .join("usage")
+                    .join("instance")
+                    .join("total")
+                    .join("test.log"),
+                storage
+                    .data_path()
+                    .join("$system")
+                    .join("audit")
+                    .join("instance")
+                    .join("api")
+                    .join("test.log"),
+            ];
+            for path in &system_transaction_log_paths {
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, b"pending transactions").unwrap();
+            }
+
+            let system_event_data_path = storage
+                .data_path()
+                .join("$system")
+                .join("usage")
+                .join("instance")
+                .join("total")
+                .join("1.blk");
+            std::fs::write(&system_event_data_path, b"system event").unwrap();
+
+            repo.remove_transaction_logs_for_replication("test")
+                .await
+                .unwrap();
+
+            assert!(!log_path.exists(), "Should remove transaction log");
+            for path in &system_transaction_log_paths {
+                assert!(!path.exists(), "Should remove diagnostics transaction log");
+            }
+            assert!(
+                system_event_data_path.exists(),
+                "Should keep diagnostics data"
+            );
+            assert!(
+                storage
+                    .get_bucket("$system")
+                    .await
+                    .unwrap()
+                    .upgrade_and_unwrap()
+                    .get_entry("replications/instance/test")
+                    .await
+                    .is_ok(),
+                "Should keep system event entry"
             );
         }
 
@@ -1296,10 +1544,10 @@ mod tests {
             dst_host: "http://localhost".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec!["entry-1".to_string()],
+            dst_prefix: String::new(),
             include: Labels::default(),
             exclude: Labels::default(),
             each_n: None,
-            each_s: None,
             when: None,
             mode: ReplicationMode::Enabled,
         }
@@ -1330,6 +1578,118 @@ mod tests {
     #[fixture]
     async fn repo(#[future] storage: Arc<StorageEngine>) -> ReplicationRepository {
         let storage = storage.await;
-        ReplicationRepository::load_or_create(storage, Cfg::default()).await
+        ReplicationRepository::load_or_create(storage, Cfg::default(), None).await
+    }
+
+    mod each_s_migration {
+
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_s_migrated_to_each_t_without_when() {
+            let proto_settings = get_proto_replication_settings(2.5, None).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 2.5})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_s_migrated_to_each_t_with_existing_when() {
+            let proto_settings =
+                get_proto_replication_settings(2.0, Some(r#"{"&label": {"$eq": 1}}"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "&label": {"$eq": 1},
+                    "$each_t": 2.0
+                }))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_migration_when_each_s_is_zero() {
+            let proto_settings =
+                get_proto_replication_settings(0.0, Some(r#"{"&label": {"$eq": 1}}"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(!migrated, "Should not mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"&label": {"$eq": 1}}))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_parsing_error_with_each_s() {
+            let proto_settings =
+                get_proto_replication_settings(1.5, Some("invalid json".to_string())).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            // When parsing fails, should use only $each_t
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 1.5})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_parsing_error_without_each_s() {
+            let proto_settings =
+                get_proto_replication_settings(0.0, Some("invalid json".to_string())).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(!migrated, "Should not mark as migrated");
+            assert_eq!(settings.when, None);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_is_not_object_with_each_s() {
+            let proto_settings = get_proto_replication_settings(
+                3.0,
+                Some(r#"["array", "not", "object"]"#.to_string()),
+            )
+            .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            // When existing condition is not an object, replace with $each_t
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 3.0})));
+        }
+
+        async fn get_proto_replication_settings(
+            each_s: f64,
+            when: ::core::option::Option<::prost::alloc::string::String>,
+        ) -> ProtoReplicationSettings {
+            ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                dst_prefix: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n: 0,
+                each_s: each_s,
+                when: when,
+                mode: ProtoReplicationMode::Enabled as i32,
+            }
+        }
     }
 }

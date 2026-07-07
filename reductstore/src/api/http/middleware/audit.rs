@@ -1,11 +1,11 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::audit::ApiAuditPayload;
 use crate::api::components::{Components, StateKeeper};
 use crate::api::http::middleware::client_ip::client_ip_from_request;
 use crate::api::http::HttpError;
-use crate::syslog::SystemEvent;
+use crate::syslog::payload::audit::ApiAuditPayload;
+use crate::syslog::{SystemEvent, SystemEventKind};
 use axum::body::Body;
 use axum::extract::State;
 use axum::http::{Request, StatusCode};
@@ -132,6 +132,7 @@ async fn write_audit_event(
     };
 
     let event = SystemEvent {
+        kind: SystemEventKind::Audit,
         event_type: "api_call".to_string(),
         timestamp: SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -144,12 +145,13 @@ async fn write_audit_event(
         payload: payload.to_value(),
     };
 
-    match components.audit_logger.write().await {
-        Ok(mut audit_logger) => {
-            if let Err(err) = audit_logger.log_event(event).await {
+    let sink = components.system_events.sink();
+    match sink.system_logger.write().await {
+        Ok(mut logger) => {
+            if let Err(err) = logger.log_event(event).await {
                 debug!("Failed to persist audit event: {}", err);
             }
         }
-        Err(err) => debug!("Failed to lock audit repository: {}", err),
-    }
+        Err(err) => debug!("Failed to lock system event logger: {}", err),
+    };
 }

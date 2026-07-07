@@ -30,10 +30,9 @@ use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
-use crate::lifecycle::SystemEventSink;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
-use crate::syslog::build_audit_logger;
-use crate::syslog::build_system_logger;
+use crate::storage::usage::UsageCounters;
+use crate::syslog::build_system_event_logger;
 use async_trait::async_trait;
 use log::{info, warn};
 use reduct_base::error::ReductError;
@@ -280,6 +279,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         let ext_cfg = ext_parser.from_env(&mut env, version).await;
 
+        let mut engine_config = Self::parse_storage_engine_config(&mut env);
+        if ext_cfg.role() == InstanceRole::Replica {
+            engine_config.enable_integrity_checks = false;
+        }
+
         let replications = Self::parse_replications(&mut env);
         let lifecycles = Self::parse_lifecycles(&mut env);
         let has_lifecycles = !lifecycles.is_empty();
@@ -316,7 +320,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             backend_config: ext_cfg.remote_storage_config(),
             lock_file_config: Self::parse_lock_file_config(&mut env),
             rw_lock_config: Self::parse_rw_lock_config(&mut env),
-            engine_config: Self::parse_storage_engine_config(&mut env),
+            engine_config,
             limits_config: Self::parse_limits_config(&mut env),
             #[cfg(feature = "zenoh-api")]
             zenoh_api: Self::parse_zenoh_api_config(&mut env),
@@ -396,11 +400,22 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
     pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
-        let storage = Arc::new(self.provision_buckets(&data_path).await);
+        // One shared counters instance: the engine increments it at its choke
+        // points, the usage aggregator drains it.
+        let usage_counters = Arc::new(UsageCounters::default());
+        let storage = Arc::new(
+            self.provision_buckets(&data_path, Arc::clone(&usage_counters))
+                .await,
+        );
         let token_repo = self.provision_tokens(&data_path, Arc::clone(&storage));
         let console = create_asset_manager(load_console());
+        // One collector owns every aggregator/task and the single shared
+        // `$system` writer; lifecycle and replication emit through a handle
+        // (`sink()`) over that same writer.
+        let system_events =
+            build_system_event_logger(&self.cfg, Arc::clone(&storage), usage_counters).await;
         let replication_engine = self
-            .provision_replication_repo(Arc::clone(&storage))
+            .provision_replication_repo(Arc::clone(&storage), system_events.sink())
             .await?;
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
@@ -420,19 +435,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .server_info(server_info.clone())
             .build();
         let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
-        let audit_logger = build_audit_logger(&self.cfg, Arc::clone(&storage)).await;
-        let audit_logger = Arc::new(AsyncRwLock::new(audit_logger));
-        let system_logger = build_system_logger(&self.cfg, Arc::clone(&storage)).await;
-        let system_logger = Arc::new(AsyncRwLock::new(system_logger));
 
         let lifecycle_engine = self
-            .provision_lifecycle_repo(
-                Arc::clone(&storage),
-                SystemEventSink {
-                    system_logger: Arc::clone(&system_logger),
-                    instance_name: self.cfg.instance_name.clone(),
-                },
-            )
+            .provision_lifecycle_repo(Arc::clone(&storage), system_events.sink())
             .await?;
 
         Ok(Components {
@@ -453,10 +458,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),
-            audit_logger,
             limits: LimitsBuilder::new()
                 .with_config(self.cfg.limits_config)
                 .build(),
+            system_events,
             cfg: self.cfg.clone(),
         })
     }
@@ -1054,6 +1059,29 @@ mod tests {
             .catch_unwind()
             .await;
             assert!(result.is_err());
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "current_thread")]
+        async fn test_replica_disables_integrity_checks(mut env_getter: MockEnvGetter) {
+            env_getter
+                .expect_get()
+                .with(eq("RS_INSTANCE_ROLE"))
+                .times(1)
+                .return_const(Ok("REPLICA".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_ENGINE_ENABLE_INTEGRITY_CHECKS"))
+                .times(1)
+                .return_const(Ok("true".to_string()));
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            let parser = CfgParser::from_env(env_getter, "0.0.0").await;
+
+            assert_eq!(parser.cfg.role, InstanceRole::Replica);
+            assert!(!parser.cfg.engine_config.enable_integrity_checks);
         }
 
         #[rstest]

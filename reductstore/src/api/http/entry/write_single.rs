@@ -53,7 +53,12 @@ pub(super) async fn write_record(
             .await?;
         let content_type = headers
             .get("content-type")
-            .map_or("application/octet-stream", |v| v.to_str().unwrap())
+            .map(|v| {
+                v.to_str()
+                    .map_err(|err| unprocessable_entity!("Malformed content-type header: {}", err))
+            })
+            .transpose()?
+            .unwrap_or("application/octet-stream")
             .to_string();
 
         let mut labels = Labels::new();
@@ -153,7 +158,7 @@ mod tests {
         empty_body, ingress_limited_keeper, keeper, path_to_entry_1, storage_limited_keeper,
     };
 
-    use axum_extra::headers::{Authorization, HeaderMapExt};
+    use axum_extra::headers::{Authorization, HeaderMapExt, HeaderValue};
     use reduct_base::error::ErrorCode;
     use reduct_base::io::ReadRecord;
     use reduct_base::not_found;
@@ -271,6 +276,33 @@ mod tests {
             err,
             unprocessable_entity!("'ts' must be an unix timestamp in microseconds").into()
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_non_utf8_content_type(
+        #[future] keeper: Arc<StateKeeper>,
+        mut headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        #[future] empty_body: Body,
+    ) {
+        headers.insert("content-type", HeaderValue::from_bytes(b"\xff").unwrap());
+
+        let err = write_record(
+            State(keeper.await),
+            headers,
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "2".to_string(),
+            )])),
+            empty_body.await,
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err.into_inner().status(), ErrorCode::UnprocessableEntity);
     }
 
     #[rstest]

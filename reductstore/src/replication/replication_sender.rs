@@ -2,8 +2,8 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::cfg::io::IoConfig;
-use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucket};
-use crate::replication::transaction_log::{TransactionLogMap, TransactionLogRef};
+use crate::replication::remote_bucket::RemoteBucket;
+use crate::replication::transaction_log::TransactionLogMap;
 use crate::replication::Transaction;
 use crate::storage::engine::StorageEngine;
 use log::{debug, error};
@@ -11,8 +11,8 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::replication_api::ReplicationSettings;
 use std::cmp::PartialEq;
+use std::collections::BTreeMap;
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 /// Internal worker for replication to process a sole iteration of the replication loop.
@@ -21,10 +21,13 @@ pub(super) struct ReplicationSender {
     storage: Arc<StorageEngine>,
     settings: ReplicationSettings,
     io_config: IoConfig,
-    bucket: Option<Box<dyn RemoteBucket + Send + Sync>>,
+    bucket: Box<dyn RemoteBucket + Send + Sync>,
 }
 
-type ResultResult = (Result<(), ReductError>, u64);
+/// Outcome of replicating a group of records: the result, the number of
+/// records it covers, and the number of bytes successfully replicated
+/// (non-zero only for successful writes).
+type ResultResult = (Result<(), ReductError>, u64, u64);
 
 #[derive(Debug, PartialEq)]
 pub(super) enum SyncState {
@@ -47,32 +50,16 @@ impl ReplicationSender {
             storage,
             settings: config,
             io_config,
-            bucket: Some(bucket),
+            bucket,
         }
     }
 
     pub async fn probe_availability(&mut self) -> bool {
-        self.bucket
-            .as_mut()
-            .unwrap()
-            .probe_availability()
-            .await;
-        self.bucket
-            .as_ref()
-            .unwrap()
-            .is_active()
+        self.bucket.probe_availability().await;
+        self.bucket.is_active()
     }
 
     pub async fn run(&mut self) -> Result<SyncState, ReductError> {
-        struct PendingSend {
-            bucket: Box<dyn RemoteBucket + Send + Sync>,
-            entry_name: String,
-            log: TransactionLogRef,
-            processed_transactions: usize,
-            batch_size: u64,
-            result: Result<ErrorRecordMap, ReductError>,
-            bucket_active: bool,
-        }
         let entries = self
             .log_map
             .read()
@@ -82,10 +69,6 @@ impl ReplicationSender {
             .collect::<Vec<_>>();
 
         let mut counter = Vec::new();
-        let mut bucket = self.bucket.take();
-
-        let mut pending_send: Option<JoinHandle<PendingSend>> = None;
-        let mut bucket_unavailable = false;
 
         for entry_name in entries.iter() {
             let log = {
@@ -106,7 +89,8 @@ impl ReplicationSender {
                     if vec.is_empty() {
                         continue;
                     }
-                    let mut batch = Vec::new();
+                    let mut batch = Vec::with_capacity(vec.len());
+                    let mut batch_sizes: BTreeMap<u64, u64> = BTreeMap::new();
                     let mut total_size = 0;
                     let mut processed_transactions = 0;
                     for transaction in vec {
@@ -122,6 +106,7 @@ impl ReplicationSender {
                             Ok(record_to_sync) => {
                                 let record_size = record_to_sync.meta().content_length();
                                 total_size += record_size;
+                                batch_sizes.insert(*transaction.timestamp(), record_size);
                                 batch.push((record_to_sync, transaction));
 
                                 if total_size >= self.io_config.batch_max_size {
@@ -136,87 +121,50 @@ impl ReplicationSender {
                                     transaction.timestamp(),
                                     err
                                 );
-                                counter.push((Err(err), 1));
+                                counter.push((Err(err), 1, 0));
                             }
-                        }
-                    }
-
-                    if let Some(handle) = pending_send.take() {
-                        let output = handle
-                            .await
-                            .expect("replication send task panicked");
-
-                        bucket = Some(output.bucket);
-
-                        match output.result {
-                            Ok(map) => {
-                                counter.push((Ok(()), output.batch_size - map.len() as u64));
-
-                                for (timestamp, err) in map.into_iter() {
-                                    debug!(
-                                        "Failed to replicate record {}/{}/{}: {:?}",
-                                        self.settings.src_bucket,
-                                        output.entry_name,
-                                        timestamp,
-                                        err
-                                    );
-
-                                    counter.push((Err(err), 1));
-                                }
-                            }
-                            Err(err) => {
-                                debug!(
-                                    "Failed to replicate batch of records from {}/{} {:?}",
-                                    self.settings.src_bucket,
-                                    output.entry_name,
-                                    err
-                                );
-
-                                counter.push((Err(err), output.batch_size));
-                            }
-                        }
-
-                        if output.bucket_active {
-                            if let Err(err) = output
-                                .log
-                                .write()
-                                .await?
-                                .pop_front(output.processed_transactions)
-                                .await
-                            {
-                                error!("Failed to remove transaction: {:?}", err);
-                            }
-                        } else {
-                            bucket_unavailable = true;
-                            break;
                         }
                     }
 
                     let batch_size = batch.len() as u64;
-                    let send_entry_name = entry_name.clone();
-                    let send_log = Arc::clone(&log);
-
-                    let mut send_bucket = bucket
-                        .take()
-                        .expect("remote bucket was already taken");
-
-                    pending_send = Some(tokio::spawn(async move {
-                        let result = send_bucket
-                            .write_batch(&send_entry_name, batch)
-                            .await;
-
-                        let bucket_active = send_bucket.is_active();
-
-                        PendingSend {
-                            bucket: send_bucket,
-                            entry_name: send_entry_name,
-                            log: send_log,
-                            processed_transactions,
-                            batch_size,
-                            result,
-                            bucket_active,
+                    let dst_entry_name =
+                        Self::destination_entry_name(&self.settings.dst_prefix, entry_name);
+                    match self.bucket.write_batch(&dst_entry_name, batch).await {
+                        Ok(map) => {
+                            // Bytes successfully replicated are those whose
+                            // timestamp is not reported as failed.
+                            let written_size: u64 = batch_sizes
+                                .iter()
+                                .filter(|(timestamp, _)| !map.contains_key(*timestamp))
+                                .map(|(_, size)| *size)
+                                .sum();
+                            counter.push((Ok(()), batch_size - map.len() as u64, written_size));
+                            for (timestamp, err) in map.into_iter() {
+                                debug!(
+                                    "Failed to replicate record {}/{}/{}: {:?}",
+                                    self.settings.src_bucket, entry_name, timestamp, err
+                                );
+                                counter.push((Err(err), 1, 0));
+                            }
                         }
-                    }));
+                        Err(err) => {
+                            debug!(
+                                "Failed to replicate batch of records from {}/{} {:?}",
+                                self.settings.src_bucket, entry_name, err
+                            );
+
+                            counter.push((Err(err), batch_size, 0));
+                        }
+                    }
+
+                    if !self.bucket.is_active() {
+                        break;
+                    }
+
+                    // remove processed transactions from the log
+                    if let Err(err) = log.write().await?.pop_front(processed_transactions).await {
+                        error!("Failed to remove transaction: {:?}", err);
+                    }
                 }
 
                 Err(err) => {
@@ -226,62 +174,11 @@ impl ReplicationSender {
             };
         }
 
-        //Handle pending HTTP request
-        if let Some(handle) = pending_send.take() {
-            let output = handle
-                .await
-                .expect("replication send task panicked");
-
-            bucket = Some(output.bucket);
-
-            match output.result {
-                Ok(map) => {
-                    counter.push((Ok(()), output.batch_size - map.len() as u64));
-
-                    for (timestamp, err) in map.into_iter() {
-                        debug!(
-                    "Failed to replicate record {}/{}/{}: {:?}",
-                    self.settings.src_bucket,
-                    output.entry_name,
-                    timestamp,
-                    err
-                );
-
-                        counter.push((Err(err), 1));
-                    }
-                }
-                Err(err) => {
-                    debug!(
-                "Failed to replicate batch of records from {}/{} {:?}",
-                self.settings.src_bucket,
-                output.entry_name,
-                err
-            );
-
-                    counter.push((Err(err), output.batch_size));
-                }
-            }
-
-            if output.bucket_active {
-                if let Err(err) = output
-                    .log
-                    .write()
-                    .await?
-                    .pop_front(output.processed_transactions)
-                    .await
-                {
-                    error!("Failed to remove transaction: {:?}", err);
-                }
-            } else {
-                bucket_unavailable = true;
-            }
-        }
-        self.bucket = bucket;
         Ok(if !counter.is_empty() {
-            if bucket_unavailable || !self.bucket.as_ref().unwrap().is_active() {
-                SyncState::NotAvailable(counter)
-            } else {
+            if self.bucket.is_active() {
                 SyncState::SyncedOrRemoved(counter)
+            } else {
+                SyncState::NotAvailable(counter)
             }
         } else {
             SyncState::NoTransactions
@@ -301,7 +198,7 @@ impl ReplicationSender {
                         .get_bucket(&self.settings.src_bucket)
                         .await?
                         .upgrade()?
-                        .get_entry(&entry_name)
+                        .get_entry(entry_name)
                         .await?
                         .upgrade()?
                         .begin_read(*transaction.timestamp())
@@ -334,6 +231,44 @@ impl ReplicationSender {
             Err(err) => Err(err),
         }
     }
+
+    fn destination_entry_name(prefix: &str, entry_name: &str) -> String {
+        let prefix = prefix.trim_matches('/');
+        if prefix.is_empty() {
+            entry_name.to_string()
+        } else {
+            format!("{}/{}", prefix, entry_name.trim_start_matches('/'))
+        }
+    }
+}
+
+#[cfg(test)]
+mod destination_entry_name_tests {
+    use super::ReplicationSender;
+
+    #[test]
+    fn keeps_entry_name_when_prefix_is_empty() {
+        assert_eq!(
+            ReplicationSender::destination_entry_name("", "camera/front"),
+            "camera/front"
+        );
+    }
+
+    #[test]
+    fn prepends_destination_prefix() {
+        assert_eq!(
+            ReplicationSender::destination_entry_name("robot-1", "camera/front"),
+            "robot-1/camera/front"
+        );
+    }
+
+    #[test]
+    fn avoids_duplicate_slashes() {
+        assert_eq!(
+            ReplicationSender::destination_entry_name("/robot-1/", "/camera/front"),
+            "robot-1/camera/front"
+        );
+    }
 }
 
 #[cfg(test)]
@@ -351,7 +286,7 @@ mod tests {
     use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
     use async_trait::async_trait;
     use bytes::Bytes;
-    use mockall::mock;
+    use mockall::{mock, predicate};
     use reduct_base::error::ErrorCode;
     use reduct_base::error::ReductError;
     use reduct_base::msg::bucket_api::BucketSettings;
@@ -394,7 +329,7 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5)])
         );
         assert_eq!(
             sender
@@ -415,6 +350,29 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_replication_applies_destination_prefix(
+        mut remote_bucket: MockRmBucket,
+        mut settings: ReplicationSettings,
+    ) {
+        settings.dst_prefix = "robot-1".to_string();
+        remote_bucket
+            .expect_write_batch()
+            .with(predicate::eq("robot-1/test"), predicate::always())
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
+        remote_bucket.expect_is_active().return_const(true);
+        let mut sender = build_sender(remote_bucket, settings).await;
+
+        let transaction = Transaction::WriteRecord(10);
+        imitate_write_record(&sender, &transaction, 5).await;
+
+        assert_eq!(
+            sender.run().await.unwrap(),
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5)])
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_replication_comm_err(mut remote_bucket: MockRmBucket) {
         remote_bucket
             .expect_write_batch()
@@ -427,7 +385,7 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::NotAvailable(vec![(Err(timeout!("Timeout")), 1)])
+            SyncState::NotAvailable(vec![(Err(timeout!("Timeout")), 1, 0)])
         );
 
         assert_eq!(
@@ -464,6 +422,7 @@ mod tests {
             SyncState::NotAvailable(vec![(
                 Err(ReductError::new(ErrorCode::TooManyRequests, "slow down")),
                 1,
+                0,
             )])
         );
 
@@ -513,8 +472,12 @@ mod tests {
         assert_eq!(
             sender.run().await.unwrap(),
             SyncState::SyncedOrRemoved(vec![
-                (Err(not_found!("Entry 'test' not found in bucket 'src'")), 1),
-                (Ok(()), 0)
+                (
+                    Err(not_found!("Entry 'test' not found in bucket 'src'")),
+                    1,
+                    0
+                ),
+                (Ok(()), 0, 0)
             ]),
         );
         assert!(
@@ -574,7 +537,7 @@ mod tests {
         writer.send(Ok(None)).await.unwrap();
         assert_eq!(
             handle.await.unwrap().unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 4)])
         );
     }
 
@@ -624,9 +587,10 @@ mod tests {
                     Err(too_early!(
                         "Record with timestamp 20 in src/test is still being written"
                     )),
-                    1
+                    1,
+                    0
                 ),
-                (Ok(()), 0)
+                (Ok(()), 0, 0)
             ])
         );
     }
@@ -654,7 +618,10 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1), (Err(conflict!("AlreadyExists")), 1)])
+            SyncState::SyncedOrRemoved(vec![
+                (Ok(()), 1, 5),
+                (Err(conflict!("AlreadyExists")), 1, 0)
+            ])
         );
         assert!(
             sender
@@ -694,7 +661,7 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1)])
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, IoConfig::default().batch_max_size + 1)])
         );
         assert!(
             sender
@@ -834,7 +801,7 @@ mod tests {
             storage,
             settings,
             io_config: IoConfig::default(),
-            bucket: Some(Box::new(remote_bucket)),
+            bucket: Box::new(remote_bucket),
         }
     }
 
@@ -852,10 +819,10 @@ mod tests {
             dst_host: "http://localhost:8383".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec!["test".to_string()],
+            dst_prefix: String::new(),
             include: Labels::new(),
             exclude: Labels::new(),
             each_n: None,
-            each_s: None,
             when: None,
             mode: ReplicationMode::Enabled,
         }

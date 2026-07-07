@@ -9,6 +9,7 @@ use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use crate::storage::in_flight::InFlightIoLimiter;
+use crate::storage::usage::{BucketSnapshot, UsageCounters, UsageSnapshot};
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
@@ -17,7 +18,7 @@ use reduct_base::msg::server_api::{BucketInfoList, Defaults, License, ServerInfo
 use reduct_base::{
     conflict, forbidden, internal_server_error, not_found, unprocessable_entity, Labels,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
@@ -29,11 +30,20 @@ pub struct StorageEngineBuilder {
     cfg: Option<Cfg>,
     license: Option<License>,
     data_path: Option<PathBuf>,
+    usage_counters: Option<Arc<UsageCounters>>,
 }
 
 impl StorageEngineBuilder {
     pub fn with_cfg(mut self, cfg: Cfg) -> Self {
         self.cfg = Some(cfg);
+        self
+    }
+
+    /// Share the usage traffic counters with the engine. The same `Arc` is
+    /// drained by the usage statistics aggregator. When unset (e.g. in tests),
+    /// the engine creates its own counters that nothing drains.
+    pub(crate) fn with_usage_counters(mut self, usage_counters: Arc<UsageCounters>) -> Self {
+        self.usage_counters = Some(usage_counters);
         self
     }
 
@@ -51,6 +61,9 @@ impl StorageEngineBuilder {
         let cfg = self.cfg.expect("Config must be set");
         let data_path = self.data_path.expect("Data path must be set");
         let io_limiter = InFlightIoLimiter::from_cfg(&cfg);
+        let usage_counters = self
+            .usage_counters
+            .unwrap_or_else(|| Arc::new(UsageCounters::default()));
 
         if !FILE_CACHE.try_exists(&data_path).await.unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
@@ -69,7 +82,13 @@ impl StorageEngineBuilder {
             .await
             .expect("Failed to list folders")
         {
-            match Bucket::restore_with_limiter(path.clone(), cfg.clone(), io_limiter.clone()).await
+            match Bucket::builder()
+                .path(path.clone())
+                .cfg(cfg.clone())
+                .io_limiter(io_limiter.clone())
+                .usage_counters(Arc::clone(&usage_counters))
+                .restore()
+                .await
             {
                 Ok(bucket) => {
                     let bucket = Arc::new(bucket);
@@ -91,6 +110,7 @@ impl StorageEngineBuilder {
             cfg,
             folder_keeper: Arc::new(folder_keeper),
             io_limiter,
+            usage_counters,
         }
     }
 }
@@ -104,6 +124,9 @@ pub struct StorageEngine {
     cfg: Cfg,
     folder_keeper: Arc<FolderKeeper>,
     io_limiter: InFlightIoLimiter,
+    /// Usage traffic counters owned by the engine and shared with the usage
+    /// statistics logger, which drains them periodically.
+    usage_counters: Arc<UsageCounters>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -118,12 +141,18 @@ impl StorageEngine {
             cfg: None,
             license: None,
             data_path: None,
+            usage_counters: None,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn cfg(&self) -> &Cfg {
         &self.cfg
+    }
+
+    #[cfg(test)]
+    pub(crate) fn usage_counters(&self) -> &Arc<UsageCounters> {
+        &self.usage_counters
     }
 
     async fn reload(&self) -> Result<(), ReductError> {
@@ -196,9 +225,62 @@ impl StorageEngine {
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_storage_limit(content_size).await?;
         let bucket = self.get_bucket(bucket_name).await?.upgrade()?;
-        bucket
+        // Write traffic is counted at `RecordWriter` creation, alongside reads
+        // at `RecordReader` creation.
+        let writer = bucket
             .begin_write(entry_name, time, content_size, content_type, labels)
-            .await
+            .await?;
+        Ok(writer)
+    }
+
+    /// Collect point-in-time usage totals in a single walk over all buckets,
+    /// returning the instance aggregate and a per-bucket breakdown.
+    pub(crate) async fn usage_snapshot(
+        &self,
+    ) -> Result<(UsageSnapshot, HashMap<String, BucketSnapshot>), ReductError> {
+        let infos = {
+            let buckets = self.buckets.read().await?;
+            buckets
+                .values()
+                .map(|bucket| (bucket.name().to_string(), bucket.clone().info()))
+                .collect::<Vec<_>>()
+        };
+
+        let mut snapshot = UsageSnapshot {
+            bucket_count: infos.len() as u64,
+            ..UsageSnapshot::default()
+        };
+        let mut bucket_snapshots = HashMap::new();
+        for (name, task) in infos {
+            let bucket = task.await?;
+            let block_count = bucket
+                .entries
+                .iter()
+                .map(|entry| entry.block_count)
+                .sum::<u64>();
+            let record_count = bucket
+                .entries
+                .iter()
+                .map(|entry| entry.record_count)
+                .sum::<u64>();
+
+            snapshot.storage_bytes += bucket.info.size;
+            snapshot.entry_count += bucket.info.entry_count;
+            snapshot.block_count += block_count;
+            snapshot.record_count += record_count;
+
+            bucket_snapshots.insert(
+                name,
+                BucketSnapshot {
+                    storage_bytes: bucket.info.size,
+                    entry_count: bucket.info.entry_count,
+                    block_count,
+                    record_count,
+                },
+            );
+        }
+
+        Ok((snapshot, bucket_snapshots))
     }
 
     async fn total_usage(&self) -> Result<u64, ReductError> {
@@ -265,14 +347,15 @@ impl StorageEngine {
 
         self.folder_keeper.add_folder(name).await?;
         let bucket = Arc::new(
-            Bucket::try_build_with_limiter(
-                name,
-                &self.data_path,
-                settings,
-                self.cfg.clone(),
-                self.io_limiter.clone(),
-            )
-            .await?,
+            Bucket::builder()
+                .name(name)
+                .data_path(self.data_path.clone())
+                .settings(settings)
+                .cfg(self.cfg.clone())
+                .io_limiter(self.io_limiter.clone())
+                .usage_counters(Arc::clone(&self.usage_counters))
+                .build()
+                .await?,
         );
         buckets.insert(name.to_string(), Arc::clone(&bucket));
 
@@ -376,6 +459,7 @@ impl StorageEngine {
                     ));
                 }
 
+                bucket.ensure_not_deleting().await?;
                 bucket.sync_fs().await?;
             } else {
                 Err(not_found!("Bucket '{}' is not found", old_name))?;
@@ -391,7 +475,13 @@ impl StorageEngine {
         folder_keeper.rename_folder(&old_name, &new_name).await?;
 
         buckets.remove(&old_name);
-        let bucket = Bucket::restore_with_limiter(new_path, cfg, self.io_limiter.clone()).await?;
+        let bucket = Bucket::builder()
+            .path(new_path)
+            .cfg(cfg)
+            .io_limiter(self.io_limiter.clone())
+            .usage_counters(Arc::clone(&self.usage_counters))
+            .restore()
+            .await?;
         buckets.insert(new_name.to_string(), Arc::new(bucket));
         debug!("Bucket '{}' is renamed to '{}'", old_name, new_name);
         Ok(())
@@ -699,6 +789,92 @@ mod tests {
         assert_eq!(storage.info().await.unwrap().license, Some(license));
     }
 
+    #[rstest]
+    #[tokio::test]
+    async fn test_usage_snapshot(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        for bucket_name in ["snap-1", "snap-2"] {
+            let bucket = storage
+                .create_bucket(bucket_name, BucketSettings::default())
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let mut writer = bucket
+                .begin_write("entry", 1, 10, "text/plain".to_string(), Labels::new())
+                .await
+                .unwrap();
+            writer
+                .send(Ok(Some(Bytes::from("0123456789"))))
+                .await
+                .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
+        let (snapshot, bucket_snapshots) = storage.usage_snapshot().await.unwrap();
+        assert_eq!(snapshot.bucket_count, 2);
+        assert_eq!(snapshot.entry_count, 2);
+        assert_eq!(snapshot.block_count, 2);
+        assert_eq!(snapshot.record_count, 2);
+        assert!(snapshot.storage_bytes > 0);
+
+        assert_eq!(bucket_snapshots.len(), 2);
+        let snap_1 = bucket_snapshots.get("snap-1").unwrap();
+        assert_eq!(snap_1.entry_count, 1);
+        assert_eq!(snap_1.block_count, 1);
+        assert_eq!(snap_1.record_count, 1);
+        assert!(snap_1.storage_bytes > 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_usage_counters_track_writes_and_reads(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        storage
+            .create_bucket("test", BucketSettings::default())
+            .await
+            .unwrap();
+
+        let mut writer = storage
+            .begin_write(
+                "test",
+                "entry",
+                1,
+                10,
+                "text/plain".to_string(),
+                Labels::new(),
+            )
+            .await
+            .unwrap();
+        writer
+            .send(Ok(Some(Bytes::from("0123456789"))))
+            .await
+            .unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let drained = storage.usage_counters().drain().await.unwrap();
+        assert_eq!(drained.total.write_bytes, 10);
+        assert_eq!(drained.total.records_written, 1);
+        assert_eq!(drained.total.records_read, 0);
+        assert_eq!(drained.total.written_entries, 1);
+        assert_eq!(drained.buckets.get("test").unwrap().write_bytes, 10);
+
+        let _reader = storage
+            .get_bucket("test")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap()
+            .begin_read("entry", 1)
+            .await
+            .unwrap();
+
+        let drained = storage.usage_counters().drain().await.unwrap();
+        assert_eq!(drained.total.read_bytes, 10);
+        assert_eq!(drained.total.records_read, 1);
+        assert_eq!(drained.total.records_written, 0);
+        assert_eq!(drained.total.read_entries, 1);
+        assert_eq!(drained.buckets.get("test").unwrap().read_bytes, 10);
+    }
+
     mod recovery {
         use super::*;
         use crate::storage::bucket::settings::SETTINGS_NAME;
@@ -761,7 +937,7 @@ mod tests {
                 ServerInfo {
                     version: env!("CARGO_PKG_VERSION").to_string(),
                     bucket_count: 1,
-                    usage: 142,
+                    usage: 146,
                     uptime: 0,
                     oldest_record: 1000,
                     latest_record: 5000,
@@ -1251,6 +1427,25 @@ mod tests {
                 result,
                 Err(conflict!("Can't rename provisioned bucket 'test'"))
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn rename_bucket_returns_conflict_when_bucket_deleting(
+            #[future] storage: Arc<StorageEngine>,
+        ) {
+            let storage = storage.await;
+            let bucket = storage
+                .create_bucket("test", BucketSettings::default())
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            bucket.mark_deleting().await.unwrap();
+
+            let result = storage
+                .rename_bucket("test".to_string(), "new".to_string())
+                .await;
+            assert_eq!(result, Err(conflict!("Bucket 'test' is being deleted")));
         }
     }
 

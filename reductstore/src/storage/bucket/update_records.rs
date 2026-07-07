@@ -35,6 +35,7 @@ impl Bucket {
         &self,
         updates: Vec<UpdateLabelsMulti>,
     ) -> Result<UpdateResult, ReductError> {
+        self.ensure_not_deleting().await?;
         let mut result: UpdateResult = BTreeMap::new();
         let mut updates_per_entry: BTreeMap<String, Vec<(u64, Labels, HashSet<String>)>> =
             BTreeMap::new();

@@ -34,9 +34,13 @@ pub struct ReplicationSettings {
     pub dst_host: String,
     /// Destination access token
     pub dst_token: Option<String>,
-    /// Entries to replicate. If empty, all entries are replicated. Wildcards are supported.
+    /// Entries to replicate. If empty, all entries are replicated. Supports exact names,
+    /// glob-like `*` and `**` wildcards, and `!` exclusion patterns.
     #[serde(default)]
     pub entries: Vec<String>,
+    /// Prefix to add to destination entry names
+    #[serde(default)]
+    pub dst_prefix: String,
     /// Labels to include
     #[serde(default)]
     pub include: Labels,
@@ -46,9 +50,6 @@ pub struct ReplicationSettings {
     /// Replication each N-th record
     #[serde(default)]
     pub each_n: Option<u64>,
-    /// Replication a record every S seconds
-    #[serde(default)]
-    pub each_s: Option<f64>,
     /// When condition
     #[serde(default)]
     pub when: Option<Value>,

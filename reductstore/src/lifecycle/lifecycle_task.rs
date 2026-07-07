@@ -1,17 +1,18 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::lifecycle::action::{LifecycleAction, LifecycleContext};
-use crate::lifecycle::system_event_payload::LifecycleSystemEventPayload;
-use crate::syslog::SystemEvent;
+use crate::lifecycle::action::{LifecycleAction, LifecycleContext, LifecycleRunResult};
+use crate::syslog::payload::lifecycle::LifecycleSystemEventPayload;
+use crate::syslog::{SystemEvent, SystemEventKind};
 
-use crate::lifecycle::SystemEventSink;
+use crate::syslog::SystemEventSink;
+use chrono::{DateTime, Utc};
 use log::{debug, error};
 use reduct_base::error::ReductError;
 use reduct_base::msg::lifecycle_api::{
     LifecycleInfo, LifecycleMode, LifecycleSettings, LifecycleType,
 };
-use std::sync::atomic::{AtomicBool, AtomicU8, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -27,6 +28,7 @@ pub(super) struct LifecycleTask {
     system_event_sink: Option<SystemEventSink>,
     stop_flag: Arc<AtomicBool>,
     mode: Arc<AtomicU8>,
+    last_run: Arc<AtomicU64>,
     worker_handle: Option<JoinHandle<()>>,
 }
 
@@ -50,6 +52,7 @@ impl LifecycleTask {
             system_event_sink,
             stop_flag: Arc::new(AtomicBool::new(false)),
             mode: Arc::new(AtomicU8::new(mode as u8)),
+            last_run: Arc::new(AtomicU64::new(0)),
             worker_handle: None,
         }
     }
@@ -68,6 +71,7 @@ impl LifecycleTask {
         let system_event_sink = self.system_event_sink.clone();
         let stop_flag = Arc::clone(&self.stop_flag);
         let mode = Arc::clone(&self.mode);
+        let last_run = Arc::clone(&self.last_run);
 
         let handle = tokio::spawn(async move {
             debug!("Lifecycle worker '{}' started", name);
@@ -82,31 +86,49 @@ impl LifecycleTask {
                     break;
                 }
 
-                let started = std::time::Instant::now();
-                match action.run(&name, &settings, context.clone()).await {
-                    Ok(result) => {
-                        Self::log_system_event(
-                            system_event_sink.clone(),
-                            &name,
-                            action.lifecycle_type(),
-                            &settings.bucket,
-                            started.elapsed().as_secs_f64(),
-                            Ok(result.affected_records),
-                        )
-                        .await;
+                Self::mark_last_run(&last_run);
+                loop {
+                    let started = std::time::Instant::now();
+                    match action.run(&name, &settings, context.clone()).await {
+                        Ok(result) => {
+                            Self::log_system_event(
+                                system_event_sink.clone(),
+                                &name,
+                                action.lifecycle_type(),
+                                &settings.bucket,
+                                started.elapsed().as_secs_f64(),
+                                Ok(result.clone()),
+                            )
+                            .await;
+
+                            // in case we in the catching up state
+                            // we repeat the action until we catch up or we have affected records
+                            if !result.caught_up && result.affected_records == 0 {
+                                Self::sleep_with_stop(
+                                    Duration::from_millis(100),
+                                    Arc::clone(&stop_flag),
+                                )
+                                .await;
+                                if stop_flag.load(Ordering::Relaxed) {
+                                    break;
+                                }
+                                continue;
+                            }
+                        }
+                        Err(err) => {
+                            error!("Lifecycle worker '{}' failed: {}", name, err);
+                            Self::log_system_event(
+                                system_event_sink.clone(),
+                                &name,
+                                action.lifecycle_type(),
+                                &settings.bucket,
+                                started.elapsed().as_secs_f64(),
+                                Err(err),
+                            )
+                            .await;
+                        }
                     }
-                    Err(err) => {
-                        error!("Lifecycle worker '{}' failed: {}", name, err);
-                        Self::log_system_event(
-                            system_event_sink.clone(),
-                            &name,
-                            action.lifecycle_type(),
-                            &settings.bucket,
-                            started.elapsed().as_secs_f64(),
-                            Err(err),
-                        )
-                        .await;
-                    }
+                    break;
                 }
             }
             debug!("Lifecycle worker '{}' stopped", name);
@@ -129,7 +151,9 @@ impl LifecycleTask {
             name: self.name.clone(),
             is_provisioned: self.is_provisioned,
             is_running: self.is_running(),
+            lifecycle_type: self.settings.lifecycle_type,
             mode: self.load_mode(),
+            last_run: self.load_last_run(),
         }
     }
 
@@ -166,6 +190,21 @@ impl LifecycleTask {
         }
     }
 
+    fn load_last_run(&self) -> Option<DateTime<Utc>> {
+        match self.last_run.load(Ordering::Relaxed) {
+            0 => None,
+            ts => DateTime::<Utc>::from_timestamp_micros(ts as i64),
+        }
+    }
+
+    fn mark_last_run(last_run: &Arc<AtomicU64>) {
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_micros() as u64;
+        last_run.store(timestamp, Ordering::Relaxed);
+    }
+
     async fn sleep_with_stop(interval: Duration, stop_flag: Arc<AtomicBool>) {
         let sleep_step = Duration::from_millis(100);
         let mut slept = Duration::ZERO;
@@ -183,7 +222,7 @@ impl LifecycleTask {
         action_type: LifecycleType,
         bucket: &str,
         duration: f64,
-        result: Result<u64, ReductError>,
+        result: Result<LifecycleRunResult, ReductError>,
     ) {
         let Some(sink) = system_event_sink else {
             debug!(
@@ -194,7 +233,7 @@ impl LifecycleTask {
         };
 
         let (status, message, payload) = match result {
-            Ok(processed_records) => (
+            Ok(result) => (
                 200u16,
                 "".to_string(),
                 LifecycleSystemEventPayload::success(
@@ -202,7 +241,10 @@ impl LifecycleTask {
                     &format!("{:?}", action_type).to_lowercase(),
                     bucket,
                     duration,
-                    processed_records,
+                    result.affected_records,
+                    result.affected_blocks,
+                    result.last_processed_ts,
+                    result.caught_up,
                 )
                 .to_value(),
             ),
@@ -214,14 +256,13 @@ impl LifecycleTask {
                     &format!("{:?}", action_type).to_lowercase(),
                     bucket,
                     duration,
-                    err.status as u16,
-                    &err.message,
                 )
                 .to_value(),
             ),
         };
 
         let event = SystemEvent {
+            kind: SystemEventKind::Lifecycle,
             event_type: "lifecycle_run".to_string(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -362,7 +403,9 @@ pub(super) mod tests {
         assert_eq!(info.name, "test");
         assert!(info.is_provisioned);
         assert!(info.is_running);
+        assert_eq!(info.lifecycle_type, LifecycleType::Delete);
         assert_eq!(info.mode, LifecycleMode::Enabled);
+        assert_eq!(info.last_run, None);
 
         task.stop().await;
     }
@@ -401,6 +444,7 @@ pub(super) mod tests {
             tx.send(name.to_string()).unwrap();
             Ok(LifecycleRunResult {
                 affected_records: 1,
+                ..Default::default()
             })
         });
 
@@ -413,6 +457,7 @@ pub(super) mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(call, "test");
+        assert!(task.info().last_run.is_some());
 
         task.stop().await;
     }
@@ -428,6 +473,7 @@ pub(super) mod tests {
             tx.send(name.to_string()).unwrap();
             Ok(LifecycleRunResult {
                 affected_records: 1,
+                ..Default::default()
             })
         });
 
@@ -455,6 +501,7 @@ pub(super) mod tests {
             tx.send(name.to_string()).unwrap();
             Ok(LifecycleRunResult {
                 affected_records: 1,
+                ..Default::default()
             })
         });
 
@@ -503,7 +550,12 @@ pub(super) mod tests {
             LifecycleType::Delete,
             "bucket-1",
             0.25,
-            Ok(42),
+            Ok(LifecycleRunResult {
+                affected_records: 42,
+                affected_blocks: Some(3),
+                last_processed_ts: None,
+                caught_up: false,
+            }),
         )
         .await;
 
@@ -520,8 +572,46 @@ pub(super) mod tests {
         assert_eq!(event.payload["action_type"], "delete");
         assert_eq!(event.payload["bucket"], "bucket-1");
         assert_eq!(event.payload["processed_records"], 42);
+        assert_eq!(event.payload["processed_blocks"], 3);
+        assert_eq!(event.payload["caught_up"], false);
         assert!(event.payload.get("error_code").is_none());
         assert!(event.payload.get("error_message").is_none());
+    }
+
+    #[tokio::test]
+    async fn log_system_event_writes_compression_metrics() {
+        let captured = Arc::new(Mutex::new(Vec::<SystemEvent>::new()));
+        let sink = SystemEventSink {
+            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
+                events: Arc::clone(&captured),
+            })
+                as Box<dyn LogSystemEvent + Send + Sync>)),
+            instance_name: "instance-1".to_string(),
+        };
+
+        LifecycleTask::log_system_event(
+            Some(sink),
+            "policy-1",
+            LifecycleType::Compress,
+            "bucket-1",
+            0.25,
+            Ok(LifecycleRunResult {
+                affected_records: 42,
+                affected_blocks: Some(3),
+                last_processed_ts: Some(123),
+                caught_up: true,
+            }),
+        )
+        .await;
+
+        let events = captured.lock().unwrap();
+        assert_eq!(events.len(), 1);
+        let event = &events[0];
+
+        assert_eq!(event.payload["processed_records"], 42);
+        assert_eq!(event.payload["processed_blocks"], 3);
+        assert_eq!(event.payload["last_processed_ts"], 123);
+        assert_eq!(event.payload["caught_up"], true);
     }
 
     #[tokio::test]
@@ -558,9 +648,11 @@ pub(super) mod tests {
         assert_eq!(event.payload["policy_name"], "policy-1");
         assert_eq!(event.payload["action_type"], "delete");
         assert_eq!(event.payload["bucket"], "bucket-1");
-        assert_eq!(event.payload["processed_records"], serde_json::Value::Null);
-        assert_eq!(event.payload["error_code"], 422);
-        assert_eq!(event.payload["error_message"], "failed to run");
+        assert_eq!(event.payload["processed_records"], 0);
+        assert_eq!(event.payload["processed_blocks"], 0);
+        assert_eq!(event.payload["caught_up"], false);
+        assert!(event.payload.get("error_code").is_none());
+        assert!(event.payload.get("error_message").is_none());
     }
 
     async fn new_task(
@@ -571,7 +663,7 @@ pub(super) mod tests {
             lifecycle_type: LifecycleType::Delete,
             bucket: "bucket-1".to_string(),
             entries: vec!["entry-1".to_string()],
-            max_age: "1d".to_string(),
+            older_than: "1d".to_string(),
             interval: "100ms".to_string(),
             when: None,
             mode,
@@ -582,7 +674,7 @@ pub(super) mod tests {
             settings,
             Duration::from_millis(100),
             action,
-            LifecycleContext::new(storage().await),
+            LifecycleContext::new(storage().await, false, "unknown".to_string()),
             None,
         )
     }
@@ -616,7 +708,7 @@ pub(super) mod tests {
             lifecycle_type: LifecycleType::Delete,
             bucket: "bucket-1".to_string(),
             entries: vec!["entry-1".to_string()],
-            max_age: "1h".to_string(),
+            older_than: "1h".to_string(),
             interval: "1h".to_string(),
             when: None,
             mode: LifecycleMode::Enabled,

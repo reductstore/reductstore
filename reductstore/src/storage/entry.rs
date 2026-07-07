@@ -1,8 +1,11 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+mod builder;
+mod compress;
 mod entry_loader;
 pub(crate) mod io;
+mod pattern;
 mod read_record;
 mod remove_records;
 mod system;
@@ -14,9 +17,7 @@ use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
-use crate::storage::block_manager::block_index::BlockIndex;
-use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
-use crate::storage::entry::entry_loader::EntryLoader;
+use crate::storage::block_manager::BlockManager;
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
@@ -27,7 +28,7 @@ use log::{debug, error};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;
-use reduct_base::{conflict, internal_server_error, not_found};
+use reduct_base::{conflict, internal_server_error, not_found, unprocessable_entity};
 use std::collections::{BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -38,6 +39,9 @@ pub(crate) use system::{
 };
 use tokio::sync::OwnedSemaphorePermit;
 use tokio::task::JoinHandle;
+
+pub(crate) use builder::EntryBuilder;
+pub(crate) use pattern::entry_matches_pattern;
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,
@@ -79,89 +83,21 @@ pub struct EntrySettings {
     pub max_block_records: u64,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct CompressionStats {
+    pub(crate) blocks: u64,
+    pub(crate) records: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct RecordQueryStats {
+    pub(crate) blocks: u64,
+    pub(crate) records: u64,
+}
+
 impl Entry {
-    #[allow(dead_code)]
-    pub async fn try_build(
-        name: &str,
-        path: PathBuf,
-        settings: EntrySettings,
-        cfg: Arc<Cfg>,
-    ) -> Result<Self, ReductError> {
-        let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
-        Self::try_build_with_limiter(name, path, settings, cfg, io_limiter).await
-    }
-
-    pub(crate) async fn try_build_with_limiter(
-        name: &str,
-        path: PathBuf,
-        settings: EntrySettings,
-        cfg: Arc<Cfg>,
-        io_limiter: InFlightIoLimiter,
-    ) -> Result<Self, ReductError> {
-        let bucket_name = path.file_name().unwrap().to_str().unwrap().to_string();
-        let path = path.join(name);
-        let block_index_path = path.join(BLOCK_INDEX_FILE);
-        let block_index = BlockIndex::new(block_index_path.clone());
-
-        // create block index file if it doesn't exist.
-        if !FILE_CACHE.try_exists(&block_index_path).await? {
-            FILE_CACHE.create_dir_all(&path).await?;
-            block_index.save().await?;
-        }
-
-        Ok(Self {
-            name: name.to_string(),
-            bucket_name: bucket_name.clone(),
-            settings: AsyncRwLock::new(settings),
-            block_manager: Arc::new(AsyncRwLock::new(
-                BlockManager::build(
-                    path.clone(),
-                    block_index,
-                    bucket_name.clone(),
-                    name.to_string(),
-                    cfg.clone(),
-                )
-                .await?,
-            )),
-            system_behavior: strategy_for_entry(name),
-            queries: Arc::new(AsyncRwLock::new(HashMap::new())),
-            status: AsyncRwLock::new(ResourceStatus::Ready),
-            path,
-            cfg,
-            io_limiter,
-        })
-    }
-
-    #[allow(dead_code)]
-    pub(crate) async fn restore(
-        path: PathBuf,
-        entry_name: String,
-        bucket_name: String,
-        options: EntrySettings,
-        cfg: Arc<Cfg>,
-    ) -> Result<Option<Entry>, ReductError> {
-        let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
-        Self::restore_with_limiter(path, entry_name, bucket_name, options, cfg, io_limiter).await
-    }
-
-    pub(crate) async fn restore_with_limiter(
-        path: PathBuf,
-        entry_name: String,
-        bucket_name: String,
-        options: EntrySettings,
-        cfg: Arc<Cfg>,
-        io_limiter: InFlightIoLimiter,
-    ) -> Result<Option<Entry>, ReductError> {
-        let entry = EntryLoader::restore_entry_with_names(
-            path,
-            entry_name,
-            bucket_name,
-            options,
-            cfg,
-            io_limiter,
-        )
-        .await?;
-        Ok(entry)
+    pub(crate) fn builder() -> EntryBuilder {
+        EntryBuilder::default()
     }
 
     pub(crate) async fn acquire_writer_slot(
@@ -282,16 +218,15 @@ impl Entry {
 
         let bm = self.block_manager.read().await?;
         let index = bm.index();
-        let oldest_record = index
-            .tree()
+        let active_tree = index.active_tree();
+        let oldest_record = active_tree
             .iter()
             .find_map(|block_id| {
                 let block = index.get_block(*block_id)?;
                 (block.record_count > 0).then_some(*block_id)
             })
             .unwrap_or(0);
-        let latest_record = index
-            .tree()
+        let latest_record = active_tree
             .iter()
             .rev()
             .find_map(|block_id| {
@@ -324,11 +259,6 @@ impl Entry {
         Ok(())
     }
 
-    pub(crate) async fn mark_ready(&self) -> Result<(), ReductError> {
-        *self.status.write().await? = ResourceStatus::Ready;
-        Ok(())
-    }
-
     pub(crate) async fn ensure_not_deleting(&self) -> Result<(), ReductError> {
         if self.status().await? == ResourceStatus::Deleting {
             Err(conflict!(
@@ -342,6 +272,10 @@ impl Entry {
     }
 
     pub(super) async fn remove_all_blocks(&self) -> Result<(), ReductError> {
+        if !FILE_CACHE.try_exists(&self.path).await? {
+            return Ok(());
+        }
+
         let block_ids = {
             let block_manager = self.block_manager.read().await?;
             Ok::<BTreeSet<u64>, ReductError>(block_manager.index().tree().clone())
@@ -349,7 +283,13 @@ impl Entry {
 
         for block_id in block_ids? {
             let mut block_manager = self.block_manager.write().await?;
-            block_manager.remove_block(block_id).await?;
+            if let Err(err) = block_manager.remove_block(block_id).await {
+                if !FILE_CACHE.try_exists(&self.path).await? {
+                    return Ok(());
+                }
+
+                return Err(err);
+            }
         }
         Ok(())
     }
@@ -398,6 +338,14 @@ impl Entry {
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
     pub async fn compact(&self) -> Result<(), ReductError> {
+        if !FILE_CACHE.try_exists(&self.path).await? {
+            debug!(
+                "Skipping compact for {}/{} because entry folder is missing",
+                self.bucket_name, self.name
+            );
+            return Ok(());
+        }
+
         if let Some(mut bm) = self.block_manager.try_write() {
             bm.save_cache_metadata_on_disk().await
         } else {
@@ -415,8 +363,16 @@ impl Entry {
     /// Unlike [`Self::compact`], this method waits for the block manager lock and
     /// must be used for strict sync points (e.g. graceful shutdown).
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
+        if !FILE_CACHE.try_exists(&self.path).await? {
+            debug!(
+                "Skipping sync for {}/{} because entry folder is missing",
+                self.bucket_name, self.name
+            );
+            return Ok(());
+        }
+
         let mut bm = self.block_manager.write().await?;
-        bm.save_cache_metadata_on_disk().await
+        bm.save_cache_on_disk().await
     }
 
     pub fn name(&self) -> &str {
@@ -448,6 +404,7 @@ impl Entry {
     }
 
     pub async fn set_settings(&self, settings: EntrySettings) -> Result<(), ReductError> {
+        self.ensure_not_deleting().await?;
         *self.settings.write().await? = settings;
         Ok(())
     }
@@ -489,6 +446,10 @@ impl Entry {
             info.latest_record + 1
         };
 
+        if start > end && !query.continuous.unwrap_or(false) {
+            return Err(unprocessable_entity!("Start time must be before stop time"));
+        }
+
         Ok((start, end))
     }
 }
@@ -505,20 +466,97 @@ mod tests {
 
     mod deleting {
         use super::*;
+        use crate::storage::entry::update_labels::UpdateLabels;
+        use std::collections::HashSet;
+
+        fn deleting_conflict(entry: &Entry) -> ReductError {
+            conflict!(
+                "Entry '{}' in bucket '{}' is being deleted",
+                entry.name(),
+                entry.bucket_name()
+            )
+        }
 
         #[rstest]
         #[tokio::test]
         async fn mark_deleting_returns_conflict_when_already_deleting(#[future] entry: Arc<Entry>) {
             let entry = entry.await;
             entry.mark_deleting().await.unwrap();
-            assert_eq!(
-                entry.mark_deleting().await,
-                Err(conflict!(
-                    "Entry '{}' in bucket '{}' is being deleted",
-                    entry.name(),
-                    entry.bucket_name()
-                ))
-            );
+            assert_eq!(entry.mark_deleting().await, Err(deleting_conflict(&entry)));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn begin_write_returns_conflict_when_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            entry.mark_deleting().await.unwrap();
+
+            let err = entry
+                .begin_write(1, 1, "text/plain".to_string(), Labels::new())
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, deleting_conflict(&entry));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn update_labels_returns_conflict_when_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            entry.mark_deleting().await.unwrap();
+
+            let err = entry
+                .clone()
+                .update_labels(vec![UpdateLabels {
+                    time: 1,
+                    update: Labels::new(),
+                    remove: HashSet::new(),
+                }])
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, deleting_conflict(&entry));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn remove_records_returns_conflict_when_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            entry.mark_deleting().await.unwrap();
+
+            let err = entry.clone().remove_records(vec![1]).await.err().unwrap();
+            assert_eq!(err, deleting_conflict(&entry));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn query_remove_records_returns_conflict_when_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            entry.mark_deleting().await.unwrap();
+
+            let err = entry
+                .query_remove_records(QueryEntry::default())
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, deleting_conflict(&entry));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn set_settings_returns_conflict_when_deleting(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            entry.mark_deleting().await.unwrap();
+
+            let err = entry
+                .set_settings(EntrySettings {
+                    max_block_size: 1,
+                    max_block_records: 1,
+                })
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, deleting_conflict(&entry));
         }
     }
 
@@ -569,20 +607,21 @@ mod tests {
             );
 
             bm.save_cache_on_disk().await.unwrap();
-            let entry = Entry::restore(
-                path.join(entry.name()),
-                "entry".to_string(),
-                "bucket".to_string(),
-                entry_settings,
-                Cfg::default().into(),
-            )
-            .await
-            .unwrap()
-            .unwrap();
+            let entry = Entry::builder()
+                .path(path.join(entry.name()))
+                .name("entry")
+                .bucket_name("bucket")
+                .settings(entry_settings)
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .restore()
+                .await
+                .unwrap()
+                .unwrap();
             let info = entry.info().await.unwrap();
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
-            assert_eq!(info.size, 88);
+            assert_eq!(info.size, 90);
         }
     }
 
@@ -681,6 +720,28 @@ mod tests {
                     id
                 ))
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn reject_reversed_historical_query_range(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1000000).await;
+
+            let err = entry
+                .query(QueryEntry {
+                    start: Some(2000000),
+                    stop: Some(1000000),
+                    ..Default::default()
+                })
+                .await
+                .unwrap_err();
+
+            assert_eq!(
+                err,
+                ReductError::unprocessable_entity("Start time must be before stop time")
+            );
+            assert!(entry.queries.read().await.unwrap().is_empty());
         }
 
         #[rstest]
@@ -826,17 +887,18 @@ mod tests {
         use reduct_base::io::ReadRecord;
 
         let entry = Arc::new(
-            Entry::try_build(
-                "x/y/z",
-                path.clone(),
-                EntrySettings {
+            Entry::builder()
+                .name("x/y/z")
+                .bucket_path(path.clone())
+                .settings(EntrySettings {
                     max_block_size: 10000,
                     max_block_records: 10000,
-                },
-                Cfg::default().into(),
-            )
-            .await
-            .unwrap(),
+                })
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap(),
         );
 
         write_stub_record(&entry, 1000000).await;
@@ -921,17 +983,18 @@ mod tests {
         #[tokio::test]
         async fn test_size_counting(path: PathBuf) {
             let entry = Arc::new(
-                Entry::try_build(
-                    "entry",
-                    path.clone(),
-                    EntrySettings {
+                Entry::builder()
+                    .name("entry")
+                    .bucket_path(path.clone())
+                    .settings(EntrySettings {
                         max_block_size: 100000,
                         max_block_records: 2,
-                    },
-                    Cfg::default().into(),
-                )
-                .await
-                .unwrap(),
+                    })
+                    .cfg(Cfg::default().into())
+                    .usage_counters(Default::default())
+                    .build()
+                    .await
+                    .unwrap(),
             );
 
             write_stub_record(&entry, 1000000).await;
@@ -941,7 +1004,7 @@ mod tests {
 
             assert_eq!(entry.info().await.unwrap().block_count, 2);
             assert_eq!(entry.info().await.unwrap().record_count, 4);
-            assert_eq!(entry.info().await.unwrap().size, 116);
+            assert_eq!(entry.info().await.unwrap().size, 140);
 
             entry.try_remove_oldest_block().await.unwrap();
             assert_eq!(entry.info().await.unwrap().block_count, 1);
@@ -966,7 +1029,13 @@ mod tests {
     #[fixture]
     pub(super) async fn entry(entry_settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
         Arc::new(
-            Entry::try_build("entry", path.clone(), entry_settings, Cfg::default().into())
+            Entry::builder()
+                .name("entry")
+                .bucket_path(path.clone())
+                .settings(entry_settings)
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .build()
                 .await
                 .unwrap(),
         )
