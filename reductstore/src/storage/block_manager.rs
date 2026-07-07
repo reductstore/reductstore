@@ -30,6 +30,7 @@ use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use reduct_base::too_early;
 use std::fs::OpenOptions;
+use std::io::ErrorKind::UnexpectedEof;
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -620,8 +621,31 @@ impl BlockManager {
         for (record_time, begin, record_size) in record_info {
             let mut read_bytes = 0;
             while read_bytes < record_size {
-                let (buf, read) =
-                    read_in_chunks(&src_block_path, begin, record_size, read_bytes).await?;
+                let (buf, read) = match read_in_chunks(
+                    &src_block_path,
+                    begin,
+                    record_size,
+                    read_bytes,
+                )
+                .await
+                {
+                    Ok(result) => result,
+                    Err(e) => {
+                        let _ = std::fs::remove_file(&temp_block_path);
+                        if let Some(source) = &e.source {
+                            if source.kind() == UnexpectedEof {
+                                warn!(
+                                        "Unexpected EOF while reading record {}/{} from block {}. Marking block as corrupted.",
+                                        block_id,
+                                        record_time,
+                                        src_block_path.display()
+                                    );
+                                self.mark_block_corrupted(block_id).await?;
+                            }
+                        }
+                        return Err(e.without_source());
+                    }
+                };
 
                 read_bytes += read as u64;
                 temp_block.write_all(&buf)?;
@@ -1772,6 +1796,39 @@ mod tests {
             let block = block.read().await.unwrap();
             assert_eq!(block.record_count(), 1);
             assert!(block.get_record(1).is_some());
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn test_remove_records_marks_corrupted_on_eof(
+            #[future] block_manager: BlockManager,
+            #[future] block: BlockRef,
+            block_id: u64,
+        ) {
+            let block_manager = block_manager.await;
+            let block = block.await;
+            let block_manager = Arc::new(AsyncRwLock::new(block_manager));
+            write_record(1, 10, &block_manager, block.clone()).await;
+
+            {
+                let bm = block_manager.write().await.unwrap();
+                let data_path = bm.path_to_data(block_id);
+                FILE_CACHE.remove(&data_path).await.unwrap();
+
+                // Write a truncated record to simulate EOF during read
+                let mut file = std::fs::OpenOptions::new()
+                    .write(true)
+                    .create(true)
+                    .truncate(true)
+                    .open(&data_path)
+                    .unwrap();
+                file.write_all(&vec![0; 100]).unwrap(); // Write a small record to simulate truncation
+            }
+
+            let mut bm = block_manager.write().await.unwrap();
+            let _ = bm.remove_records(block_id, vec![0]).await;
+
+            assert!(bm.is_block_corrupted(block_id));
         }
     }
 
