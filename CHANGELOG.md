@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Restore plain `url::ParseError` conversion for `ReductError` to keep downstream `Result<_, ReductError>` APIs compatible.
+- Restore plain type conversions for `ReductError` to keep downstream `Result<_, ReductError>` APIs compatible, [PR-1529](https://github.com/reductstore/reductstore/pull/1529)
 
 ## 1.20.8 - 2026-07-07
 
