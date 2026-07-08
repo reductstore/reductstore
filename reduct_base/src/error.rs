@@ -126,6 +126,28 @@ impl From<std::io::Error> for ReductError {
     }
 }
 
+impl From<ParseError> for ReductError {
+    fn from(err: ParseError) -> Self {
+        // Keep the plain conversion for downstream APIs returning Result<_, ReductError>.
+        ReductError {
+            status: ErrorCode::UrlParseError,
+            message: err.to_string(),
+            source: None,
+        }
+    }
+}
+
+impl From<SystemTimeError> for ReductError {
+    fn from(err: SystemTimeError) -> Self {
+        // Keep the plain conversion for downstream APIs returning Result<_, ReductError>.
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: err.to_string(),
+            source: None,
+        }
+    }
+}
+
 impl From<SystemTimeError> for ReductError<SystemTimeError> {
     fn from(err: SystemTimeError) -> Self {
         // A system time error is an internal reductstore error
@@ -148,6 +170,17 @@ impl From<ParseError> for ReductError<ParseError> {
     }
 }
 
+impl<T> From<PoisonError<T>> for ReductError {
+    fn from(_: PoisonError<T>) -> Self {
+        // Keep the plain conversion for downstream APIs returning Result<_, ReductError>.
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: "Poison error".to_string(),
+            source: None,
+        }
+    }
+}
+
 impl<T> From<PoisonError<T>> for ReductError<PoisonError<T>> {
     fn from(err: PoisonError<T>) -> Self {
         // A poison error is an internal reductstore error
@@ -155,6 +188,29 @@ impl<T> From<PoisonError<T>> for ReductError<PoisonError<T>> {
             status: ErrorCode::InternalServerError,
             message: "Poison error".to_string(),
             source: Some(err),
+        }
+    }
+}
+
+impl From<Box<dyn std::any::Any + Send>> for ReductError {
+    fn from(err: Box<dyn std::any::Any + Send>) -> Self {
+        // Keep the plain conversion for downstream APIs returning Result<_, ReductError>.
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: format!("{:?}", err),
+            source: None,
+        }
+    }
+}
+
+#[cfg(feature = "io")]
+impl<T> From<SendError<T>> for ReductError {
+    fn from(err: SendError<T>) -> Self {
+        // Keep the plain conversion for downstream APIs returning Result<_, ReductError>.
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: err.to_string(),
+            source: None,
         }
     }
 }
@@ -442,25 +498,63 @@ mod tests {
     #[test]
     fn converts_system_time_error_to_reduct_error() {
         let system_time_error = UNIX_EPOCH.duration_since(SystemTime::now()).unwrap_err();
-        let error: ReductError<_> = system_time_error.into();
+        let error: ReductError = system_time_error.into();
         assert_eq!(error.status, ErrorCode::InternalServerError);
         assert_eq!(error.message, "second time provided was later than self");
+        assert_eq!(error.source, None);
+    }
+
+    #[test]
+    fn converts_system_time_error_to_typed_reduct_error() {
+        let system_time_error = UNIX_EPOCH.duration_since(SystemTime::now()).unwrap_err();
+        let error: ReductError<SystemTimeError> = system_time_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "second time provided was later than self");
+        assert!(error.source.is_some());
     }
 
     #[test]
     fn converts_url_parse_error_to_reduct_error() {
         let parse_error = ParseError::EmptyHost;
-        let error: ReductError<_> = parse_error.into();
+        let error: ReductError = parse_error.into();
         assert_eq!(error.status, ErrorCode::UrlParseError);
         assert_eq!(error.message, "empty host");
+        assert_eq!(error.source, None);
+    }
+
+    #[test]
+    fn converts_url_parse_error_to_typed_reduct_error() {
+        let parse_error = ParseError::EmptyHost;
+        let error: ReductError<ParseError> = parse_error.into();
+        assert_eq!(error.status, ErrorCode::UrlParseError);
+        assert_eq!(error.message, "empty host");
+        assert_eq!(error.source, Some(ParseError::EmptyHost));
     }
 
     #[test]
     fn converts_poison_error_to_reduct_error() {
         let poison_error: PoisonError<()> = PoisonError::new(());
-        let error: ReductError<_> = poison_error.into();
+        let error: ReductError = poison_error.into();
         assert_eq!(error.status, ErrorCode::InternalServerError);
         assert_eq!(error.message, "Poison error");
+        assert_eq!(error.source, None);
+    }
+
+    #[test]
+    fn converts_poison_error_to_typed_reduct_error() {
+        let poison_error: PoisonError<()> = PoisonError::new(());
+        let error: ReductError<PoisonError<()>> = poison_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "Poison error");
+        assert!(error.source.is_some());
+    }
+
+    #[test]
+    fn converts_boxed_any_to_reduct_error() {
+        let boxed_error: Box<dyn std::any::Any + Send> = Box::new("panic payload");
+        let error: ReductError = boxed_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.source, None);
     }
 
     #[test]
@@ -495,9 +589,20 @@ mod tests {
     #[test]
     fn converts_send_error_to_reduct_error() {
         let send_error: SendError<()> = SendError(());
-        let error: ReductError<_> = send_error.into();
+        let error: ReductError = send_error.into();
         assert_eq!(error.status, ErrorCode::InternalServerError);
         assert_eq!(error.message, "channel closed");
+        assert_eq!(error.source, None);
+    }
+
+    #[cfg(feature = "io")]
+    #[test]
+    fn converts_send_error_to_typed_reduct_error() {
+        let send_error: SendError<()> = SendError(());
+        let error: ReductError<SendError<()>> = send_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "channel closed");
+        assert!(error.source.is_some());
     }
 
     mod macros {
