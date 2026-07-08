@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::RecordQueryStats;
+use crate::storage::entry::{entry_matches_pattern, RecordQueryStats};
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
 use std::collections::{BTreeMap, HashMap};
@@ -11,20 +11,37 @@ use std::sync::Arc;
 impl Bucket {
     pub(super) fn requested_entries(entries: &Option<Vec<String>>) -> Option<Vec<String>> {
         match entries {
-            Some(entries) if entries.iter().any(|entry| entry == "*") => None,
-            Some(entries) => Some(entries.clone()),
-            None => None,
+            Some(entries) if !entries.is_empty() => Some(entries.clone()),
+            _ => None,
         }
     }
 
+    /// Check whether an entry name is selected by a set of glob-like patterns.
+    ///
+    /// Patterns share the semantics of query and replication entry filters:
+    /// exact names, legacy prefix wildcards (`cam-*`), single-segment `*`,
+    /// recursive `**`, and `!` exclusions applied after the includes.
     pub(super) fn entry_matches_patterns(entry: &str, patterns: &[String]) -> bool {
-        patterns.iter().any(|pattern| {
-            if let Some(prefix) = pattern.strip_suffix('*') {
-                entry.starts_with(prefix)
-            } else {
-                entry == pattern
-            }
-        })
+        let include_patterns: Vec<&str> = patterns
+            .iter()
+            .filter(|pattern| !(pattern.starts_with('!') && pattern.len() > 1))
+            .map(|pattern| pattern.as_str())
+            .collect();
+        let exclude_patterns: Vec<&str> = patterns
+            .iter()
+            .filter_map(|pattern| pattern.strip_prefix('!'))
+            .filter(|pattern| !pattern.is_empty())
+            .collect();
+
+        let included = include_patterns.is_empty()
+            || include_patterns
+                .iter()
+                .any(|pattern| entry_matches_pattern(entry, pattern));
+
+        included
+            && !exclude_patterns
+                .iter()
+                .any(|pattern| entry_matches_pattern(entry, pattern))
     }
 
     pub(super) fn is_requested_entry(
@@ -163,6 +180,50 @@ mod tests {
     use reduct_base::{conflict, not_found};
     use rstest::rstest;
     use std::collections::HashMap;
+
+    #[rstest]
+    #[case("entry-1", vec!["entry-1".to_string()], true)]
+    #[case("entry-1", vec!["entry-*".to_string()], true)]
+    #[case("other", vec!["entry-*".to_string()], false)]
+    #[case("a/x/b", vec!["/a/*/b".to_string()], true)]
+    #[case("a/x/d/b", vec!["/a/*/b".to_string()], false)]
+    #[case("a/x/b", vec!["/a/**/b".to_string()], true)]
+    #[case("a/x/d/b", vec!["/a/**/b".to_string()], true)]
+    #[case("public", vec!["!secret".to_string()], true)]
+    #[case("secret", vec!["!secret".to_string()], false)]
+    #[case("a/private/x", vec!["/a/**".to_string(), "!/a/private/**".to_string()], false)]
+    #[case("a/public/x", vec!["/a/**".to_string(), "!/a/private/**".to_string()], true)]
+    fn entry_matches_patterns_supports_globs_and_exclusions(
+        #[case] entry: &str,
+        #[case] patterns: Vec<String>,
+        #[case] expected: bool,
+    ) {
+        assert_eq!(Bucket::entry_matches_patterns(entry, &patterns), expected);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_remove_records_supports_recursive_and_exclusion(#[future] bucket: Arc<Bucket>) {
+        let bucket = bucket.await;
+        write(&bucket, "a/public/b", 1, b"pub").await.unwrap();
+        write(&bucket, "a/private/b", 1, b"priv").await.unwrap();
+        write(&bucket, "other", 1, b"other").await.unwrap();
+
+        let request = QueryEntry {
+            query_type: QueryType::Remove,
+            entries: Some(vec!["/a/**".into(), "!/a/private/**".into()]),
+            start: Some(1),
+            stop: Some(2),
+            ..Default::default()
+        };
+
+        let removed = bucket.clone().query_remove_records(request).await.unwrap();
+        assert_eq!(removed, 1);
+
+        assert!(bucket.begin_read("a/public/b", 1).await.is_err());
+        assert!(bucket.begin_read("a/private/b", 1).await.is_ok());
+        assert!(bucket.begin_read("other", 1).await.is_ok());
+    }
 
     #[rstest]
     #[tokio::test]

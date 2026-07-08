@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.20.9 - 2026-07-08
+
+### Added
+
+- Support glob-like entry patterns in lifecycle task filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1524](https://github.com/reductstore/reductstore/issues/1524) by @upuddu
+
 ## 1.20.8 - 2026-07-07
 
 ### Fixed

@@ -4,6 +4,7 @@
 use crate::core::duration::parse_duration_to_micros;
 use crate::lifecycle::action::LifecycleContext;
 use crate::storage::engine::StorageEngine;
+use crate::storage::entry::entry_matches_pattern;
 use crate::syslog::{SYSTEM_BUCKET_NAME, SYSTEM_LIFECYCLE_ENTRY_PREFIX};
 use reduct_base::error::ReductError;
 use reduct_base::io::ReadRecord;
@@ -107,7 +108,7 @@ async fn matching_record_window(
 }
 
 fn requested_entries(entries: &[String]) -> Option<&[String]> {
-    if entries.is_empty() || entries.iter().any(|entry| entry == "*") {
+    if entries.is_empty() {
         None
     } else {
         Some(entries)
@@ -120,14 +121,31 @@ fn is_requested_entry(entry_name: &str, requested_entries: &Option<&[String]>) -
         .unwrap_or(true)
 }
 
+/// Match an entry name against glob-like lifecycle patterns, sharing the
+/// semantics of query and replication entry filters: exact names, legacy
+/// prefix wildcards, single-segment `*`, recursive `**`, and `!` exclusions
+/// applied after the includes.
 fn entry_matches_patterns(entry_name: &str, patterns: &[String]) -> bool {
-    patterns.iter().any(|pattern| {
-        if let Some(prefix) = pattern.strip_suffix('*') {
-            entry_name.starts_with(prefix)
-        } else {
-            entry_name == pattern
-        }
-    })
+    let include_patterns: Vec<&str> = patterns
+        .iter()
+        .filter(|pattern| !(pattern.starts_with('!') && pattern.len() > 1))
+        .map(|pattern| pattern.as_str())
+        .collect();
+    let exclude_patterns: Vec<&str> = patterns
+        .iter()
+        .filter_map(|pattern| pattern.strip_prefix('!'))
+        .filter(|pattern| !pattern.is_empty())
+        .collect();
+
+    let included = include_patterns.is_empty()
+        || include_patterns
+            .iter()
+            .any(|pattern| entry_matches_pattern(entry_name, pattern));
+
+    included
+        && !exclude_patterns
+            .iter()
+            .any(|pattern| entry_matches_pattern(entry_name, pattern))
 }
 
 pub(crate) async fn read_progress(
@@ -276,6 +294,35 @@ pub(super) mod tests {
         assert_eq!(window.stop, Some(51));
         assert_eq!(window.last_processed_ts, Some(51));
         assert!(window.reaches_cutoff);
+    }
+
+    #[tokio::test]
+    async fn processing_window_matches_recursive_wildcard_and_exclusions() {
+        let storage = storage().await;
+        let bucket = storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut settings = settings_fixture();
+        settings.entries = vec!["/a/**".to_string(), "!/a/private/**".to_string()];
+        write(&bucket, "a/public/b", 50, b"pub").await.unwrap();
+        write(&bucket, "a/private/b", 10, b"priv").await.unwrap();
+        write(&bucket, "other", 5, b"other").await.unwrap();
+
+        let window = processing_window(
+            &settings,
+            &LifecycleContext::new(storage, true, "instance-1".to_string()),
+            "policy-1",
+            100,
+        )
+        .await
+        .unwrap();
+
+        // Only `a/public/b` is selected: the excluded and unrelated entries are ignored.
+        assert_eq!(window.start, Some(50));
+        assert_eq!(window.stop, Some(51));
     }
 
     #[tokio::test]
