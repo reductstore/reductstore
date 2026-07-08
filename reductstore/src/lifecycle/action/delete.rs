@@ -198,6 +198,39 @@ mod tests {
 
     #[tokio::test]
     #[rstest]
+    async fn delete_matches_recursive_wildcards_and_exclusions(
+        #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
+        action: DeleteLifecycleAction,
+        mut settings: LifecycleSettings,
+    ) {
+        let (test_storage, test_bucket) = test_context.await;
+        write(&test_bucket, "a/public/b", 1, b"pub").await.unwrap();
+        write(&test_bucket, "a/private/b", 1, b"priv")
+            .await
+            .unwrap();
+        write(&test_bucket, "other", 1, b"other").await.unwrap();
+
+        settings.mode = LifecycleMode::Enabled;
+        settings.older_than = "0s".to_string();
+        settings.entries = vec!["/a/**".to_string(), "!/a/private/**".to_string()];
+
+        let result = action
+            .run(
+                "test",
+                &settings,
+                LifecycleContext::new(test_storage, false, "unknown".to_string()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.affected_records, 1);
+        assert!(test_bucket.begin_read("a/public/b", 1).await.is_err());
+        assert!(test_bucket.begin_read("a/private/b", 1).await.is_ok());
+        assert!(test_bucket.begin_read("other", 1).await.is_ok());
+    }
+
+    #[tokio::test]
+    #[rstest]
     async fn delete_processes_windowed_data_when_system_events_enabled(
         #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
         action: DeleteLifecycleAction,
