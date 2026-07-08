@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::cfg::io::IoConfig;
-use crate::replication::remote_bucket::{BucketFactory, RemoteBucket};
+use crate::replication::remote_bucket::RemoteBucket;
 use crate::replication::transaction_log::{TransactionLogMap, TransactionLogRef};
 use crate::replication::Transaction;
 use crate::storage::engine::StorageEngine;
@@ -13,22 +13,19 @@ use reduct_base::msg::replication_api::ReplicationSettings;
 use std::cmp::PartialEq;
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use tokio::task::JoinHandle;
 use tokio::time::{sleep, Duration};
 
 /// Internal worker for replication to process a sole iteration of the replication loop.
 ///
-/// Sends are pipelined with depth 1: while a batch is being sent in a spawned
-/// task (which owns the remote bucket for the duration of the send), the next
-/// entry's batch is prepared. The bucket is `None` only while a send is in
-/// flight or after a panicked send that could not be rebuilt from the factory.
+/// Sends are pipelined with depth 1: sending the current entry's batch and
+/// preparing the next entry's batch run concurrently in the same task, so the
+/// remote bucket never leaves the sender.
 pub(super) struct ReplicationSender {
     log_map: TransactionLogMap,
     storage: Arc<StorageEngine>,
     settings: ReplicationSettings,
     io_config: IoConfig,
-    bucket: Option<Box<dyn RemoteBucket + Send + Sync>>,
-    bucket_factory: BucketFactory,
+    bucket: Box<dyn RemoteBucket + Send + Sync>,
 }
 
 /// Outcome of replicating a group of records: the result, the number of
@@ -44,20 +41,9 @@ pub(super) enum SyncState {
     BrokenLog(String),
 }
 
-/// Result of a spawned send task: the remote bucket handed back to the
-/// sender, the accounting entries for the processed batch and the bucket
-/// availability after the send.
-struct PendingSend {
-    bucket: Box<dyn RemoteBucket + Send + Sync>,
-    counter: Vec<ResultResult>,
-    bucket_active: bool,
-}
-
-/// One entry's batch together with everything the spawned send task needs to
+/// One entry's batch prepared for sending, together with everything needed to
 /// account for it and to acknowledge the transaction log on success.
-struct SendBatch {
-    bucket: Box<dyn RemoteBucket + Send + Sync>,
-    src_bucket: String,
+struct PreparedBatch {
     entry_name: String,
     dst_entry_name: String,
     batch: Vec<(BoxedReadRecord, Transaction)>,
@@ -67,19 +53,222 @@ struct SendBatch {
     log: TransactionLogRef,
 }
 
-impl SendBatch {
-    async fn send(self) -> PendingSend {
-        let SendBatch {
-            mut bucket,
-            src_bucket,
+/// Why a batch could not be prepared for an entry.
+enum PrepareError {
+    /// The transaction log could not be read and must be recreated.
+    BrokenLog,
+    Internal(ReductError),
+}
+
+impl From<ReductError> for PrepareError {
+    fn from(err: ReductError) -> Self {
+        PrepareError::Internal(err)
+    }
+}
+
+impl ReplicationSender {
+    pub fn new(
+        log_map: TransactionLogMap,
+        storage: Arc<StorageEngine>,
+        config: ReplicationSettings,
+        io_config: IoConfig,
+        bucket: Box<dyn RemoteBucket + Send + Sync>,
+    ) -> Self {
+        Self {
+            log_map,
+            storage,
+            settings: config,
+            io_config,
+            bucket,
+        }
+    }
+
+    pub async fn probe_availability(&mut self) -> bool {
+        self.bucket.probe_availability().await;
+        self.bucket.is_active()
+    }
+
+    pub async fn run(&mut self) -> Result<SyncState, ReductError> {
+        let mut entries = self
+            .log_map
+            .read()
+            .await?
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>();
+        entries.sort();
+
+        let mut counter = Vec::new();
+        let mut prepared: Option<PreparedBatch> = None;
+
+        for entry_name in entries.iter() {
+            // Depth-1 pipelining: send the previously prepared batch while
+            // preparing this entry's batch.
+            let (send_result, prepare_result) = tokio::join!(
+                Self::send_batch(
+                    &mut self.bucket,
+                    prepared.take(),
+                    &mut counter,
+                    &self.settings.src_bucket
+                ),
+                Self::prepare_batch(
+                    &self.log_map,
+                    &self.storage,
+                    &self.settings,
+                    &self.io_config,
+                    entry_name
+                )
+            );
+
+            if !send_result? {
+                // The remote bucket is not available: stop the pass, the
+                // remaining transactions (including the freshly prepared
+                // batch) stay in their logs.
+                return Ok(self.make_state(counter));
+            }
+
+            match prepare_result {
+                Ok(next) => prepared = next,
+                Err(PrepareError::BrokenLog) => {
+                    return Ok(SyncState::BrokenLog(entry_name.clone()))
+                }
+                Err(PrepareError::Internal(err)) => return Err(err),
+            }
+        }
+
+        // send the last prepared batch
+        Self::send_batch(
+            &mut self.bucket,
+            prepared.take(),
+            &mut counter,
+            &self.settings.src_bucket,
+        )
+        .await?;
+
+        Ok(self.make_state(counter))
+    }
+
+    fn make_state(&self, counter: Vec<ResultResult>) -> SyncState {
+        if !counter.is_empty() {
+            if self.bucket.is_active() {
+                SyncState::SyncedOrRemoved(counter)
+            } else {
+                SyncState::NotAvailable(counter)
+            }
+        } else {
+            SyncState::NoTransactions
+        }
+    }
+
+    /// Read the next batch of transactions of the entry from its log and the
+    /// records to send from the local storage. Read failures are accounted in
+    /// the batch's counter.
+    async fn prepare_batch(
+        log_map: &TransactionLogMap,
+        storage: &Arc<StorageEngine>,
+        settings: &ReplicationSettings,
+        io_config: &IoConfig,
+        entry_name: &str,
+    ) -> Result<Option<PreparedBatch>, PrepareError> {
+        let log = {
+            // Take only the handle, drop the map lock before touching the log itself.
+            let map = log_map.read().await?;
+            match map.get(entry_name) {
+                Some(log) => Arc::clone(log),
+                None => return Ok(None), // log might be removed
+            }
+        };
+
+        let transactions = {
+            let log = log.write().await?;
+            log.front(io_config.batch_max_records).await
+        };
+        let vec = match transactions {
+            Ok(vec) => vec,
+            Err(err) => {
+                error!("Failed to read transaction: {:?}", err);
+                return Err(PrepareError::BrokenLog);
+            }
+        };
+
+        if vec.is_empty() {
+            return Ok(None);
+        }
+
+        let mut batch = Vec::with_capacity(vec.len());
+        let mut batch_sizes: BTreeMap<u64, u64> = BTreeMap::new();
+        let mut counter = Vec::new();
+        let mut total_size = 0;
+        let mut processed_transactions = 0;
+        for transaction in vec {
+            debug!(
+                "Replicating transaction {}/{}/{:?}",
+                settings.src_bucket, entry_name, transaction
+            );
+
+            let record_to_sync =
+                Self::read_record(storage, settings, entry_name, &transaction).await;
+            processed_transactions += 1;
+
+            match record_to_sync {
+                Ok(record_to_sync) => {
+                    let record_size = record_to_sync.meta().content_length();
+                    total_size += record_size;
+                    batch_sizes.insert(*transaction.timestamp(), record_size);
+                    batch.push((record_to_sync, transaction));
+
+                    if total_size >= io_config.batch_max_size {
+                        break;
+                    }
+                }
+                Err(err) => {
+                    error!(
+                        "Failed to read record {}/{}/{}: {:?}",
+                        settings.src_bucket,
+                        entry_name,
+                        transaction.timestamp(),
+                        err
+                    );
+                    counter.push((Err(err), 1, 0));
+                }
+            }
+        }
+
+        Ok(Some(PreparedBatch {
+            entry_name: entry_name.to_string(),
+            dst_entry_name: Self::destination_entry_name(&settings.dst_prefix, entry_name),
+            batch,
+            batch_sizes,
+            counter,
+            processed_transactions,
+            log,
+        }))
+    }
+
+    /// Send a prepared batch (if any) to the remote bucket, merge its
+    /// accounting into `counter` and remove the processed transactions from
+    /// the entry's log. Returns whether the remote bucket is still available;
+    /// if it is not, the log is kept intact so the transactions are resent.
+    async fn send_batch(
+        bucket: &mut Box<dyn RemoteBucket + Send + Sync>,
+        prepared: Option<PreparedBatch>,
+        counter: &mut Vec<ResultResult>,
+        src_bucket: &str,
+    ) -> Result<bool, ReductError> {
+        let Some(PreparedBatch {
             entry_name,
             dst_entry_name,
             batch,
             batch_sizes,
-            mut counter,
+            counter: entry_counter,
             processed_transactions,
             log,
-        } = self;
+        }) = prepared
+        else {
+            return Ok(true);
+        };
+
+        counter.extend(entry_counter);
 
         let batch_size = batch.len() as u64;
         match bucket.write_batch(&dst_entry_name, batch).await {
@@ -110,249 +299,21 @@ impl SendBatch {
             }
         }
 
-        let bucket_active = bucket.is_active();
-        if bucket_active {
-            // remove processed transactions from the log
-            match log.write().await {
-                Ok(mut log) => {
-                    if let Err(err) = log.pop_front(processed_transactions).await {
-                        error!("Failed to remove transaction: {:?}", err);
-                    }
-                }
-                Err(err) => error!(
-                    "Failed to lock transaction log to remove transactions: {:?}",
-                    err
-                ),
-            }
+        if !bucket.is_active() {
+            return Ok(false);
         }
 
-        PendingSend {
-            bucket,
-            counter,
-            bucket_active,
-        }
-    }
-}
-
-impl ReplicationSender {
-    pub fn new(
-        log_map: TransactionLogMap,
-        storage: Arc<StorageEngine>,
-        config: ReplicationSettings,
-        io_config: IoConfig,
-        bucket: Box<dyn RemoteBucket + Send + Sync>,
-        bucket_factory: BucketFactory,
-    ) -> Self {
-        Self {
-            log_map,
-            storage,
-            settings: config,
-            io_config,
-            bucket: Some(bucket),
-            bucket_factory,
-        }
-    }
-
-    pub async fn probe_availability(&mut self) -> bool {
-        let Some(bucket) = self.ensure_bucket() else {
-            return false;
-        };
-        bucket.probe_availability().await;
-        bucket.is_active()
-    }
-
-    pub async fn run(&mut self) -> Result<SyncState, ReductError> {
-        let mut pending_send: Option<JoinHandle<PendingSend>> = None;
-        let mut counter = Vec::new();
-
-        let result = self.run_loop(&mut pending_send, &mut counter).await;
-
-        // Single drain point: every exit from the loop (completion, broken
-        // log or error) must join the in-flight send to get the bucket back.
-        if let Some(handle) = pending_send.take() {
-            self.drain_pending(handle, &mut counter).await;
+        // remove processed transactions from the log
+        if let Err(err) = log.write().await?.pop_front(processed_transactions).await {
+            error!("Failed to remove transaction: {:?}", err);
         }
 
-        if let Some(broken_entry) = result? {
-            return Ok(SyncState::BrokenLog(broken_entry));
-        }
-
-        Ok(if !counter.is_empty() {
-            let bucket_active = self
-                .bucket
-                .as_ref()
-                .map(|bucket| bucket.is_active())
-                .unwrap_or(false);
-            if bucket_active {
-                SyncState::SyncedOrRemoved(counter)
-            } else {
-                SyncState::NotAvailable(counter)
-            }
-        } else {
-            SyncState::NoTransactions
-        })
-    }
-
-    /// Walk the entries pipelining the sends: prepare the next entry's batch
-    /// while the previous one is being sent, joining the previous send before
-    /// spawning the next. Returns the entry name of a broken transaction log,
-    /// if any; the caller drains a still-pending send on every exit path.
-    async fn run_loop(
-        &mut self,
-        pending_send: &mut Option<JoinHandle<PendingSend>>,
-        counter: &mut Vec<ResultResult>,
-    ) -> Result<Option<String>, ReductError> {
-        let mut entries = self
-            .log_map
-            .read()
-            .await?
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>();
-        entries.sort();
-
-        for entry_name in entries.iter() {
-            let log = {
-                // Take only the handle, drop the map lock before touching the log itself.
-                let map = self.log_map.read().await?;
-                match map.get(entry_name) {
-                    Some(log) => Arc::clone(log),
-                    None => continue, // log might be removed
-                }
-            };
-
-            let transactions = {
-                let log = log.write().await?;
-                log.front(self.io_config.batch_max_records).await
-            };
-            match transactions {
-                Ok(vec) => {
-                    if vec.is_empty() {
-                        continue;
-                    }
-                    let mut batch = Vec::with_capacity(vec.len());
-                    let mut batch_sizes: BTreeMap<u64, u64> = BTreeMap::new();
-                    let mut entry_counter = Vec::new();
-                    let mut total_size = 0;
-                    let mut processed_transactions = 0;
-                    for transaction in vec {
-                        debug!(
-                            "Replicating transaction {}/{}/{:?}",
-                            self.settings.src_bucket, entry_name, transaction
-                        );
-
-                        let record_to_sync = self.read_record(entry_name, &transaction).await;
-                        processed_transactions += 1;
-
-                        match record_to_sync {
-                            Ok(record_to_sync) => {
-                                let record_size = record_to_sync.meta().content_length();
-                                total_size += record_size;
-                                batch_sizes.insert(*transaction.timestamp(), record_size);
-                                batch.push((record_to_sync, transaction));
-
-                                if total_size >= self.io_config.batch_max_size {
-                                    break;
-                                }
-                            }
-                            Err(err) => {
-                                error!(
-                                    "Failed to read record {}/{}/{}: {:?}",
-                                    self.settings.src_bucket,
-                                    entry_name,
-                                    transaction.timestamp(),
-                                    err
-                                );
-                                entry_counter.push((Err(err), 1, 0));
-                            }
-                        }
-                    }
-
-                    // The batch above was prepared while the previous entry's
-                    // send was in flight; join it before spawning the next one.
-                    if let Some(handle) = pending_send.take() {
-                        if !self.drain_pending(handle, counter).await {
-                            return Ok(None);
-                        }
-                    }
-
-                    if self.ensure_bucket().is_none() {
-                        // The remote bucket could not be rebuilt; treated as
-                        // unavailable, the transactions stay in the log.
-                        return Ok(None);
-                    }
-
-                    *pending_send = Some(tokio::spawn(
-                        SendBatch {
-                            bucket: self.bucket.take().unwrap(),
-                            src_bucket: self.settings.src_bucket.clone(),
-                            entry_name: entry_name.clone(),
-                            dst_entry_name: Self::destination_entry_name(
-                                &self.settings.dst_prefix,
-                                entry_name,
-                            ),
-                            batch,
-                            batch_sizes,
-                            counter: entry_counter,
-                            processed_transactions,
-                            log,
-                        }
-                        .send(),
-                    ));
-                }
-
-                Err(err) => {
-                    error!("Failed to read transaction: {:?}", err);
-                    return Ok(Some(entry_name.clone()));
-                }
-            };
-        }
-
-        Ok(None)
-    }
-
-    /// Join the in-flight send task, merge its accounting into `counter` and
-    /// take the remote bucket back. A panicked task loses the bucket, so it
-    /// is rebuilt from the factory. Returns whether the bucket is still
-    /// active after the send.
-    async fn drain_pending(
-        &mut self,
-        handle: JoinHandle<PendingSend>,
-        counter: &mut Vec<ResultResult>,
-    ) -> bool {
-        match handle.await {
-            Ok(PendingSend {
-                bucket,
-                counter: send_counter,
-                bucket_active,
-            }) => {
-                counter.extend(send_counter);
-                self.bucket = Some(bucket);
-                bucket_active
-            }
-            Err(err) => {
-                error!("Replication send task failed: {:?}", err);
-                match (self.bucket_factory)() {
-                    Ok(bucket) => self.bucket = Some(bucket),
-                    Err(err) => error!("Failed to rebuild remote bucket: {:?}", err),
-                }
-                false
-            }
-        }
-    }
-
-    fn ensure_bucket(&mut self) -> Option<&mut Box<dyn RemoteBucket + Send + Sync>> {
-        if self.bucket.is_none() {
-            match (self.bucket_factory)() {
-                Ok(bucket) => self.bucket = Some(bucket),
-                Err(err) => error!("Failed to rebuild remote bucket: {:?}", err),
-            }
-        }
-        self.bucket.as_mut()
+        Ok(true)
     }
 
     async fn read_record(
-        &self,
+        storage: &Arc<StorageEngine>,
+        settings: &ReplicationSettings,
         entry_name: &str,
         transaction: &Transaction,
     ) -> Result<BoxedReadRecord, ReductError> {
@@ -360,8 +321,8 @@ impl ReplicationSender {
             let mut attempts = 3;
             loop {
                 let read_record = async || {
-                    self.storage
-                        .get_bucket(&self.settings.src_bucket)
+                    storage
+                        .get_bucket(&settings.src_bucket)
                         .await?
                         .upgrade()?
                         .get_entry(entry_name)
@@ -463,7 +424,6 @@ mod tests {
     use std::fs::OpenOptions;
     use std::io::{Seek, SeekFrom, Write};
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::Mutex;
     use tokio::task::JoinHandle;
     use tokio::time::{sleep, Duration};
 
@@ -885,7 +845,6 @@ mod tests {
             settings,
             IoConfig::default(),
             Box::new(remote_bucket),
-            test_bucket_factory(),
         );
 
         assert_eq!(sender.run().await.unwrap(), SyncState::NoTransactions);
@@ -902,13 +861,8 @@ mod tests {
             .times(2)
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut sender = build_sender_with_entries(
-            remote_bucket,
-            settings,
-            &["test", "test2"],
-            test_bucket_factory(),
-        )
-        .await;
+        let mut sender =
+            build_sender_with_entries(remote_bucket, settings, &["test", "test2"]).await;
 
         imitate_write_record_to(&sender, "test", &Transaction::WriteRecord(10), 5).await;
         imitate_write_record_to(&sender, "test2", &Transaction::WriteRecord(10), 5).await;
@@ -950,13 +904,8 @@ mod tests {
             .expect_is_active()
             .returning(move || active_reader.load(Ordering::SeqCst));
 
-        let mut sender = build_sender_with_entries(
-            remote_bucket,
-            settings,
-            &["a_ok", "b_fail"],
-            test_bucket_factory(),
-        )
-        .await;
+        let mut sender =
+            build_sender_with_entries(remote_bucket, settings, &["a_ok", "b_fail"]).await;
         imitate_write_record_to(&sender, "a_ok", &Transaction::WriteRecord(10), 5).await;
         imitate_write_record_to(&sender, "b_fail", &Transaction::WriteRecord(10), 5).await;
 
@@ -984,51 +933,6 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_send_task_panic_recovers_bucket(settings: ReplicationSettings) {
-        let mut panicking_bucket = MockRmBucket::new();
-        panicking_bucket
-            .expect_write_batch()
-            .returning(|_, _| panic!("internal bug in send task"));
-
-        let mut replacement = MockRmBucket::new();
-        replacement
-            .expect_write_batch()
-            .returning(|_, _| Ok(ErrorRecordMap::new()));
-        replacement.expect_is_active().return_const(true);
-
-        let replacement = Mutex::new(Some(
-            Box::new(replacement) as Box<dyn RemoteBucket + Send + Sync>
-        ));
-        let factory: BucketFactory = Arc::new(move || {
-            replacement
-                .lock()
-                .unwrap()
-                .take()
-                .ok_or_else(|| ReductError::internal_server_error("factory already used"))
-        });
-
-        let mut sender =
-            build_sender_with_entries(panicking_bucket, settings, &["test"], factory).await;
-        imitate_write_record_to(&sender, "test", &Transaction::WriteRecord(10), 5).await;
-
-        // The panicked send yields no accounting and must not crash run().
-        assert_eq!(sender.run().await.unwrap(), SyncState::NoTransactions);
-        assert_eq!(
-            log_front(&sender, "test").await,
-            vec![Transaction::WriteRecord(10)],
-            "transactions are kept when the send task dies"
-        );
-
-        // The bucket was rebuilt from the factory, the next pass replicates.
-        assert_eq!(
-            sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5)])
-        );
-        assert!(log_front(&sender, "test").await.is_empty());
-    }
-
-    #[rstest]
-    #[tokio::test]
     async fn test_broken_log_drains_pending_send(
         mut remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
@@ -1037,13 +941,8 @@ mod tests {
             .expect_write_batch()
             .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
-        let mut sender = build_sender_with_entries(
-            remote_bucket,
-            settings,
-            &["a_ok", "b_bad"],
-            test_bucket_factory(),
-        )
-        .await;
+        let mut sender =
+            build_sender_with_entries(remote_bucket, settings, &["a_ok", "b_bad"]).await;
 
         imitate_write_record_to(&sender, "a_ok", &Transaction::WriteRecord(10), 5).await;
         // Push a transaction to "b_bad", then corrupt its type byte on disk
@@ -1146,14 +1045,13 @@ mod tests {
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
     ) -> ReplicationSender {
-        build_sender_with_entries(remote_bucket, settings, &["test"], test_bucket_factory()).await
+        build_sender_with_entries(remote_bucket, settings, &["test"]).await
     }
 
     async fn build_sender_with_entries(
         remote_bucket: MockRmBucket,
         settings: ReplicationSettings,
         entries: &[&str],
-        bucket_factory: BucketFactory,
     ) -> ReplicationSender {
         let cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
@@ -1191,17 +1089,8 @@ mod tests {
             storage,
             settings,
             io_config: IoConfig::default(),
-            bucket: Some(Box::new(remote_bucket)),
-            bucket_factory,
+            bucket: Box::new(remote_bucket),
         }
-    }
-
-    fn test_bucket_factory() -> BucketFactory {
-        Arc::new(|| {
-            Err(ReductError::internal_server_error(
-                "no bucket rebuild in tests",
-            ))
-        })
     }
 
     async fn log_front(sender: &ReplicationSender, entry: &str) -> Vec<Transaction> {
