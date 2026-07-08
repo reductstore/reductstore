@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.20.9 - 2026-07-08
+
 ### Fixed
 
 - Restore plain type conversions for `ReductError` to keep downstream `Result<_, ReductError>` APIs compatible, [PR-1529](https://github.com/reductstore/reductstore/pull/1529)
