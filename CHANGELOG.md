@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Support glob-like entry patterns in lifecycle task filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1526](https://github.com/reductstore/reductstore/pull/1526) by @upuddu
 - Support glob-like entry patterns in replication filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1507](https://github.com/reductstore/reductstore/issues/1507) by @rohankumardubey
 - Support glob-like entry patterns in query entry filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1506](https://github.com/reductstore/reductstore/pull/1506) by @gitcommit90
 - Add CI vulnerability scanning for Rust dependencies and Docker images, gating image publishing on fixed high-severity container findings, [PR-1500](https://github.com/reductstore/reductstore/pull/1500)
