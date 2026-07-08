@@ -8,8 +8,12 @@ use std::time::SystemTime;
 use std::{env, fs};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let protoc = protoc_bin_vendored::protoc_bin_path()?;
+
     // build protos
-    prost_build::Config::new()
+    let mut config = prost_build::Config::new();
+    config
+        .protoc_executable(protoc)
         .protoc_arg("--experimental_allow_proto3_optional")
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
         .type_attribute(".reduct.proto.auth", "#[serde(default)]")
