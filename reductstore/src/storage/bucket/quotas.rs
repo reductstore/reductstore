@@ -4,12 +4,43 @@
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::Entry;
 use log::debug;
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::QuotaType;
 use reduct_base::{bad_request, internal_server_error};
 use std::sync::Arc;
 
 impl Bucket {
+    /// Ensure the filesystem that holds the data folder has enough free space to
+    /// store an incoming record of `content_size` bytes.
+    ///
+    /// This complements the configured quota: even when the bucket is within its
+    /// quota, the write is rejected early if the underlying filesystem cannot fit
+    /// the record. The check runs before any data is written.
+    pub(super) async fn check_free_disk_space(&self, content_size: u64) -> Result<(), ReductError> {
+        let path = self.path.clone();
+        let free_space_fn = self.free_space_fn.clone();
+
+        // `available_space` may perform a blocking syscall, so keep it off the async reactor.
+        let available = tokio::task::spawn_blocking(move || free_space_fn(&path))
+            .await
+            .map_err(|e| internal_server_error!("Failed to query free disk space: {}", e))?
+            .map_err(|e| {
+                internal_server_error!("Failed to query free disk space for the data folder: {}", e)
+            })?;
+
+        if content_size > available {
+            return Err(ReductError::new(
+                ErrorCode::InsufficientStorage,
+                &format!(
+                    "Not enough free disk space in the data folder to write a record of {} bytes: only {} bytes available",
+                    content_size, available
+                ),
+            ));
+        }
+
+        Ok(())
+    }
+
     pub(super) async fn keep_quota_for(
         self: &Arc<Self>,
         content_size: u64,
@@ -105,11 +136,37 @@ impl Bucket {
 
 #[cfg(test)]
 mod tests {
-    use crate::storage::bucket::tests::{bucket, path, write, write_meta};
-    use reduct_base::error::ReductError;
+    use crate::cfg::Cfg;
+    use crate::core::file_cache::FILE_CACHE;
+    use crate::storage::bucket::tests::{bucket, path, read, write, write_meta};
+    use crate::storage::bucket::{Bucket, FreeSpaceFn};
+    use reduct_base::error::{ErrorCode, ReductError};
     use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
     use rstest::rstest;
     use std::path::PathBuf;
+    use std::sync::Arc;
+
+    /// Build a bucket whose free-space provider reports a fixed number of
+    /// available bytes, so the disk-space gate can be exercised deterministically.
+    async fn bucket_with_free_space(
+        settings: BucketSettings,
+        path: PathBuf,
+        free_space_fn: FreeSpaceFn,
+    ) -> Arc<Bucket> {
+        FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
+        Arc::new(
+            Bucket::builder()
+                .name("test")
+                .data_path(path)
+                .settings(settings)
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .free_space_fn(free_space_fn)
+                .build()
+                .await
+                .unwrap(),
+        )
+    }
 
     #[rstest]
     #[tokio::test]
@@ -224,5 +281,73 @@ mod tests {
                 "Failed to keep quota of 'test'"
             ))
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_write_rejected_when_disk_full(path: PathBuf) {
+        // Simulate a filesystem that only has 10 bytes of free space left.
+        let bucket = bucket_with_free_space(
+            BucketSettings {
+                quota_type: Some(QuotaType::NONE),
+                ..BucketSettings::default()
+            },
+            path,
+            Arc::new(|_| Ok(10)),
+        )
+        .await;
+
+        let blob: &[u8] = &[0u8; 40];
+        let err = write(&bucket, "test-1", 0, blob).await.err().unwrap();
+
+        assert_eq!(err.status, ErrorCode::InsufficientStorage);
+        assert_eq!(
+            err.message,
+            "Not enough free disk space in the data folder to write a record of 40 bytes: only 10 bytes available"
+        );
+
+        // The write must be rejected before any data is stored.
+        assert!(
+            read(&bucket, "test-1", 0).await.is_err(),
+            "no record should have been written when the disk is full"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_write_allowed_when_disk_has_space(path: PathBuf) {
+        // Plenty of free disk space: the write must succeed as before.
+        let bucket = bucket_with_free_space(
+            BucketSettings {
+                quota_type: Some(QuotaType::NONE),
+                ..BucketSettings::default()
+            },
+            path,
+            Arc::new(|_| Ok(1_000_000)),
+        )
+        .await;
+
+        let blob: &[u8] = &[0u8; 40];
+        write(&bucket, "test-1", 0, blob).await.unwrap();
+        assert!(read(&bucket, "test-1", 0).await.is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_disk_full_error_surfaces_provider_failure(path: PathBuf) {
+        // A failure while querying free space is reported as an internal error.
+        let bucket = bucket_with_free_space(
+            BucketSettings {
+                quota_type: Some(QuotaType::NONE),
+                ..BucketSettings::default()
+            },
+            path,
+            Arc::new(|_| Err(std::io::Error::other("boom"))),
+        )
+        .await;
+
+        let blob: &[u8] = &[0u8; 40];
+        let err = write(&bucket, "test-1", 0, blob).await.err().unwrap();
+        assert_eq!(err.status, ErrorCode::InternalServerError);
     }
 }

@@ -45,6 +45,18 @@ fn normalize_entry_name(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
 }
 
+/// A function that returns the number of bytes available for writing on the
+/// filesystem that contains the given path.
+///
+/// It is injectable so the write-admission logic can be tested deterministically
+/// without depending on the real free space of the host filesystem.
+pub(crate) type FreeSpaceFn = Arc<dyn Fn(&std::path::Path) -> std::io::Result<u64> + Send + Sync>;
+
+/// Default free-space provider backed by the host filesystem containing the data folder.
+pub(crate) fn default_free_space_fn() -> FreeSpaceFn {
+    Arc::new(|path| fs4::available_space(path))
+}
+
 fn settings_for_entry(entry_name: &str, settings: &BucketSettings) -> EntrySettings {
     EntrySettings {
         max_block_size: if is_system_meta_entry(entry_name) {
@@ -70,6 +82,7 @@ pub(crate) struct Bucket {
     queries: AsyncRwLock<HashMap<u64, MultiEntryQuery>>,
     io_limiter: InFlightIoLimiter,
     usage_counters: Arc<UsageCounters>,
+    free_space_fn: FreeSpaceFn,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -216,6 +229,7 @@ impl Bucket {
 
         let get_entry = async || {
             self.keep_quota_for(content_size).await?;
+            self.check_free_disk_space(content_size).await?;
             self.get_or_create_entry(name).await?.upgrade()
         };
 
