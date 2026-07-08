@@ -214,11 +214,14 @@ jobs:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: test
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Login Docker
-        run: docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+        if: ${{ env.DOCKER_USER != '' && env.DOCKER_TOKEN != '' }}
+        run: docker login -u "$DOCKER_USER" -p "$DOCKER_TOKEN"
 
       - uses: ./.github/actions/api/http-tests
         with:
@@ -245,11 +248,15 @@ jobs:
             auth_dictionary: ""
             tls_root_ca: "use-misc-cert"
     timeout-minutes: 5
+    env:
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Login Docker
-        run: docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+        if: ${{ env.DOCKER_USER != '' && env.DOCKER_TOKEN != '' }}
+        run: docker login -u "$DOCKER_USER" -p "$DOCKER_TOKEN"
 
       - name: Read TLS cert if needed
         id: tls
