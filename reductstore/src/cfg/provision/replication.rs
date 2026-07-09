@@ -312,9 +312,14 @@ mod tests {
         assert_eq!(replication.entries, vec!["entry1", "entry2"]);
         assert_eq!(replication.dst_prefix, "robot-1");
         assert_eq!(replication.each_n, Some(10));
+        // The when condition should include the original $and plus migrated $in and $nin
         assert_eq!(
             replication.when,
-            Some(serde_json::json!({"$and": [true, false]}))
+            Some(serde_json::json!({
+                "$and": [true, false],
+                "$in": ["KEY", "value"],
+                "$nin": ["KEY", "value"]
+            }))
         );
         assert!(repl_info.info.is_provisioned);
     }
@@ -623,9 +628,14 @@ mod tests {
         let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication_settings("replication1").await.unwrap();
         let repl_info = repo.get_info("replication1").await.unwrap();
+        // The when condition should include the original $and plus migrated $in and $nin
         assert_eq!(
             replication.when,
-            Some(serde_json::json!({"$and": [true, false]}))
+            Some(serde_json::json!({
+                "$and": [true, false],
+                "$in": ["KEY", "value"],
+                "$nin": ["KEY", "value"]
+            }))
         );
         assert_eq!(repl_info.info.mode, ReplicationMode::Disabled);
     }
@@ -897,6 +907,128 @@ mod tests {
             env.expect_get()
                 .with(eq("RS_REPLICATION_1_DST_HOST"))
                 .return_const(Ok("http://localhost".to_string()));
+
+            env
+        }
+    }
+
+    #[cfg(test)]
+    mod include {
+
+        use super::*;
+
+        #[log_test(rstest)]
+        #[tokio::test]
+        async fn test_include_migrated_to_in_without_when() {
+            test_include_migration(
+                "sensor",
+                "temp",
+                None,
+                serde_json::json!({"$in": ["SENSOR", "temp"]}),
+            )
+            .await;
+        }
+
+        #[log_test(rstest)]
+        #[tokio::test]
+        async fn test_include_migrated_to_in_with_existing_when() {
+            test_include_migration(
+                "location",
+                "warehouse",
+                Some(r#"{"&status": {"$eq": "active"}}"#),
+                serde_json::json!({
+                    "&status": {"$eq": "active"},
+                    "$in": ["LOCATION", "warehouse"]
+                }),
+            )
+            .await;
+        }
+
+        async fn test_include_migration(
+            include_key: &str,
+            include_value: &str,
+            when: Option<&str>,
+            expected: serde_json::Value,
+        ) {
+            let path = tempfile::tempdir().unwrap().keep();
+            let mut env = env_with_include(path, include_key, include_value);
+
+            if let Some(when_condition) = when {
+                env.expect_get()
+                    .with(eq("RS_REPLICATION_1_WHEN"))
+                    .return_const(Ok(when_condition.to_string()));
+            }
+
+            env.expect_get().return_const(Err(VarError::NotPresent));
+
+            let components = CfgParser::from_env(env, "0.0.0")
+                .await
+                .build()
+                .await
+                .unwrap();
+            let repo = components.replication_repo.read().await.unwrap();
+            let replication = repo.get_replication_settings("replication1").await.unwrap();
+
+            assert_eq!(replication.when, Some(expected));
+        }
+
+        /// Creates a base MockEnvGetter for include migration tests.
+        /// Sets up minimal replication configuration with INCLUDE_{key}.
+        /// Caller must add:
+        /// - Optional WHEN expectation
+        /// - Catch-all expectation (last)
+        fn env_with_include(
+            path: PathBuf,
+            include_key: &str,
+            include_value: &str,
+        ) -> MockEnvGetter {
+            let mut env = MockEnvGetter::new();
+            env.expect_get()
+                .with(eq("RS_DATA_PATH"))
+                .return_const(Ok(path.to_str().unwrap().to_string()));
+
+            env.expect_get()
+                .with(eq("RS_BUCKET_1_NAME"))
+                .return_const(Ok("bucket1".to_string()));
+
+            let include_key_upper = include_key.to_uppercase();
+            let include_value_owned = include_value.to_string();
+            env.expect_all().returning(move || {
+                let mut map = BTreeMap::new();
+                map.insert("RS_BUCKET_1_NAME".to_string(), "bucket1".to_string());
+                map.insert(
+                    "RS_REPLICATION_1_NAME".to_string(),
+                    "replication1".to_string(),
+                );
+                map.insert(
+                    format!("RS_REPLICATION_1_INCLUDE_{}", include_key_upper),
+                    include_value_owned.clone(),
+                );
+                map
+            });
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_NAME"))
+                .return_const(Ok("replication1".to_string()));
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+                .return_const(Ok("bucket1".to_string()));
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+                .return_const(Ok("bucket2".to_string()));
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
+                .return_const(Ok("http://localhost".to_string()));
+
+            // The env.matches() will call env.get() for the matched key
+            let include_env_key =
+                format!("RS_REPLICATION_1_INCLUDE_{}", include_key.to_uppercase());
+            env.expect_get()
+                .with(eq(include_env_key))
+                .return_const(Ok(include_value.to_string()));
 
             env
         }
