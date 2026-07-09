@@ -159,6 +159,10 @@ impl Bucket {
             }
         }
 
+        if oldest_record == u64::MAX {
+            oldest_record = 0;
+        }
+
         Ok(FullBucketInfo {
             info: BucketInfo {
                 name: self.name.clone(),
@@ -532,6 +536,25 @@ pub(crate) mod tests {
             assert_eq!(entries["filled"].record_count, 2);
             assert_eq!(entries["filled"].oldest_record, 1);
             assert_eq!(entries["filled"].latest_record, 2);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_bucket_info_normalizes_history_when_only_meta_entries_have_records(
+            #[future] bucket: Arc<Bucket>,
+        ) {
+            let bucket = bucket.await;
+            write_meta(&bucket, "entry/$meta", 1, b"meta")
+                .await
+                .unwrap();
+
+            let info = bucket.info().await.unwrap();
+            assert_eq!(info.info.oldest_record, 0);
+            assert_eq!(info.info.latest_record, 0);
+            assert_eq!(info.info.entry_count, 1);
+            assert_eq!(info.entries.len(), 1);
+            assert_eq!(info.entries[0].name, "entry");
+            assert_eq!(info.entries[0].record_count, 0);
         }
 
         #[rstest]
