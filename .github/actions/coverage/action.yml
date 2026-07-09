@@ -7,9 +7,6 @@ inputs:
   target:
     description: 'Target triple.'
     required: true
-  action_github_token:
-    description: 'GitHub token for authentication.'
-    required: true
 runs:
   using: 'composite'
   steps:
@@ -22,11 +19,6 @@ runs:
 
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
-
-    - uses: reductstore/setup-protoc@ac76da16b8e70736e159368a4bc962934d1f825a # master
-      with:
-        version: '26.x'
-        repo-token: ${{ inputs.action_github_token }}
 
     - name: AWS Credentials and Cargo Cache
       uses: ./.github/actions/aws-cargo-cache
