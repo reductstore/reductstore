@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Configure server-wide default bucket settings with `RS_DEFAULTS_*` environment variables, [PR-1535](https://github.com/reductstore/reductstore/pull/1535) by @rohankumardubey
+- Reject record writes before writing when the data folder filesystem has insufficient free disk space, in addition to the existing quota check, [PR-1525](https://github.com/reductstore/reductstore/pull/1525)
+- Support glob-like entry patterns in lifecycle task filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1526](https://github.com/reductstore/reductstore/pull/1526) by @upuddu
+- Support glob-like entry patterns in replication filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1507](https://github.com/reductstore/reductstore/issues/1507) by @rohankumardubey
 - Support glob-like entry patterns in query entry filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1506](https://github.com/reductstore/reductstore/pull/1506) by @gitcommit90
 - Add CI vulnerability scanning for Rust dependencies and Docker images, gating image publishing on fixed high-severity container findings, [PR-1500](https://github.com/reductstore/reductstore/pull/1500)
 - Emit per-bucket usage statistics as system events under `usage/<instance>/<bucket>` alongside the existing instance total, and add `written_entries`, `read_entries`, and `record_count` fields to usage events, [PR-1474](https://github.com/reductstore/reductstore/pull/1474) by @DibbayajyotiRoy
@@ -18,9 +21,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Allow fork pull request CI to run without protobuf setup tokens or Docker Hub credentials by vendoring `protoc` and making Docker login optional, [PR-1532](https://github.com/reductstore/reductstore/pull/1532)
 - Split block manager storage logic into smaller modules by responsibility, [PR-1503](https://github.com/reductstore/reductstore/pull/1503) by @rohankumardubey
 - Refresh contributor onboarding docs to validate branch builds locally and add `@gitcommit90` to the README contributor wall, [PR-1511](https://github.com/reductstore/reductstore/pull/1511)
 - Unify `$system` event handling under `syslog`: move all event production (audit, usage, lifecycle, replication, logs) into the module behind a single system event logger with one shared writer and sink (no change to the stored record format), [PR-1496](https://github.com/reductstore/reductstore/pull/1496) by @DibbayajyotiRoy
+
+## 1.20.9 - 2026-07-08
+
+### Fixed
+
+- Restore plain type conversions for `ReductError` to keep downstream `Result<_, ReductError>` APIs compatible, [PR-1529](https://github.com/reductstore/reductstore/pull/1529)
+
+## 1.20.8 - 2026-07-07
+
+### Fixed
+
+- Add source field to `ReductError` and improve error handling in `BlockManager::remove_records` to detect and mark corrupted blocks, [PR-1519](https://github.com/reductstore/reductstore/pull/1519)
+- Fix read-only replica block reads when compressed index state arrives before compressed block files and make replica cache invalidation for block variants fault-tolerant, [PR-1523](https://github.com/reductstore/reductstore/pull/1523)
 
 ## 1.20.7 - 2026-06-30
 

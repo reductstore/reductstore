@@ -1,9 +1,6 @@
 name: 'Build Binaries'
 description: 'Builds binaries for a specific target and uploads them as artifacts.'
 inputs:
-  action_github_token:
-    description: 'GitHub token for setup-protoc.'
-    required: true
   target:
     description: 'Target triple.'
     required: true
@@ -23,11 +20,6 @@ inputs:
 runs:
   using: 'composite'
   steps:
-    - uses: reductstore/setup-protoc@ac76da16b8e70736e159368a4bc962934d1f825a # master
-      with:
-        version: '26.x'
-        repo-token: ${{ inputs.action_github_token }}
-
     - name: Install Rust
       uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
       with:

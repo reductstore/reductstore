@@ -5,6 +5,7 @@ mod builder;
 mod compress;
 mod entry_loader;
 pub(crate) mod io;
+mod pattern;
 mod read_record;
 mod remove_records;
 mod system;
@@ -40,6 +41,7 @@ use tokio::sync::OwnedSemaphorePermit;
 use tokio::task::JoinHandle;
 
 pub(crate) use builder::EntryBuilder;
+pub(crate) use pattern::entry_matches_pattern;
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,

@@ -427,7 +427,7 @@ pub(crate) mod tests {
             assert!(debug.contains("BadRequest"));
             assert_eq!(
                 format!("{err}"),
-                "ReductError { status: BadRequest, message: \"boom\" }"
+                "ReductError { status: BadRequest, message: \"boom\", source: None }"
             );
             assert!(StdError::source(&err).is_none());
         }

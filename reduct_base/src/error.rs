@@ -69,15 +69,37 @@ pub enum ErrorCode {
 
 /// An HTTP error, we use it for error handling.
 #[derive(PartialEq, Debug, Clone)]
-pub struct ReductError {
+pub struct ReductError<Original = ()> {
     /// The HTTP status code.
     pub status: ErrorCode,
 
     /// The human-readable message.
     pub message: String,
+
+    /// The original err
+    pub source: Option<Original>,
 }
 
-impl Display for ReductError {
+impl<Original> ReductError<Original> {
+    /// Convert to a plain `ReductError` by dropping the original source type.
+    pub fn without_source(self) -> ReductError {
+        ReductError {
+            status: self.status,
+            message: self.message,
+            source: None,
+        }
+    }
+
+    pub fn with_source<T>(self, source: T) -> ReductError<T> {
+        ReductError {
+            status: self.status,
+            message: self.message,
+            source: Some(source),
+        }
+    }
+}
+
+impl<Original> Display for ReductError<Original> {
     fn fmt(&self, f: &mut Formatter) -> Result<(), FmtError> {
         write!(f, "[{:?}] {}", self.status, self.message)
     }
@@ -99,46 +121,84 @@ impl From<std::io::Error> for ReductError {
         ReductError {
             status,
             message: err.to_string(),
-        }
-    }
-}
-
-impl From<SystemTimeError> for ReductError {
-    fn from(err: SystemTimeError) -> Self {
-        // A system time error is an internal reductstore error
-        ReductError {
-            status: ErrorCode::InternalServerError,
-            message: err.to_string(),
+            source: None,
         }
     }
 }
 
 impl From<ParseError> for ReductError {
     fn from(err: ParseError) -> Self {
+        // Keep the plain conversion for downstream APIs returning Result<_, ReductError>.
+        ReductError {
+            status: ErrorCode::UrlParseError,
+            message: err.to_string(),
+            source: None,
+        }
+    }
+}
+
+impl From<SystemTimeError> for ReductError {
+    fn from(err: SystemTimeError) -> Self {
+        // Keep the plain conversion for downstream APIs returning Result<_, ReductError>.
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: err.to_string(),
+            source: None,
+        }
+    }
+}
+
+impl From<SystemTimeError> for ReductError<SystemTimeError> {
+    fn from(err: SystemTimeError) -> Self {
+        // A system time error is an internal reductstore error
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: err.to_string(),
+            source: Some(err),
+        }
+    }
+}
+
+impl From<ParseError> for ReductError<ParseError> {
+    fn from(err: ParseError) -> Self {
         // A parse error is an internal reductstore error
         ReductError {
             status: ErrorCode::UrlParseError,
             message: err.to_string(),
+            source: Some(err),
         }
     }
 }
 
 impl<T> From<PoisonError<T>> for ReductError {
     fn from(_: PoisonError<T>) -> Self {
+        // Keep the plain conversion for downstream APIs returning Result<_, ReductError>.
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: "Poison error".to_string(),
+            source: None,
+        }
+    }
+}
+
+impl<T> From<PoisonError<T>> for ReductError<PoisonError<T>> {
+    fn from(err: PoisonError<T>) -> Self {
         // A poison error is an internal reductstore error
         ReductError {
             status: ErrorCode::InternalServerError,
             message: "Poison error".to_string(),
+            source: Some(err),
         }
     }
 }
 
 impl From<Box<dyn std::any::Any + Send>> for ReductError {
     fn from(err: Box<dyn std::any::Any + Send>) -> Self {
-        // A box error is an internal reductstore error
+        // Keep the plain conversion for downstream APIs returning Result<_, ReductError>.
         ReductError {
             status: ErrorCode::InternalServerError,
             message: format!("{:?}", err),
+            source: None,
         }
     }
 }
@@ -146,10 +206,23 @@ impl From<Box<dyn std::any::Any + Send>> for ReductError {
 #[cfg(feature = "io")]
 impl<T> From<SendError<T>> for ReductError {
     fn from(err: SendError<T>) -> Self {
+        // Keep the plain conversion for downstream APIs returning Result<_, ReductError>.
+        ReductError {
+            status: ErrorCode::InternalServerError,
+            message: err.to_string(),
+            source: None,
+        }
+    }
+}
+
+#[cfg(feature = "io")]
+impl<T> From<SendError<T>> for ReductError<SendError<T>> {
+    fn from(err: SendError<T>) -> Self {
         // A send error is an internal reductstore error
         ReductError {
             status: ErrorCode::InternalServerError,
             message: err.to_string(),
+            source: Some(err),
         }
     }
 }
@@ -165,6 +238,7 @@ impl ReductError {
         ReductError {
             status,
             message: message.to_string(),
+            source: None,
         }
     }
 
@@ -180,6 +254,7 @@ impl ReductError {
         ReductError {
             status: ErrorCode::OK,
             message: "".to_string(),
+            source: None,
         }
     }
 
@@ -187,6 +262,7 @@ impl ReductError {
         ReductError {
             status: ErrorCode::Timeout,
             message: msg.to_string(),
+            source: None,
         }
     }
 
@@ -195,6 +271,7 @@ impl ReductError {
         ReductError {
             status: ErrorCode::NoContent,
             message: msg.to_string(),
+            source: None,
         }
     }
 
@@ -203,6 +280,7 @@ impl ReductError {
         ReductError {
             status: ErrorCode::NotFound,
             message: msg.to_string(),
+            source: None,
         }
     }
 
@@ -211,6 +289,7 @@ impl ReductError {
         ReductError {
             status: ErrorCode::Conflict,
             message: msg.to_string(),
+            source: None,
         }
     }
 
@@ -219,6 +298,7 @@ impl ReductError {
         ReductError {
             status: ErrorCode::BadRequest,
             message: msg.to_string(),
+            source: None,
         }
     }
 
@@ -227,6 +307,7 @@ impl ReductError {
         ReductError {
             status: ErrorCode::Unauthorized,
             message: msg.to_string(),
+            source: None,
         }
     }
 
@@ -235,6 +316,7 @@ impl ReductError {
         ReductError {
             status: ErrorCode::Forbidden,
             message: msg.to_string(),
+            source: None,
         }
     }
 
@@ -243,6 +325,7 @@ impl ReductError {
         ReductError {
             status: ErrorCode::UnprocessableEntity,
             message: msg.to_string(),
+            source: None,
         }
     }
 
@@ -251,6 +334,7 @@ impl ReductError {
         ReductError {
             status: ErrorCode::TooEarly,
             message: msg.to_string(),
+            source: None,
         }
     }
 
@@ -259,11 +343,18 @@ impl ReductError {
         ReductError {
             status: ErrorCode::InternalServerError,
             message: msg.to_string(),
+            source: None,
         }
     }
 }
 
 // Macros for creating errors with a message.
+#[macro_export]
+macro_rules! ok {
+    () => {
+        ReductError::ok()
+    };
+}
 
 #[macro_export]
 macro_rules! timeout {
@@ -377,7 +468,17 @@ macro_rules! service_unavailable {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fmt;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[derive(Debug)]
+    struct CustomSource;
+
+    impl fmt::Display for CustomSource {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "custom source")
+        }
+    }
 
     #[test]
     fn creates_internal_server_error() {
@@ -400,6 +501,16 @@ mod tests {
         let error: ReductError = system_time_error.into();
         assert_eq!(error.status, ErrorCode::InternalServerError);
         assert_eq!(error.message, "second time provided was later than self");
+        assert_eq!(error.source, None);
+    }
+
+    #[test]
+    fn converts_system_time_error_to_typed_reduct_error() {
+        let system_time_error = UNIX_EPOCH.duration_since(SystemTime::now()).unwrap_err();
+        let error: ReductError<SystemTimeError> = system_time_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "second time provided was later than self");
+        assert!(error.source.is_some());
     }
 
     #[test]
@@ -408,6 +519,16 @@ mod tests {
         let error: ReductError = parse_error.into();
         assert_eq!(error.status, ErrorCode::UrlParseError);
         assert_eq!(error.message, "empty host");
+        assert_eq!(error.source, None);
+    }
+
+    #[test]
+    fn converts_url_parse_error_to_typed_reduct_error() {
+        let parse_error = ParseError::EmptyHost;
+        let error: ReductError<ParseError> = parse_error.into();
+        assert_eq!(error.status, ErrorCode::UrlParseError);
+        assert_eq!(error.message, "empty host");
+        assert_eq!(error.source, Some(ParseError::EmptyHost));
     }
 
     #[test]
@@ -416,6 +537,52 @@ mod tests {
         let error: ReductError = poison_error.into();
         assert_eq!(error.status, ErrorCode::InternalServerError);
         assert_eq!(error.message, "Poison error");
+        assert_eq!(error.source, None);
+    }
+
+    #[test]
+    fn converts_poison_error_to_typed_reduct_error() {
+        let poison_error: PoisonError<()> = PoisonError::new(());
+        let error: ReductError<PoisonError<()>> = poison_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "Poison error");
+        assert!(error.source.is_some());
+    }
+
+    #[test]
+    fn converts_boxed_any_to_reduct_error() {
+        let boxed_error: Box<dyn std::any::Any + Send> = Box::new("panic payload");
+        let error: ReductError = boxed_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.source, None);
+    }
+
+    #[test]
+    fn drops_source_from_typed_reduct_error() {
+        let error_with_source = ReductError {
+            status: ErrorCode::BadRequest,
+            message: "bad input".to_string(),
+            source: Some(CustomSource),
+        };
+
+        let error = error_with_source.without_source();
+        assert_eq!(error.status, ErrorCode::BadRequest);
+        assert_eq!(error.message, "bad input");
+        assert_eq!(error.source, None);
+    }
+
+    #[test]
+    fn converts_io_reduct_error_into_plain_error() {
+        let error_with_source = ReductError {
+            status: ErrorCode::InternalServerError,
+            message: "io typed error".to_string(),
+            source: Some(std::io::Error::other("boom")),
+        };
+
+        let error: ReductError = error_with_source.without_source();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "io typed error");
+        assert_eq!(error.source, None);
     }
 
     #[cfg(feature = "io")]
@@ -425,10 +592,28 @@ mod tests {
         let error: ReductError = send_error.into();
         assert_eq!(error.status, ErrorCode::InternalServerError);
         assert_eq!(error.message, "channel closed");
+        assert_eq!(error.source, None);
+    }
+
+    #[cfg(feature = "io")]
+    #[test]
+    fn converts_send_error_to_typed_reduct_error() {
+        let send_error: SendError<()> = SendError(());
+        let error: ReductError<SendError<()>> = send_error.into();
+        assert_eq!(error.status, ErrorCode::InternalServerError);
+        assert_eq!(error.message, "channel closed");
+        assert!(error.source.is_some());
     }
 
     mod macros {
         use super::*;
+
+        #[test]
+        fn test_ok_macro() {
+            let error = ok!();
+            assert_eq!(error.status, ErrorCode::OK);
+            assert_eq!(error.message, "");
+        }
 
         #[test]
         fn test_timeout_macro() {

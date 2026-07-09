@@ -12,7 +12,7 @@ Open a pull request only for an existing issue.
 - If you want to work on an issue, say so in the comments first and wait to be assigned before you start coding.
 - If you want to fix a reported bug, comment on the issue first so maintainers know you are working on it.
 - If you have a new idea, do not open a surprise PR. Start with a GitHub issue or a thread on the [ReductStore community forum](https://community.reduct.store) to discuss scope first.
-- If you want a small first task, start with [good first issue](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22) or [help wanted](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22help%20wanted%22).
+- If you want a small first task, start with [good first issue](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22).
 
 ## Prepare Your Branch
 
@@ -37,22 +37,6 @@ For most changes, build and run ReductStore locally:
 ```bash
 mkdir -p ./data
 RS_DATA_PATH=./data cargo run -p reductstore --features "fs-backend web-console"
-```
-
-If you prefer building a binary first:
-
-```bash
-cargo build -p reductstore --features "fs-backend web-console"
-mkdir -p ./data
-RS_DATA_PATH=./data ./target/debug/reductstore
-```
-
-Use the published Docker image only for dependency-free smoke checks or to compare released behavior:
-
-```bash
-mkdir -p ./data
-sudo chown -R 10001:10001 ./data
-docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
 ```
 
 Then exercise the API, replication flow, query behavior, lifecycle policy, or UI path that your change touches.

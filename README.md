@@ -121,6 +121,14 @@ Learn more and pick the next piece you need:
 - **[Community Forum](https://community.reduct.store)**
 - **[Good First Issues](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)**
 
+## Build From Source
+
+ReductStore uses a vendored `protoc` binary through Cargo, so contributors do not need to install Protocol Buffers manually. To check the workspace locally, run:
+
+```bash
+cargo check --workspace
+```
+
 ## When You Should Not Use It
 
 ReductStore is not the best fit for every data storage problem. You should consider another solution when:

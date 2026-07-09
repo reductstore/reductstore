@@ -232,23 +232,33 @@ pub(in crate::storage) async fn read_in_chunks(
     offset: u64,
     content_size: u64,
     read_bytes: u64,
-) -> Result<(Vec<u8>, usize), ReductError> {
+) -> Result<(Vec<u8>, usize), ReductError<io::Error>> {
     let chunk_size = min(content_size - read_bytes, MAX_IO_BUFFER_SIZE as u64);
     let mut buf = vec![0; chunk_size as usize];
 
     let mut file = FILE_CACHE
         .read(&file_path, SeekFrom::Start(offset + read_bytes))
-        .await?;
+        .await
+        .map_err(|e| e.with_source(io::Error::new(io::ErrorKind::Deadlock, "")))?;
 
     let read = match file.read(&mut buf) {
         Ok(read) => read,
         Err(e) => {
-            return Err(internal_server_error!("Failed to read record chunk: {}", e));
+            return Err(internal_server_error!(
+                "Failed to read record chunk from {:?}: {}",
+                file_path,
+                e
+            )
+            .with_source(e));
         }
     };
 
     if read == 0 {
-        return Err(internal_server_error!("Failed to read record chunk: EOF"));
+        return Err(internal_server_error!(
+            "Failed to read record chunk from {:?}: EOF",
+            file_path
+        )
+        .with_source(io::Error::new(io::ErrorKind::UnexpectedEof, "EOF")));
     }
 
     Ok((buf, read))
@@ -295,8 +305,11 @@ pub(crate) mod tests {
                 .err()
                 .unwrap();
             assert_eq!(
-                err,
-                internal_server_error!("Failed to read record chunk: EOF")
+                err.to_string(),
+                format!(
+                    "[InternalServerError] Failed to read record chunk from {:?}: EOF",
+                    file_to_read
+                ),
             );
         }
 

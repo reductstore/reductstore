@@ -1,7 +1,10 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use super::{normalize_entry_name, settings_for_entry, Bucket, MultiEntryQuery};
+use super::{
+    default_free_space_fn, normalize_entry_name, settings_for_entry, Bucket, FreeSpaceFn,
+    MultiEntryQuery,
+};
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
@@ -33,6 +36,7 @@ pub(crate) struct BucketBuilder {
     cfg: Option<Cfg>,
     io_limiter: Option<InFlightIoLimiter>,
     usage_counters: Option<Arc<UsageCounters>>,
+    free_space_fn: Option<FreeSpaceFn>,
 }
 
 impl BucketBuilder {
@@ -71,6 +75,14 @@ impl BucketBuilder {
         self
     }
 
+    /// Override the free-space provider. Used in tests to simulate a filesystem
+    /// with a limited amount of free disk space.
+    #[cfg(test)]
+    pub(crate) fn free_space_fn(mut self, free_space_fn: FreeSpaceFn) -> Self {
+        self.free_space_fn = Some(free_space_fn);
+        self
+    }
+
     pub(crate) async fn build(self) -> Result<Bucket, ReductError> {
         let name = self.name.expect("Bucket name must be set");
         let data_path = self.data_path.expect("Bucket data path must be set");
@@ -100,6 +112,7 @@ impl BucketBuilder {
             queries: AsyncRwLock::new(HashMap::<u64, MultiEntryQuery>::new()),
             io_limiter,
             usage_counters,
+            free_space_fn: self.free_space_fn.unwrap_or_else(default_free_space_fn),
         };
 
         bucket.save_settings().await?;
@@ -181,6 +194,7 @@ impl BucketBuilder {
             queries: AsyncRwLock::new(HashMap::<u64, MultiEntryQuery>::new()),
             io_limiter,
             usage_counters,
+            free_space_fn: self.free_space_fn.unwrap_or_else(default_free_space_fn),
         })
     }
 }
