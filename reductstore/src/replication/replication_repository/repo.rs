@@ -48,11 +48,7 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
             entries: settings.entries,
             dst_prefix: settings.dst_prefix,
             include: Vec::new(),
-            exclude: settings
-                .exclude
-                .into_iter()
-                .map(|(k, v)| ProtoLabel { name: k, value: v })
-                .collect(),
+            exclude: Vec::new(),
             each_n: settings.each_n.unwrap_or(0),
             each_s: 0.0, // Deprecated field, always set to 0.0 (migration to $each_t in when condition)
             when: settings.when.map(|value| value.to_string()),
@@ -108,7 +104,7 @@ impl ProtoReplicationSettings {
             }
         }
 
-        // Migrate deprecated include to $in by injecting it into the when condition
+        // Migrate deprecated "include" to $in by injecting it into the "when" condition
         if !self.include.is_empty() {
             migrated = true;
             warn!(
@@ -140,6 +136,38 @@ impl ProtoReplicationSettings {
             }
         }
 
+        // Migrate deprecated "exclude" to $nin by injecting it into the "when" condition
+        if !self.exclude.is_empty() {
+            migrated = true;
+            warn!(
+                "The 'exclude' field is deprecated and will be migrated to 'when' condition using $nin operator. Value: {:?}",
+                self.exclude
+            );
+            for exclude in &self.exclude {
+                if let Some(when_value) = &mut when {
+                    // Inject $nin into the existing when condition
+                    if let Some(obj) = when_value.as_object_mut() {
+                        obj.insert(
+                            "$nin".to_string(),
+                            serde_json::json!([&exclude.name, &exclude.value]),
+                        );
+                    } else {
+                        error!(
+                            "Existing 'when' condition is not an object, cannot inject $nin. Using only $nin condition."
+                        );
+                        when = Some(
+                            serde_json::json!({"$nin": serde_json::json!([&exclude.name, &exclude.value])}),
+                        );
+                    }
+                } else {
+                    // No when condition exists, create one with just $nin
+                    when = Some(
+                        serde_json::json!({"$in": serde_json::json!([&exclude.name, &exclude.value])}),
+                    );
+                }
+            }
+        }
+
         let settings = ReplicationSettings {
             src_bucket: self.src_bucket,
             dst_bucket: self.dst_bucket,
@@ -151,11 +179,6 @@ impl ProtoReplicationSettings {
             },
             entries: self.entries,
             dst_prefix: self.dst_prefix,
-            exclude: self
-                .exclude
-                .into_iter()
-                .map(|label| (label.name, label.value))
-                .collect(),
             each_n: if self.each_n > 0 {
                 Some(self.each_n)
             } else {
@@ -1717,7 +1740,6 @@ mod tests {
             dst_token: Some("token".to_string()),
             entries: vec!["entry-1".to_string()],
             dst_prefix: String::new(),
-            exclude: Labels::default(),
             each_n: None,
             when: None,
             mode: ReplicationMode::Enabled,

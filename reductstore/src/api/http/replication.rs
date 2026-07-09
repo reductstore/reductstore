@@ -110,7 +110,6 @@ mod tests {
             dst_token: Some("token".to_string()),
             entries: vec![],
             dst_prefix: String::new(),
-            exclude: Labels::default(),
             each_n: None,
             when: None,
             mode: ReplicationMode::Enabled,

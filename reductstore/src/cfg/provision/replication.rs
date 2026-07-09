@@ -68,7 +68,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     dst_token: None,
                     entries: vec![],
                     dst_prefix: String::new(),
-                    exclude: Labels::default(),
                     each_n: None,
                     when: None,
                     mode: ReplicationMode::Enabled,
@@ -135,14 +134,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_DST_PREFIX", id))
             {
                 replication.settings.dst_prefix = dst_prefix;
-            }
-
-            for (key, value) in env.matches(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id)) {
-                warn!(
-                    "The exclude parameter is deprecated. Use 'RS_REPLICATION_{}_WHEN' instead.",
-                    id
-                );
-                replication.settings.exclude.insert(key, value);
             }
 
             if let Some(each_n) = env.get_optional::<u64>(&format!("RS_REPLICATION_{}_EACH_N", id))
@@ -594,7 +585,6 @@ mod tests {
                 dst_token: None,
                 entries: vec![],
                 dst_prefix: String::new(),
-                exclude: Labels::default(),
                 each_n: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
@@ -683,7 +673,6 @@ mod tests {
                 dst_token: None,
                 entries: vec![],
                 dst_prefix: String::new(),
-                exclude: Labels::default(),
                 each_n: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
@@ -767,7 +756,6 @@ mod tests {
                 dst_token: None,
                 entries: vec![],
                 dst_prefix: String::new(),
-                exclude: Labels::default(),
                 each_n: None,
                 when: None,
                 mode: ReplicationMode::Enabled,

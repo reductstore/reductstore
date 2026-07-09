@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 use crate::msg::diagnostics::Diagnostics;
-use crate::Labels;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -54,9 +53,6 @@ pub struct ReplicationSettings {
     /// Prefix to add to destination entry names
     #[serde(default)]
     pub dst_prefix: String,
-    /// Labels to exclude
-    #[serde(default)]
-    pub exclude: Labels,
     /// Replication each N-th record
     #[serde(default)]
     pub each_n: Option<u64>,

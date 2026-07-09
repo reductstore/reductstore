@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -53,8 +52,6 @@ pub(in crate::storage) trait Query {
 pub(crate) struct QueryOptions {
     /// The time to live of the query.
     pub ttl: Duration,
-    /// Exclude the records that match the key-value pairs.
-    pub exclude: HashMap<String, String>,
     /// If true, the query will never be done
     pub continuous: bool,
     /// The maximum number of records to return only for non-continuous queries.
@@ -77,7 +74,6 @@ impl From<QueryEntry> for QueryOptions {
     fn from(query: QueryEntry) -> QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(query.ttl.unwrap_or(Self::default().ttl.as_secs())),
-            exclude: query.exclude.unwrap_or_default(),
             continuous: query.continuous.unwrap_or(false),
             limit: query.limit,
             each_n: query.each_n,
@@ -93,7 +89,6 @@ impl Default for QueryOptions {
     fn default() -> QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(60),
-            exclude: HashMap::new(),
             continuous: false,
             limit: None,
             each_n: None,
