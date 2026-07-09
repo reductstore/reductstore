@@ -1034,6 +1034,128 @@ mod tests {
         }
     }
 
+    #[cfg(test)]
+    mod exclude {
+
+        use super::*;
+
+        #[log_test(rstest)]
+        #[tokio::test]
+        async fn test_exclude_migrated_to_nin_without_when() {
+            test_exclude_migration(
+                "status",
+                "inactive",
+                None,
+                serde_json::json!({"$nin": ["STATUS", "inactive"]}),
+            )
+            .await;
+        }
+
+        #[log_test(rstest)]
+        #[tokio::test]
+        async fn test_exclude_migrated_to_nin_with_existing_when() {
+            test_exclude_migration(
+                "region",
+                "eu-west",
+                Some(r#"{"&type": {"$eq": "production"}}"#),
+                serde_json::json!({
+                    "&type": {"$eq": "production"},
+                    "$nin": ["REGION", "eu-west"]
+                }),
+            )
+            .await;
+        }
+
+        async fn test_exclude_migration(
+            exclude_key: &str,
+            exclude_value: &str,
+            when: Option<&str>,
+            expected: serde_json::Value,
+        ) {
+            let path = tempfile::tempdir().unwrap().keep();
+            let mut env = env_with_exclude(path, exclude_key, exclude_value);
+
+            if let Some(when_condition) = when {
+                env.expect_get()
+                    .with(eq("RS_REPLICATION_1_WHEN"))
+                    .return_const(Ok(when_condition.to_string()));
+            }
+
+            env.expect_get().return_const(Err(VarError::NotPresent));
+
+            let components = CfgParser::from_env(env, "0.0.0")
+                .await
+                .build()
+                .await
+                .unwrap();
+            let repo = components.replication_repo.read().await.unwrap();
+            let replication = repo.get_replication_settings("replication1").await.unwrap();
+
+            assert_eq!(replication.when, Some(expected));
+        }
+
+        /// Creates a base MockEnvGetter for exclude migration tests.
+        /// Sets up minimal replication configuration with EXCLUDE_{key}.
+        /// Caller must add:
+        /// - Optional WHEN expectation
+        /// - Catch-all expectation (last)
+        fn env_with_exclude(
+            path: PathBuf,
+            exclude_key: &str,
+            exclude_value: &str,
+        ) -> MockEnvGetter {
+            let mut env = MockEnvGetter::new();
+            env.expect_get()
+                .with(eq("RS_DATA_PATH"))
+                .return_const(Ok(path.to_str().unwrap().to_string()));
+
+            env.expect_get()
+                .with(eq("RS_BUCKET_1_NAME"))
+                .return_const(Ok("bucket1".to_string()));
+
+            let exclude_key_upper = exclude_key.to_uppercase();
+            let exclude_value_owned = exclude_value.to_string();
+            env.expect_all().returning(move || {
+                let mut map = BTreeMap::new();
+                map.insert("RS_BUCKET_1_NAME".to_string(), "bucket1".to_string());
+                map.insert(
+                    "RS_REPLICATION_1_NAME".to_string(),
+                    "replication1".to_string(),
+                );
+                map.insert(
+                    format!("RS_REPLICATION_1_EXCLUDE_{}", exclude_key_upper),
+                    exclude_value_owned.clone(),
+                );
+                map
+            });
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_NAME"))
+                .return_const(Ok("replication1".to_string()));
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
+                .return_const(Ok("bucket1".to_string()));
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_DST_BUCKET"))
+                .return_const(Ok("bucket2".to_string()));
+
+            env.expect_get()
+                .with(eq("RS_REPLICATION_1_DST_HOST"))
+                .return_const(Ok("http://localhost".to_string()));
+
+            // The env.matches() will call env.get() for the matched key
+            let exclude_env_key =
+                format!("RS_REPLICATION_1_EXCLUDE_{}", exclude_key.to_uppercase());
+            env.expect_get()
+                .with(eq(exclude_env_key))
+                .return_const(Ok(exclude_value.to_string()));
+
+            env
+        }
+    }
+
     #[fixture]
     fn path() -> PathBuf {
         let tmp = tempfile::tempdir().unwrap();
