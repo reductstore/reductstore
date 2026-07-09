@@ -60,7 +60,6 @@ pub(super) fn parse_query_params(
     // filter parameters in order of priority
     let (start, stop) = parse_time_range(&params)?;
     let each_n = parse_each_n(&params)?;
-    let limit = parse_limit(params)?;
 
     Ok(QueryEntry {
         query_type: QueryType::Query,
@@ -68,7 +67,6 @@ pub(super) fn parse_query_params(
         start,
         stop,
         each_n,
-        limit,
         continuous,
         ttl,
         only_metadata: Some(only_metadata),
@@ -128,18 +126,6 @@ fn parse_continuous_flag(params: &HashMap<String, String>) -> Result<Option<bool
         None => None,
     };
     Ok(continuous)
-}
-
-fn parse_limit(params: HashMap<String, String>) -> Result<Option<u64>, HttpError> {
-    let limit = match params.get("limit") {
-        Some(limit) => Some(
-            limit
-                .parse::<u64>()
-                .map_err(|_| unprocessable_entity!("'limit' must unsigned integer",))?,
-        ),
-        None => None,
-    };
-    Ok(limit)
 }
 
 fn parse_each_n(params: &HashMap<String, String>) -> Result<Option<u64>, HttpError> {
@@ -374,34 +360,6 @@ mod tests {
             assert_eq!(
                 result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'each_n' must be greater than 0"
-            );
-        }
-    }
-
-    mod parse_limit {
-        use super::*;
-
-        #[rstest]
-        fn test_ok() {
-            let params = HashMap::from_iter(vec![("limit".to_string(), "1".to_string())]);
-            let limit = parse_limit(params).unwrap();
-            assert_eq!(limit, Some(1));
-        }
-
-        #[rstest]
-        fn test_default() {
-            let params = HashMap::new();
-            let limit = parse_limit(params).unwrap();
-            assert_eq!(limit, None);
-        }
-
-        #[rstest]
-        fn test_bad() {
-            let params = HashMap::from_iter(vec![("limit".to_string(), "a".to_string())]);
-            let result = parse_limit(params);
-            assert_eq!(
-                result.err().unwrap().into_inner().to_string(),
-                "[UnprocessableEntity] 'limit' must unsigned integer"
             );
         }
     }

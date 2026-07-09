@@ -808,7 +808,6 @@ mod tests {
 
             let id = entry
                 .query(QueryEntry {
-                    limit: Some(1),
                     ttl: Some(1),
                     ..Default::default()
                 })

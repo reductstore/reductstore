@@ -71,8 +71,6 @@ pub struct QueryEntry {
 
     /// Return a record every N records
     pub each_n: Option<u64>,
-    /// Limit the number of records returned
-    pub limit: Option<u64>,
 
     /// TTL of query in seconds
     pub ttl: Option<u64>,

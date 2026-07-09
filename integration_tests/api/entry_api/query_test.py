@@ -109,23 +109,6 @@ def _make_bucket_with_records(base_url, session, bucket_name):
     assert resp.status_code == 200
 
 
-def test_query_limit(base_url, session, bucket):
-    """Should limit number of records returned"""
-    _make_bucket_with_records(base_url, session, bucket)
-
-    resp = session.post(
-        f"{base_url}/b/{bucket}/entry/q", json={"query_type": "QUERY", "limit": 1}
-    )
-    assert resp.status_code == 200
-
-    query_id = int(json.loads(resp.content)["id"])
-    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
-    assert resp.status_code == 200
-
-    resp = session.get(f"{base_url}/b/{bucket}/entry?q={query_id}")
-    assert resp.status_code == 204
-
-
 def test_query_each_n(base_url, session, bucket):
     """Should return each 2d record"""
     _make_bucket_with_records(base_url, session, bucket)

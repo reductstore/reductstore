@@ -177,7 +177,6 @@ fn build_query_entry(
         start,
         stop,
         each_n: None,
-        limit: None,
         continuous: None,
         ttl: None,
         only_metadata: None,
@@ -293,7 +292,6 @@ mod tests {
 
         assert_eq!(query.start, Some(0));
         assert_eq!(query.stop, Some(1000));
-        assert_eq!(query.limit, None);
         assert_eq!(query.only_metadata, None);
         assert_eq!(query.when, None);
         assert_eq!(query.strict, None);
