@@ -70,10 +70,6 @@ pub struct QueryEntry {
     /// Stop query at (Unix timestamp in microseconds)
     pub stop: Option<u64>,
 
-    /// Include records with label
-    pub include: Option<HashMap<String, String>>,
-    /// Exclude records with label
-    pub exclude: Option<HashMap<String, String>>,
     /// Return a record every N records
     pub each_n: Option<u64>,
     /// Limit the number of records returned

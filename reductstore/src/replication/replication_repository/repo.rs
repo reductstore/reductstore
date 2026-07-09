@@ -162,7 +162,7 @@ impl ProtoReplicationSettings {
                 } else {
                     // No when condition exists, create one with just $nin
                     when = Some(
-                        serde_json::json!({"$in": serde_json::json!([&exclude.name, &exclude.value])}),
+                        serde_json::json!({"$nin": serde_json::json!([&exclude.name, &exclude.value])}),
                     );
                 }
             }

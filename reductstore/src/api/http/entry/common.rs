@@ -67,8 +67,6 @@ pub(super) fn parse_query_params(
         entries: None,
         start,
         stop,
-        include: None,
-        exclude: None,
         each_n,
         limit,
         continuous,
