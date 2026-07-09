@@ -208,7 +208,7 @@ impl StorageEngine {
             oldest_record,
             latest_record,
             defaults: Defaults {
-                bucket: Bucket::defaults(),
+                bucket: self.cfg.bucket_defaults.clone(),
             },
             license: self.license.clone(),
         })
@@ -677,6 +677,31 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_info_reports_bucket_defaults(cfg: Cfg) {
+        let bucket_defaults = BucketSettings {
+            max_block_size: Some(1_000_000),
+            quota_type: Some(QuotaType::FIFO),
+            quota_size: Some(10_000_000),
+            max_block_records: Some(10),
+        };
+        let cfg = Cfg {
+            bucket_defaults: bucket_defaults.clone(),
+            ..cfg
+        };
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build()
+            .await;
+
+        assert_eq!(
+            storage.info().await.unwrap().defaults.bucket,
+            bucket_defaults
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_storage_limit_exceeded(#[future] storage: Arc<StorageEngine>) {
         let storage = storage.await;
         let bucket = storage
@@ -1101,6 +1126,74 @@ mod tests {
             .unwrap()
             .upgrade_and_unwrap();
         assert_eq!(bucket.name(), "test");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket_uses_configured_defaults(cfg: Cfg) {
+        let bucket_defaults = BucketSettings {
+            max_block_size: Some(1_000_000),
+            quota_type: Some(QuotaType::FIFO),
+            quota_size: Some(10_000_000),
+            max_block_records: Some(10),
+        };
+        let cfg = Cfg {
+            bucket_defaults: bucket_defaults.clone(),
+            ..cfg
+        };
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build()
+            .await;
+
+        let bucket = storage
+            .create_bucket("test", BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        assert_eq!(bucket.settings().await.unwrap(), bucket_defaults);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket_fills_partial_settings_from_configured_defaults(cfg: Cfg) {
+        let bucket_defaults = BucketSettings {
+            max_block_size: Some(1_000_000),
+            quota_type: Some(QuotaType::FIFO),
+            quota_size: Some(10_000_000),
+            max_block_records: Some(10),
+        };
+        let cfg = Cfg {
+            bucket_defaults: bucket_defaults.clone(),
+            ..cfg
+        };
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build()
+            .await;
+
+        let bucket = storage
+            .create_bucket(
+                "test",
+                BucketSettings {
+                    max_block_size: Some(2_000_000),
+                    ..BucketSettings::default()
+                },
+            )
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        assert_eq!(
+            bucket.settings().await.unwrap(),
+            BucketSettings {
+                max_block_size: Some(2_000_000),
+                ..bucket_defaults
+            }
+        );
     }
 
     #[rstest]

@@ -34,7 +34,6 @@ mod tests {
     use crate::api::http::tests::{headers, keeper};
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
-    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]

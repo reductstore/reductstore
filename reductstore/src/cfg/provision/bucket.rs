@@ -3,6 +3,7 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
+use crate::storage::bucket::Bucket;
 use crate::storage::engine::StorageEngine;
 use crate::storage::usage::UsageCounters;
 use bytesize::ByteSize;
@@ -91,6 +92,21 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .map(|(_id, (name, settings))| (name, settings))
             .collect()
     }
+
+    pub(in crate::cfg) fn parse_bucket_defaults(env: &mut Env<EnvGetter>) -> BucketSettings {
+        let settings = BucketSettings {
+            quota_type: env.get_optional("RS_DEFAULTS_BUCKET_QUOTA_TYPE"),
+            quota_size: env
+                .get_optional::<ByteSize>("RS_DEFAULTS_BUCKET_QUOTA_SIZE")
+                .map(|s| s.as_u64()),
+            max_block_size: env
+                .get_optional::<ByteSize>("RS_DEFAULTS_BUCKET_MAX_BLOCK_SIZE")
+                .map(|s| s.as_u64()),
+            max_block_records: env.get_optional("RS_DEFAULTS_BUCKET_MAX_BLOCK_RECORDS"),
+        };
+
+        Bucket::fill_settings(settings, Bucket::defaults())
+    }
 }
 
 #[cfg(test)]
@@ -178,6 +194,115 @@ mod tests {
             bucket1.settings().await.unwrap(),
             Bucket::defaults(),
             "use defaults if env vars are not set"
+        );
+    }
+
+    #[log_test(rstest)]
+    #[tokio::test]
+    async fn test_bucket_defaults_from_env() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter.expect_all().returning(BTreeMap::new);
+        env_getter
+            .expect_get()
+            .with(eq("RS_DEFAULTS_BUCKET_QUOTA_TYPE"))
+            .return_const(Ok("FIFO".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_DEFAULTS_BUCKET_QUOTA_SIZE"))
+            .return_const(Ok("1GB".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_SIZE"))
+            .return_const(Ok("1MB".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_RECORDS"))
+            .return_const(Ok("1000".to_string()));
+
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::from_env(env_getter, "0.0.0").await;
+
+        assert_eq!(
+            cfg.cfg.bucket_defaults,
+            BucketSettings {
+                quota_type: Some(FIFO),
+                quota_size: Some(1_000_000_000),
+                max_block_size: Some(1_000_000),
+                max_block_records: Some(1000),
+            }
+        );
+    }
+
+    #[log_test(rstest)]
+    #[tokio::test]
+    async fn test_bucket_defaults_from_env_fill_missing() {
+        let mut env_getter = MockEnvGetter::new();
+        env_getter.expect_all().returning(BTreeMap::new);
+        env_getter
+            .expect_get()
+            .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_SIZE"))
+            .return_const(Ok("1MB".to_string()));
+
+        env_getter
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::from_env(env_getter, "0.0.0").await;
+        let mut expected = Bucket::defaults();
+        expected.max_block_size = Some(1_000_000);
+
+        assert_eq!(cfg.cfg.bucket_defaults, expected);
+    }
+
+    #[log_test(rstest)]
+    #[tokio::test]
+    async fn test_provisioned_bucket_uses_configured_defaults(mut env_with_buckets: MockEnvGetter) {
+        env_with_buckets
+            .expect_get()
+            .with(eq("RS_DEFAULTS_BUCKET_QUOTA_TYPE"))
+            .return_const(Ok("FIFO".to_string()));
+        env_with_buckets
+            .expect_get()
+            .with(eq("RS_DEFAULTS_BUCKET_QUOTA_SIZE"))
+            .return_const(Ok("1GB".to_string()));
+        env_with_buckets
+            .expect_get()
+            .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_SIZE"))
+            .return_const(Ok("1MB".to_string()));
+        env_with_buckets
+            .expect_get()
+            .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_RECORDS"))
+            .return_const(Ok("1000".to_string()));
+        env_with_buckets
+            .expect_get()
+            .with(eq("RS_BUCKET_1_NAME"))
+            .return_const(Ok("bucket1".to_string()));
+
+        env_with_buckets
+            .expect_get()
+            .return_const(Err(VarError::NotPresent));
+
+        let cfg = CfgParser::from_env(env_with_buckets, "0.0.0").await;
+        let components = cfg.build().await.unwrap();
+        let bucket = components
+            .storage
+            .get_bucket("bucket1")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        assert!(bucket.is_provisioned());
+        assert_eq!(
+            bucket.settings().await.unwrap(),
+            BucketSettings {
+                quota_type: Some(FIFO),
+                quota_size: Some(1_000_000_000),
+                max_block_size: Some(1_000_000),
+                max_block_records: Some(1000),
+            }
         );
     }
 

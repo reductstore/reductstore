@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Configure server-wide default bucket settings with `RS_DEFAULTS_BUCKET_*` environment variables, [PR-1535](https://github.com/reductstore/reductstore/pull/1535) by @rohankumardubey
 - Reject record writes before writing when the data folder filesystem has insufficient free disk space, in addition to the existing quota check, [PR-1525](https://github.com/reductstore/reductstore/pull/1525)
 - Support glob-like entry patterns in lifecycle task filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1526](https://github.com/reductstore/reductstore/pull/1526) by @upuddu
 - Support glob-like entry patterns in replication filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1507](https://github.com/reductstore/reductstore/issues/1507) by @rohankumardubey
