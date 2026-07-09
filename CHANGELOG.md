@@ -84,7 +84,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- `include` parameter in `QueryBuilder` and `ReplicationSettings` is removed, [PR-1497](https://github.com/reductstore/reductstore/pull/1497)
+- `include` and `exclude` parameters in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1497](https://github.com/reductstore/reductstore/pull/1497) by @vbmade2000
 
 ## 1.20.2 - 2026-06-18
 
