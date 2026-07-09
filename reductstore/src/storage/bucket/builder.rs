@@ -81,7 +81,10 @@ impl BucketBuilder {
         let usage_counters = self
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
-        let settings = Bucket::fill_settings(self.settings.unwrap_or_default(), Bucket::defaults());
+        let settings = Bucket::fill_settings(
+            self.settings.unwrap_or_default(),
+            cfg.bucket_defaults.clone(),
+        );
         let path = data_path.join(&name);
         let folder_keeper = FolderKeeper::new(path.clone(), &cfg).await;
 

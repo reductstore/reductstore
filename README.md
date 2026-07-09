@@ -78,6 +78,10 @@ RS_DATA_PATH=./data ./reductstore
 
 For a more in-depth guide, visit the **[Getting Started](https://reduct.store/docs/)** and **[Download](https://www.reduct.store/download)** sections.
 
+Default settings for newly created buckets can be configured with environment variables:
+`RS_DEFAULTS_MAX_BLOCK_SIZE`, `RS_DEFAULTS_MAX_BLOCK_RECORDS`,
+`RS_DEFAULTS_QUOTA_TYPE`, and `RS_DEFAULTS_QUOTA_SIZE`.
+
 After initializing the instance, you can start writing and querying data immediately. Here's a Python sample:
 
 ```python

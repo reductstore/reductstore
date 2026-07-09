@@ -31,8 +31,10 @@ pub(super) async fn create_bucket(
 mod tests {
     use super::*;
 
-    use crate::api::http::tests::{headers, keeper};
+    use crate::api::http::tests::{headers, keeper, keeper_with_cfg};
+    use crate::cfg::Cfg;
     use reduct_base::error::ErrorCode;
+    use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
     use rstest::rstest;
     use std::sync::Arc;
 
@@ -47,6 +49,93 @@ mod tests {
         )
         .await
         .unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket_uses_configured_defaults(headers: HeaderMap) {
+        let bucket_defaults = BucketSettings {
+            max_block_size: Some(1_000_000),
+            quota_type: Some(QuotaType::FIFO),
+            quota_size: Some(10_000_000),
+            max_block_records: Some(10),
+        };
+        let keeper = keeper_with_cfg(Cfg {
+            data_path: tempfile::tempdir().unwrap().keep(),
+            bucket_defaults: bucket_defaults.clone(),
+            ..Cfg::default()
+        })
+        .await;
+
+        create_bucket(
+            State(Arc::clone(&keeper)),
+            Path("bucket-3".to_string()),
+            headers,
+            BucketSettingsAxum::default(),
+        )
+        .await
+        .unwrap();
+
+        let bucket = keeper
+            .get_anonymous()
+            .await
+            .unwrap()
+            .storage
+            .get_bucket("bucket-3")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        assert_eq!(bucket.settings().await.unwrap(), bucket_defaults);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_create_bucket_fills_partial_settings_from_configured_defaults(
+        headers: HeaderMap,
+    ) {
+        let bucket_defaults = BucketSettings {
+            max_block_size: Some(1_000_000),
+            quota_type: Some(QuotaType::FIFO),
+            quota_size: Some(10_000_000),
+            max_block_records: Some(10),
+        };
+        let keeper = keeper_with_cfg(Cfg {
+            data_path: tempfile::tempdir().unwrap().keep(),
+            bucket_defaults: bucket_defaults.clone(),
+            ..Cfg::default()
+        })
+        .await;
+
+        create_bucket(
+            State(Arc::clone(&keeper)),
+            Path("bucket-3".to_string()),
+            headers,
+            BucketSettingsAxum(BucketSettings {
+                max_block_size: Some(2_000_000),
+                ..BucketSettings::default()
+            }),
+        )
+        .await
+        .unwrap();
+
+        let bucket = keeper
+            .get_anonymous()
+            .await
+            .unwrap()
+            .storage
+            .get_bucket("bucket-3")
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+
+        assert_eq!(
+            bucket.settings().await.unwrap(),
+            BucketSettings {
+                max_block_size: Some(2_000_000),
+                ..bucket_defaults
+            }
+        );
     }
 
     #[rstest]

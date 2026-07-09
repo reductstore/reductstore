@@ -937,6 +937,14 @@ pub(crate) mod tests {
         keeper_with_limits_impl(limits_config).await
     }
 
+    pub(crate) async fn keeper_with_cfg(cfg: Cfg) -> Arc<StateKeeper> {
+        let components = test_components(cfg).await;
+        let (tx, rx) = tokio::sync::mpsc::channel(1);
+        tx.send(components).await.unwrap();
+
+        Arc::new(StateKeeper::new(Arc::new(LockFileBuilder::noop()), rx))
+    }
+
     pub(crate) async fn keeper_with_engine_limit(max_storage_size: u64) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),

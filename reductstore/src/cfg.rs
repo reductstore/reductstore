@@ -31,6 +31,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
+use crate::storage::bucket::Bucket;
 use crate::storage::usage::UsageCounters;
 use crate::syslog::build_system_event_logger;
 use async_trait::async_trait;
@@ -97,6 +98,7 @@ pub struct Cfg {
     pub instance_name: String,
 
     pub buckets: HashMap<String, BucketSettings>,
+    pub bucket_defaults: BucketSettings,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ProvisionedReplication>,
     pub lifecycles: HashMap<String, ProvisionedLifecycle>,
@@ -131,6 +133,7 @@ impl Default for Cfg {
             secondary_url: None,
             instance_name: "unknown".to_string(),
             buckets: HashMap::new(),
+            bucket_defaults: Bucket::defaults(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
             lifecycles: HashMap::new(),
@@ -310,6 +313,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             instance_name: resolve_instance_name(env.get_optional::<String>("RS_INSTANCE_NAME")),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
+            bucket_defaults: Self::parse_bucket_defaults(&mut env),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
             replications,
@@ -609,6 +613,7 @@ mod tests {
         assert_eq!(parser.cfg.limits_config, LimitsConfig::default());
 
         assert_eq!(parser.cfg.buckets.len(), 0);
+        assert_eq!(parser.cfg.bucket_defaults, Bucket::defaults());
         assert_eq!(parser.cfg.tokens.len(), 0);
     }
 
