@@ -95,14 +95,14 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
     pub(in crate::cfg) fn parse_bucket_defaults(env: &mut Env<EnvGetter>) -> BucketSettings {
         let settings = BucketSettings {
-            quota_type: env.get_optional("RS_DEFAULTS_QUOTA_TYPE"),
+            quota_type: env.get_optional("RS_DEFAULTS_BUCKET_QUOTA_TYPE"),
             quota_size: env
-                .get_optional::<ByteSize>("RS_DEFAULTS_QUOTA_SIZE")
+                .get_optional::<ByteSize>("RS_DEFAULTS_BUCKET_QUOTA_SIZE")
                 .map(|s| s.as_u64()),
             max_block_size: env
-                .get_optional::<ByteSize>("RS_DEFAULTS_MAX_BLOCK_SIZE")
+                .get_optional::<ByteSize>("RS_DEFAULTS_BUCKET_MAX_BLOCK_SIZE")
                 .map(|s| s.as_u64()),
-            max_block_records: env.get_optional("RS_DEFAULTS_MAX_BLOCK_RECORDS"),
+            max_block_records: env.get_optional("RS_DEFAULTS_BUCKET_MAX_BLOCK_RECORDS"),
         };
 
         Bucket::fill_settings(settings, Bucket::defaults())
@@ -204,19 +204,19 @@ mod tests {
         env_getter.expect_all().returning(BTreeMap::new);
         env_getter
             .expect_get()
-            .with(eq("RS_DEFAULTS_QUOTA_TYPE"))
+            .with(eq("RS_DEFAULTS_BUCKET_QUOTA_TYPE"))
             .return_const(Ok("FIFO".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_DEFAULTS_QUOTA_SIZE"))
+            .with(eq("RS_DEFAULTS_BUCKET_QUOTA_SIZE"))
             .return_const(Ok("1GB".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_DEFAULTS_MAX_BLOCK_SIZE"))
+            .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_SIZE"))
             .return_const(Ok("1MB".to_string()));
         env_getter
             .expect_get()
-            .with(eq("RS_DEFAULTS_MAX_BLOCK_RECORDS"))
+            .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_RECORDS"))
             .return_const(Ok("1000".to_string()));
 
         env_getter
@@ -243,7 +243,7 @@ mod tests {
         env_getter.expect_all().returning(BTreeMap::new);
         env_getter
             .expect_get()
-            .with(eq("RS_DEFAULTS_MAX_BLOCK_SIZE"))
+            .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_SIZE"))
             .return_const(Ok("1MB".to_string()));
 
         env_getter
@@ -262,19 +262,19 @@ mod tests {
     async fn test_provisioned_bucket_uses_configured_defaults(mut env_with_buckets: MockEnvGetter) {
         env_with_buckets
             .expect_get()
-            .with(eq("RS_DEFAULTS_QUOTA_TYPE"))
+            .with(eq("RS_DEFAULTS_BUCKET_QUOTA_TYPE"))
             .return_const(Ok("FIFO".to_string()));
         env_with_buckets
             .expect_get()
-            .with(eq("RS_DEFAULTS_QUOTA_SIZE"))
+            .with(eq("RS_DEFAULTS_BUCKET_QUOTA_SIZE"))
             .return_const(Ok("1GB".to_string()));
         env_with_buckets
             .expect_get()
-            .with(eq("RS_DEFAULTS_MAX_BLOCK_SIZE"))
+            .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_SIZE"))
             .return_const(Ok("1MB".to_string()));
         env_with_buckets
             .expect_get()
-            .with(eq("RS_DEFAULTS_MAX_BLOCK_RECORDS"))
+            .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_RECORDS"))
             .return_const(Ok("1000".to_string()));
         env_with_buckets
             .expect_get()
