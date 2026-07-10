@@ -6,5 +6,6 @@ pub mod duration;
 pub mod env;
 pub mod file_cache;
 pub mod internal_client;
+pub mod payload_codec;
 pub mod sync;
 pub mod weak;

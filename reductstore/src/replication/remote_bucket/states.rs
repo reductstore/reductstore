@@ -5,7 +5,7 @@ mod bucket_available;
 mod bucket_unavailable;
 mod initial_state;
 
-use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::replication::remote_bucket::{BatchStats, ErrorRecordMap};
 use crate::replication::Transaction;
 use async_trait::async_trait;
 pub(super) use initial_state::InitialState;
@@ -30,5 +30,5 @@ pub(super) trait RemoteBucketState {
     fn is_available(&self) -> bool;
 
     // Get the last result of the write operation.
-    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
+    fn last_result(&self) -> &Result<(ErrorRecordMap, BatchStats), ReductError>;
 }

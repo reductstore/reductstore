@@ -4,7 +4,7 @@
 use crate::replication::remote_bucket::client_wrapper::BoxedClientApi;
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-use crate::replication::remote_bucket::ErrorRecordMap;
+use crate::replication::remote_bucket::{BatchStats, ErrorRecordMap};
 use crate::replication::Transaction;
 use async_trait::async_trait;
 use log::error;
@@ -17,7 +17,7 @@ pub(in crate::replication::remote_bucket) struct BucketUnavailableState {
     bucket_name: String,
     init_time: Instant,
     timeout: Duration,
-    last_result: Result<ErrorRecordMap, ReductError>,
+    last_result: Result<(ErrorRecordMap, BatchStats), ReductError>,
 }
 
 #[async_trait]
@@ -51,7 +51,7 @@ impl RemoteBucketState for BucketUnavailableState {
         }
 
         let mut me = *self;
-        me.last_result = Ok(ErrorRecordMap::new());
+        me.last_result = Ok((ErrorRecordMap::new(), BatchStats::default()));
         Box::new(me)
     }
 
@@ -70,7 +70,7 @@ impl RemoteBucketState for BucketUnavailableState {
         false
     }
 
-    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
+    fn last_result(&self) -> &Result<(ErrorRecordMap, BatchStats), ReductError> {
         &self.last_result
     }
 }
@@ -112,7 +112,10 @@ mod tests {
         ));
 
         let state = state.write_batch("entry", vec![]).await;
-        assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
+        assert_eq!(
+            state.last_result(),
+            &Ok((ErrorRecordMap::new(), BatchStats::default()))
+        );
         assert!(!state.is_available());
     }
 
@@ -139,7 +142,7 @@ mod tests {
         bucket
             .expect_write_batch()
             .with(predicate::eq("test_entry"), predicate::always())
-            .return_once(|_, _| Ok(ErrorRecordMap::new()));
+            .return_once(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
         client
             .expect_get_bucket()
             .with(predicate::eq("test_bucket"))
@@ -183,7 +186,7 @@ mod tests {
             bucket_name: "test_bucket".to_string(),
             init_time: Instant::now() - Duration::new(61, 0),
             timeout: Duration::new(0, 0),
-            last_result: Ok(ErrorRecordMap::new()),
+            last_result: Ok((ErrorRecordMap::new(), BatchStats::default())),
         })
     }
 }

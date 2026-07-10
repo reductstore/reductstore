@@ -313,7 +313,9 @@ pub(crate) mod tests {
     use reduct_base::error::ReductError as BaseHttpError;
     use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
+    use reduct_base::msg::replication_api::{
+        ReplicationCompression, ReplicationMode, ReplicationSettings,
+    };
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
     use rstest::fixture;
@@ -890,6 +892,7 @@ pub(crate) mod tests {
                     each_n: None,
                     when: None,
                     mode: ReplicationMode::Enabled,
+                    compression: ReplicationCompression::None,
                 },
             )
             .await

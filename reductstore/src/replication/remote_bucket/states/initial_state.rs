@@ -5,8 +5,8 @@ use crate::replication::remote_bucket::client_wrapper::{create_client, BoxedClie
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::remote_bucket::RemoteBucketConfig;
+use crate::replication::remote_bucket::{BatchStats, ErrorRecordMap};
 use crate::replication::Transaction;
 use async_trait::async_trait;
 use log::error;
@@ -16,7 +16,7 @@ use reduct_base::io::BoxedReadRecord;
 pub(in crate::replication::remote_bucket) struct InitialState {
     client: BoxedClientApi,
     bucket_name: String,
-    last_result: Result<ErrorRecordMap, ReductError>,
+    last_result: Result<(ErrorRecordMap, BatchStats), ReductError>,
 }
 
 impl InitialState {
@@ -25,7 +25,7 @@ impl InitialState {
         Ok(Self {
             client,
             bucket_name: config.bucket_name.clone(),
-            last_result: Ok(ErrorRecordMap::new()),
+            last_result: Ok((ErrorRecordMap::new(), BatchStats::default())),
         })
     }
 }
@@ -76,7 +76,7 @@ impl RemoteBucketState for InitialState {
     fn is_available(&self) -> bool {
         false
     }
-    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
+    fn last_result(&self) -> &Result<(ErrorRecordMap, BatchStats), ReductError> {
         &self.last_result
     }
 }
@@ -99,9 +99,13 @@ mod tests {
             api_token: "test_token".to_string(),
             verify_ssl: true,
             ca_path: None,
+            compression: Default::default(),
         })
         .unwrap();
-        assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
+        assert_eq!(
+            state.last_result(),
+            &Ok((ErrorRecordMap::new(), BatchStats::default()))
+        );
     }
 
     #[rstest]
@@ -116,7 +120,7 @@ mod tests {
                 predicate::eq("test_entry"),
                 predicate::always(), // TODO: check the records
             )
-            .return_once(|_, _| Ok(ErrorRecordMap::new()));
+            .return_once(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
         client
             .expect_get_bucket()
             .return_once(move |_| Ok(Box::new(bucket)));
@@ -124,12 +128,15 @@ mod tests {
         let state = Box::new(InitialState {
             client: Box::new(client),
             bucket_name: "test_bucket".to_string(),
-            last_result: Ok(ErrorRecordMap::new()),
+            last_result: Ok((ErrorRecordMap::new(), BatchStats::default())),
         });
 
         let state = state.write_batch("test_entry", vec![]).await;
 
-        assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));
+        assert_eq!(
+            state.last_result(),
+            &Ok((ErrorRecordMap::new(), BatchStats::default()))
+        );
         assert_eq!(state.is_available(), true);
     }
 
@@ -143,7 +150,7 @@ mod tests {
         let state = Box::new(InitialState {
             client: Box::new(client),
             bucket_name: "test_bucket".to_string(),
-            last_result: Ok(ErrorRecordMap::new()),
+            last_result: Ok((ErrorRecordMap::new(), BatchStats::default())),
         });
 
         let state = state.write_batch("test_entry", vec![]).await;
@@ -165,7 +172,7 @@ mod tests {
         let state = Box::new(InitialState {
             client: Box::new(client),
             bucket_name: "test_bucket".to_string(),
-            last_result: Ok(ErrorRecordMap::new()),
+            last_result: Ok((ErrorRecordMap::new(), BatchStats::default())),
         });
 
         let state = state.probe().await;
@@ -182,7 +189,7 @@ mod tests {
         let state = Box::new(InitialState {
             client: Box::new(client),
             bucket_name: "test_bucket".to_string(),
-            last_result: Ok(ErrorRecordMap::new()),
+            last_result: Ok((ErrorRecordMap::new(), BatchStats::default())),
         });
 
         let state = state.probe().await;

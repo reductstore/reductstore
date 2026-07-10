@@ -23,6 +23,13 @@ message  ReplicationSettings {
   optional string when = 11;           // condition to replicate
   ReplicationMode mode = 12;  // replication mode
   string dst_prefix = 13;     // prefix to add to destination entry names
+  ReplicationCompression compression = 14; // compression of batch payloads during transfer
+}
+
+enum ReplicationCompression {
+  NONE = 0;
+  ZSTD = 1;
+  GZIP = 2;
 }
 
 enum ReplicationMode {

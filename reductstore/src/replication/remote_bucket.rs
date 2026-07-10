@@ -9,6 +9,7 @@ use crate::replication::Transaction;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
+use reduct_base::msg::replication_api::ReplicationCompression;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -19,6 +20,14 @@ pub(super) struct RemoteBucketConfig {
     pub(super) api_token: String,
     pub(super) verify_ssl: bool,
     pub(super) ca_path: Option<PathBuf>,
+    pub(super) compression: ReplicationCompression,
+}
+
+/// Byte accounting of a sent batch: payload size before and after wire compression.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub(crate) struct BatchStats {
+    pub raw_bytes: u64,
+    pub wire_bytes: u64,
 }
 
 pub(super) struct RemoteBucketBuilder {
@@ -60,6 +69,11 @@ impl RemoteBucketBuilder {
         self
     }
 
+    pub fn compression(mut self, compression: ReplicationCompression) -> Self {
+        self.config.compression = compression;
+        self
+    }
+
     fn build_config(self) -> RemoteBucketConfig {
         self.config
     }
@@ -82,7 +96,7 @@ pub(crate) trait RemoteBucket {
         &mut self,
         entry_name: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
-    ) -> Result<ErrorRecordMap, ReductError>;
+    ) -> Result<(ErrorRecordMap, BatchStats), ReductError>;
 
     async fn probe_availability(&mut self);
 
@@ -104,7 +118,7 @@ impl RemoteBucket for RemoteBucketImpl {
         &mut self,
         entry_name: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
-    ) -> Result<ErrorRecordMap, ReductError> {
+    ) -> Result<(ErrorRecordMap, BatchStats), ReductError> {
         self.state = Some(
             self.state
                 .take()
@@ -164,7 +178,7 @@ pub(super) mod tests {
                 &self,
                 entry: &str,
                 records: Vec<BoxedReadRecord>,
-            ) -> Result<ErrorRecordMap, ReductError>;
+            ) -> Result<(ErrorRecordMap, BatchStats), ReductError>;
 
             async fn update_batch(
                 &self,
@@ -191,7 +205,7 @@ pub(super) mod tests {
 
             async fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send>;
 
-            fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
+            fn last_result(&self) -> &Result<(ErrorRecordMap, BatchStats), ReductError>;
 
             fn is_available(&self) -> bool;
         }
@@ -223,7 +237,7 @@ pub(super) mod tests {
         let mut second_state = MockState::new();
         second_state
             .expect_last_result()
-            .return_const(Ok(ErrorRecordMap::new()));
+            .return_const(Ok((ErrorRecordMap::new(), BatchStats::default())));
         second_state.expect_is_available().return_const(true);
 
         first_state
@@ -289,7 +303,7 @@ pub(super) mod tests {
 
     async fn write_record(
         remote_bucket: &mut RemoteBucketImpl,
-    ) -> Result<ErrorRecordMap, ReductError> {
+    ) -> Result<(ErrorRecordMap, BatchStats), ReductError> {
         let (_tx, rx) = crossbeam_channel::unbounded();
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());

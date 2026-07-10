@@ -32,9 +32,10 @@ pub(super) struct ReplicationSender {
 }
 
 /// Outcome of replicating a group of records: the result, the number of
-/// records it covers, and the number of bytes successfully replicated
-/// (non-zero only for successful writes).
-type ResultResult = (Result<(), ReductError>, u64, u64);
+/// records it covers, the number of bytes successfully replicated and the
+/// number of bytes sent over the wire after compression (both non-zero only
+/// for successful writes).
+type ResultResult = (Result<(), ReductError>, u64, u64, u64);
 
 #[derive(Debug, PartialEq)]
 pub(super) enum SyncState {
@@ -265,7 +266,7 @@ impl ReplicationSender {
                         transaction.timestamp(),
                         err
                     );
-                    counter.push((Err(err), 1, 0));
+                    counter.push((Err(err), 1, 0, 0));
                 }
             }
         }
@@ -313,7 +314,7 @@ impl ReplicationSender {
 
         let batch_size = batch.len() as u64;
         match bucket.write_batch(&dst_entry_name, batch).await {
-            Ok(map) => {
+            Ok((map, stats)) => {
                 // Bytes successfully replicated are those whose
                 // timestamp is not reported as failed.
                 let written_size: u64 = batch_sizes
@@ -321,13 +322,25 @@ impl ReplicationSender {
                     .filter(|(timestamp, _)| !map.contains_key(*timestamp))
                     .map(|(_, size)| *size)
                     .sum();
-                counter.push((Ok(()), batch_size - map.len() as u64, written_size));
+                // Approximate the wire size of the successful records with the
+                // batch's compression ratio.
+                let wire_size = if stats.raw_bytes > 0 {
+                    written_size * stats.wire_bytes / stats.raw_bytes
+                } else {
+                    written_size
+                };
+                counter.push((
+                    Ok(()),
+                    batch_size - map.len() as u64,
+                    written_size,
+                    wire_size,
+                ));
                 for (timestamp, err) in map.into_iter() {
                     debug!(
                         "Failed to replicate record {}/{}/{}: {:?}",
                         src_bucket, entry_name, timestamp, err
                     );
-                    counter.push((Err(err), 1, 0));
+                    counter.push((Err(err), 1, 0, 0));
                 }
             }
             Err(err) => {
@@ -336,7 +349,7 @@ impl ReplicationSender {
                     src_bucket, entry_name, err
                 );
 
-                counter.push((Err(err), batch_size, 0));
+                counter.push((Err(err), batch_size, 0, 0));
             }
         }
 
@@ -457,7 +470,7 @@ mod tests {
     use crate::cfg::Cfg;
 
     use crate::core::sync::AsyncRwLock;
-    use crate::replication::remote_bucket::ErrorRecordMap;
+    use crate::replication::remote_bucket::{BatchStats, ErrorRecordMap};
     use crate::replication::transaction_log::TransactionLog;
     use crate::replication::transaction_log::TransactionLogRef;
     use crate::replication::Transaction;
@@ -487,7 +500,7 @@ mod tests {
                 &mut self,
                 entry_name: &str,
                 record: Vec<(BoxedReadRecord, Transaction)>,
-            ) -> Result<ErrorRecordMap, ReductError>;
+            ) -> Result<(ErrorRecordMap, BatchStats), ReductError>;
 
             async fn probe_availability(&mut self);
 
@@ -501,7 +514,7 @@ mod tests {
     async fn test_replication_ok(mut remote_bucket: MockRmBucket, settings: ReplicationSettings) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
         remote_bucket.expect_is_active().return_const(true);
         let mut sender = build_sender(remote_bucket, settings).await;
 
@@ -510,7 +523,7 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5)])
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5, 5)])
         );
         assert_eq!(
             sender
@@ -539,7 +552,7 @@ mod tests {
         remote_bucket
             .expect_write_batch()
             .with(predicate::eq("robot-1/test"), predicate::always())
-            .returning(|_, _| Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
         remote_bucket.expect_is_active().return_const(true);
         let mut sender = build_sender(remote_bucket, settings).await;
 
@@ -548,7 +561,7 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5)])
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5, 5)])
         );
     }
 
@@ -566,7 +579,7 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::NotAvailable(vec![(Err(timeout!("Timeout")), 1, 0)])
+            SyncState::NotAvailable(vec![(Err(timeout!("Timeout")), 1, 0, 0)])
         );
 
         assert_eq!(
@@ -604,6 +617,7 @@ mod tests {
                 Err(ReductError::new(ErrorCode::TooManyRequests, "slow down")),
                 1,
                 0,
+                0,
             )])
         );
 
@@ -632,7 +646,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
         remote_bucket.expect_is_active().return_const(true);
         let mut sender = build_sender(remote_bucket, settings).await;
 
@@ -656,9 +670,10 @@ mod tests {
                 (
                     Err(not_found!("Entry 'test' not found in bucket 'src'")),
                     1,
+                    0,
                     0
                 ),
-                (Ok(()), 0, 0)
+                (Ok(()), 0, 0, 0)
             ]),
         );
         assert!(
@@ -685,7 +700,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
         remote_bucket.expect_is_active().return_const(true);
         let mut sender = build_sender(remote_bucket, settings).await;
 
@@ -718,7 +733,7 @@ mod tests {
         writer.send(Ok(None)).await.unwrap();
         assert_eq!(
             handle.await.unwrap().unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 4)])
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 4, 4)])
         );
     }
 
@@ -730,7 +745,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
         remote_bucket.expect_is_active().return_const(true);
         let mut sender = build_sender(remote_bucket, settings).await;
 
@@ -769,9 +784,10 @@ mod tests {
                         "Record with timestamp 20 in src/test is still being written"
                     )),
                     1,
+                    0,
                     0
                 ),
-                (Ok(()), 0, 0)
+                (Ok(()), 0, 0, 0)
             ])
         );
     }
@@ -783,10 +799,13 @@ mod tests {
         settings: ReplicationSettings,
     ) {
         remote_bucket.expect_write_batch().returning(|_, _| {
-            Ok(ErrorRecordMap::from_iter(vec![(
-                10,
-                ReductError::new(ErrorCode::Conflict, "AlreadyExists"),
-            )]))
+            Ok((
+                ErrorRecordMap::from_iter(vec![(
+                    10,
+                    ReductError::new(ErrorCode::Conflict, "AlreadyExists"),
+                )]),
+                BatchStats::default(),
+            ))
         });
         remote_bucket.expect_is_active().return_const(true);
         let mut sender = build_sender(remote_bucket, settings).await;
@@ -800,8 +819,8 @@ mod tests {
         assert_eq!(
             sender.run().await.unwrap(),
             SyncState::SyncedOrRemoved(vec![
-                (Ok(()), 1, 5),
-                (Err(conflict!("AlreadyExists")), 1, 0)
+                (Ok(()), 1, 5, 5),
+                (Err(conflict!("AlreadyExists")), 1, 0, 0)
             ])
         );
         assert!(
@@ -828,7 +847,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
         remote_bucket.expect_is_active().return_const(true);
         let mut sender = build_sender(remote_bucket, settings).await;
 
@@ -842,7 +861,12 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, IoConfig::default().batch_max_size + 1)])
+            SyncState::SyncedOrRemoved(vec![(
+                Ok(()),
+                1,
+                IoConfig::default().batch_max_size + 1,
+                IoConfig::default().batch_max_size + 1
+            )])
         );
         assert!(
             sender
@@ -910,7 +934,7 @@ mod tests {
         remote_bucket
             .expect_write_batch()
             .times(2)
-            .returning(|_, _| Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
         remote_bucket.expect_is_active().return_const(true);
         let mut sender =
             build_sender_with_entries(remote_bucket, settings, &["test", "test2"]).await;
@@ -920,7 +944,7 @@ mod tests {
 
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5), (Ok(()), 1, 5)]),
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5, 5), (Ok(()), 1, 5, 5)]),
             "the last pending send must be drained after the loop"
         );
         for entry in ["test", "test2"] {
@@ -947,7 +971,7 @@ mod tests {
                     active_writer.store(false, Ordering::SeqCst);
                     Err(ReductError::new(ErrorCode::TooManyRequests, "slow down"))
                 } else {
-                    Ok(ErrorRecordMap::new())
+                    Ok((ErrorRecordMap::new(), BatchStats::default()))
                 }
             });
         let active_reader = Arc::clone(&active);
@@ -963,10 +987,11 @@ mod tests {
         assert_eq!(
             sender.run().await.unwrap(),
             SyncState::NotAvailable(vec![
-                (Ok(()), 1, 5),
+                (Ok(()), 1, 5, 5),
                 (
                     Err(ReductError::new(ErrorCode::TooManyRequests, "slow down")),
                     1,
+                    0,
                     0
                 ),
             ])
@@ -990,7 +1015,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok(ErrorRecordMap::new()));
+            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
         remote_bucket.expect_is_active().return_const(true);
         let mut sender =
             build_sender_with_entries(remote_bucket, settings, &["a_ok", "b_bad"]).await;
@@ -1033,7 +1058,7 @@ mod tests {
         imitate_write_record_to(&sender, "a_ok", &Transaction::WriteRecord(20), 5).await;
         assert_eq!(
             sender.run().await.unwrap(),
-            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5)])
+            SyncState::SyncedOrRemoved(vec![(Ok(()), 1, 5, 5)])
         );
     }
 
@@ -1180,6 +1205,7 @@ mod tests {
             each_n: None,
             when: None,
             mode: ReplicationMode::Enabled,
+            compression: Default::default(),
         }
     }
 }

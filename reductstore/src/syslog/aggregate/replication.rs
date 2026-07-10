@@ -34,6 +34,7 @@ struct ReplicationAggregate {
     written_records: u64,
     failed_records: u64,
     replicated_data_size: u64,
+    compressed_data_size: u64,
     duration: f64,
     message: String,
     /// Sliding idle deadline (condition 2).
@@ -64,6 +65,7 @@ fn make_event(
         written_records: aggregate.written_records,
         failed_records: aggregate.failed_records,
         replicated_data_size: aggregate.replicated_data_size,
+        compressed_data_size: aggregate.compressed_data_size,
         duration: aggregate.duration,
     };
 
@@ -113,10 +115,10 @@ impl ReplicationEventAggregator {
         &mut self,
         pending_records: u64,
         duration: f64,
-        counter: &[(Result<(), ReductError>, u64, u64)],
+        counter: &[(Result<(), ReductError>, u64, u64, u64)],
     ) {
-        let mut per_status: BTreeMap<u16, (u64, u64, String)> = BTreeMap::new();
-        for (result, records, data_size) in counter {
+        let mut per_status: BTreeMap<u16, (u64, u64, u64, String)> = BTreeMap::new();
+        for (result, records, data_size, compressed_data_size) in counter {
             let (status, message) = match result {
                 Ok(_) => (200u16, String::new()),
                 Err(err) => (err.status as u16, err.message.clone()),
@@ -124,8 +126,9 @@ impl ReplicationEventAggregator {
             let entry = per_status.entry(status).or_default();
             entry.0 += *records;
             entry.1 += *data_size;
+            entry.2 += *compressed_data_size;
             if !message.is_empty() {
-                entry.2 = message;
+                entry.3 = message;
             }
         }
 
@@ -134,7 +137,7 @@ impl ReplicationEventAggregator {
         }
 
         let mut first = true;
-        for (status, (records, data_size, message)) in per_status {
+        for (status, (records, data_size, compressed_data_size, message)) in per_status {
             let pass_duration = if first { duration } else { 0.0 };
             first = false;
 
@@ -153,6 +156,7 @@ impl ReplicationEventAggregator {
                     if is_success(status) {
                         aggregate.written_records += records;
                         aggregate.replicated_data_size += data_size;
+                        aggregate.compressed_data_size += compressed_data_size;
                     } else {
                         aggregate.failed_records += records;
                     }
@@ -172,7 +176,8 @@ impl ReplicationEventAggregator {
                         pending_records,
                         written_records: if success { records } else { 0 },
                         failed_records: if success { 0 } else { records },
-                        replicated_data_size: data_size,
+                        replicated_data_size: if success { data_size } else { 0 },
+                        compressed_data_size: if success { compressed_data_size } else { 0 },
                         duration: pass_duration,
                         message,
                         flush_at: now + Duration::from_secs(AGGREGATION_WINDOW_SECS),
@@ -269,7 +274,7 @@ mod tests {
     #[tokio::test]
     async fn records_and_flushes_success(events: Arc<Mutex<Vec<SystemEvent>>>) {
         let mut agg = aggregator(Arc::clone(&events), false);
-        agg.record_pass(3, 0.5, &[(Ok(()), 5, 1234)]).await;
+        agg.record_pass(3, 0.5, &[(Ok(()), 5, 1234, 1234)]).await;
         agg.flush().await;
 
         let captured = events.lock().unwrap();
@@ -292,11 +297,11 @@ mod tests {
     #[tokio::test]
     async fn status_change_flushes_previous_bucket(events: Arc<Mutex<Vec<SystemEvent>>>) {
         let mut agg = aggregator(Arc::clone(&events), false);
-        agg.record_pass(0, 0.1, &[(Ok(()), 2, 20)]).await;
-        agg.record_pass(0, 0.1, &[(Ok(()), 3, 30)]).await;
+        agg.record_pass(0, 0.1, &[(Ok(()), 2, 20, 20)]).await;
+        agg.record_pass(0, 0.1, &[(Ok(()), 3, 30, 30)]).await;
         assert!(events.lock().unwrap().is_empty(), "same status accumulates");
 
-        agg.record_pass(7, 0.1, &[(Err(not_found!("missing")), 4, 0)])
+        agg.record_pass(7, 0.1, &[(Err(not_found!("missing")), 4, 0, 0)])
             .await;
 
         {
@@ -324,10 +329,10 @@ mod tests {
         agg.record_pass(
             1,
             0.1,
-            &[(Ok(()), 1, 10), (Err(not_found!("missing")), 1, 0)],
+            &[(Ok(()), 1, 10, 10), (Err(not_found!("missing")), 1, 0, 0)],
         )
         .await;
-        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10, 10)]).await;
 
         let captured = events.lock().unwrap();
         assert_eq!(captured.len(), 2);
@@ -342,9 +347,9 @@ mod tests {
     #[tokio::test]
     async fn success_and_failure_events_share_schema(events: Arc<Mutex<Vec<SystemEvent>>>) {
         let mut agg = aggregator(Arc::clone(&events), false);
-        agg.record_pass(0, 0.1, &[(Ok(()), 5, 100)]).await;
+        agg.record_pass(0, 0.1, &[(Ok(()), 5, 100, 100)]).await;
         agg.flush().await;
-        agg.record_pass(0, 0.1, &[(Err(not_found!("x")), 7, 0)])
+        agg.record_pass(0, 0.1, &[(Err(not_found!("x")), 7, 0, 0)])
             .await;
         agg.flush().await;
 
@@ -373,7 +378,7 @@ mod tests {
     #[tokio::test]
     async fn idle_window_flushes(events: Arc<Mutex<Vec<SystemEvent>>>) {
         let mut agg = aggregator(Arc::clone(&events), false);
-        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10, 10)]).await;
         // age the idle deadline into the past
         agg.active.as_mut().unwrap().flush_at = Instant::now() - Duration::from_millis(1);
 
@@ -388,7 +393,7 @@ mod tests {
     #[tokio::test]
     async fn time_cap_flushes(events: Arc<Mutex<Vec<SystemEvent>>>) {
         let mut agg = aggregator(Arc::clone(&events), false);
-        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10, 10)]).await;
         let now = Instant::now();
         let aggregate = agg.active.as_mut().unwrap();
         aggregate.flush_at = now + Duration::from_secs(5); // not idle
@@ -403,7 +408,7 @@ mod tests {
     #[tokio::test]
     async fn flush_if_due_keeps_fresh_bucket(events: Arc<Mutex<Vec<SystemEvent>>>) {
         let mut agg = aggregator(Arc::clone(&events), false);
-        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10, 10)]).await;
 
         agg.flush_if_due().await;
         assert!(events.lock().unwrap().is_empty());
@@ -416,7 +421,7 @@ mod tests {
     #[tokio::test]
     async fn emission_errors_are_swallowed(events: Arc<Mutex<Vec<SystemEvent>>>) {
         let mut agg = aggregator(Arc::clone(&events), true);
-        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10, 10)]).await;
         agg.flush().await; // must not panic / propagate
 
         assert!(events.lock().unwrap().is_empty());
@@ -467,7 +472,7 @@ mod tests {
         };
         let mut agg = ReplicationEventAggregator::new(sink, "repl-1".to_string());
 
-        agg.record_pass(2, 0.5, &[(Ok(()), 3, 120)]).await;
+        agg.record_pass(2, 0.5, &[(Ok(()), 3, 120, 120)]).await;
         agg.flush().await;
 
         let bucket = storage

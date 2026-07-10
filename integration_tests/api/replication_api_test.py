@@ -25,6 +25,7 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "exclude": {"key2": "value2"},
             "each_n": 10,
             "when": {"$eq": ["&key1", "value1"]},
+            "compression": "zstd",
         },
     )
 
@@ -33,7 +34,16 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
     resp = session.get(f"{base_url}/replications/{replication_name}")
     assert resp.status_code == 200
     assert resp.json() == {
-        "diagnostics": {"hourly": {"errored": 0, "errors": {}, "ok": 0}},
+        "diagnostics": {
+            "hourly": {
+                "errored": 0,
+                "errors": {},
+                "ok": 0,
+                "data_size": 0,
+                "compressed_data_size": 0,
+                "compression_ratio": 1.0,
+            }
+        },
         "info": {
             "is_active": True,
             "is_provisioned": False,
@@ -53,6 +63,7 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "each_n": 10,
             "when": {"$eq": ["&key1", "value1"]},
             "mode": "enabled",
+            "compression": "zstd",
         },
     }
 
@@ -104,7 +115,16 @@ def test__update_replication_ok(base_url, session, bucket_name, replication_name
     assert resp.status_code == 200
 
     assert resp.json() == {
-        "diagnostics": {"hourly": {"errored": 0, "errors": {}, "ok": 0}},
+        "diagnostics": {
+            "hourly": {
+                "errored": 0,
+                "errors": {},
+                "ok": 0,
+                "data_size": 0,
+                "compressed_data_size": 0,
+                "compression_ratio": 1.0,
+            }
+        },
         "info": {
             "is_active": True,
             "is_provisioned": False,
@@ -124,6 +144,7 @@ def test__update_replication_ok(base_url, session, bucket_name, replication_name
             "src_bucket": bucket_name,
             "when": None,
             "mode": "enabled",
+            "compression": "none",
         },
     }
 

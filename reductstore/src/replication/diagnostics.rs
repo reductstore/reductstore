@@ -37,9 +37,17 @@ impl DiagnosticsCounter {
     /// # Arguments
     ///
     /// * `result` - The result to count. Errors are counted by status code.
-    pub(super) fn count(&mut self, result: Result<(), ReductError>, n: u64) {
+    pub(super) fn count(
+        &mut self,
+        result: Result<(), ReductError>,
+        n: u64,
+        data_size: u64,
+        compressed_data_size: u64,
+    ) {
         self.check_and_create_new_frame();
         let frame = self.frames.last_mut().unwrap();
+        frame.data_size += data_size;
+        frame.compressed_data_size += compressed_data_size;
         // count the result
         match result {
             Ok(_) => frame.ok += n,
@@ -76,6 +84,9 @@ impl DiagnosticsCounter {
             .fold(DiagnosticsItem::default(), |acc, frame| DiagnosticsItem {
                 ok: acc.ok + frame.ok,
                 errored: acc.errored + frame.errored,
+                data_size: acc.data_size + frame.data_size,
+                compressed_data_size: acc.compressed_data_size + frame.compressed_data_size,
+                compression_ratio: 0.0,
                 errors: frame
                     .errors
                     .iter()
@@ -98,6 +109,14 @@ impl DiagnosticsCounter {
         let k = self.frames.len() as f32 / self.frame_count as f32;
         diagnostics.ok = (diagnostics.ok as f32 / k).round() as u64;
         diagnostics.errored = (diagnostics.errored as f32 / k).round() as u64;
+        diagnostics.data_size = (diagnostics.data_size as f32 / k).round() as u64;
+        diagnostics.compressed_data_size =
+            (diagnostics.compressed_data_size as f32 / k).round() as u64;
+        diagnostics.compression_ratio = if diagnostics.compressed_data_size > 0 {
+            diagnostics.data_size as f64 / diagnostics.compressed_data_size as f64
+        } else {
+            1.0
+        };
         diagnostics
     }
 
@@ -130,7 +149,7 @@ mod tests {
         let mut counter = DiagnosticsCounter::new(Duration::from_millis(
             DEFAULT_FRAME_COUNT as u64 * FRAME_INTERVAL_MS,
         ));
-        counter.count(Ok(()), 1);
+        counter.count(Ok(()), 1, 0, 0);
 
         assert_eq!(
             counter.diagnostics().ok,
@@ -140,7 +159,7 @@ mod tests {
         assert_eq!(counter.diagnostics().errored, 0);
 
         wait_for_next_frame();
-        counter.count(Ok(()), 1);
+        counter.count(Ok(()), 1, 0, 0);
         assert_eq!(
             counter.diagnostics().ok,
             60,
@@ -148,7 +167,7 @@ mod tests {
         );
 
         wait_for_next_frame();
-        counter.count(Ok(()), 2);
+        counter.count(Ok(()), 2, 0, 0);
         assert_eq!(
             counter.diagnostics().ok,
             80,
@@ -157,7 +176,7 @@ mod tests {
 
         for _ in 0..DEFAULT_FRAME_COUNT {
             wait_for_next_frame();
-            counter.count(Ok(()), 1);
+            counter.count(Ok(()), 1, 0, 0);
         }
 
         assert_eq!(
@@ -176,7 +195,7 @@ mod tests {
         let mut counter = DiagnosticsCounter::new(Duration::from_millis(
             DEFAULT_FRAME_COUNT as u64 * FRAME_INTERVAL_MS,
         ));
-        counter.count(Err(ReductError::internal_server_error("test")), 1);
+        counter.count(Err(ReductError::internal_server_error("test")), 1, 0, 0);
 
         assert_eq!(
             counter.diagnostics().errored,
@@ -186,7 +205,7 @@ mod tests {
         assert_eq!(counter.diagnostics().ok, 0);
 
         wait_for_next_frame();
-        counter.count(Err(ReductError::internal_server_error("test")), 1);
+        counter.count(Err(ReductError::internal_server_error("test")), 1, 0, 0);
         assert_eq!(
             counter.diagnostics().errored,
             60,
@@ -194,7 +213,7 @@ mod tests {
         );
 
         wait_for_next_frame();
-        counter.count(Err(ReductError::internal_server_error("test")), 2);
+        counter.count(Err(ReductError::internal_server_error("test")), 2, 0, 0);
         assert_eq!(
             counter.diagnostics().errored,
             80,
@@ -203,7 +222,7 @@ mod tests {
 
         for _ in 0..DEFAULT_FRAME_COUNT {
             wait_for_next_frame();
-            counter.count(Err(ReductError::internal_server_error("test")), 1);
+            counter.count(Err(ReductError::internal_server_error("test")), 1, 0, 0);
         }
 
         assert_eq!(
@@ -215,13 +234,13 @@ mod tests {
 
     #[rstest]
     fn test_gaps_in_frames(mut counter: DiagnosticsCounter) {
-        counter.count(Err(ReductError::internal_server_error("test")), 1);
-        counter.count(Ok(()), 1);
+        counter.count(Err(ReductError::internal_server_error("test")), 1, 0, 0);
+        counter.count(Ok(()), 1, 0, 0);
 
         sleep(Duration::from_millis(FRAME_INTERVAL_MS * 2));
 
-        counter.count(Err(ReductError::internal_server_error("test")), 1);
-        counter.count(Ok(()), 1);
+        counter.count(Err(ReductError::internal_server_error("test")), 1, 0, 0);
+        counter.count(Ok(()), 1, 0, 0);
 
         assert_eq!(
             counter.diagnostics().errored,
@@ -236,8 +255,8 @@ mod tests {
 
         for _ in 0..DEFAULT_FRAME_COUNT / 2 {
             sleep(Duration::from_millis(FRAME_INTERVAL_MS * 2));
-            counter.count(Ok(()), 1);
-            counter.count(Err(ReductError::internal_server_error("test")), 1);
+            counter.count(Ok(()), 1, 0, 0);
+            counter.count(Err(ReductError::internal_server_error("test")), 1, 0, 0);
         }
 
         assert_eq!(
@@ -254,8 +273,8 @@ mod tests {
 
     #[rstest]
     fn test_error_map_same_type(mut counter: DiagnosticsCounter) {
-        counter.count(Err(ReductError::internal_server_error("test")), 1);
-        counter.count(Err(ReductError::internal_server_error("test-1")), 1);
+        counter.count(Err(ReductError::internal_server_error("test")), 1, 0, 0);
+        counter.count(Err(ReductError::internal_server_error("test-1")), 1, 0, 0);
 
         assert_eq!(
             counter.diagnostics().errors,
@@ -272,8 +291,8 @@ mod tests {
 
     #[rstest]
     fn test_error_map_different_type(mut counter: DiagnosticsCounter) {
-        counter.count(Err(ReductError::internal_server_error("test")), 1);
-        counter.count(Err(ReductError::bad_request("test-1")), 1);
+        counter.count(Err(ReductError::internal_server_error("test")), 1, 0, 0);
+        counter.count(Err(ReductError::bad_request("test-1")), 1, 0, 0);
 
         assert_eq!(
             counter.diagnostics().errors,
@@ -299,8 +318,8 @@ mod tests {
 
     #[rstest]
     fn test_error_map_frames(mut counter: DiagnosticsCounter) {
-        counter.count(Err(ReductError::internal_server_error("test")), 1);
-        counter.count(Err(ReductError::bad_request("test-1")), 1);
+        counter.count(Err(ReductError::internal_server_error("test")), 1, 0, 0);
+        counter.count(Err(ReductError::bad_request("test-1")), 1, 0, 0);
 
         assert_eq!(
             counter.diagnostics().errors,
@@ -328,8 +347,15 @@ mod tests {
             counter.count(
                 Err(ReductError::internal_server_error(&format!("test-{}", i))),
                 1,
+                0,
+                0,
             );
-            counter.count(Err(ReductError::bad_request(&format!("test-{}", i))), 1);
+            counter.count(
+                Err(ReductError::bad_request(&format!("test-{}", i))),
+                1,
+                0,
+                0,
+            );
         }
 
         assert_eq!(

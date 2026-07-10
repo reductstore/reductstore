@@ -4,14 +4,16 @@
 use crate::core::internal_client::{
     ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
 };
-use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucketConfig};
-use async_stream::stream;
+use crate::core::payload_codec::compress_payload;
+use crate::replication::remote_bucket::{BatchStats, ErrorRecordMap, RemoteBucketConfig};
 use async_trait::async_trait;
 use axum::http::HeaderName;
-use bytes::Bytes;
-use futures_util::Stream;
+use bytes::{Bytes, BytesMut};
+use log::warn;
+use reduct_base::batch::{is_compressible_mime, make_encoding_header_value, RecordEncoding};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
+use reduct_base::msg::replication_api::ReplicationCompression;
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
@@ -35,7 +37,7 @@ pub(super) trait ReductBucketApi {
         &self,
         entry: &str,
         records: Vec<BoxedReadRecord>,
-    ) -> Result<ErrorRecordMap, ReductError>;
+    ) -> Result<(ErrorRecordMap, BatchStats), ReductError>;
 
     async fn update_batch(
         &self,
@@ -53,9 +55,16 @@ pub(super) type BoxedBucketApi = Box<dyn ReductBucketApi + Sync + Send>;
 struct ReductClient {
     client_api: InternalClientApi,
     server_url: String,
+    compression: ReplicationCompression,
 }
 
 static API_PATH: &str = "api/v1";
+
+/// The first server version that understands `x-reduct-encoding-*` headers.
+const MIN_COMPRESSION_API_VERSION: (u64, u64) = (1, 21);
+
+/// Records smaller than this are not worth compressing.
+const MIN_COMPRESS_SIZE: u64 = 128;
 
 impl ReductClient {
     fn new(
@@ -63,6 +72,7 @@ impl ReductClient {
         api_token: &str,
         verify_ssl: bool,
         ca_path: Option<&std::path::PathBuf>,
+        compression: ReplicationCompression,
     ) -> Result<Self, ReductError> {
         let client = InternalClientBuilder::new(ClientBuildErrorContext {
             ca_read: "Failed to read replication CA certificate",
@@ -85,7 +95,25 @@ impl ReductClient {
         Ok(Self {
             client_api,
             server_url,
+            compression,
         })
+    }
+
+    /// Check via the `x-reduct-api` response header that the remote server is
+    /// recent enough to understand compressed batch payloads.
+    fn supports_compression(headers: &HeaderMap) -> bool {
+        headers
+            .get("x-reduct-api")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| {
+                let (major, minor) = value.split_once('.')?;
+                Some((
+                    major.trim().parse::<u64>().ok()?,
+                    minor.trim().parse::<u64>().ok()?,
+                ))
+            })
+            .map(|version| version >= MIN_COMPRESSION_API_VERSION)
+            .unwrap_or(false)
     }
 }
 
@@ -93,17 +121,38 @@ struct BucketWrapper {
     server_url: String,
     bucket_name: String,
     client: Client,
+    compression: ReplicationCompression,
 }
 
 impl BucketWrapper {
-    fn build_headers(records: &Vec<BoxedReadRecord>, update_only: bool) -> HeaderMap {
-        let mut headers = HeaderMap::new();
-        let content_length: u64 = if update_only {
-            0
-        } else {
-            records.iter().map(|r| r.meta().content_length()).sum()
-        };
+    /// Build the `x-reduct-time-*` header value for a record from its on-wire
+    /// content length, content type and labels.
+    fn format_record_header(
+        content_length: &str,
+        content_type: &str,
+        meta: &reduct_base::io::RecordMeta,
+    ) -> String {
+        let mut header_values = vec![content_length.to_string(), content_type.to_string()];
 
+        if !meta.labels().is_empty() {
+            let mut label_headers = vec![];
+            for (name, value) in meta.labels() {
+                if value.contains(',') {
+                    label_headers.push(format!("{}=\"{}\"", name, value));
+                } else {
+                    label_headers.push(format!("{}={}", name, value));
+                }
+            }
+
+            label_headers.sort();
+            header_values.push(label_headers.join(","));
+        }
+
+        header_values.join(",")
+    }
+
+    fn base_headers(content_length: u64) -> HeaderMap {
+        let mut headers = HeaderMap::new();
         headers.insert(
             CONTENT_TYPE,
             HeaderValue::from_str("application/octet-stream").unwrap(),
@@ -112,60 +161,91 @@ impl BucketWrapper {
             CONTENT_LENGTH,
             HeaderValue::from_str(&content_length.to_string()).unwrap(),
         );
-
-        for record in records {
-            let meta = record.meta();
-            let mut header_values = Vec::new();
-            if update_only {
-                header_values.push("0".to_string());
-                header_values.push("".to_string());
-            } else {
-                header_values.push(meta.content_length().to_string());
-                header_values.push(meta.content_type().to_string());
-            }
-
-            if !meta.labels().is_empty() {
-                let mut label_headers = vec![];
-                for (name, value) in meta.labels() {
-                    if value.contains(',') {
-                        label_headers.push(format!("{}=\"{}\"", name, value));
-                    } else {
-                        label_headers.push(format!("{}={}", name, value));
-                    }
-                }
-
-                label_headers.sort();
-                header_values.push(label_headers.join(","));
-            }
-
-            headers.insert(
-                HeaderName::from_str(&format!("x-reduct-time-{}", meta.timestamp())).unwrap(),
-                HeaderValue::from_str(&header_values.join(",").to_string()).unwrap(),
-            );
-        }
-
         headers
     }
 
+    /// Read the record bodies, compress them if configured (skipping
+    /// already-compressed MIME types and payloads that don't shrink), and
+    /// build the batch headers with the on-wire lengths.
     fn prepare_batch_to_write(
         mut records: Vec<BoxedReadRecord>,
-    ) -> (HeaderMap, impl Stream<Item = Result<Bytes, ReductError>>) {
-        Self::sort_by_timestamp(&mut records);
-        let headers = Self::build_headers(&mut records, false);
+        compression: ReplicationCompression,
+    ) -> Result<(HeaderMap, Vec<Bytes>, BatchStats), ReductError> {
+        records.sort_by(|a, b| a.meta().timestamp().cmp(&b.meta().timestamp()));
 
-        let stream = stream! {
-            while let Some(mut record) = records.pop() {
-                while let Some(chunk) = record.read_chunk() {
-                     yield chunk;
-                }
-            }
+        let codec = match compression {
+            ReplicationCompression::None => None,
+            ReplicationCompression::Zstd => Some(RecordEncoding::Zstd),
+            ReplicationCompression::Gzip => Some(RecordEncoding::Gzip),
         };
 
-        (headers, stream)
+        let mut bodies = Vec::with_capacity(records.len());
+        let mut stats = BatchStats::default();
+        let mut headers = HeaderMap::new();
+        for record in records.iter_mut() {
+            let original_length = record.meta().content_length();
+            let mut raw = BytesMut::with_capacity(original_length as usize);
+            while let Some(chunk) = record.read_chunk() {
+                raw.extend_from_slice(&chunk?);
+            }
+            let raw = raw.freeze();
+
+            let meta = record.meta();
+            let mut wire = raw;
+            let mut encoding = None;
+            if let Some(codec) = codec {
+                if original_length >= MIN_COMPRESS_SIZE && is_compressible_mime(meta.content_type())
+                {
+                    let compressed = compress_payload(codec, &wire)?;
+                    if (compressed.len() as u64) < original_length {
+                        wire = Bytes::from(compressed);
+                        encoding = Some(codec);
+                    }
+                }
+            }
+
+            let wire_length = if encoding.is_some() {
+                wire.len() as u64
+            } else {
+                original_length
+            };
+            stats.raw_bytes += original_length;
+            stats.wire_bytes += wire_length;
+
+            headers.insert(
+                HeaderName::from_str(&format!("x-reduct-time-{}", meta.timestamp())).unwrap(),
+                HeaderValue::from_str(&Self::format_record_header(
+                    &wire_length.to_string(),
+                    meta.content_type(),
+                    meta,
+                ))
+                .unwrap(),
+            );
+            if let Some(codec) = encoding {
+                headers.insert(
+                    HeaderName::from_str(&format!("x-reduct-encoding-{}", meta.timestamp()))
+                        .unwrap(),
+                    HeaderValue::from_str(&make_encoding_header_value(codec, original_length))
+                        .unwrap(),
+                );
+            }
+
+            bodies.push(wire);
+        }
+
+        headers.extend(Self::base_headers(stats.wire_bytes));
+        Ok((headers, bodies, stats))
     }
 
     fn prepare_batch_to_update(records: &Vec<BoxedReadRecord>) -> HeaderMap {
-        let headers = Self::build_headers(&records, true);
+        let mut headers = Self::base_headers(0);
+        for record in records {
+            let meta = record.meta();
+            headers.insert(
+                HeaderName::from_str(&format!("x-reduct-time-{}", meta.timestamp())).unwrap(),
+                HeaderValue::from_str(&Self::format_record_header("0", "", meta)).unwrap(),
+            );
+        }
         headers
     }
 
@@ -203,10 +283,6 @@ impl BucketWrapper {
 
         Ok(failed_records)
     }
-
-    fn sort_by_timestamp(records_to_update: &mut Vec<BoxedReadRecord>) {
-        records_to_update.sort_by(|a, b| b.meta().timestamp().cmp(&a.meta().timestamp()));
-    }
 }
 
 fn check_response(response: Result<Response, Error>) -> Result<Response, ReductError> {
@@ -222,12 +298,24 @@ impl ReductClientApi for ReductClient {
         );
 
         let resp = request.send().await;
-        check_response(resp)?;
+        let resp = check_response(resp)?;
+
+        let mut compression = self.compression;
+        if compression != ReplicationCompression::None
+            && !Self::supports_compression(resp.headers())
+        {
+            warn!(
+                "Remote server {} does not support replication payload compression, sending uncompressed",
+                self.server_url
+            );
+            compression = ReplicationCompression::None;
+        }
 
         Ok(Box::new(BucketWrapper {
             server_url: self.server_url.clone(),
             bucket_name: bucket_name.to_string(),
             client: self.client_api.client().clone(),
+            compression,
         }))
     }
 
@@ -242,8 +330,8 @@ impl ReductBucketApi for BucketWrapper {
         &self,
         entry: &str,
         records: Vec<BoxedReadRecord>,
-    ) -> Result<ErrorRecordMap, ReductError> {
-        let (headers, stream) = Self::prepare_batch_to_write(records);
+    ) -> Result<(ErrorRecordMap, BatchStats), ReductError> {
+        let (headers, bodies, stats) = Self::prepare_batch_to_write(records, self.compression)?;
         let request = self.client.request(
             Method::POST,
             &format!(
@@ -252,13 +340,14 @@ impl ReductBucketApi for BucketWrapper {
             ),
         );
 
+        let stream = futures_util::stream::iter(bodies.into_iter().map(Ok::<Bytes, ReductError>));
         let response = request
             .headers(headers)
             .body(Body::wrap_stream(stream))
             .send()
             .await;
 
-        Self::parse_record_errors(response)
+        Ok((Self::parse_record_errors(response)?, stats))
     }
 
     async fn update_batch(
@@ -295,6 +384,7 @@ pub(super) fn create_client(config: &RemoteBucketConfig) -> Result<BoxedClientAp
         &config.api_token,
         config.verify_ssl,
         config.ca_path.as_ref(),
+        config.compression,
     )?))
 }
 
@@ -306,19 +396,24 @@ pub(super) mod tests {
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{us_to_ts, Record};
     use crossbeam_channel::{Receiver, Sender};
-    use futures_util::StreamExt;
     use hyper::http;
     use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use rstest::*;
     use std::io::{Read, Seek, SeekFrom};
     use std::path::PathBuf;
-    use std::pin::pin;
 
     #[rstest]
     #[tokio::test]
     async fn test_prepare_batch_to_write(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
         let (records, mut txs) = records;
-        let (headers, stream) = BucketWrapper::prepare_batch_to_write(records);
+
+        txs[0].send(Ok(Bytes::from("record1"))).unwrap();
+        drop(txs.remove(0));
+        txs[0].send(Ok(Bytes::from("record2"))).unwrap();
+        drop(txs.remove(0));
+
+        let (headers, bodies, stats) =
+            BucketWrapper::prepare_batch_to_write(records, ReplicationCompression::None).unwrap();
 
         assert_eq!(headers.len(), 4);
         assert_eq!(
@@ -335,18 +430,149 @@ pub(super) mod tests {
             "10,image/jpg,label2=value2"
         );
 
-        let mut stream = pin!(stream);
+        assert_eq!(bodies, vec![Bytes::from("record1"), Bytes::from("record2")]);
+        assert_eq!(
+            stats,
+            BatchStats {
+                raw_bytes: 20,
+                wire_bytes: 20
+            }
+        );
+    }
 
-        txs[0].send(Ok(Bytes::from("record1"))).unwrap();
-        drop(txs.remove(0));
+    mod compression {
+        use super::*;
+        use reduct_base::batch::parse_encoding_header;
 
-        txs[0].send(Ok(Bytes::from("record2"))).unwrap();
-        drop(txs.remove(0));
+        fn compressible_record(timestamp: u64, content_type: &str, body: Bytes) -> BoxedReadRecord {
+            let (tx, rx) = crossbeam_channel::unbounded();
+            let record = Record {
+                timestamp: Some(us_to_ts(&timestamp)),
+                labels: vec![],
+                content_type: content_type.to_string(),
+                begin: 0,
+                end: body.len() as u64,
+                state: 0,
+            };
+            tx.send(Ok(body)).unwrap();
+            drop(tx);
+            MockRecordReader::form_record_with_rx(rx, record)
+        }
 
-        let chunk = stream.next().await.unwrap().unwrap();
-        assert_eq!(chunk, Bytes::from("record1"));
-        let chunk = stream.next().await.unwrap().unwrap();
-        assert_eq!(chunk, Bytes::from("record2"));
+        #[rstest]
+        #[case(ReplicationCompression::Zstd, RecordEncoding::Zstd)]
+        #[case(ReplicationCompression::Gzip, RecordEncoding::Gzip)]
+        fn test_compresses_record(
+            #[case] compression: ReplicationCompression,
+            #[case] expected_codec: RecordEncoding,
+        ) {
+            let body = Bytes::from("na ".repeat(1000));
+            let records = vec![compressible_record(1, "text/plain", body.clone())];
+
+            let (headers, bodies, stats) =
+                BucketWrapper::prepare_batch_to_write(records, compression).unwrap();
+
+            let wire_len = bodies[0].len() as u64;
+            assert!(wire_len < 3000);
+            assert_eq!(
+                headers.get("x-reduct-time-1").unwrap().to_str().unwrap(),
+                format!("{},text/plain", wire_len)
+            );
+            let (codec, original_length) = parse_encoding_header(
+                headers
+                    .get("x-reduct-encoding-1")
+                    .unwrap()
+                    .to_str()
+                    .unwrap(),
+            )
+            .unwrap();
+            assert_eq!(codec, expected_codec);
+            assert_eq!(original_length, 3000);
+            assert_eq!(
+                headers.get(CONTENT_LENGTH).unwrap().to_str().unwrap(),
+                wire_len.to_string()
+            );
+            assert_eq!(
+                stats,
+                BatchStats {
+                    raw_bytes: 3000,
+                    wire_bytes: wire_len
+                }
+            );
+        }
+
+        #[rstest]
+        fn test_skips_compressed_mime() {
+            let body = Bytes::from(vec![0u8; 1000]);
+            let records = vec![compressible_record(1, "image/jpeg", body.clone())];
+
+            let (headers, bodies, stats) =
+                BucketWrapper::prepare_batch_to_write(records, ReplicationCompression::Zstd)
+                    .unwrap();
+
+            assert!(headers.get("x-reduct-encoding-1").is_none());
+            assert_eq!(headers.get("x-reduct-time-1").unwrap(), "1000,image/jpeg");
+            assert_eq!(bodies[0], body);
+            assert_eq!(
+                stats,
+                BatchStats {
+                    raw_bytes: 1000,
+                    wire_bytes: 1000
+                }
+            );
+        }
+
+        #[rstest]
+        fn test_skips_tiny_records() {
+            let records = vec![compressible_record(1, "text/plain", Bytes::from("tiny"))];
+
+            let (headers, bodies, _) =
+                BucketWrapper::prepare_batch_to_write(records, ReplicationCompression::Zstd)
+                    .unwrap();
+
+            assert!(headers.get("x-reduct-encoding-1").is_none());
+            assert_eq!(bodies[0], Bytes::from("tiny"));
+        }
+
+        #[rstest]
+        fn test_falls_back_when_payload_grows() {
+            // random bytes don't compress, so the raw payload must be sent
+            let body: Bytes = (0..1000u32)
+                .flat_map(|i| i.wrapping_mul(2654435761).to_le_bytes())
+                .collect::<Vec<u8>>()
+                .into();
+            let records = vec![compressible_record(
+                1,
+                "application/octet-stream",
+                body.clone(),
+            )];
+
+            let (headers, bodies, stats) =
+                BucketWrapper::prepare_batch_to_write(records, ReplicationCompression::Zstd)
+                    .unwrap();
+
+            assert!(headers.get("x-reduct-encoding-1").is_none());
+            assert_eq!(bodies[0], body);
+            assert_eq!(stats.wire_bytes, stats.raw_bytes);
+        }
+
+        #[rstest]
+        #[case("1.21", true)]
+        #[case("1.22", true)]
+        #[case("2.0", true)]
+        #[case("1.20", false)]
+        #[case("1.9", false)]
+        #[case("garbage", false)]
+        fn test_supports_compression(#[case] version: &str, #[case] expected: bool) {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-reduct-api", HeaderValue::from_str(version).unwrap());
+            assert_eq!(ReductClient::supports_compression(&headers), expected);
+        }
+
+        #[rstest]
+        fn test_supports_compression_no_header() {
+            assert!(!ReductClient::supports_compression(&HeaderMap::new()));
+        }
     }
 
     #[rstest]
@@ -369,7 +595,14 @@ pub(super) mod tests {
 
     #[rstest]
     fn test_add_slash_to_url() {
-        let client = ReductClient::new("http://localhost:8080", "", true, None).unwrap();
+        let client = ReductClient::new(
+            "http://localhost:8080",
+            "",
+            true,
+            None,
+            ReplicationCompression::None,
+        )
+        .unwrap();
         assert_eq!(client.server_url, "http://localhost:8080/");
     }
 
@@ -380,6 +613,7 @@ pub(super) mod tests {
             "",
             true,
             Some(&PathBuf::from("/definitely/missing/ca.pem")),
+            ReplicationCompression::None,
         )
         .err()
         .unwrap();
@@ -406,6 +640,7 @@ pub(super) mod tests {
             api_token: "token".to_string(),
             verify_ssl: true,
             ca_path: Some(ca_path),
+            compression: ReplicationCompression::None,
         };
 
         let client = create_client(&config).unwrap();
@@ -423,7 +658,14 @@ pub(super) mod tests {
         )
         .unwrap();
 
-        let err = ReductClient::new("https://localhost:8080", "", true, Some(&ca_path)).err();
+        let err = ReductClient::new(
+            "https://localhost:8080",
+            "",
+            true,
+            Some(&ca_path),
+            ReplicationCompression::None,
+        )
+        .err();
 
         assert!(err.is_some());
         let err = err.unwrap();

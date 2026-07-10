@@ -23,6 +23,19 @@ impl Default for ReplicationMode {
     }
 }
 
+/// Compression of batch payloads during transfer
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ReplicationCompression {
+    /// No compression
+    #[default]
+    None,
+    /// Zstandard compression
+    Zstd,
+    /// Gzip compression
+    Gzip,
+}
+
 /// Replication settings
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct ReplicationSettings {
@@ -56,6 +69,9 @@ pub struct ReplicationSettings {
     /// Mode
     #[serde(default)]
     pub mode: ReplicationMode,
+    /// Compression of batch payloads during transfer
+    #[serde(default)]
+    pub compression: ReplicationCompression,
 }
 
 /// Replication info

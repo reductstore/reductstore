@@ -13,6 +13,10 @@ inputs:
   rs_api_token:
     description: 'API token for ReductStore.'
     required: true
+  compression:
+    description: 'Replication payload compression (none, zstd, gzip).'
+    required: false
+    default: 'none'
   repository:
     description: 'GitHub repository.'
     required: true
@@ -54,6 +58,7 @@ runs:
           --env RS_REPLICATION_1_DST_BUCKET=dest \
           --env RS_REPLICATION_1_DST_HOST=http://127.0.0.1:8383 \
           --env RS_REPLICATION_1_DST_TOKEN=${{ inputs.rs_api_token }} \
+          --env RS_REPLICATION_1_COMPRESSION=${{ inputs.compression }} \
           --name current -d ${{ inputs.repository }}
         sleep 5
         docker logs current

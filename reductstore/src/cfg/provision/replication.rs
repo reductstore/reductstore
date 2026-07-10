@@ -8,7 +8,9 @@ use crate::storage::engine::StorageEngine;
 use crate::syslog::SystemEventSink;
 use log::{error, info, warn};
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
+use reduct_base::msg::replication_api::{
+    ReplicationCompression, ReplicationMode, ReplicationSettings,
+};
 use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -71,6 +73,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     each_n: None,
                     when: None,
                     mode: ReplicationMode::Enabled,
+                    compression: ReplicationCompression::None,
                 },
                 mode_override: None,
             };
@@ -179,6 +182,24 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 } else {
                     // No when condition exists, create one with just $each_t
                     replication.settings.when = Some(serde_json::json!({"$each_t": each_s}));
+                }
+            }
+
+            if let Some(compression) =
+                env.get_optional::<String>(&format!("RS_REPLICATION_{}_COMPRESSION", id))
+            {
+                match compression.to_lowercase().as_str() {
+                    "none" => replication.settings.compression = ReplicationCompression::None,
+                    "zstd" => replication.settings.compression = ReplicationCompression::Zstd,
+                    "gzip" => replication.settings.compression = ReplicationCompression::Gzip,
+                    _ => {
+                        error!(
+                            "Replication '{}' has invalid compression '{}'. Drop it.",
+                            name, compression
+                        );
+                        unfinished_replications.push(id.clone());
+                        continue;
+                    }
                 }
             }
 
@@ -547,6 +568,7 @@ mod tests {
                 each_n: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
+                compression: ReplicationCompression::None,
             },
         )
         .await
@@ -636,6 +658,7 @@ mod tests {
                 each_n: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
+                compression: ReplicationCompression::None,
             },
         )
         .await
@@ -720,6 +743,7 @@ mod tests {
                 each_n: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
+                compression: ReplicationCompression::None,
             },
         )
         .await

@@ -14,6 +14,15 @@ pub struct DiagnosticsItem {
     pub ok: u64,
     pub errored: u64,
     pub errors: HashMap<i16, DiagnosticsError>,
+    /// Replicated payload bytes before wire compression
+    #[serde(default)]
+    pub data_size: u64,
+    /// Payload bytes sent over the wire after compression
+    #[serde(default)]
+    pub compressed_data_size: u64,
+    /// Compression ratio (data_size / compressed_data_size, 1.0 when uncompressed)
+    #[serde(default)]
+    pub compression_ratio: f64,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]

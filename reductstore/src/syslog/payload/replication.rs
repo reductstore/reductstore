@@ -17,6 +17,7 @@ pub(crate) struct ReplicationSystemEventPayload {
     pub written_records: u64,
     pub failed_records: u64,
     pub replicated_data_size: u64,
+    pub compressed_data_size: u64,
     pub duration: f64,
 }
 
@@ -28,6 +29,7 @@ impl ReplicationSystemEventPayload {
             "written_records": self.written_records,
             "failed_records": self.failed_records,
             "replicated_data_size": self.replicated_data_size,
+            "compressed_data_size": self.compressed_data_size,
             "duration": self.duration,
         })
     }
