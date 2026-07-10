@@ -6,7 +6,6 @@ use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{unprocessable_entity, Labels};
-use std::collections::HashMap;
 
 /// Reserved segment for system metadata entries.
 ///
@@ -68,7 +67,6 @@ pub(crate) trait SystemEntryBehavior {
 
     async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError>;
 
-    fn apply_default_query_filters(&self, query: &mut QueryEntry);
 }
 
 pub(crate) struct RegularEntryBehavior;
@@ -78,8 +76,6 @@ impl SystemEntryBehavior for RegularEntryBehavior {
     async fn prepare_write(&self, _entry: &Entry, _labels: &Labels) -> Result<(), ReductError> {
         Ok(())
     }
-
-    fn apply_default_query_filters(&self, _query: &mut QueryEntry) {}
 }
 
 pub(crate) struct MetaEntryBehavior;
@@ -87,12 +83,12 @@ pub(crate) struct MetaEntryBehavior;
 #[async_trait]
 impl SystemEntryBehavior for MetaEntryBehavior {
     async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError> {
-        let key = labels.get("key").ok_or_else(|| {
-            unprocessable_entity!(
+        if labels.get("key").is_none() {
+            return Err(unprocessable_entity!(
                 "System entry '{}' records must contain label 'key'",
                 entry.name()
-            )
-        })?;
+            ));
+        }
 
         if labels.get("remove").is_some_and(|value| value == "true") {
             return Err(unprocessable_entity!(
@@ -105,26 +101,10 @@ impl SystemEntryBehavior for MetaEntryBehavior {
             .query_remove_records(QueryEntry {
                 start: Some(0),
                 stop: Some(u64::MAX),
-                include: Some(HashMap::from([("key".to_string(), key.to_string())])),
                 ..Default::default()
             })
             .await?;
         Ok(())
-    }
-
-    fn apply_default_query_filters(&self, query: &mut QueryEntry) {
-        if query
-            .include
-            .as_ref()
-            .is_some_and(|include| include.contains_key("remove"))
-        {
-            return;
-        }
-
-        let exclude = query.exclude.get_or_insert_with(HashMap::new);
-        exclude
-            .entry("remove".to_string())
-            .or_insert_with(|| "true".to_string());
     }
 
     fn validate_remove_records(&self, entry_name: &str) -> Result<(), ReductError> {
@@ -253,26 +233,6 @@ mod tests {
         assert!(!MetaEntryBehavior.is_eligible_for_fifo_eviction());
         assert!(!MetaEntryBehavior.is_removable_by_query());
         assert!(!MetaEntryBehavior.is_queryable_by_wildcard());
-    }
-
-    #[tokio::test]
-    async fn meta_behavior_adds_default_remove_filter() {
-        let mut query = QueryEntry::default();
-        MetaEntryBehavior.apply_default_query_filters(&mut query);
-        assert_eq!(
-            query.exclude.unwrap().get("remove"),
-            Some(&"true".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn meta_behavior_does_not_override_explicit_remove_include() {
-        let mut query = QueryEntry {
-            include: Some(HashMap::from([("remove".to_string(), "true".to_string())])),
-            ..Default::default()
-        };
-        MetaEntryBehavior.apply_default_query_filters(&mut query);
-        assert!(query.exclude.is_none());
     }
 
     #[tokio::test]
