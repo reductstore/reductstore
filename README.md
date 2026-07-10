@@ -155,6 +155,7 @@ Thanks to everyone who has contributed to ReductStore.
   <a href="https://github.com/rohankumardubey"><img src="https://avatars.githubusercontent.com/u/82864904?v=4" width="48" height="48" alt="@rohankumardubey" /></a>
   <a href="https://github.com/DibbayajyotiRoy"><img src="https://avatars.githubusercontent.com/u/125145390?v=4" width="48" height="48" alt="@DibbayajyotiRoy" /></a>
   <a href="https://github.com/rtadepalli"><img src="https://avatars.githubusercontent.com/u/105760760?v=4" width="48" height="48" alt="@rtadepalli" /></a>
+  <a href="https://github.com/FirasCh3"><img src="https://avatars.githubusercontent.com/u/29213889?v=4" width="48" height="48" alt="@FirasCh3" /></a>
   <a href="https://github.com/tuanhungngyn"><img src="https://avatars.githubusercontent.com/u/165829382?v=4" width="48" height="48" alt="@tuanhungngyn" /></a>
   <a href="https://github.com/upuddu"><img src="https://avatars.githubusercontent.com/u/125773480?v=4" width="48" height="48" alt="@upuddu" /></a>
   <a href="https://github.com/gitcommit90"><img src="https://avatars.githubusercontent.com/u/294273268?v=4" width="48" height="48" alt="@gitcommit90" /></a>
