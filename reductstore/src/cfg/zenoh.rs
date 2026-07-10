@@ -16,6 +16,8 @@ const DEFAULT_BUCKET: &str = "zenoh";
 /// - `RS_ZENOH_CONFIG`: Inline Zenoh config string (e.g., "mode=client;peer=localhost:7447")
 /// - `RS_ZENOH_CONFIG_PATH`: Path to a Zenoh JSON5 config file
 /// - `RS_ZENOH_BUCKET`: The single bucket for all Zenoh data (default: "zenoh")
+/// - `RS_ZENOH_BUCKET_ROUTING`: `static` (default) writes everything to `RS_ZENOH_BUCKET`;
+///   `key-prefix` uses the first chunk of the key expression as the bucket name
 /// - `RS_ZENOH_SUB_KEYEXPRS`: Key expression for subscriber (write path), e.g., "**"
 /// - `RS_ZENOH_QUERY_KEYEXPRS`: Key expression for queryable (read path), e.g., "**"
 /// - `RS_ZENOH_QUERY_LOCALITY`: Allowed origin for query replies. One of `SessionLocal`, `Remote`, or `Any` (default)
@@ -41,7 +43,10 @@ pub struct ZenohApiConfig {
     /// Path to a Zenoh JSON5 configuration file.
     pub config_path: Option<String>,
     /// The single ReductStore bucket used for all Zenoh data.
+    /// Acts as the fallback bucket in `key-prefix` routing mode.
     pub bucket: String,
+    /// How incoming samples and queries are mapped to buckets.
+    pub bucket_routing: ZenohBucketRouting,
     /// Key expression for the Zenoh subscriber (write path).
     /// If unset, the write path is disabled.
     pub sub_keyexprs: Option<String>,
@@ -71,6 +76,7 @@ impl Default for ZenohApiConfig {
             config_inline: None,
             config_path: None,
             bucket: DEFAULT_BUCKET.to_string(),
+            bucket_routing: ZenohBucketRouting::default(),
             sub_keyexprs: None,
             query_keyexprs: None,
             query_locality: ZenohQueryableLocality::default(),
@@ -78,6 +84,36 @@ impl Default for ZenohApiConfig {
             tls_connect_cert: None,
             tls_connect_key: None,
             auth_dictionary: None,
+        }
+    }
+}
+
+/// How Zenoh keys are mapped to ReductStore buckets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub enum ZenohBucketRouting {
+    #[default]
+    Static,
+    KeyPrefix,
+}
+
+impl Display for ZenohBucketRouting {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        let value = match self {
+            ZenohBucketRouting::Static => "static",
+            ZenohBucketRouting::KeyPrefix => "key-prefix",
+        };
+        write!(f, "{}", value)
+    }
+}
+
+impl FromStr for ZenohBucketRouting {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        match s.trim().to_lowercase().as_str() {
+            "static" => Ok(ZenohBucketRouting::Static),
+            "key-prefix" | "key_prefix" | "keyprefix" => Ok(ZenohBucketRouting::KeyPrefix),
+            _ => Err(()),
         }
     }
 }
@@ -123,9 +159,10 @@ impl Display for ZenohApiConfig {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         write!(
             f,
-            "enabled={}, bucket={}, config={}, config_path={}, sub_keyexprs={}, query_keyexprs={}, query_locality={}, tls={}, auth={}",
+            "enabled={}, bucket={}, bucket_routing={}, config={}, config_path={}, sub_keyexprs={}, query_keyexprs={}, query_locality={}, tls={}, auth={}",
             self.enabled,
             self.bucket,
+            self.bucket_routing,
             self.config_inline.as_deref().unwrap_or("<none>"),
             self.config_path.as_deref().unwrap_or("<none>"),
             self.sub_keyexprs.as_deref().unwrap_or("<disabled>"),
@@ -147,6 +184,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 .get_optional("RS_ZENOH_BUCKET")
                 .filter(|value: &String| !value.trim().is_empty())
                 .unwrap_or_else(|| DEFAULT_BUCKET.to_string()),
+            bucket_routing: parse_bucket_routing(
+                env.get_optional::<String>("RS_ZENOH_BUCKET_ROUTING"),
+            ),
             sub_keyexprs: parse_optional_string(
                 env.get_optional::<String>("RS_ZENOH_SUB_KEYEXPRS"),
             ),
@@ -181,6 +221,11 @@ fn parse_query_locality(raw: Option<String>) -> ZenohQueryableLocality {
         .unwrap_or_default()
 }
 
+fn parse_bucket_routing(raw: Option<String>) -> ZenohBucketRouting {
+    raw.and_then(|value| ZenohBucketRouting::from_str(&value).ok())
+        .unwrap_or_default()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,6 +257,11 @@ mod tests {
             .with(eq("RS_ZENOH_BUCKET"))
             .times(1)
             .return_const(Ok("telemetry".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_BUCKET_ROUTING"))
+            .times(1)
+            .return_const(Ok("key-prefix".to_string()));
         env_getter
             .expect_get()
             .with(eq("RS_ZENOH_SUB_KEYEXPRS"))
@@ -256,6 +306,7 @@ mod tests {
         );
         assert_eq!(cfg.config_path, None);
         assert_eq!(cfg.bucket, "telemetry");
+        assert_eq!(cfg.bucket_routing, ZenohBucketRouting::KeyPrefix);
         assert_eq!(cfg.sub_keyexprs, Some("**".to_string()));
         assert_eq!(cfg.query_keyexprs, Some("factory/**".to_string()));
         assert_eq!(cfg.query_locality, ZenohQueryableLocality::Remote);
@@ -282,6 +333,11 @@ mod tests {
         env_getter
             .expect_get()
             .with(eq("RS_ZENOH_BUCKET"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ZENOH_BUCKET_ROUTING"))
             .times(1)
             .return_const(Err(VarError::NotPresent));
         env_getter
@@ -328,6 +384,7 @@ mod tests {
             Some("/etc/reductstore/zenoh.json5".to_string())
         );
         assert_eq!(cfg.bucket, DEFAULT_BUCKET);
+        assert_eq!(cfg.bucket_routing, ZenohBucketRouting::Static);
         assert_eq!(cfg.sub_keyexprs, None);
         assert_eq!(cfg.query_keyexprs, None);
         assert_eq!(cfg.query_locality, ZenohQueryableLocality::default());
@@ -391,6 +448,11 @@ mod tests {
             .return_const(Ok("   ".to_string())); // whitespace-only
         env_getter
             .expect_get()
+            .with(eq("RS_ZENOH_BUCKET_ROUTING"))
+            .times(1)
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
             .with(eq("RS_ZENOH_SUB_KEYEXPRS"))
             .times(1)
             .return_const(Err(VarError::NotPresent));
@@ -430,12 +492,30 @@ mod tests {
     }
 
     #[rstest]
+    #[case("static", ZenohBucketRouting::Static)]
+    #[case("key-prefix", ZenohBucketRouting::KeyPrefix)]
+    #[case("Key_Prefix", ZenohBucketRouting::KeyPrefix)]
+    fn parses_bucket_routing(#[case] raw: &str, #[case] expected: ZenohBucketRouting) {
+        assert_eq!(parse_bucket_routing(Some(raw.to_string())), expected);
+    }
+
+    #[rstest]
+    fn parses_invalid_bucket_routing_falls_back_to_static() {
+        assert_eq!(
+            parse_bucket_routing(Some("dynamic".to_string())),
+            ZenohBucketRouting::Static
+        );
+        assert_eq!(parse_bucket_routing(None), ZenohBucketRouting::Static);
+    }
+
+    #[rstest]
     fn test_display() {
         let cfg = ZenohApiConfig {
             enabled: true,
             config_inline: Some("mode=client".to_string()),
             config_path: Some("/etc/zenoh.json5".to_string()),
             bucket: "sensor-data".to_string(),
+            bucket_routing: ZenohBucketRouting::KeyPrefix,
             sub_keyexprs: Some("**".to_string()),
             query_keyexprs: None,
             query_locality: ZenohQueryableLocality::Remote,
@@ -447,6 +527,7 @@ mod tests {
         let display = format!("{cfg}");
         assert!(display.contains("enabled=true"));
         assert!(display.contains("bucket=sensor-data"));
+        assert!(display.contains("bucket_routing=key-prefix"));
         assert!(display.contains("config=mode=client"));
         assert!(display.contains("config_path=/etc/zenoh.json5"));
         assert!(display.contains("sub_keyexprs=**"));
@@ -461,6 +542,7 @@ mod tests {
         let display = format!("{cfg}");
         assert!(display.contains("enabled=false"));
         assert!(display.contains(&format!("bucket={DEFAULT_BUCKET}")));
+        assert!(display.contains("bucket_routing=static"));
         assert!(display.contains("config=<none>"));
         assert!(display.contains("config_path=<none>"));
         assert!(display.contains("sub_keyexprs=<disabled>"));

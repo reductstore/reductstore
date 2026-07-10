@@ -6,7 +6,7 @@ use crate::api::zenoh::{
     attachments, attachments::QueryAttachments, queryable::QueryablePipeline,
     subscriber::SubscriberPipeline,
 };
-use crate::cfg::zenoh::{ZenohApiConfig, ZenohQueryableLocality};
+use crate::cfg::zenoh::{ZenohApiConfig, ZenohBucketRouting, ZenohQueryableLocality};
 use bytes::Bytes;
 use log::{debug, error, info, warn};
 use reduct_base::error::ErrorCode;
@@ -44,8 +44,9 @@ pub(crate) async fn run_session(
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> Result<(), SessionError> {
     info!(
-        "Starting Zenoh API runtime: bucket='{}', sub_keyexprs={}, query_keyexprs={}",
+        "Starting Zenoh API runtime: bucket='{}', bucket_routing={}, sub_keyexprs={}, query_keyexprs={}",
         config.bucket,
+        config.bucket_routing,
         config.sub_keyexprs.as_deref().unwrap_or("<disabled>"),
         config.query_keyexprs.as_deref().unwrap_or("<disabled>")
     );
@@ -68,7 +69,13 @@ pub(crate) async fn run_session(
         }
     };
 
-    ensure_bucket_exists(&components, &config.bucket).await?;
+    match config.bucket_routing {
+        ZenohBucketRouting::Static => {
+            ensure_bucket_exists(&components, &config.bucket).await?;
+        }
+        // buckets are created on demand by the subscriber
+        ZenohBucketRouting::KeyPrefix => {}
+    }
 
     let (zenoh_config, _credential_files) = build_zenoh_config(&config)?;
 
@@ -366,46 +373,54 @@ fn load_config_file(path: &str) -> Result<Config, SessionError> {
     })
 }
 
+// zenoh key expressions have no alternation, so disjoint prefixes need one declaration each
+fn split_keyexprs(raw: &str) -> Vec<String> {
+    raw.split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
 async fn spawn_subscribers(
     session: &Session,
     config: &ZenohApiConfig,
     pipeline: Arc<SubscriberPipeline>,
 ) -> Result<Vec<tokio::task::JoinHandle<()>>, SessionError> {
     let mut handles = Vec::new();
-    let key_expr = config.sub_keyexprs.as_ref().unwrap();
 
-    info!("Declaring Zenoh subscriber on key expression: {}", key_expr);
+    for key_expr in split_keyexprs(config.sub_keyexprs.as_ref().unwrap()) {
+        info!("Declaring Zenoh subscriber on key expression: {}", key_expr);
 
-    let subscriber = session.declare_subscriber(key_expr).await.map_err(|e| {
-        SessionError::Subscriber(format!(
-            "Failed to declare subscriber on '{}': {}",
-            key_expr, e
-        ))
-    })?;
+        let subsciber = session
+            .declare_subscriber(key_expr.as_str())
+            .await
+            .map_err(|e| {
+                SessionError::Subscriber(format!(
+                    "Failed to declare subscriber on '{}': {}",
+                    key_expr, e
+                ))
+            })?;
 
-    let pipeline_clone = Arc::clone(&pipeline);
-    let key_expr_clone = key_expr.clone();
+        let pipeline_clone = Arc::clone(&pipeline);
 
-    let handle = tokio::spawn(async move {
-        loop {
-            match subscriber.recv_async().await {
-                Ok(sample) => {
-                    if let Err(e) = handle_sample(&pipeline_clone, sample).await {
-                        warn!(
-                            "Failed to handle Zenoh sample on '{}': {}",
-                            key_expr_clone, e
-                        );
+        let handle = tokio::spawn(async move {
+            loop {
+                match subsciber.recv_async().await {
+                    Ok(sample) => {
+                        if let Err(e) = handle_sample(&pipeline_clone, sample).await {
+                            warn!("Failed to handle Zenoh sample on '{}': {}", key_expr, e);
+                        }
+                    }
+                    Err(e) => {
+                        error!("Subscriber '{}' recv error: {}", key_expr, e);
+                        break;
                     }
                 }
-                Err(e) => {
-                    error!("Subscriber '{}' recv error: {}", key_expr_clone, e);
-                    break;
-                }
             }
-        }
-    });
+        });
 
-    handles.push(handle);
+        handles.push(handle);
+    }
 
     Ok(handles)
 }
@@ -467,53 +482,66 @@ async fn spawn_queryables(
 ) -> Result<Vec<tokio::task::JoinHandle<()>>, SessionError> {
     let mut handles = Vec::new();
 
-    let key_expr = config.query_keyexprs.as_ref().unwrap();
-    let allowed_origin = to_zenoh_locality(config.query_locality);
+    for key_expr in split_keyexprs(config.query_keyexprs.as_ref().unwrap()) {
+        let allowed_origin = to_zenoh_locality(config.query_locality);
 
-    info!(
-        "Declaring Zenoh queryable on key expression: {} (locality={})",
-        key_expr, config.query_locality
-    );
+        info!(
+            "Declaring Zenoh queryable on key expression: {} (locality={})",
+            key_expr, config.query_locality
+        );
 
-    let queryable = session
-        .declare_queryable(key_expr.as_str())
-        .allowed_origin(allowed_origin)
-        .await
-        .map_err(|e| SessionError::Queryable(format!("Failed to declare queryable: {}", e)))?;
+        let queryable = session
+            .declare_queryable(key_expr.as_str())
+            .allowed_origin(allowed_origin)
+            .await
+            .map_err(|e| SessionError::Queryable(format!("Failed to declare queryable: {}", e)))?;
 
-    let handle = tokio::spawn(async move {
-        loop {
-            match queryable.recv_async().await {
-                Ok(query) => {
-                    let key_expr = query.key_expr().as_str().to_string();
-                    let params = expand_query_params(query.selector().parameters());
-                    let query_attachments = parse_query_attachments(query.attachment());
+        let pipeline = Arc::clone(&pipeline);
+        let handle = tokio::spawn(async move {
+            loop {
+                match queryable.recv_async().await {
+                    Ok(query) => {
+                        let key_expr = query.key_expr().as_str().to_string();
+                        let params = expand_query_params(query.selector().parameters());
+                        let query_attachments = parse_query_attachments(query.attachment());
 
-                    debug!(
-                        "Received Zenoh query: key={}, params={:?}, has_when={}",
-                        key_expr,
-                        params,
-                        query_attachments.when.is_some(),
-                    );
+                        debug!(
+                            "Received Zenoh query: key={}, params={:?}, has_when={}",
+                            key_expr,
+                            params,
+                            query_attachments.when.is_some(),
+                        );
 
-                    if let Err(e) = pipeline.check_api_request().await {
-                        warn!("Query request limit exceeded for '{}': {}", key_expr, e);
-                        if let Err(reply_err) = query
-                            .reply_err(zenoh::bytes::ZBytes::from(e.to_string().into_bytes()))
+                        if let Err(e) = pipeline.check_api_request().await {
+                            warn!("Query request limit exceeded for '{}': {}", key_expr, e);
+                            if let Err(reply_err) = query
+                                .reply_err(zenoh::bytes::ZBytes::from(e.to_string().into_bytes()))
+                                .await
+                            {
+                                warn!("Failed to send error reply: {}", reply_err);
+                            }
+                            continue;
+                        }
+
+                        match pipeline
+                            .handle_query(&key_expr, &params, &query_attachments)
                             .await
                         {
-                            warn!("Failed to send error reply: {}", reply_err);
-                        }
-                        continue;
-                    }
-
-                    match pipeline
-                        .handle_query(&key_expr, &params, &query_attachments)
-                        .await
-                    {
-                        Ok(result) => {
-                            if let Err(e) = send_query_reply(&query, result, &pipeline).await {
-                                warn!("Failed to send query reply: {}", e);
+                            Ok(result) => {
+                                if let Err(e) = send_query_reply(&query, result, &pipeline).await {
+                                    warn!("Failed to send query reply: {}", e);
+                                    if let Err(reply_err) = query
+                                        .reply_err(zenoh::bytes::ZBytes::from(
+                                            e.to_string().into_bytes(),
+                                        ))
+                                        .await
+                                    {
+                                        warn!("Failed to send error reply: {}", reply_err);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Query handler error for '{}': {}", key_expr, e);
                                 if let Err(reply_err) = query
                                     .reply_err(zenoh::bytes::ZBytes::from(
                                         e.to_string().into_bytes(),
@@ -524,26 +552,17 @@ async fn spawn_queryables(
                                 }
                             }
                         }
-                        Err(e) => {
-                            warn!("Query handler error for '{}': {}", key_expr, e);
-                            if let Err(reply_err) = query
-                                .reply_err(zenoh::bytes::ZBytes::from(e.to_string().into_bytes()))
-                                .await
-                            {
-                                warn!("Failed to send error reply: {}", reply_err);
-                            }
-                        }
+                    }
+                    Err(e) => {
+                        error!("Queryable recv error: {}", e);
+                        break;
                     }
                 }
-                Err(e) => {
-                    error!("Queryable recv error: {}", e);
-                    break;
-                }
             }
-        }
-    });
+        });
 
-    handles.push(handle);
+        handles.push(handle);
+    }
     Ok(handles)
 }
 

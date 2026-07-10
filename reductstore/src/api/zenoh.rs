@@ -6,6 +6,7 @@ use tokio::task::JoinHandle;
 
 pub(crate) mod attachments;
 pub(crate) mod queryable;
+pub(crate) mod routing;
 mod session;
 pub(crate) mod subscriber;
 

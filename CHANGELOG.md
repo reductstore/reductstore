@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Add `RS_ZENOH_BUCKET_ROUTING=key-prefix` mode to the Zenoh API: the first chunk of a sample's key expression selects the target bucket (created on demand with default settings) and the remaining chunks become the entry name, for both the subscriber and the queryable; the default `static` mode keeps the existing single-bucket behavior
 - Configure server-wide default bucket settings with `RS_DEFAULTS_BUCKET_*` environment variables, [PR-1535](https://github.com/reductstore/reductstore/pull/1535) by @rohankumardubey
 - Reject record writes before writing when the data folder filesystem has insufficient free disk space, in addition to the existing quota check, [PR-1525](https://github.com/reductstore/reductstore/pull/1525)
 - Support glob-like entry patterns in lifecycle task filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1526](https://github.com/reductstore/reductstore/pull/1526) by @upuddu
