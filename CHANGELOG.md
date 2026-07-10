@@ -22,6 +22,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Allow fork pull request CI to run without protobuf setup tokens or Docker Hub credentials by vendoring `protoc` and making Docker login optional, [PR-1532](https://github.com/reductstore/reductstore/pull/1532)
+- Pipelined replication batch sending to overlap preparing the next batch with sending the current one, [PR-1527](https://github.com/reductstore/reductstore/pull/1527) by @DibbayajyotiRoy (based on [PR-1415](https://github.com/reductstore/reductstore/pull/1415) by @FirasCh3)
 - Split block manager storage logic into smaller modules by responsibility, [PR-1503](https://github.com/reductstore/reductstore/pull/1503) by @rohankumardubey
 - Refresh contributor onboarding docs to validate branch builds locally and add `@gitcommit90` to the README contributor wall, [PR-1511](https://github.com/reductstore/reductstore/pull/1511)
 - Unify `$system` event handling under `syslog`: move all event production (audit, usage, lifecycle, replication, logs) into the module behind a single system event logger with one shared writer and sink (no change to the stored record format), [PR-1496](https://github.com/reductstore/reductstore/pull/1496) by @DibbayajyotiRoy
