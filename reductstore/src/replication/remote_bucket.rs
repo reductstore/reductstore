@@ -151,6 +151,8 @@ pub(super) mod tests {
         impl ReductClientApi for ReductClientApi {
             async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
 
+            async fn create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
+
             fn url(&self) -> &str;
         }
     }

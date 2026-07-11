@@ -5,12 +5,32 @@ mod bucket_available;
 mod bucket_unavailable;
 mod initial_state;
 
+use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedClientApi};
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
 use async_trait::async_trait;
 pub(super) use initial_state::InitialState;
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
+
+async fn get_or_create_bucket(
+    client: &BoxedClientApi,
+    bucket_name: &str,
+) -> Result<BoxedBucketApi, ReductError> {
+    match client.get_bucket(bucket_name).await {
+        Ok(bucket) => Ok(bucket),
+        Err(err) if err.status() == ErrorCode::NotFound => {
+            match client.create_bucket(bucket_name).await {
+                Ok(bucket) => Ok(bucket),
+                Err(err) if err.status() == ErrorCode::Conflict => {
+                    client.get_bucket(bucket_name).await
+                }
+                Err(err) => Err(err),
+            }
+        }
+        Err(err) => Err(err),
+    }
+}
 
 /// A state of the remote bucket.
 
