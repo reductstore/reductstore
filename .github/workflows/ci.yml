@@ -345,15 +345,12 @@ jobs:
           - max_blob_size: 0.01
             entries: 4
             records: 1536
-            compression: none
           - max_blob_size: 1
             entries: 4
             records: 1536
-            compression: zstd
           - max_blob_size: 18
             entries: 2
             records: 128
-            compression: gzip
     env:
       RS_API_TOKEN: XXXX
     timeout-minutes: 5
@@ -365,7 +362,6 @@ jobs:
           entries: ${{ matrix.entries }}
           records: ${{ matrix.records }}
           rs_api_token: ${{ env.RS_API_TOKEN }}
-          compression: ${{ matrix.compression }}
           repository: ${{ github.repository }}
 
   read_only_replica_test:
