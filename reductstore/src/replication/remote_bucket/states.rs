@@ -5,6 +5,7 @@ mod bucket_available;
 mod bucket_unavailable;
 mod initial_state;
 
+use crate::replication::remote_bucket::client_wrapper::BoxedClientApi;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
 use async_trait::async_trait;
