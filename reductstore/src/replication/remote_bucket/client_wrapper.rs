@@ -25,6 +25,22 @@ pub(super) trait ReductClientApi {
 
     async fn create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
 
+    async fn get_or_create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
+        match self.get_bucket(bucket_name).await {
+            Ok(bucket) => Ok(bucket),
+            Err(err) if err.status() == ErrorCode::NotFound => {
+                match self.create_bucket(bucket_name).await {
+                    Ok(bucket) => Ok(bucket),
+                    Err(err) if err.status() == ErrorCode::Conflict => {
+                        self.get_bucket(bucket_name).await
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
+
     fn url(&self) -> &str;
 }
 

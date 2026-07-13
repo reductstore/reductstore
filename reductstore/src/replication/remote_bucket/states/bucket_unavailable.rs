@@ -3,7 +3,6 @@
 
 use crate::replication::remote_bucket::client_wrapper::BoxedClientApi;
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
-use crate::replication::remote_bucket::states::get_or_create_bucket;
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
@@ -29,7 +28,7 @@ impl RemoteBucketState for BucketUnavailableState {
         records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         if self.init_time.elapsed() > self.timeout {
-            return match get_or_create_bucket(&self.client, &self.bucket_name).await {
+            return match self.client.get_or_create_bucket(&self.bucket_name).await {
                 Ok(bucket) => {
                     let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
                     new_state.write_batch(entry, records).await
@@ -56,7 +55,7 @@ impl RemoteBucketState for BucketUnavailableState {
     }
 
     async fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send> {
-        match get_or_create_bucket(&self.client, &self.bucket_name).await {
+        match self.client.get_or_create_bucket(&self.bucket_name).await {
             Ok(bucket) => Box::new(BucketAvailableState::new(self.client, bucket)),
             Err(err) => Box::new(BucketUnavailableState::new(
                 self.client,
