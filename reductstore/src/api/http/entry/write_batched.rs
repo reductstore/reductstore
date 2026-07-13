@@ -14,15 +14,10 @@ use futures_util::StreamExt;
 use crate::api::http::entry::common::{err_to_batched_header, parse_content_length_from_header};
 use crate::api::http::StateKeeper;
 use crate::api::limits::limit_scope_from_client_ip;
-use crate::core::payload_codec::decompress_payload;
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::RecordDrainer;
-use bytes::BytesMut;
 use log::debug;
-use reduct_base::batch::{
-    parse_batched_header, parse_encoding_headers, sort_headers_by_time, RecordEncoding,
-    RecordHeader,
-};
+use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
 use reduct_base::io::{RecordMeta, WriteRecord};
 use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
@@ -35,11 +30,8 @@ use tokio::time::timeout;
 struct WriteContext {
     time: u64,
     header: RecordHeader,
-    encoding: Option<(RecordEncoding, u64)>,
     writer: Box<dyn WriteRecord + Sync + Send>,
 }
-
-type TimedHeader = (u64, RecordHeader, Option<(RecordEncoding, u64)>);
 
 type ErrorMap = BTreeMap<u64, ReductError>;
 
@@ -60,8 +52,7 @@ pub(super) async fn write_batched_records(
     let mut stream = body.into_data_stream();
 
     let process_stream = async {
-        let mut encodings = parse_encoding_headers(&headers)?;
-        let mut timed_headers: Vec<TimedHeader> = Vec::new();
+        let mut timed_headers: Vec<(u64, RecordHeader)> = Vec::new();
         for (time, v) in record_headers {
             let header = match v.to_str() {
                 Ok(raw_header) => parse_batched_header(raw_header)?,
@@ -70,15 +61,7 @@ pub(super) async fn write_batched_records(
                 }
             };
 
-            timed_headers.push((time, header, encodings.remove(&time)));
-        }
-
-        if let Some((time, _)) = encodings.into_iter().next() {
-            return Err(unprocessable_entity!(
-                "Header 'x-reduct-encoding-{}' has no matching 'x-reduct-time-{}' header",
-                time,
-                time
-            ));
+            timed_headers.push((time, header));
         }
 
         let content_length = check_and_get_content_length(&headers, &timed_headers)?;
@@ -93,7 +76,7 @@ pub(super) async fn write_batched_records(
             .await?;
         let (rx_writer, spawn_handler) =
             spawn_getting_writers(&components, &bucket, &entry_name, timed_headers).await?;
-        let decode_errors = receive_body_and_write_records(
+        receive_body_and_write_records(
             bucket,
             entry_name,
             components,
@@ -103,13 +86,9 @@ pub(super) async fn write_batched_records(
         )
         .await?;
 
-        let mut error_map = spawn_handler
+        Ok(spawn_handler
             .await
-            .map_err(|e| internal_server_error!("Failed to complete write operation: {}", e))?;
-        for (time, err) in decode_errors {
-            error_map.entry(time).or_insert(err);
-        }
-        Ok(error_map)
+            .map_err(|e| internal_server_error!("Failed to complete write operation: {}", e))?)
     };
 
     match process_stream.await {
@@ -162,8 +141,7 @@ async fn receive_body_and_write_records(
     mut total_content_len: i64,
     stream: &mut BodyDataStream,
     mut rx_writer: Receiver<WriteContext>,
-) -> Result<ErrorMap, ReductError> {
-    let mut decode_errors = ErrorMap::new();
+) -> Result<(), ReductError> {
     let mut chunk = Bytes::new();
 
     let mut read_chunk = async || -> Result<Bytes, ReductError> {
@@ -191,46 +169,6 @@ async fn receive_body_and_write_records(
 
         if chunk.is_empty() {
             chunk = read_chunk().await?
-        }
-
-        if let Some((codec, original_length)) = ctx.encoding {
-            // compressed record: buffer the on-wire slice, decompress, then write
-            let wire_length = ctx.header.content_length as usize;
-            let mut buffer = BytesMut::with_capacity(wire_length);
-            loop {
-                let needed = wire_length - buffer.len();
-                if chunk.len() >= needed {
-                    buffer.extend_from_slice(&chunk.slice(0..needed));
-                    chunk = chunk.slice(needed..);
-                    break;
-                }
-                buffer.extend_from_slice(&chunk);
-                chunk = read_chunk().await?;
-            }
-
-            match decompress_payload(codec, &buffer, original_length) {
-                Ok(data) => {
-                    ctx.writer
-                        .send_timeout(Ok(Some(data)), components.cfg.io_conf.operation_timeout)
-                        .await?;
-                    if let Err(err) = ctx
-                        .writer
-                        .send_timeout(Ok(None), components.cfg.io_conf.operation_timeout)
-                        .await
-                    {
-                        debug!("Timeout while sending EOF: {}", err);
-                    }
-                    notify_replication_write(&components, bucket, &entry_name, &ctx).await?;
-                }
-                Err(err) => {
-                    let _ = ctx
-                        .writer
-                        .send_timeout(Err(err.clone()), components.cfg.io_conf.operation_timeout)
-                        .await;
-                    decode_errors.insert(ctx.time, err);
-                }
-            }
-            continue;
         }
 
         loop {
@@ -268,14 +206,14 @@ async fn receive_body_and_write_records(
         }
     }
 
-    Ok(decode_errors)
+    Ok(())
 }
 
 async fn spawn_getting_writers(
     components: &Arc<Components>,
     bucket_name: &str,
     entry_name: &str,
-    timed_headers: Vec<TimedHeader>,
+    timed_headers: Vec<(u64, RecordHeader)>,
 ) -> Result<(Receiver<WriteContext>, JoinHandle<ErrorMap>), ReductError> {
     let (tx_writer, rx_writer) = tokio::sync::mpsc::channel(64);
 
@@ -285,14 +223,13 @@ async fn spawn_getting_writers(
     let spawn_handler = tokio::spawn(async move {
         let mut error_map = BTreeMap::new();
 
-        for (time, header, encoding) in timed_headers.into_iter() {
+        for (time, header) in timed_headers.into_iter() {
             let writer = start_writing(
                 &entry_name,
                 &bucket_name,
                 storage.clone(),
                 time,
                 &header,
-                encoding,
                 &mut error_map,
             )
             .await;
@@ -301,7 +238,6 @@ async fn spawn_getting_writers(
                 .send(WriteContext {
                     time,
                     header,
-                    encoding,
                     writer,
                 })
                 .await
@@ -341,11 +277,11 @@ async fn write_chunk(
 
 fn check_and_get_content_length(
     headers: &HeaderMap,
-    timed_headers: &Vec<TimedHeader>,
+    timed_headers: &Vec<(u64, RecordHeader)>,
 ) -> Result<u64, ReductError> {
     let total_content_length: u64 = timed_headers
         .iter()
-        .map(|(_, header, _)| header.content_length)
+        .map(|(_, header)| header.content_length)
         .sum();
 
     let header_content_length = parse_content_length_from_header(headers)?;
@@ -365,20 +301,15 @@ async fn start_writing(
     storage: Arc<crate::storage::engine::StorageEngine>,
     time: u64,
     record_header: &RecordHeader,
-    encoding: Option<(RecordEncoding, u64)>,
     error_map: &mut BTreeMap<u64, ReductError>,
 ) -> Box<dyn WriteRecord + Sync + Send> {
-    // for compressed records the stored length is the decompressed one
-    let content_length = encoding
-        .map(|(_, original_length)| original_length)
-        .unwrap_or(record_header.content_length);
     let get_writer = async {
         storage
             .begin_write(
                 bucket_name,
                 entry_name,
                 time,
-                content_length,
+                record_header.content_length,
                 record_header.content_type.clone(),
                 record_header.labels.clone(),
             )
@@ -860,182 +791,113 @@ mod tests {
 
     mod compressed {
         use super::*;
-        use crate::core::payload_codec::compress_payload;
+        use axum::routing::post;
+        use axum::Router;
+        use bytes::BytesMut;
+        use flate2::write::GzEncoder;
+        use std::io::Write;
+        use tower::ServiceExt;
+        use tower_http::decompression::RequestDecompressionLayer;
 
-        async fn read_all(reader: &mut impl ReadRecord) -> Bytes {
-            let mut data = BytesMut::new();
-            while let Some(chunk) = reader.read_chunk() {
-                data.extend_from_slice(&chunk.unwrap());
+        /// The batch route wrapped with the same request decompression layer
+        /// as the production router.
+        fn app(keeper: Arc<StateKeeper>) -> Router {
+            Router::new()
+                .route(
+                    "/b/{bucket_name}/{entry_name}/batch",
+                    post(write_batched_records),
+                )
+                .layer(RequestDecompressionLayer::new())
+                .with_state(keeper)
+        }
+
+        fn compress(codec: &str, data: &[u8]) -> Vec<u8> {
+            match codec {
+                "zstd" => zstd::bulk::compress(data, 3).unwrap(),
+                "gzip" => {
+                    let mut encoder = GzEncoder::new(Vec::new(), flate2::Compression::default());
+                    encoder.write_all(data).unwrap();
+                    encoder.finish().unwrap()
+                }
+                _ => unreachable!(),
             }
-            data.freeze()
         }
 
         #[rstest]
-        #[case(RecordEncoding::Zstd)]
-        #[case(RecordEncoding::Gzip)]
+        #[case("zstd")]
+        #[case("gzip")]
         #[tokio::test(flavor = "multi_thread")]
-        async fn test_write_mixed_batch(
+        async fn test_write_compressed_batch(
             #[future] keeper: Arc<StateKeeper>,
-            mut headers: HeaderMap,
-            path_to_entry_1: Path<HashMap<String, String>>,
-            #[case] codec: RecordEncoding,
+            #[case] codec: &str,
         ) {
             let keeper = keeper.await;
             let components = keeper.get_anonymous().await.unwrap();
 
-            let original = Bytes::from("hello world ".repeat(100));
-            let compressed = compress_payload(codec, &original).unwrap();
+            let record_1 = "hello world ".repeat(100);
+            let record_2 = "plain";
+            let raw = format!("{}{}", record_1, record_2);
+            let compressed = compress(codec, raw.as_bytes());
 
-            headers.insert(
-                "content-length",
-                (compressed.len() + 5).to_string().parse().unwrap(),
-            );
-            headers.insert(
-                "x-reduct-time-1",
-                format!("{},text/plain,a=b", compressed.len())
-                    .parse()
-                    .unwrap(),
-            );
-            headers.insert(
-                "x-reduct-encoding-1",
-                format!("{},{}", codec, original.len()).parse().unwrap(),
-            );
-            headers.insert("x-reduct-time-2", "5,text/plain".parse().unwrap());
-            headers.insert("x-reduct-time-3", "0,text/plain".parse().unwrap());
-
-            let mut body = compressed.clone();
-            body.extend_from_slice(b"plain");
-            let stream = Body::from(body);
-
-            write_batched_records(State(Arc::clone(&keeper)), headers, path_to_entry_1, stream)
-                .await
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/b/bucket-1/entry-1/batch")
+                .header("authorization", "Bearer init-token")
+                .header("content-encoding", codec)
+                .header("content-length", compressed.len().to_string())
+                .header("x-reduct-content-length", raw.len().to_string())
+                .header(
+                    "x-reduct-time-1",
+                    format!("{},text/plain,a=b", record_1.len()),
+                )
+                .header("x-reduct-time-2", format!("{},text/plain", record_2.len()))
+                .body(Body::from(compressed))
                 .unwrap();
 
+            let response = app(Arc::clone(&keeper)).oneshot(request).await.unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::OK);
+
             let bucket = components
                 .storage
                 .get_bucket("bucket-1")
                 .await
                 .unwrap()
                 .upgrade_and_unwrap();
-            let entry = bucket.get_entry("entry-1").await.unwrap();
             {
-                let mut reader = entry.upgrade_and_unwrap().begin_read(1).await.unwrap();
-                assert_eq!(reader.meta().content_length(), original.len() as u64);
-                assert_eq!(reader.meta().content_type(), "text/plain");
+                let mut reader = bucket.begin_read("entry-1", 1).await.unwrap();
+                assert_eq!(reader.meta().content_length(), record_1.len() as u64);
                 assert_eq!(&reader.meta().labels()["a"], "b");
-                assert_eq!(read_all(&mut reader).await, original);
+                let mut data = BytesMut::new();
+                while let Some(chunk) = reader.read_chunk() {
+                    data.extend_from_slice(&chunk.unwrap());
+                }
+                assert_eq!(data, record_1.as_bytes());
             }
             {
-                let mut reader = entry.upgrade_and_unwrap().begin_read(2).await.unwrap();
-                assert_eq!(reader.meta().content_length(), 5);
-                assert_eq!(read_all(&mut reader).await, Bytes::from("plain"));
-            }
-            {
-                let reader = entry.upgrade_and_unwrap().begin_read(3).await.unwrap();
-                assert_eq!(reader.meta().content_length(), 0);
+                let mut reader = bucket.begin_read("entry-1", 2).await.unwrap();
+                assert_eq!(reader.meta().content_length(), record_2.len() as u64);
+                assert_eq!(reader.read_chunk().unwrap().unwrap(), Bytes::from(record_2));
             }
         }
 
         #[rstest]
         #[tokio::test(flavor = "multi_thread")]
-        async fn test_corrupted_payload_keeps_batch_going(
-            #[future] keeper: Arc<StateKeeper>,
-            mut headers: HeaderMap,
-            path_to_entry_1: Path<HashMap<String, String>>,
-        ) {
+        async fn test_corrupted_compressed_body(#[future] keeper: Arc<StateKeeper>) {
             let keeper = keeper.await;
-            let components = keeper.get_anonymous().await.unwrap();
 
-            headers.insert("content-length", "12".parse().unwrap());
-            headers.insert("x-reduct-time-1", "7,text/plain".parse().unwrap());
-            headers.insert("x-reduct-encoding-1", "zstd,100".parse().unwrap());
-            headers.insert("x-reduct-time-2", "5,text/plain".parse().unwrap());
+            let request = axum::http::Request::builder()
+                .method("POST")
+                .uri("/b/bucket-1/entry-1/batch")
+                .header("authorization", "Bearer init-token")
+                .header("content-encoding", "zstd")
+                .header("content-length", "7")
+                .header("x-reduct-content-length", "10")
+                .header("x-reduct-time-1", "10,text/plain")
+                .body(Body::from("garbage"))
+                .unwrap();
 
-            let stream = Body::from("garbageplain");
-
-            let resp =
-                write_batched_records(State(Arc::clone(&keeper)), headers, path_to_entry_1, stream)
-                    .await
-                    .unwrap()
-                    .into_response();
-
-            let resp_headers = resp.headers();
-            assert_eq!(resp_headers.len(), 1);
-            assert_eq!(
-                resp_headers.get("x-reduct-error-1").unwrap(),
-                &HeaderValue::from_static("422,Failed to decompress payload")
-            );
-
-            // the second record survives
-            let bucket = components
-                .storage
-                .get_bucket("bucket-1")
-                .await
-                .unwrap()
-                .upgrade_and_unwrap();
-            let mut reader = bucket.begin_read("entry-1", 2).await.unwrap();
-            assert_eq!(reader.meta().content_length(), 5);
-            assert_eq!(read_all(&mut reader).await, Bytes::from("plain"));
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_unknown_codec(
-            #[future] keeper: Arc<StateKeeper>,
-            mut headers: HeaderMap,
-            path_to_entry_1: Path<HashMap<String, String>>,
-        ) {
-            headers.insert("content-length", "5".parse().unwrap());
-            headers.insert("x-reduct-time-1", "5,text/plain".parse().unwrap());
-            headers.insert("x-reduct-encoding-1", "br,100".parse().unwrap());
-
-            let err = write_batched_records(
-                State(keeper.await),
-                headers,
-                path_to_entry_1,
-                Body::from("12345"),
-            )
-            .await
-            .err()
-            .unwrap();
-
-            assert_eq!(
-                err,
-                HttpError::new(
-                    ErrorCode::UnprocessableEntity,
-                    "Unknown record encoding 'br'"
-                )
-            );
-        }
-
-        #[rstest]
-        #[tokio::test]
-        async fn test_encoding_without_time_header(
-            #[future] keeper: Arc<StateKeeper>,
-            mut headers: HeaderMap,
-            path_to_entry_1: Path<HashMap<String, String>>,
-        ) {
-            headers.insert("content-length", "5".parse().unwrap());
-            headers.insert("x-reduct-time-1", "5,text/plain".parse().unwrap());
-            headers.insert("x-reduct-encoding-2", "zstd,100".parse().unwrap());
-
-            let err = write_batched_records(
-                State(keeper.await),
-                headers,
-                path_to_entry_1,
-                Body::from("12345"),
-            )
-            .await
-            .err()
-            .unwrap();
-
-            assert_eq!(
-                err,
-                HttpError::new(
-                    ErrorCode::UnprocessableEntity,
-                    "Header 'x-reduct-encoding-2' has no matching 'x-reduct-time-2' header"
-                )
-            );
+            let response = app(keeper).oneshot(request).await.unwrap();
+            assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
         }
     }
 

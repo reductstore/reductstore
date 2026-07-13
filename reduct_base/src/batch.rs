@@ -1,12 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-pub mod encoding;
-pub use encoding::{
-    is_compressible_mime, make_encoding_header_value, parse_encoding_header,
-    parse_encoding_headers, RecordEncoding, ENCODING_HEADER_PREFIX,
-};
-
 pub mod v1;
 pub use v1::{parse_batched_header, sort_headers_by_time, RecordHeader};
 

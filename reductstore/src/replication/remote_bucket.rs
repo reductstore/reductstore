@@ -23,13 +23,6 @@ pub(super) struct RemoteBucketConfig {
     pub(super) compression: ReplicationCompression,
 }
 
-/// Byte accounting of a sent batch: payload size before and after wire compression.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub(crate) struct BatchStats {
-    pub raw_bytes: u64,
-    pub wire_bytes: u64,
-}
-
 pub(super) struct RemoteBucketBuilder {
     config: RemoteBucketConfig,
 }
@@ -96,7 +89,7 @@ pub(crate) trait RemoteBucket {
         &mut self,
         entry_name: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
-    ) -> Result<(ErrorRecordMap, BatchStats), ReductError>;
+    ) -> Result<ErrorRecordMap, ReductError>;
 
     async fn probe_availability(&mut self);
 
@@ -118,7 +111,7 @@ impl RemoteBucket for RemoteBucketImpl {
         &mut self,
         entry_name: &str,
         records: Vec<(BoxedReadRecord, Transaction)>,
-    ) -> Result<(ErrorRecordMap, BatchStats), ReductError> {
+    ) -> Result<ErrorRecordMap, ReductError> {
         self.state = Some(
             self.state
                 .take()
@@ -178,7 +171,7 @@ pub(super) mod tests {
                 &self,
                 entry: &str,
                 records: Vec<BoxedReadRecord>,
-            ) -> Result<(ErrorRecordMap, BatchStats), ReductError>;
+            ) -> Result<ErrorRecordMap, ReductError>;
 
             async fn update_batch(
                 &self,
@@ -205,7 +198,7 @@ pub(super) mod tests {
 
             async fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send>;
 
-            fn last_result(&self) -> &Result<(ErrorRecordMap, BatchStats), ReductError>;
+            fn last_result(&self) -> &Result<ErrorRecordMap, ReductError>;
 
             fn is_available(&self) -> bool;
         }
@@ -237,7 +230,7 @@ pub(super) mod tests {
         let mut second_state = MockState::new();
         second_state
             .expect_last_result()
-            .return_const(Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .return_const(Ok(ErrorRecordMap::new()));
         second_state.expect_is_available().return_const(true);
 
         first_state
@@ -303,7 +296,7 @@ pub(super) mod tests {
 
     async fn write_record(
         remote_bucket: &mut RemoteBucketImpl,
-    ) -> Result<(ErrorRecordMap, BatchStats), ReductError> {
+    ) -> Result<ErrorRecordMap, ReductError> {
         let (_tx, rx) = crossbeam_channel::unbounded();
         let mut rec = Record::default();
         rec.timestamp = Some(Timestamp::default());

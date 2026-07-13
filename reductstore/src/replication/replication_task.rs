@@ -321,8 +321,8 @@ impl ReplicationTask {
                 if let Some(c) = counter {
                     match thr_hourly_diagnostics.write().await {
                         Ok(mut diagnostics) => {
-                            for (result, count, size, wire_size) in c.iter() {
-                                diagnostics.count(result.clone(), *count, *size, *wire_size);
+                            for (result, count, _size) in c.iter() {
+                                diagnostics.count(result.clone(), *count);
                             }
                         }
                         Err(err) => error!("Failed to acquire hourly diagnostics lock: {:?}", err),
@@ -566,7 +566,7 @@ mod tests {
     use reduct_base::io::{BoxedReadRecord, RecordMeta};
     use rstest::*;
 
-    use crate::replication::remote_bucket::{BatchStats, ErrorRecordMap};
+    use crate::replication::remote_bucket::ErrorRecordMap;
     use crate::replication::Transaction;
 
     use crate::core::sync::rwlock_timeout;
@@ -585,7 +585,7 @@ mod tests {
                 &mut self,
                 entry_name: &str,
                 record: Vec<(BoxedReadRecord, Transaction)>,
-            ) -> Result<(ErrorRecordMap, BatchStats), ReductError>;
+            ) -> Result<ErrorRecordMap, ReductError>;
 
             async fn probe_availability(&mut self);
 
@@ -678,7 +678,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket
             .expect_is_active()
             .times(0..)
@@ -754,7 +754,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
         let mut replication = build_replication(path, remote_bucket, settings).await;
 
@@ -775,9 +775,6 @@ mod tests {
             replication.diagnostics().await.unwrap(),
             Diagnostics {
                 hourly: DiagnosticsItem {
-                    data_size: 240,
-                    compressed_data_size: 240,
-                    compression_ratio: 1.0,
                     ok: 60,
                     errored: 0,
                     errors: HashMap::new(),
@@ -796,7 +793,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(false);
         let mut replication = build_replication(path, remote_bucket, settings).await;
 
@@ -817,9 +814,6 @@ mod tests {
             replication.diagnostics().await.unwrap(),
             Diagnostics {
                 hourly: DiagnosticsItem {
-                    data_size: 0,
-                    compressed_data_size: 0,
-                    compression_ratio: 1.0,
                     ok: 0,
                     errored: 0,
                     errors: HashMap::new(),
@@ -937,7 +931,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
         let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
         replication.notify(notification.clone()).await.unwrap();
@@ -968,7 +962,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
         let mut replication = build_replication(path, remote_bucket, settings.clone()).await;
         replication.notify(notification.clone()).await.unwrap();
@@ -1006,7 +1000,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
 
         let path = tempfile::tempdir().unwrap().keep();
@@ -1044,7 +1038,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(false);
 
         let mut replication = build_replication(path, remote_bucket, settings).await;
@@ -1121,7 +1115,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
 
         let captured = Arc::new(std::sync::Mutex::new(Vec::new()));
@@ -1163,7 +1157,7 @@ mod tests {
     ) {
         remote_bucket
             .expect_write_batch()
-            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         remote_bucket.expect_is_active().return_const(true);
 
         let captured = Arc::new(std::sync::Mutex::new(Vec::new()));

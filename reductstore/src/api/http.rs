@@ -44,6 +44,7 @@ use std::sync::Arc;
 use token::create_token_api_routes;
 use tokio::sync::mpsc::Receiver;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::decompression::RequestDecompressionLayer;
 
 #[derive(PartialEq, Clone)]
 pub struct HttpError {
@@ -258,6 +259,11 @@ impl AxumAppBuilder {
                 // UI
                 .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
                 .fallback(get(show_ui))
+                // Decompress request bodies sent with Content-Encoding (gzip, zstd),
+                // e.g. compressed replication batches. Handlers read the raw
+                // payload size from x-reduct-content-length when the
+                // content-length header is consumed by the decompression.
+                .layer(RequestDecompressionLayer::new())
                 .layer(from_fn(attach_client_ip))
                 .layer(from_fn_with_state(state_keeper.clone(), audit_requests))
                 .layer(from_fn(default_headers))

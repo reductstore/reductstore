@@ -4,7 +4,7 @@
 use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedClientApi};
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
-use crate::replication::remote_bucket::{BatchStats, ErrorRecordMap};
+use crate::replication::remote_bucket::ErrorRecordMap;
 use crate::replication::Transaction;
 use async_trait::async_trait;
 use log::{debug, warn};
@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 pub(in crate::replication::remote_bucket) struct BucketAvailableState {
     client: BoxedClientApi,
     bucket: BoxedBucketApi,
-    last_result: Result<(ErrorRecordMap, BatchStats), ReductError>,
+    last_result: Result<ErrorRecordMap, ReductError>,
 }
 
 impl BucketAvailableState {
@@ -24,7 +24,7 @@ impl BucketAvailableState {
         Self {
             client,
             bucket,
-            last_result: Ok((ErrorRecordMap::new(), BatchStats::default())),
+            last_result: Ok(ErrorRecordMap::new()),
         }
     }
 
@@ -133,8 +133,8 @@ impl RemoteBucketState for BucketAvailableState {
 
         if !records_to_write.is_empty() {
             match self.bucket.write_batch(entry_name, records_to_write).await {
-                Ok((error_map, stats)) => {
-                    self.last_result = Ok((error_map, stats));
+                Ok(error_map) => {
+                    self.last_result = Ok(error_map);
                     self
                 }
                 Err(err) => {
@@ -149,7 +149,7 @@ impl RemoteBucketState for BucketAvailableState {
                 }
             }
         } else {
-            self.last_result = Ok((error_map, BatchStats::default()));
+            self.last_result = Ok(error_map);
             self
         }
     }
@@ -163,7 +163,7 @@ impl RemoteBucketState for BucketAvailableState {
         self
     }
 
-    fn last_result(&self) -> &Result<(ErrorRecordMap, BatchStats), ReductError> {
+    fn last_result(&self) -> &Result<ErrorRecordMap, ReductError> {
         &self.last_result
     }
 }
@@ -195,7 +195,7 @@ mod tests {
                 predicate::eq("test_entry"),
                 predicate::always(), // TODO: check the records
             )
-            .returning(|_, _| Ok((ErrorRecordMap::new(), BatchStats::default())));
+            .returning(|_, _| Ok(ErrorRecordMap::new()));
         bucket.expect_update_batch().times(0);
 
         let state = Box::new(BucketAvailableState {
@@ -331,13 +331,10 @@ mod tests {
         record_to_write: (BoxedReadRecord, Transaction),
     ) {
         bucket.expect_write_batch().returning(|_, _| {
-            Ok((
-                ErrorRecordMap::from_iter(vec![(
-                    1u64,
-                    ReductError::new(ErrorCode::Conflict, "AlreadyExists"),
-                )]),
-                BatchStats::default(),
-            ))
+            Ok(ErrorRecordMap::from_iter(vec![(
+                1u64,
+                ReductError::new(ErrorCode::Conflict, "AlreadyExists"),
+            )]))
         });
 
         let state = Box::new(BucketAvailableState::new(
@@ -346,7 +343,7 @@ mod tests {
         ));
 
         let state = state.write_batch("test", vec![record_to_write]).await;
-        let (error_map, _) = state.last_result().as_ref().unwrap();
+        let error_map = state.last_result().as_ref().unwrap();
 
         assert_eq!(error_map.len(), 1);
         assert_eq!(error_map.get(&1).unwrap().status, ErrorCode::Conflict);
@@ -369,7 +366,7 @@ mod tests {
         });
         bucket.expect_write_batch().returning(|_, records| {
             assert_eq!(records.len(), 2, "we write the new record and failed one");
-            Ok((ErrorRecordMap::new(), BatchStats::default()))
+            Ok(ErrorRecordMap::new())
         });
 
         let state = Box::new(BucketAvailableState::new(
@@ -400,7 +397,7 @@ mod tests {
 
         bucket.expect_write_batch().returning(|_, records| {
             assert_eq!(records.len(), 1, "we create an entry and write the records");
-            Ok((ErrorRecordMap::new(), BatchStats::default()))
+            Ok(ErrorRecordMap::new())
         });
 
         let state = Box::new(BucketAvailableState::new(
