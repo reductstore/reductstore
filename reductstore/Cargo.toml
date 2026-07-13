@@ -47,6 +47,8 @@ bytes = "1.11.0"
 axum = { version = "0.8.7", features = ["default", "macros"] }
 axum-extra = { version = "0.12.1", features = ["default", "typed-header"] }
 tokio = { version = "1.51.1", features = ["full"] }
+tokio-util = { version = "0.7.18", features = ["io"] }
+async-compression = { version = "0.4.41", features = ["tokio", "gzip", "zstd"] }
 hyper = { version = "1.10.1", features = ["full"] }
 futures-util = "0.3.31"
 futures = "0.3"

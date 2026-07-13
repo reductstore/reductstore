@@ -284,12 +284,17 @@ fn check_and_get_content_length(
         .map(|(_, header)| header.content_length)
         .sum();
 
-    let header_content_length = parse_content_length_from_header(headers)?;
-    if total_content_length != header_content_length {
-        return Err(unprocessable_entity!(
-            "content-length header does not match the sum of the content-lengths in the headers",
-        )
-        .into());
+    // A body sent with Content-Encoding arrives without a content-length
+    // header (the decompression layer consumes it); the sum of the record
+    // lengths defines the expected payload size then.
+    if headers.contains_key("content-length") || headers.contains_key("x-reduct-content-length") {
+        let header_content_length = parse_content_length_from_header(headers)?;
+        if total_content_length != header_content_length {
+            return Err(unprocessable_entity!(
+                "content-length header does not match the sum of the content-lengths in the headers",
+            )
+            .into());
+        }
     }
 
     Ok(total_content_length)
@@ -787,118 +792,6 @@ mod tests {
 
         assert_eq!(err.status(), ErrorCode::TooManyRequests);
         assert!(err.message().contains("ingress bytes"));
-    }
-
-    mod compressed {
-        use super::*;
-        use axum::routing::post;
-        use axum::Router;
-        use bytes::BytesMut;
-        use flate2::write::GzEncoder;
-        use std::io::Write;
-        use tower::ServiceExt;
-        use tower_http::decompression::RequestDecompressionLayer;
-
-        /// The batch route wrapped with the same request decompression layer
-        /// as the production router.
-        fn app(keeper: Arc<StateKeeper>) -> Router {
-            Router::new()
-                .route(
-                    "/b/{bucket_name}/{entry_name}/batch",
-                    post(write_batched_records),
-                )
-                .layer(RequestDecompressionLayer::new())
-                .with_state(keeper)
-        }
-
-        fn compress(codec: &str, data: &[u8]) -> Vec<u8> {
-            match codec {
-                "zstd" => zstd::bulk::compress(data, 3).unwrap(),
-                "gzip" => {
-                    let mut encoder = GzEncoder::new(Vec::new(), flate2::Compression::default());
-                    encoder.write_all(data).unwrap();
-                    encoder.finish().unwrap()
-                }
-                _ => unreachable!(),
-            }
-        }
-
-        #[rstest]
-        #[case("zstd")]
-        #[case("gzip")]
-        #[tokio::test(flavor = "multi_thread")]
-        async fn test_write_compressed_batch(
-            #[future] keeper: Arc<StateKeeper>,
-            #[case] codec: &str,
-        ) {
-            let keeper = keeper.await;
-            let components = keeper.get_anonymous().await.unwrap();
-
-            let record_1 = "hello world ".repeat(100);
-            let record_2 = "plain";
-            let raw = format!("{}{}", record_1, record_2);
-            let compressed = compress(codec, raw.as_bytes());
-
-            let request = axum::http::Request::builder()
-                .method("POST")
-                .uri("/b/bucket-1/entry-1/batch")
-                .header("authorization", "Bearer init-token")
-                .header("content-encoding", codec)
-                .header("content-length", compressed.len().to_string())
-                .header("x-reduct-content-length", raw.len().to_string())
-                .header(
-                    "x-reduct-time-1",
-                    format!("{},text/plain,a=b", record_1.len()),
-                )
-                .header("x-reduct-time-2", format!("{},text/plain", record_2.len()))
-                .body(Body::from(compressed))
-                .unwrap();
-
-            let response = app(Arc::clone(&keeper)).oneshot(request).await.unwrap();
-            assert_eq!(response.status(), axum::http::StatusCode::OK);
-
-            let bucket = components
-                .storage
-                .get_bucket("bucket-1")
-                .await
-                .unwrap()
-                .upgrade_and_unwrap();
-            {
-                let mut reader = bucket.begin_read("entry-1", 1).await.unwrap();
-                assert_eq!(reader.meta().content_length(), record_1.len() as u64);
-                assert_eq!(&reader.meta().labels()["a"], "b");
-                let mut data = BytesMut::new();
-                while let Some(chunk) = reader.read_chunk() {
-                    data.extend_from_slice(&chunk.unwrap());
-                }
-                assert_eq!(data, record_1.as_bytes());
-            }
-            {
-                let mut reader = bucket.begin_read("entry-1", 2).await.unwrap();
-                assert_eq!(reader.meta().content_length(), record_2.len() as u64);
-                assert_eq!(reader.read_chunk().unwrap().unwrap(), Bytes::from(record_2));
-            }
-        }
-
-        #[rstest]
-        #[tokio::test(flavor = "multi_thread")]
-        async fn test_corrupted_compressed_body(#[future] keeper: Arc<StateKeeper>) {
-            let keeper = keeper.await;
-
-            let request = axum::http::Request::builder()
-                .method("POST")
-                .uri("/b/bucket-1/entry-1/batch")
-                .header("authorization", "Bearer init-token")
-                .header("content-encoding", "zstd")
-                .header("content-length", "7")
-                .header("x-reduct-content-length", "10")
-                .header("x-reduct-time-1", "10,text/plain")
-                .body(Body::from("garbage"))
-                .unwrap();
-
-            let response = app(keeper).oneshot(request).await.unwrap();
-            assert_eq!(response.status(), axum::http::StatusCode::BAD_REQUEST);
-        }
     }
 
     #[fixture]

@@ -5,18 +5,17 @@ use crate::core::internal_client::{
     ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
 };
 use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucketConfig};
+use async_compression::tokio::bufread::{GzipEncoder, ZstdEncoder};
 use async_stream::stream;
 use async_trait::async_trait;
 use axum::http::HeaderName;
 use bytes::Bytes;
-use flate2::write::GzEncoder;
-use flate2::Compression;
-use futures_util::{Stream, StreamExt};
+use futures_util::{Stream, TryStreamExt};
 use log::warn;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::replication_api::ReplicationCompression;
-use reduct_base::{internal_server_error, unprocessable_entity};
+use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
 use std::collections::BTreeMap;
@@ -135,6 +134,9 @@ impl ReductClient {
     }
 }
 
+type BoxedByteStream =
+    std::pin::Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + Sync + 'static>>;
+
 struct BucketWrapper {
     server_url: String,
     bucket_name: String,
@@ -216,50 +218,35 @@ impl BucketWrapper {
         headers
     }
 
-    /// Compress the whole batch body and rewrite the headers for a
-    /// `Content-Encoding` transfer: the raw payload size moves to
-    /// `x-reduct-content-length` (the receiver reads it after its
-    /// decompression layer consumed `content-length`), while `content-length`
-    /// is set from the compressed body by the HTTP client.
-    async fn compress_body(
+    /// Wrap the batch body into a compressing stream for a `Content-Encoding`
+    /// transfer. The compressed size is unknown upfront, so `content-length`
+    /// is dropped and the body is sent chunked; the receiver restores the
+    /// payload size from the sum of the record lengths.
+    fn compress_body(
         headers: &mut HeaderMap,
-        body: impl Stream<Item = Result<Bytes, ReductError>>,
+        body: impl Stream<Item = Result<Bytes, ReductError>> + Send + Sync + 'static,
         compression: ReplicationCompression,
-    ) -> Result<Vec<u8>, ReductError> {
-        let mut raw = Vec::new();
-        let mut body = std::pin::pin!(body);
-        while let Some(chunk) = body.next().await {
-            raw.extend_from_slice(&chunk?);
-        }
+    ) -> impl Stream<Item = std::io::Result<Bytes>> + Send + Sync + 'static {
+        let reader = tokio_util::io::StreamReader::new(
+            body.map_err(|err| std::io::Error::other(err.to_string())),
+        );
 
-        let (encoding, compressed) = match compression {
+        let (encoding, stream): (_, BoxedByteStream) = match compression {
             ReplicationCompression::None => unreachable!("checked by the caller"),
             ReplicationCompression::Zstd => (
                 "zstd",
-                zstd::bulk::compress(&raw, zstd::DEFAULT_COMPRESSION_LEVEL).map_err(|err| {
-                    internal_server_error!("Failed to compress batch payload: {}", err)
-                })?,
+                Box::pin(tokio_util::io::ReaderStream::new(ZstdEncoder::new(reader))),
             ),
-            ReplicationCompression::Gzip => {
-                use std::io::Write;
-                let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
-                encoder
-                    .write_all(&raw)
-                    .and_then(|_| encoder.finish())
-                    .map(|compressed| ("gzip", compressed))
-                    .map_err(|err| {
-                        internal_server_error!("Failed to compress batch payload: {}", err)
-                    })?
-            }
+            ReplicationCompression::Gzip => (
+                "gzip",
+                Box::pin(tokio_util::io::ReaderStream::new(GzipEncoder::new(reader))),
+            ),
         };
 
-        let raw_content_length = headers
-            .remove(CONTENT_LENGTH)
-            .expect("batch headers always carry content-length");
-        headers.insert("x-reduct-content-length", raw_content_length);
+        headers.remove(CONTENT_LENGTH);
         headers.insert(CONTENT_ENCODING, HeaderValue::from_static(encoding));
 
-        Ok(compressed)
+        stream
     }
 
     fn parse_record_errors(
@@ -343,12 +330,24 @@ impl ReductClientApi for ReductClient {
         );
 
         let resp = request.send().await;
-        check_response(resp)?;
+        let resp = check_response(resp)?;
+
+        let mut compression = self.compression;
+        if compression != ReplicationCompression::None
+            && !Self::supports_compression(resp.headers())
+        {
+            warn!(
+                "Remote server {} does not support replication payload compression, sending uncompressed",
+                self.server_url
+            );
+            compression = ReplicationCompression::None;
+        }
 
         Ok(Box::new(BucketWrapper {
             server_url: self.server_url.clone(),
             bucket_name: bucket_name.to_string(),
             client: self.client_api.client().clone(),
+            compression,
         }))
     }
 
@@ -376,8 +375,8 @@ impl ReductBucketApi for BucketWrapper {
         let request = if self.compression == ReplicationCompression::None {
             request.headers(headers).body(Body::wrap_stream(stream))
         } else {
-            let compressed = Self::compress_body(&mut headers, stream, self.compression).await?;
-            request.headers(headers).body(compressed)
+            let compressed = Self::compress_body(&mut headers, stream, self.compression);
+            request.headers(headers).body(Body::wrap_stream(compressed))
         };
 
         let response = request.send().await;
@@ -605,8 +604,7 @@ pub(super) mod tests {
 
     mod compression {
         use super::*;
-        use futures_util::stream;
-        use std::io::Read;
+        use futures_util::{stream, StreamExt};
 
         fn raw_batch_headers() -> HeaderMap {
             let mut headers = HeaderMap::new();
@@ -632,12 +630,13 @@ pub(super) mod tests {
                 Ok(Bytes::from("record56")),
             ]);
 
-            let compressed = BucketWrapper::compress_body(&mut headers, body, compression)
-                .await
-                .unwrap();
+            let compressed_stream = BucketWrapper::compress_body(&mut headers, body, compression);
 
-            assert_eq!(headers.get(CONTENT_LENGTH), None);
-            assert_eq!(headers.get("x-reduct-content-length").unwrap(), "18");
+            assert_eq!(
+                headers.get(CONTENT_LENGTH),
+                None,
+                "compressed size is unknown upfront, the body is sent chunked"
+            );
             assert_eq!(headers.get(CONTENT_ENCODING).unwrap(), expected_encoding);
             assert_eq!(
                 headers.get("x-reduct-time-1").unwrap(),
@@ -645,9 +644,16 @@ pub(super) mod tests {
                 "record framing headers are untouched"
             );
 
+            let mut compressed = Vec::new();
+            let mut compressed_stream = std::pin::pin!(compressed_stream);
+            while let Some(chunk) = compressed_stream.next().await {
+                compressed.extend_from_slice(&chunk.unwrap());
+            }
+
             let decompressed = match compression {
                 ReplicationCompression::Zstd => zstd::bulk::decompress(&compressed, 1024).unwrap(),
                 ReplicationCompression::Gzip => {
+                    use std::io::Read;
                     let mut buf = Vec::new();
                     flate2::read::GzDecoder::new(compressed.as_slice())
                         .read_to_end(&mut buf)
@@ -667,12 +673,15 @@ pub(super) mod tests {
                 ReductError::internal_server_error("broken record"),
             )]);
 
-            let err =
-                BucketWrapper::compress_body(&mut headers, body, ReplicationCompression::Zstd)
-                    .await
-                    .err()
-                    .unwrap();
-            assert_eq!(err.message(), "broken record");
+            let compressed_stream =
+                BucketWrapper::compress_body(&mut headers, body, ReplicationCompression::Zstd);
+            let mut compressed_stream = std::pin::pin!(compressed_stream);
+            let mut last = None;
+            while let Some(chunk) = compressed_stream.next().await {
+                last = Some(chunk);
+            }
+            let err = last.unwrap().err().unwrap();
+            assert!(err.to_string().contains("broken record"));
         }
 
         #[rstest]

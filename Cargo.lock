@@ -3211,6 +3211,7 @@ version = "1.21.0"
 dependencies = [
  "aes-siv",
  "argon2",
+ "async-compression",
  "async-stream",
  "async-trait",
  "axum",
@@ -3255,6 +3256,7 @@ dependencies = [
  "tempfile",
  "test-log",
  "tokio",
+ "tokio-util",
  "tower",
  "tower-http 0.7.0",
  "url",
