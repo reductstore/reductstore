@@ -218,6 +218,8 @@ mod tests {
     #[case("for=\"[2001:db8:cafe::17]\"", Some("2001:db8:cafe::17"))]
     #[case("by=203.0.113.60;proto=http", None)]
     #[case("for=_hidden", None)]
+    #[case("for=192.0.2.43, for=198.51.100.17", Some("192.0.2.43"))]
+    #[case("for=192.0.2.43, for=198.51.100.17;proto=http", Some("192.0.2.43"))]
     fn parses_forwarded_header(#[case] input: &str, #[case] expected: Option<&str>) {
         assert_eq!(
             parse_forwarded_for(input).map(|ip| ip.to_string()),
