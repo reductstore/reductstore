@@ -87,12 +87,12 @@ pub(crate) struct MetaEntryBehavior;
 #[async_trait]
 impl SystemEntryBehavior for MetaEntryBehavior {
     async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError> {
-        if labels.get("key").is_none() {
+        let Some(key) = labels.get("key") else {
             return Err(unprocessable_entity!(
                 "System entry '{}' records must contain label 'key'",
                 entry.name()
             ));
-        }
+        };
 
         if labels.get("remove").is_some_and(|value| value == "true") {
             return Err(unprocessable_entity!(
@@ -101,10 +101,22 @@ impl SystemEntryBehavior for MetaEntryBehavior {
             ));
         }
 
+        // escape system names started with $
+        let key = if key.starts_with('$') {
+            format!("${}", key)
+        } else {
+            key.to_string()
+        };
+
+        // remove previous version with the same key (upsert-by-key behavior)
         let _ = entry
             .query_remove_records(QueryEntry {
                 start: Some(0),
                 stop: Some(u64::MAX),
+                when: Some(json!({
+                    "$has": "key",
+                    "&key": {"$eq": key}
+                })),
                 ..Default::default()
             })
             .await?;
