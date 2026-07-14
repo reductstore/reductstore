@@ -164,6 +164,7 @@ Thanks to everyone who has contributed to ReductStore.
   <a href="https://github.com/victor1234"><img src="https://avatars.githubusercontent.com/u/1102205?v=4" width="48" height="48" alt="@victor1234" /></a>
   <a href="https://github.com/aschenbecherwespe"><img src="https://avatars.githubusercontent.com/u/94011659?v=4" width="48" height="48" alt="@aschenbecherwespe" /></a>
   <a href="https://github.com/renghen"><img src="https://avatars.githubusercontent.com/u/271285?v=4" width="48" height="48" alt="@renghen" /></a>
+  <a href="https://github.com/LordAizen1"><img src="https://avatars.githubusercontent.com/u/119096690?v=4" width="48" height="48" alt="@LordAizen1" /></a>
 </p>
 
 Your support fuels our passion and drives us to keep improving.
