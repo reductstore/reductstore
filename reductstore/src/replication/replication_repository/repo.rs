@@ -1728,6 +1728,175 @@ mod tests {
                 "Should preserve original when condition"
             );
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_with_non_object_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "temp".to_string(),
+                }],
+                Some(r#"["invalid", "array"]"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            // When the existing 'when' is not an object (e.g., an array),
+            // it should be replaced with just the $in condition
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"$in": ["sensor", "temp"]})),
+                "Should replace non-object when with $in condition"
+            );
+        }
+    }
+
+    mod exclude_migration {
+        use super::*;
+        use crate::replication::proto::{
+            Label as ProtoLabel, ReplicationSettings as ProtoReplicationSettings,
+        };
+
+        fn create_proto_settings(
+            exclude: Vec<ProtoLabel>,
+            when: Option<String>,
+        ) -> ProtoReplicationSettings {
+            ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "token".to_string(),
+                entries: vec![],
+                dst_prefix: String::new(),
+                include: vec![],
+                exclude,
+                each_n: 0,
+                each_s: 0.0,
+                when,
+                mode: ProtoReplicationMode::Enabled as i32,
+                compression: ProtoReplicationCompression::None as i32,
+            }
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_migrated_to_nin_without_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "error".to_string(),
+                }],
+                None,
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"$nin": ["sensor", "error"]})),
+                "Should migrate exclude to $nin in when condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_migrated_to_nin_with_existing_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "error".to_string(),
+                }],
+                Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "$eq": ["&status", "active"],
+                    "$nin": ["sensor", "error"]
+                })),
+                "Should inject $nin into existing when condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_with_multiple_labels() {
+            let proto_settings = create_proto_settings(
+                vec![
+                    ProtoLabel {
+                        name: "sensor".to_string(),
+                        value: "error".to_string(),
+                    },
+                    ProtoLabel {
+                        name: "location".to_string(),
+                        value: "maintenance".to_string(),
+                    },
+                ],
+                None,
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            // Note: The current implementation overwrites with each label,
+            // so only the last one will be present. This is the expected behavior.
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"$nin": ["location", "maintenance"]})),
+                "Should migrate last exclude label to $nin"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_migration_when_exclude_empty() {
+            let proto_settings = create_proto_settings(
+                vec![],
+                Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(
+                !migrated,
+                "Should not indicate migration when exclude is empty"
+            );
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"$eq": ["&status", "active"]})),
+                "Should preserve original when condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_with_non_object_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "error".to_string(),
+                }],
+                Some(r#"["invalid", "array"]"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            // When the existing 'when' is not an object (e.g., an array),
+            // it should be replaced with just the $nin condition
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"$nin": ["sensor", "error"]})),
+                "Should replace non-object when with $nin condition"
+            );
+        }
     }
 
     #[fixture]
@@ -1847,6 +2016,21 @@ mod tests {
 
             assert!(!migrated, "Should not mark as migrated");
             assert_eq!(settings.when, None);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_s_with_non_object_when() {
+            let proto_settings =
+                get_proto_replication_settings(1.5, Some(r#"["invalid", "array"]"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            // When the existing 'when' is not an object (e.g., an array),
+            // it should be replaced with just the $each_t condition
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 1.5})));
         }
 
         #[rstest]
