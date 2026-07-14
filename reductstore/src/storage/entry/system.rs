@@ -6,6 +6,7 @@ use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{unprocessable_entity, Labels};
+use serde_json::json;
 
 /// Reserved segment for system metadata entries.
 ///
@@ -67,6 +68,7 @@ pub(crate) trait SystemEntryBehavior {
 
     async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError>;
 
+    fn apply_default_query_filters(&self, query: &mut QueryEntry);
 }
 
 pub(crate) struct RegularEntryBehavior;
@@ -76,6 +78,8 @@ impl SystemEntryBehavior for RegularEntryBehavior {
     async fn prepare_write(&self, _entry: &Entry, _labels: &Labels) -> Result<(), ReductError> {
         Ok(())
     }
+
+    fn apply_default_query_filters(&self, _query: &mut QueryEntry) {}
 }
 
 pub(crate) struct MetaEntryBehavior;
@@ -105,6 +109,29 @@ impl SystemEntryBehavior for MetaEntryBehavior {
             })
             .await?;
         Ok(())
+    }
+
+    fn apply_default_query_filters(&self, query: &mut QueryEntry) {
+        // Filter out tombstoned records (remove=true) by injecting $not condition
+        let exclude = json!([{
+            "$and": [
+                {"$has": "remove"}, {"&remove": {"$eq": true}}
+            ]
+        }]);
+
+        let when = query.when.get_or_insert_with(|| json!({}));
+        match when.as_object_mut().unwrap().entry("$not") {
+            serde_json::map::Entry::Vacant(entry) => {
+                entry.insert(exclude);
+            }
+            serde_json::map::Entry::Occupied(mut entry) => {
+                entry
+                    .get_mut()
+                    .as_array_mut()
+                    .unwrap()
+                    .push(exclude.get(0).unwrap().clone());
+            }
+        }
     }
 
     fn validate_remove_records(&self, entry_name: &str) -> Result<(), ReductError> {
