@@ -98,7 +98,6 @@ mod tests {
     use reduct_base::msg::replication_api::{
         ReplicationCompression, ReplicationMode, ReplicationSettings,
     };
-    use reduct_base::Labels;
     use rstest::fixture;
 
     #[fixture]

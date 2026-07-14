@@ -6,9 +6,8 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
-    Label as ProtoLabel, ReplicationCompression as ProtoReplicationCompression,
-    ReplicationMode as ProtoReplicationMode, ReplicationRepo as ProtoReplicationRepo,
-    ReplicationSettings as ProtoReplicationSettings,
+    ReplicationCompression as ProtoReplicationCompression, ReplicationMode as ProtoReplicationMode,
+    ReplicationRepo as ProtoReplicationRepo, ReplicationSettings as ProtoReplicationSettings,
 };
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};

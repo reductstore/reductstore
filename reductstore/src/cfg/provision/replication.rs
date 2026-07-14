@@ -11,7 +11,6 @@ use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::replication_api::{
     ReplicationCompression, ReplicationMode, ReplicationSettings,
 };
-use reduct_base::Labels;
 use std::collections::HashMap;
 use std::sync::Arc;
 
