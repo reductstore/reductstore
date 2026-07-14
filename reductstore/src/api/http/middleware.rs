@@ -220,6 +220,7 @@ mod tests {
     #[case("for=_hidden", None)]
     #[case("for=192.0.2.43, for=198.51.100.17", Some("192.0.2.43"))]
     #[case("for=192.0.2.43, for=198.51.100.17;proto=http", Some("192.0.2.43"))]
+    #[case("for=_hidden, for=198.51.100.17;proto=http", Some("198.51.100.17"))]
     fn parses_forwarded_header(#[case] input: &str, #[case] expected: Option<&str>) {
         assert_eq!(
             parse_forwarded_for(input).map(|ip| ip.to_string()),
