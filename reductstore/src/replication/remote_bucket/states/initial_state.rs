@@ -97,6 +97,7 @@ mod tests {
             api_token: "test_token".to_string(),
             verify_ssl: true,
             ca_path: None,
+            compression: Default::default(),
         })
         .unwrap();
         assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));

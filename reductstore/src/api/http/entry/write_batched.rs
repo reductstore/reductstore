@@ -284,12 +284,17 @@ fn check_and_get_content_length(
         .map(|(_, header)| header.content_length)
         .sum();
 
-    let header_content_length = parse_content_length_from_header(headers)?;
-    if total_content_length != header_content_length {
-        return Err(unprocessable_entity!(
-            "content-length header does not match the sum of the content-lengths in the headers",
-        )
-        .into());
+    // A body sent with Content-Encoding arrives without a content-length
+    // header (the decompression layer consumes it); the sum of the record
+    // lengths defines the expected payload size then.
+    if headers.contains_key("content-length") || headers.contains_key("x-reduct-content-length") {
+        let header_content_length = parse_content_length_from_header(headers)?;
+        if total_content_length != header_content_length {
+            return Err(unprocessable_entity!(
+                "content-length header does not match the sum of the content-lengths in the headers",
+            )
+            .into());
+        }
     }
 
     Ok(total_content_length)

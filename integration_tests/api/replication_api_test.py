@@ -25,6 +25,7 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "exclude": {"key2": "value2"},
             "each_n": 10,
             "when": {"$eq": ["&key1", "value1"]},
+            "compression": "zstd",
         },
     )
 
@@ -53,6 +54,7 @@ def test__create_replication_ok(base_url, session, bucket_name, replication_name
             "each_n": 10,
             "when": {"$eq": ["&key1", "value1"]},
             "mode": "enabled",
+            "compression": "zstd",
         },
     }
 
@@ -124,6 +126,7 @@ def test__update_replication_ok(base_url, session, bucket_name, replication_name
             "src_bucket": bucket_name,
             "when": None,
             "mode": "enabled",
+            "compression": "none",
         },
     }
 

@@ -1180,6 +1180,7 @@ mod tests {
             each_n: None,
             when: None,
             mode: ReplicationMode::Enabled,
+            compression: Default::default(),
         }
     }
 }

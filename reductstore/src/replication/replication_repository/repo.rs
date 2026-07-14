@@ -6,8 +6,9 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
-    Label as ProtoLabel, ReplicationMode as ProtoReplicationMode,
-    ReplicationRepo as ProtoReplicationRepo, ReplicationSettings as ProtoReplicationSettings,
+    Label as ProtoLabel, ReplicationCompression as ProtoReplicationCompression,
+    ReplicationMode as ProtoReplicationMode, ReplicationRepo as ProtoReplicationRepo,
+    ReplicationSettings as ProtoReplicationSettings,
 };
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{ManageReplications, TransactionNotification};
@@ -21,7 +22,8 @@ use log::{debug, error, warn};
 use prost::Message;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::replication_api::{
-    FullReplicationInfo, ReplicationInfo, ReplicationMode, ReplicationSettings,
+    FullReplicationInfo, ReplicationCompression, ReplicationInfo, ReplicationMode,
+    ReplicationSettings,
 };
 use reduct_base::{not_found, unprocessable_entity};
 use std::collections::HashMap;
@@ -59,6 +61,7 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
             each_s: 0.0, // Deprecated field, always set to 0.0 (migration to $each_t in when condition)
             when: settings.when.map(|value| value.to_string()),
             mode: ProtoReplicationMode::from(&settings.mode) as i32,
+            compression: ProtoReplicationCompression::from(&settings.compression) as i32,
         }
     }
 }
@@ -139,6 +142,9 @@ impl ProtoReplicationSettings {
             mode: ProtoReplicationMode::try_from(self.mode)
                 .unwrap_or(ProtoReplicationMode::Enabled)
                 .into(),
+            compression: ProtoReplicationCompression::try_from(self.compression)
+                .unwrap_or(ProtoReplicationCompression::None)
+                .into(),
         };
 
         (settings, migrated)
@@ -167,6 +173,26 @@ impl From<ProtoReplicationMode> for ReplicationMode {
             ProtoReplicationMode::Enabled => ReplicationMode::Enabled,
             ProtoReplicationMode::Paused => ReplicationMode::Paused,
             ProtoReplicationMode::Disabled => ReplicationMode::Disabled,
+        }
+    }
+}
+
+impl From<&ReplicationCompression> for ProtoReplicationCompression {
+    fn from(compression: &ReplicationCompression) -> Self {
+        match compression {
+            ReplicationCompression::None => ProtoReplicationCompression::None,
+            ReplicationCompression::Zstd => ProtoReplicationCompression::Zstd,
+            ReplicationCompression::Gzip => ProtoReplicationCompression::Gzip,
+        }
+    }
+}
+
+impl From<ProtoReplicationCompression> for ReplicationCompression {
+    fn from(compression: ProtoReplicationCompression) -> Self {
+        match compression {
+            ProtoReplicationCompression::None => ReplicationCompression::None,
+            ProtoReplicationCompression::Zstd => ReplicationCompression::Zstd,
+            ProtoReplicationCompression::Gzip => ReplicationCompression::Gzip,
         }
     }
 }
@@ -1550,6 +1576,7 @@ mod tests {
             each_n: None,
             when: None,
             mode: ReplicationMode::Enabled,
+            compression: Default::default(),
         }
     }
 
@@ -1689,6 +1716,7 @@ mod tests {
                 each_s: each_s,
                 when: when,
                 mode: ProtoReplicationMode::Enabled as i32,
+                compression: ProtoReplicationCompression::None as i32,
             }
         }
     }

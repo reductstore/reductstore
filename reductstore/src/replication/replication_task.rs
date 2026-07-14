@@ -82,7 +82,8 @@ impl ReplicationTask {
             .url(remote_host)
             .bucket_name(remote_bucket)
             .verify_ssl(config.replication_conf.verify_ssl)
-            .ca_path(config.replication_conf.ca_path.clone());
+            .ca_path(config.replication_conf.ca_path.clone())
+            .compression(settings.compression);
 
         if let Some(token) = remote_token {
             remote_bucket_builder = remote_bucket_builder.api_token(token);
@@ -1278,6 +1279,7 @@ mod tests {
             each_n: None,
             when: None,
             mode: ReplicationMode::Enabled,
+            compression: Default::default(),
         }
     }
 
