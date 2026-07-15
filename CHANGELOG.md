@@ -10,7 +10,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - Automatically create missing destination buckets during replication, [PR-1539](https://github.com/reductstore/reductstore/pull/1539) by @rohankumardubey
-
 - Add a replication `compression` setting (`none`, `zstd`, `gzip`, default `none`) that compresses batch payloads during transfer using HTTP `Content-Encoding`, [Issue-1348](https://github.com/reductstore/reductstore/issues/1348) by @DibbayajyotiRoy
 - Configure server-wide default bucket settings with `RS_DEFAULTS_BUCKET_*` environment variables, [PR-1535](https://github.com/reductstore/reductstore/pull/1535) by @rohankumardubey
 - Reject record writes before writing when the data folder filesystem has insufficient free disk space, in addition to the existing quota check, [PR-1525](https://github.com/reductstore/reductstore/pull/1525)
@@ -34,6 +33,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Resolve client IP from multi-hop RFC 7239 `Forwarded` headers so token IP allowlists compare against the real client instead of the proxy, [PR-1546](https://github.com/reductstore/reductstore/pull/1546) by @LordAizen1
 - Normalize bucket history timestamps when only attachment metadata entries contain records, [PR-1534](https://github.com/reductstore/reductstore/pull/1534)
+
+### Removed
+
+- `include` and `exclude` parameters in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1497](https://github.com/reductstore/reductstore/pull/1497) by @vbmade2000
+- `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414) by @vbmade2000
 
 ## 1.20.9 - 2026-07-08
 
@@ -82,9 +86,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Throttle lifecycle delete and compression runs using progress persisted in existing lifecycle system event stats [PR-1475](https://github.com/reductstore/reductstore/pull/1475)
 - Report both processed record and block counts for lifecycle compression events, [PR-1470](https://github.com/reductstore/reductstore/pull/1470) by @rohankumardubey
 
-### Removed
-
-- `include` and `exclude` parameters in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1497](https://github.com/reductstore/reductstore/pull/1497) by @vbmade2000
 
 ## 1.20.2 - 2026-06-18
 
@@ -124,10 +125,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support object shorthand for unconditional `#ext` pipelines by expanding multi-extension objects into ordered execution steps, while keeping array-based pipeline syntax unchanged, [PR-1367](https://github.com/reductstore/reductstore/pull/1367)
 - Support strict extension pipelines in `#ext` directives with ordered step execution and backward compatibility for legacy `"#ext": { ... }` object format, [PR-1351](https://github.com/reductstore/reductstore/pull/1351)
 - Add `--version` (`-V`) CLI option to the `reductstore` server binary to print the version and exit successfully from shared launcher code, [PR-1343](https://github.com/reductstore/reductstore/pull/1343)
-
-### Removed
-
-- `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414) by @vbmade2000
 
 ### Changed
 
