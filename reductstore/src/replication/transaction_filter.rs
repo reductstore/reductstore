@@ -6,8 +6,7 @@ use crate::replication::TransactionNotification;
 use crate::storage::entry::{entry_matches_pattern, is_system_meta_entry, meta_entry_parent};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, ExcludeLabelFilter, FilterRecord, IncludeLabelFilter,
-    RecordFilter, WhenFilter,
+    apply_filters_recursively, EachNFilter, FilterRecord, RecordFilter, WhenFilter,
 };
 use log::warn;
 use reduct_base::error::ReductError;
@@ -57,21 +56,12 @@ impl TransactionFilter {
     ///
     /// * `bucket` - Bucket name to filter.
     /// * `entries` - Entries to filter. Supports wildcards. If empty, all entries are matched.
-    /// * `include` - Labels to include. All must match. If empty, all labels are matched.
-    /// * `exclude` - Labels to exclude. Any must match. If empty, no labels are matched.
     pub(super) fn try_new(
         name: &str,
         settings: ReplicationSettings,
         io_config: IoConfig,
     ) -> Result<Self, ReductError> {
         let mut query_filters: Vec<Filter> = vec![];
-        if !settings.include.is_empty() {
-            query_filters.push(Box::new(IncludeLabelFilter::new(settings.include)));
-        }
-
-        if !settings.exclude.is_empty() {
-            query_filters.push(Box::new(ExcludeLabelFilter::new(settings.exclude)));
-        }
 
         if let Some(each_n) = settings.each_n {
             query_filters.push(Box::new(EachNFilter::new(each_n)));
@@ -300,7 +290,6 @@ mod tests {
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
                 entries,
-                include: HashMap::from([("must".to_string(), "match".to_string())]),
                 ..ReplicationSettings::default()
             },
             IoConfig::default(),
@@ -308,59 +297,6 @@ mod tests {
         .unwrap();
 
         assert_eq!(filter.filter(notification).is_empty(), !expected);
-    }
-
-    #[rstest]
-    #[case(vec ! [("a".to_string(), "b".to_string())], false)]
-    #[case(vec ! [("x".to_string(), "z".to_string())], false)]
-    #[case(vec ! [("x".to_string(), "y".to_string())], true)]
-    #[case(vec ! [("x".to_string(), "y".to_string()), ("z".to_string(), "w".to_string())], true)]
-    #[case(vec ! [("x".to_string(), "y".to_string()), ("z".to_string(), "z".to_string())], false)]
-    #[case(vec ! [("x".to_string(), "y".to_string()), ("z".to_string(), "w".to_string()), ("a".to_string(), "b".to_string())], false)]
-    fn test_transaction_filter_include(
-        #[case] include: Vec<(String, String)>,
-        #[case] expected: bool,
-        notification: TransactionNotification,
-    ) {
-        let mut filter = TransactionFilter::try_new(
-            "test",
-            ReplicationSettings {
-                src_bucket: "bucket".to_string(),
-                include: Labels::from_iter(include),
-                ..ReplicationSettings::default()
-            },
-            IoConfig::default(),
-        )
-        .unwrap();
-
-        let filtered = filter.filter(notification);
-        assert_eq!(filtered.is_empty(), !expected);
-    }
-
-    #[rstest]
-    #[case(vec ! [("a".to_string(), "b".to_string())], true)]
-    #[case(vec ! [("x".to_string(), "z".to_string())], true)]
-    #[case(vec ! [("x".to_string(), "y".to_string())], false)]
-    #[case(vec ! [("x".to_string(), "y".to_string()), ("z".to_string(), "w".to_string())], false)]
-    #[case(vec ! [("z".to_string(), "w".to_string())], false)]
-    fn test_transaction_filter_exclude(
-        #[case] exclude: Vec<(String, String)>,
-        #[case] expected: bool,
-        notification: TransactionNotification,
-    ) {
-        let mut filter = TransactionFilter::try_new(
-            "test",
-            ReplicationSettings {
-                src_bucket: "bucket".to_string(),
-                exclude: Labels::from_iter(exclude),
-                ..ReplicationSettings::default()
-            },
-            IoConfig::default(),
-        )
-        .unwrap();
-
-        let filtered = filter.filter(notification);
-        assert_eq!(filtered.is_empty(), !expected);
     }
 
     #[rstest]
@@ -442,8 +378,6 @@ mod tests {
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
                 entries: vec!["entry".to_string()],
-                include: HashMap::from([("must".to_string(), "match".to_string())]),
-                exclude: HashMap::from([("x".to_string(), "y".to_string())]),
                 each_n: Some(100),
                 when: Some(serde_json::json!({"$eq": ["&NOT_EXIST", "y"]})),
                 ..ReplicationSettings::default()

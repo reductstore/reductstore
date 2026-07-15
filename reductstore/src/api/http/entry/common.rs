@@ -59,7 +59,6 @@ pub(super) fn parse_query_params(
 
     // filter parameters in order of priority
     let (start, stop) = parse_time_range(&params)?;
-    let (include, exclude) = parse_include_exclude_filters(&params);
     let each_n = parse_each_n(&params)?;
     let limit = parse_limit(params)?;
 
@@ -68,8 +67,6 @@ pub(super) fn parse_query_params(
         entries: None,
         start,
         stop,
-        include: Some(include),
-        exclude: Some(exclude),
         each_n,
         limit,
         continuous,
@@ -159,22 +156,6 @@ fn parse_each_n(params: &HashMap<String, String>) -> Result<Option<u64>, HttpErr
         None => None,
     };
     Ok(each_n)
-}
-
-fn parse_include_exclude_filters(
-    params: &HashMap<String, String>,
-) -> (HashMap<String, String>, HashMap<String, String>) {
-    let mut include = HashMap::new();
-    let mut exclude = HashMap::new();
-
-    for (k, v) in params.iter() {
-        if k.starts_with("include-") {
-            include.insert(k[8..].to_string(), v.to_string());
-        } else if k.starts_with("exclude-") {
-            exclude.insert(k[8..].to_string(), v.to_string());
-        }
-    }
-    (include, exclude)
 }
 
 pub(super) fn check_and_extract_ts_or_query_id(
@@ -356,35 +337,6 @@ mod tests {
                 result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'stop' must be an unix timestamp in microseconds"
             );
-        }
-    }
-
-    mod parse_include_exclude_filters {
-        use super::*;
-
-        #[rstest]
-        fn test_ok() {
-            let params = HashMap::from_iter(vec![
-                ("include-key".to_string(), "value".to_string()),
-                ("exclude-key".to_string(), "value".to_string()),
-            ]);
-            let (include, exclude) = parse_include_exclude_filters(&params);
-            assert_eq!(
-                include,
-                HashMap::from_iter(vec![("key".to_string(), "value".to_string())])
-            );
-            assert_eq!(
-                exclude,
-                HashMap::from_iter(vec![("key".to_string(), "value".to_string())])
-            );
-        }
-
-        #[rstest]
-        fn test_no_filters() {
-            let params = HashMap::new();
-            let (include, exclude) = parse_include_exclude_filters(&params);
-            assert_eq!(include, HashMap::new());
-            assert_eq!(exclude, HashMap::new());
         }
     }
 
