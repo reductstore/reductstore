@@ -151,6 +151,26 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_settings_with_per_run_limits() {
+            let json = r#"{"type":"delete","bucket":"bucket-1","older_than":"30d","max_span_per_run":"6h","max_records_per_run":1000}"#;
+            let req = Request::builder().body(Body::from(json)).unwrap();
+            let body = LifecycleSettingsAxum::from_request(req, &()).await.unwrap();
+            assert_eq!(body.0.max_span_per_run, Some("6h".to_string()));
+            assert_eq!(body.0.max_records_per_run, Some(1000));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_settings_per_run_limits_default_to_none() {
+            let json = r#"{"type":"delete","bucket":"bucket-1","older_than":"30d"}"#;
+            let req = Request::builder().body(Body::from(json)).unwrap();
+            let body = LifecycleSettingsAxum::from_request(req, &()).await.unwrap();
+            assert_eq!(body.0.max_span_per_run, None);
+            assert_eq!(body.0.max_records_per_run, None);
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_settings_invalid_json() {
             let req = Request::builder().body(Body::from("{bad")).unwrap();
             let err = LifecycleSettingsAxum::from_request(req, &())

@@ -28,7 +28,8 @@ The module is built around three layers:
 The repository owns all configured lifecycle policies.
 
 Each policy becomes a `LifecycleTask` with:
-- immutable policy settings for bucket, entries, interval, and `older_than`
+- immutable policy settings for bucket, entries, interval, `older_than`, and
+  optional per-run limits (`max_span_per_run`, `max_records_per_run`)
 - a concrete action implementation selected by lifecycle type
 - a shared storage handle
 - optional system-event sink
@@ -88,6 +89,9 @@ When system events are disabled, actions process the full eligible data range:
 - `start = oldest matching record`
 - `stop = min(latest matching record + 1, now - older_than + 1)`
 
+If `max_span_per_run` is set, `stop` is additionally clamped to
+`start + max_span_per_run`.
+
 When system events are enabled, lifecycle uses persisted progress from the latest lifecycle stats event:
 - progress source: `$system/lifecycle/<instance>/<policy>`
 - stored field: `last_processed_ts`
@@ -97,11 +101,11 @@ The shared window calculation works like this:
 2. Find the latest matching record across selected entries.
 3. Compute `effective_cutoff_stop = min(latest_matching_record + 1, now - older_than + 1)`.
 4. Load `last_processed_ts`; if absent, start from the oldest matching record.
-5. Advance by a bounded data window: `24 * interval`.
+5. Advance by a bounded data window: `max_span_per_run` if set, otherwise `24 * interval`.
 
 Effective range for one run:
 - `start = oldest matching record`, clamped so `start <= stop`
-- `stop = min(last_processed_ts + 24 * interval, effective_cutoff_stop)`
+- `stop = min(last_processed_ts + data_window, effective_cutoff_stop)`
 
 Important behavior:
 - tasks always scan from the oldest matching record
@@ -109,6 +113,23 @@ Important behavior:
 - this allows old data to be re-processed if later mutations make it eligible again
   for example: label updates after delete rules, or decompressed blocks after compress rules
 - `caught_up` means the current run reached the effective stop for the currently visible data
+
+## Per-Run Limits
+
+Two optional settings bound how much a single run processes:
+
+- `max_span_per_run`: maximum span of data time per run (e.g. `6h`). When set,
+  it replaces the default `24 * interval` data window and also bounds the
+  full-range window used when system events are disabled.
+- `max_records_per_run`: maximum number of records per run, supported only by
+  the delete action. The action queries matching entries one at a time with
+  the remaining budget, so the cap applies across all entries of the run.
+
+When the record limit is reached, the run reports `caught_up = false` and
+re-emits the previous `last_processed_ts` instead of advancing it, so the next
+scheduled run re-covers the unfinished window. Removing exactly the limit is
+treated the same way: the following run finds the window empty and advances
+progress through the normal empty-window retry.
 
 ## Why Tasks Always Start From The Oldest Record
 
@@ -161,6 +182,9 @@ The same event stream is also used as the source of persisted lifecycle progress
 The repository is responsible for:
 - validating lifecycle settings
 - enforcing minimum `older_than` and interval limits
+- validating per-run limits: `max_span_per_run` must be a positive duration,
+  `max_records_per_run` must be greater than zero and is rejected for
+  compress policies
 - persisting lifecycle definitions in `.lifecycles`
 - starting and stopping tasks
 - switching task mode at runtime

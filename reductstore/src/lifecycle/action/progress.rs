@@ -15,6 +15,10 @@ pub(crate) struct ProcessingWindow {
     pub(crate) start: Option<u64>,
     pub(crate) stop: Option<u64>,
     pub(crate) last_processed_ts: Option<u64>,
+    /// Progress persisted before this run. Reported instead of
+    /// `last_processed_ts` when a per-run record limit truncates the window,
+    /// so the next run re-covers the unfinished range.
+    pub(crate) prior_processed_ts: Option<u64>,
     pub(crate) reaches_cutoff: bool,
 }
 
@@ -27,25 +31,40 @@ pub(crate) async fn processing_window(
     let (first_record_start, effective_cutoff_stop) =
         matching_record_window(settings, context, cutoff_stop).await?;
 
+    let max_span_us = settings
+        .max_span_per_run
+        .as_ref()
+        .map(|span| parse_duration_to_micros(span))
+        .transpose()?
+        .map(|span| span.max(0) as u64);
+
     if !context.system_events_enabled {
-        let stop = effective_cutoff_stop;
+        // Without persisted progress, the span limit still bounds each run:
+        // processed data becomes ineligible, so the window advances anyway.
+        let stop = match max_span_us {
+            Some(span) => first_record_start
+                .saturating_add(span)
+                .min(effective_cutoff_stop),
+            None => effective_cutoff_stop,
+        };
         return Ok(ProcessingWindow {
             start: Some(first_record_start.min(stop)),
             stop: Some(stop),
             last_processed_ts: None,
+            prior_processed_ts: None,
             reaches_cutoff: false,
         });
     }
 
     let interval_us = parse_duration_to_micros(&settings.interval)?.max(0) as u64;
-    let data_window = interval_us.saturating_mul(24);
-    let last_processed = read_progress(
+    let data_window = max_span_us.unwrap_or_else(|| interval_us.saturating_mul(24));
+    let prior_processed = read_progress(
         &context.storage,
         &context.system_event_instance,
         policy_name,
     )
-    .await
-    .unwrap_or(first_record_start);
+    .await;
+    let last_processed = prior_processed.unwrap_or(first_record_start);
 
     if last_processed >= effective_cutoff_stop {
         let stop = effective_cutoff_stop;
@@ -53,6 +72,7 @@ pub(crate) async fn processing_window(
             start: Some(first_record_start.min(stop)),
             stop: Some(stop),
             last_processed_ts: Some(last_processed),
+            prior_processed_ts: prior_processed,
             reaches_cutoff: true,
         });
     }
@@ -64,8 +84,34 @@ pub(crate) async fn processing_window(
         start: Some(first_record_start.min(window_stop)),
         stop: Some(window_stop),
         last_processed_ts: Some(window_stop),
+        prior_processed_ts: prior_processed,
         reaches_cutoff: window_stop >= effective_cutoff_stop,
     })
+}
+
+/// List the entries matched by the lifecycle settings, sorted by name so
+/// per-entry processing under a per-run record limit is deterministic.
+pub(crate) async fn matching_entry_names(
+    settings: &LifecycleSettings,
+    context: &LifecycleContext,
+) -> Result<Vec<String>, ReductError> {
+    let bucket = context
+        .storage
+        .get_bucket(&settings.bucket)
+        .await?
+        .upgrade()?;
+    let requested_entries = requested_entries(&settings.entries);
+    let mut names = bucket
+        .info()
+        .await?
+        .entries
+        .into_iter()
+        .filter(|entry| entry.record_count > 0)
+        .filter(|entry| is_requested_entry(&entry.name, &requested_entries))
+        .map(|entry| entry.name)
+        .collect::<Vec<_>>();
+    names.sort();
+    Ok(names)
 }
 
 async fn matching_record_window(
@@ -411,6 +457,101 @@ pub(super) mod tests {
         assert_eq!(window.stop, Some(101));
         assert_eq!(window.last_processed_ts, Some(101));
         assert!(window.reaches_cutoff);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn processing_window_uses_max_span_per_run_instead_of_default_window() {
+        let storage = storage().await;
+        let bucket = storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut settings = settings_fixture();
+        settings.interval = "1s".to_string();
+        settings.max_span_per_run = Some("2s".to_string());
+        write_lifecycle_stats(&storage, "instance-1", "policy-1", 1_000_000)
+            .await
+            .unwrap();
+        write(&bucket, "entry-1", 50, b"old").await.unwrap();
+        write(&bucket, "entry-1", 50_000_000, b"newer")
+            .await
+            .unwrap();
+
+        let window = processing_window(
+            &settings,
+            &LifecycleContext::new(storage, true, "instance-1".to_string()),
+            "policy-1",
+            u64::MAX,
+        )
+        .await
+        .unwrap();
+
+        // The window advances by max_span_per_run (2s), not 24 * interval (24s).
+        assert_eq!(window.start, Some(50));
+        assert_eq!(window.stop, Some(3_000_000));
+        assert_eq!(window.last_processed_ts, Some(3_000_000));
+        assert_eq!(window.prior_processed_ts, Some(1_000_000));
+        assert!(!window.reaches_cutoff);
+    }
+
+    #[tokio::test]
+    async fn processing_window_clamps_full_range_to_max_span_without_system_events() {
+        let storage = storage().await;
+        let bucket = storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut settings = settings_fixture();
+        settings.max_span_per_run = Some("2s".to_string());
+        write(&bucket, "entry-1", 50, b"old").await.unwrap();
+        write(&bucket, "entry-1", 50_000_000, b"newer")
+            .await
+            .unwrap();
+
+        let window = processing_window(
+            &settings,
+            &LifecycleContext::new(storage, false, "unknown".to_string()),
+            "policy-1",
+            u64::MAX,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(window.start, Some(50));
+        assert_eq!(window.stop, Some(2_000_050));
+        assert_eq!(window.last_processed_ts, None);
+        assert_eq!(window.prior_processed_ts, None);
+        assert!(!window.reaches_cutoff);
+    }
+
+    #[tokio::test]
+    async fn matching_entry_names_returns_sorted_matching_entries() {
+        let storage = storage().await;
+        let bucket = storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut settings = settings_fixture();
+        settings.entries = vec!["entry-*".to_string(), "!entry-c".to_string()];
+        write(&bucket, "entry-b", 10, b"b").await.unwrap();
+        write(&bucket, "entry-a", 20, b"a").await.unwrap();
+        write(&bucket, "entry-c", 30, b"c").await.unwrap();
+        write(&bucket, "other", 40, b"o").await.unwrap();
+
+        let names = matching_entry_names(
+            &settings,
+            &LifecycleContext::new(storage, false, "unknown".to_string()),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(names, vec!["entry-a".to_string(), "entry-b".to_string()]);
     }
 
     pub(crate) async fn write_lifecycle_stats(

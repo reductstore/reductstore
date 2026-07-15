@@ -119,6 +119,18 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 lifecycle.settings.interval = interval;
             }
 
+            if let Some(max_span) =
+                env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_MAX_SPAN_PER_RUN", id))
+            {
+                lifecycle.settings.max_span_per_run = Some(max_span);
+            }
+
+            if let Some(max_records) =
+                env.get_optional::<u64>(&format!("RS_LIFECYCLE_{}_MAX_RECORDS_PER_RUN", id))
+            {
+                lifecycle.settings.max_records_per_run = Some(max_records);
+            }
+
             if let Some(entries) =
                 env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_ENTRIES", id))
             {
@@ -287,6 +299,26 @@ mod tests {
             settings.when,
             Some(serde_json::json!({"$eq": ["&label", "true"]}))
         );
+        assert_eq!(settings.max_span_per_run, None);
+        assert_eq!(settings.max_records_per_run, None);
+    }
+
+    #[rstest]
+    fn parse_lifecycles_parses_per_run_limits() {
+        let getter = TestEnvGetter::new(&[
+            ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
+            ("RS_LIFECYCLE_A_TYPE", "delete"),
+            ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
+            ("RS_LIFECYCLE_A_OLDER_THAN", "30d"),
+            ("RS_LIFECYCLE_A_MAX_SPAN_PER_RUN", "6h"),
+            ("RS_LIFECYCLE_A_MAX_RECORDS_PER_RUN", "1000"),
+        ]);
+        let mut env = Env::new(getter);
+        let lifecycles = CfgParser::<TestEnvGetter>::parse_lifecycles(&mut env);
+
+        let lifecycle = lifecycles.get("purge-sensors-30d").unwrap();
+        assert_eq!(lifecycle.settings.max_span_per_run, Some("6h".to_string()));
+        assert_eq!(lifecycle.settings.max_records_per_run, Some(1000));
     }
 
     #[rstest]
@@ -454,6 +486,8 @@ mod tests {
                 older_than: "1d".to_string(),
                 interval: "1h".to_string(),
                 when: None,
+                max_span_per_run: None,
+                max_records_per_run: None,
                 mode: LifecycleMode::Enabled,
             },
         )
@@ -500,6 +534,8 @@ mod tests {
                 older_than: "1d".to_string(),
                 interval: "1h".to_string(),
                 when: None,
+                max_span_per_run: None,
+                max_records_per_run: None,
                 mode: LifecycleMode::Enabled,
             },
         )

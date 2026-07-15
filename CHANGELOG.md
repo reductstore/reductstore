@@ -11,6 +11,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Automatically create missing destination buckets during replication, [PR-1539](https://github.com/reductstore/reductstore/pull/1539) by @rohankumardubey
 - Add a replication `compression` setting (`none`, `zstd`, `gzip`, default `none`) that compresses batch payloads during transfer using HTTP `Content-Encoding`, [Issue-1348](https://github.com/reductstore/reductstore/issues/1348) by @DibbayajyotiRoy
+- Add per-run processing limits to lifecycle policies: `max_span_per_run` bounds how much data time one run processes and `max_records_per_run` caps removed records per run for delete policies, configurable via the API and `RS_LIFECYCLE_<ID>_MAX_SPAN_PER_RUN` / `RS_LIFECYCLE_<ID>_MAX_RECORDS_PER_RUN`, [ISSUE-1463](https://github.com/reductstore/reductstore/issues/1463)
 - Configure server-wide default bucket settings with `RS_DEFAULTS_BUCKET_*` environment variables, [PR-1535](https://github.com/reductstore/reductstore/pull/1535) by @rohankumardubey
 - Reject record writes before writing when the data folder filesystem has insufficient free disk space, in addition to the existing quota check, [PR-1525](https://github.com/reductstore/reductstore/pull/1525)
 - Support glob-like entry patterns in lifecycle task filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1526](https://github.com/reductstore/reductstore/pull/1526) by @upuddu
