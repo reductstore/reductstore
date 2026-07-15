@@ -53,38 +53,11 @@ mod tests {
     use crate::core::sync::AsyncRwLock as RwLock;
     use crate::core::weak::Weak;
     use crate::storage::query::QueryRx;
-    use reduct_base::error::{ErrorCode, ReductError};
+    use reduct_base::error::ReductError;
     use reduct_base::msg::entry_api::QueryType;
     use rstest::*;
     use serde_json::json;
     use std::sync::Arc;
-
-    #[rstest]
-    #[tokio::test]
-    async fn test_limited_query(
-        #[future] keeper: Arc<StateKeeper>,
-        path_to_entry_1: Path<HashMap<String, String>>,
-        headers: HeaderMap,
-    ) {
-        let keeper = keeper.await;
-        let request = QueryEntry {
-            query_type: QueryType::Query,
-            limit: Some(1),
-            ..Default::default()
-        };
-
-        let rx = get_query_receiver(path_to_entry_1, headers, keeper.clone(), request)
-            .await
-            .unwrap()
-            .upgrade()
-            .unwrap();
-        let mut rx = rx.write().await.unwrap();
-        assert!(rx.recv().await.unwrap().is_ok());
-        assert_eq!(
-            rx.recv().await.unwrap().err().unwrap().status,
-            ErrorCode::NoContent
-        );
-    }
 
     #[rstest]
     #[tokio::test]

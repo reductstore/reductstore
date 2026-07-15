@@ -38,6 +38,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `include` and `exclude` parameters in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1497](https://github.com/reductstore/reductstore/pull/1497) by @vbmade2000
 - `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414) by @vbmade2000
+- `limit` parameter in `QueryEntry` is removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1548) by @vbmade2000
 
 ## 1.20.9 - 2026-07-08
 

@@ -54,8 +54,6 @@ pub(crate) struct QueryOptions {
     pub ttl: Duration,
     /// If true, the query will never be done
     pub continuous: bool,
-    /// The maximum number of records to return only for non-continuous queries.
-    pub limit: Option<u64>,
     /// Return each N records
     pub each_n: Option<u64>,
     /// Only metadata
@@ -75,7 +73,6 @@ impl From<QueryEntry> for QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(query.ttl.unwrap_or(Self::default().ttl.as_secs())),
             continuous: query.continuous.unwrap_or(false),
-            limit: query.limit,
             each_n: query.each_n,
             only_metadata: query.only_metadata.unwrap_or(false),
             when: query.when,
@@ -90,7 +87,6 @@ impl Default for QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(60),
             continuous: false,
-            limit: None,
             each_n: None,
             only_metadata: false,
             when: None,
