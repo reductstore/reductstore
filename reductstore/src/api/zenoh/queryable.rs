@@ -176,7 +176,6 @@ fn build_query_entry(
         entries: None,
         start,
         stop,
-        each_n: None,
         continuous: None,
         ttl: None,
         only_metadata: None,

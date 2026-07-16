@@ -894,7 +894,7 @@ mod tests {
         path: PathBuf,
     ) {
         let settings = ReplicationSettings {
-            each_n: Some(2),
+            when: Some(serde_json::json!({"$each_n": 2})),
             ..settings
         };
 
@@ -913,11 +913,11 @@ mod tests {
         assert_eq!(replication.log_map.read().await.unwrap().len(), 2);
         assert_eq!(
             get_entries_from_transaction_log(&mut replication, "test1").await,
-            vec![Transaction::WriteRecord(10), Transaction::WriteRecord(30)]
+            vec![Transaction::WriteRecord(20)]
         );
         assert_eq!(
             get_entries_from_transaction_log(&mut replication, "test2").await,
-            vec![Transaction::WriteRecord(40), Transaction::WriteRecord(60)]
+            vec![Transaction::WriteRecord(50)]
         );
     }
 
@@ -1274,7 +1274,6 @@ mod tests {
             dst_token: Some("token".to_string()),
             entries: vec!["test1".to_string(), "test2".to_string()],
             dst_prefix: String::new(),
-            each_n: None,
             when: None,
             mode: ReplicationMode::Enabled,
             compression: Default::default(),

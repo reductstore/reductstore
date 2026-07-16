@@ -1,12 +1,10 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-pub(crate) mod each_n;
 pub(crate) mod record_state;
 pub(crate) mod time_range;
 pub(crate) mod when;
 
-pub(crate) use each_n::EachNFilter;
 pub(crate) use record_state::RecordStateFilter;
 use reduct_base::error::ReductError;
 use std::collections::HashMap;

@@ -156,3 +156,24 @@ pub trait ManageReplications {
 }
 
 pub(crate) use replication_repository::ReplicationRepoBuilder;
+
+pub(crate) fn prepend_when_conditions(
+    when: &mut Option<serde_json::Value>,
+    conditions: Vec<serde_json::Value>,
+) -> bool {
+    if conditions.is_empty() {
+        return false;
+    }
+
+    let condition = if conditions.len() == 1 {
+        conditions.into_iter().next().unwrap()
+    } else {
+        serde_json::json!({"$and": conditions})
+    };
+    let invalid_when = when.as_ref().is_some_and(|when| !when.is_object());
+    *when = Some(match when.take() {
+        Some(when) if when.is_object() => serde_json::json!({"$and": [condition, when]}),
+        _ => condition,
+    });
+    invalid_when
+}

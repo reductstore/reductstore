@@ -69,9 +69,6 @@ pub struct QueryEntry {
     /// Stop query at (Unix timestamp in microseconds)
     pub stop: Option<u64>,
 
-    /// Return a record every N records
-    pub each_n: Option<u64>,
-
     /// TTL of query in seconds
     pub ttl: Option<u64>,
     /// Retrieve only metadata
