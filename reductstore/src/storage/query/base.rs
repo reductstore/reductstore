@@ -54,8 +54,6 @@ pub(crate) struct QueryOptions {
     pub ttl: Duration,
     /// If true, the query will never be done
     pub continuous: bool,
-    /// Return each N records
-    pub each_n: Option<u64>,
     /// Only metadata
     pub only_metadata: bool,
     /// Condition
@@ -65,7 +63,6 @@ pub(crate) struct QueryOptions {
     /// Extension part
     #[allow(dead_code)] // used in extension
     pub ext: Option<Value>,
-    // Io Config
 }
 
 impl From<QueryEntry> for QueryOptions {
@@ -73,7 +70,6 @@ impl From<QueryEntry> for QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(query.ttl.unwrap_or(Self::default().ttl.as_secs())),
             continuous: query.continuous.unwrap_or(false),
-            each_n: query.each_n,
             only_metadata: query.only_metadata.unwrap_or(false),
             when: query.when,
             strict: query.strict.unwrap_or(false),
@@ -87,7 +83,6 @@ impl Default for QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(60),
             continuous: false,
-            each_n: None,
             only_metadata: false,
             when: None,
             strict: false,

@@ -53,9 +53,6 @@ pub struct ReplicationSettings {
     /// Prefix to add to destination entry names
     #[serde(default)]
     pub dst_prefix: String,
-    /// Replication each N-th record
-    #[serde(default)]
-    pub each_n: Option<u64>,
     /// When condition
     #[serde(default)]
     pub when: Option<Value>,

@@ -16,11 +16,11 @@ message  ReplicationSettings {
   string dst_host = 4;        // URL of destination host
   string dst_token = 5;       // access token for destination host
   repeated string entries = 6;// list of entries to replicate, empty means all. Wildcards are allowed.
-  repeated Label include = 7; // list of labels to include
-  repeated Label exclude = 8; // list of labels to exclude
-  uint64 each_n = 9;          // replicate each Nth record
-  double each_s = 10;         // replicate each record every N seconds
-  optional string when = 11;           // condition to replicate
+  repeated Label include = 7; // DEPRECATED: list of labels to include
+  repeated Label exclude = 8; // DEPRECATED: list of labels to exclude
+  uint64 each_n = 9;          // DEPRECATED: replicate each Nth record (migrated to $each_n in when condition)
+  double each_s = 10;         // DEPRECATED: replicate each record every N seconds
+  optional string when = 11;   // condition to replicate
   ReplicationMode mode = 12;  // replication mode
   string dst_prefix = 13;     // prefix to add to destination entry names
   ReplicationCompression compression = 14; // compression of batch payloads during transfer

@@ -67,7 +67,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     dst_token: None,
                     entries: vec![],
                     dst_prefix: String::new(),
-                    each_n: None,
                     when: None,
                     mode: ReplicationMode::Enabled,
                     compression: ReplicationCompression::None,
@@ -135,11 +134,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 replication.settings.dst_prefix = dst_prefix;
             }
 
-            if let Some(each_n) = env.get_optional::<u64>(&format!("RS_REPLICATION_{}_EACH_N", id))
-            {
-                replication.settings.each_n = Some(each_n);
-            }
-
             // Parse the when condition first
             if let Some(when) =
                 env.get_optional::<serde_json::Value>(&format!("RS_REPLICATION_{}_WHEN", id))
@@ -163,6 +157,22 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 } else {
                     // No when condition exists, create one with just $each_t
                     replication.settings.when = Some(serde_json::json!({"$each_t": each_s}));
+                }
+            }
+
+            if let Some(each_n) = env.get_optional::<u64>(&format!("RS_REPLICATION_{}_EACH_N", id))
+            {
+                warn!(
+                    "The 'RS_REPLICATION_{}_EACH_N' environment variable is deprecated. Use 'RS_REPLICATION_{}_WHEN' with $each_n operator instead.",
+                    id, id
+                );
+
+                if let Some(when) = &mut replication.settings.when {
+                    if let Some(obj) = when.as_object_mut() {
+                        obj.insert("$each_n".to_string(), serde_json::json!(each_n));
+                    }
+                } else {
+                    replication.settings.when = Some(serde_json::json!({"$each_n": each_n}));
                 }
             }
 
@@ -310,12 +320,12 @@ mod tests {
         assert_eq!(replication.dst_token, Some("TOKEN".to_string()));
         assert_eq!(replication.entries, vec!["entry1", "entry2"]);
         assert_eq!(replication.dst_prefix, "robot-1");
-        assert_eq!(replication.each_n, Some(10));
-        // The when condition should include the original $and plus migrated $in and $nin
+        // The when condition should include the original $and and migrated filters.
         assert_eq!(
             replication.when,
             Some(serde_json::json!({
                 "$and": [true, false],
+                "$each_n": 10,
                 "$in": ["KEY", "value"],
                 "$nin": ["KEY", "value"]
             }))
@@ -589,7 +599,6 @@ mod tests {
                 dst_token: None,
                 entries: vec![],
                 dst_prefix: String::new(),
-                each_n: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
                 compression: ReplicationCompression::None,
@@ -627,11 +636,12 @@ mod tests {
         let repo = components.replication_repo.read().await.unwrap();
         let replication = repo.get_replication_settings("replication1").await.unwrap();
         let repl_info = repo.get_info("replication1").await.unwrap();
-        // The when condition should include the original $and plus migrated $in and $nin
+        // The when condition should include the original $and and migrated filters.
         assert_eq!(
             replication.when,
             Some(serde_json::json!({
                 "$and": [true, false],
+                "$each_n": 10,
                 "$in": ["KEY", "value"],
                 "$nin": ["KEY", "value"]
             }))
@@ -682,7 +692,6 @@ mod tests {
                 dst_token: None,
                 entries: vec![],
                 dst_prefix: String::new(),
-                each_n: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
                 compression: ReplicationCompression::None,
@@ -765,7 +774,6 @@ mod tests {
                 dst_token: None,
                 entries: vec![],
                 dst_prefix: String::new(),
-                each_n: None,
                 when: None,
                 mode: ReplicationMode::Enabled,
                 compression: ReplicationCompression::None,

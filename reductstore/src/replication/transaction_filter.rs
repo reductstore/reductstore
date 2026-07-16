@@ -6,7 +6,7 @@ use crate::replication::TransactionNotification;
 use crate::storage::entry::{entry_matches_pattern, is_system_meta_entry, meta_entry_parent};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, FilterRecord, RecordFilter, WhenFilter,
+    apply_filters_recursively, FilterRecord, RecordFilter, WhenFilter,
 };
 use log::warn;
 use reduct_base::error::ReductError;
@@ -62,10 +62,6 @@ impl TransactionFilter {
         io_config: IoConfig,
     ) -> Result<Self, ReductError> {
         let mut query_filters: Vec<Filter> = vec![];
-
-        if let Some(each_n) = settings.each_n {
-            query_filters.push(Box::new(EachNFilter::new(each_n)));
-        }
 
         if let Some(when) = settings.when {
             match Parser::new().parse(when.clone()) {
@@ -305,16 +301,16 @@ mod tests {
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
-                each_n: Some(2),
+                when: Some(serde_json::json!({"$each_n": 2})),
                 ..ReplicationSettings::default()
             },
             IoConfig::default(),
         )
         .unwrap();
 
-        assert_eq!(filter.filter(notification.clone()).len(), 1);
         assert_eq!(filter.filter(notification.clone()).len(), 0);
-        assert_eq!(filter.filter(notification).len(), 1);
+        assert_eq!(filter.filter(notification.clone()).len(), 1);
+        assert_eq!(filter.filter(notification).len(), 0);
     }
 
     #[rstest]
@@ -378,8 +374,10 @@ mod tests {
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
                 entries: vec!["entry".to_string()],
-                each_n: Some(100),
-                when: Some(serde_json::json!({"$eq": ["&NOT_EXIST", "y"]})),
+                when: Some(serde_json::json!({
+                    "$each_n": 100,
+                    "$eq": ["&NOT_EXIST", "y"]
+                })),
                 ..ReplicationSettings::default()
             },
             IoConfig::default(),

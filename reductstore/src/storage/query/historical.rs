@@ -9,13 +9,9 @@ use crate::storage::proto::record;
 use crate::storage::proto::{record::State as RecordState, ts_to_us, Record};
 use crate::storage::query::base::{Query, QueryOptions};
 use crate::storage::query::condition::Parser;
-// use crate::storage::query::filters::{
-//     apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
-//     IncludeLabelFilter, RecordFilter, RecordStateFilter, TimeRangeFilter, WhenFilter,
-// };
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, FilterRecord, RecordFilter, RecordStateFilter,
-    TimeRangeFilter, WhenFilter,
+    apply_filters_recursively, FilterRecord, RecordFilter, RecordStateFilter, TimeRangeFilter,
+    WhenFilter,
 };
 use async_trait::async_trait;
 use log::debug;
@@ -84,10 +80,6 @@ impl HistoricalQuery {
             Box::new(TimeRangeFilter::new(start_time, stop_time)),
             Box::new(RecordStateFilter::new(RecordState::Finished)),
         ];
-
-        if let Some(each_n) = options.each_n {
-            filters.push(Box::new(EachNFilter::new(each_n)));
-        }
 
         // If extensions are requested, we need to fetch the content.
         let mut only_metadata = if options.ext.is_none() {
@@ -611,16 +603,15 @@ mod tests {
             0,
             1001,
             QueryOptions {
-                each_n: Some(2),
+                when: Some(serde_json::json!({"$each_n": 2})),
                 ..QueryOptions::default()
             },
         )
         .unwrap();
         let records = read_to_vector(&mut query, block_manager).await;
 
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.meta().timestamp(), 0);
-        assert_eq!(records[1].0.meta().timestamp(), 1000);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].0.meta().timestamp(), 5);
     }
 
     #[rstest]

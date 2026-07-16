@@ -48,7 +48,7 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
             dst_prefix: settings.dst_prefix,
             include: Vec::new(),
             exclude: Vec::new(),
-            each_n: settings.each_n.unwrap_or(0),
+            each_n: 0, // Deprecated field, always set to 0 (migration to $each_n in when condition)
             each_s: 0.0, // Deprecated field, always set to 0.0 (migration to $each_t in when condition)
             when: settings.when.map(|value| value.to_string()),
             mode: ProtoReplicationMode::from(&settings.mode) as i32,
@@ -100,6 +100,28 @@ impl ProtoReplicationSettings {
             } else {
                 // No when condition exists, create one with just $each_t
                 when = Some(serde_json::json!({"$each_t": self.each_s}));
+            }
+        }
+
+        // Migrate deprecated each_n to $each_n by injecting it into the when condition
+        if self.each_n > 0 {
+            migrated = true;
+            warn!(
+                "The 'each_n' field is deprecated and will be migrated to 'when' condition using $each_n operator. Value: {}",
+                self.each_n
+            );
+
+            if let Some(when_value) = &mut when {
+                if let Some(obj) = when_value.as_object_mut() {
+                    obj.insert("$each_n".to_string(), serde_json::json!(self.each_n));
+                } else {
+                    error!(
+                        "Existing 'when' condition is not an object, cannot inject $each_n. Using only $each_n condition."
+                    );
+                    when = Some(serde_json::json!({"$each_n": self.each_n}));
+                }
+            } else {
+                when = Some(serde_json::json!({"$each_n": self.each_n}));
             }
         }
 
@@ -178,11 +200,6 @@ impl ProtoReplicationSettings {
             },
             entries: self.entries,
             dst_prefix: self.dst_prefix,
-            each_n: if self.each_n > 0 {
-                Some(self.each_n)
-            } else {
-                None
-            },
             when,
             mode: ProtoReplicationMode::try_from(self.mode)
                 .unwrap_or(ProtoReplicationMode::Enabled)
@@ -1908,7 +1925,6 @@ mod tests {
             dst_token: Some("token".to_string()),
             entries: vec!["entry-1".to_string()],
             dst_prefix: String::new(),
-            each_n: None,
             when: None,
             mode: ReplicationMode::Enabled,
             compression: Default::default(),
@@ -2065,6 +2081,102 @@ mod tests {
                 each_n: 0,
                 each_s: each_s,
                 when: when,
+                mode: ProtoReplicationMode::Enabled as i32,
+                compression: ProtoReplicationCompression::None as i32,
+            }
+        }
+    }
+
+    mod each_n_migration {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_n_migrated_to_each_n_without_when() {
+            let proto_settings = get_proto_replication_settings(2, None).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_n": 2})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_n_migrated_to_each_n_with_existing_when() {
+            let proto_settings =
+                get_proto_replication_settings(2, Some(r#"{"&label": {"$eq": 1}}"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "&label": {"$eq": 1},
+                    "$each_n": 2
+                }))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_migration_when_each_n_is_zero() {
+            let proto_settings =
+                get_proto_replication_settings(0, Some(r#"{"&label": {"$eq": 1}}"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(!migrated, "Should not mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"&label": {"$eq": 1}}))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_parsing_error_with_each_n() {
+            let proto_settings =
+                get_proto_replication_settings(2, Some("invalid json".to_string())).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_n": 2})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_n_with_non_object_when() {
+            let proto_settings =
+                get_proto_replication_settings(2, Some(r#"["invalid", "array"]"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_n": 2})));
+        }
+
+        async fn get_proto_replication_settings(
+            each_n: u64,
+            when: Option<String>,
+        ) -> ProtoReplicationSettings {
+            ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                dst_prefix: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n,
+                each_s: 0.0,
+                when,
                 mode: ProtoReplicationMode::Enabled as i32,
                 compression: ProtoReplicationCompression::None as i32,
             }
