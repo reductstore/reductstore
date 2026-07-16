@@ -1653,7 +1653,7 @@ mod tests {
             assert_eq!(
                 settings.when,
                 Some(serde_json::json!({
-                    "$or": [
+                    "$and": [
                         {"$has": "sensor"},
                         {"$eq": ["&sensor", "temp"]}
                     ]
