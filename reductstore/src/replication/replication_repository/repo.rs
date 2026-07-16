@@ -10,7 +10,7 @@ use crate::replication::proto::{
     ReplicationRepo as ProtoReplicationRepo, ReplicationSettings as ProtoReplicationSettings,
 };
 use crate::replication::replication_task::ReplicationTask;
-use crate::replication::{ManageReplications, TransactionNotification};
+use crate::replication::{prepend_when_conditions, ManageReplications, TransactionNotification};
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::WhenFilter;
@@ -125,68 +125,51 @@ impl ProtoReplicationSettings {
             }
         }
 
-        // Migrate deprecated "include" to $in by injecting it into the "when" condition
+        let mut legacy_label_conditions = vec![];
+
+        // Migrate deprecated "include" to guarded label equality conditions.
         if !self.include.is_empty() {
             migrated = true;
             warn!(
-                "The 'include' field is deprecated and will be migrated to 'when' condition using $in operator. Value: {:?}",
+                "The 'include' field is deprecated and will be migrated to 'when' condition using $has and $eq operators. Value: {:?}",
                 self.include
             );
             for include in &self.include {
-                if let Some(when_value) = &mut when {
-                    // Inject $in into the existing when condition
-                    if let Some(obj) = when_value.as_object_mut() {
-                        obj.insert(
-                            "$in".to_string(),
-                            serde_json::json!([&include.name, &include.value]),
-                        );
-                    } else {
-                        error!(
-                            "Existing 'when' condition is not an object, cannot inject $in. Using only $in condition."
-                        );
-                        when = Some(
-                            serde_json::json!({"$in": serde_json::json!([&include.name, &include.value])}),
-                        );
-                    }
-                } else {
-                    // No when condition exists, create one with just $in
-                    when = Some(
-                        serde_json::json!({"$in": serde_json::json!([&include.name, &include.value])}),
-                    );
-                }
+                legacy_label_conditions.push(serde_json::json!({
+                    "$and": [
+                        {"$has": &include.name},
+                        {"$eq": [format!("&{}", include.name), &include.value]}
+                    ]
+                }));
             }
         }
 
-        // Migrate deprecated "exclude" to $nin by injecting it into the "when" condition
+        // Migrate deprecated "exclude" to a condition that keeps records unless all labels match.
         if !self.exclude.is_empty() {
             migrated = true;
             warn!(
-                "The 'exclude' field is deprecated and will be migrated to 'when' condition using $nin operator. Value: {:?}",
+                "The 'exclude' field is deprecated and will be migrated to 'when' condition using $has and $ne operators. Value: {:?}",
                 self.exclude
             );
+            let mut exclude_conditions = vec![];
             for exclude in &self.exclude {
-                if let Some(when_value) = &mut when {
-                    // Inject $nin into the existing when condition
-                    if let Some(obj) = when_value.as_object_mut() {
-                        obj.insert(
-                            "$nin".to_string(),
-                            serde_json::json!([&exclude.name, &exclude.value]),
-                        );
-                    } else {
-                        error!(
-                            "Existing 'when' condition is not an object, cannot inject $nin. Using only $nin condition."
-                        );
-                        when = Some(
-                            serde_json::json!({"$nin": serde_json::json!([&exclude.name, &exclude.value])}),
-                        );
-                    }
-                } else {
-                    // No when condition exists, create one with just $nin
-                    when = Some(
-                        serde_json::json!({"$nin": serde_json::json!([&exclude.name, &exclude.value])}),
-                    );
-                }
+                exclude_conditions.push(serde_json::json!({
+                    "$or": [
+                        {"$not": [{"$has": &exclude.name}]},
+                        {"$ne": [format!("&{}", exclude.name), &exclude.value]}
+                    ]
+                }));
             }
+            legacy_label_conditions.push(if exclude_conditions.len() == 1 {
+                exclude_conditions.into_iter().next().unwrap()
+            } else {
+                serde_json::json!({"$or": exclude_conditions})
+            });
+        }
+        if prepend_when_conditions(&mut when, legacy_label_conditions) {
+            error!(
+                "Existing 'when' condition is not an object, cannot prepend migrated conditions. Using only migrated conditions."
+            );
         }
 
         let settings = ReplicationSettings {
@@ -1629,6 +1612,8 @@ mod tests {
         use crate::replication::proto::{
             Label as ProtoLabel, ReplicationSettings as ProtoReplicationSettings,
         };
+        use crate::storage::query::condition::Context;
+        use std::collections::HashMap;
 
         fn create_proto_settings(
             include: Vec<ProtoLabel>,
@@ -1653,7 +1638,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_include_migrated_to_in_without_when() {
+        async fn test_include_migrated_to_eq_without_when() {
             let proto_settings = create_proto_settings(
                 vec![ProtoLabel {
                     name: "sensor".to_string(),
@@ -1667,14 +1652,19 @@ mod tests {
             assert!(migrated, "Should indicate migration occurred");
             assert_eq!(
                 settings.when,
-                Some(serde_json::json!({"$in": ["sensor", "temp"]})),
-                "Should migrate include to $in in when condition"
+                Some(serde_json::json!({
+                    "$or": [
+                        {"$has": "sensor"},
+                        {"$eq": ["&sensor", "temp"]}
+                    ]
+                })),
+                "Should migrate include to a guarded equality condition"
             );
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_include_migrated_to_in_with_existing_when() {
+        async fn test_include_migrated_to_eq_with_existing_when() {
             let proto_settings = create_proto_settings(
                 vec![ProtoLabel {
                     name: "sensor".to_string(),
@@ -1689,10 +1679,17 @@ mod tests {
             assert_eq!(
                 settings.when,
                 Some(serde_json::json!({
-                    "$eq": ["&status", "active"],
-                    "$in": ["sensor", "temp"]
+                    "$and": [
+                        {
+                            "$and": [
+                                {"$has": "sensor"},
+                                {"$eq": ["&sensor", "temp"]}
+                            ]
+                        },
+                        {"$eq": ["&status", "active"]}
+                    ]
                 })),
-                "Should inject $in into existing when condition"
+                "Should add the include condition to the existing when condition"
             );
         }
 
@@ -1716,12 +1713,25 @@ mod tests {
             let (settings, migrated) = proto_settings.into_settings();
 
             assert!(migrated, "Should indicate migration occurred");
-            // Note: The current implementation overwrites with each label,
-            // so only the last one will be present. This is the expected behavior.
             assert_eq!(
                 settings.when,
-                Some(serde_json::json!({"$in": ["location", "warehouse"]})),
-                "Should migrate last include label to $in"
+                Some(serde_json::json!({
+                    "$and": [
+                        {
+                            "$and": [
+                                {"$has": "sensor"},
+                                {"$eq": ["&sensor", "temp"]}
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {"$has": "location"},
+                                {"$eq": ["&location", "warehouse"]}
+                            ]
+                        }
+                    ]
+                })),
+                "Should require every included label"
             );
         }
 
@@ -1760,13 +1770,36 @@ mod tests {
             let (settings, migrated) = proto_settings.into_settings();
 
             assert!(migrated, "Should indicate migration occurred");
-            // When the existing 'when' is not an object (e.g., an array),
-            // it should be replaced with just the $in condition
             assert_eq!(
                 settings.when,
-                Some(serde_json::json!({"$in": ["sensor", "temp"]})),
-                "Should replace non-object when with $in condition"
+                Some(serde_json::json!({
+                    "$and": [
+                        {"$has": "sensor"},
+                        {"$eq": ["&sensor", "temp"]}
+                    ]
+                })),
+                "Should replace non-object when with the include condition"
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_skips_missing_label() {
+            let (settings, _) = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "temp".to_string(),
+                }],
+                None,
+            )
+            .into_settings();
+            let (mut condition, _) = Parser::new().parse(settings.when.unwrap()).unwrap();
+
+            assert!(!condition
+                .apply(&Context::new(0, HashMap::new(), HashMap::new()))
+                .unwrap()
+                .as_bool()
+                .unwrap());
         }
     }
 
@@ -1775,6 +1808,8 @@ mod tests {
         use crate::replication::proto::{
             Label as ProtoLabel, ReplicationSettings as ProtoReplicationSettings,
         };
+        use crate::storage::query::condition::Context;
+        use std::collections::HashMap;
 
         fn create_proto_settings(
             exclude: Vec<ProtoLabel>,
@@ -1799,7 +1834,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_exclude_migrated_to_nin_without_when() {
+        async fn test_exclude_migrated_to_ne_without_when() {
             let proto_settings = create_proto_settings(
                 vec![ProtoLabel {
                     name: "sensor".to_string(),
@@ -1813,14 +1848,19 @@ mod tests {
             assert!(migrated, "Should indicate migration occurred");
             assert_eq!(
                 settings.when,
-                Some(serde_json::json!({"$nin": ["sensor", "error"]})),
-                "Should migrate exclude to $nin in when condition"
+                Some(serde_json::json!({
+                    "$or": [
+                        {"$not": [{"$has": "sensor"}]},
+                        {"$ne": ["&sensor", "error"]}
+                    ]
+                })),
+                "Should migrate exclude to a guarded inequality condition"
             );
         }
 
         #[rstest]
         #[tokio::test]
-        async fn test_exclude_migrated_to_nin_with_existing_when() {
+        async fn test_exclude_migrated_to_ne_with_existing_when() {
             let proto_settings = create_proto_settings(
                 vec![ProtoLabel {
                     name: "sensor".to_string(),
@@ -1835,10 +1875,17 @@ mod tests {
             assert_eq!(
                 settings.when,
                 Some(serde_json::json!({
-                    "$eq": ["&status", "active"],
-                    "$nin": ["sensor", "error"]
+                    "$and": [
+                        {
+                            "$or": [
+                                {"$not": [{"$has": "sensor"}]},
+                                {"$ne": ["&sensor", "error"]}
+                            ]
+                        },
+                        {"$eq": ["&status", "active"]}
+                    ]
                 })),
-                "Should inject $nin into existing when condition"
+                "Should add the exclude condition to the existing when condition"
             );
         }
 
@@ -1862,13 +1909,53 @@ mod tests {
             let (settings, migrated) = proto_settings.into_settings();
 
             assert!(migrated, "Should indicate migration occurred");
-            // Note: The current implementation overwrites with each label,
-            // so only the last one will be present. This is the expected behavior.
             assert_eq!(
                 settings.when,
-                Some(serde_json::json!({"$nin": ["location", "maintenance"]})),
-                "Should migrate last exclude label to $nin"
+                Some(serde_json::json!({
+                    "$or": [
+                        {
+                            "$or": [
+                                {"$not": [{"$has": "sensor"}]},
+                                {"$ne": ["&sensor", "error"]}
+                            ]
+                        },
+                        {
+                            "$or": [
+                                {"$not": [{"$has": "location"}]},
+                                {"$ne": ["&location", "maintenance"]}
+                            ]
+                        }
+                    ]
+                })),
+                "Should keep records unless every excluded label matches"
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_with_multiple_labels_keeps_partial_match() {
+            let (settings, _) = create_proto_settings(
+                vec![
+                    ProtoLabel {
+                        name: "sensor".to_string(),
+                        value: "error".to_string(),
+                    },
+                    ProtoLabel {
+                        name: "location".to_string(),
+                        value: "maintenance".to_string(),
+                    },
+                ],
+                None,
+            )
+            .into_settings();
+            let (mut condition, _) = Parser::new().parse(settings.when.unwrap()).unwrap();
+            let labels = HashMap::from([("sensor", "error"), ("location", "production")]);
+
+            assert!(condition
+                .apply(&Context::new(0, labels, HashMap::new()))
+                .unwrap()
+                .as_bool()
+                .unwrap());
         }
 
         #[rstest]
@@ -1906,13 +1993,36 @@ mod tests {
             let (settings, migrated) = proto_settings.into_settings();
 
             assert!(migrated, "Should indicate migration occurred");
-            // When the existing 'when' is not an object (e.g., an array),
-            // it should be replaced with just the $nin condition
             assert_eq!(
                 settings.when,
-                Some(serde_json::json!({"$nin": ["sensor", "error"]})),
-                "Should replace non-object when with $nin condition"
+                Some(serde_json::json!({
+                    "$or": [
+                        {"$not": [{"$has": "sensor"}]},
+                        {"$ne": ["&sensor", "error"]}
+                    ]
+                })),
+                "Should replace non-object when with the exclude condition"
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_keeps_missing_label() {
+            let (settings, _) = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "error".to_string(),
+                }],
+                None,
+            )
+            .into_settings();
+            let (mut condition, _) = Parser::new().parse(settings.when.unwrap()).unwrap();
+
+            assert!(condition
+                .apply(&Context::new(0, HashMap::new(), HashMap::new()))
+                .unwrap()
+                .as_bool()
+                .unwrap());
         }
     }
 

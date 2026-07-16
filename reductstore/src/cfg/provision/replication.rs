@@ -3,7 +3,7 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds, ProvisionedReplication};
 use crate::core::env::{Env, GetEnv};
-use crate::replication::{ManageReplications, ReplicationRepoBuilder};
+use crate::replication::{prepend_when_conditions, ManageReplications, ReplicationRepoBuilder};
 use crate::storage::engine::StorageEngine;
 use crate::syslog::SystemEventSink;
 use log::{error, info, warn};
@@ -176,7 +176,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 }
             }
 
-            // Migrate deprecated include to $in by injecting it into the when condition
+            let mut legacy_label_conditions = vec![];
+
+            // Migrate deprecated include to a guarded label equality condition.
             for (key, value) in
                 env.matches::<String>(&format!("RS_REPLICATION_{}_INCLUDE_(.*)", id))
             {
@@ -185,18 +187,16 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     id
                 );
 
-                if let Some(when) = &mut replication.settings.when {
-                    if let Some(obj) = when.as_object_mut() {
-                        obj.insert("$in".to_string(), serde_json::json!([&key, &value]));
-                    }
-                } else {
-                    // No when condition exists, create one with just $in
-                    replication.settings.when =
-                        Some(serde_json::json!({"$in": serde_json::json!([&key, &value])}));
-                }
+                legacy_label_conditions.push(serde_json::json!({
+                    "$and": [
+                        {"$has": &key},
+                        {"$eq": [format!("&{}", key), &value]}
+                    ]
+                }));
             }
 
-            // Migrate deprecated exclude to $nin by injecting it into the when condition
+            // Migrate deprecated exclude to a condition that keeps records unless all labels match.
+            let mut exclude_conditions = vec![];
             for (key, value) in
                 env.matches::<String>(&format!("RS_REPLICATION_{}_EXCLUDE_(.*)", id))
             {
@@ -205,16 +205,21 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     id
                 );
 
-                if let Some(when) = &mut replication.settings.when {
-                    if let Some(obj) = when.as_object_mut() {
-                        obj.insert("$nin".to_string(), serde_json::json!([&key, &value]));
-                    }
-                } else {
-                    // No when condition exists, create one with just $nin
-                    replication.settings.when =
-                        Some(serde_json::json!({"$nin": serde_json::json!([&key, &value])}));
-                }
+                exclude_conditions.push(serde_json::json!({
+                    "$or": [
+                        {"$not": [{"$has": &key}]},
+                        {"$ne": [format!("&{}", key), &value]}
+                    ]
+                }));
             }
+            if !exclude_conditions.is_empty() {
+                legacy_label_conditions.push(if exclude_conditions.len() == 1 {
+                    exclude_conditions.into_iter().next().unwrap()
+                } else {
+                    serde_json::json!({"$or": exclude_conditions})
+                });
+            }
+            prepend_when_conditions(&mut replication.settings.when, legacy_label_conditions);
 
             if let Some(compression) =
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_COMPRESSION", id))
@@ -324,10 +329,25 @@ mod tests {
         assert_eq!(
             replication.when,
             Some(serde_json::json!({
-                "$and": [true, false],
-                "$each_n": 10,
-                "$in": ["KEY", "value"],
-                "$nin": ["KEY", "value"]
+                "$and": [
+                    {
+                        "$and": [
+                            {
+                                "$and": [
+                                    {"$has": "KEY"},
+                                    {"$eq": ["&KEY", "value"]}
+                                ]
+                            },
+                            {
+                                "$or": [
+                                    {"$not": [{"$has": "KEY"}]},
+                                    {"$ne": ["&KEY", "value"]}
+                                ]
+                            }
+                        ]
+                    },
+                    {"$and": [true, false], "$each_n": 10}
+                ]
             }))
         );
         assert!(repl_info.info.is_provisioned);
@@ -640,10 +660,25 @@ mod tests {
         assert_eq!(
             replication.when,
             Some(serde_json::json!({
-                "$and": [true, false],
-                "$each_n": 10,
-                "$in": ["KEY", "value"],
-                "$nin": ["KEY", "value"]
+                "$and": [
+                    {
+                        "$and": [
+                            {
+                                "$and": [
+                                    {"$has": "KEY"},
+                                    {"$eq": ["&KEY", "value"]}
+                                ]
+                            },
+                            {
+                                "$or": [
+                                    {"$not": [{"$has": "KEY"}]},
+                                    {"$ne": ["&KEY", "value"]}
+                                ]
+                            }
+                        ]
+                    },
+                    {"$and": [true, false], "$each_n": 10}
+                ]
             }))
         );
         assert_eq!(repl_info.info.mode, ReplicationMode::Disabled);
@@ -926,26 +961,38 @@ mod tests {
 
         #[log_test(rstest)]
         #[tokio::test]
-        async fn test_include_migrated_to_in_without_when() {
+        async fn test_include_migrated_to_eq_without_when() {
             test_include_migration(
                 "sensor",
                 "temp",
                 None,
-                serde_json::json!({"$in": ["SENSOR", "temp"]}),
+                serde_json::json!({
+                    "$and": [
+                        {"$has": "SENSOR"},
+                        {"$eq": ["&SENSOR", "temp"]}
+                    ]
+                }),
             )
             .await;
         }
 
         #[log_test(rstest)]
         #[tokio::test]
-        async fn test_include_migrated_to_in_with_existing_when() {
+        async fn test_include_migrated_to_eq_with_existing_when() {
             test_include_migration(
                 "location",
                 "warehouse",
                 Some(r#"{"&status": {"$eq": "active"}}"#),
                 serde_json::json!({
-                    "&status": {"$eq": "active"},
-                    "$in": ["LOCATION", "warehouse"]
+                    "$and": [
+                        {
+                            "$and": [
+                                {"$has": "LOCATION"},
+                                {"$eq": ["&LOCATION", "warehouse"]}
+                            ]
+                        },
+                        {"&status": {"$eq": "active"}}
+                    ]
                 }),
             )
             .await;
@@ -1048,26 +1095,38 @@ mod tests {
 
         #[log_test(rstest)]
         #[tokio::test]
-        async fn test_exclude_migrated_to_nin_without_when() {
+        async fn test_exclude_migrated_to_ne_without_when() {
             test_exclude_migration(
                 "status",
                 "inactive",
                 None,
-                serde_json::json!({"$nin": ["STATUS", "inactive"]}),
+                serde_json::json!({
+                    "$or": [
+                        {"$not": [{"$has": "STATUS"}]},
+                        {"$ne": ["&STATUS", "inactive"]}
+                    ]
+                }),
             )
             .await;
         }
 
         #[log_test(rstest)]
         #[tokio::test]
-        async fn test_exclude_migrated_to_nin_with_existing_when() {
+        async fn test_exclude_migrated_to_ne_with_existing_when() {
             test_exclude_migration(
                 "region",
                 "eu-west",
                 Some(r#"{"&type": {"$eq": "production"}}"#),
                 serde_json::json!({
-                    "&type": {"$eq": "production"},
-                    "$nin": ["REGION", "eu-west"]
+                    "$and": [
+                        {
+                            "$or": [
+                                {"$not": [{"$has": "REGION"}]},
+                                {"$ne": ["&REGION", "eu-west"]}
+                            ]
+                        },
+                        {"&type": {"$eq": "production"}}
+                    ]
                 }),
             )
             .await;

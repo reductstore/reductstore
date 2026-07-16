@@ -23,6 +23,7 @@
 ## Coding Style & Naming
 
 - Rust 2021, 4-space indent; modules/files snake_case, types/traits title case, functions snake_case.
+- Place private functions at the end of their module or implementation block.
 - `rustfmt` (imports reordered via `.rustfmt.toml`) is required before commits.
 - Prefer `?` over `unwrap` in non-test code; keep errors contextual.
 - Python in `integration_tests` should pass `black .` and avoid leaking secrets in logs.
