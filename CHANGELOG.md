@@ -23,6 +23,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Default `RS_SYSTEM_EVENTS_QUOTA_SIZE` to 10 GB when it is not set, [Issue-1551](https://github.com/reductstore/reductstore/issues/1551) by @LordAizen1
 - Allow fork pull request CI to run without protobuf setup tokens or Docker Hub credentials by vendoring `protoc` and making Docker login optional, [PR-1532](https://github.com/reductstore/reductstore/pull/1532)
 - Pipelined replication batch sending to overlap preparing the next batch with sending the current one, [PR-1527](https://github.com/reductstore/reductstore/pull/1527) by @DibbayajyotiRoy (based on [PR-1415](https://github.com/reductstore/reductstore/pull/1415) by @FirasCh3)
 - Split block manager storage logic into smaller modules by responsibility, [PR-1503](https://github.com/reductstore/reductstore/pull/1503) by @rohankumardubey
