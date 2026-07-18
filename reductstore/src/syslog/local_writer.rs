@@ -47,9 +47,15 @@ impl LocalSystemLogger {
         {
             Ok(writer) => writer,
             Err(err) if err.status == ErrorCode::NotFound => {
-                self.storage
+                let bucket = self
+                    .storage
                     .create_system_bucket(self.bucket_name, self.bucket_settings.clone())
                     .await?;
+                // The server owns this bucket, so protect it from being removed,
+                // renamed or reconfigured through the API.
+                if let Ok(bucket) = bucket.upgrade() {
+                    bucket.set_provisioned(true);
+                }
                 self.storage
                     .begin_write(
                         self.bucket_name,

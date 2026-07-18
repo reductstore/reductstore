@@ -32,6 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Treat the `$system` bucket as provisioned so it cannot be removed through the API, and reapply `RS_SYSTEM_EVENTS_QUOTA_SIZE` on startup instead of only at first creation, [PR-1557](https://github.com/reductstore/reductstore/pull/1557) by @LordAizen1
 - Resolve client IP from multi-hop RFC 7239 `Forwarded` headers so token IP allowlists compare against the real client instead of the proxy, [PR-1546](https://github.com/reductstore/reductstore/pull/1546) by @LordAizen1
 - Normalize bucket history timestamps when only attachment metadata entries contain records, [PR-1534](https://github.com/reductstore/reductstore/pull/1534)
 
