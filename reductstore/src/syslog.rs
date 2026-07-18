@@ -137,22 +137,17 @@ async fn provision_system_bucket(cfg: &Cfg, storage: &StorageEngine) {
     }
 
     // Not created yet: the local writer provisions it when it writes the first
-    // event.
+    // event, so on a fresh start there is nothing to reapply.
     let Ok(bucket) = storage.get_bucket(SYSTEM_BUCKET_NAME).await else {
         return;
     };
-    let Ok(bucket) = bucket.upgrade() else {
-        return;
-    };
+    let bucket = bucket.upgrade().unwrap();
 
     // `set_settings` refuses on a provisioned bucket, so step around the flag
     // the same way `provision_buckets` does for user buckets.
     bucket.set_provisioned(false);
     if let Err(err) = bucket.set_settings(system_bucket_settings(cfg)).await {
-        error!(
-            "Failed to provision bucket '{}': {}",
-            SYSTEM_BUCKET_NAME, err
-        );
+        error!("Failed to provision bucket '{SYSTEM_BUCKET_NAME}': {err}");
     }
     bucket.set_provisioned(true);
 }
@@ -824,6 +819,45 @@ mod tests {
             Some(2_000_000_000),
             "restart must reapply the configured system-events quota"
         );
+    }
+
+    /// A replica keeps no local `$system`, so provisioning must leave it alone.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn provision_skips_replica() {
+        let (storage, mut cfg) = enabled_storage().await;
+
+        // Create `$system`, then drop the flag so we can tell whether a replica
+        // provision touches it.
+        let mut repo = build_audit_logger(&cfg, Arc::clone(&storage)).await;
+        repo.log_event(make_event()).await.unwrap();
+        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
+        let bucket = storage
+            .get_bucket(SYSTEM_BUCKET_NAME)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        bucket.set_provisioned(false);
+
+        cfg.role = crate::cfg::InstanceRole::Replica;
+        provision_system_bucket(&cfg, &storage).await;
+
+        assert!(
+            !bucket.is_provisioned(),
+            "a replica must not provision $system"
+        );
+    }
+
+    /// On a fresh start `$system` does not exist yet, so provisioning is a no-op
+    /// and must not panic.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn provision_noop_when_system_bucket_absent() {
+        let (storage, cfg) = enabled_storage().await;
+        // No event has been written, so `$system` is not created yet.
+        assert!(storage.get_bucket(SYSTEM_BUCKET_NAME).await.is_err());
+
+        provision_system_bucket(&cfg, &storage).await;
+
+        assert!(storage.get_bucket(SYSTEM_BUCKET_NAME).await.is_err());
     }
 
     mod routing {
