@@ -55,7 +55,10 @@ runs:
 
     - name: Install cargo-export
       shell: bash
-      run: cargo install cargo-export --version 0.3.0 --locked --force
+      run: |
+        if ! command -v cargo-export >/dev/null 2>&1; then
+          cargo install cargo-export --version 0.3.0 --locked
+        fi
 
     - name: Install Syft
       shell: bash

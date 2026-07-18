@@ -1,5 +1,5 @@
 name: 'AWS Credentials and Cargo Cache'
-description: 'Configures S3-backed sccache and a small Cargo download cache.'
+description: 'Configures Cargo target caching, S3-backed sccache, and a small Cargo download cache.'
 inputs:
   target:
     description: 'Target triple.'
@@ -74,9 +74,26 @@ runs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
+          ~/.cargo/bin/cargo-export
         key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-downloads-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
           ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-downloads-rust${{ env.RUST_MINOR }}-
+      env:
+        RUNS_ON_S3_BUCKET_CACHE: reduct-cache
+        RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        AWS_REGION: fsn1
+        AWS_DEFAULT_REGION: fsn1
+
+    - name: Use cache for Cargo target
+      uses: runs-on/cache@v4
+      with:
+        path: target/
+        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-
       env:
         RUNS_ON_S3_BUCKET_CACHE: reduct-cache
         RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com
