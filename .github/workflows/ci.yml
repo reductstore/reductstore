@@ -65,16 +65,16 @@ jobs:
               ]
         include:
           - target: "x86_64-unknown-linux-gnu"
-            os: self-hosted
+            os: ubuntu-22.04
             compiler: "gcc"
           - target: "aarch64-unknown-linux-gnu"
-            os: self-hosted
+            os: ubuntu-22.04
             compiler: "gcc-aarch64-linux-gnu"
           - target: "armv7-unknown-linux-gnueabihf"
-            os: self-hosted
+            os: ubuntu-22.04
             compiler: "gcc-arm-linux-gnueabihf"
           - target: "x86_64-pc-windows-gnu"
-            os: self-hosted
+            os: ubuntu-22.04
             compiler: "gcc-mingw-w64-x86-64"
           - target: "x86_64-apple-darwin"
             os: macos-14
