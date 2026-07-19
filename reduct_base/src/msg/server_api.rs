@@ -42,6 +42,12 @@ impl Display for License {
 pub struct ServerInfo {
     /// Version of ReductSoftware UG instance
     pub version: String,
+    /// Effective instance name resolved from the runtime configuration
+    #[serde(default)]
+    pub instance_name: String,
+    /// Effective instance role (`STANDALONE`, `PRIMARY`, `SECONDARY`, or `REPLICA`)
+    #[serde(default)]
+    pub instance_role: String,
     /// Number of buckets
     pub bucket_count: u64,
     /// Disk usage in bytes
@@ -68,4 +74,26 @@ pub struct Defaults {
 #[derive(Serialize, Deserialize, Default, Clone, Debug, PartialEq)]
 pub struct BucketInfoList {
     pub buckets: Vec<BucketInfo>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn server_info_deserializes_without_instance_identity() {
+        let mut value = serde_json::to_value(ServerInfo {
+            instance_name: "edge-a".to_string(),
+            instance_role: "PRIMARY".to_string(),
+            ..ServerInfo::default()
+        })
+        .unwrap();
+        let object = value.as_object_mut().unwrap();
+        object.remove("instance_name");
+        object.remove("instance_role");
+
+        let info: ServerInfo = serde_json::from_value(value).unwrap();
+        assert_eq!(info.instance_name, "");
+        assert_eq!(info.instance_role, "");
+    }
 }
