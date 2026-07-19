@@ -10,14 +10,33 @@
 //! five families share it.
 
 use crate::core::sync::AsyncRwLock;
+use crate::replication::TransactionNotification;
 use crate::syslog::SystemEvent;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+
+/// Late-bound replication notifier (issue #1457). The local `$system` writer
+/// cannot own the replication repo at construction (the repo is built after
+/// the collector, same dependency shape as the log sink), so the wiring
+/// registers this callback once the repo exists. It routes a
+/// [`TransactionNotification`] into `ManageReplications::notify`.
+pub(crate) type ReplicationNotifier = Arc<
+    dyn Fn(TransactionNotification) -> Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>
+        + Send
+        + Sync,
+>;
 
 #[async_trait]
 pub(crate) trait LogSystemEvent {
     async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError>;
+
+    /// Register the late-bound replication notifier. Default is a no-op: only
+    /// the local writer (the one internal path that bypasses the API notify
+    /// sites) stores it; forward/disabled/aggregating writers ignore it.
+    async fn set_replication_notifier(&mut self, _notifier: ReplicationNotifier) {}
 }
 
 pub(crate) type BoxedSystemLogger = Box<dyn LogSystemEvent + Send + Sync>;

@@ -418,9 +418,23 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         // (`sink()`) over that same writer.
         let system_events =
             build_system_event_logger(&self.cfg, Arc::clone(&storage), usage_counters).await;
-        let replication_engine = self
-            .provision_replication_repo(Arc::clone(&storage), system_events.sink())
-            .await?;
+        let replication_engine = Arc::new(AsyncRwLock::new(
+            self.provision_replication_repo(Arc::clone(&storage), system_events.sink())
+                .await?,
+        ));
+        // Late-bind the replication notifier (issue #1457): the `$system`
+        // writer was built before the repo existed, so register the notify
+        // callback now. System-event writes then replicate like API writes
+        // (the writer itself excludes the replications/ and logs/ families).
+        {
+            let repo = Arc::clone(&replication_engine);
+            system_events
+                .set_replication_notifier(Arc::new(move |notification| {
+                    let repo = Arc::clone(&repo);
+                    Box::pin(async move { repo.write().await?.notify(notification).await })
+                }))
+                .await;
+        }
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
                 internal_server_error!(
@@ -449,7 +463,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(&self.cfg.api_token),
             console,
-            replication_repo: AsyncRwLock::new(replication_engine),
+            replication_repo: replication_engine,
             lifecycle_repo: AsyncRwLock::new(lifecycle_engine),
             ext_repo: create_ext_repository(
                 ext_path,
