@@ -139,6 +139,8 @@ jobs:
         with:
           os: ${{ matrix.os }}
           target: ${{ matrix.target }}
+          access-key-id: ${{ secrets.S3_CACHE_ACCESS_KEY }}
+          secret-access-key: ${{ secrets.S3_CACHE_SECRET_KEY }}
 
       - name: Upload coverage to Codecov
         continue-on-error: true

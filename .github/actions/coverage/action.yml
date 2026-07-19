@@ -7,6 +7,12 @@ inputs:
   target:
     description: 'Target triple.'
     required: true
+  access-key-id:
+    description: 'AWS Access Key ID'
+    required: true
+  secret-access-key:
+    description: 'AWS Secret Access Key'
+    required: true
 runs:
   using: 'composite'
   steps:
@@ -25,6 +31,8 @@ runs:
       with:
         target: ${{ inputs.target }}
         profile: coverage
+        access-key-id: ${{ inputs.access-key-id }}
+        secret-access-key: ${{ inputs.secret-access-key }}
 
     - name: Run code coverage
       shell: bash
@@ -34,6 +42,10 @@ runs:
       run: |
         set -e -x
         cargo llvm-cov --locked --features fs-backend,ci --workspace --lcov --output-path lcov.info
+
+    - name: Show sccache stats
+      shell: bash
+      run: sccache --show-stats
 
     - name: Upload coverage artifact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
