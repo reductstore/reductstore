@@ -198,9 +198,10 @@ pub(crate) trait SystemEventLogger: Send + Sync {
 
     /// Late-bind the replication notifier (issue #1457): the writer is built
     /// before the replication repo, so the components wiring registers the
-    /// notify callback here once the repo exists. No-op by default (disabled
-    /// collector, replicas).
-    async fn set_replication_notifier(&self, _notifier: ReplicationNotifier) {}
+    /// notify callback (`Some`) once the repo exists and clears it (`None`)
+    /// during shutdown before the replication workers stop. No-op by default
+    /// (disabled collector, replicas).
+    async fn set_replication_notifier(&self, _notifier: Option<ReplicationNotifier>) {}
 
     /// Stop the owned background tasks (usage timer, log capture), draining
     /// their final events. Telemetry must never break shutdown.
@@ -245,7 +246,7 @@ impl LogSystemEvent for RoutingSystemLogger {
         }
     }
 
-    async fn set_replication_notifier(&mut self, notifier: ReplicationNotifier) {
+    async fn set_replication_notifier(&mut self, notifier: Option<ReplicationNotifier>) {
         // Forward to the shared writer (the local writer stores it; the
         // forward writer's default no-op ignores it — a replica never notifies).
         // Registration is best-effort: a poisoned lock only means no notifier.
@@ -276,7 +277,7 @@ impl SystemEventLogger for EnabledSystemEventLogger {
         }
     }
 
-    async fn set_replication_notifier(&self, notifier: ReplicationNotifier) {
+    async fn set_replication_notifier(&self, notifier: Option<ReplicationNotifier>) {
         if let Ok(mut sink_logger) = self.sink_logger.write().await {
             sink_logger.set_replication_notifier(notifier).await;
         }
@@ -387,6 +388,7 @@ mod tests {
     fn make_event() -> SystemEvent {
         SystemEvent {
             kind: SystemEventKind::Audit,
+            replicate: true,
             event_type: "api_call".to_string(),
             timestamp: 1,
             instance: "test-instance".to_string(),
@@ -482,6 +484,7 @@ mod tests {
         logger
             .log_event(SystemEvent {
                 kind: SystemEventKind::Lifecycle,
+                replicate: true,
                 event_type: "lifecycle_run".to_string(),
                 timestamp: 100,
                 instance: "instance-1".to_string(),
@@ -537,6 +540,7 @@ mod tests {
     fn lifecycle_system_event(payload: Value, status: u16, message: &str) -> SystemEvent {
         SystemEvent {
             kind: SystemEventKind::Lifecycle,
+            replicate: true,
             event_type: "lifecycle_run".to_string(),
             timestamp: 100,
             instance: "instance-1".to_string(),

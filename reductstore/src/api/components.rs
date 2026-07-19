@@ -157,6 +157,14 @@ impl StateKeeper {
             error!("Failed to stop lifecycle policies: {}", err);
         }
 
+        // Detach the replication notifier BEFORE stopping the replication
+        // workers: the system-event collector keeps flushing during shutdown,
+        // and notifying a stopped repo only produces spurious warnings
+        // (issue #1457).
+        if let Err(err) = self.detach_replication_notifier().await {
+            error!("Failed to detach replication notifier: {}", err);
+        }
+
         if let Err(err) = self.stop_replication_tasks().await {
             error!("Failed to stop replication tasks: {}", err);
         }
@@ -168,6 +176,15 @@ impl StateKeeper {
         if let Err(err) = self.sync_storage().await {
             error!("Failed to shutdown storage: {}", err);
         }
+    }
+
+    async fn detach_replication_notifier(&self) -> Result<(), ReductError> {
+        let components = self.wait_components().await?.clone();
+        components
+            .system_events
+            .set_replication_notifier(None)
+            .await;
+        Ok(())
     }
 
     async fn stop_replication_tasks(&self) -> Result<(), ReductError> {

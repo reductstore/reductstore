@@ -33,10 +33,13 @@ pub(crate) type ReplicationNotifier = Arc<
 pub(crate) trait LogSystemEvent {
     async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError>;
 
-    /// Register the late-bound replication notifier. Default is a no-op: only
-    /// the local writer (the one internal path that bypasses the API notify
-    /// sites) stores it; forward/disabled/aggregating writers ignore it.
-    async fn set_replication_notifier(&mut self, _notifier: ReplicationNotifier) {}
+    /// Register (`Some`) or clear (`None`) the late-bound replication
+    /// notifier. Default is a no-op: only the local writer (the one internal
+    /// path that bypasses the API notify sites) stores it;
+    /// forward/disabled/aggregating writers ignore it. Shutdown clears it
+    /// before stopping the replication workers so final telemetry flushes do
+    /// not notify a stopped repo.
+    async fn set_replication_notifier(&mut self, _notifier: Option<ReplicationNotifier>) {}
 }
 
 pub(crate) type BoxedSystemLogger = Box<dyn LogSystemEvent + Send + Sync>;

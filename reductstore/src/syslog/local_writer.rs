@@ -5,7 +5,7 @@ use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::engine::StorageEngine;
 use crate::syslog::path::{entry_path, record_labels};
 use crate::syslog::sink::ReplicationNotifier;
-use crate::syslog::{LogSystemEvent, SystemEvent, SystemEventKind};
+use crate::syslog::{LogSystemEvent, SystemEvent};
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::warn;
@@ -85,21 +85,18 @@ impl LocalSystemLogger {
     }
 
     /// Notify replication about a successful `$system` write, exactly as the
-    /// API handlers do (issue #1457). The `replications/` and `logs/` families
-    /// are excluded: replicating replication telemetry feeds back into itself,
-    /// and log records are node-local by design. A notification failure is
-    /// swallowed and logged — a replication problem must never fail a
-    /// system-event write.
+    /// API handlers do (issue #1457). Events whose `replicate` flag is cleared
+    /// by their producer (diagnostics of a `$system`-source replication, logs
+    /// emitted by the replication module) are skipped to prevent feedback
+    /// loops. A notification failure is swallowed and logged — a replication
+    /// problem must never fail a system-event write.
     async fn notify_replication(
         &self,
         event: &SystemEvent,
         entry_name: String,
         labels: reduct_base::Labels,
     ) {
-        if matches!(
-            event.kind,
-            SystemEventKind::Replication | SystemEventKind::Log
-        ) {
+        if !event.replicate {
             return;
         }
         let Some(notifier) = &self.replication_notifier else {
@@ -130,8 +127,8 @@ impl LogSystemEvent for LocalSystemLogger {
         self.log_local(event).await
     }
 
-    async fn set_replication_notifier(&mut self, notifier: ReplicationNotifier) {
-        self.replication_notifier = Some(notifier);
+    async fn set_replication_notifier(&mut self, notifier: Option<ReplicationNotifier>) {
+        self.replication_notifier = notifier;
     }
 }
 
@@ -141,7 +138,7 @@ mod tests {
     use crate::cfg::Cfg;
     use crate::core::sync::AsyncRwLock;
     use crate::replication::{ManageReplications, ReplicationRepoBuilder};
-    use crate::syslog::SYSTEM_BUCKET_NAME;
+    use crate::syslog::{SystemEventKind, SYSTEM_BUCKET_NAME};
     use reduct_base::internal_server_error;
     use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
     use rstest::{fixture, rstest};
@@ -149,9 +146,10 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::{sleep, Duration};
 
-    fn system_event(kind: SystemEventKind) -> SystemEvent {
+    fn system_event(kind: SystemEventKind, replicate: bool) -> SystemEvent {
         SystemEvent {
             kind,
+            replicate,
             event_type: "usage".to_string(),
             timestamp: 100,
             instance: "instance-1".to_string(),
@@ -239,10 +237,12 @@ mod tests {
         let storage = storage.await;
         let repo = system_replication_repo(Arc::clone(&storage)).await;
         let mut writer = writer(storage);
-        writer.set_replication_notifier(notifier_for(&repo)).await;
+        writer
+            .set_replication_notifier(Some(notifier_for(&repo)))
+            .await;
 
         writer
-            .log_event(system_event(SystemEventKind::Usage))
+            .log_event(system_event(SystemEventKind::Usage, true))
             .await
             .unwrap();
         sleep(Duration::from_millis(50)).await;
@@ -258,23 +258,49 @@ mod tests {
     #[case::replications(SystemEventKind::Replication)]
     #[case::logs(SystemEventKind::Log)]
     #[tokio::test]
-    async fn excluded_families_do_not_notify(
+    async fn non_replicable_events_do_not_notify(
         #[future] storage: Arc<StorageEngine>,
         #[case] kind: SystemEventKind,
     ) {
         let storage = storage.await;
         let repo = system_replication_repo(Arc::clone(&storage)).await;
         let mut writer = writer(storage);
-        writer.set_replication_notifier(notifier_for(&repo)).await;
+        writer
+            .set_replication_notifier(Some(notifier_for(&repo)))
+            .await;
 
-        writer.log_event(system_event(kind)).await.unwrap();
+        writer.log_event(system_event(kind, false)).await.unwrap();
         sleep(Duration::from_millis(50)).await;
 
         assert_eq!(
             pending_records(&repo).await,
             0,
-            "{:?} events must not produce replication transactions",
-            kind
+            "events with the replicate flag cleared must not produce replication transactions"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn cleared_notifier_stops_notifications(#[future] storage: Arc<StorageEngine>) {
+        let storage = storage.await;
+        let repo = system_replication_repo(Arc::clone(&storage)).await;
+        let mut writer = writer(storage);
+        writer
+            .set_replication_notifier(Some(notifier_for(&repo)))
+            .await;
+        // Shutdown detaches the notifier before stopping replication workers.
+        writer.set_replication_notifier(None).await;
+
+        writer
+            .log_event(system_event(SystemEventKind::Usage, true))
+            .await
+            .unwrap();
+        sleep(Duration::from_millis(50)).await;
+
+        assert_eq!(
+            pending_records(&repo).await,
+            0,
+            "no transactions may be produced after the notifier is detached"
         );
     }
 
@@ -286,14 +312,14 @@ mod tests {
         let calls = Arc::new(AtomicUsize::new(0));
         let seen = Arc::clone(&calls);
         writer
-            .set_replication_notifier(Arc::new(move |_notification| {
+            .set_replication_notifier(Some(Arc::new(move |_notification| {
                 seen.fetch_add(1, Ordering::SeqCst);
                 Box::pin(async { Err(internal_server_error!("replication is down")) })
-            }))
+            })))
             .await;
 
         writer
-            .log_event(system_event(SystemEventKind::Usage))
+            .log_event(system_event(SystemEventKind::Usage, true))
             .await
             .expect("a replication failure must never fail the system-event write");
         assert_eq!(calls.load(Ordering::SeqCst), 1, "notifier must be invoked");
@@ -305,7 +331,7 @@ mod tests {
         let storage = storage.await;
         let mut writer = writer(storage);
         writer
-            .log_event(system_event(SystemEventKind::Usage))
+            .log_event(system_event(SystemEventKind::Usage, true))
             .await
             .unwrap();
     }

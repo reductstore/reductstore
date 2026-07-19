@@ -429,10 +429,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         {
             let repo = Arc::clone(&replication_engine);
             system_events
-                .set_replication_notifier(Arc::new(move |notification| {
+                .set_replication_notifier(Some(Arc::new(move |notification| {
                     let repo = Arc::clone(&repo);
                     Box::pin(async move { repo.write().await?.notify(notification).await })
-                }))
+                })))
                 .await;
         }
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {

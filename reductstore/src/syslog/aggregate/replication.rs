@@ -56,6 +56,7 @@ fn now_micros() -> u64 {
 fn make_event(
     instance: &str,
     replication_name: &str,
+    replicate: bool,
     aggregate: ReplicationAggregate,
 ) -> SystemEvent {
     let payload = ReplicationSystemEventPayload {
@@ -69,6 +70,7 @@ fn make_event(
 
     SystemEvent {
         kind: SystemEventKind::Replication,
+        replicate,
         event_type: REPLICATION_EVENT_TYPE.to_string(),
         timestamp: aggregate.first_timestamp,
         instance: instance.to_string(),
@@ -83,15 +85,21 @@ fn make_event(
 pub(crate) struct ReplicationEventAggregator {
     sink: SystemEventSink,
     replication_name: String,
+    /// Diagnostics of a replication whose SOURCE is `$system` must not be
+    /// replicated themselves: each pass of that replication would write a new
+    /// `$system` record, feeding the replication a new transaction forever
+    /// (issue #1457).
+    replicate: bool,
     active: Option<ReplicationAggregate>,
     last_event_timestamp: u64,
 }
 
 impl ReplicationEventAggregator {
-    pub(crate) fn new(sink: SystemEventSink, replication_name: String) -> Self {
+    pub(crate) fn new(sink: SystemEventSink, replication_name: String, src_bucket: &str) -> Self {
         Self {
             sink,
             replication_name,
+            replicate: src_bucket != crate::syslog::SYSTEM_BUCKET_NAME,
             active: None,
             last_event_timestamp: 0,
         }
@@ -205,7 +213,12 @@ impl ReplicationEventAggregator {
         let Some(aggregate) = self.active.take() else {
             return;
         };
-        let event = make_event(&self.sink.instance_name, &self.replication_name, aggregate);
+        let event = make_event(
+            &self.sink.instance_name,
+            &self.replication_name,
+            self.replicate,
+            aggregate,
+        );
 
         match self.sink.system_logger.write().await {
             Ok(mut logger) => {
@@ -257,7 +270,7 @@ mod tests {
             )),
             instance_name: "instance-1".to_string(),
         };
-        ReplicationEventAggregator::new(sink, "repl-1".to_string())
+        ReplicationEventAggregator::new(sink, "repl-1".to_string(), "bucket-1")
     }
 
     #[fixture]
@@ -423,6 +436,34 @@ mod tests {
         assert!(agg.active.is_none());
     }
 
+    /// Loop guard (#1457): diagnostics of a replication whose source is
+    /// `$system` are marked non-replicable; ordinary sources replicate.
+    #[rstest]
+    #[case::system_source(crate::syslog::SYSTEM_BUCKET_NAME, false)]
+    #[case::user_source("bucket-1", true)]
+    #[tokio::test]
+    async fn system_source_diagnostics_are_not_replicable(
+        events: Arc<Mutex<Vec<SystemEvent>>>,
+        #[case] src_bucket: &str,
+        #[case] expected_replicate: bool,
+    ) {
+        let sink = SystemEventSink {
+            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingLogger {
+                events: Arc::clone(&events),
+                fail: false,
+            })
+                as Box<dyn LogSystemEvent + Send + Sync>)),
+            instance_name: "instance-1".to_string(),
+        };
+        let mut agg = ReplicationEventAggregator::new(sink, "repl-1".to_string(), src_bucket);
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
+        agg.flush().await;
+
+        let captured = events.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].replicate, expected_replicate);
+    }
+
     #[rstest]
     #[tokio::test]
     async fn empty_pass_is_ignored(events: Arc<Mutex<Vec<SystemEvent>>>) {
@@ -465,7 +506,7 @@ mod tests {
             system_logger: Arc::new(AsyncRwLock::new(logger)),
             instance_name: "instance-1".to_string(),
         };
-        let mut agg = ReplicationEventAggregator::new(sink, "repl-1".to_string());
+        let mut agg = ReplicationEventAggregator::new(sink, "repl-1".to_string(), "bucket-1");
 
         agg.record_pass(2, 0.5, &[(Ok(()), 3, 120)]).await;
         agg.flush().await;
