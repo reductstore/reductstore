@@ -177,6 +177,7 @@ mod tests {
     fn make_event() -> SystemEvent {
         SystemEvent {
             kind: SystemEventKind::Audit,
+            replicate: true,
             event_type: "api_call".to_string(),
             timestamp: 42,
             instance: "replica-a".to_string(),

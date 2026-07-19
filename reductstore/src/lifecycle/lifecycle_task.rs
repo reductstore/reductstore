@@ -263,6 +263,7 @@ impl LifecycleTask {
 
         let event = SystemEvent {
             kind: SystemEventKind::Lifecycle,
+            replicate: true,
             event_type: "lifecycle_run".to_string(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)

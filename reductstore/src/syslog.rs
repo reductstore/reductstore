@@ -26,7 +26,7 @@ use tokio::sync::Mutex;
 
 pub(crate) use aggregate::usage::UsageEventAggregator;
 pub(crate) use event::{SystemEvent, SystemEventKind};
-pub(crate) use sink::{BoxedSystemLogger, LogSystemEvent, SystemEventSink};
+pub(crate) use sink::{BoxedSystemLogger, LogSystemEvent, ReplicationNotifier, SystemEventSink};
 use system_event_logger::SystemEventLoggerBuilder;
 
 pub(crate) const AUDIT_BUCKET_NAME: &str = "$audit";
@@ -196,6 +196,10 @@ pub(crate) trait SystemEventLogger: Send + Sync {
     /// every other family is written straight through the shared writer.
     fn sink(&self) -> SystemEventSink;
 
+    /// Register (`Some`) or clear (`None`) the replication notifier on the
+    /// shared writer. No-op by default (disabled collector, replicas).
+    async fn set_replication_notifier(&self, _notifier: Option<ReplicationNotifier>) {}
+
     /// Stop the owned background tasks (usage timer, log capture), draining
     /// their final events. Telemetry must never break shutdown.
     async fn stop(&self);
@@ -238,6 +242,12 @@ impl LogSystemEvent for RoutingSystemLogger {
             self.writer.write().await?.log_event(event).await
         }
     }
+
+    async fn set_replication_notifier(&mut self, notifier: Option<ReplicationNotifier>) {
+        if let Ok(mut writer) = self.writer.write().await {
+            writer.set_replication_notifier(notifier).await;
+        }
+    }
 }
 
 /// The live collector: owns the routing sink logger and every background task.
@@ -258,6 +268,12 @@ impl SystemEventLogger for EnabledSystemEventLogger {
         SystemEventSink {
             system_logger: Arc::clone(&self.sink_logger),
             instance_name: self.instance_name.clone(),
+        }
+    }
+
+    async fn set_replication_notifier(&self, notifier: Option<ReplicationNotifier>) {
+        if let Ok(mut sink_logger) = self.sink_logger.write().await {
+            sink_logger.set_replication_notifier(notifier).await;
         }
     }
 
@@ -366,6 +382,7 @@ mod tests {
     fn make_event() -> SystemEvent {
         SystemEvent {
             kind: SystemEventKind::Audit,
+            replicate: true,
             event_type: "api_call".to_string(),
             timestamp: 1,
             instance: "test-instance".to_string(),
@@ -461,6 +478,7 @@ mod tests {
         logger
             .log_event(SystemEvent {
                 kind: SystemEventKind::Lifecycle,
+                replicate: true,
                 event_type: "lifecycle_run".to_string(),
                 timestamp: 100,
                 instance: "instance-1".to_string(),
@@ -516,6 +534,7 @@ mod tests {
     fn lifecycle_system_event(payload: Value, status: u16, message: &str) -> SystemEvent {
         SystemEvent {
             kind: SystemEventKind::Lifecycle,
+            replicate: true,
             event_type: "lifecycle_run".to_string(),
             timestamp: 100,
             instance: "instance-1".to_string(),

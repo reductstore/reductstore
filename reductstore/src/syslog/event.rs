@@ -53,6 +53,10 @@ pub(crate) struct SystemEvent {
     /// to. Skipped by serde so it never appears in the persisted record.
     #[serde(skip)]
     pub kind: SystemEventKind,
+    /// Whether the record may be picked up by a `$system`-source replication.
+    /// Cleared by producers whose events would feed back into that replication.
+    #[serde(skip, default = "default_replicate")]
+    pub replicate: bool,
     #[serde(default = "default_audit_type", rename = "type")]
     pub event_type: String,
     pub timestamp: u64,
@@ -81,6 +85,10 @@ impl SystemEvent {
         serde_json::to_vec(&map)
             .map_err(|err| internal_server_error!("Failed to serialize audit event: {}", err))
     }
+}
+
+fn default_replicate() -> bool {
+    true
 }
 
 fn default_audit_type() -> String {
@@ -127,6 +135,7 @@ mod tests {
     fn kind_is_excluded_from_flat_json() {
         let event = SystemEvent {
             kind: SystemEventKind::Lifecycle,
+            replicate: true,
             event_type: "lifecycle_run".to_string(),
             timestamp: 1,
             instance: "node".to_string(),

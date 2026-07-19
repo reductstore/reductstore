@@ -799,7 +799,7 @@ pub(crate) mod tests {
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: AsyncRwLock::new(replication_repo),
+            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             system_events,
             ext_repo: create_ext_repository(
@@ -915,7 +915,7 @@ pub(crate) mod tests {
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: AsyncRwLock::new(replication_repo),
+            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             system_events,
             ext_repo: create_ext_repository(
@@ -1007,7 +1007,7 @@ pub(crate) mod tests {
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: AsyncRwLock::new(replication_repo),
+            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             ext_repo: create_ext_repository(
                 None,

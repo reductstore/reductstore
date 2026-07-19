@@ -169,8 +169,13 @@ impl ReplicationTask {
             // Aggregates replication diagnostics into periodic $system events,
             // driven inline by this worker loop (flushed on idle/cap each
             // iteration and on loop exit).
-            let mut diagnostics_aggregator = thr_system_event_sink
-                .map(|sink| ReplicationEventAggregator::new(sink, replication_name.clone()));
+            let mut diagnostics_aggregator = thr_system_event_sink.map(|sink| {
+                ReplicationEventAggregator::new(
+                    sink,
+                    replication_name.clone(),
+                    &thr_settings.src_bucket,
+                )
+            });
             let init_transaction_logs = async || {
                 let mut logs = thr_log_map.write().await?;
                 for entry in thr_storage
