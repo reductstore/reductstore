@@ -35,9 +35,8 @@ pub struct Components {
     pub(crate) auth: TokenAuthorization,
     pub(crate) token_repo: AsyncRwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub(crate) console: Box<dyn ManageStaticAsset + Send + Sync>,
-    /// `Arc`-shared (issue #1457) so the components wiring can hand the
-    /// system-event writer a late-bound notify callback into this repo;
-    /// access through `Deref` is unchanged for every call site.
+    /// `Arc`-shared so the system-event writer can hold a notify callback
+    /// into this repo.
     pub(crate) replication_repo: Arc<AsyncRwLock<Box<dyn ManageReplications + Send + Sync>>>,
     pub(crate) lifecycle_repo: AsyncRwLock<Box<dyn ManageLifecycles + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
@@ -157,10 +156,8 @@ impl StateKeeper {
             error!("Failed to stop lifecycle policies: {}", err);
         }
 
-        // Detach the replication notifier BEFORE stopping the replication
-        // workers: the system-event collector keeps flushing during shutdown,
-        // and notifying a stopped repo only produces spurious warnings
-        // (issue #1457).
+        // Detach the notifier before stopping replication so final telemetry
+        // flushes do not notify a stopped repo.
         if let Err(err) = self.detach_replication_notifier().await {
             error!("Failed to detach replication notifier: {}", err);
         }

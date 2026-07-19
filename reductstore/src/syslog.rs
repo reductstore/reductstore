@@ -196,11 +196,8 @@ pub(crate) trait SystemEventLogger: Send + Sync {
     /// every other family is written straight through the shared writer.
     fn sink(&self) -> SystemEventSink;
 
-    /// Late-bind the replication notifier (issue #1457): the writer is built
-    /// before the replication repo, so the components wiring registers the
-    /// notify callback (`Some`) once the repo exists and clears it (`None`)
-    /// during shutdown before the replication workers stop. No-op by default
-    /// (disabled collector, replicas).
+    /// Register (`Some`) or clear (`None`) the replication notifier on the
+    /// shared writer. No-op by default (disabled collector, replicas).
     async fn set_replication_notifier(&self, _notifier: Option<ReplicationNotifier>) {}
 
     /// Stop the owned background tasks (usage timer, log capture), draining
@@ -247,9 +244,6 @@ impl LogSystemEvent for RoutingSystemLogger {
     }
 
     async fn set_replication_notifier(&mut self, notifier: Option<ReplicationNotifier>) {
-        // Forward to the shared writer (the local writer stores it; the
-        // forward writer's default no-op ignores it — a replica never notifies).
-        // Registration is best-effort: a poisoned lock only means no notifier.
         if let Ok(mut writer) = self.writer.write().await {
             writer.set_replication_notifier(notifier).await;
         }

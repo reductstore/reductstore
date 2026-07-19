@@ -85,10 +85,8 @@ fn make_event(
 pub(crate) struct ReplicationEventAggregator {
     sink: SystemEventSink,
     replication_name: String,
-    /// Diagnostics of a replication whose SOURCE is `$system` must not be
-    /// replicated themselves: each pass of that replication would write a new
-    /// `$system` record, feeding the replication a new transaction forever
-    /// (issue #1457).
+    /// `false` for a `$system`-source replication: its own diagnostics must
+    /// not feed it new transactions.
     replicate: bool,
     active: Option<ReplicationAggregate>,
     last_event_timestamp: u64,
@@ -436,8 +434,6 @@ mod tests {
         assert!(agg.active.is_none());
     }
 
-    /// Loop guard (#1457): diagnostics of a replication whose source is
-    /// `$system` are marked non-replicable; ordinary sources replicate.
     #[rstest]
     #[case::system_source(crate::syslog::SYSTEM_BUCKET_NAME, false)]
     #[case::user_source("bucket-1", true)]

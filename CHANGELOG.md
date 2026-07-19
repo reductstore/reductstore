@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Replicate internal `$system` events when `$system` is a replication source by notifying replication from the system-event writer; to prevent feedback loops, diagnostics of a `$system`-source replication and log messages from the replication module are excluded, [Issue-1457](https://github.com/reductstore/reductstore/issues/1457) by @DibbayajyotiRoy
+- Replicate internal `$system` events when `$system` is a replication source by notifying replication from the system-event writer; to prevent feedback loops, diagnostics of a `$system`-source replication and log messages from the replication module are excluded, [PR-1567](https://github.com/reductstore/reductstore/pull/1567) by @DibbayajyotiRoy
 - Treat the `$system` bucket as provisioned so it cannot be removed through the API, and reapply `RS_SYSTEM_EVENTS_QUOTA_SIZE` on startup instead of only at first creation, [PR-1557](https://github.com/reductstore/reductstore/pull/1557) by @LordAizen1
 - Resolve client IP from multi-hop RFC 7239 `Forwarded` headers so token IP allowlists compare against the real client instead of the proxy, [PR-1546](https://github.com/reductstore/reductstore/pull/1546) by @LordAizen1
 - Normalize bucket history timestamps when only attachment metadata entries contain records, [PR-1534](https://github.com/reductstore/reductstore/pull/1534)

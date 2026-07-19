@@ -45,10 +45,8 @@ fn make_event(instance: &str, snapshot: LogSnapshot) -> SystemEvent {
         line,
         message,
     } = snapshot;
-    // Log messages emitted by the replication module must not replicate: a
-    // failing `$system` replication logs errors, which would become `$system`
-    // records, which would feed the same replication new transactions exactly
-    // while it is failing (issue #1457). Every other captured log replicates.
+    // Replication-module logs must not replicate: a failing `$system`
+    // replication would feed itself its own error logs.
     let replicate = !target.starts_with("reductstore::replication");
     let payload = LogSystemEventPayload {
         level: level.to_string(),
@@ -268,9 +266,6 @@ mod tests {
         assert!(event.replicate, "ordinary log records replicate");
     }
 
-    /// Loop guard (#1457): log records emitted by the replication module must
-    /// not replicate — a failing `$system` replication would otherwise feed
-    /// itself its own error logs.
     #[test]
     fn make_event_marks_replication_module_logs_non_replicable() {
         let mut record = snapshot(Level::Error, "replication failed");

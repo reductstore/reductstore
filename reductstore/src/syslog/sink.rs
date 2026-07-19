@@ -18,11 +18,8 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-/// Late-bound replication notifier (issue #1457). The local `$system` writer
-/// cannot own the replication repo at construction (the repo is built after
-/// the collector, same dependency shape as the log sink), so the wiring
-/// registers this callback once the repo exists. It routes a
-/// [`TransactionNotification`] into `ManageReplications::notify`.
+/// Late-bound callback that routes a [`TransactionNotification`] into
+/// `ManageReplications::notify`.
 pub(crate) type ReplicationNotifier = Arc<
     dyn Fn(TransactionNotification) -> Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>
         + Send
@@ -33,12 +30,8 @@ pub(crate) type ReplicationNotifier = Arc<
 pub(crate) trait LogSystemEvent {
     async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError>;
 
-    /// Register (`Some`) or clear (`None`) the late-bound replication
-    /// notifier. Default is a no-op: only the local writer (the one internal
-    /// path that bypasses the API notify sites) stores it;
-    /// forward/disabled/aggregating writers ignore it. Shutdown clears it
-    /// before stopping the replication workers so final telemetry flushes do
-    /// not notify a stopped repo.
+    /// Register (`Some`) or clear (`None`) the replication notifier.
+    /// No-op by default; only the local writer stores it.
     async fn set_replication_notifier(&mut self, _notifier: Option<ReplicationNotifier>) {}
 }
 

@@ -422,10 +422,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             self.provision_replication_repo(Arc::clone(&storage), system_events.sink())
                 .await?,
         ));
-        // Late-bind the replication notifier (issue #1457): the `$system`
-        // writer was built before the repo existed, so register the notify
-        // callback now. System-event writes then replicate like API writes
-        // (the writer itself excludes the replications/ and logs/ families).
+        // Register the replication notifier so `$system` writes replicate
+        // like API writes.
         {
             let repo = Arc::clone(&replication_engine);
             system_events

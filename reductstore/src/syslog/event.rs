@@ -53,11 +53,8 @@ pub(crate) struct SystemEvent {
     /// to. Skipped by serde so it never appears in the persisted record.
     #[serde(skip)]
     pub kind: SystemEventKind,
-    /// Whether the persisted record may be picked up by a `$system`-source
-    /// replication (issue #1457). Producers clear it for events that would feed
-    /// back into the replication they describe: diagnostics of a `$system`
-    /// replication and log messages emitted by the replication module. Skipped
-    /// by serde so it never appears in the persisted record.
+    /// Whether the record may be picked up by a `$system`-source replication.
+    /// Cleared by producers whose events would feed back into that replication.
     #[serde(skip, default = "default_replicate")]
     pub replicate: bool,
     #[serde(default = "default_audit_type", rename = "type")]

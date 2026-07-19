@@ -18,8 +18,8 @@ pub(super) struct LocalSystemLogger {
     bucket_name: &'static str,
     bucket_settings: BucketSettings,
     storage: Arc<StorageEngine>,
-    /// Late-bound (issue #1457): registered by the components wiring once the
-    /// replication repo exists, so `$system` writes replicate like API writes.
+    /// Notifies replication about `$system` writes; registered once the
+    /// replication repo exists.
     replication_notifier: Option<ReplicationNotifier>,
 }
 
@@ -84,12 +84,8 @@ impl LocalSystemLogger {
         Ok(())
     }
 
-    /// Notify replication about a successful `$system` write, exactly as the
-    /// API handlers do (issue #1457). Events whose `replicate` flag is cleared
-    /// by their producer (diagnostics of a `$system`-source replication, logs
-    /// emitted by the replication module) are skipped to prevent feedback
-    /// loops. A notification failure is swallowed and logged — a replication
-    /// problem must never fail a system-event write.
+    /// Notify replication about a successful `$system` write. Skips events
+    /// with a cleared `replicate` flag; failures are logged, never propagated.
     async fn notify_replication(
         &self,
         event: &SystemEvent,
@@ -181,11 +177,8 @@ mod tests {
 
     type SystemReplicationRepo = Arc<AsyncRwLock<Box<dyn ManageReplications + Send + Sync>>>;
 
-    /// A real repo with `$system` as replication source, and a notifier closure
-    /// wired to it exactly as the components wiring does.
+    /// A real repo with `$system` as replication source.
     async fn system_replication_repo(storage: Arc<StorageEngine>) -> SystemReplicationRepo {
-        // The source bucket must exist before the replication is created; in
-        // production the first system event creates it.
         storage
             .create_system_bucket(SYSTEM_BUCKET_NAME, BucketSettings::default())
             .await
@@ -288,7 +281,6 @@ mod tests {
         writer
             .set_replication_notifier(Some(notifier_for(&repo)))
             .await;
-        // Shutdown detaches the notifier before stopping replication workers.
         writer.set_replication_notifier(None).await;
 
         writer
