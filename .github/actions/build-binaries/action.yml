@@ -107,7 +107,12 @@ runs:
 
     - name: Show sccache stats
       shell: bash
-      run: sccache --show-stats
+      run: |
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --show-stats
+        else
+          echo "sccache is disabled for this build."
+        fi
 
     - name: Upload binary (PR)
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
@@ -150,7 +155,12 @@ runs:
 
     - name: Show sccache stats after test export
       shell: bash
-      run: sccache --show-stats
+      run: |
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --show-stats
+        else
+          echo "sccache is disabled for this build."
+        fi
 
     - name: Upload tests
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
