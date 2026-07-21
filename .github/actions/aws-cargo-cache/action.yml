@@ -27,6 +27,22 @@ runs:
         else
           echo "Using preset RUST_MINOR=${RUST_MINOR}"
         fi
+
+    - name: Detect S3 cache credentials
+      id: s3_cache
+      shell: bash
+      env:
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+      run: |
+        if [[ -n "${AWS_ACCESS_KEY_ID}" && -n "${AWS_SECRET_ACCESS_KEY}" ]]; then
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "S3_CARGO_CACHE_ENABLED=true" >> "$GITHUB_ENV"
+        else
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "S3_CARGO_CACHE_ENABLED=false" >> "$GITHUB_ENV"
+          echo "S3 Cargo cache is disabled because credentials are unavailable."
+        fi
     #
     #    - name: Configure AWS credentials via OIDC (org-wide role)
     #      uses: aws-actions/configure-aws-credentials@v4
@@ -36,9 +52,11 @@ runs:
     #        aws-region: eu-central
 
     - name: Install sccache
+      if: steps.s3_cache.outputs.enabled == 'true'
       uses: mozilla-actions/sccache-action@v0.0.9
 
     - name: Configure sccache
+      if: steps.s3_cache.outputs.enabled == 'true'
       shell: bash
       run: |
         export RUSTC_WRAPPER=sccache
@@ -68,6 +86,7 @@ runs:
         sccache --start-server
 
     - name: Use cache for Cargo downloads
+      if: steps.s3_cache.outputs.enabled == 'true'
       uses: runs-on/cache@v4
       with:
         path: |
@@ -87,6 +106,7 @@ runs:
         AWS_DEFAULT_REGION: fsn1
 
     - name: Use cache for Cargo target
+      if: steps.s3_cache.outputs.enabled == 'true'
       uses: runs-on/cache@v4
       with:
         path: target/
