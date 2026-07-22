@@ -119,7 +119,7 @@ async fn notify_replication_write(
 ) -> Result<(), ReductError> {
     components
         .replication_repo
-        .write()
+        .read()
         .await?
         .notify(TransactionNotification {
             bucket: bucket.to_string(),
