@@ -57,6 +57,14 @@ pub struct LifecycleSettings {
     /// When condition.
     #[serde(default)]
     pub when: Option<Value>,
+    /// Maximum span of data time processed in one run, e.g. "6h" or "1d".
+    /// If not set, the run window defaults to 24 times the interval.
+    #[serde(default)]
+    pub max_span_per_run: Option<String>,
+    /// Maximum number of records processed in one run. Only supported for
+    /// the 'delete' lifecycle type.
+    #[serde(default)]
+    pub max_records_per_run: Option<u64>,
     /// Lifecycle mode.
     #[serde(default)]
     pub mode: LifecycleMode,
@@ -71,6 +79,8 @@ impl Default for LifecycleSettings {
             older_than: String::default(),
             interval: default_lifecycle_interval(),
             when: Option::default(),
+            max_span_per_run: Option::default(),
+            max_records_per_run: Option::default(),
             mode: LifecycleMode::default(),
         }
     }
@@ -174,6 +184,42 @@ mod tests {
         .unwrap();
 
         assert_eq!(settings.mode, LifecycleMode::Enabled);
+    }
+
+    #[test]
+    fn lifecycle_settings_per_run_limits_default_to_none() {
+        let settings: LifecycleSettings = serde_json::from_str(
+            r#"{
+                "type": "delete",
+                "bucket": "bucket-1",
+                "older_than": "1d"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.max_span_per_run, None);
+        assert_eq!(settings.max_records_per_run, None);
+    }
+
+    #[test]
+    fn lifecycle_settings_per_run_limits_roundtrip() {
+        let settings: LifecycleSettings = serde_json::from_str(
+            r#"{
+                "type": "delete",
+                "bucket": "bucket-1",
+                "older_than": "1d",
+                "max_span_per_run": "6h",
+                "max_records_per_run": 1000
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.max_span_per_run, Some("6h".to_string()));
+        assert_eq!(settings.max_records_per_run, Some(1000));
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        let deserialized: LifecycleSettings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, settings);
     }
 
     #[test]

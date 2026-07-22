@@ -4,10 +4,12 @@
 use crate::core::duration::parse_duration_to_micros;
 use crate::lifecycle::action::progress;
 use crate::lifecycle::action::{LifecycleAction, LifecycleContext, LifecycleRunResult};
+use crate::storage::entry::RecordQueryStats;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{QueryEntry, QueryType};
 use reduct_base::msg::lifecycle_api::{LifecycleMode, LifecycleSettings, LifecycleType};
+use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 pub(super) struct DeleteLifecycleAction;
@@ -45,7 +47,7 @@ impl LifecycleAction for DeleteLifecycleAction {
             .get_bucket(&settings.bucket)
             .await?
             .upgrade()?;
-        let query_entry = QueryEntry {
+        let build_query = |entries: Option<Vec<String>>, limit: Option<u64>| QueryEntry {
             query_type: if settings.mode == LifecycleMode::DryRun {
                 QueryType::Query
             } else {
@@ -56,21 +58,65 @@ impl LifecycleAction for DeleteLifecycleAction {
             // range valid even when an entry only contains fresher data.
             start: window.start,
             stop: window.stop,
-            when: settings.when.clone(),
+            // $limit must follow the policy condition inside $and so it only
+            // counts records the condition matched.
+            when: match limit {
+                Some(limit) => Some(match &settings.when {
+                    Some(when) => serde_json::json!({"$and": [when, {"$limit": limit}]}),
+                    None => serde_json::json!({"$limit": limit}),
+                }),
+                None => settings.when.clone(),
+            },
             ..Default::default()
         };
 
-        let stats = if settings.mode == LifecycleMode::DryRun {
-            bucket.query_count_records_with_stats(query_entry).await?
+        let stats = if let Some(max_records) = settings.max_records_per_run {
+            // The query limit applies per entry, so query one entry at a time
+            // with the remaining budget to keep the cap global for the run.
+            let mut total = RecordQueryStats::default();
+            let mut remaining = max_records;
+            for entry_name in progress::matching_entry_names(settings, &context).await? {
+                if remaining == 0 {
+                    break;
+                }
+                let query_entry = build_query(Some(vec![entry_name]), Some(remaining));
+                let entry_stats = if settings.mode == LifecycleMode::DryRun {
+                    Arc::clone(&bucket)
+                        .query_count_records_with_stats(query_entry)
+                        .await?
+                } else {
+                    Arc::clone(&bucket)
+                        .query_remove_records_with_stats(query_entry)
+                        .await?
+                };
+                total.records += entry_stats.records;
+                total.blocks += entry_stats.blocks;
+                remaining = remaining.saturating_sub(entry_stats.records);
+            }
+            total
         } else {
-            bucket.query_remove_records_with_stats(query_entry).await?
+            let query_entry = build_query(entries, None);
+            if settings.mode == LifecycleMode::DryRun {
+                bucket.query_count_records_with_stats(query_entry).await?
+            } else {
+                bucket.query_remove_records_with_stats(query_entry).await?
+            }
         };
 
+        // A truncated run must not advance the progress marker: report the
+        // prior progress so the next run re-covers the unfinished window.
+        let limit_hit = settings
+            .max_records_per_run
+            .is_some_and(|max_records| stats.records >= max_records);
         Ok(LifecycleRunResult {
             affected_records: stats.records,
             affected_blocks: Some(stats.blocks),
-            last_processed_ts: window.last_processed_ts,
-            caught_up: window.reaches_cutoff,
+            last_processed_ts: if limit_hit {
+                window.prior_processed_ts
+            } else {
+                window.last_processed_ts
+            },
+            caught_up: window.reaches_cutoff && !limit_hit,
         })
     }
 }
@@ -365,6 +411,177 @@ mod tests {
         assert_eq!(result.affected_records, 1);
         assert_eq!(result.affected_blocks, Some(1));
         assert!(result.caught_up);
+    }
+
+    #[tokio::test]
+    #[rstest]
+    async fn delete_stops_at_max_records_per_run(
+        #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
+        action: DeleteLifecycleAction,
+        mut settings: LifecycleSettings,
+    ) {
+        let (test_storage, test_bucket) = test_context.await;
+        write(&test_bucket, "entry-1", 1, b"r1").await.unwrap();
+        write(&test_bucket, "entry-1", 2, b"r2").await.unwrap();
+        write(&test_bucket, "entry-1", 3, b"r3").await.unwrap();
+        settings.mode = LifecycleMode::Enabled;
+        settings.older_than = "0s".to_string();
+        settings.max_records_per_run = Some(2);
+
+        let result = action
+            .run(
+                "test",
+                &settings,
+                LifecycleContext::new(test_storage, false, "unknown".to_string()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.affected_records, 2);
+        assert!(!result.caught_up);
+        assert!(test_bucket.begin_read("entry-1", 1).await.is_err());
+        assert!(test_bucket.begin_read("entry-1", 2).await.is_err());
+        assert!(test_bucket.begin_read("entry-1", 3).await.is_ok());
+    }
+
+    #[tokio::test]
+    #[rstest]
+    async fn delete_applies_max_records_per_run_across_entries(
+        #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
+        action: DeleteLifecycleAction,
+        mut settings: LifecycleSettings,
+    ) {
+        let (test_storage, test_bucket) = test_context.await;
+        write(&test_bucket, "entry-a", 1, b"a1").await.unwrap();
+        write(&test_bucket, "entry-a", 2, b"a2").await.unwrap();
+        write(&test_bucket, "entry-b", 3, b"b1").await.unwrap();
+        write(&test_bucket, "entry-b", 4, b"b2").await.unwrap();
+        settings.mode = LifecycleMode::Enabled;
+        settings.older_than = "0s".to_string();
+        settings.entries = vec!["entry-*".to_string()];
+        settings.max_records_per_run = Some(3);
+
+        let result = action
+            .run(
+                "test",
+                &settings,
+                LifecycleContext::new(test_storage, false, "unknown".to_string()),
+            )
+            .await
+            .unwrap();
+
+        // Entries are processed in sorted order: entry-a fully, then one
+        // record of entry-b consumes the remaining budget.
+        assert_eq!(result.affected_records, 3);
+        assert!(!result.caught_up);
+        assert!(test_bucket.begin_read("entry-a", 1).await.is_err());
+        assert!(test_bucket.begin_read("entry-a", 2).await.is_err());
+        assert!(test_bucket.begin_read("entry-b", 3).await.is_err());
+        assert!(test_bucket.begin_read("entry-b", 4).await.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[rstest]
+    async fn delete_holds_back_progress_when_max_records_per_run_is_hit(
+        #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
+        action: DeleteLifecycleAction,
+        mut settings: LifecycleSettings,
+    ) {
+        let (test_storage, test_bucket) = test_context.await;
+        progress::tests::write_lifecycle_stats(&test_storage, "instance-1", "test", 10)
+            .await
+            .unwrap();
+        write(&test_bucket, "entry-1", 20, b"r1").await.unwrap();
+        write(&test_bucket, "entry-1", 30, b"r2").await.unwrap();
+        settings.mode = LifecycleMode::Enabled;
+        settings.older_than = "0s".to_string();
+        settings.interval = "1s".to_string();
+        settings.max_records_per_run = Some(1);
+
+        let result = action
+            .run(
+                "test",
+                &settings,
+                LifecycleContext::new(test_storage, true, "instance-1".to_string()),
+            )
+            .await
+            .unwrap();
+
+        // The truncated run reports the prior progress instead of the new
+        // window stop, so the next run re-covers the unfinished window.
+        assert_eq!(result.affected_records, 1);
+        assert_eq!(result.last_processed_ts, Some(10));
+        assert!(!result.caught_up);
+        assert!(test_bucket.begin_read("entry-1", 20).await.is_err());
+        assert!(test_bucket.begin_read("entry-1", 30).await.is_ok());
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[rstest]
+    async fn delete_treats_exactly_exhausted_limit_as_truncated_run(
+        #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
+        action: DeleteLifecycleAction,
+        mut settings: LifecycleSettings,
+    ) {
+        let (test_storage, test_bucket) = test_context.await;
+        progress::tests::write_lifecycle_stats(&test_storage, "instance-1", "test", 10)
+            .await
+            .unwrap();
+        write(&test_bucket, "entry-1", 20, b"r1").await.unwrap();
+        write(&test_bucket, "entry-1", 30, b"r2").await.unwrap();
+        settings.mode = LifecycleMode::Enabled;
+        settings.older_than = "0s".to_string();
+        settings.interval = "1s".to_string();
+        settings.max_records_per_run = Some(2);
+
+        let result = action
+            .run(
+                "test",
+                &settings,
+                LifecycleContext::new(test_storage, true, "instance-1".to_string()),
+            )
+            .await
+            .unwrap();
+
+        // Removing exactly max_records_per_run is indistinguishable from a
+        // truncated run, so progress is conservatively held back and the next
+        // run's empty window advances it instead.
+        assert_eq!(result.affected_records, 2);
+        assert_eq!(result.last_processed_ts, Some(10));
+        assert!(!result.caught_up);
+        assert!(test_bucket.begin_read("entry-1", 20).await.is_err());
+        assert!(test_bucket.begin_read("entry-1", 30).await.is_err());
+    }
+
+    #[tokio::test]
+    #[rstest]
+    async fn dry_run_delete_counts_at_most_max_records_per_run(
+        #[future] test_context: (Arc<StorageEngine>, Arc<Bucket>),
+        action: DeleteLifecycleAction,
+        mut settings: LifecycleSettings,
+    ) {
+        let (test_storage, test_bucket) = test_context.await;
+        write(&test_bucket, "entry-1", 1, b"r1").await.unwrap();
+        write(&test_bucket, "entry-1", 2, b"r2").await.unwrap();
+        write(&test_bucket, "entry-1", 3, b"r3").await.unwrap();
+        settings.mode = LifecycleMode::DryRun;
+        settings.older_than = "0s".to_string();
+        settings.max_records_per_run = Some(2);
+
+        let result = action
+            .run(
+                "test",
+                &settings,
+                LifecycleContext::new(test_storage, false, "unknown".to_string()),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(result.affected_records, 2);
+        assert!(!result.caught_up);
+        assert!(test_bucket.begin_read("entry-1", 1).await.is_ok());
+        assert!(test_bucket.begin_read("entry-1", 2).await.is_ok());
+        assert!(test_bucket.begin_read("entry-1", 3).await.is_ok());
     }
 
     #[tokio::test]

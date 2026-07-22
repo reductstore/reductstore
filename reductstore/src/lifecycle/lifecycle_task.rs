@@ -667,6 +667,8 @@ pub(super) mod tests {
             older_than: "1d".to_string(),
             interval: "100ms".to_string(),
             when: None,
+            max_span_per_run: None,
+            max_records_per_run: None,
             mode,
         };
 
@@ -712,6 +714,8 @@ pub(super) mod tests {
             older_than: "1h".to_string(),
             interval: "1h".to_string(),
             when: None,
+            max_span_per_run: None,
+            max_records_per_run: None,
             mode: LifecycleMode::Enabled,
         }
     }

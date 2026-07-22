@@ -309,9 +309,47 @@ impl LifecycleRepository {
             ));
         }
 
+        if let Some(max_span) = &settings.max_span_per_run {
+            let max_span_us = parse_duration_to_micros(max_span).map_err(|err| {
+                unprocessable_entity!("Invalid lifecycle max_span_per_run '{}': {}", max_span, err)
+            })?;
+            if max_span_us <= 0 {
+                return Err(unprocessable_entity!(
+                    "Lifecycle max_span_per_run '{}' must be positive",
+                    max_span
+                ));
+            }
+        }
+
+        if settings.max_records_per_run == Some(0) {
+            return Err(unprocessable_entity!(
+                "Lifecycle max_records_per_run must be greater than 0"
+            ));
+        }
+
+        // The record cap is enforced with the '$limit' query operator, which
+        // takes a signed integer operand.
+        if settings
+            .max_records_per_run
+            .is_some_and(|max_records| max_records > i64::MAX as u64)
+        {
+            return Err(unprocessable_entity!(
+                "Lifecycle max_records_per_run must not exceed {}",
+                i64::MAX
+            ));
+        }
+
         if settings.lifecycle_type == LifecycleType::Compress && settings.when.is_some() {
             return Err(unprocessable_entity!(
                 "Lifecycle type 'compress' does not support 'when' condition"
+            ));
+        }
+
+        if settings.lifecycle_type == LifecycleType::Compress
+            && settings.max_records_per_run.is_some()
+        {
+            return Err(unprocessable_entity!(
+                "Lifecycle type 'compress' does not support 'max_records_per_run'"
             ));
         }
 
@@ -611,6 +649,44 @@ mod tests {
         },
         unprocessable_entity!("Lifecycle type 'compress' does not support 'when' condition")
     )]
+    #[case::bad_max_span(
+        LifecycleSettings {
+            max_span_per_run: Some("6hours".to_string()),
+            ..settings_fixture()
+        },
+        unprocessable_entity!(
+            "Invalid lifecycle max_span_per_run '6hours': [UnprocessableEntity] Invalid duration unit: hours"
+        )
+    )]
+    #[case::zero_max_span(
+        LifecycleSettings {
+            max_span_per_run: Some("0s".to_string()),
+            ..settings_fixture()
+        },
+        unprocessable_entity!("Lifecycle max_span_per_run '0s' must be positive")
+    )]
+    #[case::zero_max_records(
+        LifecycleSettings {
+            max_records_per_run: Some(0),
+            ..settings_fixture()
+        },
+        unprocessable_entity!("Lifecycle max_records_per_run must be greater than 0")
+    )]
+    #[case::too_large_max_records(
+        LifecycleSettings {
+            max_records_per_run: Some(i64::MAX as u64 + 1),
+            ..settings_fixture()
+        },
+        unprocessable_entity!("Lifecycle max_records_per_run must not exceed {}", i64::MAX)
+    )]
+    #[case::compress_with_max_records(
+        LifecycleSettings {
+            lifecycle_type: LifecycleType::Compress,
+            max_records_per_run: Some(1000),
+            ..settings_fixture()
+        },
+        unprocessable_entity!("Lifecycle type 'compress' does not support 'max_records_per_run'")
+    )]
     #[tokio::test]
     async fn rejects_invalid_settings(
         #[future] mut repo: LifecycleRepository,
@@ -629,6 +705,43 @@ mod tests {
         let settings = LifecycleSettings {
             lifecycle_type: LifecycleType::Compress,
             when: None,
+            ..settings_fixture()
+        };
+
+        repo.create_lifecycle("test", settings.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), settings);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn creates_delete_lifecycle_with_per_run_limits(#[future] mut repo: LifecycleRepository) {
+        let mut repo = repo.await;
+        let settings = LifecycleSettings {
+            max_span_per_run: Some("6h".to_string()),
+            max_records_per_run: Some(1000),
+            ..settings_fixture()
+        };
+
+        repo.create_lifecycle("test", settings.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), settings);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn creates_compress_lifecycle_with_max_span_per_run(
+        #[future] mut repo: LifecycleRepository,
+    ) {
+        let mut repo = repo.await;
+        let settings = LifecycleSettings {
+            lifecycle_type: LifecycleType::Compress,
+            when: None,
+            max_span_per_run: Some("6h".to_string()),
             ..settings_fixture()
         };
 
