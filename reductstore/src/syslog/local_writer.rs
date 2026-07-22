@@ -132,7 +132,7 @@ impl LogSystemEvent for LocalSystemLogger {
 mod tests {
     use super::*;
     use crate::cfg::Cfg;
-    use crate::core::sync::{reset_rwlock_config, set_rwlock_timeout, AsyncRwLock};
+    use crate::core::sync::{rwlock_timeout, set_rwlock_timeout, AsyncRwLock};
     use crate::replication::{ManageReplications, ReplicationRepoBuilder};
     use crate::syslog::{SystemEventKind, SYSTEM_BUCKET_NAME};
     use reduct_base::internal_server_error;
@@ -143,11 +143,11 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::{sleep, Duration};
 
-    struct ResetRwLockConfig;
+    struct RestoreRwLockTimeout(Duration);
 
-    impl Drop for ResetRwLockConfig {
+    impl Drop for RestoreRwLockTimeout {
         fn drop(&mut self) {
-            reset_rwlock_config();
+            set_rwlock_timeout(self.0);
         }
     }
 
@@ -262,7 +262,7 @@ mod tests {
     async fn usage_event_notifies_replication_while_repo_read_guard_is_held(
         #[future] storage: Arc<StorageEngine>,
     ) {
-        let _reset = ResetRwLockConfig;
+        let _restore_timeout = RestoreRwLockTimeout(rwlock_timeout());
         set_rwlock_timeout(Duration::from_millis(20));
 
         let storage = storage.await;
