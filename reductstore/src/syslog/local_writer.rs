@@ -132,15 +132,24 @@ impl LogSystemEvent for LocalSystemLogger {
 mod tests {
     use super::*;
     use crate::cfg::Cfg;
-    use crate::core::sync::AsyncRwLock;
+    use crate::core::sync::{reset_rwlock_config, set_rwlock_timeout, AsyncRwLock};
     use crate::replication::{ManageReplications, ReplicationRepoBuilder};
     use crate::syslog::{SystemEventKind, SYSTEM_BUCKET_NAME};
     use reduct_base::internal_server_error;
     use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
     use rstest::{fixture, rstest};
     use serde_json::json;
+    use serial_test::serial;
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::time::{sleep, Duration};
+
+    struct ResetRwLockConfig;
+
+    impl Drop for ResetRwLockConfig {
+        fn drop(&mut self) {
+            reset_rwlock_config();
+        }
+    }
 
     fn system_event(kind: SystemEventKind, replicate: bool) -> SystemEvent {
         SystemEvent {
@@ -209,12 +218,12 @@ mod tests {
         let repo = Arc::clone(repo);
         Arc::new(move |notification| {
             let repo = Arc::clone(&repo);
-            Box::pin(async move { repo.write().await?.notify(notification).await })
+            Box::pin(async move { repo.read().await?.notify(notification).await })
         })
     }
 
     async fn pending_records(repo: &SystemReplicationRepo) -> u64 {
-        repo.write()
+        repo.read()
             .await
             .unwrap()
             .get_info("sys-replication")
@@ -244,6 +253,37 @@ mod tests {
             pending_records(&repo).await,
             1,
             "a usage system event must produce exactly one pending transaction"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn usage_event_notifies_replication_while_repo_read_guard_is_held(
+        #[future] storage: Arc<StorageEngine>,
+    ) {
+        let _reset = ResetRwLockConfig;
+        set_rwlock_timeout(Duration::from_millis(20));
+
+        let storage = storage.await;
+        let repo = system_replication_repo(Arc::clone(&storage)).await;
+        let mut writer = writer(storage);
+        writer
+            .set_replication_notifier(Some(notifier_for(&repo)))
+            .await;
+
+        let guard = repo.read().await.unwrap();
+        writer
+            .log_event(system_event(SystemEventKind::Usage, true))
+            .await
+            .unwrap();
+        drop(guard);
+        sleep(Duration::from_millis(50)).await;
+
+        assert_eq!(
+            pending_records(&repo).await,
+            1,
+            "a caller holding the outer repository read guard must not block system-event replication"
         );
     }
 

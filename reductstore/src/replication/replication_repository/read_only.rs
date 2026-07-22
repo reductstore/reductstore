@@ -66,7 +66,7 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         ))
     }
 
-    async fn remove_replication(&mut self, _name: &str) -> Result<(), ReductError> {
+    async fn remove_replication(&self, _name: &str) -> Result<(), ReductError> {
         Err(forbidden!("Cannot remove replication in read-only mode"))
     }
 
@@ -76,7 +76,7 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         ))
     }
 
-    async fn notify(&mut self, _notification: TransactionNotification) -> Result<(), ReductError> {
+    async fn notify(&self, _notification: TransactionNotification) -> Result<(), ReductError> {
         Err(forbidden!("Cannot notify replication in read-only mode"))
     }
 
@@ -193,7 +193,7 @@ mod tests {
         use reduct_base::io::RecordMeta;
         #[rstest]
         #[tokio::test]
-        async fn test_notify_forbidden(mut repo: ReadOnlyReplicationRepository) {
+        async fn test_notify_forbidden(repo: ReadOnlyReplicationRepository) {
             let notification = TransactionNotification {
                 bucket: "bucket".to_string(),
                 entry: "entry".to_string(),

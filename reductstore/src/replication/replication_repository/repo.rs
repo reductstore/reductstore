@@ -362,7 +362,7 @@ impl ManageReplications for ReplicationRepository {
         Ok(())
     }
 
-    async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError> {
+    async fn remove_replication(&self, name: &str) -> Result<(), ReductError> {
         let mut guard = self.replications.write().await?;
         let repl = guard.get(name).ok_or_else(|| {
             ReductError::not_found(&format!("Replication '{}' does not exist", name))
@@ -392,7 +392,7 @@ impl ManageReplications for ReplicationRepository {
         self.save_repo().await
     }
 
-    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
+    async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
         let should_enqueue = {
             let guard = self.replications.read().await?;
             guard
@@ -1223,8 +1223,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_non_existing_replication(#[future] mut repo: ReplicationRepository) {
-            let mut repo = repo.await;
+        async fn test_remove_non_existing_replication(#[future] repo: ReplicationRepository) {
+            let repo = repo.await;
             assert_eq!(
                 repo.remove_replication("test-2").await,
                 Err(not_found!("Replication 'test-2' does not exist")),

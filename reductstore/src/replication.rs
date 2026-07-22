@@ -132,7 +132,7 @@ pub trait ManageReplications {
     ) -> Result<(), ReductError>;
 
     /// Remove a replication task
-    async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
+    async fn remove_replication(&self, name: &str) -> Result<(), ReductError>;
 
     /// Update replication mode
     async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError>;
@@ -146,7 +146,7 @@ pub trait ManageReplications {
     /// # Errors
     ///
     /// A `ReductError` is returned if the notification fails.
-    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
+    async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError>;
 
     /// Start background workers if they are not running yet.
     fn start(&mut self);

@@ -429,7 +429,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             system_events
                 .set_replication_notifier(Some(Arc::new(move |notification| {
                     let repo = Arc::clone(&repo);
-                    Box::pin(async move { repo.write().await?.notify(notification).await })
+                    Box::pin(async move { repo.read().await?.notify(notification).await })
                 })))
                 .await;
         }
