@@ -36,7 +36,7 @@ For most changes, build and run ReductStore locally:
 
 ```bash
 mkdir -p ./data
-RS_DATA_PATH=./data cargo run -p reductstore --features "fs-backend web-console"
+RS_DATA_PATH=./data RS_DISABLE_AUTH=true cargo run -p reductstore --features "fs-backend web-console"
 ```
 
 Then exercise the API, replication flow, query behavior, lifecycle policy, or UI path that your change touches.

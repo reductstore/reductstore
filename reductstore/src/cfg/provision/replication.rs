@@ -917,6 +917,9 @@ mod tests {
         fn env_with_each_s(path: PathBuf) -> MockEnvGetter {
             let mut env = MockEnvGetter::new();
             env.expect_get()
+                .with(eq("RS_DISABLE_AUTH"))
+                .return_const(Ok("true".to_string()));
+            env.expect_get()
                 .with(eq("RS_DATA_PATH"))
                 .return_const(Ok(path.to_str().unwrap().to_string()));
 
@@ -1037,6 +1040,9 @@ mod tests {
             include_value: &str,
         ) -> MockEnvGetter {
             let mut env = MockEnvGetter::new();
+            env.expect_get()
+                .with(eq("RS_DISABLE_AUTH"))
+                .return_const(Ok("true".to_string()));
             env.expect_get()
                 .with(eq("RS_DATA_PATH"))
                 .return_const(Ok(path.to_str().unwrap().to_string()));
@@ -1172,6 +1178,9 @@ mod tests {
         ) -> MockEnvGetter {
             let mut env = MockEnvGetter::new();
             env.expect_get()
+                .with(eq("RS_DISABLE_AUTH"))
+                .return_const(Ok("true".to_string()));
+            env.expect_get()
                 .with(eq("RS_DATA_PATH"))
                 .return_const(Ok(path.to_str().unwrap().to_string()));
 
@@ -1231,6 +1240,10 @@ mod tests {
     #[fixture]
     fn env_with_replications(path: PathBuf) -> MockEnvGetter {
         let mut mock_getter = MockEnvGetter::new();
+        mock_getter
+            .expect_get()
+            .with(eq("RS_DISABLE_AUTH"))
+            .return_const(Ok("true".to_string()));
         mock_getter
             .expect_get()
             .with(eq("RS_DATA_PATH"))

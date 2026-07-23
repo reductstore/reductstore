@@ -64,7 +64,8 @@ The quickest way to get up and running is with Docker:
 ```bash
 mkdir -p ./data
 sudo chown -R 10001:10001 ./data
-docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
+docker run -p 8383:8383 -v ${PWD}/data:/data \
+  -e RS_API_TOKEN=my-secret-token reduct/store:latest
 ```
 
 Or download a Linux binary directly from the latest release:
@@ -73,7 +74,7 @@ Or download a Linux binary directly from the latest release:
 curl -LO https://github.com/reductstore/reductstore/releases/latest/download/reductstore.x86_64-unknown-linux-gnu.tar.gz
 tar -xzf reductstore.x86_64-unknown-linux-gnu.tar.gz
 mkdir -p ./data
-RS_DATA_PATH=./data ./reductstore
+RS_DATA_PATH=./data RS_API_TOKEN=my-secret-token ./reductstore
 ```
 
 For a more in-depth guide, visit the **[Getting Started](https://reduct.store/docs/)** and **[Download](https://www.reduct.store/download)** sections.
@@ -86,7 +87,7 @@ import asyncio
 from reduct import Client
 
 async def main():
-    async with Client("http://localhost:8383") as client:
+    async with Client("http://localhost:8383", api_token="my-secret-token") as client:
         bucket = await client.create_bucket("my-bucket", exist_ok=True)
 
         await bucket.write(

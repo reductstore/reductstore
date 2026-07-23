@@ -84,6 +84,15 @@ impl<EnvGetter: GetEnv> Env<EnvGetter> {
 
     /// Get a value from the environment. without default value
     pub fn get_optional<T: EnvValue>(&mut self, key: &str) -> Option<T> {
+        self.get_optional_impl(key, false)
+    }
+
+    /// Get a value from the environment without a default value and mask it in the log.
+    pub fn get_masked_optional<T: EnvValue>(&mut self, key: &str) -> Option<T> {
+        self.get_optional_impl(key, true)
+    }
+
+    fn get_optional_impl<T: EnvValue>(&mut self, key: &str, masked: bool) -> Option<T> {
         let mut additional = String::new();
         let value = match self.getter.get(key) {
             Ok(value) => match T::from_str(&value) {
@@ -103,8 +112,17 @@ impl<EnvGetter: GetEnv> Env<EnvGetter> {
 
         if !print_value.is_empty() {
             // Add to the message
-            self.message
-                .push_str(&format!("\t{} = {} {}\n", key, print_value, additional));
+            if masked {
+                self.message.push_str(&format!(
+                    "\t{} = {} {}\n",
+                    key,
+                    "*".repeat(print_value.len()),
+                    additional
+                ));
+            } else {
+                self.message
+                    .push_str(&format!("\t{} = {} {}\n", key, print_value, additional));
+            }
         }
 
         value.ok()
@@ -200,6 +218,15 @@ mod tests {
 
         let value = env.get_masked("TEST", String::from("default"));
         assert_eq!(value, "123");
+        assert_eq!(env.message(), "\tTEST = *** \n");
+    }
+
+    #[rstest]
+    fn masked_optional_values(mut env: Env) {
+        std::env::set_var("TEST", "123");
+
+        let value = env.get_masked_optional::<String>("TEST");
+        assert_eq!(value, Some("123".to_string()));
         assert_eq!(env.message(), "\tTEST = *** \n");
     }
 
