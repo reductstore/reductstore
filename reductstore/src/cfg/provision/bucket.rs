@@ -204,6 +204,10 @@ mod tests {
         env_getter.expect_all().returning(BTreeMap::new);
         env_getter
             .expect_get()
+            .with(eq("RS_DISABLE_AUTH"))
+            .return_const(Ok("true".to_string()));
+        env_getter
+            .expect_get()
             .with(eq("RS_DEFAULTS_BUCKET_QUOTA_TYPE"))
             .return_const(Ok("FIFO".to_string()));
         env_getter
@@ -241,6 +245,10 @@ mod tests {
     async fn test_bucket_defaults_from_env_fill_missing() {
         let mut env_getter = MockEnvGetter::new();
         env_getter.expect_all().returning(BTreeMap::new);
+        env_getter
+            .expect_get()
+            .with(eq("RS_DISABLE_AUTH"))
+            .return_const(Ok("true".to_string()));
         env_getter
             .expect_get()
             .with(eq("RS_DEFAULTS_BUCKET_MAX_BLOCK_SIZE"))
@@ -331,6 +339,10 @@ mod tests {
     fn env_with_buckets() -> MockEnvGetter {
         let tmp = tempfile::tempdir().unwrap();
         let mut mock_getter = MockEnvGetter::new();
+        mock_getter
+            .expect_get()
+            .with(eq("RS_DISABLE_AUTH"))
+            .return_const(Ok("true".to_string()));
         mock_getter
             .expect_get()
             .with(eq("RS_DATA_PATH"))

@@ -385,6 +385,7 @@ mod tests {
 
         let data_path = tempdir().unwrap().keep();
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
+        env::set_var("RS_DISABLE_AUTH", "true");
         let parser = CfgParser::from_env(StdEnvGetter::default(), "0.0.0").await;
         let storage = parser.build().await.unwrap().storage;
 
@@ -480,6 +481,7 @@ mod tests {
         env::set_var("RS_CERT_KEY_PATH", "");
         env::set_var("RS_INSTANCE_ROLE", "STANDALONE");
         env::set_var("RS_ENGINE_REPLICA_UPDATE_INTERVAL", "60");
+        env::set_var("RS_DISABLE_AUTH", "true");
 
         for (key, value) in cfg {
             env::set_var(key, value);

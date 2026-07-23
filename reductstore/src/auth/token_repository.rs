@@ -417,8 +417,15 @@ impl TokenRepositoryBuilder {
         }
 
         if !self.cfg.api_token.is_empty() {
-            Box::new(TokenRepository::new(config_path, self.cfg.api_token, storage).await)
-                as BoxedTokenRepository
+            Box::new(
+                TokenRepository::new(
+                    config_path,
+                    self.cfg.api_token,
+                    self.cfg.api_token_is_provisioned,
+                    storage,
+                )
+                .await,
+            ) as BoxedTokenRepository
         } else {
             Box::new(NoAuthRepository::new()) as BoxedTokenRepository
         }
