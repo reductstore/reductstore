@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Expose the effective instance name and role in the `/api/v1/info` response, [Issue-1568](https://github.com/reductstore/reductstore/issues/1568)
 - Automatically create missing destination buckets during replication, [PR-1539](https://github.com/reductstore/reductstore/pull/1539) by @rohankumardubey
 - Add a replication `compression` setting (`none`, `zstd`, `gzip`, default `none`) that compresses batch payloads during transfer using HTTP `Content-Encoding`, [Issue-1348](https://github.com/reductstore/reductstore/issues/1348) by @DibbayajyotiRoy
 - Configure server-wide default bucket settings with `RS_DEFAULTS_BUCKET_*` environment variables, [PR-1535](https://github.com/reductstore/reductstore/pull/1535) by @rohankumardubey
