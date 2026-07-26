@@ -67,6 +67,17 @@ pub enum InstanceRole {
     Replica,
 }
 
+impl InstanceRole {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            InstanceRole::Standalone => "STANDALONE",
+            InstanceRole::Primary => "PRIMARY",
+            InstanceRole::Secondary => "SECONDARY",
+            InstanceRole::Replica => "REPLICA",
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Clone, Default)]
 pub enum ApiToken {
     #[default]
