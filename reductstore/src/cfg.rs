@@ -67,6 +67,23 @@ pub enum InstanceRole {
     Replica,
 }
 
+#[derive(Debug, PartialEq, Clone, Default)]
+pub enum ApiToken {
+    #[default]
+    NoToken,
+    Provisioned(String),
+    Initialized(String),
+}
+
+impl ApiToken {
+    pub fn as_str(&self) -> &str {
+        match self {
+            ApiToken::NoToken => "",
+            ApiToken::Provisioned(token) | ApiToken::Initialized(token) => token,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ProvisionedReplication {
     pub settings: ReplicationSettings,
@@ -87,8 +104,7 @@ pub struct Cfg {
     pub public_url: String,
     pub api_base_path: String,
     pub data_path: PathBuf,
-    pub api_token: String,
-    pub api_token_is_provisioned: bool,
+    pub api_token: ApiToken,
     pub cert_path: Option<PathBuf>,
     pub cert_key_path: Option<PathBuf>,
     pub ext_path: Option<PathBuf>,
@@ -124,8 +140,7 @@ impl Default for Cfg {
             public_url: format!("http://{}:{}/", DEFAULT_HOST, DEFAULT_PORT),
             api_base_path: "/".to_string(),
             data_path: PathBuf::from("/data"),
-            api_token: "".to_string(),
-            api_token_is_provisioned: true,
+            api_token: ApiToken::NoToken,
             cert_path: None,
             cert_key_path: None,
             ext_path: None,
@@ -293,8 +308,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let lifecycles = Self::parse_lifecycles(&mut env);
         let has_lifecycles = !lifecycles.is_empty();
 
-        let (api_token, api_token_is_provisioned) =
-            Self::parse_auth_config(&mut env, ext_cfg.role());
+        let api_token = Self::parse_auth_config(&mut env, ext_cfg.role());
 
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
@@ -303,8 +317,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             port,
             api_base_path,
             data_path: ext_cfg.data_path(),
-            api_token: api_token.clone(),
-            api_token_is_provisioned,
+            api_token,
             cert_path,
             cert_key_path,
             role: ext_cfg.role(),
@@ -463,7 +476,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         Ok(Components {
             storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
-            auth: TokenAuthorization::new(&self.cfg.api_token),
+            auth: TokenAuthorization::new(self.cfg.api_token.as_str()),
             console,
             replication_repo: replication_engine,
             lifecycle_repo: AsyncRwLock::new(lifecycle_engine),
@@ -522,13 +535,18 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .collect()
     }
 
-    fn parse_auth_config(env: &mut Env<EnvGetter>, instance_role: InstanceRole) -> (String, bool) {
+    fn parse_auth_config(env: &mut Env<EnvGetter>, instance_role: InstanceRole) -> ApiToken {
         if instance_role == InstanceRole::Replica {
-            return (env.get_masked("RS_API_TOKEN", String::new()), true);
+            let token = env.get_masked("RS_API_TOKEN", String::new());
+            return if token.is_empty() {
+                ApiToken::NoToken
+            } else {
+                ApiToken::Provisioned(token)
+            };
         }
 
         if env.get("RS_DISABLE_AUTH", false) {
-            return (String::new(), false);
+            return ApiToken::NoToken;
         }
 
         let api_token = env.get_masked_optional::<String>("RS_API_TOKEN");
@@ -545,11 +563,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             }
             (Some(token), None) => {
                 assert!(!token.is_empty(), "RS_API_TOKEN must not be empty");
-                (token, true)
+                ApiToken::Provisioned(token)
             }
             (None, Some(token)) => {
                 assert!(!token.is_empty(), "RS_INIT_API_TOKEN must not be empty");
-                (token, false)
+                ApiToken::Initialized(token)
             }
         }
     }
@@ -654,7 +672,7 @@ mod tests {
         assert_eq!(parser.cfg.api_base_path, "/");
         assert_eq!(parser.cfg.public_url, "http://0.0.0.0:8383/");
         assert_eq!(parser.cfg.data_path, PathBuf::from("/data"));
-        assert_eq!(parser.cfg.api_token, "");
+        assert_eq!(parser.cfg.api_token, ApiToken::NoToken);
         assert_eq!(parser.cfg.cert_path, None);
         assert_eq!(parser.cfg.cert_key_path, None);
         assert_eq!(parser.cfg.cors_allow_origin.len(), 0);
@@ -885,7 +903,7 @@ mod tests {
         use super::*;
 
         #[rstest]
-        fn api_token_is_provisioned() {
+        fn parses_api_token_as_provisioned() {
             let mut env_getter = MockEnvGetter::new();
             env_getter
                 .expect_get()
@@ -903,12 +921,12 @@ mod tests {
             let mut env = Env::new(env_getter);
             assert_eq!(
                 CfgParser::<MockEnvGetter>::parse_auth_config(&mut env, InstanceRole::Standalone),
-                ("api-token".to_string(), true)
+                ApiToken::Provisioned("api-token".to_string())
             );
         }
 
         #[rstest]
-        fn init_api_token_is_not_provisioned() {
+        fn parses_init_api_token_as_initialized() {
             let mut env_getter = MockEnvGetter::new();
             env_getter
                 .expect_get()
@@ -926,7 +944,7 @@ mod tests {
             let mut env = Env::new(env_getter);
             assert_eq!(
                 CfgParser::<MockEnvGetter>::parse_auth_config(&mut env, InstanceRole::Standalone),
-                ("init-api-token".to_string(), false)
+                ApiToken::Initialized("init-api-token".to_string())
             );
         }
 
@@ -946,7 +964,7 @@ mod tests {
             let mut env = Env::new(env_getter);
             assert_eq!(
                 CfgParser::<MockEnvGetter>::parse_auth_config(&mut env, InstanceRole::Standalone),
-                (String::new(), false)
+                ApiToken::NoToken
             );
         }
 
@@ -966,7 +984,7 @@ mod tests {
             let mut env = Env::new(env_getter);
             assert_eq!(
                 CfgParser::<MockEnvGetter>::parse_auth_config(&mut env, InstanceRole::Replica),
-                ("replica-token".to_string(), true)
+                ApiToken::Provisioned("replica-token".to_string())
             );
         }
 
@@ -981,7 +999,7 @@ mod tests {
             let mut env = Env::new(env_getter);
             assert_eq!(
                 CfgParser::<MockEnvGetter>::parse_auth_config(&mut env, InstanceRole::Replica),
-                (String::new(), true)
+                ApiToken::NoToken
             );
         }
 

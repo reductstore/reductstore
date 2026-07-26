@@ -9,7 +9,7 @@ use crate::auth::token_repository::disabled::NoAuthRepository;
 use crate::auth::token_repository::read_only::ReadOnlyTokenRepository;
 use crate::auth::token_repository::repo::TokenRepository;
 use crate::auth::token_secret::verify_token_secret;
-use crate::cfg::{Cfg, InstanceRole};
+use crate::cfg::{ApiToken, Cfg, InstanceRole};
 use crate::storage::engine::StorageEngine;
 use crate::syslog::SYSTEM_AUDIT_ENTRY_PREFIX;
 use async_trait::async_trait;
@@ -416,18 +416,10 @@ impl TokenRepositoryBuilder {
             ) as BoxedTokenRepository;
         }
 
-        if !self.cfg.api_token.is_empty() {
-            Box::new(
-                TokenRepository::new(
-                    config_path,
-                    self.cfg.api_token,
-                    self.cfg.api_token_is_provisioned,
-                    storage,
-                )
-                .await,
-            ) as BoxedTokenRepository
-        } else {
-            Box::new(NoAuthRepository::new()) as BoxedTokenRepository
+        match self.cfg.api_token {
+            ApiToken::NoToken => Box::new(NoAuthRepository::new()) as BoxedTokenRepository,
+            api_token => Box::new(TokenRepository::new(config_path, api_token, storage).await)
+                as BoxedTokenRepository,
         }
     }
 }

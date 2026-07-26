@@ -10,6 +10,7 @@ use crate::auth::token_repository::{
 use crate::auth::token_secret::{
     hash_token_secret, is_hashed_token_secret, matched_hashed_token_secret,
 };
+use crate::cfg::ApiToken;
 use crate::core::cache::Cache;
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::engine::StorageEngine;
@@ -55,16 +56,14 @@ impl TokenRepository {
     /// # Arguments
     ///
     /// * `data_path` - The path to the data directory
-    /// * `api_token` - The API token with full access to the repository.
-    /// * `api_token_is_provisioned` - Whether the initial token is managed by configuration.
+    /// * `api_token` - The configured API token with full access to the repository.
     ///
     /// # Returns
     ///
     /// The repository
     pub async fn new(
         data_path: PathBuf,
-        api_token: String,
-        api_token_is_provisioned: bool,
+        api_token: ApiToken,
         storage: Option<Arc<StorageEngine>>,
     ) -> TokenRepository {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
@@ -125,18 +124,22 @@ impl TokenRepository {
         }
 
         let existing_init_token = token_repository.repo.get(INIT_TOKEN_NAME).cloned();
-        let should_initialize_token = api_token_is_provisioned
-            || existing_init_token
+        let should_initialize_token = match &api_token {
+            ApiToken::NoToken => false,
+            ApiToken::Provisioned(_) => true,
+            ApiToken::Initialized(_) => existing_init_token
                 .as_ref()
-                .map_or(true, |token| token.is_provisioned);
+                .map_or(true, |token| token.is_provisioned),
+        };
 
         if should_initialize_token {
+            let api_token_value = api_token.as_str();
             let init_token_value = existing_init_token
                 .as_ref()
-                .and_then(|token| matched_hashed_token_secret(&token.value, &api_token))
+                .and_then(|token| matched_hashed_token_secret(&token.value, api_token_value))
                 .map(|secret| secret.to_string())
                 .unwrap_or_else(|| {
-                    hash_token_secret(&api_token).expect("Failed to hash init token secret")
+                    hash_token_secret(api_token_value).expect("Failed to hash init token secret")
                 });
 
             let init_token = Token {
@@ -151,7 +154,7 @@ impl TokenRepository {
                     read: vec![],
                     write: vec![],
                 }),
-                is_provisioned: api_token_is_provisioned,
+                is_provisioned: matches!(&api_token, ApiToken::Provisioned(_)),
                 expires_at: None,
                 ttl: None,
                 last_access: None,
@@ -162,7 +165,7 @@ impl TokenRepository {
             token_repository
                 .repo
                 .insert(init_token.name.clone(), init_token);
-            if !api_token_is_provisioned {
+            if matches!(&api_token, ApiToken::Initialized(_)) {
                 repository_changed = true;
             }
         }
@@ -714,7 +717,7 @@ mod tests {
         #[tokio::test]
         async fn test_create_token_persistent(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
+                api_token: ApiToken::Provisioned(init_token.to_string()),
                 ..Default::default()
             };
 
@@ -743,7 +746,7 @@ mod tests {
         #[tokio::test]
         async fn test_migrate_plaintext_token_on_startup(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
+                api_token: ApiToken::Provisioned(init_token.to_string()),
                 ..Default::default()
             };
 
@@ -784,7 +787,7 @@ mod tests {
         #[tokio::test]
         async fn test_create_token_expiry_persistent(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
+                api_token: ApiToken::Provisioned(init_token.to_string()),
                 ..Default::default()
             };
 
@@ -911,7 +914,7 @@ mod tests {
         #[tokio::test]
         async fn test_update_token_persistent(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
+                api_token: ApiToken::Provisioned(init_token.to_string()),
                 ..Default::default()
             };
 
@@ -1082,7 +1085,7 @@ mod tests {
         #[tokio::test]
         async fn test_validate_token_cache_invalidation_on_update(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
+                api_token: ApiToken::Provisioned(init_token.to_string()),
                 ..Default::default()
             };
 
@@ -1204,8 +1207,7 @@ mod tests {
         #[tokio::test]
         async fn test_reject_remove_last_full_access_token(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
-                api_token_is_provisioned: false,
+                api_token: ApiToken::Initialized(init_token.to_string()),
                 ..Default::default()
             };
             let mut repo = build_repo_at(&path, &cfg).await;
@@ -1227,8 +1229,7 @@ mod tests {
             init_token: &str,
         ) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
-                api_token_is_provisioned: false,
+                api_token: ApiToken::Initialized(init_token.to_string()),
                 ..Default::default()
             };
             let mut repo = build_repo_at(&path, &cfg).await;
@@ -1316,8 +1317,7 @@ mod tests {
         #[tokio::test]
         async fn test_rotate_initial_api_token(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
-                api_token_is_provisioned: false,
+                api_token: ApiToken::Initialized(init_token.to_string()),
                 ..Default::default()
             };
             let mut repo = build_repo_at(&path, &cfg).await;
@@ -1482,7 +1482,7 @@ mod tests {
             let temp_dir = tempdir().unwrap();
             let mut cfg = Cfg {
                 data_path: temp_dir.keep(),
-                api_token: "init-token".to_string(),
+                api_token: ApiToken::Provisioned("init-token".to_string()),
                 ..Cfg::default()
             };
             cfg.system_events_conf.enabled = true;
@@ -1580,7 +1580,7 @@ mod tests {
     #[fixture]
     fn cfg(init_token: &str) -> Cfg {
         Cfg {
-            api_token: init_token.to_string(),
+            api_token: ApiToken::Provisioned(init_token.to_string()),
             ..Default::default()
         }
     }
