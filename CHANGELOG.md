@@ -45,7 +45,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
-- Remove auth-disabled HTTP API integration test runs; CI now exercises the HTTP API with explicit credentials only, [PR-1575](https://github.com/reductstore/reductstore/pull/1575)
 - Remove deprecated `each_n` query and replication API field; use the `$each_n` operator in the `when` condition instead, [Issue-1359](https://github.com/reductstore/reductstore/issues/1359), [PR-1555](https://github.com/reductstore/reductstore/pull/1555)
 - `include` and `exclude` parameters in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1497](https://github.com/reductstore/reductstore/pull/1497) by @vbmade2000
 - `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414) by @vbmade2000
