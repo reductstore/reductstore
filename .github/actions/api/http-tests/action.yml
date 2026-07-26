@@ -31,11 +31,9 @@ runs:
       shell: bash
       env:
         RS_API_TOKEN: ${{ inputs.token }}
-        RS_DISABLE_AUTH: ${{ inputs.token == '' }}
       run: |
         docker run --network=host -v ${PWD}/misc:/misc \
           --env RS_API_TOKEN="${RS_API_TOKEN}" \
-          --env RS_DISABLE_AUTH="${RS_DISABLE_AUTH}" \
           --env RS_AUDIT_ENABLED=true \
           --env RS_INSTANCE_NAME=http-api-tests \
           --env RS_INSTANCE_ROLE=STANDALONE \

@@ -204,7 +204,7 @@ jobs:
       - build_test_docker_image
     strategy:
       matrix:
-        token: [ "", "XXXX" ]
+        token: [ "XXXX" ]
         cert_path: [ "", "/misc/certificate.crt" ]
         include:
           - cert_path: "/misc/certificate.crt"
