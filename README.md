@@ -19,7 +19,7 @@ ReductStore is high-performance, time-indexed object storage for robotics and in
 
 Store terabytes of images, video, sensor readings, logs, files, and ROS bags in their native binary formats. Every record is organized by timestamp and can be enriched with labels, so you can retrieve exactly the data you need by time range and operational context.
 
-Instead of combining a time-series database, generic object storage, metadata indexes, and custom retention jobs, ReductStore provides one system for ingesting, organizing, retaining, and querying unstructured time-series data.
+Instead of combining a time-series database, generic object storage, metadata indexes, and custom retention jobs, ReductStore provides one system for ingesting, organizing, retaining, and querying multimodal time-series data.
 
 ## Why Teams Pick ReductStore
 
