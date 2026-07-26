@@ -10,6 +10,7 @@ use crate::auth::token_repository::{
 use crate::auth::token_secret::{
     hash_token_secret, is_hashed_token_secret, matched_hashed_token_secret,
 };
+use crate::cfg::ApiToken;
 use crate::core::cache::Cache;
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::engine::StorageEngine;
@@ -55,14 +56,14 @@ impl TokenRepository {
     /// # Arguments
     ///
     /// * `data_path` - The path to the data directory
-    /// * `api_token` - The API token with full access to the repository. If it is empty, no authentication is required.
+    /// * `api_token` - The configured API token with full access to the repository.
     ///
     /// # Returns
     ///
     /// The repository
     pub async fn new(
         data_path: PathBuf,
-        api_token: String,
+        api_token: ApiToken,
         storage: Option<Arc<StorageEngine>>,
     ) -> TokenRepository {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
@@ -115,48 +116,61 @@ impl TokenRepository {
             }
         };
 
-        let mut migrated = false;
+        let mut repository_changed = false;
         for token in token_repository.repo.values_mut() {
             if Self::ensure_hashed_token_secret(token).expect("Failed to hash token secret") {
-                migrated = true;
+                repository_changed = true;
             }
         }
 
-        let full_access_permissions = Some(Permissions {
-            full_access: true,
-            read: vec![],
-            write: vec![],
-        });
         let existing_init_token = token_repository.repo.get(INIT_TOKEN_NAME).cloned();
-        let init_token_value = token_repository
-            .repo
-            .get(INIT_TOKEN_NAME)
-            .and_then(|token| matched_hashed_token_secret(&token.value, &api_token))
-            .map(|secret| secret.to_string())
-            .unwrap_or_else(|| {
-                hash_token_secret(&api_token).expect("Failed to hash init token secret")
-            });
-
-        let init_token = Token {
-            name: INIT_TOKEN_NAME.to_string(),
-            value: init_token_value,
-            created_at: existing_init_token
+        let should_initialize_token = match &api_token {
+            ApiToken::NoToken => false,
+            ApiToken::Provisioned(_) => true,
+            ApiToken::Initialized(_) => existing_init_token
                 .as_ref()
-                .map(|token| token.created_at)
-                .unwrap_or_else(|| DateTime::<Utc>::from(SystemTime::now())),
-            permissions: full_access_permissions.clone(),
-            is_provisioned: true,
-            expires_at: None,
-            ttl: None,
-            last_access: None,
-            ip_allowlist: vec![],
-            is_expired: false,
+                .map_or(true, |token| token.is_provisioned),
         };
 
-        token_repository
-            .repo
-            .insert(init_token.name.clone(), init_token);
-        if migrated {
+        if should_initialize_token {
+            let api_token_value = api_token.as_str();
+            let init_token_value = existing_init_token
+                .as_ref()
+                .and_then(|token| matched_hashed_token_secret(&token.value, api_token_value))
+                .map(|secret| secret.to_string())
+                .unwrap_or_else(|| {
+                    hash_token_secret(api_token_value).expect("Failed to hash init token secret")
+                });
+
+            let init_token = Token {
+                name: INIT_TOKEN_NAME.to_string(),
+                value: init_token_value,
+                created_at: existing_init_token
+                    .as_ref()
+                    .map(|token| token.created_at)
+                    .unwrap_or_else(|| DateTime::<Utc>::from(SystemTime::now())),
+                permissions: Some(Permissions {
+                    full_access: true,
+                    read: vec![],
+                    write: vec![],
+                }),
+                is_provisioned: matches!(&api_token, ApiToken::Provisioned(_)),
+                expires_at: None,
+                ttl: None,
+                last_access: None,
+                ip_allowlist: vec![],
+                is_expired: false,
+            };
+
+            token_repository
+                .repo
+                .insert(init_token.name.clone(), init_token);
+            if matches!(&api_token, ApiToken::Initialized(_)) {
+                repository_changed = true;
+            }
+        }
+
+        if repository_changed {
             token_repository
                 .save_repo()
                 .await
@@ -433,6 +447,27 @@ impl ManageTokens for TokenRepository {
             if token.is_provisioned {
                 return Err(conflict!("Can't remove provisioned token '{}'", name));
             }
+
+            let is_full_access = token
+                .permissions
+                .as_ref()
+                .is_some_and(|permissions| permissions.full_access);
+            let full_access_token_count = self
+                .repo
+                .values()
+                .filter(|token| {
+                    token
+                        .permissions
+                        .as_ref()
+                        .is_some_and(|permissions| permissions.full_access)
+                })
+                .count();
+            if is_full_access && full_access_token_count == 1 {
+                return Err(conflict!(
+                    "Can't remove token '{}': at least one full-access token must remain",
+                    name
+                ));
+            }
         }
 
         if self.repo.remove(name).is_none() {
@@ -445,10 +480,6 @@ impl ManageTokens for TokenRepository {
     }
 
     async fn rotate_token(&mut self, name: &str) -> Result<TokenCreateResponse, ReductError> {
-        if name == INIT_TOKEN_NAME {
-            return Err(conflict!("Can't rotate init token"));
-        }
-
         let token = self
             .repo
             .get_mut(name)
@@ -686,7 +717,7 @@ mod tests {
         #[tokio::test]
         async fn test_create_token_persistent(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
+                api_token: ApiToken::Provisioned(init_token.to_string()),
                 ..Default::default()
             };
 
@@ -715,7 +746,7 @@ mod tests {
         #[tokio::test]
         async fn test_migrate_plaintext_token_on_startup(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
+                api_token: ApiToken::Provisioned(init_token.to_string()),
                 ..Default::default()
             };
 
@@ -756,7 +787,7 @@ mod tests {
         #[tokio::test]
         async fn test_create_token_expiry_persistent(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
+                api_token: ApiToken::Provisioned(init_token.to_string()),
                 ..Default::default()
             };
 
@@ -883,7 +914,7 @@ mod tests {
         #[tokio::test]
         async fn test_update_token_persistent(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
+                api_token: ApiToken::Provisioned(init_token.to_string()),
                 ..Default::default()
             };
 
@@ -1054,7 +1085,7 @@ mod tests {
         #[tokio::test]
         async fn test_validate_token_cache_invalidation_on_update(path: PathBuf, init_token: &str) {
             let cfg = Cfg {
-                api_token: init_token.to_string(),
+                api_token: ApiToken::Provisioned(init_token.to_string()),
                 ..Default::default()
             };
 
@@ -1171,6 +1202,77 @@ mod tests {
             let err = repo.remove_token("test").await.err().unwrap();
             assert_eq!(err, conflict!("Can't remove provisioned token 'test'"))
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_reject_remove_last_full_access_token(path: PathBuf, init_token: &str) {
+            let cfg = Cfg {
+                api_token: ApiToken::Initialized(init_token.to_string()),
+                ..Default::default()
+            };
+            let mut repo = build_repo_at(&path, &cfg).await;
+
+            let err = repo.remove_token(INIT_TOKEN_NAME).await.err().unwrap();
+
+            assert_eq!(
+                err,
+                conflict!(
+                    "Can't remove token 'init-token': at least one full-access token must remain"
+                )
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_recreate_removed_init_token_from_initial_api_token(
+            path: PathBuf,
+            init_token: &str,
+        ) {
+            let cfg = Cfg {
+                api_token: ApiToken::Initialized(init_token.to_string()),
+                ..Default::default()
+            };
+            let mut repo = build_repo_at(&path, &cfg).await;
+            repo.generate_token(
+                "admin",
+                TokenCreateRequest {
+                    permissions: Permissions {
+                        full_access: true,
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+
+            repo.remove_token(INIT_TOKEN_NAME).await.unwrap();
+            drop(repo);
+
+            let mut repo = build_repo_at(&path, &cfg).await;
+            let token = repo.get_token(INIT_TOKEN_NAME).await.unwrap();
+            assert!(!token.is_provisioned);
+            assert!(token
+                .permissions
+                .as_ref()
+                .is_some_and(|permissions| permissions.full_access));
+            repo.validate_token(Some(&format!("Bearer {}", init_token)), None)
+                .await
+                .unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_non_full_access_token_when_only_one_admin_remains(
+            #[future] repo: BoxedTokenRepository,
+        ) {
+            let mut repo = repo.await;
+            let mut token = repo.get_token("test").await.unwrap().clone();
+            token.permissions = Some(Permissions::default());
+            repo.update_token(token).await.unwrap();
+
+            repo.remove_token("test").await.unwrap();
+        }
     }
 
     mod rotate_token {
@@ -1202,10 +1304,39 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_rotate_init_token(#[future] repo: BoxedTokenRepository) {
+        async fn test_rotate_provisioned_init_token(#[future] repo: BoxedTokenRepository) {
             let mut repo = repo.await;
             let err = repo.rotate_token(INIT_TOKEN_NAME).await.err().unwrap();
-            assert_eq!(err, conflict!("Can't rotate init token"));
+            assert_eq!(
+                err,
+                conflict!("Can't rotate provisioned token 'init-token'")
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rotate_initial_api_token(path: PathBuf, init_token: &str) {
+            let cfg = Cfg {
+                api_token: ApiToken::Initialized(init_token.to_string()),
+                ..Default::default()
+            };
+            let mut repo = build_repo_at(&path, &cfg).await;
+
+            let rotated = repo.rotate_token(INIT_TOKEN_NAME).await.unwrap();
+            drop(repo);
+
+            let mut repo = build_repo_at(&path, &cfg).await;
+            let token = repo
+                .validate_token(Some(&format!("Bearer {}", rotated.value)), None)
+                .await
+                .unwrap();
+            assert_eq!(token.name, INIT_TOKEN_NAME);
+            assert!(!token.is_provisioned);
+            assert_eq!(
+                repo.validate_token(Some(&format!("Bearer {}", init_token)), None)
+                    .await,
+                Err(unauthorized!("Invalid token"))
+            );
         }
 
         #[rstest]
@@ -1351,7 +1482,7 @@ mod tests {
             let temp_dir = tempdir().unwrap();
             let mut cfg = Cfg {
                 data_path: temp_dir.keep(),
-                api_token: "init-token".to_string(),
+                api_token: ApiToken::Provisioned("init-token".to_string()),
                 ..Cfg::default()
             };
             cfg.system_events_conf.enabled = true;
@@ -1449,7 +1580,7 @@ mod tests {
     #[fixture]
     fn cfg(init_token: &str) -> Cfg {
         Cfg {
-            api_token: init_token.to_string(),
+            api_token: ApiToken::Provisioned(init_token.to_string()),
             ..Default::default()
         }
     }

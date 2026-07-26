@@ -306,7 +306,7 @@ mod tests {
         let mut env_with_tokens = env_with_tokens.await;
         let data_path = env_with_tokens.get("RS_DATA_PATH").unwrap();
         let mut auth_repo = TokenRepositoryBuilder::new(Cfg {
-            api_token: "init".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("init".to_string()),
             ..Default::default()
         })
         .build(data_path.clone().into())
@@ -341,7 +341,7 @@ mod tests {
         drop(repo);
 
         let mut repo = TokenRepositoryBuilder::new(Cfg {
-            api_token: "XXX".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("XXX".to_string()),
             ..Default::default()
         })
         .build(data_path.into())
@@ -362,7 +362,7 @@ mod tests {
         let data_path = PathBuf::from(env_with_tokens.get("RS_DATA_PATH").unwrap());
 
         let mut auth_repo = TokenRepositoryBuilder::new(Cfg {
-            api_token: "init".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("init".to_string()),
             ..Default::default()
         })
         .build(data_path.clone())
@@ -399,7 +399,7 @@ mod tests {
         fs::set_permissions(&data_path, fs::Permissions::from_mode(0o755)).unwrap();
 
         let mut repo = TokenRepositoryBuilder::new(Cfg {
-            api_token: "XXX".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("XXX".to_string()),
             ..Default::default()
         })
         .build(data_path)
@@ -476,7 +476,7 @@ mod tests {
         CfgParser {
             cfg: Cfg {
                 data_path: data_path.clone(),
-                api_token: "XXX".to_string(),
+                api_token: crate::cfg::ApiToken::Provisioned("XXX".to_string()),
                 tokens,
                 ..Default::default()
             },

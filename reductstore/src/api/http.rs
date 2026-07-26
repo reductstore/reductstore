@@ -511,7 +511,7 @@ pub(crate) mod tests {
         async fn test_builder_builds_and_redirects_to_ui() {
             let cfg = Cfg {
                 data_path: tempfile::tempdir().unwrap().keep(),
-                api_token: "init-token".to_string(),
+                api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
                 api_base_path: "/".to_string(),
                 ..Cfg::default()
             };
@@ -821,7 +821,7 @@ pub(crate) mod tests {
     async fn keeper_with_limits_impl(limits_config: LimitsConfig) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
-            api_token: "init-token".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
             ..Cfg::default()
         };
         cfg.system_events_conf.enabled = true;
@@ -946,7 +946,7 @@ pub(crate) mod tests {
     pub(crate) async fn keeper_with_engine_limit(max_storage_size: u64) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
-            api_token: "init-token".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
             ..Cfg::default()
         };
         cfg.engine_config.max_storage_size = Some(max_storage_size);

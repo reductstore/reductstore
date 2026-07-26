@@ -1054,7 +1054,7 @@ mod tests {
     #[tokio::test]
     async fn test_check_permissions_with_token_repo_expired_token() {
         let cfg = Cfg {
-            api_token: "init-token".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
             ..Cfg::default()
         };
         let path = tempdir().unwrap().keep();

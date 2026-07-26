@@ -218,6 +218,7 @@ mod tests {
 
     fn lifecycle_env(path: PathBuf, overrides: &[(&str, &str)]) -> TestEnvGetter {
         let mut values = BTreeMap::from([
+            ("RS_DISABLE_AUTH".to_string(), "true".to_string()),
             (
                 "RS_DATA_PATH".to_string(),
                 path.to_str().unwrap().to_string(),
