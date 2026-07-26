@@ -30,6 +30,8 @@ mod tests {
     #[tokio::test]
     async fn test_info(#[future] keeper: Arc<StateKeeper>, headers: HeaderMap) {
         let info = info(State(keeper.await), headers).await.unwrap();
+        assert_eq!(info.0.instance_name, "unknown");
+        assert_eq!(info.0.instance_role, "PRIMARY");
         assert_eq!(info.0.bucket_count, 2);
     }
 }

@@ -202,6 +202,8 @@ impl StorageEngine {
             version: option_env!("CARGO_PKG_VERSION")
                 .unwrap_or("unknown")
                 .to_string(),
+            instance_name: self.cfg.instance_name.clone(),
+            instance_role: self.cfg.role.as_str().to_string(),
             bucket_count: buckets.len() as u64,
             usage,
             uptime: self.start_time.elapsed().as_secs(),
@@ -662,6 +664,8 @@ mod tests {
             info,
             ServerInfo {
                 version: env!("CARGO_PKG_VERSION").to_string(),
+                instance_name: "unknown".to_string(),
+                instance_role: "PRIMARY".to_string(),
                 bucket_count: 0,
                 usage: 0,
                 uptime: 1,
@@ -673,6 +677,25 @@ mod tests {
                 license: None,
             }
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_info_reports_instance_identity(cfg: Cfg) {
+        let cfg = Cfg {
+            instance_name: "edge-a".to_string(),
+            role: InstanceRole::Replica,
+            ..cfg
+        };
+        let storage = StorageEngine::builder()
+            .with_data_path(cfg.data_path.clone())
+            .with_cfg(cfg)
+            .build()
+            .await;
+
+        let info = storage.info().await.unwrap();
+        assert_eq!(info.instance_name, "edge-a");
+        assert_eq!(info.instance_role, "REPLICA");
     }
 
     #[rstest]
@@ -961,6 +984,8 @@ mod tests {
                 storage.info().await.unwrap(),
                 ServerInfo {
                     version: env!("CARGO_PKG_VERSION").to_string(),
+                    instance_name: "unknown".to_string(),
+                    instance_role: "PRIMARY".to_string(),
                     bucket_count: 1,
                     usage: 146,
                     uptime: 0,
@@ -1102,6 +1127,8 @@ mod tests {
                 storage.info().await.unwrap(),
                 ServerInfo {
                     version: env!("CARGO_PKG_VERSION").to_string(),
+                    instance_name: "unknown".to_string(),
+                    instance_role: "PRIMARY".to_string(),
                     bucket_count: 0,
                     usage: 0,
                     uptime: 0,
