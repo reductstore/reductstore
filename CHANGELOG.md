@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking Changes
+
+- To support compliance with the EU Cyber Resilience Act (CRA), standalone instances must now explicitly configure authentication with exactly one of RS_API_TOKEN or RS_INIT_API_TOKEN, or set RS_DISABLE_AUTH=true. Read-only replica behavior is unchanged, [PR-1573](https://github.com/reductstore/reductstore/pull/1573) by @rohankumardubey
+
 ### Added
 
 - Expose the effective instance name and role in the `/api/v1/info` response, [PR-1569](https://github.com/reductstore/reductstore/pull/1569) by @lntutor
