@@ -4,10 +4,7 @@
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block_index::BlockIndex;
-use crate::storage::block_manager::{
-    BlockManager, BLOCK_INDEX_FILE, COMPRESSED_DATA_FILE_EXT, COMPRESSED_DESCRIPTOR_FILE_EXT,
-    DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
-};
+use crate::storage::block_manager::{all_block_file_paths, BlockManager, BLOCK_INDEX_FILE};
 use crate::storage::proto::block_index::Block as BlockEntry;
 use log::warn;
 use reduct_base::error::ReductError;
@@ -34,15 +31,7 @@ impl ReplicaIndexReload {
         for (block_id, new_block_info) in updated_index.info().iter() {
             if let Some(previous_block_info) = self.previous_state.get(block_id) {
                 if previous_block_info.crc64 != new_block_info.crc64 {
-                    let extensions = [
-                        DESCRIPTOR_FILE_EXT,
-                        DATA_FILE_EXT,
-                        COMPRESSED_DESCRIPTOR_FILE_EXT,
-                        COMPRESSED_DATA_FILE_EXT,
-                    ];
-
-                    for ext in extensions {
-                        let path = self.entry_path.join(format!("{}{}", block_id, ext));
+                    for path in all_block_file_paths(&self.entry_path, *block_id) {
                         if let Err(err) = FILE_CACHE.invalidate_local_cache_file(&path).await {
                             warn!(
                                 "Failed to invalidate replica cache file {:?}: {}",

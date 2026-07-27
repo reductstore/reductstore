@@ -32,7 +32,7 @@ use reduct_base::too_early;
 use std::fs::OpenOptions;
 use std::io::ErrorKind::UnexpectedEof;
 use std::io::{Read, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -63,6 +63,15 @@ pub const DATA_FILE_EXT: &str = ".blk";
 pub const COMPRESSED_DESCRIPTOR_FILE_EXT: &str = ".meta.zst";
 pub const COMPRESSED_DATA_FILE_EXT: &str = ".blk.zst";
 pub const BLOCK_INDEX_FILE: &str = "blocks.idx";
+
+fn all_block_file_paths(entry_path: &Path, block_id: u64) -> [PathBuf; 4] {
+    [
+        entry_path.join(format!("{}{}", block_id, DATA_FILE_EXT)),
+        entry_path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT)),
+        entry_path.join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT)),
+        entry_path.join(format!("{}{}", block_id, COMPRESSED_DESCRIPTOR_FILE_EXT)),
+    ]
+}
 
 // we need 2 to avoid double sync when start a new one but not yet saved the old one when the record is written
 const WRITE_BLOCK_CACHE_SIZE: usize = 2;
@@ -427,12 +436,7 @@ impl BlockManager {
     pub async fn remove_block(&mut self, block_id: u64) -> Result<(), ReductError> {
         self.wal.append(block_id, WalEntry::RemoveBlock).await?;
 
-        for path in [
-            self.path_to_data(block_id),
-            self.path_to_desc(block_id),
-            self.path_to_compressed_data(block_id),
-            self.path_to_compressed_desc(block_id),
-        ] {
+        for path in all_block_file_paths(&self.path, block_id) {
             if FILE_CACHE.try_exists(&path).await? {
                 // The block may still exist only in WAL during recovery.
                 FILE_CACHE.remove(&path).await?;
@@ -899,15 +903,8 @@ impl BlockManager {
     }
 
     async fn invalidate_replica_block_cache(&self, block_id: u64) -> Result<(), ReductError> {
-        let paths = [
-            self.path_to_desc(block_id),
-            self.path_to_data(block_id),
-            self.path_to_compressed_desc(block_id),
-            self.path_to_compressed_data(block_id),
-        ];
-
         let mut first_err = None;
-        for path in paths {
+        for path in all_block_file_paths(&self.path, block_id) {
             if let Err(err) = FILE_CACHE.invalidate_local_cache_file(&path).await {
                 warn!(
                     "Failed to invalidate replica cache file {:?} for {}/{}: {}",
