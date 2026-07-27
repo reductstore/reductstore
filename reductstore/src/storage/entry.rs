@@ -23,7 +23,7 @@ use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
-use log::{debug, error};
+use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;
@@ -323,9 +323,7 @@ impl Entry {
             }
         };
 
-        bm.remove_block(oldest_block_id).await.unwrap_or_else(|e| {
-            error!("Failed to remove oldest block {}: {}", oldest_block_id, e);
-        });
+        bm.remove_block(oldest_block_id).await?;
         debug!(
             "Removing the oldest block {}.blk",
             bm.path().join(oldest_block_id.to_string()).display()
@@ -975,6 +973,19 @@ mod tests {
             let info = entry.info().await.unwrap();
             assert_eq!(info.block_count, 1);
             assert_eq!(info.size, 524309);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_returns_error_when_removing_oldest_block_fails(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1000000).await;
+            let data_path = entry.path.join("1000000.blk");
+            std::fs::remove_file(&data_path).unwrap();
+            std::fs::create_dir(&data_path).unwrap();
+
+            assert!(entry.try_remove_oldest_block().await.is_err());
+            assert_eq!(entry.info().await.unwrap().block_count, 1);
         }
 
         #[rstest]
