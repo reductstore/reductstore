@@ -32,7 +32,7 @@ use reduct_base::too_early;
 use std::fs::OpenOptions;
 use std::io::ErrorKind::UnexpectedEof;
 use std::io::{Read, SeekFrom, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Receiver, Sender};
@@ -63,6 +63,15 @@ pub const DATA_FILE_EXT: &str = ".blk";
 pub const COMPRESSED_DESCRIPTOR_FILE_EXT: &str = ".meta.zst";
 pub const COMPRESSED_DATA_FILE_EXT: &str = ".blk.zst";
 pub const BLOCK_INDEX_FILE: &str = "blocks.idx";
+
+fn all_block_file_paths(entry_path: &Path, block_id: u64) -> [PathBuf; 4] {
+    [
+        entry_path.join(format!("{}{}", block_id, DATA_FILE_EXT)),
+        entry_path.join(format!("{}{}", block_id, DESCRIPTOR_FILE_EXT)),
+        entry_path.join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT)),
+        entry_path.join(format!("{}{}", block_id, COMPRESSED_DESCRIPTOR_FILE_EXT)),
+    ]
+}
 
 // we need 2 to avoid double sync when start a new one but not yet saved the old one when the record is written
 const WRITE_BLOCK_CACHE_SIZE: usize = 2;
@@ -427,22 +436,18 @@ impl BlockManager {
     pub async fn remove_block(&mut self, block_id: u64) -> Result<(), ReductError> {
         self.wal.append(block_id, WalEntry::RemoveBlock).await?;
 
-        let data_block_path = self.path_to_data(block_id);
-        if FILE_CACHE.try_exists(&data_block_path).await? {
-            // it can be still in WAL only
-            FILE_CACHE.remove(&data_block_path).await?;
-        }
-
-        let desc_block_path = self.path_to_desc(block_id);
-        if FILE_CACHE.try_exists(&desc_block_path).await? {
-            // it can be still in WAL only
-            FILE_CACHE.remove(&desc_block_path).await?;
+        for path in all_block_file_paths(&self.path, block_id) {
+            if FILE_CACHE.try_exists(&path).await? {
+                // The block may still exist only in WAL during recovery.
+                FILE_CACHE.remove(&path).await?;
+            }
         }
 
         self.block_index.remove_block(block_id);
         self.block_index.save().await?;
 
         self.block_cache.remove(&block_id);
+        self.decompress_cache.invalidate(&self.path, block_id).await;
 
         self.wal.remove(block_id).await?;
         Ok(())
@@ -898,15 +903,8 @@ impl BlockManager {
     }
 
     async fn invalidate_replica_block_cache(&self, block_id: u64) -> Result<(), ReductError> {
-        let paths = [
-            self.path_to_desc(block_id),
-            self.path_to_data(block_id),
-            self.path_to_compressed_desc(block_id),
-            self.path_to_compressed_data(block_id),
-        ];
-
         let mut first_err = None;
-        for path in paths {
+        for path in all_block_file_paths(&self.path, block_id) {
             if let Err(err) = FILE_CACHE.invalidate_local_cache_file(&path).await {
                 warn!(
                     "Failed to invalidate replica cache file {:?} for {}/{}: {}",
@@ -1494,6 +1492,60 @@ mod tests {
         async fn test_remove_non_existing_block(#[future] block_manager: BlockManager) {
             let mut block_manager = block_manager.await;
             block_manager.remove_block(999999).await.expect("No error");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_remove_compressed_block_cleans_files_and_caches(
+            #[future] block_manager: BlockManager,
+            block_id: u64,
+        ) {
+            let mut block_manager = block_manager.await;
+            block_manager
+                .compress_block(block_id, CompressionAlgorithm::Zstd)
+                .await
+                .unwrap();
+
+            let compressed_data_path = block_manager.path_to_compressed_data(block_id);
+            let compressed_desc_path = block_manager.path_to_compressed_desc(block_id);
+            let cached_data_path = block_manager
+                .decompress_cache
+                .get_or_decompress(
+                    block_manager.path(),
+                    block_id,
+                    DecompressedFileType::Data,
+                    &compressed_data_path,
+                )
+                .await
+                .unwrap();
+            let cached_desc_path = block_manager
+                .decompress_cache
+                .get_or_decompress(
+                    block_manager.path(),
+                    block_id,
+                    DecompressedFileType::Descriptor,
+                    &compressed_desc_path,
+                )
+                .await
+                .unwrap();
+
+            block_manager.remove_block(block_id).await.unwrap();
+
+            assert!(!block_manager.path_to_data(block_id).exists());
+            assert!(!block_manager.path_to_desc(block_id).exists());
+            assert!(!compressed_data_path.exists());
+            assert!(!compressed_desc_path.exists());
+            assert!(!cached_data_path.exists());
+            assert!(!cached_desc_path.exists());
+            assert!(block_manager.block_cache.get_read(&block_id).is_none());
+            assert!(block_manager.index().get_block(block_id).is_none());
+            assert!(
+                BlockIndex::try_load(block_manager.path.join(BLOCK_INDEX_FILE))
+                    .await
+                    .unwrap()
+                    .get_block(block_id)
+                    .is_none()
+            );
         }
     }
 
