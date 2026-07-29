@@ -51,6 +51,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414) by @vbmade2000
 - `limit` parameter in `QueryEntry` is removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1548) by @vbmade2000
 
+## 1.20.10 - 2026-07-29
+
+### Fixed
+
+- Remove compressed block files and decompression cache entries during FIFO quota eviction, [PR-1578](https://github.com/reductstore/reductstore/pull/1578)
+
 ## 1.20.9 - 2026-07-08
 
 ### Fixed
