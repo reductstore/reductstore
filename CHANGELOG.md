@@ -7,16 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Fixed
+## 1.20.11 - 2026-08-05
 
-- Invalidate cached bearer credentials after token rotation and store rotated secrets as salted hashes, [PR-1](https://github.com/reductstore/reductstore-ghsa-cg68-3m38-wq4c/pull/1)
+### Security
+
+- Invalidate cached bearer credentials after token rotation and store rotated secrets as salted hashes, [CVE-2026-0001](https://github.com/reductstore/reductstore/security/advisories/GHSA-cg68-3m38-wq4c)
 
 ## 1.20.10 - 2026-07-29
 
 ### Fixed
 
 - Remove compressed block files and decompression cache entries during FIFO quota eviction, [PR-1578](https://github.com/reductstore/reductstore/pull/1578)
-
 
 ## 1.20.9 - 2026-07-08
 
