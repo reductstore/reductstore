@@ -212,6 +212,9 @@ def test__rotate_token(base_url, session, token_name):
     assert resp.status_code == 200
     old_value = json.loads(resp.content)["value"]
 
+    resp = session.get(f"{base_url}/me", headers=auth_headers(old_value))
+    assert resp.status_code == 200
+
     resp = session.post(f"{base_url}/tokens/{token_name}/rotate")
     assert resp.status_code == 200
     new_value = json.loads(resp.content)["value"]
