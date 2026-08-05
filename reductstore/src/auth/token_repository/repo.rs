@@ -506,12 +506,14 @@ impl ManageTokens for TokenRepository {
                 .collect();
             format!("{}-{}", name, value)
         };
+        let secret = hash_token_secret(&value)?;
 
-        token.value = value.clone();
+        token.value = secret;
         token.created_at = created_at;
         token.last_access = Some(created_at);
 
         self.save_repo().await?;
+        self.clear_auth_cache();
 
         Ok(TokenCreateResponse { value, created_at })
     }
@@ -1290,8 +1292,46 @@ mod tests {
             assert!(rotated.value.starts_with("test-"));
 
             let token = repo.get_token("test").await.unwrap();
-            assert_eq!(token.value, rotated.value);
+            assert!(is_hashed_token_secret(&token.value));
+            assert_ne!(token.value, rotated.value);
+            assert!(verify_token_secret(&token.value, &rotated.value));
             assert_eq!(token.created_at, rotated.created_at);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_rotate_token_invalidates_auth_cache(#[future] repo: BoxedTokenRepository) {
+            let mut repo = repo.await;
+            let old_value = repo
+                .generate_token(
+                    "cache-token",
+                    TokenCreateRequest {
+                        permissions: Permissions::default(),
+                        ..Default::default()
+                    },
+                )
+                .await
+                .unwrap()
+                .value;
+
+            repo.validate_token(Some(&format!("Bearer {}", old_value)), None)
+                .await
+                .unwrap();
+
+            let rotated = repo.rotate_token("cache-token").await.unwrap();
+
+            let err = repo
+                .validate_token(Some(&format!("Bearer {}", old_value)), None)
+                .await
+                .err()
+                .unwrap();
+            assert_eq!(err, unauthorized!("Invalid token"));
+
+            let token = repo
+                .validate_token(Some(&format!("Bearer {}", rotated.value)), None)
+                .await
+                .unwrap();
+            assert_eq!(token.name, "cache-token");
         }
 
         #[rstest]
