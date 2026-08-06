@@ -35,7 +35,7 @@ impl ForwardSystemLogger {
             client_build: "Failed to build system bucket replica HTTP client",
             kind: ClientBuildErrorKind::InternalServerError,
         })
-        .api_token(&cfg.api_token)
+        .api_token(cfg.api_token.as_str())
         .verify_ssl(remote_verify_ssl)
         .ca_path(remote_ca_path)
         .connect_timeout(remote_timeout)
@@ -177,6 +177,7 @@ mod tests {
     fn make_event() -> SystemEvent {
         SystemEvent {
             kind: SystemEventKind::Audit,
+            replicate: true,
             event_type: "api_call".to_string(),
             timestamp: 42,
             instance: "replica-a".to_string(),

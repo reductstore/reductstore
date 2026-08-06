@@ -7,9 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+
+### Breaking Changes
+
+- To support compliance with the EU Cyber Resilience Act (CRA), standalone instances must now explicitly configure authentication with exactly one of RS_API_TOKEN or RS_INIT_API_TOKEN, or set RS_DISABLE_AUTH=true. Read-only replica behavior is unchanged, [PR-1573](https://github.com/reductstore/reductstore/pull/1573) by @rohankumardubey
+
 ### Added
 
 - Add `RS_ZENOH_BUCKET_ROUTING=key-prefix` mode to the Zenoh API: the first chunk of a sample's key expression selects the target bucket (created on demand with default settings) and the remaining chunks become the entry name, for both the subscriber and the queryable; the default `static` mode keeps the existing single-bucket behavior
+- Expose the effective instance name and role in the `/api/v1/info` response, [PR-1569](https://github.com/reductstore/reductstore/pull/1569) by @lntutor
+- Automatically create missing destination buckets during replication, [PR-1539](https://github.com/reductstore/reductstore/pull/1539) by @rohankumardubey
+- Add a replication `compression` setting (`none`, `zstd`, `gzip`, default `none`) that compresses batch payloads during transfer using HTTP `Content-Encoding`, [Issue-1348](https://github.com/reductstore/reductstore/issues/1348) by @DibbayajyotiRoy
+- Add a `processing_interval` setting to lifecycle policies that bounds how much data time a single run processes (defaults to `24 * interval` when unset), configurable via the API and `RS_LIFECYCLE_<ID>_PROCESSING_INTERVAL`, [PR-1549](https://github.com/reductstore/reductstore/pull/1549) by @Harshal875
 - Configure server-wide default bucket settings with `RS_DEFAULTS_BUCKET_*` environment variables, [PR-1535](https://github.com/reductstore/reductstore/pull/1535) by @rohankumardubey
 - Reject record writes before writing when the data folder filesystem has insufficient free disk space, in addition to the existing quota check, [PR-1525](https://github.com/reductstore/reductstore/pull/1525)
 - Support glob-like entry patterns in lifecycle task filters, including path-aware `*` and `**` wildcards and exclusion patterns, [PR-1526](https://github.com/reductstore/reductstore/pull/1526) by @upuddu
@@ -22,6 +31,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Default `RS_SYSTEM_EVENTS_QUOTA_SIZE` to 10 GB when it is not set, [PR-1556](https://github.com/reductstore/reductstore/pull/1556) by @LordAizen1
 - Allow fork pull request CI to run without protobuf setup tokens or Docker Hub credentials by vendoring `protoc` and making Docker login optional, [PR-1532](https://github.com/reductstore/reductstore/pull/1532)
 - Pipelined replication batch sending to overlap preparing the next batch with sending the current one, [PR-1527](https://github.com/reductstore/reductstore/pull/1527) by @DibbayajyotiRoy (based on [PR-1415](https://github.com/reductstore/reductstore/pull/1415) by @FirasCh3)
 - Split block manager storage logic into smaller modules by responsibility, [PR-1503](https://github.com/reductstore/reductstore/pull/1503) by @rohankumardubey
@@ -30,7 +40,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Avoid a lock inversion when deleting a replication task that emits final `$system` diagnostics by using shared outer replication repository access for removal and transaction notifications, [PR-1572](https://github.com/reductstore/reductstore/pull/1572)
+- Replicate internal `$system` events when `$system` is a replication source by notifying replication from the system-event writer; to prevent feedback loops, diagnostics of a `$system`-source replication and log messages from the replication module are excluded, [PR-1567](https://github.com/reductstore/reductstore/pull/1567) by @DibbayajyotiRoy
+- Treat the `$system` bucket as provisioned so it cannot be removed through the API, and reapply `RS_SYSTEM_EVENTS_QUOTA_SIZE` on startup instead of only at first creation, [PR-1557](https://github.com/reductstore/reductstore/pull/1557) by @LordAizen1
+- Resolve client IP from multi-hop RFC 7239 `Forwarded` headers so token IP allowlists compare against the real client instead of the proxy, [PR-1546](https://github.com/reductstore/reductstore/pull/1546) by @LordAizen1
 - Normalize bucket history timestamps when only attachment metadata entries contain records, [PR-1534](https://github.com/reductstore/reductstore/pull/1534)
+
+### Removed
+
+- Remove deprecated `each_n` query and replication API field; use the `$each_n` operator in the `when` condition instead, [Issue-1359](https://github.com/reductstore/reductstore/issues/1359), [PR-1555](https://github.com/reductstore/reductstore/pull/1555)
+- `include` and `exclude` parameters in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1497](https://github.com/reductstore/reductstore/pull/1497) by @vbmade2000
+- `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414) by @vbmade2000
+- `limit` parameter in `QueryEntry` is removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1548) by @vbmade2000
+
+## 1.20.11 - 2026-08-05
+
+### Security
+
+- Invalidate cached bearer credentials after token rotation and store rotated secrets as salted hashes, [CVE-2026-0001](https://github.com/reductstore/reductstore/security/advisories/GHSA-cg68-3m38-wq4c)
+
+## 1.20.10 - 2026-07-29
+
+### Fixed
+
+- Remove compressed block files and decompression cache entries during FIFO quota eviction, [PR-1578](https://github.com/reductstore/reductstore/pull/1578)
 
 ## 1.20.9 - 2026-07-08
 
@@ -117,10 +150,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Support object shorthand for unconditional `#ext` pipelines by expanding multi-extension objects into ordered execution steps, while keeping array-based pipeline syntax unchanged, [PR-1367](https://github.com/reductstore/reductstore/pull/1367)
 - Support strict extension pipelines in `#ext` directives with ordered step execution and backward compatibility for legacy `"#ext": { ... }` object format, [PR-1351](https://github.com/reductstore/reductstore/pull/1351)
 - Add `--version` (`-V`) CLI option to the `reductstore` server binary to print the version and exit successfully from shared launcher code, [PR-1343](https://github.com/reductstore/reductstore/pull/1343)
-
-### Removed
-
-- `each_s` parameter in `QueryBuilder` and `ReplicationSettings` are removed, [PR-1414](https://github.com/reductstore/reductstore/pull/1414) by @vbmade2000
 
 ### Changed
 

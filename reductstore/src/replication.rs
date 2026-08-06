@@ -132,7 +132,7 @@ pub trait ManageReplications {
     ) -> Result<(), ReductError>;
 
     /// Remove a replication task
-    async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
+    async fn remove_replication(&self, name: &str) -> Result<(), ReductError>;
 
     /// Update replication mode
     async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError>;
@@ -146,7 +146,7 @@ pub trait ManageReplications {
     /// # Errors
     ///
     /// A `ReductError` is returned if the notification fails.
-    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
+    async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError>;
 
     /// Start background workers if they are not running yet.
     fn start(&mut self);
@@ -156,3 +156,24 @@ pub trait ManageReplications {
 }
 
 pub(crate) use replication_repository::ReplicationRepoBuilder;
+
+pub(crate) fn prepend_when_conditions(
+    when: &mut Option<serde_json::Value>,
+    conditions: Vec<serde_json::Value>,
+) -> bool {
+    if conditions.is_empty() {
+        return false;
+    }
+
+    let condition = if conditions.len() == 1 {
+        conditions.into_iter().next().unwrap()
+    } else {
+        serde_json::json!({"$and": conditions})
+    };
+    let invalid_when = when.as_ref().is_some_and(|when| !when.is_object());
+    *when = Some(match when.take() {
+        Some(when) if when.is_object() => serde_json::json!({"$and": [condition, when]}),
+        _ => condition,
+    });
+    invalid_when
+}

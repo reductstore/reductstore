@@ -87,7 +87,7 @@ pub(super) async fn update_batched_records(
                 err_to_batched_header(&mut headers, time, &err);
             }
             Ok(new_labels) => {
-                let mut replication_repo = components.replication_repo.write().await?;
+                let replication_repo = components.replication_repo.read().await?;
                 replication_repo
                     .notify(TransactionNotification {
                         bucket: bucket_name.clone(),

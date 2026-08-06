@@ -113,6 +113,7 @@ pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> S
 
     SystemEvent {
         kind: SystemEventKind::Audit,
+        replicate: true,
         event_type: "api_call".to_string(),
         timestamp: aggregate.first_timestamp,
         instance: key.instance,
@@ -324,6 +325,7 @@ mod tests {
 
         SystemEvent {
             kind: SystemEventKind::Audit,
+            replicate: true,
             event_type: "api_call".to_string(),
             timestamp,
             instance: "instance-a".to_string(),
@@ -643,6 +645,7 @@ mod tests {
 
         tx.send(SystemEvent {
             kind: SystemEventKind::Lifecycle,
+            replicate: true,
             event_type: "lifecycle_run".to_string(),
             timestamp: 1,
             instance: "instance-a".to_string(),

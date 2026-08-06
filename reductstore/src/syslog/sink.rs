@@ -10,14 +10,29 @@
 //! five families share it.
 
 use crate::core::sync::AsyncRwLock;
+use crate::replication::TransactionNotification;
 use crate::syslog::SystemEvent;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
+use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+
+/// Late-bound callback that routes a [`TransactionNotification`] into
+/// `ManageReplications::notify`.
+pub(crate) type ReplicationNotifier = Arc<
+    dyn Fn(TransactionNotification) -> Pin<Box<dyn Future<Output = Result<(), ReductError>> + Send>>
+        + Send
+        + Sync,
+>;
 
 #[async_trait]
 pub(crate) trait LogSystemEvent {
     async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError>;
+
+    /// Register (`Some`) or clear (`None`) the replication notifier.
+    /// No-op by default; only the local writer stores it.
+    async fn set_replication_notifier(&mut self, _notifier: Option<ReplicationNotifier>) {}
 }
 
 pub(crate) type BoxedSystemLogger = Box<dyn LogSystemEvent + Send + Sync>;

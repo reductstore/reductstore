@@ -309,6 +309,23 @@ impl LifecycleRepository {
             ));
         }
 
+        if let Some(processing_interval) = &settings.processing_interval {
+            let processing_interval_us =
+                parse_duration_to_micros(processing_interval).map_err(|err| {
+                    unprocessable_entity!(
+                        "Invalid lifecycle processing_interval '{}': {}",
+                        processing_interval,
+                        err
+                    )
+                })?;
+            if processing_interval_us <= 0 {
+                return Err(unprocessable_entity!(
+                    "Lifecycle processing_interval '{}' must be positive",
+                    processing_interval
+                ));
+            }
+        }
+
         if settings.lifecycle_type == LifecycleType::Compress && settings.when.is_some() {
             return Err(unprocessable_entity!(
                 "Lifecycle type 'compress' does not support 'when' condition"
@@ -611,6 +628,22 @@ mod tests {
         },
         unprocessable_entity!("Lifecycle type 'compress' does not support 'when' condition")
     )]
+    #[case::bad_processing_interval(
+        LifecycleSettings {
+            processing_interval: Some("6hours".to_string()),
+            ..settings_fixture()
+        },
+        unprocessable_entity!(
+            "Invalid lifecycle processing_interval '6hours': [UnprocessableEntity] Invalid duration unit: hours"
+        )
+    )]
+    #[case::zero_processing_interval(
+        LifecycleSettings {
+            processing_interval: Some("0s".to_string()),
+            ..settings_fixture()
+        },
+        unprocessable_entity!("Lifecycle processing_interval '0s' must be positive")
+    )]
     #[tokio::test]
     async fn rejects_invalid_settings(
         #[future] mut repo: LifecycleRepository,
@@ -629,6 +662,44 @@ mod tests {
         let settings = LifecycleSettings {
             lifecycle_type: LifecycleType::Compress,
             when: None,
+            ..settings_fixture()
+        };
+
+        repo.create_lifecycle("test", settings.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), settings);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn creates_delete_lifecycle_with_processing_interval(
+        #[future] mut repo: LifecycleRepository,
+    ) {
+        let mut repo = repo.await;
+        let settings = LifecycleSettings {
+            processing_interval: Some("6h".to_string()),
+            ..settings_fixture()
+        };
+
+        repo.create_lifecycle("test", settings.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), settings);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn creates_compress_lifecycle_with_processing_interval(
+        #[future] mut repo: LifecycleRepository,
+    ) {
+        let mut repo = repo.await;
+        let settings = LifecycleSettings {
+            lifecycle_type: LifecycleType::Compress,
+            when: None,
+            processing_interval: Some("6h".to_string()),
             ..settings_fixture()
         };
 

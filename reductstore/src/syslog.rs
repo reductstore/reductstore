@@ -18,6 +18,7 @@ use crate::storage::engine::StorageEngine;
 use crate::storage::usage::UsageCounters;
 use aggregate::audit::BoxedSystemEventAggregator;
 use async_trait::async_trait;
+use log::error;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
 use std::sync::Arc;
@@ -25,7 +26,7 @@ use tokio::sync::Mutex;
 
 pub(crate) use aggregate::usage::UsageEventAggregator;
 pub(crate) use event::{SystemEvent, SystemEventKind};
-pub(crate) use sink::{BoxedSystemLogger, LogSystemEvent, SystemEventSink};
+pub(crate) use sink::{BoxedSystemLogger, LogSystemEvent, ReplicationNotifier, SystemEventSink};
 use system_event_logger::SystemEventLoggerBuilder;
 
 pub(crate) const AUDIT_BUCKET_NAME: &str = "$audit";
@@ -118,6 +119,39 @@ pub(crate) async fn build_logs_system_logger(
         .expect("logs system logger must build")
 }
 
+/// Reapply the configured settings to `$system` and mark it provisioned.
+///
+/// `$system` is created lazily by the local writer on the first event, so at
+/// startup it only exists on a restart. Two things have to happen there:
+///
+/// * `is_provisioned` lives in memory, so it is false again on every boot and
+///   has to be re-armed, otherwise the bucket can be removed through the API.
+/// * the settings are reapplied, so a changed `RS_SYSTEM_EVENTS_QUOTA_SIZE`
+///   takes effect on restart instead of only at first creation.
+///
+/// A replica forwards its events and keeps no local `$system`, so there is
+/// nothing to provision there.
+async fn provision_system_bucket(cfg: &Cfg, storage: &StorageEngine) {
+    if cfg.role == crate::cfg::InstanceRole::Replica {
+        return;
+    }
+
+    // Not created yet: the local writer provisions it when it writes the first
+    // event, so on a fresh start there is nothing to reapply.
+    let Ok(bucket) = storage.get_bucket(SYSTEM_BUCKET_NAME).await else {
+        return;
+    };
+    let bucket = bucket.upgrade().unwrap();
+
+    // `set_settings` refuses on a provisioned bucket, so step around the flag
+    // the same way `provision_buckets` does for user buckets.
+    bucket.set_provisioned(false);
+    if let Err(err) = bucket.set_settings(system_bucket_settings(cfg)).await {
+        error!("Failed to provision bucket '{SYSTEM_BUCKET_NAME}': {err}");
+    }
+    bucket.set_provisioned(true);
+}
+
 fn system_bucket_settings(cfg: &Cfg) -> BucketSettings {
     if let Some(quota_size) = cfg.system_events_conf.quota_size {
         BucketSettings {
@@ -162,6 +196,10 @@ pub(crate) trait SystemEventLogger: Send + Sync {
     /// every other family is written straight through the shared writer.
     fn sink(&self) -> SystemEventSink;
 
+    /// Register (`Some`) or clear (`None`) the replication notifier on the
+    /// shared writer. No-op by default (disabled collector, replicas).
+    async fn set_replication_notifier(&self, _notifier: Option<ReplicationNotifier>) {}
+
     /// Stop the owned background tasks (usage timer, log capture), draining
     /// their final events. Telemetry must never break shutdown.
     async fn stop(&self);
@@ -204,6 +242,12 @@ impl LogSystemEvent for RoutingSystemLogger {
             self.writer.write().await?.log_event(event).await
         }
     }
+
+    async fn set_replication_notifier(&mut self, notifier: Option<ReplicationNotifier>) {
+        if let Ok(mut writer) = self.writer.write().await {
+            writer.set_replication_notifier(notifier).await;
+        }
+    }
 }
 
 /// The live collector: owns the routing sink logger and every background task.
@@ -224,6 +268,12 @@ impl SystemEventLogger for EnabledSystemEventLogger {
         SystemEventSink {
             system_logger: Arc::clone(&self.sink_logger),
             instance_name: self.instance_name.clone(),
+        }
+    }
+
+    async fn set_replication_notifier(&self, notifier: Option<ReplicationNotifier>) {
+        if let Ok(mut sink_logger) = self.sink_logger.write().await {
+            sink_logger.set_replication_notifier(notifier).await;
         }
     }
 
@@ -250,6 +300,8 @@ pub(crate) async fn build_system_event_logger(
             instance_name: cfg.instance_name.clone(),
         });
     }
+
+    provision_system_bucket(cfg, &storage).await;
 
     let instance_name = cfg.instance_name.clone();
     // One shared writer for every family; the audit aggregator's flush handler
@@ -330,6 +382,7 @@ mod tests {
     fn make_event() -> SystemEvent {
         SystemEvent {
             kind: SystemEventKind::Audit,
+            replicate: true,
             event_type: "api_call".to_string(),
             timestamp: 1,
             instance: "test-instance".to_string(),
@@ -425,6 +478,7 @@ mod tests {
         logger
             .log_event(SystemEvent {
                 kind: SystemEventKind::Lifecycle,
+                replicate: true,
                 event_type: "lifecycle_run".to_string(),
                 timestamp: 100,
                 instance: "instance-1".to_string(),
@@ -480,6 +534,7 @@ mod tests {
     fn lifecycle_system_event(payload: Value, status: u16, message: &str) -> SystemEvent {
         SystemEvent {
             kind: SystemEventKind::Lifecycle,
+            replicate: true,
             event_type: "lifecycle_run".to_string(),
             timestamp: 100,
             instance: "instance-1".to_string(),
@@ -716,6 +771,112 @@ mod tests {
         assert!(!object.contains_key("error_code"));
         assert!(!object.contains_key("error_message"));
         assert!(!object.contains_key("last_processed_ts"));
+    }
+
+    /// Regression test for #1550: `$system` must behave as a provisioned bucket.
+    ///
+    /// Two guarantees, one per changed file:
+    ///
+    /// * On lazy creation the local writer marks `$system` provisioned, so it
+    ///   cannot be removed or reconfigured through the API.
+    /// * On restart `provision_system_bucket` re-arms that flag — it lives in
+    ///   memory and is lost on reload — and reapplies the configured quota, so a
+    ///   changed `RS_SYSTEM_EVENTS_QUOTA_SIZE` takes effect instead of staying
+    ///   pinned to the value from first creation.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn provisions_and_reapplies_quota_on_restart() {
+        let tmp_dir = tempdir().unwrap();
+        let mut cfg = Cfg {
+            data_path: tmp_dir.keep(),
+            ..Cfg::default()
+        };
+        cfg.system_events_conf.enabled = true;
+        cfg.system_events_conf.quota_size = Some(1_000_000_000);
+
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(cfg.data_path.clone())
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
+
+        // Lazy creation: writing the first event creates `$system`.
+        let mut repo = build_audit_logger(&cfg, Arc::clone(&storage)).await;
+        repo.log_event(make_event()).await.unwrap();
+        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
+
+        let bucket = storage
+            .get_bucket(SYSTEM_BUCKET_NAME)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        assert!(
+            bucket.is_provisioned(),
+            "the local writer must provision $system on creation"
+        );
+        assert_eq!(
+            bucket.settings().await.unwrap().quota_size,
+            Some(1_000_000_000)
+        );
+
+        // Mimic a restart: the provisioned flag lives in memory, so a reloaded
+        // engine sees it false again while the old quota still persists on disk.
+        // A second engine on the same path would block on the instance lock, so
+        // resetting the flag in place reproduces the post-reload state exactly.
+        bucket.set_provisioned(false);
+        cfg.system_events_conf.quota_size = Some(2_000_000_000);
+
+        provision_system_bucket(&cfg, &storage).await;
+
+        assert!(
+            bucket.is_provisioned(),
+            "restart must re-arm the provisioned flag"
+        );
+        assert_eq!(
+            bucket.settings().await.unwrap().quota_size,
+            Some(2_000_000_000),
+            "restart must reapply the configured system-events quota"
+        );
+    }
+
+    /// A replica keeps no local `$system`, so provisioning must leave it alone.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn provision_skips_replica() {
+        let (storage, mut cfg) = enabled_storage().await;
+
+        // Create `$system`, then drop the flag so we can tell whether a replica
+        // provision touches it.
+        let mut repo = build_audit_logger(&cfg, Arc::clone(&storage)).await;
+        repo.log_event(make_event()).await.unwrap();
+        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
+        let bucket = storage
+            .get_bucket(SYSTEM_BUCKET_NAME)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        bucket.set_provisioned(false);
+
+        cfg.role = crate::cfg::InstanceRole::Replica;
+        provision_system_bucket(&cfg, &storage).await;
+
+        assert!(
+            !bucket.is_provisioned(),
+            "a replica must not provision $system"
+        );
+    }
+
+    /// On a fresh start `$system` does not exist yet, so provisioning is a no-op
+    /// and must not panic.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn provision_noop_when_system_bucket_absent() {
+        let (storage, cfg) = enabled_storage().await;
+        // No event has been written, so `$system` is not created yet.
+        assert!(storage.get_bucket(SYSTEM_BUCKET_NAME).await.is_err());
+
+        provision_system_bucket(&cfg, &storage).await;
+
+        assert!(storage.get_bucket(SYSTEM_BUCKET_NAME).await.is_err());
     }
 
     mod routing {

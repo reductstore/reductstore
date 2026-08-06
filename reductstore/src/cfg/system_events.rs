@@ -11,6 +11,8 @@ use std::time::Duration;
 
 const DEFAULT_SYSTEM_EVENTS_ENABLED: bool = true;
 const DEFAULT_SYSTEM_EVENTS_LOG_LEVEL: Level = Level::Warn;
+/// 10 GB in SI notation, matching how the other size settings are expressed.
+const DEFAULT_SYSTEM_EVENTS_QUOTA_SIZE: u64 = 10_000_000_000;
 const DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL: bool = true;
 const DEFAULT_SYSTEM_EVENTS_REMOTE_TIMEOUT_S: u64 = 5;
 
@@ -32,7 +34,7 @@ impl Default for SystemEventsConfig {
         Self {
             enabled: DEFAULT_SYSTEM_EVENTS_ENABLED,
             log_level: Some(DEFAULT_SYSTEM_EVENTS_LOG_LEVEL),
-            quota_size: None,
+            quota_size: Some(DEFAULT_SYSTEM_EVENTS_QUOTA_SIZE),
             remote_verify_ssl: DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL,
             remote_ca_path: None,
             remote_timeout: Duration::from_secs(DEFAULT_SYSTEM_EVENTS_REMOTE_TIMEOUT_S),
@@ -55,9 +57,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 .map_or(Some(DEFAULT_SYSTEM_EVENTS_LOG_LEVEL), |level| {
                     parse_log_level(&level)
                 }),
-            quota_size: env
-                .get_optional::<ByteSize>("RS_SYSTEM_EVENTS_QUOTA_SIZE")
-                .map(|size| size.as_u64()),
+            quota_size: Some(
+                env.get_optional::<ByteSize>("RS_SYSTEM_EVENTS_QUOTA_SIZE")
+                    .map_or(DEFAULT_SYSTEM_EVENTS_QUOTA_SIZE, |size| size.as_u64()),
+            ),
             remote_verify_ssl: env
                 .get_optional("RS_SYSTEM_EVENTS_REMOTE_VERIFY_SSL")
                 .unwrap_or(DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL),
@@ -148,7 +151,7 @@ mod tests {
             SystemEventsConfig {
                 enabled: true,
                 log_level: Some(Level::Warn),
-                quota_size: None,
+                quota_size: Some(10_000_000_000),
                 remote_verify_ssl: true,
                 remote_ca_path: None,
                 remote_timeout: Duration::from_secs(5),
@@ -170,7 +173,7 @@ mod tests {
             SystemEventsConfig {
                 enabled: true,
                 log_level: Some(Level::Warn),
-                quota_size: None,
+                quota_size: Some(10_000_000_000),
                 remote_verify_ssl: true,
                 remote_ca_path: None,
                 remote_timeout: Duration::from_secs(5),

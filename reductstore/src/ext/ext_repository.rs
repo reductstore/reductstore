@@ -591,7 +591,6 @@ impl ExtRepository {
 
             let query_id = meta_entry
                 .query(QueryEntry {
-                    limit: Some(MAX_META_ATTACHMENTS + 1),
                     ..Default::default()
                 })
                 .await?;

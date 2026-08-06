@@ -37,8 +37,12 @@ async def wait_until(
 ):
     deadline = time.time() + timeout_s
     while time.time() < deadline:
-        if await predicate():
-            return
+        try:
+            if await predicate():
+                return
+        except ReductError as err:
+            if err.status_code not in (404, 409, 425):
+                raise
         await asyncio.sleep(step_s)
     raise AssertionError(f"Timed out waiting for {label}")
 

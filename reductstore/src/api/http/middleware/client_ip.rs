@@ -56,7 +56,16 @@ pub(super) fn parse_x_forwarded_for(value: &str) -> Option<IpAddr> {
 }
 
 pub(super) fn parse_forwarded_for(value: &str) -> Option<IpAddr> {
-    for part in value.split(';') {
+    // RFC 7239 allows several proxy hops separated by commas, with the
+    // originating client listed first. Within a hop the parameters are
+    // separated by semicolons. Return the first hop that carries a usable
+    // `for=` address, matching how `parse_x_forwarded_for` takes the first
+    // comma-separated element.
+    value.split(',').find_map(parse_forwarded_hop)
+}
+
+fn parse_forwarded_hop(hop: &str) -> Option<IpAddr> {
+    for part in hop.split(';') {
         let mut kv = part.splitn(2, '=');
         let key = kv.next()?.trim();
         let val = kv.next()?.trim();

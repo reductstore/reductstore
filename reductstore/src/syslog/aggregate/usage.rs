@@ -32,6 +32,7 @@ fn now_micros() -> u64 {
 fn make_event(instance: &str, entry_name: &str, payload: UsageSystemEventPayload) -> SystemEvent {
     SystemEvent {
         kind: SystemEventKind::Usage,
+        replicate: true,
         event_type: USAGE_EVENT_TYPE.to_string(),
         timestamp: now_micros(),
         instance: instance.to_string(),

@@ -1,5 +1,5 @@
 name: 'AWS Credentials and Cargo Cache'
-description: 'Configures AWS credentials via OIDC and sets up Cargo cache.'
+description: 'Configures Cargo target caching, S3-backed sccache, and a small Cargo download cache.'
 inputs:
   target:
     description: 'Target triple.'
@@ -27,6 +27,22 @@ runs:
         else
           echo "Using preset RUST_MINOR=${RUST_MINOR}"
         fi
+
+    - name: Detect S3 cache credentials
+      id: s3_cache
+      shell: bash
+      env:
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+      run: |
+        if [[ -n "${AWS_ACCESS_KEY_ID}" && -n "${AWS_SECRET_ACCESS_KEY}" ]]; then
+          echo "enabled=true" >> "$GITHUB_OUTPUT"
+          echo "S3_CARGO_CACHE_ENABLED=true" >> "$GITHUB_ENV"
+        else
+          echo "enabled=false" >> "$GITHUB_OUTPUT"
+          echo "S3_CARGO_CACHE_ENABLED=false" >> "$GITHUB_ENV"
+          echo "S3 Cargo cache is disabled because credentials are unavailable."
+        fi
     #
     #    - name: Configure AWS credentials via OIDC (org-wide role)
     #      uses: aws-actions/configure-aws-credentials@v4
@@ -35,15 +51,69 @@ runs:
     #        aws-secret-access-key: ${{ inputs.secret-access-key }}
     #        aws-region: eu-central
 
-    - name: Use cache for Cargo
+    - name: Install sccache
+      if: steps.s3_cache.outputs.enabled == 'true'
+      uses: mozilla-actions/sccache-action@v0.0.9
+
+    - name: Configure sccache
+      if: steps.s3_cache.outputs.enabled == 'true'
+      shell: bash
+      run: |
+        export RUSTC_WRAPPER=sccache
+        export SCCACHE_BUCKET=reduct-cache
+        export SCCACHE_ENDPOINT=https://fsn1.your-objectstorage.com
+        export SCCACHE_REGION=fsn1
+        export SCCACHE_S3_KEY_PREFIX="sccache/${{ github.repository }}/${{ inputs.target }}/${{ inputs.profile }}/rust${RUST_MINOR}"
+        export SCCACHE_IDLE_TIMEOUT=0
+        export AWS_ACCESS_KEY_ID="${{ inputs.access-key-id }}"
+        export AWS_SECRET_ACCESS_KEY="${{ inputs.secret-access-key }}"
+        export AWS_REGION=fsn1
+        export AWS_DEFAULT_REGION=fsn1
+
+        {
+          echo "RUSTC_WRAPPER=${RUSTC_WRAPPER}"
+          echo "SCCACHE_BUCKET=${SCCACHE_BUCKET}"
+          echo "SCCACHE_ENDPOINT=${SCCACHE_ENDPOINT}"
+          echo "SCCACHE_REGION=${SCCACHE_REGION}"
+          echo "SCCACHE_S3_KEY_PREFIX=${SCCACHE_S3_KEY_PREFIX}"
+          echo "SCCACHE_IDLE_TIMEOUT=${SCCACHE_IDLE_TIMEOUT}"
+          echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}"
+          echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}"
+          echo "AWS_REGION=${AWS_REGION}"
+          echo "AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}"
+        } >> "$GITHUB_ENV"
+
+        sccache --start-server
+
+    - name: Use cache for Cargo downloads
+      if: steps.s3_cache.outputs.enabled == 'true'
       uses: runs-on/cache@v4
       with:
         path: |
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}
+          ~/.cargo/bin/cargo-export
+        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-downloads-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-downloads-rust${{ env.RUST_MINOR }}-
+      env:
+        RUNS_ON_S3_BUCKET_CACHE: reduct-cache
+        RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com
+        AWS_ACCESS_KEY_ID: ${{ inputs.access-key-id }}
+        AWS_SECRET_ACCESS_KEY: ${{ inputs.secret-access-key }}
+        AWS_REGION: fsn1
+        AWS_DEFAULT_REGION: fsn1
+
+    - name: Use cache for Cargo target
+      if: steps.s3_cache.outputs.enabled == 'true'
+      uses: runs-on/cache@v4
+      with:
+        path: target/
+        key: ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-${{ github.sha }}
+        restore-keys: |
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-${{ hashFiles('**/Cargo.lock', '**/Cargo.toml') }}-
+          ${{ runner.os }}-${{ inputs.target }}-${{ inputs.profile }}-cargo-target-rust${{ env.RUST_MINOR }}-
       env:
         RUNS_ON_S3_BUCKET_CACHE: reduct-cache
         RUNS_ON_S3_BUCKET_ENDPOINT: https://fsn1.your-objectstorage.com

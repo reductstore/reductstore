@@ -62,7 +62,7 @@ pub(super) async fn update_batched_records(
             if let Some(res) = entry_results.get(&update.time) {
                 match res {
                     Ok(labels) => {
-                        let mut replication_repo = components.replication_repo.write().await?;
+                        let replication_repo = components.replication_repo.read().await?;
                         replication_repo
                             .notify(TransactionNotification {
                                 bucket: bucket_name.clone(),

@@ -145,7 +145,6 @@ mod tests {
     use rstest::rstest;
     use std::path::PathBuf;
     use std::sync::Arc;
-
     /// Build a bucket whose free-space provider reports a fixed number of
     /// available bytes, so the disk-space gate can be exercised deterministically.
     async fn bucket_with_free_space(
@@ -349,5 +348,62 @@ mod tests {
         let blob: &[u8] = &[0u8; 40];
         let err = write(&bucket, "test-1", 0, blob).await.err().unwrap();
         assert_eq!(err.status, ErrorCode::InternalServerError);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_fifo_quota_removes_compressed_oldest_block(path: PathBuf) {
+        let bucket = bucket(
+            BucketSettings {
+                quota_type: Some(QuotaType::NONE),
+                max_block_records: Some(1),
+                ..BucketSettings::default()
+            },
+            path,
+        )
+        .await;
+        let blob: &[u8] = &[0; 40];
+
+        write(&bucket, "entry", 1, blob).await.unwrap();
+        write(&bucket, "entry", 2, blob).await.unwrap();
+        bucket.sync_fs().await.unwrap();
+        let bucket = Arc::new(
+            Bucket::builder()
+                .path(bucket.path.clone())
+                .cfg(Cfg::default())
+                .usage_counters(Default::default())
+                .restore()
+                .await
+                .unwrap(),
+        );
+        bucket
+            .clone()
+            .compress_blocks(Some(vec!["entry".into()]), None, Some(2))
+            .await
+            .unwrap();
+
+        let compressed_data_path = bucket.path.join("entry/1.blk.zst");
+        let compressed_desc_path = bucket.path.join("entry/1.meta.zst");
+        assert!(compressed_data_path.exists());
+        assert!(compressed_desc_path.exists());
+
+        let size = bucket.clone().info().await.unwrap().info.size;
+        bucket
+            .set_settings(BucketSettings {
+                quota_type: Some(QuotaType::FIFO),
+                quota_size: Some(size + blob.len() as u64 - 1),
+                max_block_records: Some(1),
+                ..BucketSettings::default()
+            })
+            .await
+            .unwrap();
+        write(&bucket, "entry", 3, blob).await.unwrap();
+
+        assert!(crate::storage::bucket::tests::read(&bucket, "entry", 1)
+            .await
+            .is_err());
+        assert!(!compressed_data_path.exists());
+        assert!(!compressed_desc_path.exists());
+        assert!(bucket.clone().info().await.unwrap().info.size <= size + blob.len() as u64 - 1);
     }
 }

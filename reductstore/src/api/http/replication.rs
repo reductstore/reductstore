@@ -95,8 +95,9 @@ pub(super) fn create_replication_api_routes() -> axum::Router<Arc<StateKeeper>> 
 
 #[cfg(test)]
 mod tests {
-    use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
-    use reduct_base::Labels;
+    use reduct_base::msg::replication_api::{
+        ReplicationCompression, ReplicationMode, ReplicationSettings,
+    };
     use rstest::fixture;
 
     #[fixture]
@@ -108,11 +109,9 @@ mod tests {
             dst_token: Some("token".to_string()),
             entries: vec![],
             dst_prefix: String::new(),
-            include: Labels::default(),
-            exclude: Labels::default(),
-            each_n: None,
             when: None,
             mode: ReplicationMode::Enabled,
+            compression: ReplicationCompression::None,
         }
     }
 

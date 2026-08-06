@@ -133,6 +133,7 @@ async fn write_audit_event(
 
     let event = SystemEvent {
         kind: SystemEventKind::Audit,
+        replicate: true,
         event_type: "api_call".to_string(),
         timestamp: SystemTime::now()
             .duration_since(UNIX_EPOCH)

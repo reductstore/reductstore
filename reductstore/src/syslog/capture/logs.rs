@@ -45,6 +45,9 @@ fn make_event(instance: &str, snapshot: LogSnapshot) -> SystemEvent {
         line,
         message,
     } = snapshot;
+    // Replication-module logs must not replicate: a failing `$system`
+    // replication would feed itself its own error logs.
+    let replicate = !target.starts_with("reductstore::replication");
     let payload = LogSystemEventPayload {
         level: level.to_string(),
         target,
@@ -53,6 +56,7 @@ fn make_event(instance: &str, snapshot: LogSnapshot) -> SystemEvent {
     };
     SystemEvent {
         kind: SystemEventKind::Log,
+        replicate,
         event_type: LOG_EVENT_TYPE.to_string(),
         timestamp,
         instance: instance.to_string(),
@@ -259,6 +263,18 @@ mod tests {
         assert_eq!(event.payload["target"], "reductstore::test");
         assert_eq!(event.payload["file"], "syslog/log_capture.rs");
         assert_eq!(event.payload["line"], 42);
+        assert!(event.replicate, "ordinary log records replicate");
+    }
+
+    #[test]
+    fn make_event_marks_replication_module_logs_non_replicable() {
+        let mut record = snapshot(Level::Error, "replication failed");
+        record.target = "reductstore::replication::replication_sender".to_string();
+        assert!(!make_event("instance-1", record).replicate);
+
+        let mut record = snapshot(Level::Error, "storage failed");
+        record.target = "reductstore::storage::engine".to_string();
+        assert!(make_event("instance-1", record).replicate);
     }
 
     #[tokio::test]

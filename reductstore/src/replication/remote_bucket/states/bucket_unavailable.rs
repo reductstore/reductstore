@@ -28,8 +28,7 @@ impl RemoteBucketState for BucketUnavailableState {
         records: Vec<(BoxedReadRecord, Transaction)>,
     ) -> Box<dyn RemoteBucketState + Sync + Send> {
         if self.init_time.elapsed() > self.timeout {
-            let bucket = self.client.get_bucket(&self.bucket_name).await;
-            return match bucket {
+            return match self.client.get_or_create_bucket(&self.bucket_name).await {
                 Ok(bucket) => {
                     let new_state = Box::new(BucketAvailableState::new(self.client, bucket));
                     new_state.write_batch(entry, records).await
@@ -56,7 +55,7 @@ impl RemoteBucketState for BucketUnavailableState {
     }
 
     async fn probe(self: Box<Self>) -> Box<dyn RemoteBucketState + Sync + Send> {
-        match self.client.get_bucket(&self.bucket_name).await {
+        match self.client.get_or_create_bucket(&self.bucket_name).await {
             Ok(bucket) => Box::new(BucketAvailableState::new(self.client, bucket)),
             Err(err) => Box::new(BucketUnavailableState::new(
                 self.client,
@@ -93,7 +92,7 @@ mod tests {
     use crate::replication::remote_bucket::tests::{
         bucket, client, MockReductBucketApi, MockReductClientApi,
     };
-    use mockall::predicate;
+    use mockall::{predicate, Sequence};
     use reduct_base::error::{ErrorCode, ReductError};
     use rstest::rstest;
 
@@ -122,12 +121,95 @@ mod tests {
         client
             .expect_get_bucket()
             .with(predicate::eq("test_bucket"))
-            .return_once(move |_| Err(ReductError::not_found("")));
+            .return_once(move |_| Err(ReductError::bad_request("test error")));
+        client.expect_create_bucket().times(0);
 
         let state = state_without_timeout(client);
         let state = state.write_batch("test_entry", vec![]).await;
-        assert_eq!(state.last_result(), &Err(ReductError::not_found("")));
+        assert_eq!(
+            state.last_result(),
+            &Err(ReductError::bad_request("test error"))
+        );
         assert!(!state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_bucket_missing_created(
+        mut client: MockReductClientApi,
+        mut bucket: MockReductBucketApi,
+    ) {
+        bucket
+            .expect_write_batch()
+            .with(predicate::eq("test_entry"), predicate::always())
+            .return_once(|_, _| Ok(ErrorRecordMap::new()));
+        client
+            .expect_get_bucket()
+            .with(predicate::eq("test_bucket"))
+            .return_once(move |_| Err(ReductError::not_found("bucket not found")));
+        client
+            .expect_create_bucket()
+            .with(predicate::eq("test_bucket"))
+            .return_once(move |_| Ok(Box::new(bucket)));
+
+        let state = state_without_timeout(client);
+        let state = state.write_batch("test_entry", vec![]).await;
+        assert!(state.last_result().is_ok());
+        assert!(state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_bucket_missing_create_fails(mut client: MockReductClientApi) {
+        client
+            .expect_get_bucket()
+            .with(predicate::eq("test_bucket"))
+            .return_once(move |_| Err(ReductError::not_found("bucket not found")));
+        client
+            .expect_create_bucket()
+            .with(predicate::eq("test_bucket"))
+            .return_once(move |_| Err(ReductError::forbidden("denied")));
+
+        let state = state_without_timeout(client);
+        let state = state.write_batch("test_entry", vec![]).await;
+        assert_eq!(state.last_result(), &Err(ReductError::forbidden("denied")));
+        assert!(!state.is_available());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_bucket_created_concurrently(
+        mut client: MockReductClientApi,
+        mut bucket: MockReductBucketApi,
+    ) {
+        bucket
+            .expect_write_batch()
+            .with(predicate::eq("test_entry"), predicate::always())
+            .return_once(|_, _| Ok(ErrorRecordMap::new()));
+        let mut sequence = Sequence::new();
+        client
+            .expect_get_bucket()
+            .with(predicate::eq("test_bucket"))
+            .times(1)
+            .in_sequence(&mut sequence)
+            .return_once(move |_| Err(ReductError::not_found("bucket not found")));
+        client
+            .expect_create_bucket()
+            .with(predicate::eq("test_bucket"))
+            .times(1)
+            .in_sequence(&mut sequence)
+            .return_once(move |_| Err(ReductError::new(ErrorCode::Conflict, "already exists")));
+        client
+            .expect_get_bucket()
+            .with(predicate::eq("test_bucket"))
+            .times(1)
+            .in_sequence(&mut sequence)
+            .return_once(move |_| Ok(Box::new(bucket)));
+
+        let state = state_without_timeout(client);
+        let state = state.write_batch("test_entry", vec![]).await;
+        assert!(state.last_result().is_ok());
+        assert!(state.is_available());
     }
 
     #[rstest]
@@ -170,7 +252,8 @@ mod tests {
         client
             .expect_get_bucket()
             .with(predicate::eq("test_bucket"))
-            .return_once(move |_| Err(ReductError::not_found("")));
+            .return_once(move |_| Err(ReductError::bad_request("test error")));
+        client.expect_create_bucket().times(0);
 
         let state = state_without_timeout(client);
         let state = state.probe().await;

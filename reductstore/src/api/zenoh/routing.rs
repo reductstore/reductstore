@@ -6,9 +6,13 @@ use crate::cfg::zenoh::{ZenohApiConfig, ZenohBucketRouting};
 /// Maps a Zenoh key expression to a `(bucket, entry)` pair.
 #[derive(Debug, Clone)]
 pub(crate) enum BucketRouting {
-    Static { bucket: String },
+    Static {
+        bucket: String,
+    },
     /// Single-chunk keys fall back to the configured bucket.
-    KeyPrefix { fallback: String },
+    KeyPrefix {
+        fallback: String,
+    },
 }
 
 impl BucketRouting {

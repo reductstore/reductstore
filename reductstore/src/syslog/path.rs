@@ -48,6 +48,7 @@ mod tests {
     fn event(kind: SystemEventKind, instance: &str, payload: serde_json::Value) -> SystemEvent {
         SystemEvent {
             kind,
+            replicate: true,
             event_type: "t".to_string(),
             timestamp: 1,
             instance: instance.to_string(),

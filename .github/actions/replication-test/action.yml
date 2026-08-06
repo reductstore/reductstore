@@ -48,7 +48,6 @@ runs:
           --env RS_LOG_LEVEL=DEBUG \
           --env RS_API_TOKEN=${{ inputs.rs_api_token }} \
           --env RS_BUCKET_1_NAME=src \
-          --env RS_BUCKET_2_NAME=dest \
           --env RS_REPLICATION_1_NAME=replication \
           --env RS_REPLICATION_1_SRC_BUCKET=src \
           --env RS_REPLICATION_1_DST_BUCKET=dest \

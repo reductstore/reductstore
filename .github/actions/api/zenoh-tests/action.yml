@@ -72,6 +72,7 @@ runs:
         RS_ZENOH_AUTH_DICTIONARY: ${{ inputs.auth_dictionary }}
       run: |
         docker run --network=host -v ${PWD}/misc:/misc \
+          --env RS_DISABLE_AUTH=true \
           --env RS_ZENOH_ENABLED=1 \
           --env RS_ZENOH_CONFIG="${{ steps.zenoh-endpoint.outputs.config }}" \
           --env RS_ZENOH_SUB_KEYEXPRS="**" \

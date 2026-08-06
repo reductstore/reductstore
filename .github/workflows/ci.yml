@@ -65,16 +65,16 @@ jobs:
               ]
         include:
           - target: "x86_64-unknown-linux-gnu"
-            os: self-hosted
+            os: ubuntu-22.04
             compiler: "gcc"
           - target: "aarch64-unknown-linux-gnu"
-            os: self-hosted
+            os: ubuntu-22.04
             compiler: "gcc-aarch64-linux-gnu"
           - target: "armv7-unknown-linux-gnueabihf"
-            os: self-hosted
+            os: ubuntu-22.04
             compiler: "gcc-arm-linux-gnueabihf"
           - target: "x86_64-pc-windows-gnu"
-            os: self-hosted
+            os: ubuntu-22.04
             compiler: "gcc-mingw-w64-x86-64"
           - target: "x86_64-apple-darwin"
             os: macos-14
@@ -139,6 +139,8 @@ jobs:
         with:
           os: ${{ matrix.os }}
           target: ${{ matrix.target }}
+          access-key-id: ${{ secrets.S3_CACHE_ACCESS_KEY }}
+          secret-access-key: ${{ secrets.S3_CACHE_SECRET_KEY }}
 
       - name: Upload coverage to Codecov
         continue-on-error: true
@@ -202,7 +204,6 @@ jobs:
       - build_test_docker_image
     strategy:
       matrix:
-        token: [ "", "XXXX" ]
         cert_path: [ "", "/misc/certificate.crt" ]
         include:
           - cert_path: "/misc/certificate.crt"
@@ -225,7 +226,7 @@ jobs:
 
       - uses: ./.github/actions/api/http-tests
         with:
-          token: ${{ matrix.token }}
+          token: XXXX
           cert_path: ${{ matrix.cert_path }}
           url: ${{ matrix.url }}
 

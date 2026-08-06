@@ -263,6 +263,7 @@ impl LifecycleTask {
 
         let event = SystemEvent {
             kind: SystemEventKind::Lifecycle,
+            replicate: true,
             event_type: "lifecycle_run".to_string(),
             timestamp: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
@@ -666,6 +667,7 @@ pub(super) mod tests {
             older_than: "1d".to_string(),
             interval: "100ms".to_string(),
             when: None,
+            processing_interval: None,
             mode,
         };
 
@@ -711,6 +713,7 @@ pub(super) mod tests {
             older_than: "1h".to_string(),
             interval: "1h".to_string(),
             when: None,
+            processing_interval: None,
             mode: LifecycleMode::Enabled,
         }
     }

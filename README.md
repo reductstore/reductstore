@@ -13,9 +13,13 @@
   <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
 </p>
 
-ReductStore makes robotics and industrial data queryable.
+## Make robotics and industrial data queryable
 
-Store terabytes of images, sensor readings, logs, files, and ROS bags with timestamps and labels in one system, then query them by time range and context instead of stitching together a TSDB, object storage, and custom retention jobs.
+ReductStore is high-performance, time-indexed object storage for robotics and industrial IoT.
+
+Store terabytes of images, video, sensor readings, logs, files, and ROS bags in their native binary formats. Every record is organized by timestamp and can be enriched with labels, so you can retrieve exactly the data you need by time range and operational context.
+
+Instead of combining a time-series database, generic object storage, metadata indexes, and custom retention jobs, ReductStore provides one system for ingesting, organizing, retaining, and querying multimodal time-series data.
 
 ## Why Teams Pick ReductStore
 
@@ -64,7 +68,8 @@ The quickest way to get up and running is with Docker:
 ```bash
 mkdir -p ./data
 sudo chown -R 10001:10001 ./data
-docker run -p 8383:8383 -v ${PWD}/data:/data reduct/store:latest
+docker run -p 8383:8383 -v ${PWD}/data:/data \
+  -e RS_API_TOKEN=my-secret-token reduct/store:latest
 ```
 
 Or download a Linux binary directly from the latest release:
@@ -73,7 +78,7 @@ Or download a Linux binary directly from the latest release:
 curl -LO https://github.com/reductstore/reductstore/releases/latest/download/reductstore.x86_64-unknown-linux-gnu.tar.gz
 tar -xzf reductstore.x86_64-unknown-linux-gnu.tar.gz
 mkdir -p ./data
-RS_DATA_PATH=./data ./reductstore
+RS_DATA_PATH=./data RS_API_TOKEN=my-secret-token ./reductstore
 ```
 
 For a more in-depth guide, visit the **[Getting Started](https://reduct.store/docs/)** and **[Download](https://www.reduct.store/download)** sections.
@@ -86,7 +91,7 @@ import asyncio
 from reduct import Client
 
 async def main():
-    async with Client("http://localhost:8383") as client:
+    async with Client("http://localhost:8383", api_token="my-secret-token") as client:
         bucket = await client.create_bucket("my-bucket", exist_ok=True)
 
         await bucket.write(
@@ -152,14 +157,16 @@ Thanks to everyone who has contributed to ReductStore.
   <a href="https://github.com/atimin"><img src="https://avatars.githubusercontent.com/u/67068?v=4" width="48" height="48" alt="@atimin" /></a>
   <a href="https://github.com/mother-6000"><img src="https://avatars.githubusercontent.com/u/270019311?v=4" width="48" height="48" alt="@mother-6000" /></a>
   <a href="https://github.com/AnthonyCvn"><img src="https://avatars.githubusercontent.com/u/26444489?v=4" width="48" height="48" alt="@AnthonyCvn" /></a>
-  <a href="https://github.com/rohankumardubey"><img src="https://avatars.githubusercontent.com/u/82864904?v=4" width="48" height="48" alt="@rohankumardubey" /></a>
   <a href="https://github.com/DibbayajyotiRoy"><img src="https://avatars.githubusercontent.com/u/125145390?v=4" width="48" height="48" alt="@DibbayajyotiRoy" /></a>
+  <a href="https://github.com/rohankumardubey"><img src="https://avatars.githubusercontent.com/u/82864904?v=4" width="48" height="48" alt="@rohankumardubey" /></a>
   <a href="https://github.com/rtadepalli"><img src="https://avatars.githubusercontent.com/u/105760760?v=4" width="48" height="48" alt="@rtadepalli" /></a>
   <a href="https://github.com/FirasCh3"><img src="https://avatars.githubusercontent.com/u/29213889?v=4" width="48" height="48" alt="@FirasCh3" /></a>
+  <a href="https://github.com/vbmade2000"><img src="https://avatars.githubusercontent.com/u/1904995?v=4" width="48" height="48" alt="@vbmade2000" /></a>
+  <a href="https://github.com/LordAizen1"><img src="https://avatars.githubusercontent.com/u/119096690?v=4" width="48" height="48" alt="@LordAizen1" /></a>
   <a href="https://github.com/tuanhungngyn"><img src="https://avatars.githubusercontent.com/u/165829382?v=4" width="48" height="48" alt="@tuanhungngyn" /></a>
   <a href="https://github.com/upuddu"><img src="https://avatars.githubusercontent.com/u/125773480?v=4" width="48" height="48" alt="@upuddu" /></a>
   <a href="https://github.com/gitcommit90"><img src="https://avatars.githubusercontent.com/u/294273268?v=4" width="48" height="48" alt="@gitcommit90" /></a>
-  <a href="https://github.com/vbmade2000"><img src="https://avatars.githubusercontent.com/u/1904995?v=4" width="48" height="48" alt="@vbmade2000" /></a>
+  <a href="https://github.com/lntutor"><img src="https://avatars.githubusercontent.com/u/1948922?v=4" width="48" height="48" alt="@lntutor" /></a>
   <a href="https://github.com/mambaz"><img src="https://avatars.githubusercontent.com/u/3928782?v=4" width="48" height="48" alt="@mambaz" /></a>
   <a href="https://github.com/victor1234"><img src="https://avatars.githubusercontent.com/u/1102205?v=4" width="48" height="48" alt="@victor1234" /></a>
   <a href="https://github.com/aschenbecherwespe"><img src="https://avatars.githubusercontent.com/u/94011659?v=4" width="48" height="48" alt="@aschenbecherwespe" /></a>
@@ -168,4 +175,4 @@ Thanks to everyone who has contributed to ReductStore.
 
 Your support fuels our passion and drives us to keep improving.
 
-Together, let's redefine the future of blob data storage! 🚀
+Together, let's build better storage for robotics and industrial data. 🚀

@@ -35,7 +35,9 @@ pub struct Components {
     pub(crate) auth: TokenAuthorization,
     pub(crate) token_repo: AsyncRwLock<Box<dyn ManageTokens + Send + Sync>>,
     pub(crate) console: Box<dyn ManageStaticAsset + Send + Sync>,
-    pub(crate) replication_repo: AsyncRwLock<Box<dyn ManageReplications + Send + Sync>>,
+    /// `Arc`-shared so the system-event writer can hold a notify callback
+    /// into this repo.
+    pub(crate) replication_repo: Arc<AsyncRwLock<Box<dyn ManageReplications + Send + Sync>>>,
     pub(crate) lifecycle_repo: AsyncRwLock<Box<dyn ManageLifecycles + Send + Sync>>,
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
@@ -154,6 +156,12 @@ impl StateKeeper {
             error!("Failed to stop lifecycle policies: {}", err);
         }
 
+        // Detach the notifier before stopping replication so final telemetry
+        // flushes do not notify a stopped repo.
+        if let Err(err) = self.detach_replication_notifier().await {
+            error!("Failed to detach replication notifier: {}", err);
+        }
+
         if let Err(err) = self.stop_replication_tasks().await {
             error!("Failed to stop replication tasks: {}", err);
         }
@@ -165,6 +173,15 @@ impl StateKeeper {
         if let Err(err) = self.sync_storage().await {
             error!("Failed to shutdown storage: {}", err);
         }
+    }
+
+    async fn detach_replication_notifier(&self) -> Result<(), ReductError> {
+        let components = self.wait_components().await?.clone();
+        components
+            .system_events
+            .set_replication_notifier(None)
+            .await;
+        Ok(())
     }
 
     async fn stop_replication_tasks(&self) -> Result<(), ReductError> {

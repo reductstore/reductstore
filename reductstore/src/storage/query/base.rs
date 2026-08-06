@@ -9,7 +9,6 @@ use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
 use serde_json::Value;
-use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -53,16 +52,8 @@ pub(in crate::storage) trait Query {
 pub(crate) struct QueryOptions {
     /// The time to live of the query.
     pub ttl: Duration,
-    /// Only include the records that match the key-value pairs.
-    pub include: HashMap<String, String>,
-    /// Exclude the records that match the key-value pairs.
-    pub exclude: HashMap<String, String>,
     /// If true, the query will never be done
     pub continuous: bool,
-    /// The maximum number of records to return only for non-continuous queries.
-    pub limit: Option<u64>,
-    /// Return each N records
-    pub each_n: Option<u64>,
     /// Only metadata
     pub only_metadata: bool,
     /// Condition
@@ -72,18 +63,13 @@ pub(crate) struct QueryOptions {
     /// Extension part
     #[allow(dead_code)] // used in extension
     pub ext: Option<Value>,
-    // Io Config
 }
 
 impl From<QueryEntry> for QueryOptions {
     fn from(query: QueryEntry) -> QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(query.ttl.unwrap_or(Self::default().ttl.as_secs())),
-            include: query.include.unwrap_or_default(),
-            exclude: query.exclude.unwrap_or_default(),
             continuous: query.continuous.unwrap_or(false),
-            limit: query.limit,
-            each_n: query.each_n,
             only_metadata: query.only_metadata.unwrap_or(false),
             when: query.when,
             strict: query.strict.unwrap_or(false),
@@ -96,11 +82,7 @@ impl Default for QueryOptions {
     fn default() -> QueryOptions {
         QueryOptions {
             ttl: Duration::from_secs(60),
-            include: HashMap::new(),
-            exclude: HashMap::new(),
             continuous: false,
-            limit: None,
-            each_n: None,
             only_metadata: false,
             when: None,
             strict: false,

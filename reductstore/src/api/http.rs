@@ -44,6 +44,7 @@ use std::sync::Arc;
 use token::create_token_api_routes;
 use tokio::sync::mpsc::Receiver;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::decompression::RequestDecompressionLayer;
 
 #[derive(PartialEq, Clone)]
 pub struct HttpError {
@@ -258,6 +259,11 @@ impl AxumAppBuilder {
                 // UI
                 .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
                 .fallback(get(show_ui))
+                // Decompress request bodies sent with Content-Encoding (gzip, zstd),
+                // e.g. compressed replication batches. Handlers read the raw
+                // payload size from x-reduct-content-length when the
+                // content-length header is consumed by the decompression.
+                .layer(RequestDecompressionLayer::new())
                 .layer(from_fn(attach_client_ip))
                 .layer(from_fn_with_state(state_keeper.clone(), audit_requests))
                 .layer(from_fn(default_headers))
@@ -313,7 +319,9 @@ pub(crate) mod tests {
     use reduct_base::error::ReductError as BaseHttpError;
     use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
+    use reduct_base::msg::replication_api::{
+        ReplicationCompression, ReplicationMode, ReplicationSettings,
+    };
     use reduct_base::msg::server_api::ServerInfo;
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
     use rstest::fixture;
@@ -503,7 +511,7 @@ pub(crate) mod tests {
         async fn test_builder_builds_and_redirects_to_ui() {
             let cfg = Cfg {
                 data_path: tempfile::tempdir().unwrap().keep(),
-                api_token: "init-token".to_string(),
+                api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
                 api_base_path: "/".to_string(),
                 ..Cfg::default()
             };
@@ -791,7 +799,7 @@ pub(crate) mod tests {
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: AsyncRwLock::new(replication_repo),
+            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             system_events,
             ext_repo: create_ext_repository(
@@ -813,7 +821,7 @@ pub(crate) mod tests {
     async fn keeper_with_limits_impl(limits_config: LimitsConfig) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
-            api_token: "init-token".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
             ..Cfg::default()
         };
         cfg.system_events_conf.enabled = true;
@@ -885,11 +893,9 @@ pub(crate) mod tests {
                     dst_token: None,
                     entries: vec![],
                     dst_prefix: String::new(),
-                    include: Default::default(),
-                    exclude: Default::default(),
-                    each_n: None,
                     when: None,
                     mode: ReplicationMode::Enabled,
+                    compression: ReplicationCompression::None,
                 },
             )
             .await
@@ -909,7 +915,7 @@ pub(crate) mod tests {
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: AsyncRwLock::new(replication_repo),
+            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             system_events,
             ext_repo: create_ext_repository(
@@ -940,7 +946,7 @@ pub(crate) mod tests {
     pub(crate) async fn keeper_with_engine_limit(max_storage_size: u64) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
-            api_token: "init-token".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
             ..Cfg::default()
         };
         cfg.engine_config.max_storage_size = Some(max_storage_size);
@@ -1001,7 +1007,7 @@ pub(crate) mod tests {
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: AsyncRwLock::new(replication_repo),
+            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             ext_repo: create_ext_repository(
                 None,

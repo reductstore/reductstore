@@ -57,6 +57,10 @@ pub struct LifecycleSettings {
     /// When condition.
     #[serde(default)]
     pub when: Option<Value>,
+    /// Maximum timestamp range processed in one run, e.g. "12h" or "1d".
+    /// If not set, the run window defaults to 24 times the interval.
+    #[serde(default)]
+    pub processing_interval: Option<String>,
     /// Lifecycle mode.
     #[serde(default)]
     pub mode: LifecycleMode,
@@ -71,6 +75,7 @@ impl Default for LifecycleSettings {
             older_than: String::default(),
             interval: default_lifecycle_interval(),
             when: Option::default(),
+            processing_interval: Option::default(),
             mode: LifecycleMode::default(),
         }
     }
@@ -174,6 +179,39 @@ mod tests {
         .unwrap();
 
         assert_eq!(settings.mode, LifecycleMode::Enabled);
+    }
+
+    #[test]
+    fn lifecycle_settings_processing_interval_defaults_to_none() {
+        let settings: LifecycleSettings = serde_json::from_str(
+            r#"{
+                "type": "delete",
+                "bucket": "bucket-1",
+                "older_than": "1d"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.processing_interval, None);
+    }
+
+    #[test]
+    fn lifecycle_settings_processing_interval_roundtrip() {
+        let settings: LifecycleSettings = serde_json::from_str(
+            r#"{
+                "type": "delete",
+                "bucket": "bucket-1",
+                "older_than": "1d",
+                "processing_interval": "12h"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.processing_interval, Some("12h".to_string()));
+
+        let serialized = serde_json::to_string(&settings).unwrap();
+        let deserialized: LifecycleSettings = serde_json::from_str(&serialized).unwrap();
+        assert_eq!(deserialized, settings);
     }
 
     #[test]

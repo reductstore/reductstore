@@ -27,8 +27,23 @@ pub(crate) async fn processing_window(
     let (first_record_start, effective_cutoff_stop) =
         matching_record_window(settings, context, cutoff_stop).await?;
 
+    let processing_interval_us = settings
+        .processing_interval
+        .as_ref()
+        .map(|interval| parse_duration_to_micros(interval))
+        .transpose()?
+        .map(|interval| interval.max(0) as u64);
+
     if !context.system_events_enabled {
-        let stop = effective_cutoff_stop;
+        // Without persisted progress, the processing interval still bounds
+        // each run: processed data becomes ineligible, so the window
+        // advances anyway.
+        let stop = match processing_interval_us {
+            Some(interval) => first_record_start
+                .saturating_add(interval)
+                .min(effective_cutoff_stop),
+            None => effective_cutoff_stop,
+        };
         return Ok(ProcessingWindow {
             start: Some(first_record_start.min(stop)),
             stop: Some(stop),
@@ -38,7 +53,7 @@ pub(crate) async fn processing_window(
     }
 
     let interval_us = parse_duration_to_micros(&settings.interval)?.max(0) as u64;
-    let data_window = interval_us.saturating_mul(24);
+    let data_window = processing_interval_us.unwrap_or_else(|| interval_us.saturating_mul(24));
     let last_processed = read_progress(
         &context.storage,
         &context.system_event_instance,
@@ -411,6 +426,73 @@ pub(super) mod tests {
         assert_eq!(window.stop, Some(101));
         assert_eq!(window.last_processed_ts, Some(101));
         assert!(window.reaches_cutoff);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn processing_window_uses_processing_interval_instead_of_default_window() {
+        let storage = storage().await;
+        let bucket = storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut settings = settings_fixture();
+        settings.interval = "1s".to_string();
+        settings.processing_interval = Some("2s".to_string());
+        write_lifecycle_stats(&storage, "instance-1", "policy-1", 1_000_000)
+            .await
+            .unwrap();
+        write(&bucket, "entry-1", 50, b"old").await.unwrap();
+        write(&bucket, "entry-1", 50_000_000, b"newer")
+            .await
+            .unwrap();
+
+        let window = processing_window(
+            &settings,
+            &LifecycleContext::new(storage, true, "instance-1".to_string()),
+            "policy-1",
+            u64::MAX,
+        )
+        .await
+        .unwrap();
+
+        // The window advances by processing_interval (2s), not 24 * interval (24s).
+        assert_eq!(window.start, Some(50));
+        assert_eq!(window.stop, Some(3_000_000));
+        assert_eq!(window.last_processed_ts, Some(3_000_000));
+        assert!(!window.reaches_cutoff);
+    }
+
+    #[tokio::test]
+    async fn processing_window_clamps_full_range_to_processing_interval_without_system_events() {
+        let storage = storage().await;
+        let bucket = storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        let mut settings = settings_fixture();
+        settings.processing_interval = Some("2s".to_string());
+        write(&bucket, "entry-1", 50, b"old").await.unwrap();
+        write(&bucket, "entry-1", 50_000_000, b"newer")
+            .await
+            .unwrap();
+
+        let window = processing_window(
+            &settings,
+            &LifecycleContext::new(storage, false, "unknown".to_string()),
+            "policy-1",
+            u64::MAX,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(window.start, Some(50));
+        assert_eq!(window.stop, Some(2_000_050));
+        assert_eq!(window.last_processed_ts, None);
+        assert!(!window.reaches_cutoff);
     }
 
     pub(crate) async fn write_lifecycle_stats(
