@@ -20,7 +20,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         storage: Arc<StorageEngine>,
         system_event_sink: SystemEventSink,
     ) -> Result<Box<dyn ManageReplications + Send + Sync>, ReductError> {
-        let mut repo = ReplicationRepoBuilder::new(self.cfg.clone())
+        let repo = ReplicationRepoBuilder::new(self.cfg.clone())
             .with_system_event_sink(system_event_sink)
             .build(Arc::clone(&storage))
             .await;
@@ -596,7 +596,7 @@ mod tests {
             .create_bucket("bucket1", Default::default())
             .await
             .unwrap();
-        let mut repo = create_replication_repo(
+        let repo = create_replication_repo(
             Arc::new(storage),
             Cfg {
                 replication_conf: ReplicationConfig {
@@ -704,7 +704,7 @@ mod tests {
             .create_bucket("bucket1", Default::default())
             .await
             .unwrap();
-        let mut repo = create_replication_repo(
+        let repo = create_replication_repo(
             storage.clone(),
             Cfg {
                 replication_conf: ReplicationConfig {
@@ -786,7 +786,7 @@ mod tests {
             .create_bucket("bucket1", Default::default())
             .await
             .unwrap();
-        let mut repo = create_replication_repo(
+        let repo = create_replication_repo(
             storage.clone(),
             Cfg {
                 replication_conf: ReplicationConfig {

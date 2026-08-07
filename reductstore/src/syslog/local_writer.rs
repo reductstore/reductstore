@@ -287,6 +287,73 @@ mod tests {
         );
     }
 
+    /// Regression test for #1593: updating a replication task must not hold
+    /// the outer `replication_repo` lock across the awaited update, or the
+    /// `$system` event notifier (which also needs the outer lock) times out.
+    ///
+    /// The fixed HTTP handler (`api/http/replication/update.rs`) now acquires
+    /// only `replication_repo.read()` before calling `update_replication`,
+    /// because `ManageReplications::update_replication` takes `&self` and
+    /// relies on the repo's own internal locking. This test mirrors that
+    /// handler by driving the update through a read guard concurrently with
+    /// a `$system` event write, and asserts both complete under a tight
+    /// rwlock timeout. If `update_replication` ever regresses back to
+    /// `&mut self`, this test stops compiling (a read guard cannot provide
+    /// `&mut self`); if the handler ever regresses back to `.write()`, this
+    /// scenario is exactly what would reintroduce the timeout from the
+    /// issue.
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn concurrent_replication_update_does_not_block_system_event_notification(
+        #[future] storage: Arc<StorageEngine>,
+    ) {
+        let _restore_timeout = RestoreRwLockTimeout(rwlock_timeout());
+        set_rwlock_timeout(Duration::from_millis(20));
+
+        let storage = storage.await;
+        let repo = system_replication_repo(Arc::clone(&storage)).await;
+        let mut writer = writer(storage);
+        writer
+            .set_replication_notifier(Some(notifier_for(&repo)))
+            .await;
+
+        let update_repo = Arc::clone(&repo);
+        let update = async move {
+            update_repo
+                .read()
+                .await
+                .unwrap()
+                .update_replication(
+                    "sys-replication",
+                    ReplicationSettings {
+                        src_bucket: SYSTEM_BUCKET_NAME.to_string(),
+                        dst_bucket: "dst-bucket".to_string(),
+                        dst_host: "http://localhost".to_string(),
+                        dst_token: None,
+                        entries: vec![],
+                        dst_prefix: String::new(),
+                        when: None,
+                        mode: ReplicationMode::Enabled,
+                        compression: Default::default(),
+                    },
+                )
+                .await
+        };
+        let notify = writer.log_event(system_event(SystemEventKind::Usage, true));
+
+        let (update_result, log_result) = tokio::join!(update, notify);
+        update_result.expect("update_replication must not be blocked by the notifier");
+        log_result.expect("the system event write itself must always succeed");
+
+        sleep(Duration::from_millis(50)).await;
+        assert_eq!(
+            pending_records(&repo).await,
+            1,
+            "a concurrent replication update must not drop the system-event replication notification"
+        );
+    }
+
     #[rstest]
     #[case::replications(SystemEventKind::Replication)]
     #[case::logs(SystemEventKind::Log)]
