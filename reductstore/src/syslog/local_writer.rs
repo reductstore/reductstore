@@ -287,21 +287,7 @@ mod tests {
         );
     }
 
-    /// Regression test for #1593: updating a replication task must not hold
-    /// the outer `replication_repo` lock across the awaited update, or the
-    /// `$system` event notifier (which also needs the outer lock) times out.
-    ///
-    /// The fixed HTTP handler (`api/http/replication/update.rs`) now acquires
-    /// only `replication_repo.read()` before calling `update_replication`,
-    /// because `ManageReplications::update_replication` takes `&self` and
-    /// relies on the repo's own internal locking. This test mirrors that
-    /// handler by driving the update through a read guard concurrently with
-    /// a `$system` event write, and asserts both complete under a tight
-    /// rwlock timeout. If `update_replication` ever regresses back to
-    /// `&mut self`, this test stops compiling (a read guard cannot provide
-    /// `&mut self`); if the handler ever regresses back to `.write()`, this
-    /// scenario is exactly what would reintroduce the timeout from the
-    /// issue.
+    /// Regression test for #1593.
     #[rstest]
     #[tokio::test]
     #[serial]
