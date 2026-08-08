@@ -263,7 +263,7 @@ pub(crate) struct ReplicationRepository {
 #[async_trait]
 impl ManageReplications for ReplicationRepository {
     async fn create_replication(
-        &mut self,
+        &self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
@@ -279,7 +279,7 @@ impl ManageReplications for ReplicationRepository {
     }
 
     async fn update_replication(
-        &mut self,
+        &self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
@@ -350,7 +350,7 @@ impl ManageReplications for ReplicationRepository {
     }
 
     async fn set_replication_provisioned(
-        &mut self,
+        &self,
         name: &str,
         provisioned: bool,
     ) -> Result<(), ReductError> {
@@ -382,7 +382,7 @@ impl ManageReplications for ReplicationRepository {
         self.remove_transaction_logs_for_replication(name).await
     }
 
-    async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
+    async fn set_mode(&self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
         let mut guard = self.replications.write().await?;
         let replication = guard.get_mut(name).ok_or_else(|| {
             ReductError::not_found(&format!("Replication '{}' does not exist", name))
@@ -540,7 +540,7 @@ impl ReplicationRepository {
     }
 
     async fn create_or_update_replication_task(
-        &mut self,
+        &self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {

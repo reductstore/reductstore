@@ -20,7 +20,7 @@ impl ReadOnlyReplicationRepository {
 #[async_trait]
 impl ManageReplications for ReadOnlyReplicationRepository {
     async fn create_replication(
-        &mut self,
+        &self,
         _name: &str,
         _settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
@@ -28,7 +28,7 @@ impl ManageReplications for ReadOnlyReplicationRepository {
     }
 
     async fn update_replication(
-        &mut self,
+        &self,
         _name: &str,
         _settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
@@ -57,7 +57,7 @@ impl ManageReplications for ReadOnlyReplicationRepository {
     }
 
     async fn set_replication_provisioned(
-        &mut self,
+        &self,
         _name: &str,
         _provisioned: bool,
     ) -> Result<(), ReductError> {
@@ -70,7 +70,7 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         Err(forbidden!("Cannot remove replication in read-only mode"))
     }
 
-    async fn set_mode(&mut self, _name: &str, _mode: ReplicationMode) -> Result<(), ReductError> {
+    async fn set_mode(&self, _name: &str, _mode: ReplicationMode) -> Result<(), ReductError> {
         Err(forbidden!(
             "Cannot update replication mode in read-only mode"
         ))

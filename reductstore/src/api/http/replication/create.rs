@@ -20,7 +20,7 @@ pub(super) async fn create_replication(
         .await?;
     components
         .replication_repo
-        .write()
+        .read()
         .await?
         .create_replication(&replication_name, settings.into())
         .await?;
