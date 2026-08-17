@@ -42,9 +42,9 @@ dependencies = [
 
 [[package]]
 name = "aes-siv"
-version = "0.8.0-rc.3"
+version = "0.8.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c961e5c9c716aed8bcbf7bcfce11474e25816935b4a3a93d454f78d282137531"
+checksum = "4f60ec3717e40f849d065676ef76a0fbd76ed6c300b18cc70a9a3bde80d7c8e8"
 dependencies = [
  "aead",
  "aes 0.9.2",
