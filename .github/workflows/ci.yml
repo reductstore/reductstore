@@ -195,6 +195,7 @@ jobs:
           exit-code: '1'
           severity: CRITICAL,HIGH
           ignore-unfixed: true
+          trivyignores: .trivyignore
 
   http_api_tests:
     name: HTTP API Tests
