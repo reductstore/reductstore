@@ -14,18 +14,6 @@ RUN mkdir -p /data && chown 10001:10001 /data
 
 FROM debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2
 
-RUN apt-get update && apt-get install -y --no-install-recommends --only-upgrade \
-    bsdutils \
-    libblkid1 \
-    liblastlog2-2 \
-    libmount1 \
-    libsmartcols1 \
-    libuuid1 \
-    login \
-    mount \
-    util-linux \
-    && rm -rf /var/lib/apt/lists/*
-
 # Binaries are prepared on GitHub runner.
 COPY .image-build/usr/local/bin/reductstore /usr/local/bin/reductstore
 COPY .image-build/usr/local/bin/reduct-cli /usr/local/bin/reduct-cli
