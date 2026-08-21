@@ -3,6 +3,7 @@
 
 use crate::api::limits::LimitScope;
 use crate::api::zenoh::attachments::QueryAttachments;
+use crate::api::zenoh::routing::BucketRouting;
 use crate::api::Components;
 use crate::cfg::io::IoConfig;
 use crate::cfg::zenoh::ZenohApiConfig;
@@ -19,19 +20,16 @@ use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
 /// Queryable pipeline for handling Zenoh queries against ReductStore.
-///
-/// All queries target a fixed bucket configured via `RS_ZENOH_BUCKET`.
-/// The full Zenoh key expression becomes the entry name.
 pub(crate) struct QueryablePipeline {
     components: Arc<Components>,
-    bucket: String,
+    routing: BucketRouting,
 }
 
 impl QueryablePipeline {
     pub(crate) fn new(config: ZenohApiConfig, components: Arc<Components>) -> Self {
         QueryablePipeline {
             components,
-            bucket: config.bucket.clone(),
+            routing: BucketRouting::from_config(&config),
         }
     }
 
@@ -44,8 +42,9 @@ impl QueryablePipeline {
             .map_err(|err| err.to_string())?;
 
         info!(
-            "Zenoh queryable ready (storage version {}): bucket='{}'",
-            server_info.version, self.bucket
+            "Zenoh queryable ready (storage version {}): {}",
+            server_info.version,
+            self.routing.describe()
         );
         Ok(())
     }
@@ -73,20 +72,20 @@ impl QueryablePipeline {
         params: &HashMap<String, String>,
         attachments: &QueryAttachments,
     ) -> Result<QueryResult, QueryError> {
-        let entry_name = key_expr.trim_matches('/');
+        let (bucket_name, entry_name) = self.routing.resolve(key_expr);
 
         debug!(
             "Handling Zenoh query: bucket={} entry={} when={:?}",
-            self.bucket, entry_name, attachments.when
+            bucket_name, entry_name, attachments.when
         );
 
         let bucket = self
             .components
             .storage
-            .get_bucket(&self.bucket)
+            .get_bucket(bucket_name)
             .await?
             .upgrade()?;
-        let entry = bucket.get_entry(&entry_name).await?.upgrade()?;
+        let entry = bucket.get_entry(entry_name).await?.upgrade()?;
 
         if let Some(ts) = parse_timestamp(params)? {
             let reader = entry.begin_read(ts).await?;
