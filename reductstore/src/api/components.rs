@@ -364,6 +364,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    #[serial]
     async fn test_sync_storage(#[future] keeper: Arc<StateKeeper>) {
         let keeper = keeper.await;
         let components = keeper.get_anonymous().await.unwrap();

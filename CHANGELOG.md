@@ -39,6 +39,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Fix the `#[task]` proc macro build after the `syn` 3 update by ignoring newly added `ItemFn` fields, update `h2` to resolve RUSTSEC-2026-0258 in CI, and suppress the current Debian base-image CVE until a fixed image digest is available, [PR-1598](https://github.com/reductstore/reductstore/pull/1598)
 - Avoid blocking `$system` event replication notifications while a replication task is being created, updated, or has its mode changed, by using shared outer replication repository access for those operations instead of exclusive access, the same pattern already used for removal, [PR-1594](https://github.com/reductstore/reductstore/pull/1594) by @vjymisal0
 - Avoid a lock inversion when deleting a replication task that emits final `$system` diagnostics by using shared outer replication repository access for removal and transaction notifications, [PR-1572](https://github.com/reductstore/reductstore/pull/1572)
 - Replicate internal `$system` events when `$system` is a replication source by notifying replication from the system-event writer; to prevent feedback loops, diagnostics of a `$system`-source replication and log messages from the replication module are excluded, [PR-1567](https://github.com/reductstore/reductstore/pull/1567) by @DibbayajyotiRoy
