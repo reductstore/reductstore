@@ -41,7 +41,7 @@ use tokio::sync::OwnedSemaphorePermit;
 use tokio::task::JoinHandle;
 
 pub(crate) use builder::EntryBuilder;
-pub(crate) use pattern::entry_matches_pattern;
+pub(crate) use pattern::{entry_matches_pattern, matches_patterns};
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,

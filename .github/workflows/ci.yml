@@ -242,12 +242,19 @@ jobs:
           - name: "basic"
             auth_dictionary: ""
             tls_root_ca: ""
+            routing_mode: "legacy"
           - name: "with-auth-dictionary"
             auth_dictionary: "testuser:testpassword"
             tls_root_ca: ""
+            routing_mode: "legacy"
           - name: "with-tls"
             auth_dictionary: ""
             tls_root_ca: "use-misc-cert"
+            routing_mode: "legacy"
+          - name: "with-indexed-routing"
+            auth_dictionary: ""
+            tls_root_ca: ""
+            routing_mode: "indexed"
     timeout-minutes: 5
     env:
       DOCKER_USER: ${{ secrets.DOCKER_USER }}
@@ -274,6 +281,7 @@ jobs:
         with:
           auth_dictionary: ${{ matrix.auth_dictionary }}
           tls_root_ca: ${{ steps.tls.outputs.cert }}
+          routing_mode: ${{ matrix.routing_mode }}
 
   migration_test:
     name: Migration Tests

@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Add `RS_ZENOH_BUCKET_ROUTING=key-prefix` mode to the Zenoh API: the first chunk of a sample's key expression selects the target bucket (created on demand with default settings) and the remaining chunks become the entry name, for both the subscriber and the queryable; the default `static` mode keeps the existing single-bucket behavior
+- Configure the Zenoh API as `RS_ZENOH_SUB_<ID>_*` and `RS_ZENOH_QUERY_<ID>_*` blocks, each declaring one or more key expressions (`_KEYEXPRS`, comma separated) and its own target bucket (`_BUCKET`); `_ROUTING=key-prefix` additionally lets the first chunk of a key expression select the bucket, bounded by `_BUCKET_ALLOWLIST` and, for subscribers, `_ALLOW_BUCKET_CREATION`. The unindexed `RS_ZENOH_BUCKET` / `RS_ZENOH_SUB_KEYEXPRS` / `RS_ZENOH_QUERY_KEYEXPRS` / `RS_ZENOH_QUERY_LOCALITY` settings keep working as a single static block when no indexed variable is set, [Issue-1590](https://github.com/reductstore/reductstore/issues/1590)
 - Expose the effective instance name and role in the `/api/v1/info` response, [PR-1569](https://github.com/reductstore/reductstore/pull/1569) by @lntutor
 - Automatically create missing destination buckets during replication, [PR-1539](https://github.com/reductstore/reductstore/pull/1539) by @rohankumardubey
 - Add a replication `compression` setting (`none`, `zstd`, `gzip`, default `none`) that compresses batch payloads during transfer using HTTP `Content-Encoding`, [Issue-1348](https://github.com/reductstore/reductstore/issues/1348) by @DibbayajyotiRoy
