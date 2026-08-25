@@ -26,6 +26,7 @@ use crate::cfg::system_events::SystemEventsConfig;
 #[cfg(feature = "zenoh-api")]
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::cache::Cache;
+use crate::core::deployment_uid::DeploymentUid;
 use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
@@ -202,6 +203,14 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
             .backend_type(self.remote_storage_config().backend_type.clone())
             .local_data_path(self.data_path());
         builder.try_build().await
+    }
+
+    fn requires_deployment_uid(&self) -> bool {
+        false
+    }
+
+    async fn validate_deployment_uid(&self, _uid: DeploymentUid) -> Result<(), ReductError> {
+        Ok(())
     }
     fn static_extensions(&self, _settings: ExtSettings) -> Vec<Box<dyn IoExtension + Send + Sync>> {
         vec![]
@@ -432,6 +441,16 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
     pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
+        if self.ext_cfg.requires_deployment_uid() {
+            let uid = DeploymentUid::load_or_create(
+                &data_path,
+                self.cfg.role.clone(),
+                self.cfg.lock_file_config.polling_interval,
+                self.cfg.lock_file_config.timeout,
+            )
+            .await?;
+            self.ext_cfg.validate_deployment_uid(uid).await?;
+        }
         // One shared counters instance: the engine increments it at its choke
         // points, the usage aggregator drains it.
         let usage_counters = Arc::new(UsageCounters::default());
