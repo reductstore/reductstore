@@ -21,7 +21,7 @@ pub(super) async fn set_mode(
 
     components
         .replication_repo
-        .write()
+        .read()
         .await?
         .set_mode(&replication_name, payload.0.mode)
         .await?;

@@ -19,6 +19,7 @@ pub fn task(attr: TokenStream, item: TokenStream) -> TokenStream {
         vis,
         sig,
         block,
+        ..
     } = parse_macro_input!(item as ItemFn);
 
     if sig.asyncness.is_some() {
