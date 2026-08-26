@@ -7,14 +7,14 @@ use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::fmt::{Display, Formatter};
 use std::io::{Read, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use uuid::Uuid;
 
 const STORE_ID_FILE: &str = ".uuid";
-static BOOT_NODE_ID: LazyLock<String> = LazyLock::new(|| format!("boot-{}", Uuid::new_v4()));
+static RUN_ID: LazyLock<String> = LazyLock::new(|| Uuid::new_v4().to_string());
 
 /// A stable identifier for a ReductStore dataset.
 ///
@@ -58,34 +58,34 @@ impl StoreId {
         self.0
     }
 
-    async fn create(data_path: &Path, path: &std::path::PathBuf) -> Result<Self, ReductError> {
+    async fn create(data_path: &Path, path: &PathBuf) -> Result<Self, ReductError> {
         FILE_CACHE.create_dir_all(&data_path.to_path_buf()).await?;
 
         let id = Self(Uuid::new_v4());
-        let mut descriptor = FILE_CACHE.write_or_create(path, SeekFrom::Start(0)).await?;
-        descriptor.set_len(0)?;
-        descriptor.write_all(id.to_string().as_bytes())?;
-        descriptor.sync_all().await?;
+        let mut file = FILE_CACHE.write_or_create(path, SeekFrom::Start(0)).await?;
+        file.set_len(0)?;
+        write!(file, "{id}")?;
+        file.sync_all().await?;
         Ok(id)
     }
 
-    async fn read(path: &std::path::PathBuf) -> Result<Self, ReductError> {
-        let mut descriptor = FILE_CACHE.read(path, SeekFrom::Start(0)).await?;
+    async fn read(path: &PathBuf) -> Result<Self, ReductError> {
+        let mut file = FILE_CACHE.read(path, SeekFrom::Start(0)).await?;
         let mut value = String::new();
-        descriptor.read_to_string(&mut value)?;
-        let id = Uuid::parse_str(&value).map_err(|_| {
-            internal_server_error!(
-                "Store ID file '{}' does not contain a canonical UUID",
-                path.display()
-            )
-        })?;
-        if id.to_string() != value {
-            return Err(internal_server_error!(
-                "Store ID file '{}' does not contain a canonical UUID",
-                path.display()
-            ));
+        file.read_to_string(&mut value)?;
+        let id = Uuid::parse_str(&value).map_err(|_| Self::invalid_file(path))?;
+        if id.to_string() == value {
+            Ok(Self(id))
+        } else {
+            Err(Self::invalid_file(path))
         }
-        Ok(Self(id))
+    }
+
+    fn invalid_file(path: &Path) -> ReductError {
+        internal_server_error!(
+            "Store ID file '{}' does not contain a canonical UUID",
+            path.display()
+        )
     }
 }
 
@@ -102,34 +102,9 @@ impl Display for StoreId {
 pub struct NodeId(String);
 
 impl NodeId {
-    /// Resolve the node ID from the instance name, machine ID hash with boot identifier, or boot identifier.
-    pub fn from_environment() -> Self {
-        Self::from_values(
-            std::env::var("RS_INSTANCE_NAME").ok().as_deref(),
-            machine_id().as_deref(),
-            BOOT_NODE_ID.as_str(),
-        )
-    }
-
-    fn from_values(instance_name: Option<&str>, machine_id: Option<&str>, boot_id: &str) -> Self {
-        let id = instance_name
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_string)
-            .or_else(|| {
-                machine_id
-                    .map(str::trim)
-                    .filter(|id| !id.is_empty())
-                    .map(|id| {
-                        format!(
-                            "{}-{}",
-                            hex::encode(ring::digest::digest(&ring::digest::SHA256, id.as_bytes())),
-                            boot_id
-                        )
-                    })
-            })
-            .unwrap_or_else(|| boot_id.to_string());
-        Self(id)
+    /// Build a node ID from the resolved instance name and the process run ID.
+    pub fn from_instance_name(instance_name: &str) -> Self {
+        Self(format!("instance:{instance_name}:run:{}", RUN_ID.as_str()))
     }
 }
 
@@ -139,21 +114,19 @@ impl Display for NodeId {
     }
 }
 
-fn machine_id() -> Option<String> {
-    std::fs::read_to_string("/etc/machine-id").ok()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::backend::Backend;
     use crate::cfg::InstanceRole;
     use crate::core::file_cache::FILE_CACHE;
+    use serial_test::serial;
     use std::fs;
     use std::time::Duration;
     use tokio::time::sleep;
 
     #[tokio::test]
+    #[serial]
     async fn persists_store_id_for_primary_and_reuses_it_for_replica() {
         let directory = tempfile::tempdir().unwrap();
         configure_file_cache(directory.path()).await;
@@ -185,6 +158,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[serial]
     async fn replica_retries_until_primary_persists_store_id() {
         let directory = tempfile::tempdir().unwrap();
         configure_file_cache(directory.path()).await;
@@ -214,7 +188,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn replica_rejects_missing_uid_after_timeout() {
+    #[serial]
+    async fn replica_rejects_missing_uuid_after_timeout() {
         let directory = tempfile::tempdir().unwrap();
         configure_file_cache(directory.path()).await;
 
@@ -231,7 +206,8 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_noncanonical_persisted_uid() {
+    #[serial]
+    async fn rejects_noncanonical_persisted_uuid() {
         let directory = tempfile::tempdir().unwrap();
         configure_file_cache(directory.path()).await;
         fs::write(directory.path().join(".uuid"), "invalid").unwrap();
@@ -247,37 +223,19 @@ mod tests {
 
         assert!(error.to_string().contains("canonical UUID"));
     }
-
     #[test]
-    fn node_id_prefers_instance_name() {
-        assert_eq!(
-            NodeId::from_values(Some("node-a"), Some("machine-id"), "boot-id").to_string(),
-            "node-a"
-        );
+    fn node_id_formats_instance_and_run_id() {
+        let node_id = NodeId::from_instance_name("edge-pc-1").to_string();
+
+        assert!(node_id.starts_with("instance:edge-pc-1:run:"));
     }
 
     #[test]
-    fn node_id_combines_machine_hash_with_boot_id() {
-        assert_eq!(
-            NodeId::from_values(None, Some("machine-id"), "boot-id").to_string(),
-            "626a34be1bfdb1d11229f71a3a8098dc935a42f7fabe0c45d37f73d58224c559-boot-id"
-        );
-    }
+    fn node_ids_differ_per_process_run() {
+        let node_id = NodeId::from_instance_name("edge-pc-1").to_string();
+        let run_uuid = node_id.strip_prefix("instance:edge-pc-1:run:").unwrap();
 
-    #[test]
-    fn node_ids_differ_for_instances_on_same_machine() {
-        let first = NodeId::from_values(None, Some("machine-id"), "boot-a");
-        let second = NodeId::from_values(None, Some("machine-id"), "boot-b");
-
-        assert_ne!(first, second);
-    }
-
-    #[test]
-    fn node_id_uses_boot_id_without_machine_identity() {
-        assert_eq!(
-            NodeId::from_values(Some("  "), None, "boot-id").to_string(),
-            "boot-id"
-        );
+        assert!(uuid::Uuid::parse_str(run_uuid).is_ok());
     }
 
     async fn configure_file_cache(path: &std::path::Path) {
