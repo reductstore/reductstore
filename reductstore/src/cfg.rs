@@ -33,6 +33,7 @@ use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLo
 use crate::ext::ext_repository::create_ext_repository;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use crate::storage::bucket::Bucket;
+use crate::storage::engine::StorageEngine;
 use crate::storage::usage::UsageCounters;
 use crate::syslog::build_system_event_logger;
 use async_trait::async_trait;
@@ -187,6 +188,18 @@ pub struct CoreExtCfg {
 }
 
 #[async_trait]
+pub trait StorageUsage: Send + Sync {
+    async fn stored_bytes(&self) -> Result<u64, ReductError>;
+}
+
+#[async_trait]
+impl StorageUsage for StorageEngine {
+    async fn stored_bytes(&self) -> Result<u64, ReductError> {
+        Ok(self.info().await?.usage)
+    }
+}
+
+#[async_trait]
 pub trait ExtCfgBounds: Clone + Send + Sync {
     fn role(&self) -> InstanceRole;
     fn data_path(&self) -> PathBuf;
@@ -204,14 +217,15 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
             .local_data_path(self.data_path());
         builder.try_build().await
     }
-
-    async fn on_store_id_ready(
+    async fn on_storage_ready(
         &self,
         _store_id: StoreId,
         _node_id: NodeId,
+        _storage_usage: Arc<dyn StorageUsage>,
     ) -> Result<(), ReductError> {
         Ok(())
     }
+
     fn static_extensions(&self, _settings: ExtSettings) -> Vec<Box<dyn IoExtension + Send + Sync>> {
         vec![]
     }
@@ -447,7 +461,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .load_or_create()
             .await?;
         let node_id = NodeId::from_instance_name(&self.cfg.instance_name);
-        self.ext_cfg.on_store_id_ready(store_id, node_id).await?;
         // One shared counters instance: the engine increments it at its choke
         // points, the usage aggregator drains it.
         let usage_counters = Arc::new(UsageCounters::default());
@@ -455,6 +468,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             self.provision_buckets(&data_path, Arc::clone(&usage_counters))
                 .await,
         );
+        let storage_usage: Arc<dyn StorageUsage> = storage.clone();
+        self.ext_cfg
+            .on_storage_ready(store_id, node_id, storage_usage)
+            .await?;
         let token_repo = self.provision_tokens(&data_path, Arc::clone(&storage));
         let console = create_asset_manager(load_console());
         // One collector owns every aggregator/task and the single shared

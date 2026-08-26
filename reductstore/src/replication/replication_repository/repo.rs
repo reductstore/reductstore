@@ -465,7 +465,7 @@ impl ReplicationRepository {
             }
         });
 
-        let mut repo = Self {
+        let repo = Self {
             replications,
             storage,
             repo_path,
