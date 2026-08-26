@@ -446,13 +446,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
         if self.ext_cfg.requires_store_id() {
-            let store_id = StoreId::load_or_create(
-                &data_path,
-                self.cfg.role.clone(),
-                self.cfg.lock_file_config.polling_interval,
-                self.cfg.lock_file_config.timeout,
-            )
-            .await?;
+            let store_id = StoreId::builder(&data_path, self.cfg.role.clone())
+                .retry_interval(self.cfg.lock_file_config.polling_interval)
+                .retry_timeout(self.cfg.lock_file_config.timeout)
+                .load_or_create()
+                .await?;
             let node_id = NodeId::from_instance_name(&self.cfg.instance_name);
             self.ext_cfg.validate_store_id(store_id, node_id).await?;
         }

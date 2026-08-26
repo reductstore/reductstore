@@ -23,34 +23,12 @@ static RUN_ID: LazyLock<String> = LazyLock::new(|| Uuid::new_v4().to_string());
 pub struct StoreId(Uuid);
 
 impl StoreId {
-    /// Load the store ID or initialize it for a primary or standalone instance.
-    pub async fn load_or_create(
-        data_path: &Path,
-        role: InstanceRole,
-        retry_interval: Duration,
-        retry_timeout: Duration,
-    ) -> Result<Self, ReductError> {
-        let path = data_path.join(STORE_ID_FILE);
-        let started_at = Instant::now();
-
-        loop {
-            if FILE_CACHE.try_exists(&path).await? {
-                FILE_CACHE.invalidate_local_cache_file(&path).await?;
-                return Self::read(&path).await;
-            }
-
-            if matches!(role, InstanceRole::Primary | InstanceRole::Standalone) {
-                return Self::create(data_path, &path).await;
-            }
-
-            if !retry_timeout.is_zero() && started_at.elapsed() >= retry_timeout {
-                return Err(internal_server_error!(
-                    "Store ID file '{}' was not initialized by a primary or standalone instance",
-                    path.display()
-                ));
-            }
-
-            sleep(retry_interval).await;
+    pub fn builder(data_path: &Path, role: InstanceRole) -> StoreIdBuilder<'_> {
+        StoreIdBuilder {
+            data_path,
+            role,
+            retry_interval: Duration::from_secs(10),
+            retry_timeout: Duration::from_secs(60),
         }
     }
 
@@ -88,10 +66,54 @@ impl StoreId {
         )
     }
 }
-
 impl Display for StoreId {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(formatter)
+    }
+}
+
+pub struct StoreIdBuilder<'a> {
+    data_path: &'a Path,
+    role: InstanceRole,
+    retry_interval: Duration,
+    retry_timeout: Duration,
+}
+
+impl<'a> StoreIdBuilder<'a> {
+    pub fn retry_interval(mut self, interval: Duration) -> Self {
+        self.retry_interval = interval;
+        self
+    }
+
+    pub fn retry_timeout(mut self, timeout: Duration) -> Self {
+        self.retry_timeout = timeout;
+        self
+    }
+
+    /// Load the store ID or initialize it for a primary or standalone instance.
+    pub async fn load_or_create(self) -> Result<StoreId, ReductError> {
+        let path = self.data_path.join(STORE_ID_FILE);
+        let started_at = Instant::now();
+
+        loop {
+            if FILE_CACHE.try_exists(&path).await? {
+                FILE_CACHE.invalidate_local_cache_file(&path).await?;
+                return StoreId::read(&path).await;
+            }
+
+            if matches!(self.role, InstanceRole::Primary | InstanceRole::Standalone) {
+                return StoreId::create(self.data_path, &path).await;
+            }
+
+            if !self.retry_timeout.is_zero() && started_at.elapsed() >= self.retry_timeout {
+                return Err(internal_server_error!(
+                    "Store ID file '{}' was not initialized by a primary or standalone instance",
+                    path.display()
+                ));
+            }
+
+            sleep(self.retry_interval).await;
+        }
     }
 }
 
@@ -131,28 +153,24 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         configure_file_cache(directory.path()).await;
 
-        let primary = StoreId::load_or_create(
-            directory.path(),
-            InstanceRole::Primary,
-            Duration::from_millis(1),
-            Duration::from_millis(10),
-        )
-        .await
-        .unwrap();
+        let primary = StoreId::builder(directory.path(), InstanceRole::Primary)
+            .retry_interval(Duration::from_millis(1))
+            .retry_timeout(Duration::from_millis(10))
+            .load_or_create()
+            .await
+            .unwrap();
 
         assert_eq!(
             fs::read_to_string(directory.path().join(".uuid")).unwrap(),
             primary.to_string()
         );
 
-        let replica = StoreId::load_or_create(
-            directory.path(),
-            InstanceRole::Replica,
-            Duration::from_millis(1),
-            Duration::from_millis(10),
-        )
-        .await
-        .unwrap();
+        let replica = StoreId::builder(directory.path(), InstanceRole::Replica)
+            .retry_interval(Duration::from_millis(1))
+            .retry_timeout(Duration::from_millis(10))
+            .load_or_create()
+            .await
+            .unwrap();
 
         assert_eq!(replica, primary);
     }
@@ -165,24 +183,20 @@ mod tests {
 
         let path = directory.path().to_path_buf();
         let replica = tokio::spawn(async move {
-            StoreId::load_or_create(
-                &path,
-                InstanceRole::Replica,
-                Duration::from_millis(1),
-                Duration::from_millis(100),
-            )
-            .await
+            StoreId::builder(&path, InstanceRole::Replica)
+                .retry_interval(Duration::from_millis(1))
+                .retry_timeout(Duration::from_millis(100))
+                .load_or_create()
+                .await
         });
 
         sleep(Duration::from_millis(5)).await;
-        let primary = StoreId::load_or_create(
-            directory.path(),
-            InstanceRole::Primary,
-            Duration::from_millis(1),
-            Duration::from_millis(10),
-        )
-        .await
-        .unwrap();
+        let primary = StoreId::builder(directory.path(), InstanceRole::Primary)
+            .retry_interval(Duration::from_millis(1))
+            .retry_timeout(Duration::from_millis(10))
+            .load_or_create()
+            .await
+            .unwrap();
 
         assert_eq!(replica.await.unwrap().unwrap(), primary);
     }
@@ -193,14 +207,12 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         configure_file_cache(directory.path()).await;
 
-        let error = StoreId::load_or_create(
-            directory.path(),
-            InstanceRole::Replica,
-            Duration::from_millis(1),
-            Duration::from_millis(5),
-        )
-        .await
-        .unwrap_err();
+        let error = StoreId::builder(directory.path(), InstanceRole::Replica)
+            .retry_interval(Duration::from_millis(1))
+            .retry_timeout(Duration::from_millis(5))
+            .load_or_create()
+            .await
+            .unwrap_err();
 
         assert!(error.to_string().contains(".uuid"));
     }
@@ -212,14 +224,12 @@ mod tests {
         configure_file_cache(directory.path()).await;
         fs::write(directory.path().join(".uuid"), "invalid").unwrap();
 
-        let error = StoreId::load_or_create(
-            directory.path(),
-            InstanceRole::Primary,
-            Duration::from_millis(1),
-            Duration::from_millis(10),
-        )
-        .await
-        .unwrap_err();
+        let error = StoreId::builder(directory.path(), InstanceRole::Primary)
+            .retry_interval(Duration::from_millis(1))
+            .retry_timeout(Duration::from_millis(10))
+            .load_or_create()
+            .await
+            .unwrap_err();
 
         assert!(error.to_string().contains("canonical UUID"));
     }
