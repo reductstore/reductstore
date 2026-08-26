@@ -600,8 +600,37 @@ fn format_blocks<T: Display>(blocks: &[T]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cfg::tests::TestEnvGetter;
+    use crate::core::env::GetEnv;
     use rstest::rstest;
+    use std::collections::BTreeMap;
+    use std::env::VarError;
+
+    /// Map-backed [`GetEnv`] for parsers that discover keys through [`Env::matches`].
+    #[derive(Clone)]
+    struct TestEnvGetter {
+        values: BTreeMap<String, String>,
+    }
+
+    impl TestEnvGetter {
+        fn new(values: &[(&str, &str)]) -> Self {
+            Self {
+                values: values
+                    .iter()
+                    .map(|(key, value)| (key.to_string(), value.to_string()))
+                    .collect(),
+            }
+        }
+    }
+
+    impl GetEnv for TestEnvGetter {
+        fn get(&self, key: &str) -> Result<String, VarError> {
+            self.values.get(key).cloned().ok_or(VarError::NotPresent)
+        }
+
+        fn all(&self) -> BTreeMap<String, String> {
+            self.values.clone()
+        }
+    }
 
     fn parse(vars: &[(&str, &str)]) -> ZenohApiConfig {
         let getter = TestEnvGetter::new(vars);

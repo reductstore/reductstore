@@ -649,33 +649,6 @@ mod tests {
         }
     }
 
-    /// Map-backed [`GetEnv`] for parsers that discover keys through [`Env::matches`].
-    #[derive(Clone)]
-    pub(super) struct TestEnvGetter {
-        pub(super) values: BTreeMap<String, String>,
-    }
-
-    impl TestEnvGetter {
-        pub(super) fn new(values: &[(&str, &str)]) -> Self {
-            Self {
-                values: values
-                    .iter()
-                    .map(|(key, value)| (key.to_string(), value.to_string()))
-                    .collect(),
-            }
-        }
-    }
-
-    impl GetEnv for TestEnvGetter {
-        fn get(&self, key: &str) -> Result<String, VarError> {
-            self.values.get(key).cloned().ok_or(VarError::NotPresent)
-        }
-
-        fn all(&self) -> BTreeMap<String, String> {
-            self.values.clone()
-        }
-    }
-
     #[rstest]
     #[case(Some("true".to_string()), false, true)]
     #[case(Some("0".to_string()), true, false)]
