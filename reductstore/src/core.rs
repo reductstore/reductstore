@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 pub mod cache;
-pub mod deployment_uid;
+pub mod deployment_id;
 pub mod duration;
 pub mod env;
 pub mod file_cache;
