@@ -66,13 +66,14 @@ impl StoreId {
         )
     }
 }
+
 impl Display for StoreId {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> std::fmt::Result {
         self.0.fmt(formatter)
     }
 }
 
-pub struct StoreIdBuilder<'a> {
+pub(crate) struct StoreIdBuilder<'a> {
     data_path: &'a Path,
     role: InstanceRole,
     retry_interval: Duration,
