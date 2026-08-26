@@ -23,7 +23,7 @@ static RUN_ID: LazyLock<String> = LazyLock::new(|| Uuid::new_v4().to_string());
 pub struct StoreId(Uuid);
 
 impl StoreId {
-    pub fn builder(data_path: &Path, role: InstanceRole) -> StoreIdBuilder<'_> {
+    pub(crate) fn builder(data_path: &Path, role: InstanceRole) -> StoreIdBuilder<'_> {
         StoreIdBuilder {
             data_path,
             role,

@@ -205,11 +205,7 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
         builder.try_build().await
     }
 
-    fn requires_store_id(&self) -> bool {
-        false
-    }
-
-    async fn validate_store_id(
+    async fn on_store_id_ready(
         &self,
         _store_id: StoreId,
         _node_id: NodeId,
@@ -445,15 +441,13 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
     pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
-        if self.ext_cfg.requires_store_id() {
-            let store_id = StoreId::builder(&data_path, self.cfg.role.clone())
-                .retry_interval(self.cfg.lock_file_config.polling_interval)
-                .retry_timeout(self.cfg.lock_file_config.timeout)
-                .load_or_create()
-                .await?;
-            let node_id = NodeId::from_instance_name(&self.cfg.instance_name);
-            self.ext_cfg.validate_store_id(store_id, node_id).await?;
-        }
+        let store_id = StoreId::builder(&data_path, self.cfg.role.clone())
+            .retry_interval(self.cfg.lock_file_config.polling_interval)
+            .retry_timeout(self.cfg.lock_file_config.timeout)
+            .load_or_create()
+            .await?;
+        let node_id = NodeId::from_instance_name(&self.cfg.instance_name);
+        self.ext_cfg.on_store_id_ready(store_id, node_id).await?;
         // One shared counters instance: the engine increments it at its choke
         // points, the usage aggregator drains it.
         let usage_counters = Arc::new(UsageCounters::default());
@@ -659,6 +653,7 @@ mod tests {
     use mockall::mock;
     use mockall::predicate::eq;
     use rstest::{fixture, rstest};
+    use serial_test::serial;
     use std::collections::BTreeMap;
     use std::env::VarError;
     use std::panic::AssertUnwindSafe;
@@ -689,6 +684,30 @@ mod tests {
 
         let fallback = resolve_instance_name(Some("   ".to_string()));
         assert!(!fallback.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn initializes_store_id_for_core_configuration() {
+        let data_path = tempfile::tempdir().unwrap().keep();
+        let parser = CfgParser {
+            cfg: Cfg {
+                data_path: data_path.clone(),
+                role: InstanceRole::Primary,
+                ..Cfg::default()
+            },
+            env: Env::new(MockEnvGetter::new()),
+            license: None,
+            ext_cfg: CoreExtCfg {
+                role: InstanceRole::Primary,
+                data_path: data_path.clone(),
+            },
+        };
+
+        parser.init_storage_backend().await.unwrap();
+        parser.build().await.unwrap();
+
+        assert!(data_path.join(".uuid").is_file());
     }
 
     #[rstest]
