@@ -8,7 +8,7 @@ use crate::api::Components;
 use crate::replication::{Transaction, TransactionNotification};
 use bytes::Bytes;
 use log::{debug, info, warn};
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::Labels;
@@ -21,6 +21,10 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use tokio::sync::Mutex;
 
 const DROP_REPORT_INTERVAL_MS: u64 = 10_000;
+
+/// How far a record timestamp may be advanced past the publisher's stamp to clear
+/// microsecond collisions before the sample is rejected.
+const MAX_TIMESTAMP_SHIFT_US: u64 = 1_000;
 
 /// Subscriber pipeline for ingesting Zenoh samples of one configured block into ReductStore.
 pub(crate) struct SubscriberPipeline {
@@ -83,7 +87,7 @@ impl SubscriberPipeline {
             labels.insert(key, value);
         }
 
-        let ts = timestamp.unwrap_or_else(current_time_us);
+        let mut ts = timestamp.unwrap_or_else(current_time_us);
 
         self.ensure_bucket(bucket, route.may_create).await?;
 
@@ -92,18 +96,41 @@ impl SubscriberPipeline {
             bucket, entry_name, ts, content_size, content_type
         );
 
-        let mut writer = self
-            .components
-            .storage
-            .begin_write(
-                bucket,
-                entry_name,
-                ts,
-                content_size,
-                content_type,
-                labels.clone(),
-            )
-            .await?;
+        let mut recreated = false;
+        let mut writer = loop {
+            match self
+                .components
+                .storage
+                .begin_write(
+                    bucket,
+                    entry_name,
+                    ts,
+                    content_size,
+                    content_type.clone(),
+                    labels.clone(),
+                )
+                .await
+            {
+                Ok(writer) => break writer,
+                // Publishers stamping faster than the microsecond resolution of a
+                // record timestamp land on an occupied slot; the next free one keeps
+                // the sample and its arrival order.
+                Err(err)
+                    if err.status() == ErrorCode::Conflict
+                        && ts.wrapping_sub(timestamp.unwrap_or(ts)) < MAX_TIMESTAMP_SHIFT_US =>
+                {
+                    ts += 1;
+                }
+                // The bucket was removed out of band after it was memoized as ready;
+                // recreate it and keep the sample.
+                Err(err) if err.status() == ErrorCode::NotFound && !recreated => {
+                    recreated = true;
+                    self.forget_bucket(bucket).await;
+                    self.ensure_bucket(bucket, route.may_create).await?;
+                }
+                Err(err) => return Err(err.into()),
+            }
+        };
 
         writer.send(Ok(Some(payload))).await?;
         writer.send(Ok(None)).await?;
@@ -162,6 +189,10 @@ impl SubscriberPipeline {
 
         self.ready_buckets.lock().await.insert(bucket.to_string());
         Ok(())
+    }
+
+    async fn forget_bucket(&self, bucket: &str) {
+        self.ready_buckets.lock().await.remove(bucket);
     }
 
     fn report_drop(&self, subject: &str, err: &RoutingError) {
@@ -329,6 +360,91 @@ mod tests {
             IngestError::Routing(err) => err,
             other => panic!("expected a routing error, got {:?}", other),
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn recreates_bucket_removed_out_of_band(#[future] keeper: Arc<StateKeeper>) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let pipeline = SubscriberPipeline::new(
+            router(ZenohBucketRouting::KeyPrefix, None, &["run_*"], true),
+            Arc::clone(&components),
+        );
+
+        write(&pipeline, "/run_gone/motion", 100).await.unwrap();
+        components.storage.remove_bucket("run_gone").await.unwrap();
+
+        let mut attempts = 0;
+        while write(&pipeline, "/run_gone/motion", 200).await.is_err() {
+            attempts += 1;
+            assert!(attempts < 100, "ingest never recovered from bucket removal");
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+
+        let bucket = components
+            .storage
+            .get_bucket("run_gone")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        assert_eq!(
+            bucket
+                .get_entry("motion")
+                .await
+                .unwrap()
+                .upgrade()
+                .unwrap()
+                .info()
+                .await
+                .unwrap()
+                .record_count,
+            1
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn shifts_timestamp_when_slot_is_taken(#[future] keeper: Arc<StateKeeper>) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let pipeline = SubscriberPipeline::new(static_router(), Arc::clone(&components));
+
+        for _ in 0..3 {
+            write(&pipeline, "motion/welder", 500).await.unwrap();
+        }
+
+        let entry = components
+            .storage
+            .get_bucket("bucket-1")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap()
+            .get_entry("motion/welder")
+            .await
+            .unwrap()
+            .upgrade()
+            .unwrap();
+        assert_eq!(entry.info().await.unwrap().record_count, 3);
+        for ts in [500, 501, 502] {
+            assert!(entry.begin_read(ts).await.is_ok(), "record {} missing", ts);
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_timestamp_shifted_beyond_the_limit(#[future] keeper: Arc<StateKeeper>) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let pipeline = SubscriberPipeline::new(static_router(), Arc::clone(&components));
+
+        for offset in 0..=MAX_TIMESTAMP_SHIFT_US {
+            write(&pipeline, "motion/welder", 1_000 + offset)
+                .await
+                .unwrap();
+        }
+
+        let err = expect_storage_error(write(&pipeline, "motion/welder", 1_000).await.unwrap_err());
+        assert_eq!(err.status(), ErrorCode::Conflict);
     }
 
     #[rstest]
