@@ -234,6 +234,49 @@ mod tests {
 
         assert!(error.to_string().contains("canonical UUID"));
     }
+
+    #[tokio::test]
+    #[serial]
+    async fn store_id_as_uuid_roundtrips() {
+        let directory = tempfile::tempdir().unwrap();
+        configure_file_cache(directory.path()).await;
+        let id = StoreId::builder(directory.path(), InstanceRole::Primary)
+            .retry_interval(Duration::from_millis(1))
+            .retry_timeout(Duration::from_millis(10))
+            .load_or_create()
+            .await
+            .unwrap();
+
+        assert_eq!(id.to_string(), id.as_uuid().to_string());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn rejects_uuid_with_wrong_case() {
+        let directory = tempfile::tempdir().unwrap();
+        configure_file_cache(directory.path()).await;
+        let id = StoreId::builder(directory.path(), InstanceRole::Primary)
+            .retry_interval(Duration::from_millis(1))
+            .retry_timeout(Duration::from_millis(10))
+            .load_or_create()
+            .await
+            .unwrap();
+
+        fs::write(
+            directory.path().join(".uuid"),
+            id.to_string().to_uppercase(),
+        )
+        .unwrap();
+
+        let error = StoreId::builder(directory.path(), InstanceRole::Primary)
+            .retry_interval(Duration::from_millis(1))
+            .retry_timeout(Duration::from_millis(10))
+            .load_or_create()
+            .await
+            .unwrap_err();
+
+        assert!(error.to_string().contains("canonical UUID"));
+    }
     #[test]
     fn node_id_formats_instance_and_run_id() {
         let node_id = NodeId::from_instance_name("edge-pc-1").to_string();

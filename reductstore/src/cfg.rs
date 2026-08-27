@@ -727,6 +727,29 @@ mod tests {
         assert!(data_path.join(".uuid").is_file());
     }
 
+    #[tokio::test]
+    #[serial]
+    async fn storage_engine_reports_stored_bytes() {
+        let data_path = tempfile::tempdir().unwrap().keep();
+        let parser = CfgParser {
+            cfg: Cfg {
+                data_path: data_path.clone(),
+                role: InstanceRole::Primary,
+                ..Cfg::default()
+            },
+            env: Env::new(MockEnvGetter::new()),
+            license: None,
+            ext_cfg: CoreExtCfg {
+                role: InstanceRole::Primary,
+                data_path: data_path.clone(),
+            },
+        };
+        parser.init_storage_backend().await.unwrap();
+        let components = parser.build().await.unwrap();
+        let bytes = components.storage.stored_bytes().await.unwrap();
+        assert_eq!(bytes, 0);
+    }
+
     #[rstest]
     #[tokio::test(flavor = "current_thread")]
     async fn test_default_settings(mut env_getter: MockEnvGetter) {
