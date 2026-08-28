@@ -305,6 +305,7 @@ pub(crate) mod tests {
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::core::cache::Cache;
+    use crate::core::deployment_id::{NodeId, StoreId};
     use crate::core::sync::AsyncRwLock;
     use crate::ext::ext_repository::create_ext_repository;
     use crate::lifecycle::LifecycleRepoBuilder;
@@ -768,6 +769,15 @@ pub(crate) mod tests {
         .await
     }
 
+    async fn test_deployment_ids(cfg: &Cfg) -> (StoreId, NodeId) {
+        let store_id = StoreId::builder(&cfg.data_path, cfg.role.clone())
+            .load_or_create()
+            .await
+            .unwrap();
+        let node_id = NodeId::from_instance_name(&cfg.instance_name);
+        (store_id, node_id)
+    }
+
     async fn test_components(cfg: Cfg) -> Components {
         let cfg_for_storage = cfg.clone();
         let storage = Arc::new(
@@ -794,7 +804,10 @@ pub(crate) mod tests {
         let console_bytes: &[u8] = &[];
 
         let system_events = test_system_events(&cfg, &storage).await;
+        let (store_id, node_id) = test_deployment_ids(&cfg).await;
         Components {
+            store_id,
+            node_id,
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
@@ -910,7 +923,10 @@ pub(crate) mod tests {
         let console_bytes: &[u8] = &[];
 
         let system_events = test_system_events(&cfg, &storage).await;
+        let (store_id, node_id) = test_deployment_ids(&cfg).await;
         let components = Components {
+            store_id,
+            node_id,
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
@@ -1002,7 +1018,10 @@ pub(crate) mod tests {
         let console_bytes: &[u8] = &[];
 
         let system_events = test_system_events(&cfg, &storage).await;
+        let (store_id, node_id) = test_deployment_ids(&cfg).await;
         let components = Components {
+            store_id,
+            node_id,
             storage: Arc::clone(&storage),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),

@@ -33,7 +33,6 @@ use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLo
 use crate::ext::ext_repository::create_ext_repository;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use crate::storage::bucket::Bucket;
-use crate::storage::engine::StorageEngine;
 use crate::storage::usage::UsageCounters;
 use crate::syslog::build_system_event_logger;
 use async_trait::async_trait;
@@ -188,18 +187,6 @@ pub struct CoreExtCfg {
 }
 
 #[async_trait]
-pub trait StorageUsage: Send + Sync {
-    async fn stored_bytes(&self) -> Result<u64, ReductError>;
-}
-
-#[async_trait]
-impl StorageUsage for StorageEngine {
-    async fn stored_bytes(&self) -> Result<u64, ReductError> {
-        Ok(self.info().await?.usage)
-    }
-}
-
-#[async_trait]
 pub trait ExtCfgBounds: Clone + Send + Sync {
     fn role(&self) -> InstanceRole;
     fn data_path(&self) -> PathBuf;
@@ -216,14 +203,6 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
             .backend_type(self.remote_storage_config().backend_type.clone())
             .local_data_path(self.data_path());
         builder.try_build().await
-    }
-    async fn on_storage_ready(
-        &self,
-        _store_id: StoreId,
-        _node_id: NodeId,
-        _storage_usage: Arc<dyn StorageUsage>,
-    ) -> Result<(), ReductError> {
-        Ok(())
     }
 
     fn static_extensions(&self, _settings: ExtSettings) -> Vec<Box<dyn IoExtension + Send + Sync>> {
@@ -468,10 +447,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             self.provision_buckets(&data_path, Arc::clone(&usage_counters))
                 .await,
         );
-        let storage_usage: Arc<dyn StorageUsage> = storage.clone();
-        self.ext_cfg
-            .on_storage_ready(store_id, node_id, storage_usage)
-            .await?;
         let token_repo = self.provision_tokens(&data_path, Arc::clone(&storage));
         let console = create_asset_manager(load_console());
         // One collector owns every aggregator/task and the single shared
@@ -518,6 +493,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .await?;
 
         Ok(Components {
+            store_id,
+            node_id,
             storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(self.cfg.api_token.as_str()),
@@ -729,12 +706,14 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn storage_engine_reports_stored_bytes() {
+    async fn component_construction_preserves_initialized_ids_and_usable_storage() {
         let data_path = tempfile::tempdir().unwrap().keep();
+        let instance_name = "test-node".to_string();
         let parser = CfgParser {
             cfg: Cfg {
                 data_path: data_path.clone(),
                 role: InstanceRole::Primary,
+                instance_name: instance_name.clone(),
                 ..Cfg::default()
             },
             env: Env::new(MockEnvGetter::new()),
@@ -744,10 +723,19 @@ mod tests {
                 data_path: data_path.clone(),
             },
         };
+
         parser.init_storage_backend().await.unwrap();
+        let initialized_store_id = StoreId::builder(&data_path, InstanceRole::Primary)
+            .load_or_create()
+            .await
+            .unwrap();
+        let initialized_node_id = NodeId::from_instance_name(&instance_name);
+
         let components = parser.build().await.unwrap();
-        let bytes = components.storage.stored_bytes().await.unwrap();
-        assert_eq!(bytes, 0);
+
+        assert_eq!(components.store_id, initialized_store_id);
+        assert_eq!(components.node_id, initialized_node_id);
+        assert_eq!(components.storage.info().await.unwrap().usage, 0);
     }
 
     #[rstest]
