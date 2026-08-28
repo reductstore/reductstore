@@ -3,14 +3,14 @@
 
 use crate::api::limits::LimitScope;
 use crate::api::zenoh::attachments::QueryAttachments;
+use crate::api::zenoh::routing::{BucketRouter, RoutingError};
 use crate::api::Components;
 use crate::cfg::io::IoConfig;
-use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::QueryRx;
-use log::{debug, info};
+use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{QueryEntry, QueryType};
 use std::collections::HashMap;
@@ -18,36 +18,19 @@ use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::sync::Arc;
 
-/// Queryable pipeline for handling Zenoh queries against ReductStore.
-///
-/// All queries target a fixed bucket configured via `RS_ZENOH_BUCKET`.
-/// The full Zenoh key expression becomes the entry name.
+/// Queryable pipeline for handling Zenoh queries of one configured block against ReductStore.
 pub(crate) struct QueryablePipeline {
     components: Arc<Components>,
-    bucket: String,
+    router: Arc<BucketRouter>,
 }
 
 impl QueryablePipeline {
-    pub(crate) fn new(config: ZenohApiConfig, components: Arc<Components>) -> Self {
-        QueryablePipeline {
-            components,
-            bucket: config.bucket.clone(),
-        }
+    pub(crate) fn new(router: Arc<BucketRouter>, components: Arc<Components>) -> Self {
+        QueryablePipeline { components, router }
     }
 
-    pub(crate) async fn bootstrap(&self) -> Result<(), String> {
-        let server_info = self
-            .components
-            .storage
-            .info()
-            .await
-            .map_err(|err| err.to_string())?;
-
-        info!(
-            "Zenoh queryable ready (storage version {}): bucket='{}'",
-            server_info.version, self.bucket
-        );
-        Ok(())
+    pub(crate) fn describe(&self) -> String {
+        self.router.describe()
     }
 
     pub(crate) async fn check_api_request(&self) -> Result<(), ReductError> {
@@ -66,27 +49,37 @@ impl QueryablePipeline {
 
     /// Resolves a Zenoh selector and query parameters into ReductStore records.
     ///
-    /// The full key expression is used as the entry name within the configured bucket.
+    /// The block's routing decides which bucket the key expression maps to and which part of it
+    /// becomes the entry name.
     pub(crate) async fn handle_query(
         &self,
         key_expr: &str,
         params: &HashMap<String, String>,
         attachments: &QueryAttachments,
     ) -> Result<QueryResult, QueryError> {
-        let entry_name = key_expr.trim_matches('/');
+        let route = self.router.resolve(key_expr).map_err(|err| {
+            debug!(
+                "Zenoh queryable block '{}' rejected '{}': {}",
+                self.router.block_id(),
+                key_expr,
+                err
+            );
+            QueryError::Routing(err)
+        })?;
+        let (bucket_name, entry_name) = (route.bucket, route.entry);
 
         debug!(
             "Handling Zenoh query: bucket={} entry={} when={:?}",
-            self.bucket, entry_name, attachments.when
+            bucket_name, entry_name, attachments.when
         );
 
         let bucket = self
             .components
             .storage
-            .get_bucket(&self.bucket)
+            .get_bucket(bucket_name)
             .await?
             .upgrade()?;
-        let entry = bucket.get_entry(&entry_name).await?.upgrade()?;
+        let entry = bucket.get_entry(entry_name).await?.upgrade()?;
 
         if let Some(ts) = parse_timestamp(params)? {
             let reader = entry.begin_read(ts).await?;
@@ -127,6 +120,16 @@ pub(crate) enum QueryResult {
 pub(crate) enum QueryError {
     Storage(ReductError),
     InvalidParameter(String),
+    Routing(RoutingError),
+}
+
+impl QueryError {
+    pub(crate) fn public_message(&self) -> String {
+        match self {
+            QueryError::Routing(err) => err.public_message().to_string(),
+            other => other.to_string(),
+        }
+    }
 }
 
 impl Display for QueryError {
@@ -134,6 +137,7 @@ impl Display for QueryError {
         match self {
             QueryError::Storage(err) => write!(f, "Storage error: {}", err),
             QueryError::InvalidParameter(param) => write!(f, "{}", param),
+            QueryError::Routing(err) => write!(f, "Routing error: {}", err),
         }
     }
 }
@@ -219,11 +223,46 @@ fn parse_time_range(
 mod tests {
     use super::*;
     use crate::api::components::StateKeeper;
-    use crate::api::http::tests::{api_limited_keeper, egress_limited_keeper};
-    use crate::cfg::zenoh::ZenohApiConfig;
+    use crate::api::http::tests::{api_limited_keeper, egress_limited_keeper, keeper};
+    use crate::cfg::zenoh::{ZenohBlock, ZenohBucketRouting};
     use reduct_base::error::ErrorCode;
+    use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::rstest;
     use std::sync::Arc;
+
+    fn router(
+        routing: ZenohBucketRouting,
+        bucket: Option<&str>,
+        allowlist: &[&str],
+    ) -> Arc<BucketRouter> {
+        Arc::new(BucketRouter::from_block(&ZenohBlock {
+            id: "0".to_string(),
+            keyexprs: vec!["**".to_string()],
+            routing,
+            bucket: bucket.map(|name| name.to_string()),
+            bucket_allowlist: allowlist.iter().map(|p| p.to_string()).collect(),
+            allow_bucket_creation: false,
+        }))
+    }
+
+    fn static_router() -> Arc<BucketRouter> {
+        router(ZenohBucketRouting::Static, Some("bucket-1"), &[])
+    }
+
+    fn expect_routing_error(result: Result<QueryResult, QueryError>) -> RoutingError {
+        match result {
+            Err(QueryError::Routing(err)) => err,
+            Err(other) => panic!("expected a routing error, got {:?}", other),
+            Ok(_) => panic!("expected a routing error, got a result"),
+        }
+    }
+
+    async fn query(pipeline: &QueryablePipeline, key: &str) -> Result<QueryResult, QueryError> {
+        let params = HashMap::from_iter(vec![("last".to_string(), "true".to_string())]);
+        pipeline
+            .handle_query(key, &params, &QueryAttachments::default())
+            .await
+    }
 
     #[test]
     fn parses_timestamp_param() {
@@ -301,13 +340,7 @@ mod tests {
     #[tokio::test]
     async fn check_api_request_applies_rate_limit(#[future] api_limited_keeper: Arc<StateKeeper>) {
         let components = api_limited_keeper.await.get_anonymous().await.unwrap();
-        let pipeline = QueryablePipeline::new(
-            ZenohApiConfig {
-                bucket: "bucket-1".to_string(),
-                ..Default::default()
-            },
-            components,
-        );
+        let pipeline = QueryablePipeline::new(static_router(), components);
 
         assert!(pipeline.check_api_request().await.is_ok());
         let err = pipeline.check_api_request().await.err().unwrap();
@@ -319,16 +352,114 @@ mod tests {
     #[tokio::test]
     async fn check_egress_applies_rate_limit(#[future] egress_limited_keeper: Arc<StateKeeper>) {
         let components = egress_limited_keeper.await.get_anonymous().await.unwrap();
-        let pipeline = QueryablePipeline::new(
-            ZenohApiConfig {
-                bucket: "bucket-1".to_string(),
-                ..Default::default()
-            },
-            components,
-        );
+        let pipeline = QueryablePipeline::new(static_router(), components);
 
         let err = pipeline.check_egress(6).await.err().unwrap();
         assert_eq!(err.status, ErrorCode::TooManyRequests);
         assert!(err.message.contains("egress bytes"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn handle_query_static_reads_entry(#[future] keeper: Arc<StateKeeper>) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let pipeline = QueryablePipeline::new(static_router(), components);
+
+        assert!(matches!(
+            query(&pipeline, "entry-1").await.unwrap(),
+            QueryResult::Record(_)
+        ));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn handle_query_key_prefix_reads_entry(#[future] keeper: Arc<StateKeeper>) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let pipeline = QueryablePipeline::new(
+            router(ZenohBucketRouting::KeyPrefix, None, &["bucket-*"]),
+            components,
+        );
+
+        assert!(matches!(
+            query(&pipeline, "bucket-1/entry-1").await.unwrap(),
+            QueryResult::Record(_)
+        ));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn handle_query_allowlist_rejects_bucket(#[future] keeper: Arc<StateKeeper>) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let pipeline = QueryablePipeline::new(
+            router(ZenohBucketRouting::KeyPrefix, None, &["bucket-1"]),
+            components,
+        );
+
+        assert_eq!(
+            expect_routing_error(query(&pipeline, "bucket-2/entry-1").await),
+            RoutingError::NotAllowed {
+                bucket: "bucket-2".to_string()
+            }
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn handle_query_rejects_system_bucket(#[future] keeper: Arc<StateKeeper>) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let _ = components
+            .storage
+            .create_system_bucket("$system", BucketSettings::default())
+            .await;
+
+        let pipeline = QueryablePipeline::new(
+            router(ZenohBucketRouting::KeyPrefix, None, &["*"]),
+            components,
+        );
+
+        assert!(matches!(
+            expect_routing_error(query(&pipeline, "$system/anything").await),
+            RoutingError::InvalidBucketName { .. }
+        ));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn handle_query_without_fallback_rejects_single_chunk(
+        #[future] keeper: Arc<StateKeeper>,
+    ) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let pipeline = QueryablePipeline::new(
+            router(ZenohBucketRouting::KeyPrefix, None, &["*"]),
+            components,
+        );
+
+        assert_eq!(
+            expect_routing_error(query(&pipeline, "orphan").await),
+            RoutingError::NoFallbackBucket {
+                key: "orphan".to_string()
+            }
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn handle_query_never_creates_bucket(#[future] keeper: Arc<StateKeeper>) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let pipeline = QueryablePipeline::new(
+            router(ZenohBucketRouting::KeyPrefix, None, &["*"]),
+            Arc::clone(&components),
+        );
+
+        assert!(query(&pipeline, "brand_new/entry").await.is_err());
+        assert!(components.storage.get_bucket("brand_new").await.is_err());
+    }
+
+    #[rstest]
+    fn public_message_hides_routing_detail() {
+        let err = QueryError::Routing(RoutingError::NotAllowed {
+            bucket: "secret_bucket".to_string(),
+        });
+        assert!(!err.public_message().contains("secret_bucket"));
     }
 }

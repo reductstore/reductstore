@@ -1,6 +1,26 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+/// Matches a name against a pattern list where a leading `!` marks an exclusion.
+pub(crate) fn matches_patterns(name: &str, patterns: &[String]) -> bool {
+    let mut includes = patterns
+        .iter()
+        .filter(|pattern| !is_exclusion(pattern))
+        .peekable();
+    let included =
+        includes.peek().is_none() || includes.any(|pattern| entry_matches_pattern(name, pattern));
+
+    included
+        && !patterns
+            .iter()
+            .filter(|pattern| is_exclusion(pattern))
+            .any(|pattern| entry_matches_pattern(name, &pattern[1..]))
+}
+
+fn is_exclusion(pattern: &str) -> bool {
+    pattern.starts_with('!') && pattern.len() > 1
+}
+
 pub(crate) fn entry_matches_pattern(entry: &str, pattern: &str) -> bool {
     let pattern = pattern.trim_start_matches('/');
 
@@ -97,5 +117,24 @@ mod tests {
     #[case("a/sensor-alpha-temp/b", "/a/*alpha*/b", true)]
     fn matches_entry_patterns(#[case] entry: &str, #[case] pattern: &str, #[case] expected: bool) {
         assert_eq!(entry_matches_pattern(entry, pattern), expected);
+    }
+
+    #[rstest]
+    #[case("site_a", &[], true)]
+    #[case("site_a", &["site_*"], true)]
+    #[case("cell_a", &["site_*"], false)]
+    #[case("cell_a", &["site_*", "cell_*"], true)]
+    #[case("site_test", &["site_*", "!site_test*"], false)]
+    #[case("site_prod", &["site_*", "!site_test*"], true)]
+    #[case("anything", &["!secret_*"], true)]
+    #[case("secret_a", &["!secret_*"], false)]
+    #[case("!", &["!"], true)]
+    fn matches_pattern_lists(
+        #[case] name: &str,
+        #[case] patterns: &[&str],
+        #[case] expected: bool,
+    ) {
+        let patterns: Vec<String> = patterns.iter().map(|p| p.to_string()).collect();
+        assert_eq!(matches_patterns(name, &patterns), expected);
     }
 }

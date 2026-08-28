@@ -24,6 +24,36 @@ docker rm -f zenoh-router
 rm -rf ~/data-test
 ```
 
+## Zenoh Block Routing
+
+`RS_ZENOH_SUB_KEYEXPRS` / `RS_ZENOH_QUERY_KEYEXPRS` above configure a single static block writing
+everything to `RS_ZENOH_BUCKET` (default `zenoh`). The same paths can also be configured as
+`RS_ZENOH_SUB_<ID>_*` / `RS_ZENOH_QUERY_<ID>_*` blocks, each with its own bucket and routing.
+Setting any indexed variable makes the unindexed ones inactive.
+
+`routing_test.py` exercises this and is skipped unless `RS_ZENOH_ROUTING_TESTS` is set.
+
+1) Start ReductStore with indexed blocks:
+```bash
+RS_DATA_PATH=~/data-test RS_DISABLE_AUTH=true RS_ZENOH_ENABLED=1 \
+  RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tcp/127.0.0.1:7447]" \
+  RS_ZENOH_SUB_0_KEYEXPRS='entry_$*,factory/**' RS_ZENOH_SUB_0_BUCKET=zenoh \
+  RS_ZENOH_SUB_1_KEYEXPRS='rt_$*/**' RS_ZENOH_SUB_1_ROUTING=key-prefix \
+  RS_ZENOH_SUB_1_BUCKET_ALLOWLIST='rt_site_*' RS_ZENOH_SUB_1_ALLOW_BUCKET_CREATION=true \
+  RS_ZENOH_QUERY_0_KEYEXPRS='entry_$*,factory/**' RS_ZENOH_QUERY_0_BUCKET=zenoh \
+  RS_ZENOH_QUERY_1_KEYEXPRS='rt_$*/**' RS_ZENOH_QUERY_1_ROUTING=key-prefix \
+  RS_ZENOH_QUERY_1_BUCKET_ALLOWLIST='rt_site_*' \
+  cargo run -p reductstore --features "fs-backend web-console zenoh-api"
+```
+
+2) Run tests:
+```bash
+RS_ZENOH_ROUTING_TESTS=1 pytest integration_tests/zenoh -v
+```
+
+Note that `_KEYEXPRS` takes Zenoh key expressions (`$*` matches within a chunk) while
+`_BUCKET_ALLOWLIST` takes plain globs matched against bucket names.
+
 ## Zenoh Inline Credentials (TLS/Auth)
 
 For cloud or container environments where file mounts are impractical, credentials can be provided inline via environment variables:

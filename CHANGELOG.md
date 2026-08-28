@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Configure the Zenoh API as `RS_ZENOH_SUB_<ID>_*` and `RS_ZENOH_QUERY_<ID>_*` blocks, each declaring one or more key expressions (`_KEYEXPRS`, comma separated) and its own target bucket (`_BUCKET`); `_ROUTING=key-prefix` additionally lets the first chunk of a key expression select the bucket, bounded by `_BUCKET_ALLOWLIST` and, for subscribers, `_ALLOW_BUCKET_CREATION`. The unindexed `RS_ZENOH_BUCKET` / `RS_ZENOH_SUB_KEYEXPRS` / `RS_ZENOH_QUERY_KEYEXPRS` / `RS_ZENOH_QUERY_LOCALITY` settings keep working as a single static block when no indexed variable is set, [Issue-1590](https://github.com/reductstore/reductstore/issues/1590)
 - Expose the effective instance name and role in the `/api/v1/info` response, [PR-1569](https://github.com/reductstore/reductstore/pull/1569) by @lntutor
 - Automatically create missing destination buckets during replication, [PR-1539](https://github.com/reductstore/reductstore/pull/1539) by @rohankumardubey
 - Add a replication `compression` setting (`none`, `zstd`, `gzip`, default `none`) that compresses batch payloads during transfer using HTTP `Content-Encoding`, [Issue-1348](https://github.com/reductstore/reductstore/issues/1348) by @DibbayajyotiRoy
@@ -40,6 +41,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Update the Debian base image and apply its security updates when building the Docker image so the runtime picks up the fixed OpenSSL packages, [PR-1591](https://github.com/reductstore/reductstore/pull/1591)
 - Fix the `#[task]` proc macro build after the `syn` 3 update by ignoring newly added `ItemFn` fields, update `h2` to resolve RUSTSEC-2026-0258 in CI, and suppress the current Debian base-image CVE until a fixed image digest is available, [PR-1598](https://github.com/reductstore/reductstore/pull/1598)
 - Avoid blocking `$system` event replication notifications while a replication task is being created, updated, or has its mode changed, by using shared outer replication repository access for those operations instead of exclusive access, the same pattern already used for removal, [PR-1594](https://github.com/reductstore/reductstore/pull/1594) by @vjymisal0
 - Avoid a lock inversion when deleting a replication task that emits final `$system` diagnostics by using shared outer replication repository access for removal and transaction notifications, [PR-1572](https://github.com/reductstore/reductstore/pull/1572)
