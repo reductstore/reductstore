@@ -6,7 +6,7 @@ mod repo;
 
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole::Replica;
-use crate::replication::ManageReplications;
+use crate::replication::{ManageReplications, ReplicationSourceIdentity};
 use crate::storage::engine::StorageEngine;
 use crate::syslog::SystemEventSink;
 use read_only::ReadOnlyReplicationRepository;
@@ -16,6 +16,7 @@ use std::sync::Arc;
 pub(crate) struct ReplicationRepoBuilder {
     cfg: Cfg,
     system_event_sink: Option<SystemEventSink>,
+    source_identity: ReplicationSourceIdentity,
 }
 
 type BoxedReplicationRepository = Box<dyn ManageReplications + Send + Sync>;
@@ -25,6 +26,7 @@ impl ReplicationRepoBuilder {
         ReplicationRepoBuilder {
             cfg,
             system_event_sink: None,
+            source_identity: ReplicationSourceIdentity::default(),
         }
     }
 
@@ -33,13 +35,23 @@ impl ReplicationRepoBuilder {
         self
     }
 
+    pub fn with_source_identity(mut self, source_identity: ReplicationSourceIdentity) -> Self {
+        self.source_identity = source_identity;
+        self
+    }
+
     pub async fn build(self, storage: Arc<StorageEngine>) -> BoxedReplicationRepository {
         if self.cfg.role == Replica {
             Box::new(ReadOnlyReplicationRepository::new())
         } else {
             Box::new(
-                ReplicationRepository::load_or_create(storage, self.cfg, self.system_event_sink)
-                    .await,
+                ReplicationRepository::load_or_create(
+                    storage,
+                    self.cfg,
+                    self.system_event_sink,
+                    self.source_identity,
+                )
+                .await,
             )
         }
     }

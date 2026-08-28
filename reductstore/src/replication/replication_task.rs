@@ -10,6 +10,7 @@ use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketBuilder};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::{TransactionLog, TransactionLogMap, TransactionLogRef};
+use crate::replication::ReplicationSourceIdentity;
 use crate::replication::TransactionNotification;
 use crate::storage::engine::StorageEngine;
 use crate::syslog::aggregate::replication::ReplicationEventAggregator;
@@ -70,6 +71,7 @@ impl ReplicationTask {
         config: Cfg,
         storage: Arc<StorageEngine>,
         system_event_sink: Option<SystemEventSink>,
+        source_identity: ReplicationSourceIdentity,
     ) -> Result<Self, ReductError> {
         let ReplicationSettings {
             dst_bucket: remote_bucket,
@@ -83,7 +85,8 @@ impl ReplicationTask {
             .bucket_name(remote_bucket)
             .verify_ssl(config.replication_conf.verify_ssl)
             .ca_path(config.replication_conf.ca_path.clone())
-            .compression(settings.compression);
+            .compression(settings.compression)
+            .source_identity(source_identity);
 
         if let Some(token) = remote_token {
             remote_bucket_builder = remote_bucket_builder.api_token(token);

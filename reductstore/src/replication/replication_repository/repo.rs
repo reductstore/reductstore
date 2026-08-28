@@ -10,7 +10,9 @@ use crate::replication::proto::{
     ReplicationRepo as ProtoReplicationRepo, ReplicationSettings as ProtoReplicationSettings,
 };
 use crate::replication::replication_task::ReplicationTask;
-use crate::replication::{prepend_when_conditions, ManageReplications, TransactionNotification};
+use crate::replication::{
+    prepend_when_conditions, ManageReplications, ReplicationSourceIdentity, TransactionNotification,
+};
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::WhenFilter;
@@ -255,6 +257,7 @@ pub(crate) struct ReplicationRepository {
     repo_path: PathBuf,
     config: Cfg,
     system_event_sink: Option<SystemEventSink>,
+    source_identity: ReplicationSourceIdentity,
     started: bool,
     notification_tx: UnboundedSender<NotificationCommand>,
     notification_worker: Option<JoinHandle<()>>,
@@ -433,6 +436,7 @@ impl ReplicationRepository {
         storage: Arc<StorageEngine>,
         config: Cfg,
         system_event_sink: Option<SystemEventSink>,
+        source_identity: ReplicationSourceIdentity,
     ) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
         let replications = Arc::new(AsyncRwLock::new(HashMap::<String, ReplicationTask>::new()));
@@ -471,6 +475,7 @@ impl ReplicationRepository {
             repo_path,
             config,
             system_event_sink,
+            source_identity,
             started: false,
             notification_tx,
             notification_worker: Some(notification_worker),
@@ -621,6 +626,7 @@ impl ReplicationRepository {
             conf,
             Arc::clone(&self.storage),
             self.system_event_sink.clone(),
+            self.source_identity.clone(),
         )?;
         let mut replication = replication;
         if self.started {
@@ -834,16 +840,24 @@ mod tests {
         ) {
             settings.dst_prefix = "robot-1".to_string();
             let storage = storage.await;
-            let mut repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
-                    .await;
+            let mut repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+            )
+            .await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
 
-            let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
-                    .await;
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+            )
+            .await;
             assert_eq!(repo.replications().await.unwrap().len(), 1);
             assert_eq!(
                 repo.get_replication_settings("test").await.unwrap(),
@@ -1098,9 +1112,13 @@ mod tests {
             assert!(!log_path.exists(), "Should remove transaction log");
 
             // check if replication is removed from file
-            let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
-                    .await;
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+            )
+            .await;
             assert_eq!(
                 repo.replications().await.unwrap().len(),
                 0,
@@ -2066,7 +2084,13 @@ mod tests {
     #[fixture]
     async fn repo(#[future] storage: Arc<StorageEngine>) -> ReplicationRepository {
         let storage = storage.await;
-        ReplicationRepository::load_or_create(storage, Cfg::default(), None).await
+        ReplicationRepository::load_or_create(
+            storage,
+            Cfg::default(),
+            None,
+            ReplicationSourceIdentity::default(),
+        )
+        .await
     }
 
     mod each_s_migration {

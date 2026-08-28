@@ -5,6 +5,7 @@ use crate::core::internal_client::{
     ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
 };
 use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucketConfig};
+use crate::replication::ReplicationSourceIdentity;
 use async_compression::tokio::bufread::{GzipEncoder, ZstdEncoder};
 use async_stream::stream;
 use async_trait::async_trait;
@@ -78,6 +79,9 @@ struct ReductClient {
 }
 
 static API_PATH: &str = "api/v1";
+const NODE_ID_HEADER: HeaderName = HeaderName::from_static("x-reduct-node-id");
+const STORE_ID_HEADER: HeaderName = HeaderName::from_static("x-reduct-store-id");
+const LICENSE_HASH_HEADER: HeaderName = HeaderName::from_static("x-reduct-license-hash");
 
 /// The first server version that decompresses request bodies sent with
 /// `Content-Encoding`.
@@ -90,7 +94,9 @@ impl ReductClient {
         verify_ssl: bool,
         ca_path: Option<&std::path::PathBuf>,
         compression: ReplicationCompression,
+        source_identity: &ReplicationSourceIdentity,
     ) -> Result<Self, ReductError> {
+        let default_headers = identity_headers(source_identity)?;
         let client = InternalClientBuilder::new(ClientBuildErrorContext {
             ca_read: "Failed to read replication CA certificate",
             ca_parse: "Invalid replication CA certificate",
@@ -98,6 +104,7 @@ impl ReductClient {
             kind: ClientBuildErrorKind::UnprocessableEntity,
         })
         .api_token(api_token)
+        .default_headers(default_headers)
         .verify_ssl(verify_ssl)
         .ca_path(ca_path)
         .connect_timeout(std::time::Duration::from_secs(10))
@@ -418,7 +425,23 @@ pub(super) fn create_client(config: &RemoteBucketConfig) -> Result<BoxedClientAp
         config.verify_ssl,
         config.ca_path.as_ref(),
         config.compression,
+        &config.source_identity,
     )?))
+}
+
+fn identity_headers(source_identity: &ReplicationSourceIdentity) -> Result<HeaderMap, ReductError> {
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        (NODE_ID_HEADER, &source_identity.node_id),
+        (STORE_ID_HEADER, &source_identity.store_id),
+        (LICENSE_HASH_HEADER, &source_identity.license_hash),
+    ] {
+        let value = HeaderValue::from_str(value).map_err(|err| {
+            unprocessable_entity!("Invalid replication identity header '{}': {}", name, err)
+        })?;
+        headers.insert(name, value);
+    }
+    Ok(headers)
 }
 
 #[cfg(test)]
@@ -428,6 +451,7 @@ pub(super) mod tests {
     use crate::replication::remote_bucket::RemoteBucketConfig;
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{us_to_ts, Record};
+    use axum::{extract::State, http::StatusCode, routing::any, Router};
     use crossbeam_channel::{Receiver, Sender};
     use futures_util::StreamExt;
     use hyper::http;
@@ -436,6 +460,8 @@ pub(super) mod tests {
     use std::io::{Read, Seek, SeekFrom};
     use std::path::PathBuf;
     use std::pin::pin;
+    use std::sync::{Arc, Mutex};
+    use tokio::net::TcpListener;
 
     #[rstest]
     #[tokio::test]
@@ -498,9 +524,125 @@ pub(super) mod tests {
             true,
             None,
             ReplicationCompression::None,
+            &Default::default(),
         )
         .unwrap();
         assert_eq!(client.server_url, "http://localhost:8080/");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_client_includes_licensed_identity_headers_on_all_replication_requests() {
+        let headers = Arc::new(Mutex::new(Vec::new()));
+        let url = start_header_server(Arc::clone(&headers)).await;
+        let identity = ReplicationSourceIdentity::new(
+            "instance:source:run:123".to_string(),
+            "f2f3931e-faca-4db5-84ed-d23bc1b09bda".to_string(),
+            Some("license-fingerprint".to_string()),
+        );
+        let client = ReductClient::new(
+            &url,
+            "token",
+            true,
+            None,
+            ReplicationCompression::None,
+            &identity,
+        )
+        .unwrap();
+
+        let api_client = client.client_api.client();
+        let bucket = BucketWrapper {
+            server_url: client.server_url.clone(),
+            bucket_name: "bucket".to_string(),
+            client: api_client.clone(),
+            compression: ReplicationCompression::None,
+        };
+
+        api_client
+            .get(format!("{url}api/v1/b/bucket"))
+            .send()
+            .await
+            .unwrap();
+        api_client
+            .post(format!("{url}api/v1/b/bucket"))
+            .send()
+            .await
+            .unwrap();
+        bucket
+            .client
+            .patch(format!("{url}api/v1/b/bucket/entry/batch"))
+            .send()
+            .await
+            .unwrap();
+
+        let headers = headers.lock().unwrap();
+        assert_eq!(headers.len(), 3);
+        for request in headers.iter() {
+            assert_eq!(
+                request.get(NODE_ID_HEADER).unwrap().as_bytes(),
+                identity.node_id.as_bytes()
+            );
+            assert_eq!(
+                request.get(STORE_ID_HEADER).unwrap().as_bytes(),
+                identity.store_id.as_bytes()
+            );
+            assert_eq!(
+                request.get(LICENSE_HASH_HEADER).unwrap().as_bytes(),
+                identity.license_hash.as_bytes()
+            );
+            assert_eq!(request.get("authorization").unwrap(), "Bearer token");
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_client_includes_null_license_hash_when_unlicensed() {
+        let headers = Arc::new(Mutex::new(Vec::new()));
+        let url = start_header_server(Arc::clone(&headers)).await;
+        let identity = ReplicationSourceIdentity::new(
+            "instance:source:run:123".to_string(),
+            "f2f3931e-faca-4db5-84ed-d23bc1b09bda".to_string(),
+            None,
+        );
+        let client = ReductClient::new(
+            &url,
+            "",
+            true,
+            None,
+            ReplicationCompression::None,
+            &identity,
+        )
+        .unwrap();
+
+        client
+            .client_api
+            .client()
+            .get(format!("{url}api/v1/b/bucket"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            headers.lock().unwrap()[0].get(LICENSE_HASH_HEADER).unwrap(),
+            "null"
+        );
+    }
+
+    async fn start_header_server(headers: Arc<Mutex<Vec<HeaderMap>>>) -> String {
+        async fn handler(
+            State(headers): State<Arc<Mutex<Vec<HeaderMap>>>>,
+            request: axum::extract::Request,
+        ) -> StatusCode {
+            headers.lock().unwrap().push(request.headers().clone());
+            StatusCode::OK
+        }
+
+        let app = Router::new().fallback(any(handler)).with_state(headers);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{address}/")
     }
 
     #[rstest]
@@ -511,6 +653,7 @@ pub(super) mod tests {
             true,
             Some(&PathBuf::from("/definitely/missing/ca.pem")),
             ReplicationCompression::None,
+            &Default::default(),
         )
         .err()
         .unwrap();
@@ -538,6 +681,7 @@ pub(super) mod tests {
             verify_ssl: true,
             ca_path: Some(ca_path),
             compression: ReplicationCompression::None,
+            source_identity: Default::default(),
         };
 
         let client = create_client(&config).unwrap();
@@ -561,6 +705,7 @@ pub(super) mod tests {
             true,
             Some(&ca_path),
             ReplicationCompression::None,
+            &Default::default(),
         )
         .err();
 

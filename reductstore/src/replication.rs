@@ -17,6 +17,23 @@ mod replication_task;
 mod transaction_filter;
 mod transaction_log;
 
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ReplicationSourceIdentity {
+    pub(crate) node_id: String,
+    pub(crate) store_id: String,
+    pub(crate) license_hash: String,
+}
+
+impl ReplicationSourceIdentity {
+    pub(crate) fn new(node_id: String, store_id: String, license_hash: Option<String>) -> Self {
+        Self {
+            node_id,
+            store_id,
+            license_hash: license_hash.unwrap_or_else(|| "null".to_string()),
+        }
+    }
+}
+
 /// Replication event to be synchronized.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Transaction {
