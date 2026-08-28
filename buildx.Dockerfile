@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 ARG BUILDPLATFORM
-FROM --platform=${BUILDPLATFORM} debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS builder
+FROM --platform=${BUILDPLATFORM} debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132 AS builder
 ARG BUILDPLATFORM
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,7 +12,11 @@ RUN groupadd --gid 10001 reduct \
 
 RUN mkdir -p /data && chown 10001:10001 /data
 
-FROM debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2
+FROM debian:trixie-slim@sha256:d7e12182ce18b85b93007c1dedf31f2d29e01ccf3182cc4017c709b6259bc132
+
+RUN apt-get update \
+    && apt-get upgrade -y --no-install-recommends \
+    && rm -rf /var/lib/apt/lists/*
 
 # Binaries are prepared on GitHub runner.
 COPY .image-build/usr/local/bin/reductstore /usr/local/bin/reductstore
