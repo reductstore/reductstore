@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::api::components::Components;
+use crate::api::components::{Components, StateKeeper};
 use crate::api::http::AxumAppBuilder;
 #[cfg(feature = "zenoh-api")]
 use crate::api::zenoh;
@@ -11,6 +11,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::set_rwlock_timeout;
 use crate::lock_file::BoxedLockFile;
 use crate::storage::engine::StorageEngine;
+use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use log::{error, info, warn};
@@ -22,6 +23,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc;
+use tokio::task::JoinHandle;
 
 static SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(test)]
@@ -41,11 +43,52 @@ pub fn maybe_print_version_and_exit() {
     }
 }
 
+struct ListenerTask {
+    handle: Handle<SocketAddr>,
+    task: JoinHandle<()>,
+}
+
+impl ListenerTask {
+    async fn wait(&mut self) {
+        (&mut self.task).await.expect("HTTP server task panicked");
+    }
+}
+
+impl Drop for ListenerTask {
+    fn drop(&mut self) {
+        self.handle.shutdown();
+        self.task.abort();
+    }
+}
+
+struct ServerRuntime {
+    component_sender: Option<mpsc::Sender<Components>>,
+    listener: Option<ListenerTask>,
+    state_keeper: Option<Arc<StateKeeper>>,
+}
+
+impl ServerRuntime {
+    fn into_parts(mut self) -> (mpsc::Sender<Components>, ListenerTask, Arc<StateKeeper>) {
+        (
+            self.component_sender
+                .take()
+                .expect("Server runtime component sender must exist"),
+            self.listener
+                .take()
+                .expect("Server runtime listener must exist"),
+            self.state_keeper
+                .take()
+                .expect("Server runtime state keeper must exist"),
+        )
+    }
+}
+
 pub struct PreparedServer<ExtCfg: ExtCfgBounds> {
     cfg: Cfg,
     ext_cfg: ExtCfg,
     components: Components,
     lock_file: Arc<BoxedLockFile>,
+    runtime: ServerRuntime,
 }
 
 impl<ExtCfg: ExtCfgBounds> PreparedServer<ExtCfg> {
@@ -63,8 +106,10 @@ impl<ExtCfg: ExtCfgBounds> PreparedServer<ExtCfg> {
             ext_cfg: _ext_cfg,
             components,
             lock_file,
+            runtime,
         } = self;
-        let handle = Handle::new();
+        let (component_sender, mut listener, state_keeper) = runtime.into_parts();
+        let handle = listener.handle.clone();
         let engine_config = cfg.engine_config.clone();
         let instance_role = cfg.role.clone();
 
@@ -103,22 +148,6 @@ impl<ExtCfg: ExtCfgBounds> PreparedServer<ExtCfg> {
         #[cfg(test)]
         tokio::spawn(tests::shutdown_server(handle.clone()));
 
-        let (tx, rx) = mpsc::channel(1);
-        tx.send(components).await.unwrap();
-
-        info!("Public URL: {}", cfg.public_url);
-
-        let addr = SocketAddr::new(
-            IpAddr::from_str(&cfg.host).expect("Invalid host address"),
-            cfg.port,
-        );
-
-        let (app, state_keeper) = AxumAppBuilder::new()
-            .with_cfg(cfg.clone())
-            .with_component_receiver(rx)
-            .with_lock_file(lock_file.clone())
-            .build();
-
         #[cfg(feature = "zenoh-api")]
         let zenoh_runtime = zenoh::spawn_runtime(cfg.zenoh_api.clone(), state_keeper.clone());
 
@@ -131,41 +160,8 @@ impl<ExtCfg: ExtCfgBounds> PreparedServer<ExtCfg> {
             }));
         }
 
-        macro_rules! apply_http_settings {
-            ($server:expr) => {{
-                let mut server = $server.handle(handle);
-                server
-                    .http_builder()
-                    .http1()
-                    .max_headers(cfg.io_conf.batch_max_records + 15);
-                server
-                    .http_builder()
-                    .http1()
-                    .max_buf_size(cfg.io_conf.batch_max_metadata_size);
-                server
-            }};
-        }
-
-        if cfg.cert_path.is_none() {
-            apply_http_settings!(axum_server::bind(addr))
-                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-                .await
-                .unwrap_or_else(|e| error!("Server error: {}", e));
-        } else {
-            rustls::crypto::aws_lc_rs::default_provider()
-                .install_default()
-                .expect("Failed to install rustls crypto provider");
-            let config = RustlsConfig::from_pem_file(
-                cfg.cert_path.expect("Cert path must be set"),
-                cfg.cert_key_path.expect("Cert key path must be set"),
-            )
-            .await
-            .expect("Failed to load TLS certificate");
-            apply_http_settings!(axum_server::bind_rustls(addr, config))
-                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-                .await
-                .unwrap_or_else(|e| error!("Server error: {}", e));
-        };
+        component_sender.send(components).await.unwrap();
+        listener.wait().await;
 
         #[cfg(feature = "zenoh-api")]
         if let Some(handle) = zenoh_runtime {
@@ -198,6 +194,7 @@ where
     let parser =
         CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_parser, version).await;
     let lock_file = Arc::new(parser.build_lock_file()?);
+    let runtime = start_listener(parser.cfg.clone(), Arc::clone(&lock_file));
 
     while lock_file.is_waiting().await.unwrap_or(false) {
         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -214,7 +211,72 @@ where
         ext_cfg: parser.ext_cfg,
         components,
         lock_file,
+        runtime,
     })
+}
+
+fn start_listener(cfg: Cfg, lock_file: Arc<BoxedLockFile>) -> ServerRuntime {
+    let handle = Handle::new();
+    let (component_sender, component_receiver) = mpsc::channel(1);
+    let (app, state_keeper) = AxumAppBuilder::new()
+        .with_cfg(cfg.clone())
+        .with_component_receiver(component_receiver)
+        .with_lock_file(lock_file)
+        .build();
+
+    info!("Public URL: {}", cfg.public_url);
+    let server_task = tokio::spawn(serve_http(app, cfg, handle.clone()));
+    ServerRuntime {
+        component_sender: Some(component_sender),
+        listener: Some(ListenerTask {
+            handle,
+            task: server_task,
+        }),
+        state_keeper: Some(state_keeper),
+    }
+}
+
+async fn serve_http(app: Router, cfg: Cfg, handle: Handle<SocketAddr>) {
+    let addr = SocketAddr::new(
+        IpAddr::from_str(&cfg.host).expect("Invalid host address"),
+        cfg.port,
+    );
+
+    macro_rules! apply_http_settings {
+        ($server:expr) => {{
+            let mut server = $server.handle(handle);
+            server
+                .http_builder()
+                .http1()
+                .max_headers(cfg.io_conf.batch_max_records + 15);
+            server
+                .http_builder()
+                .http1()
+                .max_buf_size(cfg.io_conf.batch_max_metadata_size);
+            server
+        }};
+    }
+
+    if cfg.cert_path.is_none() {
+        apply_http_settings!(axum_server::bind(addr))
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .unwrap_or_else(|e| error!("Server error: {}", e));
+    } else {
+        rustls::crypto::aws_lc_rs::default_provider()
+            .install_default()
+            .expect("Failed to install rustls crypto provider");
+        let config = RustlsConfig::from_pem_file(
+            cfg.cert_path.expect("Cert path must be set"),
+            cfg.cert_key_path.expect("Cert key path must be set"),
+        )
+        .await
+        .expect("Failed to load TLS certificate");
+        apply_http_settings!(axum_server::bind_rustls(addr, config))
+            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+            .await
+            .unwrap_or_else(|e| error!("Server error: {}", e));
+    };
 }
 
 async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>) {
@@ -332,13 +394,15 @@ mod tests {
     use serial_test::serial;
     use std::collections::HashMap;
     use std::env;
+    use std::ffi::OsString;
+    use std::net::TcpListener;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::{Arc, LazyLock};
     use std::thread::{spawn, JoinHandle};
     use tempfile::tempdir;
     use tokio::sync::Mutex;
-    use tokio::time::sleep;
+    use tokio::time::{sleep, Instant};
 
     static STOP_SERVER: LazyLock<Mutex<bool>> = LazyLock::new(|| Mutex::new(false));
 
@@ -352,9 +416,35 @@ mod tests {
 
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
-    async fn prepare_server_exposes_configuration_and_components_before_launch() {
+    async fn prepare_server_exposes_configuration_and_unready_listener_before_launch() {
+        struct EnvRestore([(&'static str, Option<OsString>); 5]);
+
+        impl Drop for EnvRestore {
+            fn drop(&mut self) {
+                for (key, value) in &self.0 {
+                    match value {
+                        Some(value) => env::set_var(key, value),
+                        None => env::remove_var(key),
+                    }
+                }
+            }
+        }
+
+        let _env_restore = EnvRestore([
+            ("RS_DATA_PATH", env::var_os("RS_DATA_PATH")),
+            ("RS_HOST", env::var_os("RS_HOST")),
+            ("RS_PORT", env::var_os("RS_PORT")),
+            ("RS_INSTANCE_ROLE", env::var_os("RS_INSTANCE_ROLE")),
+            ("RS_DISABLE_AUTH", env::var_os("RS_DISABLE_AUTH")),
+        ]);
+
         let data_path = tempdir().unwrap().keep();
+        let port_reservation = TcpListener::bind(("127.0.0.1", 0)).unwrap();
+        let port = port_reservation.local_addr().unwrap().port();
+        drop(port_reservation);
         env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
+        env::set_var("RS_HOST", "127.0.0.1");
+        env::set_var("RS_PORT", port.to_string());
         env::set_var("RS_INSTANCE_ROLE", "STANDALONE");
         env::set_var("RS_DISABLE_AUTH", "true");
 
@@ -363,6 +453,17 @@ mod tests {
         assert_eq!(prepared.ext_cfg().role, InstanceRole::Standalone);
         assert_eq!(prepared.ext_cfg().data_path, data_path);
         assert_eq!(prepared.components().storage.info().await.unwrap().usage, 0);
+
+        let url = format!("http://127.0.0.1:{port}/api/v1/ready");
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let response = loop {
+            match reqwest::get(&url).await {
+                Ok(response) => break response,
+                Err(_) if Instant::now() < deadline => sleep(Duration::from_millis(10)).await,
+                Err(error) => panic!("Prepared server listener did not start: {error}"),
+            }
+        };
+        assert_eq!(response.status(), reqwest::StatusCode::SERVICE_UNAVAILABLE);
     }
 
     #[rstest]
