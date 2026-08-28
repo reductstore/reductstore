@@ -1,17 +1,20 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::api::components::Components;
 use crate::api::http::AxumAppBuilder;
 #[cfg(feature = "zenoh-api")]
 use crate::api::zenoh;
-use crate::cfg::{CfgParser, ExtCfgBounds, ExtCfgParser, InstanceRole};
+use crate::cfg::{Cfg, CfgParser, ExtCfgBounds, ExtCfgParser, InstanceRole};
 use crate::core::env::StdEnvGetter;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::set_rwlock_timeout;
+use crate::lock_file::BoxedLockFile;
 use crate::storage::engine::StorageEngine;
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use log::{error, info, warn};
+use reduct_base::error::ReductError;
 use reduct_base::logger::Logger;
 use std::net::{IpAddr, SocketAddr};
 use std::process::exit;
@@ -38,42 +41,32 @@ pub fn maybe_print_version_and_exit() {
     }
 }
 
-pub async fn launch_server<Parser, ExtCfg: ExtCfgBounds + 'static>(ext_cfg_parser: Parser)
-where
-    Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
-{
-    let version = env!("CARGO_PKG_VERSION");
-    Logger::init("INFO");
-    info!(
-        "ReductStore Core {} [{} at {}]",
-        version,
-        env!("COMMIT"),
-        env!("BUILD_TIME")
-    );
+pub struct PreparedServer<ExtCfg: ExtCfgBounds> {
+    cfg: Cfg,
+    ext_cfg: ExtCfg,
+    components: Components,
+    lock_file: Arc<BoxedLockFile>,
+}
 
-    let parser =
-        CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_parser, version).await;
-    let handle = Handle::new();
-    let lock_file = Arc::new(parser.build_lock_file().unwrap());
+impl<ExtCfg: ExtCfgBounds> PreparedServer<ExtCfg> {
+    pub fn ext_cfg(&self) -> &ExtCfg {
+        &self.ext_cfg
+    }
 
-    // Run initialization in a separate thread to avoid blocking HTTP server startup
-    // if waiting for the lock file.
-    let config_lock = Arc::clone(&lock_file);
-    let signal_handle = handle.clone();
-    let cfg = parser.cfg.clone();
-    let engine_config = cfg.engine_config.clone();
-    let instance_role = cfg.role.clone();
-    let (tx, rx) = mpsc::channel(1);
-    tokio::spawn(async move {
-        while config_lock.is_waiting().await.unwrap_or(false) {
-            tokio::time::sleep(Duration::from_millis(100)).await;
-        }
+    pub fn components(&self) -> &Components {
+        &self.components
+    }
 
-        if config_lock.is_failed().await.unwrap_or(true) {
-            panic!("Another ReductStore instance is holding the lock. Exiting.");
-        }
-
-        let components = parser.build().await.unwrap();
+    pub async fn launch(self) {
+        let PreparedServer {
+            cfg,
+            ext_cfg: _ext_cfg,
+            components,
+            lock_file,
+        } = self;
+        let handle = Handle::new();
+        let engine_config = cfg.engine_config.clone();
+        let instance_role = cfg.role.clone();
 
         #[cfg(not(test))]
         {
@@ -104,91 +97,124 @@ where
             ));
         }
 
-        tokio::spawn(shutdown_ctrl_c(signal_handle.clone()));
+        tokio::spawn(shutdown_ctrl_c(handle.clone()));
         #[cfg(unix)]
-        tokio::spawn(shutdown_signal(signal_handle.clone()));
+        tokio::spawn(shutdown_signal(handle.clone()));
         #[cfg(test)]
-        tokio::spawn(tests::shutdown_server(signal_handle.clone()));
+        tokio::spawn(tests::shutdown_server(handle.clone()));
 
+        let (tx, rx) = mpsc::channel(1);
         tx.send(components).await.unwrap();
-    });
 
-    info!("Public URL: {}", cfg.public_url);
+        info!("Public URL: {}", cfg.public_url);
 
-    let addr = SocketAddr::new(
-        IpAddr::from_str(&cfg.host).expect("Invalid host address"),
-        cfg.port,
+        let addr = SocketAddr::new(
+            IpAddr::from_str(&cfg.host).expect("Invalid host address"),
+            cfg.port,
+        );
+
+        let (app, state_keeper) = AxumAppBuilder::new()
+            .with_cfg(cfg.clone())
+            .with_component_receiver(rx)
+            .with_lock_file(lock_file.clone())
+            .build();
+
+        #[cfg(feature = "zenoh-api")]
+        let zenoh_runtime = zenoh::spawn_runtime(cfg.zenoh_api.clone(), state_keeper.clone());
+
+        #[cfg(not(test))]
+        {
+            let default_panic = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |info| {
+                default_panic(info);
+                std::process::exit(1);
+            }));
+        }
+
+        macro_rules! apply_http_settings {
+            ($server:expr) => {{
+                let mut server = $server.handle(handle);
+                server
+                    .http_builder()
+                    .http1()
+                    .max_headers(cfg.io_conf.batch_max_records + 15);
+                server
+                    .http_builder()
+                    .http1()
+                    .max_buf_size(cfg.io_conf.batch_max_metadata_size);
+                server
+            }};
+        }
+
+        if cfg.cert_path.is_none() {
+            apply_http_settings!(axum_server::bind(addr))
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+                .await
+                .unwrap_or_else(|e| error!("Server error: {}", e));
+        } else {
+            rustls::crypto::aws_lc_rs::default_provider()
+                .install_default()
+                .expect("Failed to install rustls crypto provider");
+            let config = RustlsConfig::from_pem_file(
+                cfg.cert_path.expect("Cert path must be set"),
+                cfg.cert_key_path.expect("Cert key path must be set"),
+            )
+            .await
+            .expect("Failed to load TLS certificate");
+            apply_http_settings!(axum_server::bind_rustls(addr, config))
+                .serve(app.into_make_service_with_connect_info::<SocketAddr>())
+                .await
+                .unwrap_or_else(|e| error!("Server error: {}", e));
+        };
+
+        #[cfg(feature = "zenoh-api")]
+        if let Some(handle) = zenoh_runtime {
+            handle.shutdown().await;
+        }
+
+        set_rwlock_timeout(RW_LOCK_SHUTDOWN_TIMEOUT);
+        state_keeper.shutdown().await;
+        FILE_CACHE.stop_sync_worker();
+        drop(lock_file);
+        info!("Server has been shut down.");
+    }
+}
+
+pub async fn prepare_server<Parser, ExtCfg: ExtCfgBounds>(
+    ext_cfg_parser: Parser,
+) -> Result<PreparedServer<ExtCfg>, ReductError>
+where
+    Parser: ExtCfgParser<StdEnvGetter, Cfg = ExtCfg>,
+{
+    let version = env!("CARGO_PKG_VERSION");
+    Logger::init("INFO");
+    info!(
+        "ReductStore Core {} [{} at {}]",
+        version,
+        env!("COMMIT"),
+        env!("BUILD_TIME")
     );
 
-    let (app, state_keeper) = AxumAppBuilder::new()
-        .with_cfg(cfg.clone())
-        .with_component_receiver(rx)
-        .with_lock_file(lock_file.clone())
-        .build();
+    let parser =
+        CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_parser, version).await;
+    let lock_file = Arc::new(parser.build_lock_file()?);
 
-    // Spawn Zenoh API runtime if enabled
-    #[cfg(feature = "zenoh-api")]
-    let zenoh_runtime = zenoh::spawn_runtime(cfg.zenoh_api.clone(), state_keeper.clone());
-
-    #[cfg(not(test))]
-    {
-        // Ensure that the process exits with a non-zero exit code on panic.
-        let default_panic = std::panic::take_hook();
-        std::panic::set_hook(Box::new(move |info| {
-            default_panic(info);
-            std::process::exit(1);
-        }));
+    while lock_file.is_waiting().await.unwrap_or(false) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    macro_rules! apply_http_settings {
-        ($server:expr) => {{
-            let mut server = $server.handle(handle);
-            server
-                .http_builder()
-                .http1()
-                .max_headers(cfg.io_conf.batch_max_records + 15);
-            server
-                .http_builder()
-                .http1()
-                .max_buf_size(cfg.io_conf.batch_max_metadata_size);
-            server
-        }};
+    if lock_file.is_failed().await.unwrap_or(true) {
+        panic!("Another ReductStore instance is holding the lock. Exiting.");
     }
 
-    if cfg.cert_path.is_none() {
-        apply_http_settings!(axum_server::bind(addr))
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-            .await
-            .unwrap_or_else(|e| error!("Server error: {}", e));
-    } else {
-        rustls::crypto::aws_lc_rs::default_provider()
-            .install_default()
-            .expect("Failed to install rustls crypto provider");
-        let config = RustlsConfig::from_pem_file(
-            cfg.cert_path.expect("Cert path must be set"),
-            cfg.cert_key_path.expect("Cert key path must be set"),
-        )
-        .await
-        .expect("Failed to load TLS certificate");
-        apply_http_settings!(axum_server::bind_rustls(addr, config))
-            .serve(app.into_make_service_with_connect_info::<SocketAddr>())
-            .await
-            .unwrap_or_else(|e| error!("Server error: {}", e));
-    };
+    let components = parser.build().await?;
 
-    // shutdown procedure
-    #[cfg(feature = "zenoh-api")]
-    if let Some(handle) = zenoh_runtime {
-        handle.shutdown().await;
-    }
-
-    // remote synchronization can lock resources for a long time,
-    // so we set rwlock timeout to 1 hour to avoid panics during shutdown
-    set_rwlock_timeout(RW_LOCK_SHUTDOWN_TIMEOUT);
-    state_keeper.shutdown().await;
-    FILE_CACHE.stop_sync_worker();
-    drop(lock_file);
-    info!("Server has been shut down.");
+    Ok(PreparedServer {
+        cfg: parser.cfg,
+        ext_cfg: parser.ext_cfg,
+        components,
+        lock_file,
+    })
 }
 
 async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>) {
@@ -322,6 +348,21 @@ mod tests {
         }
         warn!("Shutting down server");
         handle.shutdown();
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn prepare_server_exposes_configuration_and_components_before_launch() {
+        let data_path = tempdir().unwrap().keep();
+        env::set_var("RS_DATA_PATH", data_path.to_str().unwrap());
+        env::set_var("RS_INSTANCE_ROLE", "STANDALONE");
+        env::set_var("RS_DISABLE_AUTH", "true");
+
+        let prepared = prepare_server(CoreExtCfgParser).await.unwrap();
+
+        assert_eq!(prepared.ext_cfg().role, InstanceRole::Standalone);
+        assert_eq!(prepared.ext_cfg().data_path, data_path);
+        assert_eq!(prepared.components().storage.info().await.unwrap().usage, 0);
     }
 
     #[rstest]
@@ -490,7 +531,11 @@ mod tests {
         let task = spawn(|| {
             tokio::runtime::Runtime::new().unwrap().block_on(async {
                 *STOP_SERVER.lock().await = false;
-                launch_server(CoreExtCfgParser).await;
+                prepare_server(CoreExtCfgParser)
+                    .await
+                    .expect("Failed to prepare server")
+                    .launch()
+                    .await;
             });
         });
 
