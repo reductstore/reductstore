@@ -10,6 +10,7 @@ use crate::auth::token_auth::TokenAuthorization;
 use crate::auth::token_repository::ManageTokens;
 use crate::cfg::Cfg;
 use crate::core::cache::Cache;
+use crate::core::deployment_id::{NodeId, StoreId};
 use crate::core::sync::AsyncRwLock;
 use crate::ext::ext_repository::ManageExtensions;
 use crate::lifecycle::ManageLifecycles;
@@ -31,6 +32,8 @@ use tokio::sync::Mutex;
 
 /// Core server components shared across all APIs.
 pub struct Components {
+    pub store_id: StoreId,
+    pub node_id: NodeId,
     pub storage: Arc<StorageEngine>,
     pub(crate) auth: TokenAuthorization,
     pub(crate) token_repo: AsyncRwLock<Box<dyn ManageTokens + Send + Sync>>,

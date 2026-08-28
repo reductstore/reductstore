@@ -379,6 +379,13 @@ mod tests {
             .unwrap();
         drop(auth_repo);
         FILE_CACHE.discard_recursive(&data_path).await.unwrap();
+        crate::core::deployment_id::StoreId::builder(
+            &data_path,
+            crate::cfg::InstanceRole::Standalone,
+        )
+        .load_or_create()
+        .await
+        .unwrap();
 
         let token_file = data_path.join(".auth");
         fs::set_permissions(&data_path, fs::Permissions::from_mode(0o555)).unwrap();

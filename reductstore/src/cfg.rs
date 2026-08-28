@@ -26,6 +26,7 @@ use crate::cfg::system_events::SystemEventsConfig;
 #[cfg(feature = "zenoh-api")]
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::cache::Cache;
+use crate::core::deployment_id::{NodeId, StoreId};
 use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
@@ -203,6 +204,7 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
             .local_data_path(self.data_path());
         builder.try_build().await
     }
+
     fn static_extensions(&self, _settings: ExtSettings) -> Vec<Box<dyn IoExtension + Send + Sync>> {
         vec![]
     }
@@ -432,6 +434,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
     pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
+        let store_id = StoreId::builder(&data_path, self.cfg.role.clone())
+            .retry_interval(Duration::from_secs(30))
+            .retry_timeout(Duration::from_secs(5))
+            .load_or_create()
+            .await?;
+        let node_id = NodeId::from_instance_name(&self.cfg.instance_name);
         // One shared counters instance: the engine increments it at its choke
         // points, the usage aggregator drains it.
         let usage_counters = Arc::new(UsageCounters::default());
@@ -485,6 +493,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .await?;
 
         Ok(Components {
+            store_id,
+            node_id,
             storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(self.cfg.api_token.as_str()),
@@ -637,6 +647,7 @@ mod tests {
     use mockall::mock;
     use mockall::predicate::eq;
     use rstest::{fixture, rstest};
+    use serial_test::serial;
     use std::collections::BTreeMap;
     use std::env::VarError;
     use std::panic::AssertUnwindSafe;
@@ -667,6 +678,64 @@ mod tests {
 
         let fallback = resolve_instance_name(Some("   ".to_string()));
         assert!(!fallback.is_empty());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn initializes_store_id_for_core_configuration() {
+        let data_path = tempfile::tempdir().unwrap().keep();
+        let parser = CfgParser {
+            cfg: Cfg {
+                data_path: data_path.clone(),
+                role: InstanceRole::Primary,
+                ..Cfg::default()
+            },
+            env: Env::new(MockEnvGetter::new()),
+            license: None,
+            ext_cfg: CoreExtCfg {
+                role: InstanceRole::Primary,
+                data_path: data_path.clone(),
+            },
+        };
+
+        parser.init_storage_backend().await.unwrap();
+        parser.build().await.unwrap();
+
+        assert!(data_path.join(".uuid").is_file());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn component_construction_preserves_initialized_ids_and_usable_storage() {
+        let data_path = tempfile::tempdir().unwrap().keep();
+        let instance_name = "test-node".to_string();
+        let parser = CfgParser {
+            cfg: Cfg {
+                data_path: data_path.clone(),
+                role: InstanceRole::Primary,
+                instance_name: instance_name.clone(),
+                ..Cfg::default()
+            },
+            env: Env::new(MockEnvGetter::new()),
+            license: None,
+            ext_cfg: CoreExtCfg {
+                role: InstanceRole::Primary,
+                data_path: data_path.clone(),
+            },
+        };
+
+        parser.init_storage_backend().await.unwrap();
+        let initialized_store_id = StoreId::builder(&data_path, InstanceRole::Primary)
+            .load_or_create()
+            .await
+            .unwrap();
+        let initialized_node_id = NodeId::from_instance_name(&instance_name);
+
+        let components = parser.build().await.unwrap();
+
+        assert_eq!(components.store_id, initialized_store_id);
+        assert_eq!(components.node_id, initialized_node_id);
+        assert_eq!(components.storage.info().await.unwrap().usage, 0);
     }
 
     #[rstest]
