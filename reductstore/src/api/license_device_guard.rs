@@ -139,6 +139,7 @@ mod tests {
     use super::*;
     use axum::http::HeaderValue;
     use chrono::Utc;
+    use rstest::{fixture, rstest};
 
     fn license(device_number: u32) -> License {
         License {
@@ -166,74 +167,88 @@ mod tests {
         headers
     }
 
+    #[fixture]
+    fn licensed_guard() -> LicenseDeviceGuard {
+        guard(Some(license(1)))
+    }
+
     fn guard(license: Option<License>) -> LicenseDeviceGuard {
         LicenseDeviceGuard::with_receiver_store_id(license, Uuid::nil())
     }
 
-    #[test]
-    fn bypasses_unlicensed_and_identity_free_requests() {
-        assert!(guard(None).check(&HeaderMap::new()).is_ok());
-        assert!(guard(Some(license(1))).check(&HeaderMap::new()).is_ok());
+    fn partial_headers(header: axum::http::HeaderName) -> HeaderMap {
+        let mut headers = HeaderMap::new();
+        headers.insert(header, HeaderValue::from_static("value"));
+        headers
     }
 
-    #[test]
-    fn rejects_partial_or_invalid_identity_headers() {
-        let guard = guard(Some(license(1)));
-        for header in [
-            REPLICATION_NODE_ID_HEADER,
-            REPLICATION_STORE_ID_HEADER,
-            REPLICATION_LICENSE_HASH_HEADER,
-        ] {
-            let mut partial = HeaderMap::new();
-            partial.insert(header, HeaderValue::from_static("value"));
-            assert_eq!(
-                guard.validate_headers(&partial).unwrap_err().status,
-                ErrorCode::TooManyRequests
-            );
-        }
-
+    fn empty_node_headers() -> HeaderMap {
         let mut empty = headers(Uuid::new_v4(), "node", "license-fingerprint");
         empty.insert(REPLICATION_NODE_ID_HEADER, HeaderValue::from_static(""));
-        assert_eq!(
-            guard.validate_headers(&empty).unwrap_err().status,
-            ErrorCode::TooManyRequests
-        );
+        empty
+    }
 
+    fn non_utf8_node_headers() -> HeaderMap {
         let mut non_utf8 = headers(Uuid::new_v4(), "node", "license-fingerprint");
         non_utf8.insert(
             REPLICATION_NODE_ID_HEADER,
             HeaderValue::from_bytes(b"\xff").unwrap(),
         );
-        assert_eq!(
-            guard.validate_headers(&non_utf8).unwrap_err().status,
-            ErrorCode::TooManyRequests
-        );
+        non_utf8
+    }
 
-        let invalid = headers(Uuid::new_v4(), "node", "null");
+    #[rstest]
+    #[case::unlicensed(guard(None))]
+    #[case::licensed_without_identity(guard(Some(license(1))))]
+    fn bypasses_unlicensed_or_identity_free_requests(#[case] guard: LicenseDeviceGuard) {
+        assert!(guard.check(&HeaderMap::new()).is_ok());
+    }
+
+    #[rstest]
+    #[case::node_only(partial_headers(REPLICATION_NODE_ID_HEADER))]
+    #[case::store_only(partial_headers(REPLICATION_STORE_ID_HEADER))]
+    #[case::license_only(partial_headers(REPLICATION_LICENSE_HASH_HEADER))]
+    #[case::empty_node(empty_node_headers())]
+    #[case::non_utf8_node(non_utf8_node_headers())]
+    fn rejects_invalid_identity_headers(
+        licensed_guard: LicenseDeviceGuard,
+        #[case] headers: HeaderMap,
+    ) {
         assert_eq!(
-            guard.check(&invalid).unwrap_err().status,
-            ErrorCode::TooManyRequests
-        );
-        let invalid = headers(Uuid::new_v4(), "node", "different-fingerprint");
-        assert_eq!(
-            guard.check(&invalid).unwrap_err().status,
+            licensed_guard
+                .validate_headers(&headers)
+                .unwrap_err()
+                .status,
             ErrorCode::TooManyRequests
         );
     }
 
-    #[test]
-    fn admits_matching_identity_and_enforces_distinct_stores() {
-        let guard = guard(Some(license(1)));
+    #[rstest]
+    #[case::null("null")]
+    #[case::different("different-fingerprint")]
+    fn rejects_invalid_license_fingerprints(
+        licensed_guard: LicenseDeviceGuard,
+        #[case] fingerprint: &str,
+    ) {
+        let invalid = headers(Uuid::new_v4(), "node", fingerprint);
+        assert_eq!(
+            licensed_guard.check(&invalid).unwrap_err().status,
+            ErrorCode::TooManyRequests
+        );
+    }
+
+    #[rstest]
+    fn admits_matching_identity_and_enforces_distinct_stores(licensed_guard: LicenseDeviceGuard) {
         let first = Uuid::new_v4();
         let second = Uuid::new_v4();
-        assert!(guard
+        assert!(licensed_guard
             .check(&headers(first, "node-a", "license-fingerprint"))
             .is_ok());
-        assert!(guard
+        assert!(licensed_guard
             .check(&headers(first, "node-b", "license-fingerprint"))
             .is_ok());
         assert_eq!(
-            guard
+            licensed_guard
                 .check(&headers(second, "node-a", "license-fingerprint"))
                 .unwrap_err()
                 .status,
@@ -241,7 +256,7 @@ mod tests {
         );
     }
 
-    #[test]
+    #[rstest]
     fn supports_unlimited_devices_and_releases_expired_stores() {
         let unlimited_guard = guard(Some(license(0)));
         assert!(unlimited_guard

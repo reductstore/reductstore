@@ -172,7 +172,7 @@ mod tests {
     use axum::{middleware::from_fn_with_state, Router};
     use log::Level;
     use reduct_base::io::ReadRecord;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use std::sync::Arc;
     use tokio::time::{sleep, Duration};
     use tower::ServiceExt;
@@ -389,46 +389,36 @@ mod tests {
             .contains("api requests"));
     }
 
-    #[rstest]
-    #[tokio::test]
-    async fn rejects_partial_commercial_identity_before_the_handler() {
-        let keeper = licensed_keeper(1).await;
-        let app = Router::new()
-            .route("/test", get(|| async { StatusCode::OK }))
-            .layer(from_fn_with_state(keeper, validate_replication_identity));
-
-        let response = app
-            .oneshot(
-                Request::get("/test")
-                    .header("x-reduct-node-id", "node")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
-            .await
-            .unwrap();
-        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    #[fixture]
+    async fn commercial_keeper() -> Arc<StateKeeper> {
+        licensed_keeper(1).await
     }
 
     #[rstest]
+    #[case::partial(false, StatusCode::TOO_MANY_REQUESTS)]
+    #[case::complete(true, StatusCode::OK)]
     #[tokio::test]
-    async fn accepts_complete_commercial_identity() {
-        let keeper = licensed_keeper(1).await;
+    async fn validates_commercial_identity_before_the_handler(
+        #[future] commercial_keeper: Arc<StateKeeper>,
+        #[case] complete: bool,
+        #[case] expected_status: StatusCode,
+    ) {
+        let keeper = commercial_keeper.await;
         let app = Router::new()
             .route("/test", get(|| async { StatusCode::OK }))
             .layer(from_fn_with_state(keeper, validate_replication_identity));
 
+        let mut request = Request::get("/test").header("x-reduct-node-id", "node");
+        if complete {
+            request = request
+                .header("x-reduct-store-id", uuid::Uuid::new_v4().to_string())
+                .header("x-reduct-license-hash", "license-fingerprint");
+        }
         let response = app
-            .oneshot(
-                Request::get("/test")
-                    .header("x-reduct-node-id", "node")
-                    .header("x-reduct-store-id", uuid::Uuid::new_v4().to_string())
-                    .header("x-reduct-license-hash", "license-fingerprint")
-                    .body(Body::empty())
-                    .unwrap(),
-            )
+            .oneshot(request.body(Body::empty()).unwrap())
             .await
             .unwrap();
-        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.status(), expected_status);
     }
 
     #[rstest]
