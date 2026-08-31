@@ -5,7 +5,10 @@ use crate::core::internal_client::{
     ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
 };
 use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucketConfig};
-use crate::replication::ReplicationSourceIdentity;
+use crate::replication::{
+    ReplicationSourceIdentity, REPLICATION_LICENSE_HASH_HEADER, REPLICATION_NODE_ID_HEADER,
+    REPLICATION_STORE_ID_HEADER,
+};
 use async_compression::tokio::bufread::{GzipEncoder, ZstdEncoder};
 use async_stream::stream;
 use async_trait::async_trait;
@@ -79,9 +82,6 @@ struct ReductClient {
 }
 
 static API_PATH: &str = "api/v1";
-const NODE_ID_HEADER: HeaderName = HeaderName::from_static("x-reduct-node-id");
-const STORE_ID_HEADER: HeaderName = HeaderName::from_static("x-reduct-store-id");
-const LICENSE_HASH_HEADER: HeaderName = HeaderName::from_static("x-reduct-license-hash");
 
 /// The first server version that decompresses request bodies sent with
 /// `Content-Encoding`.
@@ -432,9 +432,12 @@ pub(super) fn create_client(config: &RemoteBucketConfig) -> Result<BoxedClientAp
 fn identity_headers(source_identity: &ReplicationSourceIdentity) -> Result<HeaderMap, ReductError> {
     let mut headers = HeaderMap::new();
     for (name, value) in [
-        (NODE_ID_HEADER, &source_identity.node_id),
-        (STORE_ID_HEADER, &source_identity.store_id),
-        (LICENSE_HASH_HEADER, &source_identity.license_hash),
+        (REPLICATION_NODE_ID_HEADER, &source_identity.node_id),
+        (REPLICATION_STORE_ID_HEADER, &source_identity.store_id),
+        (
+            REPLICATION_LICENSE_HASH_HEADER,
+            &source_identity.license_hash,
+        ),
     ] {
         let value = HeaderValue::from_str(value).map_err(|err| {
             unprocessable_entity!("Invalid replication identity header '{}': {}", name, err)
@@ -579,15 +582,18 @@ pub(super) mod tests {
         assert_eq!(headers.len(), 3);
         for request in headers.iter() {
             assert_eq!(
-                request.get(NODE_ID_HEADER).unwrap().as_bytes(),
+                request.get(REPLICATION_NODE_ID_HEADER).unwrap().as_bytes(),
                 identity.node_id.as_bytes()
             );
             assert_eq!(
-                request.get(STORE_ID_HEADER).unwrap().as_bytes(),
+                request.get(REPLICATION_STORE_ID_HEADER).unwrap().as_bytes(),
                 identity.store_id.as_bytes()
             );
             assert_eq!(
-                request.get(LICENSE_HASH_HEADER).unwrap().as_bytes(),
+                request
+                    .get(REPLICATION_LICENSE_HASH_HEADER)
+                    .unwrap()
+                    .as_bytes(),
                 identity.license_hash.as_bytes()
             );
             assert_eq!(request.get("authorization").unwrap(), "Bearer token");
@@ -622,7 +628,9 @@ pub(super) mod tests {
             .await
             .unwrap();
         assert_eq!(
-            headers.lock().unwrap()[0].get(LICENSE_HASH_HEADER).unwrap(),
+            headers.lock().unwrap()[0]
+                .get(REPLICATION_LICENSE_HASH_HEADER)
+                .unwrap(),
             "null"
         );
     }

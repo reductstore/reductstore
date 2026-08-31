@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use async_trait::async_trait;
+use axum::http::HeaderName;
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::{
@@ -16,6 +17,13 @@ mod replication_sender;
 mod replication_task;
 mod transaction_filter;
 mod transaction_log;
+
+pub(crate) const REPLICATION_NODE_ID_HEADER: HeaderName =
+    HeaderName::from_static("x-reduct-node-id");
+pub(crate) const REPLICATION_STORE_ID_HEADER: HeaderName =
+    HeaderName::from_static("x-reduct-store-id");
+pub(crate) const REPLICATION_LICENSE_HASH_HEADER: HeaderName =
+    HeaderName::from_static("x-reduct-license-hash");
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ReplicationSourceIdentity {

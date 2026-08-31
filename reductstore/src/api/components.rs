@@ -3,6 +3,7 @@
 
 //! Server-wide shared state used by all API layers (HTTP, Zenoh).
 
+use crate::api::license_device_guard::LicenseDeviceGuard;
 use crate::api::limits::BoxedLimits;
 use crate::asset::asset_manager::ManageStaticAsset;
 use crate::auth::policy::Policy;
@@ -45,6 +46,7 @@ pub struct Components {
     pub(crate) ext_repo: Box<dyn ManageExtensions + Send + Sync>,
     pub(crate) query_link_cache: AsyncRwLock<Cache<String, Arc<Mutex<BoxedReadRecord>>>>,
     pub(crate) limits: BoxedLimits,
+    pub(crate) license_device_guard: LicenseDeviceGuard,
     /// The single system-event collector: owns every aggregator/task (audit
     /// batching, usage timer, log capture) and the one shared `$system` writer
     /// they fan through. A no-op when system events are disabled, so no `Option`
@@ -101,6 +103,8 @@ impl StateKeeper {
                 policy,
             )
             .await?;
+
+        components.license_device_guard.check(headers)?;
 
         Ok(components)
     }

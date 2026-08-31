@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Send `x-reduct-node-id`, `x-reduct-store-id`, and `x-reduct-license-hash` headers with replication requests, [Issue-1580](https://github.com/reductstore/reductstore/issues/1580)
+- Send `x-reduct-node-id`, `x-reduct-store-id`, and `x-reduct-license-hash` headers with replication requests, enforcing matching commercial licenses and device limits on receivers, [Issue-1580](https://github.com/reductstore/reductstore/issues/1580)
 - Persist a deployment UUID in `.uuid` on the configured filesystem, S3, or Azure Blob storage, [PR-1606](https://github.com/reductstore/reductstore/pull/1606) by @anthonycvn
 - Expose the effective instance name and role in the `/api/v1/info` response, [PR-1569](https://github.com/reductstore/reductstore/pull/1569) by @lntutor
 - Automatically create missing destination buckets during replication, [PR-1539](https://github.com/reductstore/reductstore/pull/1539) by @rohankumardubey

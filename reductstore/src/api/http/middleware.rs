@@ -88,6 +88,18 @@ pub(super) async fn check_api_rate_limit(
     Ok(next.run(request).await)
 }
 
+pub(super) async fn validate_replication_identity(
+    State(keeper): State<Arc<StateKeeper>>,
+    request: Request<Body>,
+    next: Next,
+) -> Result<impl IntoResponse, HttpError> {
+    let components = keeper.get_anonymous().await?;
+    components
+        .license_device_guard
+        .validate_headers(request.headers())?;
+    Ok(next.run(request).await)
+}
+
 pub async fn print_statuses(
     request: Request<Body>,
     next: Next,
@@ -151,7 +163,7 @@ mod tests {
     use super::client_ip::{parse_forwarded_for, parse_x_forwarded_for};
     use super::*;
     use crate::api::components::StateKeeper;
-    use crate::api::http::tests::{api_limited_keeper, keeper, waiting_keeper};
+    use crate::api::http::tests::{api_limited_keeper, keeper, licensed_keeper, waiting_keeper};
     use crate::syslog::{SYSTEM_AUDIT_ENTRY_PREFIX, SYSTEM_BUCKET_NAME};
     use axum::extract::ConnectInfo;
     use axum::http::Request;
@@ -375,6 +387,48 @@ mod tests {
             .to_str()
             .unwrap()
             .contains("api requests"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn rejects_partial_commercial_identity_before_the_handler() {
+        let keeper = licensed_keeper(1).await;
+        let app = Router::new()
+            .route("/test", get(|| async { StatusCode::OK }))
+            .layer(from_fn_with_state(keeper, validate_replication_identity));
+
+        let response = app
+            .oneshot(
+                Request::get("/test")
+                    .header("x-reduct-node-id", "node")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn accepts_complete_commercial_identity() {
+        let keeper = licensed_keeper(1).await;
+        let app = Router::new()
+            .route("/test", get(|| async { StatusCode::OK }))
+            .layer(from_fn_with_state(keeper, validate_replication_identity));
+
+        let response = app
+            .oneshot(
+                Request::get("/test")
+                    .header("x-reduct-node-id", "node")
+                    .header("x-reduct-store-id", uuid::Uuid::new_v4().to_string())
+                    .header("x-reduct-license-hash", "license-fingerprint")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
     }
 
     #[rstest]
