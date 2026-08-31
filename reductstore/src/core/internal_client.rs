@@ -26,6 +26,7 @@ pub(crate) struct ClientBuildErrorContext<'a> {
 
 pub(crate) struct InternalClientBuilder<'a> {
     api_token: &'a str,
+    default_headers: HeaderMap,
     verify_ssl: bool,
     ca_path: Option<&'a PathBuf>,
     connect_timeout: Duration,
@@ -36,6 +37,7 @@ impl<'a> InternalClientBuilder<'a> {
     pub(crate) fn new(error_context: ClientBuildErrorContext<'a>) -> Self {
         Self {
             api_token: "",
+            default_headers: HeaderMap::new(),
             verify_ssl: true,
             ca_path: None,
             connect_timeout: Duration::from_secs(10),
@@ -45,6 +47,11 @@ impl<'a> InternalClientBuilder<'a> {
 
     pub(crate) fn api_token(mut self, api_token: &'a str) -> Self {
         self.api_token = api_token;
+        self
+    }
+
+    pub(crate) fn default_headers(mut self, default_headers: HeaderMap) -> Self {
+        self.default_headers = default_headers;
         self
     }
 
@@ -64,7 +71,7 @@ impl<'a> InternalClientBuilder<'a> {
     }
 
     pub(crate) fn build(self) -> Result<Client, ReductError> {
-        let mut headers = HeaderMap::new();
+        let mut headers = self.default_headers;
         if !self.api_token.is_empty() {
             let mut value = HeaderValue::from_str(&format!("Bearer {}", self.api_token)).unwrap();
             value.set_sensitive(true);

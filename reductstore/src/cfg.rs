@@ -13,6 +13,7 @@ pub mod system_events;
 pub mod zenoh;
 
 use crate::api::components::Components;
+use crate::api::license_device_guard::LicenseDeviceGuard;
 use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
@@ -32,6 +33,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
+use crate::replication::ReplicationSourceIdentity;
 use crate::storage::bucket::Bucket;
 use crate::storage::usage::UsageCounters;
 use crate::syslog::build_system_event_logger;
@@ -440,6 +442,13 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .load_or_create()
             .await?;
         let node_id = NodeId::from_instance_name(&self.cfg.instance_name);
+        let replication_source_identity = ReplicationSourceIdentity::new(
+            node_id.to_string(),
+            store_id.to_string(),
+            self.license
+                .as_ref()
+                .map(|license| license.fingerprint.clone()),
+        );
         // One shared counters instance: the engine increments it at its choke
         // points, the usage aggregator drains it.
         let usage_counters = Arc::new(UsageCounters::default());
@@ -455,8 +464,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let system_events =
             build_system_event_logger(&self.cfg, Arc::clone(&storage), usage_counters).await;
         let replication_engine = Arc::new(AsyncRwLock::new(
-            self.provision_replication_repo(Arc::clone(&storage), system_events.sink())
-                .await?,
+            self.provision_replication_repo(
+                Arc::clone(&storage),
+                system_events.sink(),
+                replication_source_identity,
+            )
+            .await?,
         ));
         // Register the replication notifier so `$system` writes replicate
         // like API writes.
@@ -494,7 +507,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         Ok(Components {
             store_id,
-            node_id,
+            node_id: node_id.clone(),
+            license_device_guard: LicenseDeviceGuard::new(self.license.clone(), store_id, node_id),
             storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(self.cfg.api_token.as_str()),

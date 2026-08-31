@@ -33,6 +33,7 @@ use lifecycle::create_lifecycle_policy_api_routes;
 use log::{error, warn};
 use middleware::{
     attach_client_ip, audit_requests, check_api_rate_limit, default_headers, print_statuses,
+    validate_replication_identity,
 };
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
@@ -265,6 +266,10 @@ impl AxumAppBuilder {
                 // content-length header is consumed by the decompression.
                 .layer(RequestDecompressionLayer::new())
                 .layer(from_fn(attach_client_ip))
+                .layer(from_fn_with_state(
+                    state_keeper.clone(),
+                    validate_replication_identity,
+                ))
                 .layer(from_fn_with_state(state_keeper.clone(), audit_requests))
                 .layer(from_fn(default_headers))
                 .layer(from_fn(print_statuses))
@@ -323,7 +328,7 @@ pub(crate) mod tests {
     use reduct_base::msg::replication_api::{
         ReplicationCompression, ReplicationMode, ReplicationSettings,
     };
-    use reduct_base::msg::server_api::ServerInfo;
+    use reduct_base::msg::server_api::{License, ServerInfo};
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
     use rstest::fixture;
     use std::collections::HashMap;
@@ -807,8 +812,11 @@ pub(crate) mod tests {
         let (store_id, node_id) = test_deployment_ids(&cfg).await;
         Components {
             store_id,
-            node_id,
+            node_id: node_id.clone(),
             storage: Arc::clone(&storage),
+            license_device_guard: crate::api::license_device_guard::LicenseDeviceGuard::new(
+                None, store_id, node_id,
+            ),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
@@ -831,7 +839,10 @@ pub(crate) mod tests {
         }
     }
 
-    async fn keeper_with_limits_impl(limits_config: LimitsConfig) -> Arc<StateKeeper> {
+    async fn keeper_with_limits_impl(
+        limits_config: LimitsConfig,
+        license: Option<License>,
+    ) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
             api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
@@ -926,8 +937,11 @@ pub(crate) mod tests {
         let (store_id, node_id) = test_deployment_ids(&cfg).await;
         let components = Components {
             store_id,
-            node_id,
+            node_id: node_id.clone(),
             storage: Arc::clone(&storage),
+            license_device_guard: crate::api::license_device_guard::LicenseDeviceGuard::new(
+                license, store_id, node_id,
+            ),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
@@ -956,7 +970,23 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
-        keeper_with_limits_impl(limits_config).await
+        keeper_with_limits_impl(limits_config, None).await
+    }
+
+    pub(crate) async fn licensed_keeper(device_number: u32) -> Arc<StateKeeper> {
+        keeper_with_limits_impl(
+            LimitsConfig::default(),
+            Some(License {
+                licensee: String::new(),
+                invoice: String::new(),
+                expiry_date: chrono::Utc::now(),
+                plan: String::new(),
+                device_number,
+                disk_quota: 0,
+                fingerprint: "license-fingerprint".to_string(),
+            }),
+        )
+        .await
     }
 
     pub(crate) async fn keeper_with_engine_limit(max_storage_size: u64) -> Arc<StateKeeper> {
@@ -1021,8 +1051,11 @@ pub(crate) mod tests {
         let (store_id, node_id) = test_deployment_ids(&cfg).await;
         let components = Components {
             store_id,
-            node_id,
+            node_id: node_id.clone(),
             storage: Arc::clone(&storage),
+            license_device_guard: crate::api::license_device_guard::LicenseDeviceGuard::new(
+                None, store_id, node_id,
+            ),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
