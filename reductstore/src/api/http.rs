@@ -812,10 +812,10 @@ pub(crate) mod tests {
         let (store_id, node_id) = test_deployment_ids(&cfg).await;
         Components {
             store_id,
-            node_id,
+            node_id: node_id.clone(),
             storage: Arc::clone(&storage),
             license_device_guard: crate::api::license_device_guard::LicenseDeviceGuard::new(
-                None, store_id,
+                None, store_id, node_id,
             ),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
@@ -937,10 +937,10 @@ pub(crate) mod tests {
         let (store_id, node_id) = test_deployment_ids(&cfg).await;
         let components = Components {
             store_id,
-            node_id,
+            node_id: node_id.clone(),
             storage: Arc::clone(&storage),
             license_device_guard: crate::api::license_device_guard::LicenseDeviceGuard::new(
-                license, store_id,
+                license, store_id, node_id,
             ),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
@@ -1051,10 +1051,10 @@ pub(crate) mod tests {
         let (store_id, node_id) = test_deployment_ids(&cfg).await;
         let components = Components {
             store_id,
-            node_id,
+            node_id: node_id.clone(),
             storage: Arc::clone(&storage),
             license_device_guard: crate::api::license_device_guard::LicenseDeviceGuard::new(
-                None, store_id,
+                None, store_id, node_id,
             ),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),

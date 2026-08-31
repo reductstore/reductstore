@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::deployment_id::StoreId;
+use crate::core::deployment_id::{NodeId, StoreId};
 use crate::replication::{
     REPLICATION_LICENSE_HASH_HEADER, REPLICATION_NODE_ID_HEADER, REPLICATION_STORE_ID_HEADER,
 };
@@ -16,6 +16,7 @@ use uuid::Uuid;
 const DEVICE_IDLE_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 const INVALID_LICENSE_MESSAGE: &str = "Invalid replication license identity";
 const DEVICE_LIMIT_MESSAGE: &str = "Replication device limit reached";
+const ACTIVE_NODE_MESSAGE: &str = "Replication node is already active for this device";
 
 #[derive(Debug, PartialEq)]
 struct ReplicationIdentity {
@@ -24,21 +25,40 @@ struct ReplicationIdentity {
     license_hash: String,
 }
 
+struct ActiveNode {
+    node_id: String,
+    last_seen: Instant,
+}
+
 pub(crate) struct LicenseDeviceGuard {
     license: Option<License>,
     receiver_store_id: Uuid,
-    devices: Mutex<HashMap<Uuid, HashMap<String, Instant>>>,
+    receiver_node_id: String,
+    devices: Mutex<HashMap<Uuid, ActiveNode>>,
 }
 
 impl LicenseDeviceGuard {
-    pub(crate) fn new(license: Option<License>, receiver_store_id: StoreId) -> Self {
-        Self::with_receiver_store_id(license, receiver_store_id.as_uuid())
+    pub(crate) fn new(
+        license: Option<License>,
+        receiver_store_id: StoreId,
+        receiver_node_id: NodeId,
+    ) -> Self {
+        Self::with_receiver_identity(
+            license,
+            receiver_store_id.as_uuid(),
+            receiver_node_id.to_string(),
+        )
     }
 
-    fn with_receiver_store_id(license: Option<License>, receiver_store_id: Uuid) -> Self {
+    fn with_receiver_identity(
+        license: Option<License>,
+        receiver_store_id: Uuid,
+        receiver_node_id: String,
+    ) -> Self {
         Self {
             license,
             receiver_store_id,
+            receiver_node_id,
             devices: Mutex::new(HashMap::new()),
         }
     }
@@ -80,26 +100,42 @@ impl LicenseDeviceGuard {
         device_number: u32,
     ) -> Result<(), ReductError> {
         if store_id == self.receiver_store_id {
+            return if node_id == self.receiver_node_id {
+                Ok(())
+            } else {
+                Err(active_node_error())
+            };
+        }
+
+        if device_number == 0 {
             return Ok(());
         }
 
         let mut devices = self.devices.lock();
-        devices.retain(|_, nodes| {
-            nodes.retain(|_, last_seen| now.duration_since(*last_seen) <= DEVICE_IDLE_TIMEOUT);
-            !nodes.is_empty()
+        devices.retain(|_, active_node| {
+            now.duration_since(active_node.last_seen) <= DEVICE_IDLE_TIMEOUT
         });
 
-        if !devices.contains_key(&store_id)
-            && device_number != 0
-            && devices.len() >= device_number as usize
-        {
-            return Err(ReductError::new(
-                ErrorCode::TooManyRequests,
-                DEVICE_LIMIT_MESSAGE,
-            ));
+        if let Some(active_node) = devices.get_mut(&store_id) {
+            if active_node.node_id == node_id {
+                active_node.last_seen = now;
+                return Ok(());
+            }
+
+            return Err(active_node_error());
         }
 
-        devices.entry(store_id).or_default().insert(node_id, now);
+        if devices.len() >= device_number as usize {
+            return Err(device_limit_error());
+        }
+
+        devices.insert(
+            store_id,
+            ActiveNode {
+                node_id,
+                last_seen: now,
+            },
+        );
         Ok(())
     }
 }
@@ -132,6 +168,14 @@ fn parse_identity(headers: &HeaderMap) -> Result<Option<ReplicationIdentity>, Re
 
 fn invalid_license_error() -> ReductError {
     ReductError::new(ErrorCode::TooManyRequests, INVALID_LICENSE_MESSAGE)
+}
+
+fn active_node_error() -> ReductError {
+    ReductError::new(ErrorCode::TooManyRequests, ACTIVE_NODE_MESSAGE)
+}
+
+fn device_limit_error() -> ReductError {
+    ReductError::new(ErrorCode::TooManyRequests, DEVICE_LIMIT_MESSAGE)
 }
 
 #[cfg(test)]
@@ -173,7 +217,11 @@ mod tests {
     }
 
     fn guard(license: Option<License>) -> LicenseDeviceGuard {
-        LicenseDeviceGuard::with_receiver_store_id(license, Uuid::nil())
+        LicenseDeviceGuard::with_receiver_identity(
+            license,
+            Uuid::nil(),
+            "receiver-node".to_string(),
+        )
     }
 
     fn partial_headers(header: axum::http::HeaderName) -> HeaderMap {
@@ -238,14 +286,14 @@ mod tests {
     }
 
     #[rstest]
-    fn admits_matching_identity_and_enforces_distinct_stores(licensed_guard: LicenseDeviceGuard) {
+    fn admits_matching_node_and_enforces_distinct_stores(licensed_guard: LicenseDeviceGuard) {
         let first = Uuid::new_v4();
         let second = Uuid::new_v4();
         assert!(licensed_guard
             .check(&headers(first, "node-a", "license-fingerprint"))
             .is_ok());
         assert!(licensed_guard
-            .check(&headers(first, "node-b", "license-fingerprint"))
+            .check(&headers(first, "node-a", "license-fingerprint"))
             .is_ok());
         assert_eq!(
             licensed_guard
@@ -254,13 +302,93 @@ mod tests {
                 .status,
             ErrorCode::TooManyRequests
         );
+        let devices = licensed_guard.devices.lock();
+        assert_eq!(devices.len(), 1);
+        assert!(!devices.contains_key(&second));
+    }
+
+    #[rstest]
+    fn refreshes_matching_node_activity(licensed_guard: LicenseDeviceGuard) {
+        let store_id = Uuid::new_v4();
+        let now = Instant::now();
+
+        licensed_guard
+            .check_at(store_id, "node-a".to_string(), now, 1)
+            .unwrap();
+        licensed_guard
+            .check_at(
+                store_id,
+                "node-a".to_string(),
+                now + Duration::from_secs(30),
+                1,
+            )
+            .unwrap();
+        assert_eq!(
+            licensed_guard
+                .check_at(
+                    store_id,
+                    "node-b".to_string(),
+                    now + DEVICE_IDLE_TIMEOUT + Duration::from_secs(1),
+                    1,
+                )
+                .unwrap_err()
+                .message,
+            ACTIVE_NODE_MESSAGE
+        );
+    }
+
+    #[rstest]
+    fn rejects_different_active_node_without_refreshing_it() {
+        let guard = guard(Some(license(1)));
+        let store_id = Uuid::new_v4();
+        let now = Instant::now();
+
+        guard
+            .check_at(store_id, "node-a".to_string(), now, 1)
+            .unwrap();
+        assert_eq!(
+            guard
+                .check_at(
+                    store_id,
+                    "node-b".to_string(),
+                    now + Duration::from_secs(30),
+                    1,
+                )
+                .unwrap_err()
+                .message,
+            ACTIVE_NODE_MESSAGE
+        );
+        guard
+            .check_at(
+                store_id,
+                "node-b".to_string(),
+                now + DEVICE_IDLE_TIMEOUT + Duration::from_secs(1),
+                1,
+            )
+            .unwrap();
+        assert_eq!(
+            guard
+                .check_at(
+                    store_id,
+                    "node-a".to_string(),
+                    now + DEVICE_IDLE_TIMEOUT + Duration::from_secs(2),
+                    1,
+                )
+                .unwrap_err()
+                .message,
+            ACTIVE_NODE_MESSAGE
+        );
     }
 
     #[rstest]
     fn supports_unlimited_devices_and_releases_expired_stores() {
         let unlimited_guard = guard(Some(license(0)));
+        let unlimited_store = Uuid::new_v4();
         assert!(unlimited_guard
-            .check(&headers(Uuid::new_v4(), "node", "license-fingerprint"))
+            .check(&headers(unlimited_store, "node-a", "license-fingerprint"))
+            .is_ok());
+        assert!(unlimited_guard
+            .check(&headers(unlimited_store, "node-b", "license-fingerprint"))
             .is_ok());
         assert!(unlimited_guard
             .check(&headers(Uuid::new_v4(), "node", "license-fingerprint"))
@@ -279,5 +407,25 @@ mod tests {
                 1,
             )
             .unwrap();
+    }
+
+    #[rstest]
+    #[case::capped(1)]
+    #[case::unlimited(0)]
+    fn admits_receiver_identity_without_a_seat_and_rejects_other_nodes(#[case] device_number: u32) {
+        let guard = guard(Some(license(device_number)));
+        let now = Instant::now();
+
+        guard
+            .check_at(Uuid::nil(), "receiver-node".to_string(), now, device_number)
+            .unwrap();
+        assert!(guard.devices.lock().is_empty());
+        assert_eq!(
+            guard
+                .check_at(Uuid::nil(), "other-node".to_string(), now, device_number,)
+                .unwrap_err()
+                .message,
+            ACTIVE_NODE_MESSAGE
+        );
     }
 }

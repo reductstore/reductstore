@@ -13,6 +13,7 @@ pub mod system_events;
 pub mod zenoh;
 
 use crate::api::components::Components;
+use crate::api::license_device_guard::LicenseDeviceGuard;
 use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
@@ -506,11 +507,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         Ok(Components {
             store_id,
-            node_id,
-            license_device_guard: crate::api::license_device_guard::LicenseDeviceGuard::new(
-                self.license.clone(),
-                store_id,
-            ),
+            node_id: node_id.clone(),
+            license_device_guard: LicenseDeviceGuard::new(self.license.clone(), store_id, node_id),
             storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
             auth: TokenAuthorization::new(self.cfg.api_token.as_str()),
