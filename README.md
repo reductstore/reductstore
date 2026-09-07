@@ -118,6 +118,7 @@ Learn more and pick the next piece you need:
 
 - **[Documentation](https://www.reduct.store/docs/)**
 - **[Download](https://www.reduct.store/download)**
+- **[Snap configuration](./snap/README.md)**
 - **[Contributing Guide](./CONTRIBUTING.md)**
 - **[Community Forum](https://community.reduct.store)**
 - **[Good First Issues](https://github.com/reductstore/reductstore/issues?q=is%3Aissue%20is%3Aopen%20label%3A%22good%20first%20issue%22)**

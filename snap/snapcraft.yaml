@@ -24,6 +24,12 @@ platforms:
     build-on: [amd64]
     build-for: [arm64]
 
+plugs:
+  reductstore-configuration:
+    interface: content
+    content: reductstore-configuration-v1
+    target: $SNAP_COMMON/config
+
 parts:
   reductstore:
     plugin: dump
@@ -49,3 +55,4 @@ apps:
       - network-bind
       - removable-media
       - home
+      - reductstore-configuration
