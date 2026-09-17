@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Update Web Console to v1.17.2, [PR-1615](https://github.com/reductstore/reductstore/pull/1615)
 - Update Web Console to v1.16.0, [PR-1607](https://github.com/reductstore/reductstore/pull/1607)
 - Default `RS_SYSTEM_EVENTS_QUOTA_SIZE` to 10 GB when it is not set, [PR-1556](https://github.com/reductstore/reductstore/pull/1556) by @LordAizen1
 - Allow fork pull request CI to run without protobuf setup tokens or Docker Hub credentials by vendoring `protoc` and making Docker login optional, [PR-1532](https://github.com/reductstore/reductstore/pull/1532)
