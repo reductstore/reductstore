@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.21.0 - 2026-09-17
 
 ### Breaking Changes
 
@@ -62,7 +63,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Invalidate cached bearer credentials after token rotation and store rotated secrets as salted hashes, [CVE-2026-0001](https://github.com/reductstore/reductstore/security/advisories/GHSA-cg68-3m38-wq4c)
+- Invalidate cached bearer credentials after token rotation and store rotated secrets as salted hashes, [CVE-2026-90667](https://github.com/reductstore/reductstore/security/advisories/GHSA-cg68-3m38-wq4c)
 
 ## 1.20.10 - 2026-07-29
 
