@@ -57,3 +57,4 @@
 - Default data root is `RS_DATA_PATH` (`/data` in containers); avoid committing real keys or licenses—use sample PEMs in
   `misc/`.
 - S3 backend needs `s3-backend` plus AWS credentials/env vars; prefer env vars over checked-in config.
+- Do not use `apt-get` in the final Docker image stage.

@@ -7,6 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.21.0 - 2026-09-17
 
 ### Breaking Changes
 
@@ -33,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Update Web Console to v1.17.2, [PR-1615](https://github.com/reductstore/reductstore/pull/1615)
 - Update Web Console to v1.16.0, [PR-1607](https://github.com/reductstore/reductstore/pull/1607)
 - Default `RS_SYSTEM_EVENTS_QUOTA_SIZE` to 10 GB when it is not set, [PR-1556](https://github.com/reductstore/reductstore/pull/1556) by @LordAizen1
 - Allow fork pull request CI to run without protobuf setup tokens or Docker Hub credentials by vendoring `protoc` and making Docker login optional, [PR-1532](https://github.com/reductstore/reductstore/pull/1532)
@@ -62,7 +64,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Invalidate cached bearer credentials after token rotation and store rotated secrets as salted hashes, [CVE-2026-0001](https://github.com/reductstore/reductstore/security/advisories/GHSA-cg68-3m38-wq4c)
+- Invalidate cached bearer credentials after token rotation and store rotated secrets as salted hashes, [CVE-2026-90667](https://github.com/reductstore/reductstore/security/advisories/GHSA-cg68-3m38-wq4c)
 
 ## 1.20.10 - 2026-07-29
 
