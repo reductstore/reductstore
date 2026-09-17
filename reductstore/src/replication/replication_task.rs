@@ -5,15 +5,16 @@ use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
-use crate::lifecycle::SystemEventSink;
 use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketBuilder};
-use crate::replication::replication_aggregator::ReplicationEventAggregator;
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::{TransactionLog, TransactionLogMap, TransactionLogRef};
+use crate::replication::ReplicationSourceIdentity;
 use crate::replication::TransactionNotification;
 use crate::storage::engine::StorageEngine;
+use crate::syslog::aggregate::replication::ReplicationEventAggregator;
+use crate::syslog::SystemEventSink;
 use log::{error, info};
 use reduct_base::error::ReductError;
 use reduct_base::msg::diagnostics::Diagnostics;
@@ -70,6 +71,7 @@ impl ReplicationTask {
         config: Cfg,
         storage: Arc<StorageEngine>,
         system_event_sink: Option<SystemEventSink>,
+        source_identity: ReplicationSourceIdentity,
     ) -> Result<Self, ReductError> {
         let ReplicationSettings {
             dst_bucket: remote_bucket,
@@ -82,7 +84,9 @@ impl ReplicationTask {
             .url(remote_host)
             .bucket_name(remote_bucket)
             .verify_ssl(config.replication_conf.verify_ssl)
-            .ca_path(config.replication_conf.ca_path.clone());
+            .ca_path(config.replication_conf.ca_path.clone())
+            .compression(settings.compression)
+            .source_identity(source_identity);
 
         if let Some(token) = remote_token {
             remote_bucket_builder = remote_bucket_builder.api_token(token);
@@ -168,8 +172,13 @@ impl ReplicationTask {
             // Aggregates replication diagnostics into periodic $system events,
             // driven inline by this worker loop (flushed on idle/cap each
             // iteration and on loop exit).
-            let mut diagnostics_aggregator = thr_system_event_sink
-                .map(|sink| ReplicationEventAggregator::new(sink, replication_name.clone()));
+            let mut diagnostics_aggregator = thr_system_event_sink.map(|sink| {
+                ReplicationEventAggregator::new(
+                    sink,
+                    replication_name.clone(),
+                    &thr_settings.src_bucket,
+                )
+            });
             let init_transaction_logs = async || {
                 let mut logs = thr_log_map.write().await?;
                 for entry in thr_storage
@@ -893,7 +902,7 @@ mod tests {
         path: PathBuf,
     ) {
         let settings = ReplicationSettings {
-            each_n: Some(2),
+            when: Some(serde_json::json!({"$each_n": 2})),
             ..settings
         };
 
@@ -912,11 +921,11 @@ mod tests {
         assert_eq!(replication.log_map.read().await.unwrap().len(), 2);
         assert_eq!(
             get_entries_from_transaction_log(&mut replication, "test1").await,
-            vec![Transaction::WriteRecord(10), Transaction::WriteRecord(30)]
+            vec![Transaction::WriteRecord(20)]
         );
         assert_eq!(
             get_entries_from_transaction_log(&mut replication, "test2").await,
-            vec![Transaction::WriteRecord(40), Transaction::WriteRecord(60)]
+            vec![Transaction::WriteRecord(50)]
         );
     }
 
@@ -1272,12 +1281,10 @@ mod tests {
             dst_host: "http://localhost:8383".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec!["test1".to_string(), "test2".to_string()],
-            include: Labels::new(),
-            exclude: Labels::new(),
-            each_n: None,
-            each_s: None,
+            dst_prefix: String::new(),
             when: None,
             mode: ReplicationMode::Enabled,
+            compression: Default::default(),
         }
     }
 

@@ -11,6 +11,8 @@ def test__get_info(base_url, session):
     assert resp.status_code == 200
     data = json.loads(resp.content)
     assert data["version"] >= "1.11.0"
+    assert data["instance_name"] == "http-api-tests"
+    assert data["instance_role"] == "STANDALONE"
     assert int(data["bucket_count"]) > 0
     assert int(data["uptime"]) >= 0
     assert int(data["latest_record"]) >= 0

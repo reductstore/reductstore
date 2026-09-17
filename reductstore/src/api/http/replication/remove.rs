@@ -18,7 +18,7 @@ pub(super) async fn remove_replication(
         .await?;
     components
         .replication_repo
-        .write()
+        .read()
         .await?
         .remove_replication(&replication_name)
         .await?;

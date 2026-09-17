@@ -96,7 +96,7 @@ impl ReadOnlyTokenRepository {
             client_build: "Failed to build system-events read-only token client",
             kind: ClientBuildErrorKind::InternalServerError,
         })
-        .api_token(&cfg.api_token)
+        .api_token(cfg.api_token.as_str())
         .verify_ssl(cfg.system_events_conf.remote_verify_ssl)
         .ca_path(cfg.system_events_conf.remote_ca_path.as_ref())
         .connect_timeout(cfg.system_events_conf.remote_timeout)
@@ -119,7 +119,7 @@ impl ReadOnlyTokenRepository {
     }
 
     async fn load_repo(&self) -> Result<HashMap<String, Token>, ReductError> {
-        let api_token = self.cfg.api_token.clone();
+        let api_token = self.cfg.api_token.as_str().to_string();
 
         FILE_CACHE.discard_recursive(&self.config_path).await?; // ensure we update it from backend
         let mut repo: HashMap<String, Token> = HashMap::new();
@@ -409,7 +409,7 @@ mod tests {
             let (mut repo, _) = repo_fixture.await;
             let token = repo.get_token(INIT_TOKEN_NAME).await.unwrap();
             assert!(is_hashed_token_secret(&token.value));
-            assert!(verify_token_secret(&token.value, &cfg.api_token));
+            assert!(verify_token_secret(&token.value, cfg.api_token.as_str()));
             assert!(token.is_provisioned);
         }
 
@@ -487,7 +487,7 @@ mod tests {
             let token = repo.get_token(INIT_TOKEN_NAME).await.unwrap().clone();
             assert_eq!(token.name, INIT_TOKEN_NAME.to_string());
             assert!(is_hashed_token_secret(&token.value));
-            assert!(verify_token_secret(&token.value, &cfg.api_token));
+            assert!(verify_token_secret(&token.value, cfg.api_token.as_str()));
             assert_eq!(
                 token.permissions,
                 Some(Permissions {
@@ -545,14 +545,14 @@ mod tests {
             cfg: Cfg,
         ) {
             let (mut repo, _) = repo_fixture.await;
-            let header = format!("Bearer {}", cfg.api_token);
+            let header = format!("Bearer {}", cfg.api_token.as_str());
             let res = repo
                 .validate_token(Some(header.as_str()), None)
                 .await
                 .unwrap();
             assert_eq!(res.name, INIT_TOKEN_NAME.to_string());
             assert!(is_hashed_token_secret(&res.value));
-            assert!(verify_token_secret(&res.value, &cfg.api_token));
+            assert!(verify_token_secret(&res.value, cfg.api_token.as_str()));
             assert_eq!(
                 res.permissions,
                 Some(Permissions {
@@ -715,7 +715,7 @@ mod tests {
     #[tokio::test]
     async fn test_build_audit_client_none_with_invalid_ca() {
         let mut cfg = Cfg::default();
-        cfg.api_token = "secret".to_string();
+        cfg.api_token = crate::cfg::ApiToken::Provisioned("secret".to_string());
         cfg.primary_url = Some("http://127.0.0.1:1/".to_string());
         cfg.system_events_conf.remote_ca_path = Some("/tmp/does-not-exist-ca.pem".into());
         assert!(ReadOnlyTokenRepository::build_audit_client(&cfg).is_none());
@@ -736,7 +736,7 @@ mod tests {
         let base_url = start_bucket_info_server(body).await;
 
         let mut cfg = Cfg::default();
-        cfg.api_token = "test_token".to_string();
+        cfg.api_token = crate::cfg::ApiToken::Provisioned("test_token".to_string());
         cfg.role = InstanceRole::Replica;
         cfg.primary_url = Some(base_url);
 
@@ -767,7 +767,7 @@ mod tests {
     #[fixture]
     fn cfg() -> Cfg {
         let mut cfg = Cfg::default();
-        cfg.api_token = "test_token".to_string();
+        cfg.api_token = crate::cfg::ApiToken::Provisioned("test_token".to_string());
         cfg.role = InstanceRole::Replica;
         cfg.engine_config.replica_update_interval = std::time::Duration::from_millis(100);
         cfg

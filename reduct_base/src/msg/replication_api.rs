@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 use crate::msg::diagnostics::Diagnostics;
-use crate::Labels;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -23,6 +22,19 @@ impl Default for ReplicationMode {
     }
 }
 
+/// Compression of batch payloads during transfer
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "lowercase")]
+pub enum ReplicationCompression {
+    /// No compression
+    #[default]
+    None,
+    /// Zstandard compression
+    Zstd,
+    /// Gzip compression
+    Gzip,
+}
+
 /// Replication settings
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
 pub struct ReplicationSettings {
@@ -34,27 +46,22 @@ pub struct ReplicationSettings {
     pub dst_host: String,
     /// Destination access token
     pub dst_token: Option<String>,
-    /// Entries to replicate. If empty, all entries are replicated. Wildcards are supported.
+    /// Entries to replicate. If empty, all entries are replicated. Supports exact names,
+    /// glob-like `*` and `**` wildcards, and `!` exclusion patterns.
     #[serde(default)]
     pub entries: Vec<String>,
-    /// Labels to include
+    /// Prefix to add to destination entry names
     #[serde(default)]
-    pub include: Labels,
-    /// Labels to exclude
-    #[serde(default)]
-    pub exclude: Labels,
-    /// Replication each N-th record
-    #[serde(default)]
-    pub each_n: Option<u64>,
-    /// Replication a record every S seconds
-    #[serde(default)]
-    pub each_s: Option<f64>,
+    pub dst_prefix: String,
     /// When condition
     #[serde(default)]
     pub when: Option<Value>,
     /// Mode
     #[serde(default)]
     pub mode: ReplicationMode,
+    /// Compression of batch payloads during transfer
+    #[serde(default)]
+    pub compression: ReplicationCompression,
 }
 
 /// Replication info

@@ -57,7 +57,7 @@ impl Bucket {
     }
 
     /// Fill in missing settings with defaults
-    pub(super) fn fill_settings(
+    pub(crate) fn fill_settings(
         settings: BucketSettings,
         default: BucketSettings,
     ) -> BucketSettings {

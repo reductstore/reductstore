@@ -6,7 +6,7 @@ use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{unprocessable_entity, Labels};
-use std::collections::HashMap;
+use serde_json::json;
 
 /// Reserved segment for system metadata entries.
 ///
@@ -87,12 +87,12 @@ pub(crate) struct MetaEntryBehavior;
 #[async_trait]
 impl SystemEntryBehavior for MetaEntryBehavior {
     async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError> {
-        let key = labels.get("key").ok_or_else(|| {
-            unprocessable_entity!(
+        let Some(key) = labels.get("key") else {
+            return Err(unprocessable_entity!(
                 "System entry '{}' records must contain label 'key'",
                 entry.name()
-            )
-        })?;
+            ));
+        };
 
         if labels.get("remove").is_some_and(|value| value == "true") {
             return Err(unprocessable_entity!(
@@ -101,11 +101,22 @@ impl SystemEntryBehavior for MetaEntryBehavior {
             ));
         }
 
+        // escape system names started with $
+        let key = if key.starts_with('$') {
+            format!("${}", key)
+        } else {
+            key.to_string()
+        };
+
+        // remove previous version with the same key (upsert-by-key behavior)
         let _ = entry
             .query_remove_records(QueryEntry {
                 start: Some(0),
                 stop: Some(u64::MAX),
-                include: Some(HashMap::from([("key".to_string(), key.to_string())])),
+                when: Some(json!({
+                    "$has": "key",
+                    "&key": {"$eq": key}
+                })),
                 ..Default::default()
             })
             .await?;
@@ -113,18 +124,26 @@ impl SystemEntryBehavior for MetaEntryBehavior {
     }
 
     fn apply_default_query_filters(&self, query: &mut QueryEntry) {
-        if query
-            .include
-            .as_ref()
-            .is_some_and(|include| include.contains_key("remove"))
-        {
-            return;
-        }
+        // Filter out tombstoned records (remove=true) by injecting $not condition
+        let exclude = json!([{
+            "$and": [
+                {"$has": "remove"}, {"&remove": {"$eq": true}}
+            ]
+        }]);
 
-        let exclude = query.exclude.get_or_insert_with(HashMap::new);
-        exclude
-            .entry("remove".to_string())
-            .or_insert_with(|| "true".to_string());
+        let when = query.when.get_or_insert_with(|| json!({}));
+        match when.as_object_mut().unwrap().entry("$not") {
+            serde_json::map::Entry::Vacant(entry) => {
+                entry.insert(exclude);
+            }
+            serde_json::map::Entry::Occupied(mut entry) => {
+                entry
+                    .get_mut()
+                    .as_array_mut()
+                    .unwrap()
+                    .push(exclude.get(0).unwrap().clone());
+            }
+        }
     }
 
     fn validate_remove_records(&self, entry_name: &str) -> Result<(), ReductError> {
@@ -253,26 +272,6 @@ mod tests {
         assert!(!MetaEntryBehavior.is_eligible_for_fifo_eviction());
         assert!(!MetaEntryBehavior.is_removable_by_query());
         assert!(!MetaEntryBehavior.is_queryable_by_wildcard());
-    }
-
-    #[tokio::test]
-    async fn meta_behavior_adds_default_remove_filter() {
-        let mut query = QueryEntry::default();
-        MetaEntryBehavior.apply_default_query_filters(&mut query);
-        assert_eq!(
-            query.exclude.unwrap().get("remove"),
-            Some(&"true".to_string())
-        );
-    }
-
-    #[tokio::test]
-    async fn meta_behavior_does_not_override_explicit_remove_include() {
-        let mut query = QueryEntry {
-            include: Some(HashMap::from([("remove".to_string(), "true".to_string())])),
-            ..Default::default()
-        };
-        MetaEntryBehavior.apply_default_query_filters(&mut query);
-        assert!(query.exclude.is_none());
     }
 
     #[tokio::test]

@@ -13,6 +13,7 @@ pub mod system_events;
 pub mod zenoh;
 
 use crate::api::components::Components;
+use crate::api::license_device_guard::LicenseDeviceGuard;
 use crate::api::limits::{LimitsBuilder, LimitsConfig};
 use crate::asset::asset_manager::create_asset_manager;
 use crate::auth::token_auth::TokenAuthorization;
@@ -26,17 +27,16 @@ use crate::cfg::system_events::SystemEventsConfig;
 #[cfg(feature = "zenoh-api")]
 use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::cache::Cache;
+use crate::core::deployment_id::{NodeId, StoreId};
 use crate::core::env::{Env, GetEnv, StdEnvGetter};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
-use crate::lifecycle::SystemEventSink;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
+use crate::replication::ReplicationSourceIdentity;
+use crate::storage::bucket::Bucket;
 use crate::storage::usage::UsageCounters;
-use crate::syslog::build_audit_logger;
-use crate::syslog::build_replication_system_logger;
-use crate::syslog::build_system_logger;
-use crate::syslog::build_usage_logger;
+use crate::syslog::build_system_event_logger;
 use async_trait::async_trait;
 use log::{info, warn};
 use reduct_base::error::ReductError;
@@ -70,6 +70,34 @@ pub enum InstanceRole {
     Replica,
 }
 
+impl InstanceRole {
+    pub(crate) fn as_str(&self) -> &'static str {
+        match self {
+            InstanceRole::Standalone => "STANDALONE",
+            InstanceRole::Primary => "PRIMARY",
+            InstanceRole::Secondary => "SECONDARY",
+            InstanceRole::Replica => "REPLICA",
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Clone, Default)]
+pub enum ApiToken {
+    #[default]
+    NoToken,
+    Provisioned(String),
+    Initialized(String),
+}
+
+impl ApiToken {
+    pub fn as_str(&self) -> &str {
+        match self {
+            ApiToken::NoToken => "",
+            ApiToken::Provisioned(token) | ApiToken::Initialized(token) => token,
+        }
+    }
+}
+
 #[derive(Clone, Default)]
 pub struct ProvisionedReplication {
     pub settings: ReplicationSettings,
@@ -90,7 +118,7 @@ pub struct Cfg {
     pub public_url: String,
     pub api_base_path: String,
     pub data_path: PathBuf,
-    pub api_token: String,
+    pub api_token: ApiToken,
     pub cert_path: Option<PathBuf>,
     pub cert_key_path: Option<PathBuf>,
     pub ext_path: Option<PathBuf>,
@@ -101,6 +129,7 @@ pub struct Cfg {
     pub instance_name: String,
 
     pub buckets: HashMap<String, BucketSettings>,
+    pub bucket_defaults: BucketSettings,
     pub tokens: HashMap<String, Token>,
     pub replications: HashMap<String, ProvisionedReplication>,
     pub lifecycles: HashMap<String, ProvisionedLifecycle>,
@@ -125,7 +154,7 @@ impl Default for Cfg {
             public_url: format!("http://{}:{}/", DEFAULT_HOST, DEFAULT_PORT),
             api_base_path: "/".to_string(),
             data_path: PathBuf::from("/data"),
-            api_token: "".to_string(),
+            api_token: ApiToken::NoToken,
             cert_path: None,
             cert_key_path: None,
             ext_path: None,
@@ -135,6 +164,7 @@ impl Default for Cfg {
             secondary_url: None,
             instance_name: "unknown".to_string(),
             buckets: HashMap::new(),
+            bucket_defaults: Bucket::defaults(),
             tokens: HashMap::new(),
             replications: HashMap::new(),
             lifecycles: HashMap::new(),
@@ -176,6 +206,7 @@ pub trait ExtCfgBounds: Clone + Send + Sync {
             .local_data_path(self.data_path());
         builder.try_build().await
     }
+
     fn static_extensions(&self, _settings: ExtSettings) -> Vec<Box<dyn IoExtension + Send + Sync>> {
         vec![]
     }
@@ -292,7 +323,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         let lifecycles = Self::parse_lifecycles(&mut env);
         let has_lifecycles = !lifecycles.is_empty();
 
-        let api_token = env.get_masked("RS_API_TOKEN", "".to_string());
+        let api_token = Self::parse_auth_config(&mut env, ext_cfg.role());
 
         let cfg = Cfg {
             log_level: env.get("RS_LOG_LEVEL", DEFAULT_LOG_LEVEL.to_string()),
@@ -301,7 +332,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             port,
             api_base_path,
             data_path: ext_cfg.data_path(),
-            api_token: api_token.clone(),
+            api_token,
             cert_path,
             cert_key_path,
             role: ext_cfg.role(),
@@ -314,6 +345,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             instance_name: resolve_instance_name(env.get_optional::<String>("RS_INSTANCE_NAME")),
             ext_path: env.get_optional::<String>("RS_EXT_PATH").map(PathBuf::from),
             cors_allow_origin: Self::parse_cors_allow_origin(&mut env),
+            bucket_defaults: Self::parse_bucket_defaults(&mut env),
             buckets: Self::parse_buckets(&mut env),
             tokens: Self::parse_tokens(&mut env),
             replications,
@@ -404,6 +436,19 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
     pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
+        let store_id = StoreId::builder(&data_path, self.cfg.role.clone())
+            .retry_interval(Duration::from_secs(30))
+            .retry_timeout(Duration::from_secs(5))
+            .load_or_create()
+            .await?;
+        let node_id = NodeId::from_instance_name(&self.cfg.instance_name);
+        let replication_source_identity = ReplicationSourceIdentity::new(
+            node_id.to_string(),
+            store_id.to_string(),
+            self.license
+                .as_ref()
+                .map(|license| license.fingerprint.clone()),
+        );
         // One shared counters instance: the engine increments it at its choke
         // points, the usage aggregator drains it.
         let usage_counters = Arc::new(UsageCounters::default());
@@ -413,18 +458,30 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         );
         let token_repo = self.provision_tokens(&data_path, Arc::clone(&storage));
         let console = create_asset_manager(load_console());
-        let replication_system_logger =
-            build_replication_system_logger(&self.cfg, Arc::clone(&storage)).await;
-        let replication_system_logger = Arc::new(AsyncRwLock::new(replication_system_logger));
-        let replication_engine = self
-            .provision_replication_repo(
+        // One collector owns every aggregator/task and the single shared
+        // `$system` writer; lifecycle and replication emit through a handle
+        // (`sink()`) over that same writer.
+        let system_events =
+            build_system_event_logger(&self.cfg, Arc::clone(&storage), usage_counters).await;
+        let replication_engine = Arc::new(AsyncRwLock::new(
+            self.provision_replication_repo(
                 Arc::clone(&storage),
-                SystemEventSink {
-                    system_logger: Arc::clone(&replication_system_logger),
-                    instance_name: self.cfg.instance_name.clone(),
-                },
+                system_events.sink(),
+                replication_source_identity,
             )
-            .await?;
+            .await?,
+        ));
+        // Register the replication notifier so `$system` writes replicate
+        // like API writes.
+        {
+            let repo = Arc::clone(&replication_engine);
+            system_events
+                .set_replication_notifier(Some(Arc::new(move |notification| {
+                    let repo = Arc::clone(&repo);
+                    Box::pin(async move { repo.read().await?.notify(notification).await })
+                })))
+                .await;
+        }
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
                 internal_server_error!(
@@ -443,30 +500,20 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .server_info(server_info.clone())
             .build();
         let static_extensions = self.ext_cfg.static_extensions(ext_settings.clone());
-        let audit_logger = build_audit_logger(&self.cfg, Arc::clone(&storage)).await;
-        let audit_logger = Arc::new(AsyncRwLock::new(audit_logger));
-        let system_logger = build_system_logger(&self.cfg, Arc::clone(&storage)).await;
-        let system_logger = Arc::new(AsyncRwLock::new(system_logger));
 
         let lifecycle_engine = self
-            .provision_lifecycle_repo(
-                Arc::clone(&storage),
-                SystemEventSink {
-                    system_logger: Arc::clone(&system_logger),
-                    instance_name: self.cfg.instance_name.clone(),
-                },
-            )
+            .provision_lifecycle_repo(Arc::clone(&storage), system_events.sink())
             .await?;
 
-        let usage_stat_logger =
-            build_usage_logger(&self.cfg, Arc::clone(&storage), usage_counters).await;
-
         Ok(Components {
+            store_id,
+            node_id: node_id.clone(),
+            license_device_guard: LicenseDeviceGuard::new(self.license.clone(), store_id, node_id),
             storage: Arc::clone(&storage),
             token_repo: AsyncRwLock::new(token_repo.await),
-            auth: TokenAuthorization::new(&self.cfg.api_token),
+            auth: TokenAuthorization::new(self.cfg.api_token.as_str()),
             console,
-            replication_repo: AsyncRwLock::new(replication_engine),
+            replication_repo: replication_engine,
             lifecycle_repo: AsyncRwLock::new(lifecycle_engine),
             ext_repo: create_ext_repository(
                 ext_path,
@@ -479,11 +526,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 DEFAULT_CACHED_QUERIES,
                 Duration::from_secs(DEFAULT_CACHED_QUERIES_TTL),
             )),
-            audit_logger,
             limits: LimitsBuilder::new()
                 .with_config(self.cfg.limits_config)
                 .build(),
-            usage_stat_logger: AsyncRwLock::new(usage_stat_logger),
+            system_events,
             cfg: self.cfg.clone(),
         })
     }
@@ -522,6 +568,43 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty())
             .collect()
+    }
+
+    fn parse_auth_config(env: &mut Env<EnvGetter>, instance_role: InstanceRole) -> ApiToken {
+        if instance_role == InstanceRole::Replica {
+            let token = env.get_masked("RS_API_TOKEN", String::new());
+            return if token.is_empty() {
+                ApiToken::NoToken
+            } else {
+                ApiToken::Provisioned(token)
+            };
+        }
+
+        if env.get("RS_DISABLE_AUTH", false) {
+            return ApiToken::NoToken;
+        }
+
+        let api_token = env.get_masked_optional::<String>("RS_API_TOKEN");
+        let init_api_token = env.get_masked_optional::<String>("RS_INIT_API_TOKEN");
+
+        match (api_token, init_api_token) {
+            (Some(_), Some(_)) => {
+                panic!("RS_API_TOKEN and RS_INIT_API_TOKEN must not both be set")
+            }
+            (None, None) => {
+                panic!(
+                    "Authentication is enabled: set exactly one of RS_API_TOKEN or RS_INIT_API_TOKEN"
+                )
+            }
+            (Some(token), None) => {
+                assert!(!token.is_empty(), "RS_API_TOKEN must not be empty");
+                ApiToken::Provisioned(token)
+            }
+            (None, Some(token)) => {
+                assert!(!token.is_empty(), "RS_INIT_API_TOKEN must not be empty");
+                ApiToken::Initialized(token)
+            }
+        }
     }
 }
 
@@ -578,6 +661,7 @@ mod tests {
     use mockall::mock;
     use mockall::predicate::eq;
     use rstest::{fixture, rstest};
+    use serial_test::serial;
     use std::collections::BTreeMap;
     use std::env::VarError;
     use std::panic::AssertUnwindSafe;
@@ -610,6 +694,64 @@ mod tests {
         assert!(!fallback.is_empty());
     }
 
+    #[tokio::test]
+    #[serial]
+    async fn initializes_store_id_for_core_configuration() {
+        let data_path = tempfile::tempdir().unwrap().keep();
+        let parser = CfgParser {
+            cfg: Cfg {
+                data_path: data_path.clone(),
+                role: InstanceRole::Primary,
+                ..Cfg::default()
+            },
+            env: Env::new(MockEnvGetter::new()),
+            license: None,
+            ext_cfg: CoreExtCfg {
+                role: InstanceRole::Primary,
+                data_path: data_path.clone(),
+            },
+        };
+
+        parser.init_storage_backend().await.unwrap();
+        parser.build().await.unwrap();
+
+        assert!(data_path.join(".uuid").is_file());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn component_construction_preserves_initialized_ids_and_usable_storage() {
+        let data_path = tempfile::tempdir().unwrap().keep();
+        let instance_name = "test-node".to_string();
+        let parser = CfgParser {
+            cfg: Cfg {
+                data_path: data_path.clone(),
+                role: InstanceRole::Primary,
+                instance_name: instance_name.clone(),
+                ..Cfg::default()
+            },
+            env: Env::new(MockEnvGetter::new()),
+            license: None,
+            ext_cfg: CoreExtCfg {
+                role: InstanceRole::Primary,
+                data_path: data_path.clone(),
+            },
+        };
+
+        parser.init_storage_backend().await.unwrap();
+        let initialized_store_id = StoreId::builder(&data_path, InstanceRole::Primary)
+            .load_or_create()
+            .await
+            .unwrap();
+        let initialized_node_id = NodeId::from_instance_name(&instance_name);
+
+        let components = parser.build().await.unwrap();
+
+        assert_eq!(components.store_id, initialized_store_id);
+        assert_eq!(components.node_id, initialized_node_id);
+        assert_eq!(components.storage.info().await.unwrap().usage, 0);
+    }
+
     #[rstest]
     #[tokio::test(flavor = "current_thread")]
     async fn test_default_settings(mut env_getter: MockEnvGetter) {
@@ -624,13 +766,14 @@ mod tests {
         assert_eq!(parser.cfg.api_base_path, "/");
         assert_eq!(parser.cfg.public_url, "http://0.0.0.0:8383/");
         assert_eq!(parser.cfg.data_path, PathBuf::from("/data"));
-        assert_eq!(parser.cfg.api_token, "");
+        assert_eq!(parser.cfg.api_token, ApiToken::NoToken);
         assert_eq!(parser.cfg.cert_path, None);
         assert_eq!(parser.cfg.cert_key_path, None);
         assert_eq!(parser.cfg.cors_allow_origin.len(), 0);
         assert_eq!(parser.cfg.limits_config, LimitsConfig::default());
 
         assert_eq!(parser.cfg.buckets.len(), 0);
+        assert_eq!(parser.cfg.bucket_defaults, Bucket::defaults());
         assert_eq!(parser.cfg.tokens.len(), 0);
     }
 
@@ -850,19 +993,191 @@ mod tests {
         assert_eq!(parser.cfg.data_path, PathBuf::from("/tmp"));
     }
 
-    #[rstest]
-    #[tokio::test(flavor = "current_thread")]
-    async fn test_api_token(mut env_getter: MockEnvGetter) {
-        env_getter
-            .expect_get()
-            .with(eq("RS_API_TOKEN"))
-            .times(1)
-            .return_const(Ok("XXX".to_string()));
-        env_getter
-            .expect_get()
-            .return_const(Err(VarError::NotPresent));
-        let parser = CfgParser::from_env(env_getter, "0.0.0").await;
-        assert_eq!(parser.cfg.api_token, "XXX");
+    mod auth_config {
+        use super::*;
+
+        #[rstest]
+        fn parses_api_token_as_provisioned() {
+            let mut env_getter = MockEnvGetter::new();
+            env_getter
+                .expect_get()
+                .with(eq("RS_DISABLE_AUTH"))
+                .return_const(Err(VarError::NotPresent));
+            env_getter
+                .expect_get()
+                .with(eq("RS_API_TOKEN"))
+                .return_const(Ok("api-token".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_INIT_API_TOKEN"))
+                .return_const(Err(VarError::NotPresent));
+
+            let mut env = Env::new(env_getter);
+            assert_eq!(
+                CfgParser::<MockEnvGetter>::parse_auth_config(&mut env, InstanceRole::Standalone),
+                ApiToken::Provisioned("api-token".to_string())
+            );
+        }
+
+        #[rstest]
+        fn parses_init_api_token_as_initialized() {
+            let mut env_getter = MockEnvGetter::new();
+            env_getter
+                .expect_get()
+                .with(eq("RS_DISABLE_AUTH"))
+                .return_const(Err(VarError::NotPresent));
+            env_getter
+                .expect_get()
+                .with(eq("RS_API_TOKEN"))
+                .return_const(Err(VarError::NotPresent));
+            env_getter
+                .expect_get()
+                .with(eq("RS_INIT_API_TOKEN"))
+                .return_const(Ok("init-api-token".to_string()));
+
+            let mut env = Env::new(env_getter);
+            assert_eq!(
+                CfgParser::<MockEnvGetter>::parse_auth_config(&mut env, InstanceRole::Standalone),
+                ApiToken::Initialized("init-api-token".to_string())
+            );
+        }
+
+        #[rstest]
+        fn disabled_auth_ignores_token_variables() {
+            let mut env_getter = MockEnvGetter::new();
+            env_getter
+                .expect_get()
+                .with(eq("RS_DISABLE_AUTH"))
+                .return_const(Ok("true".to_string()));
+            env_getter.expect_get().with(eq("RS_API_TOKEN")).times(0);
+            env_getter
+                .expect_get()
+                .with(eq("RS_INIT_API_TOKEN"))
+                .times(0);
+
+            let mut env = Env::new(env_getter);
+            assert_eq!(
+                CfgParser::<MockEnvGetter>::parse_auth_config(&mut env, InstanceRole::Standalone),
+                ApiToken::NoToken
+            );
+        }
+
+        #[rstest]
+        fn replica_uses_api_token_without_new_auth_configuration() {
+            let mut env_getter = MockEnvGetter::new();
+            env_getter
+                .expect_get()
+                .with(eq("RS_API_TOKEN"))
+                .return_const(Ok("replica-token".to_string()));
+            env_getter.expect_get().with(eq("RS_DISABLE_AUTH")).times(0);
+            env_getter
+                .expect_get()
+                .with(eq("RS_INIT_API_TOKEN"))
+                .times(0);
+
+            let mut env = Env::new(env_getter);
+            assert_eq!(
+                CfgParser::<MockEnvGetter>::parse_auth_config(&mut env, InstanceRole::Replica),
+                ApiToken::Provisioned("replica-token".to_string())
+            );
+        }
+
+        #[rstest]
+        fn replica_allows_missing_api_token() {
+            let mut env_getter = MockEnvGetter::new();
+            env_getter
+                .expect_get()
+                .with(eq("RS_API_TOKEN"))
+                .return_const(Err(VarError::NotPresent));
+
+            let mut env = Env::new(env_getter);
+            assert_eq!(
+                CfgParser::<MockEnvGetter>::parse_auth_config(&mut env, InstanceRole::Replica),
+                ApiToken::NoToken
+            );
+        }
+
+        #[rstest]
+        #[should_panic(expected = "RS_API_TOKEN and RS_INIT_API_TOKEN must not both be set")]
+        fn rejects_both_token_variables() {
+            let mut env_getter = MockEnvGetter::new();
+            env_getter
+                .expect_get()
+                .with(eq("RS_DISABLE_AUTH"))
+                .return_const(Err(VarError::NotPresent));
+            env_getter
+                .expect_get()
+                .with(eq("RS_API_TOKEN"))
+                .return_const(Ok("api-token".to_string()));
+            env_getter
+                .expect_get()
+                .with(eq("RS_INIT_API_TOKEN"))
+                .return_const(Ok("init-api-token".to_string()));
+
+            CfgParser::<MockEnvGetter>::parse_auth_config(
+                &mut Env::new(env_getter),
+                InstanceRole::Standalone,
+            );
+        }
+
+        #[rstest]
+        #[should_panic(
+            expected = "Authentication is enabled: set exactly one of RS_API_TOKEN or RS_INIT_API_TOKEN"
+        )]
+        fn rejects_missing_token_variables() {
+            let mut env_getter = MockEnvGetter::new();
+            env_getter
+                .expect_get()
+                .return_const(Err(VarError::NotPresent));
+
+            CfgParser::<MockEnvGetter>::parse_auth_config(
+                &mut Env::new(env_getter),
+                InstanceRole::Standalone,
+            );
+        }
+
+        #[rstest]
+        #[case("RS_API_TOKEN", "RS_API_TOKEN must not be empty")]
+        #[case("RS_INIT_API_TOKEN", "RS_INIT_API_TOKEN must not be empty")]
+        fn rejects_empty_token_variable(#[case] variable: &str, #[case] expected: &str) {
+            let mut env_getter = MockEnvGetter::new();
+            env_getter
+                .expect_get()
+                .with(eq("RS_DISABLE_AUTH"))
+                .return_const(Err(VarError::NotPresent));
+            let selected_variable = variable.to_string();
+            env_getter
+                .expect_get()
+                .withf(move |name| name == selected_variable)
+                .return_const(Ok(String::new()));
+            let missing_variable = if variable == "RS_API_TOKEN" {
+                "RS_INIT_API_TOKEN"
+            } else {
+                "RS_API_TOKEN"
+            };
+            env_getter
+                .expect_get()
+                .with(eq(missing_variable))
+                .return_const(Err(VarError::NotPresent));
+
+            let result = std::panic::catch_unwind(AssertUnwindSafe(|| {
+                CfgParser::<MockEnvGetter>::parse_auth_config(
+                    &mut Env::new(env_getter),
+                    InstanceRole::Standalone,
+                );
+            }));
+            let payload = result.err().unwrap();
+            let panic_message = payload
+                .downcast_ref::<String>()
+                .cloned()
+                .or_else(|| {
+                    payload
+                        .downcast_ref::<&str>()
+                        .map(|value| value.to_string())
+                })
+                .unwrap();
+            assert_eq!(panic_message, expected);
+        }
     }
 
     #[rstest]
@@ -997,6 +1312,10 @@ mod tests {
     async fn test_remote_storage_s3() {
         // we cover only s3 parts here, filesystem is used as backend
         let mut env_getter = MockEnvGetter::new();
+        env_getter
+            .expect_get()
+            .with(eq("RS_DISABLE_AUTH"))
+            .return_const(Ok("true".to_string()));
         env_getter
             .expect_get()
             .with(eq("RS_DATA_PATH"))
@@ -1142,6 +1461,10 @@ mod tests {
     #[fixture]
     fn env_getter() -> MockEnvGetter {
         let mut mock_getter = MockEnvGetter::new();
+        mock_getter
+            .expect_get()
+            .with(eq("RS_DISABLE_AUTH"))
+            .return_const(Ok("true".to_string()));
         mock_getter.expect_all().returning(|| BTreeMap::new());
         mock_getter
     }

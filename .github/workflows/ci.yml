@@ -33,6 +33,20 @@ jobs:
       - name: Check code
         run: cargo fmt --all -- --check
 
+  # Scans Cargo.lock for RustSec advisories. This job reports dependency
+  # findings independently without blocking test jobs from running.
+  dependency_audit:
+    runs-on: ubuntu-latest
+    name: Dependency Audit
+    needs:
+      - rust_fmt
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Install cargo-audit
+        run: cargo install cargo-audit --version 0.22.2 --locked
+      - name: Run cargo audit
+        run: cargo audit
+
   build_binaries:
     name: Build Binaries
     runs-on: ${{ matrix.os }}
@@ -72,7 +86,6 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: ./.github/actions/build-binaries
         with:
-          action_github_token: ${{ github.token }}
           target: ${{ matrix.target }}
           os: ${{ matrix.os }}
           compiler: ${{ matrix.compiler }}
@@ -126,7 +139,8 @@ jobs:
         with:
           os: ${{ matrix.os }}
           target: ${{ matrix.target }}
-          action_github_token: ${{ github.token }}
+          access-key-id: ${{ secrets.S3_CACHE_ACCESS_KEY }}
+          secret-access-key: ${{ secrets.S3_CACHE_SECRET_KEY }}
 
       - name: Upload coverage to Codecov
         continue-on-error: true
@@ -159,6 +173,31 @@ jobs:
           name: image
           path: /tmp/image.tar
 
+  # Scans the amd64 test image before publishing. CRITICAL/HIGH fixed
+  # vulnerabilities fail the job; accepted false positives can go in .trivyignore.
+  container_scan:
+    runs-on: ubuntu-latest
+    name: Container Image Scan
+    needs:
+      - build_test_docker_image
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c
+        with:
+          name: image
+          path: /tmp/
+      - name: Load Docker image
+        run: docker load --input /tmp/image.tar
+      - name: Run Trivy vulnerability scanner
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
+        with:
+          image-ref: ${{ github.repository }}
+          format: table
+          exit-code: '1'
+          severity: CRITICAL,HIGH
+          ignore-unfixed: true
+          trivyignores: .trivyignore
+
   http_api_tests:
     name: HTTP API Tests
     runs-on: ubuntu-latest
@@ -167,7 +206,6 @@ jobs:
       - build_test_docker_image
     strategy:
       matrix:
-        token: [ "", "XXXX" ]
         cert_path: [ "", "/misc/certificate.crt" ]
         include:
           - cert_path: "/misc/certificate.crt"
@@ -179,15 +217,18 @@ jobs:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: test
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Login Docker
-        run: docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+        if: ${{ env.DOCKER_USER != '' && env.DOCKER_TOKEN != '' }}
+        run: docker login -u "$DOCKER_USER" -p "$DOCKER_TOKEN"
 
       - uses: ./.github/actions/api/http-tests
         with:
-          token: ${{ matrix.token }}
+          token: XXXX
           cert_path: ${{ matrix.cert_path }}
           url: ${{ matrix.url }}
 
@@ -210,11 +251,15 @@ jobs:
             auth_dictionary: ""
             tls_root_ca: "use-misc-cert"
     timeout-minutes: 5
+    env:
+      DOCKER_USER: ${{ secrets.DOCKER_USER }}
+      DOCKER_TOKEN: ${{ secrets.DOCKER_TOKEN }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
       - name: Login Docker
-        run: docker login -u ${{ secrets.DOCKER_USER }} -p ${{ secrets.DOCKER_TOKEN }}
+        if: ${{ env.DOCKER_USER != '' && env.DOCKER_TOKEN != '' }}
+        run: docker login -u "$DOCKER_USER" -p "$DOCKER_TOKEN"
 
       - name: Read TLS cert if needed
         id: tls
@@ -243,6 +288,7 @@ jobs:
         version:
           [
             "latest",
+            "v1.19.10",
             "v1.18.10",
             "v1.17.10",
             "v1.16.3",
@@ -518,6 +564,7 @@ jobs:
       - replication_test
       - read_only_replica_test
       - primary_secondary_test
+      - container_scan
     if: github.event_name != 'pull_request'
     strategy:
       matrix:
@@ -654,10 +701,6 @@ jobs:
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
         with:
           toolchain: ${{ vars.MINIMAL_RUST_VERSION }}
-      - uses: reductstore/setup-protoc@ac76da16b8e70736e159368a4bc962934d1f825a # master
-        with:
-          version: "3.x"
-          repo-token: ${{ github.token }}
       - name: Login
         run: |
           cargo login ${{ secrets.CRATES_IO_TOKEN }}

@@ -1,0 +1,23 @@
+# Trivy ignore file
+# Add accepted CVE IDs here, one per line, to suppress known false positives or risks.
+# Example: CVE-2024-XXXXX
+CVE-2026-53612
+CVE-2026-53613
+CVE-2026-53614
+CVE-2026-53615
+CVE-2026-14456
+# Fixed versions are available only via apt upgrades. The final image stage must
+# not run apt-get, so these are accepted until Debian publishes a refreshed base image.
+CVE-2026-41992
+CVE-2026-86145
+CVE-2026-89157
+CVE-2026-89161
+CVE-2026-11822
+CVE-2026-11824
+CVE-2026-13221
+CVE-2026-42496
+CVE-2026-8376
+CVE-2026-42497
+CVE-2026-48962
+CVE-2026-57432
+CVE-2026-57433

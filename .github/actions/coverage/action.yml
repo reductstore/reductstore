@@ -7,8 +7,11 @@ inputs:
   target:
     description: 'Target triple.'
     required: true
-  action_github_token:
-    description: 'GitHub token for authentication.'
+  access-key-id:
+    description: 'AWS Access Key ID'
+    required: true
+  secret-access-key:
+    description: 'AWS Secret Access Key'
     required: true
 runs:
   using: 'composite'
@@ -23,16 +26,13 @@ runs:
     - name: Install cargo-llvm-cov
       uses: taiki-e/install-action@cargo-llvm-cov
 
-    - uses: reductstore/setup-protoc@ac76da16b8e70736e159368a4bc962934d1f825a # master
-      with:
-        version: '26.x'
-        repo-token: ${{ inputs.action_github_token }}
-
     - name: AWS Credentials and Cargo Cache
       uses: ./.github/actions/aws-cargo-cache
       with:
         target: ${{ inputs.target }}
         profile: coverage
+        access-key-id: ${{ inputs.access-key-id }}
+        secret-access-key: ${{ inputs.secret-access-key }}
 
     - name: Run code coverage
       shell: bash
@@ -42,6 +42,15 @@ runs:
       run: |
         set -e -x
         cargo llvm-cov --locked --features fs-backend,ci --workspace --lcov --output-path lcov.info
+
+    - name: Show sccache stats
+      shell: bash
+      run: |
+        if command -v sccache >/dev/null 2>&1; then
+          sccache --show-stats
+        else
+          echo "sccache is disabled for this build."
+        fi
 
     - name: Upload coverage artifact
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a

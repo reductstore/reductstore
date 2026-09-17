@@ -95,8 +95,9 @@ pub(super) fn create_replication_api_routes() -> axum::Router<Arc<StateKeeper>> 
 
 #[cfg(test)]
 mod tests {
-    use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
-    use reduct_base::Labels;
+    use reduct_base::msg::replication_api::{
+        ReplicationCompression, ReplicationMode, ReplicationSettings,
+    };
     use rstest::fixture;
 
     #[fixture]
@@ -107,12 +108,10 @@ mod tests {
             dst_host: "http://localhost".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec![],
-            include: Labels::default(),
-            exclude: Labels::default(),
-            each_n: None,
-            each_s: None,
+            dst_prefix: String::new(),
             when: None,
             mode: ReplicationMode::Enabled,
+            compression: ReplicationCompression::None,
         }
     }
 
@@ -172,7 +171,7 @@ mod tests {
         async fn test_replication_settings_ok() {
             use crate::api::http::replication::ReplicationSettingsAxum;
 
-            let json = r#"{"src_bucket":"b1","dst_bucket":"b2","dst_host":"http://localhost"}"#;
+            let json = r#"{"src_bucket":"b1","dst_bucket":"b2","dst_host":"http://localhost","dst_prefix":"robot-1"}"#;
             let req = Request::builder().body(Body::from(json)).unwrap();
 
             let payload = ReplicationSettingsAxum::from_request(req, &())
@@ -180,6 +179,7 @@ mod tests {
                 .expect("parse settings");
             assert_eq!(payload.0.src_bucket, "b1");
             assert_eq!(payload.0.dst_bucket, "b2");
+            assert_eq!(payload.0.dst_prefix, "robot-1");
         }
 
         #[rstest]

@@ -4,16 +4,25 @@
 use crate::cfg::{parse_bool, CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
 use bytesize::ByteSize;
+use log::Level;
+use reduct_base::logger::parse_log_level;
 use std::path::PathBuf;
 use std::time::Duration;
 
 const DEFAULT_SYSTEM_EVENTS_ENABLED: bool = true;
+const DEFAULT_SYSTEM_EVENTS_LOG_LEVEL: Level = Level::Warn;
+/// 10 GB in SI notation, matching how the other size settings are expressed.
+const DEFAULT_SYSTEM_EVENTS_QUOTA_SIZE: u64 = 10_000_000_000;
 const DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL: bool = true;
 const DEFAULT_SYSTEM_EVENTS_REMOTE_TIMEOUT_S: u64 = 5;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SystemEventsConfig {
     pub enabled: bool,
+    /// Minimum level for persisting the instance's own log messages to
+    /// `$system/logs/<instance>`. Defaults to `WARN`; set `RS_SYSTEM_EVENTS_LOG_LEVEL`
+    /// to `OFF` (or an invalid value) for `None`, which disables log capture.
+    pub log_level: Option<Level>,
     pub quota_size: Option<u64>,
     pub remote_verify_ssl: bool,
     pub remote_ca_path: Option<PathBuf>,
@@ -24,7 +33,8 @@ impl Default for SystemEventsConfig {
     fn default() -> Self {
         Self {
             enabled: DEFAULT_SYSTEM_EVENTS_ENABLED,
-            quota_size: None,
+            log_level: Some(DEFAULT_SYSTEM_EVENTS_LOG_LEVEL),
+            quota_size: Some(DEFAULT_SYSTEM_EVENTS_QUOTA_SIZE),
             remote_verify_ssl: DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL,
             remote_ca_path: None,
             remote_timeout: Duration::from_secs(DEFAULT_SYSTEM_EVENTS_REMOTE_TIMEOUT_S),
@@ -42,9 +52,15 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 env.get_optional::<String>("RS_SYSTEM_EVENTS_ENABLED"),
                 DEFAULT_SYSTEM_EVENTS_ENABLED || has_lifecycles,
             ),
-            quota_size: env
-                .get_optional::<ByteSize>("RS_SYSTEM_EVENTS_QUOTA_SIZE")
-                .map(|size| size.as_u64()),
+            log_level: env
+                .get_optional::<String>("RS_SYSTEM_EVENTS_LOG_LEVEL")
+                .map_or(Some(DEFAULT_SYSTEM_EVENTS_LOG_LEVEL), |level| {
+                    parse_log_level(&level)
+                }),
+            quota_size: Some(
+                env.get_optional::<ByteSize>("RS_SYSTEM_EVENTS_QUOTA_SIZE")
+                    .map_or(DEFAULT_SYSTEM_EVENTS_QUOTA_SIZE, |size| size.as_u64()),
+            ),
             remote_verify_ssl: env
                 .get_optional("RS_SYSTEM_EVENTS_REMOTE_VERIFY_SSL")
                 .unwrap_or(DEFAULT_SYSTEM_EVENTS_REMOTE_VERIFY_SSL),
@@ -82,6 +98,10 @@ mod tests {
             .return_const(Ok("true".to_string()));
         env_getter
             .expect_get()
+            .with(eq("RS_SYSTEM_EVENTS_LOG_LEVEL"))
+            .return_const(Ok("WARN".to_string()));
+        env_getter
+            .expect_get()
             .with(eq("RS_SYSTEM_EVENTS_QUOTA_SIZE"))
             .return_const(Ok("10MB".to_string()));
         env_getter
@@ -106,6 +126,7 @@ mod tests {
             config,
             SystemEventsConfig {
                 enabled: true,
+                log_level: Some(Level::Warn),
                 quota_size: Some(10_000_000),
                 remote_verify_ssl: false,
                 remote_ca_path: Some(PathBuf::from("/tmp/system-ca.pem")),
@@ -129,7 +150,8 @@ mod tests {
             config,
             SystemEventsConfig {
                 enabled: true,
-                quota_size: None,
+                log_level: Some(Level::Warn),
+                quota_size: Some(10_000_000_000),
                 remote_verify_ssl: true,
                 remote_ca_path: None,
                 remote_timeout: Duration::from_secs(5),
@@ -150,7 +172,8 @@ mod tests {
             config,
             SystemEventsConfig {
                 enabled: true,
-                quota_size: None,
+                log_level: Some(Level::Warn),
+                quota_size: Some(10_000_000_000),
                 remote_verify_ssl: true,
                 remote_ca_path: None,
                 remote_timeout: Duration::from_secs(5),
@@ -164,6 +187,10 @@ mod tests {
         env_getter
             .expect_get()
             .with(eq("RS_SYSTEM_EVENTS_ENABLED"))
+            .return_const(Err(VarError::NotPresent));
+        env_getter
+            .expect_get()
+            .with(eq("RS_SYSTEM_EVENTS_LOG_LEVEL"))
             .return_const(Err(VarError::NotPresent));
         env_getter
             .expect_get()

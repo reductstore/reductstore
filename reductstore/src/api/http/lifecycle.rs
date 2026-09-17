@@ -151,6 +151,24 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_settings_with_processing_interval() {
+            let json = r#"{"type":"delete","bucket":"bucket-1","older_than":"30d","processing_interval":"6h"}"#;
+            let req = Request::builder().body(Body::from(json)).unwrap();
+            let body = LifecycleSettingsAxum::from_request(req, &()).await.unwrap();
+            assert_eq!(body.0.processing_interval, Some("6h".to_string()));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_settings_processing_interval_defaults_to_none() {
+            let json = r#"{"type":"delete","bucket":"bucket-1","older_than":"30d"}"#;
+            let req = Request::builder().body(Body::from(json)).unwrap();
+            let body = LifecycleSettingsAxum::from_request(req, &()).await.unwrap();
+            assert_eq!(body.0.processing_interval, None);
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_settings_invalid_json() {
             let req = Request::builder().body(Body::from("{bad")).unwrap();
             let err = LifecycleSettingsAxum::from_request(req, &())

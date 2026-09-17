@@ -33,6 +33,7 @@ use lifecycle::create_lifecycle_policy_api_routes;
 use log::{error, warn};
 use middleware::{
     attach_client_ip, audit_requests, check_api_rate_limit, default_headers, print_statuses,
+    validate_replication_identity,
 };
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
@@ -44,6 +45,7 @@ use std::sync::Arc;
 use token::create_token_api_routes;
 use tokio::sync::mpsc::Receiver;
 use tower_http::cors::{Any, CorsLayer};
+use tower_http::decompression::RequestDecompressionLayer;
 
 #[derive(PartialEq, Clone)]
 pub struct HttpError {
@@ -258,7 +260,16 @@ impl AxumAppBuilder {
                 // UI
                 .route(&format!("{}", cfg.api_base_path), get(redirect_to_index))
                 .fallback(get(show_ui))
+                // Decompress request bodies sent with Content-Encoding (gzip, zstd),
+                // e.g. compressed replication batches. Handlers read the raw
+                // payload size from x-reduct-content-length when the
+                // content-length header is consumed by the decompression.
+                .layer(RequestDecompressionLayer::new())
                 .layer(from_fn(attach_client_ip))
+                .layer(from_fn_with_state(
+                    state_keeper.clone(),
+                    validate_replication_identity,
+                ))
                 .layer(from_fn_with_state(state_keeper.clone(), audit_requests))
                 .layer(from_fn(default_headers))
                 .layer(from_fn(print_statuses))
@@ -299,13 +310,14 @@ pub(crate) mod tests {
     use crate::auth::token_auth::TokenAuthorization;
     use crate::auth::token_repository::TokenRepositoryBuilder;
     use crate::core::cache::Cache;
+    use crate::core::deployment_id::{NodeId, StoreId};
     use crate::core::sync::AsyncRwLock;
     use crate::ext::ext_repository::create_ext_repository;
     use crate::lifecycle::LifecycleRepoBuilder;
     use crate::lock_file::{LockFile, LockFileBuilder};
     use crate::replication::ReplicationRepoBuilder;
     use crate::storage::engine::StorageEngine;
-    use crate::syslog::build_audit_logger;
+    use crate::syslog::{build_system_event_logger, SystemEventLogger};
     use axum::body::Body;
     use axum::extract::Path;
     use axum_extra::headers::{Authorization, HeaderMap, HeaderMapExt};
@@ -313,8 +325,10 @@ pub(crate) mod tests {
     use reduct_base::error::ReductError as BaseHttpError;
     use reduct_base::ext::ExtSettings;
     use reduct_base::msg::bucket_api::BucketSettings;
-    use reduct_base::msg::replication_api::{ReplicationMode, ReplicationSettings};
-    use reduct_base::msg::server_api::ServerInfo;
+    use reduct_base::msg::replication_api::{
+        ReplicationCompression, ReplicationMode, ReplicationSettings,
+    };
+    use reduct_base::msg::server_api::{License, ServerInfo};
     use reduct_base::msg::token_api::{Permissions, TokenCreateRequest};
     use rstest::fixture;
     use std::collections::HashMap;
@@ -503,7 +517,7 @@ pub(crate) mod tests {
         async fn test_builder_builds_and_redirects_to_ui() {
             let cfg = Cfg {
                 data_path: tempfile::tempdir().unwrap().keep(),
-                api_token: "init-token".to_string(),
+                api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
                 api_base_path: "/".to_string(),
                 ..Cfg::default()
             };
@@ -743,6 +757,32 @@ pub(crate) mod tests {
         }
     }
 
+    /// Build the system-event collector for tests: audit/usage per the cfg, but
+    /// with log capture forced off so we never register the process-global log
+    /// sink from a test.
+    async fn test_system_events(
+        cfg: &Cfg,
+        storage: &Arc<StorageEngine>,
+    ) -> Arc<dyn SystemEventLogger + Send + Sync> {
+        let mut cfg = cfg.clone();
+        cfg.system_events_conf.log_level = None;
+        build_system_event_logger(
+            &cfg,
+            Arc::clone(storage),
+            Arc::new(crate::storage::usage::UsageCounters::default()),
+        )
+        .await
+    }
+
+    async fn test_deployment_ids(cfg: &Cfg) -> (StoreId, NodeId) {
+        let store_id = StoreId::builder(&cfg.data_path, cfg.role.clone())
+            .load_or_create()
+            .await
+            .unwrap();
+        let node_id = NodeId::from_instance_name(&cfg.instance_name);
+        (store_id, node_id)
+    }
+
     async fn test_components(cfg: Cfg) -> Components {
         let cfg_for_storage = cfg.clone();
         let storage = Arc::new(
@@ -756,7 +796,6 @@ pub(crate) mod tests {
         let token_repo = TokenRepositoryBuilder::new(cfg.clone())
             .build_with_storage(cfg.data_path.clone(), Arc::clone(&storage))
             .await;
-        let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -769,14 +808,21 @@ pub(crate) mod tests {
         #[cfg(not(feature = "web-console"))]
         let console_bytes: &[u8] = &[];
 
+        let system_events = test_system_events(&cfg, &storage).await;
+        let (store_id, node_id) = test_deployment_ids(&cfg).await;
         Components {
+            store_id,
+            node_id: node_id.clone(),
             storage: Arc::clone(&storage),
+            license_device_guard: crate::api::license_device_guard::LicenseDeviceGuard::new(
+                None, store_id, node_id,
+            ),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: AsyncRwLock::new(replication_repo),
+            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
-            audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
+            system_events,
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -787,17 +833,19 @@ pub(crate) mod tests {
                 Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
-            usage_stat_logger: AsyncRwLock::new(None),
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: crate::api::limits::LimitsBuilder::new().build(),
         }
     }
 
-    async fn keeper_with_limits_impl(limits_config: LimitsConfig) -> Arc<StateKeeper> {
+    async fn keeper_with_limits_impl(
+        limits_config: LimitsConfig,
+        license: Option<License>,
+    ) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
-            api_token: "init-token".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
             ..Cfg::default()
         };
         cfg.system_events_conf.enabled = true;
@@ -856,7 +904,6 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-        let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
         let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -869,12 +916,10 @@ pub(crate) mod tests {
                     dst_host: "http://localhost:8080".to_string(),
                     dst_token: None,
                     entries: vec![],
-                    include: Default::default(),
-                    exclude: Default::default(),
-                    each_n: None,
-                    each_s: None,
+                    dst_prefix: String::new(),
                     when: None,
                     mode: ReplicationMode::Enabled,
+                    compression: ReplicationCompression::None,
                 },
             )
             .await
@@ -888,14 +933,21 @@ pub(crate) mod tests {
         #[cfg(not(feature = "web-console"))]
         let console_bytes: &[u8] = &[];
 
+        let system_events = test_system_events(&cfg, &storage).await;
+        let (store_id, node_id) = test_deployment_ids(&cfg).await;
         let components = Components {
+            store_id,
+            node_id: node_id.clone(),
             storage: Arc::clone(&storage),
+            license_device_guard: crate::api::license_device_guard::LicenseDeviceGuard::new(
+                license, store_id, node_id,
+            ),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: AsyncRwLock::new(replication_repo),
+            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
-            audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
+            system_events,
             ext_repo: create_ext_repository(
                 None,
                 vec![],
@@ -906,7 +958,6 @@ pub(crate) mod tests {
                 Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
-            usage_stat_logger: AsyncRwLock::new(None),
             cfg: Cfg::default(),
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: LimitsBuilder::new().with_config(limits_config).build(),
@@ -919,13 +970,29 @@ pub(crate) mod tests {
     }
 
     pub(crate) async fn keeper_with_limits(limits_config: LimitsConfig) -> Arc<StateKeeper> {
-        keeper_with_limits_impl(limits_config).await
+        keeper_with_limits_impl(limits_config, None).await
+    }
+
+    pub(crate) async fn licensed_keeper(device_number: u32) -> Arc<StateKeeper> {
+        keeper_with_limits_impl(
+            LimitsConfig::default(),
+            Some(License {
+                licensee: String::new(),
+                invoice: String::new(),
+                expiry_date: chrono::Utc::now(),
+                plan: String::new(),
+                device_number,
+                disk_quota: 0,
+                fingerprint: "license-fingerprint".to_string(),
+            }),
+        )
+        .await
     }
 
     pub(crate) async fn keeper_with_engine_limit(max_storage_size: u64) -> Arc<StateKeeper> {
         let mut cfg = Cfg {
             data_path: tempfile::tempdir().unwrap().keep(),
-            api_token: "init-token".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("init-token".to_string()),
             ..Cfg::default()
         };
         cfg.engine_config.max_storage_size = Some(max_storage_size);
@@ -974,19 +1041,25 @@ pub(crate) mod tests {
         let lifecycle_repo = LifecycleRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
-        let audit_logger = build_audit_logger(&cfg, Arc::clone(&storage)).await;
 
         #[cfg(feature = "web-console")]
         let console_bytes: &[u8] = include_bytes!(concat!(env!("OUT_DIR"), "/console.zip"));
         #[cfg(not(feature = "web-console"))]
         let console_bytes: &[u8] = &[];
 
+        let system_events = test_system_events(&cfg, &storage).await;
+        let (store_id, node_id) = test_deployment_ids(&cfg).await;
         let components = Components {
+            store_id,
+            node_id: node_id.clone(),
             storage: Arc::clone(&storage),
+            license_device_guard: crate::api::license_device_guard::LicenseDeviceGuard::new(
+                None, store_id, node_id,
+            ),
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: AsyncRwLock::new(replication_repo),
+            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             ext_repo: create_ext_repository(
                 None,
@@ -998,8 +1071,7 @@ pub(crate) mod tests {
                 Some(Arc::clone(&storage)),
             )
             .expect("Failed to create extension repo"),
-            audit_logger: Arc::new(AsyncRwLock::new(audit_logger)),
-            usage_stat_logger: AsyncRwLock::new(None),
+            system_events,
             cfg,
             query_link_cache: AsyncRwLock::new(Cache::new(8, Duration::from_secs(60))),
             limits: crate::api::limits::LimitsBuilder::new().build(),

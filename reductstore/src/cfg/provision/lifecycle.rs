@@ -3,8 +3,9 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds, ProvisionedLifecycle};
 use crate::core::env::{Env, GetEnv};
-use crate::lifecycle::{LifecycleRepoBuilder, ManageLifecycles, SystemEventSink};
+use crate::lifecycle::{LifecycleRepoBuilder, ManageLifecycles};
 use crate::storage::engine::StorageEngine;
+use crate::syslog::SystemEventSink;
 use log::{debug, error, info};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::lifecycle_api::{LifecycleMode, LifecycleSettings, LifecycleType};
@@ -118,6 +119,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 lifecycle.settings.interval = interval;
             }
 
+            if let Some(processing_interval) =
+                env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_PROCESSING_INTERVAL", id))
+            {
+                lifecycle.settings.processing_interval = Some(processing_interval);
+            }
+
             if let Some(entries) =
                 env.get_optional::<String>(&format!("RS_LIFECYCLE_{}_ENTRIES", id))
             {
@@ -217,6 +224,7 @@ mod tests {
 
     fn lifecycle_env(path: PathBuf, overrides: &[(&str, &str)]) -> TestEnvGetter {
         let mut values = BTreeMap::from([
+            ("RS_DISABLE_AUTH".to_string(), "true".to_string()),
             (
                 "RS_DATA_PATH".to_string(),
                 path.to_str().unwrap().to_string(),
@@ -285,6 +293,26 @@ mod tests {
         assert_eq!(
             settings.when,
             Some(serde_json::json!({"$eq": ["&label", "true"]}))
+        );
+        assert_eq!(settings.processing_interval, None);
+    }
+
+    #[rstest]
+    fn parse_lifecycles_parses_processing_interval() {
+        let getter = TestEnvGetter::new(&[
+            ("RS_LIFECYCLE_A_NAME", "purge-sensors-30d"),
+            ("RS_LIFECYCLE_A_TYPE", "delete"),
+            ("RS_LIFECYCLE_A_BUCKET", "telemetry"),
+            ("RS_LIFECYCLE_A_OLDER_THAN", "30d"),
+            ("RS_LIFECYCLE_A_PROCESSING_INTERVAL", "6h"),
+        ]);
+        let mut env = Env::new(getter);
+        let lifecycles = CfgParser::<TestEnvGetter>::parse_lifecycles(&mut env);
+
+        let lifecycle = lifecycles.get("purge-sensors-30d").unwrap();
+        assert_eq!(
+            lifecycle.settings.processing_interval,
+            Some("6h".to_string())
         );
     }
 
@@ -453,6 +481,7 @@ mod tests {
                 older_than: "1d".to_string(),
                 interval: "1h".to_string(),
                 when: None,
+                processing_interval: None,
                 mode: LifecycleMode::Enabled,
             },
         )
@@ -499,6 +528,7 @@ mod tests {
                 older_than: "1d".to_string(),
                 interval: "1h".to_string(),
                 when: None,
+                processing_interval: None,
                 mode: LifecycleMode::Enabled,
             },
         )

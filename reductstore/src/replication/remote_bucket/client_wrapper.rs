@@ -5,15 +5,22 @@ use crate::core::internal_client::{
     ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
 };
 use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucketConfig};
+use crate::replication::{
+    ReplicationSourceIdentity, REPLICATION_LICENSE_HASH_HEADER, REPLICATION_NODE_ID_HEADER,
+    REPLICATION_STORE_ID_HEADER,
+};
+use async_compression::tokio::bufread::{GzipEncoder, ZstdEncoder};
 use async_stream::stream;
 use async_trait::async_trait;
 use axum::http::HeaderName;
 use bytes::Bytes;
-use futures_util::Stream;
+use futures_util::{Stream, TryStreamExt};
+use log::warn;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
+use reduct_base::msg::replication_api::ReplicationCompression;
 use reduct_base::unprocessable_entity;
-use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
+use reqwest::header::{HeaderMap, HeaderValue, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_TYPE};
 use reqwest::{Body, Client, Error, Method, Response};
 use std::collections::BTreeMap;
 use std::str::FromStr;
@@ -22,6 +29,24 @@ use std::str::FromStr;
 #[async_trait]
 pub(super) trait ReductClientApi {
     async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
+
+    async fn create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
+
+    async fn get_or_create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
+        match self.get_bucket(bucket_name).await {
+            Ok(bucket) => Ok(bucket),
+            Err(err) if err.status() == ErrorCode::NotFound => {
+                match self.create_bucket(bucket_name).await {
+                    Ok(bucket) => Ok(bucket),
+                    Err(err) if err.status() == ErrorCode::Conflict => {
+                        self.get_bucket(bucket_name).await
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
 
     fn url(&self) -> &str;
 }
@@ -53,9 +78,14 @@ pub(super) type BoxedBucketApi = Box<dyn ReductBucketApi + Sync + Send>;
 struct ReductClient {
     client_api: InternalClientApi,
     server_url: String,
+    compression: ReplicationCompression,
 }
 
 static API_PATH: &str = "api/v1";
+
+/// The first server version that decompresses request bodies sent with
+/// `Content-Encoding`.
+const MIN_COMPRESSION_API_VERSION: (u64, u64) = (1, 21);
 
 impl ReductClient {
     fn new(
@@ -63,7 +93,10 @@ impl ReductClient {
         api_token: &str,
         verify_ssl: bool,
         ca_path: Option<&std::path::PathBuf>,
+        compression: ReplicationCompression,
+        source_identity: &ReplicationSourceIdentity,
     ) -> Result<Self, ReductError> {
+        let default_headers = identity_headers(source_identity)?;
         let client = InternalClientBuilder::new(ClientBuildErrorContext {
             ca_read: "Failed to read replication CA certificate",
             ca_parse: "Invalid replication CA certificate",
@@ -71,6 +104,7 @@ impl ReductClient {
             kind: ClientBuildErrorKind::UnprocessableEntity,
         })
         .api_token(api_token)
+        .default_headers(default_headers)
         .verify_ssl(verify_ssl)
         .ca_path(ca_path)
         .connect_timeout(std::time::Duration::from_secs(10))
@@ -85,14 +119,36 @@ impl ReductClient {
         Ok(Self {
             client_api,
             server_url,
+            compression,
         })
     }
+
+    /// Check via the `x-reduct-api` response header that the remote server is
+    /// recent enough to decompress request bodies.
+    fn supports_compression(headers: &HeaderMap) -> bool {
+        headers
+            .get("x-reduct-api")
+            .and_then(|value| value.to_str().ok())
+            .and_then(|value| {
+                let (major, minor) = value.split_once('.')?;
+                Some((
+                    major.trim().parse::<u64>().ok()?,
+                    minor.trim().parse::<u64>().ok()?,
+                ))
+            })
+            .map(|version| version >= MIN_COMPRESSION_API_VERSION)
+            .unwrap_or(false)
+    }
 }
+
+type BoxedByteStream =
+    std::pin::Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + Sync + 'static>>;
 
 struct BucketWrapper {
     server_url: String,
     bucket_name: String,
     client: Client,
+    compression: ReplicationCompression,
 }
 
 impl BucketWrapper {
@@ -169,6 +225,37 @@ impl BucketWrapper {
         headers
     }
 
+    /// Wrap the batch body into a compressing stream for a `Content-Encoding`
+    /// transfer. The compressed size is unknown upfront, so `content-length`
+    /// is dropped and the body is sent chunked; the receiver restores the
+    /// payload size from the sum of the record lengths.
+    fn compress_body(
+        headers: &mut HeaderMap,
+        body: impl Stream<Item = Result<Bytes, ReductError>> + Send + Sync + 'static,
+        compression: ReplicationCompression,
+    ) -> impl Stream<Item = std::io::Result<Bytes>> + Send + Sync + 'static {
+        let reader = tokio_util::io::StreamReader::new(
+            body.map_err(|err| std::io::Error::other(err.to_string())),
+        );
+
+        let (encoding, stream): (_, BoxedByteStream) = match compression {
+            ReplicationCompression::None => unreachable!("checked by the caller"),
+            ReplicationCompression::Zstd => (
+                "zstd",
+                Box::pin(tokio_util::io::ReaderStream::new(ZstdEncoder::new(reader))),
+            ),
+            ReplicationCompression::Gzip => (
+                "gzip",
+                Box::pin(tokio_util::io::ReaderStream::new(GzipEncoder::new(reader))),
+            ),
+        };
+
+        headers.remove(CONTENT_LENGTH);
+        headers.insert(CONTENT_ENCODING, HeaderValue::from_static(encoding));
+
+        stream
+    }
+
     fn parse_record_errors(
         response: Result<Response, Error>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
@@ -222,12 +309,52 @@ impl ReductClientApi for ReductClient {
         );
 
         let resp = request.send().await;
-        check_response(resp)?;
+        let resp = check_response(resp)?;
+
+        let mut compression = self.compression;
+        if compression != ReplicationCompression::None
+            && !Self::supports_compression(resp.headers())
+        {
+            warn!(
+                "Remote server {} does not support replication payload compression, sending uncompressed",
+                self.server_url
+            );
+            compression = ReplicationCompression::None;
+        }
 
         Ok(Box::new(BucketWrapper {
             server_url: self.server_url.clone(),
             bucket_name: bucket_name.to_string(),
             client: self.client_api.client().clone(),
+            compression,
+        }))
+    }
+
+    async fn create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
+        let request = self.client_api.client().request(
+            Method::POST,
+            &format!("{}{}/b/{}", self.server_url, API_PATH, bucket_name),
+        );
+
+        let resp = request.send().await;
+        let resp = check_response(resp)?;
+
+        let mut compression = self.compression;
+        if compression != ReplicationCompression::None
+            && !Self::supports_compression(resp.headers())
+        {
+            warn!(
+                "Remote server {} does not support replication payload compression, sending uncompressed",
+                self.server_url
+            );
+            compression = ReplicationCompression::None;
+        }
+
+        Ok(Box::new(BucketWrapper {
+            server_url: self.server_url.clone(),
+            bucket_name: bucket_name.to_string(),
+            client: self.client_api.client().clone(),
+            compression,
         }))
     }
 
@@ -243,7 +370,7 @@ impl ReductBucketApi for BucketWrapper {
         entry: &str,
         records: Vec<BoxedReadRecord>,
     ) -> Result<ErrorRecordMap, ReductError> {
-        let (headers, stream) = Self::prepare_batch_to_write(records);
+        let (mut headers, stream) = Self::prepare_batch_to_write(records);
         let request = self.client.request(
             Method::POST,
             &format!(
@@ -252,12 +379,14 @@ impl ReductBucketApi for BucketWrapper {
             ),
         );
 
-        let response = request
-            .headers(headers)
-            .body(Body::wrap_stream(stream))
-            .send()
-            .await;
+        let request = if self.compression == ReplicationCompression::None {
+            request.headers(headers).body(Body::wrap_stream(stream))
+        } else {
+            let compressed = Self::compress_body(&mut headers, stream, self.compression);
+            request.headers(headers).body(Body::wrap_stream(compressed))
+        };
 
+        let response = request.send().await;
         Self::parse_record_errors(response)
     }
 
@@ -295,7 +424,27 @@ pub(super) fn create_client(config: &RemoteBucketConfig) -> Result<BoxedClientAp
         &config.api_token,
         config.verify_ssl,
         config.ca_path.as_ref(),
+        config.compression,
+        &config.source_identity,
     )?))
+}
+
+fn identity_headers(source_identity: &ReplicationSourceIdentity) -> Result<HeaderMap, ReductError> {
+    let mut headers = HeaderMap::new();
+    for (name, value) in [
+        (REPLICATION_NODE_ID_HEADER, &source_identity.node_id),
+        (REPLICATION_STORE_ID_HEADER, &source_identity.store_id),
+        (
+            REPLICATION_LICENSE_HASH_HEADER,
+            &source_identity.license_hash,
+        ),
+    ] {
+        let value = HeaderValue::from_str(value).map_err(|err| {
+            unprocessable_entity!("Invalid replication identity header '{}': {}", name, err)
+        })?;
+        headers.insert(name, value);
+    }
+    Ok(headers)
 }
 
 #[cfg(test)]
@@ -305,6 +454,7 @@ pub(super) mod tests {
     use crate::replication::remote_bucket::RemoteBucketConfig;
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{us_to_ts, Record};
+    use axum::{extract::State, http::StatusCode, routing::any, Router};
     use crossbeam_channel::{Receiver, Sender};
     use futures_util::StreamExt;
     use hyper::http;
@@ -313,6 +463,8 @@ pub(super) mod tests {
     use std::io::{Read, Seek, SeekFrom};
     use std::path::PathBuf;
     use std::pin::pin;
+    use std::sync::{Arc, Mutex};
+    use tokio::net::TcpListener;
 
     #[rstest]
     #[tokio::test]
@@ -369,8 +521,136 @@ pub(super) mod tests {
 
     #[rstest]
     fn test_add_slash_to_url() {
-        let client = ReductClient::new("http://localhost:8080", "", true, None).unwrap();
+        let client = ReductClient::new(
+            "http://localhost:8080",
+            "",
+            true,
+            None,
+            ReplicationCompression::None,
+            &Default::default(),
+        )
+        .unwrap();
         assert_eq!(client.server_url, "http://localhost:8080/");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_client_includes_licensed_identity_headers_on_all_replication_requests() {
+        let headers = Arc::new(Mutex::new(Vec::new()));
+        let url = start_header_server(Arc::clone(&headers)).await;
+        let identity = ReplicationSourceIdentity::new(
+            "instance:source:run:123".to_string(),
+            "f2f3931e-faca-4db5-84ed-d23bc1b09bda".to_string(),
+            Some("license-fingerprint".to_string()),
+        );
+        let client = ReductClient::new(
+            &url,
+            "token",
+            true,
+            None,
+            ReplicationCompression::None,
+            &identity,
+        )
+        .unwrap();
+
+        let api_client = client.client_api.client();
+        let bucket = BucketWrapper {
+            server_url: client.server_url.clone(),
+            bucket_name: "bucket".to_string(),
+            client: api_client.clone(),
+            compression: ReplicationCompression::None,
+        };
+
+        api_client
+            .get(format!("{url}api/v1/b/bucket"))
+            .send()
+            .await
+            .unwrap();
+        api_client
+            .post(format!("{url}api/v1/b/bucket"))
+            .send()
+            .await
+            .unwrap();
+        bucket
+            .client
+            .patch(format!("{url}api/v1/b/bucket/entry/batch"))
+            .send()
+            .await
+            .unwrap();
+
+        let headers = headers.lock().unwrap();
+        assert_eq!(headers.len(), 3);
+        for request in headers.iter() {
+            assert_eq!(
+                request.get(REPLICATION_NODE_ID_HEADER).unwrap().as_bytes(),
+                identity.node_id.as_bytes()
+            );
+            assert_eq!(
+                request.get(REPLICATION_STORE_ID_HEADER).unwrap().as_bytes(),
+                identity.store_id.as_bytes()
+            );
+            assert_eq!(
+                request
+                    .get(REPLICATION_LICENSE_HASH_HEADER)
+                    .unwrap()
+                    .as_bytes(),
+                identity.license_hash.as_bytes()
+            );
+            assert_eq!(request.get("authorization").unwrap(), "Bearer token");
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_client_includes_null_license_hash_when_unlicensed() {
+        let headers = Arc::new(Mutex::new(Vec::new()));
+        let url = start_header_server(Arc::clone(&headers)).await;
+        let identity = ReplicationSourceIdentity::new(
+            "instance:source:run:123".to_string(),
+            "f2f3931e-faca-4db5-84ed-d23bc1b09bda".to_string(),
+            None,
+        );
+        let client = ReductClient::new(
+            &url,
+            "",
+            true,
+            None,
+            ReplicationCompression::None,
+            &identity,
+        )
+        .unwrap();
+
+        client
+            .client_api
+            .client()
+            .get(format!("{url}api/v1/b/bucket"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            headers.lock().unwrap()[0]
+                .get(REPLICATION_LICENSE_HASH_HEADER)
+                .unwrap(),
+            "null"
+        );
+    }
+
+    async fn start_header_server(headers: Arc<Mutex<Vec<HeaderMap>>>) -> String {
+        async fn handler(
+            State(headers): State<Arc<Mutex<Vec<HeaderMap>>>>,
+            request: axum::extract::Request,
+        ) -> StatusCode {
+            headers.lock().unwrap().push(request.headers().clone());
+            StatusCode::OK
+        }
+
+        let app = Router::new().fallback(any(handler)).with_state(headers);
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+        format!("http://{address}/")
     }
 
     #[rstest]
@@ -380,6 +660,8 @@ pub(super) mod tests {
             "",
             true,
             Some(&PathBuf::from("/definitely/missing/ca.pem")),
+            ReplicationCompression::None,
+            &Default::default(),
         )
         .err()
         .unwrap();
@@ -406,6 +688,8 @@ pub(super) mod tests {
             api_token: "token".to_string(),
             verify_ssl: true,
             ca_path: Some(ca_path),
+            compression: ReplicationCompression::None,
+            source_identity: Default::default(),
         };
 
         let client = create_client(&config).unwrap();
@@ -423,7 +707,15 @@ pub(super) mod tests {
         )
         .unwrap();
 
-        let err = ReductClient::new("https://localhost:8080", "", true, Some(&ca_path)).err();
+        let err = ReductClient::new(
+            "https://localhost:8080",
+            "",
+            true,
+            Some(&ca_path),
+            ReplicationCompression::None,
+            &Default::default(),
+        )
+        .err();
 
         assert!(err.is_some());
         let err = err.unwrap();
@@ -462,6 +754,107 @@ pub(super) mod tests {
     }
 
     type Tx = Sender<Result<Bytes, ReductError>>;
+
+    mod compression {
+        use super::*;
+        use futures_util::{stream, StreamExt};
+
+        fn raw_batch_headers() -> HeaderMap {
+            let mut headers = HeaderMap::new();
+            headers.insert(CONTENT_LENGTH, HeaderValue::from_static("18"));
+            headers.insert(
+                HeaderName::from_static("x-reduct-time-1"),
+                HeaderValue::from_static("18,text/plain"),
+            );
+            headers
+        }
+
+        #[rstest]
+        #[case(ReplicationCompression::Zstd, "zstd")]
+        #[case(ReplicationCompression::Gzip, "gzip")]
+        #[tokio::test]
+        async fn test_compress_body(
+            #[case] compression: ReplicationCompression,
+            #[case] expected_encoding: &str,
+        ) {
+            let mut headers = raw_batch_headers();
+            let body = stream::iter(vec![
+                Ok::<Bytes, ReductError>(Bytes::from("record1234")),
+                Ok(Bytes::from("record56")),
+            ]);
+
+            let compressed_stream = BucketWrapper::compress_body(&mut headers, body, compression);
+
+            assert_eq!(
+                headers.get(CONTENT_LENGTH),
+                None,
+                "compressed size is unknown upfront, the body is sent chunked"
+            );
+            assert_eq!(headers.get(CONTENT_ENCODING).unwrap(), expected_encoding);
+            assert_eq!(
+                headers.get("x-reduct-time-1").unwrap(),
+                "18,text/plain",
+                "record framing headers are untouched"
+            );
+
+            let mut compressed = Vec::new();
+            let mut compressed_stream = std::pin::pin!(compressed_stream);
+            while let Some(chunk) = compressed_stream.next().await {
+                compressed.extend_from_slice(&chunk.unwrap());
+            }
+
+            let decompressed = match compression {
+                ReplicationCompression::Zstd => zstd::bulk::decompress(&compressed, 1024).unwrap(),
+                ReplicationCompression::Gzip => {
+                    use std::io::Read;
+                    let mut buf = Vec::new();
+                    flate2::read::GzDecoder::new(compressed.as_slice())
+                        .read_to_end(&mut buf)
+                        .unwrap();
+                    buf
+                }
+                ReplicationCompression::None => unreachable!(),
+            };
+            assert_eq!(decompressed, b"record1234record56");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compress_body_propagates_read_errors() {
+            let mut headers = raw_batch_headers();
+            let body = stream::iter(vec![Err::<Bytes, ReductError>(
+                ReductError::internal_server_error("broken record"),
+            )]);
+
+            let compressed_stream =
+                BucketWrapper::compress_body(&mut headers, body, ReplicationCompression::Zstd);
+            let mut compressed_stream = std::pin::pin!(compressed_stream);
+            let mut last = None;
+            while let Some(chunk) = compressed_stream.next().await {
+                last = Some(chunk);
+            }
+            let err = last.unwrap().err().unwrap();
+            assert!(err.to_string().contains("broken record"));
+        }
+
+        #[rstest]
+        #[case("1.21", true)]
+        #[case("1.22", true)]
+        #[case("2.0", true)]
+        #[case("1.20", false)]
+        #[case("1.9", false)]
+        #[case("garbage", false)]
+        fn test_supports_compression(#[case] version: &str, #[case] expected: bool) {
+            let mut headers = HeaderMap::new();
+            headers.insert("x-reduct-api", HeaderValue::from_str(version).unwrap());
+            assert_eq!(ReductClient::supports_compression(&headers), expected);
+        }
+
+        #[rstest]
+        fn test_supports_compression_no_header() {
+            assert!(!ReductClient::supports_compression(&HeaderMap::new()));
+        }
+    }
 
     mod check_response {
         use super::*;

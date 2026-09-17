@@ -8,8 +8,12 @@ use std::time::SystemTime;
 use std::{env, fs};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    let protoc = protoc_bin_vendored::protoc_bin_path()?;
+
     // build protos
-    prost_build::Config::new()
+    let mut config = prost_build::Config::new();
+    config
+        .protoc_executable(protoc)
         .protoc_arg("--experimental_allow_proto3_optional")
         .type_attribute(".", "#[derive(serde::Serialize, serde::Deserialize)]")
         .type_attribute(".reduct.proto.auth", "#[serde(default)]")
@@ -25,7 +29,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .expect("Failed to compile protos");
 
     #[cfg(feature = "web-console")]
-    download_web_console("v1.15.1");
+    download_web_console("v1.17.2");
     // get build time and commit
     let build_time = chrono::DateTime::<chrono::Utc>::from(SystemTime::now())
         .to_rfc3339_opts(chrono::SecondsFormat::Secs, true);

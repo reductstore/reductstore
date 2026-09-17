@@ -9,10 +9,12 @@ inputs:
     required: true
   docker_user:
     description: 'Docker username.'
-    required: true
+    required: false
+    default: ''
   docker_token:
     description: 'Docker token.'
-    required: true
+    required: false
+    default: ''
   repository:
     description: 'GitHub repository.'
     required: true
@@ -30,10 +32,14 @@ runs:
         echo "DATA_VOLUME=$DATA_VOLUME" >> "$GITHUB_ENV"
         docker volume create "$DATA_VOLUME"
 
+    - name: Login Docker
+      if: ${{ inputs.docker_user != '' && inputs.docker_token != '' }}
+      shell: bash
+      run: docker login -u "${{ inputs.docker_user }}" -p "${{ inputs.docker_token }}"
+
     - name: Run latest stable ReductStore
       shell: bash
       run: |
-        docker login -u ${{ inputs.docker_user }} -p ${{ inputs.docker_token }}
         docker run --network=host -v "${DATA_VOLUME}:/data" --env RS_API_TOKEN=${{ inputs.rs_api_token }} --name latest -d reduct/store:${{ inputs.version }}
         sleep 5
         docker logs latest

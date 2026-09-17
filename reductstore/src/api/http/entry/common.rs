@@ -59,21 +59,11 @@ pub(super) fn parse_query_params(
 
     // filter parameters in order of priority
     let (start, stop) = parse_time_range(&params)?;
-    let (include, exclude) = parse_include_exclude_filters(&params);
-    let each_s = parse_each_s(&params)?;
-    let each_n = parse_each_n(&params)?;
-    let limit = parse_limit(params)?;
-
     Ok(QueryEntry {
         query_type: QueryType::Query,
         entries: None,
         start,
         stop,
-        include: Some(include),
-        exclude: Some(exclude),
-        each_s,
-        each_n,
-        limit,
         continuous,
         ttl,
         only_metadata: Some(only_metadata),
@@ -133,67 +123,6 @@ fn parse_continuous_flag(params: &HashMap<String, String>) -> Result<Option<bool
         None => None,
     };
     Ok(continuous)
-}
-
-fn parse_limit(params: HashMap<String, String>) -> Result<Option<u64>, HttpError> {
-    let limit = match params.get("limit") {
-        Some(limit) => Some(
-            limit
-                .parse::<u64>()
-                .map_err(|_| unprocessable_entity!("'limit' must unsigned integer",))?,
-        ),
-        None => None,
-    };
-    Ok(limit)
-}
-
-fn parse_each_n(params: &HashMap<String, String>) -> Result<Option<u64>, HttpError> {
-    let each_n = match params.get("each_n") {
-        Some(each_n) => {
-            let value = each_n
-                .parse::<u64>()
-                .map_err(|_| unprocessable_entity!("'each_n' must unsigned integer",))?;
-            if value == 0 {
-                return Err(unprocessable_entity!("'each_n' must be greater than 0",).into());
-            }
-            Some(value)
-        }
-        None => None,
-    };
-    Ok(each_n)
-}
-
-fn parse_each_s(params: &HashMap<String, String>) -> Result<Option<f64>, HttpError> {
-    let each_s = match params.get("each_s") {
-        Some(each_s) => {
-            let value = each_s
-                .parse::<f64>()
-                .map_err(|_| unprocessable_entity!("'each_s' must be a float value",))?;
-
-            if value <= 0.0 {
-                return Err(unprocessable_entity!("Time must be greater than 0 seconds",).into());
-            }
-            Some(value)
-        }
-        None => None,
-    };
-    Ok(each_s)
-}
-
-fn parse_include_exclude_filters(
-    params: &HashMap<String, String>,
-) -> (HashMap<String, String>, HashMap<String, String>) {
-    let mut include = HashMap::new();
-    let mut exclude = HashMap::new();
-
-    for (k, v) in params.iter() {
-        if k.starts_with("include-") {
-            include.insert(k[8..].to_string(), v.to_string());
-        } else if k.starts_with("exclude-") {
-            exclude.insert(k[8..].to_string(), v.to_string());
-        }
-    }
-    (include, exclude)
 }
 
 pub(super) fn check_and_extract_ts_or_query_id(
@@ -374,139 +303,6 @@ mod tests {
             assert_eq!(
                 result.err().unwrap().into_inner().to_string(),
                 "[UnprocessableEntity] 'stop' must be an unix timestamp in microseconds"
-            );
-        }
-    }
-
-    mod parse_include_exclude_filters {
-        use super::*;
-
-        #[rstest]
-        fn test_ok() {
-            let params = HashMap::from_iter(vec![
-                ("include-key".to_string(), "value".to_string()),
-                ("exclude-key".to_string(), "value".to_string()),
-            ]);
-            let (include, exclude) = parse_include_exclude_filters(&params);
-            assert_eq!(
-                include,
-                HashMap::from_iter(vec![("key".to_string(), "value".to_string())])
-            );
-            assert_eq!(
-                exclude,
-                HashMap::from_iter(vec![("key".to_string(), "value".to_string())])
-            );
-        }
-
-        #[rstest]
-        fn test_no_filters() {
-            let params = HashMap::new();
-            let (include, exclude) = parse_include_exclude_filters(&params);
-            assert_eq!(include, HashMap::new());
-            assert_eq!(exclude, HashMap::new());
-        }
-    }
-
-    mod parse_each_s {
-        use super::*;
-
-        #[rstest]
-        fn test_ok() {
-            let params = HashMap::from_iter(vec![("each_s".to_string(), "1.0".to_string())]);
-            let each_s = parse_each_s(&params).unwrap();
-            assert_eq!(each_s, Some(1.0));
-        }
-
-        #[rstest]
-        fn test_default() {
-            let params = HashMap::new();
-            let each_s = parse_each_s(&params).unwrap();
-            assert_eq!(each_s, None);
-        }
-
-        #[rstest]
-        fn test_bad() {
-            let params = HashMap::from_iter(vec![("each_s".to_string(), "a".to_string())]);
-            let result = parse_each_s(&params);
-            assert_eq!(
-                result.err().unwrap().into_inner().to_string(),
-                "[UnprocessableEntity] 'each_s' must be a float value"
-            );
-        }
-
-        #[rstest]
-        fn test_zero() {
-            let params = HashMap::from_iter(vec![("each_s".to_string(), "0".to_string())]);
-            let result = parse_each_s(&params);
-            assert_eq!(
-                result.err().unwrap().into_inner().to_string(),
-                "[UnprocessableEntity] Time must be greater than 0 seconds"
-            );
-        }
-    }
-
-    mod parse_each_n {
-        use super::*;
-
-        #[rstest]
-        fn test_ok() {
-            let params = HashMap::from_iter(vec![("each_n".to_string(), "1".to_string())]);
-            let each_n = parse_each_n(&params).unwrap();
-            assert_eq!(each_n, Some(1));
-        }
-
-        #[rstest]
-        fn test_default() {
-            let params = HashMap::new();
-            let each_n = parse_each_n(&params).unwrap();
-            assert_eq!(each_n, None);
-        }
-
-        #[rstest]
-        fn test_bad() {
-            let params = HashMap::from_iter(vec![("each_n".to_string(), "a".to_string())]);
-            let result = parse_each_n(&params);
-            assert_eq!(
-                result.err().unwrap().into_inner().to_string(),
-                "[UnprocessableEntity] 'each_n' must unsigned integer"
-            );
-        }
-
-        #[rstest]
-        fn test_zero() {
-            let params = HashMap::from_iter(vec![("each_n".to_string(), "0".to_string())]);
-            let result = parse_each_n(&params);
-            assert_eq!(
-                result.err().unwrap().into_inner().to_string(),
-                "[UnprocessableEntity] 'each_n' must be greater than 0"
-            );
-        }
-    }
-
-    mod parse_limit {
-        use super::*;
-
-        #[rstest]
-        fn test_ok() {
-            let params = HashMap::from_iter(vec![("limit".to_string(), "1".to_string())]);
-            let limit = parse_limit(params).unwrap();
-            assert_eq!(limit, Some(1));
-        }
-
-        #[rstest]
-        fn test_default() {
-            let params = HashMap::new();
-            let limit = parse_limit(params).unwrap();
-            assert_eq!(limit, None);
-        }
-
-        #[rstest]
-        fn test_bad() {
-            let params = HashMap::from_iter(vec![("limit".to_string(), "a".to_string())]);
-            let result = parse_limit(params);
-            assert_eq!(
-                result.err().unwrap().into_inner().to_string(),
-                "[UnprocessableEntity] 'limit' must unsigned integer"
             );
         }
     }

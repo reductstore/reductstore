@@ -72,7 +72,7 @@ pub(super) async fn update_record(
 
     components
         .replication_repo
-        .write()
+        .read()
         .await?
         .notify(TransactionNotification {
             bucket: bucket.clone(),

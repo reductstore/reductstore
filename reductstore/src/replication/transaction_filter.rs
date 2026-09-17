@@ -3,11 +3,10 @@
 
 use crate::cfg::io::IoConfig;
 use crate::replication::TransactionNotification;
-use crate::storage::entry::{is_system_meta_entry, meta_entry_parent};
+use crate::storage::entry::{entry_matches_pattern, is_system_meta_entry, meta_entry_parent};
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::{
-    apply_filters_recursively, EachNFilter, EachSecondFilter, ExcludeLabelFilter, FilterRecord,
-    IncludeLabelFilter, RecordFilter, WhenFilter,
+    apply_filters_recursively, FilterRecord, RecordFilter, WhenFilter,
 };
 use log::warn;
 use reduct_base::error::ReductError;
@@ -57,29 +56,12 @@ impl TransactionFilter {
     ///
     /// * `bucket` - Bucket name to filter.
     /// * `entries` - Entries to filter. Supports wildcards. If empty, all entries are matched.
-    /// * `include` - Labels to include. All must match. If empty, all labels are matched.
-    /// * `exclude` - Labels to exclude. Any must match. If empty, no labels are matched.
     pub(super) fn try_new(
         name: &str,
         settings: ReplicationSettings,
         io_config: IoConfig,
     ) -> Result<Self, ReductError> {
         let mut query_filters: Vec<Filter> = vec![];
-        if !settings.include.is_empty() {
-            query_filters.push(Box::new(IncludeLabelFilter::new(settings.include)));
-        }
-
-        if !settings.exclude.is_empty() {
-            query_filters.push(Box::new(ExcludeLabelFilter::new(settings.exclude)));
-        }
-
-        if let Some(each_n) = settings.each_n {
-            query_filters.push(Box::new(EachNFilter::new(each_n)));
-        }
-
-        if let Some(each_s) = settings.each_s {
-            query_filters.push(Box::new(EachSecondFilter::new(each_s)));
-        }
 
         if let Some(when) = settings.when {
             match Parser::new().parse(when.clone()) {
@@ -119,17 +101,8 @@ impl TransactionFilter {
             return vec![];
         }
 
-        if !self.entries.is_empty() {
-            let mut found = false;
-            for entry in self.entries.iter() {
-                if Self::entry_matches(entry, &notification.entry) {
-                    found = true;
-                    break;
-                }
-            }
-            if !found {
-                return vec![];
-            }
+        if !Self::entry_is_selected(&self.entries, &notification.entry) {
+            return vec![];
         }
 
         if is_system_meta_entry(&notification.entry) {
@@ -160,13 +133,44 @@ impl TransactionFilter {
         notifications
     }
 
-    fn entry_matches(entry_filter: &str, entry_name: &str) -> bool {
-        if entry_filter.contains('*') {
-            let prefix = entry_filter.replace('*', "");
-            return entry_name.starts_with(&prefix);
+    fn entry_is_selected(entries: &[String], entry_name: &str) -> bool {
+        if entries.is_empty() {
+            return true;
         }
 
-        entry_name == entry_filter || meta_entry_parent(entry_name) == Some(entry_filter)
+        let include_patterns: Vec<&str> = entries
+            .iter()
+            .filter_map(|pattern| {
+                if pattern.starts_with('!') && pattern.len() > 1 {
+                    None
+                } else {
+                    Some(pattern.as_str())
+                }
+            })
+            .collect();
+        let exclude_patterns: Vec<&str> = entries
+            .iter()
+            .filter_map(|pattern| pattern.strip_prefix('!'))
+            .filter(|pattern| !pattern.is_empty())
+            .collect();
+
+        let included = include_patterns.is_empty()
+            || include_patterns
+                .iter()
+                .any(|pattern| Self::entry_matches(pattern, entry_name));
+
+        included
+            && !exclude_patterns
+                .iter()
+                .any(|pattern| Self::entry_matches(pattern, entry_name))
+    }
+
+    fn entry_matches(entry_filter: &str, entry_name: &str) -> bool {
+        let entry_filter = entry_filter.trim_start_matches('/');
+
+        entry_matches_pattern(entry_name, entry_filter)
+            || meta_entry_parent(entry_name)
+                .is_some_and(|parent| entry_matches_pattern(parent, entry_filter))
     }
 }
 
@@ -208,16 +212,29 @@ mod tests {
     }
 
     #[rstest]
-    #[case(vec ! ["entry".to_string()], true)]
-    #[case(vec ! ["other".to_string(), "entry".to_string()], true)]
-    #[case(vec ! ["ent*".to_string()], true)]
-    #[case(vec ! ["other".to_string()], false)]
-    #[case(vec ! ["oth*".to_string()], false)]
+    #[case("entry", vec ! ["entry".to_string()], true)]
+    #[case("entry", vec ! ["other".to_string(), "entry".to_string()], true)]
+    #[case("entry", vec ! ["ent*".to_string()], true)]
+    #[case("entry", vec ! ["*".to_string()], true)]
+    #[case("entry", vec ! ["other".to_string()], false)]
+    #[case("entry", vec ! ["oth*".to_string()], false)]
+    #[case("cam-1", vec ! ["cam-*".to_string()], true)]
+    #[case("cam-1/nested", vec ! ["cam-*".to_string()], true)]
+    #[case("a/x/b", vec ! ["/a/*/b".to_string()], true)]
+    #[case("a/x/d/b", vec ! ["/a/*/b".to_string()], false)]
+    #[case("a/x/b", vec ! ["/a/**/b".to_string()], true)]
+    #[case("a/x/d/b", vec ! ["/a/**/b".to_string()], true)]
+    #[case("a/private/x/b", vec ! ["!/a/private/**".to_string()], false)]
+    #[case("a/public/x/b", vec ! ["!/a/private/**".to_string()], true)]
+    #[case("a/private/x/b", vec ! ["/a/**/b".to_string(), "!/a/private/**".to_string()], false)]
+    #[case("a/public/x/b", vec ! ["/a/**/b".to_string(), "!/a/private/**".to_string()], true)]
     fn test_transaction_filter_entries(
+        #[case] entry: String,
         #[case] entries: Vec<String>,
         #[case] expected: bool,
-        notification: TransactionNotification,
+        mut notification: TransactionNotification,
     ) {
+        notification.entry = entry;
         let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
@@ -254,56 +271,28 @@ mod tests {
     }
 
     #[rstest]
-    #[case(vec ! [("a".to_string(), "b".to_string())], false)]
-    #[case(vec ! [("x".to_string(), "z".to_string())], false)]
-    #[case(vec ! [("x".to_string(), "y".to_string())], true)]
-    #[case(vec ! [("x".to_string(), "y".to_string()), ("z".to_string(), "w".to_string())], true)]
-    #[case(vec ! [("x".to_string(), "y".to_string()), ("z".to_string(), "z".to_string())], false)]
-    #[case(vec ! [("x".to_string(), "y".to_string()), ("z".to_string(), "w".to_string()), ("a".to_string(), "b".to_string())], false)]
-    fn test_transaction_filter_include(
-        #[case] include: Vec<(String, String)>,
+    #[case("a/x/$meta", vec ! ["/a/*".to_string()], true)]
+    #[case("a/private/$meta", vec ! ["/a/**".to_string(), "!/a/private".to_string()], false)]
+    fn test_transaction_filter_entries_match_meta_parent(
+        #[case] entry: String,
+        #[case] entries: Vec<String>,
         #[case] expected: bool,
-        notification: TransactionNotification,
+        mut notification: TransactionNotification,
     ) {
+        notification.entry = entry;
+
         let mut filter = TransactionFilter::try_new(
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
-                include: Labels::from_iter(include),
+                entries,
                 ..ReplicationSettings::default()
             },
             IoConfig::default(),
         )
         .unwrap();
 
-        let filtered = filter.filter(notification);
-        assert_eq!(filtered.is_empty(), !expected);
-    }
-
-    #[rstest]
-    #[case(vec ! [("a".to_string(), "b".to_string())], true)]
-    #[case(vec ! [("x".to_string(), "z".to_string())], true)]
-    #[case(vec ! [("x".to_string(), "y".to_string())], false)]
-    #[case(vec ! [("x".to_string(), "y".to_string()), ("z".to_string(), "w".to_string())], false)]
-    #[case(vec ! [("z".to_string(), "w".to_string())], false)]
-    fn test_transaction_filter_exclude(
-        #[case] exclude: Vec<(String, String)>,
-        #[case] expected: bool,
-        notification: TransactionNotification,
-    ) {
-        let mut filter = TransactionFilter::try_new(
-            "test",
-            ReplicationSettings {
-                src_bucket: "bucket".to_string(),
-                exclude: Labels::from_iter(exclude),
-                ..ReplicationSettings::default()
-            },
-            IoConfig::default(),
-        )
-        .unwrap();
-
-        let filtered = filter.filter(notification);
-        assert_eq!(filtered.is_empty(), !expected);
+        assert_eq!(filter.filter(notification).is_empty(), !expected);
     }
 
     #[rstest]
@@ -312,38 +301,16 @@ mod tests {
             "test",
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
-                each_n: Some(2),
+                when: Some(serde_json::json!({"$each_n": 2})),
                 ..ReplicationSettings::default()
             },
             IoConfig::default(),
         )
         .unwrap();
 
-        assert_eq!(filter.filter(notification.clone()).len(), 1);
         assert_eq!(filter.filter(notification.clone()).len(), 0);
-        assert_eq!(filter.filter(notification).len(), 1);
-    }
-
-    #[rstest]
-    fn test_transaction_filter_each_s(mut notification: TransactionNotification) {
-        let mut filter = TransactionFilter::try_new(
-            "test",
-            ReplicationSettings {
-                src_bucket: "bucket".to_string(),
-                each_s: Some(1.0),
-                ..ReplicationSettings::default()
-            },
-            IoConfig::default(),
-        )
-        .unwrap();
-
         assert_eq!(filter.filter(notification.clone()).len(), 1);
-        notification.event = Transaction::WriteRecord(1);
-        assert_eq!(filter.filter(notification.clone()).len(), 0);
-        notification.event = Transaction::WriteRecord(2);
-        assert_eq!(filter.filter(notification.clone()).len(), 0);
-        notification.event = Transaction::WriteRecord(1000_002);
-        assert_eq!(filter.filter(notification.clone()).len(), 1);
+        assert_eq!(filter.filter(notification).len(), 0);
     }
 
     #[rstest]
@@ -407,10 +374,10 @@ mod tests {
             ReplicationSettings {
                 src_bucket: "bucket".to_string(),
                 entries: vec!["entry".to_string()],
-                include: HashMap::from([("must".to_string(), "match".to_string())]),
-                exclude: HashMap::from([("x".to_string(), "y".to_string())]),
-                each_n: Some(100),
-                when: Some(serde_json::json!({"$eq": ["&NOT_EXIST", "y"]})),
+                when: Some(serde_json::json!({
+                    "$each_n": 100,
+                    "$eq": ["&NOT_EXIST", "y"]
+                })),
                 ..ReplicationSettings::default()
             },
             IoConfig::default(),

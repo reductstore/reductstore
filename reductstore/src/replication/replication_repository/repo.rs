@@ -4,24 +4,27 @@
 use crate::cfg::{Cfg, DEFAULT_PORT};
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
-use crate::lifecycle::SystemEventSink;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
-    Label as ProtoLabel, ReplicationMode as ProtoReplicationMode,
+    ReplicationCompression as ProtoReplicationCompression, ReplicationMode as ProtoReplicationMode,
     ReplicationRepo as ProtoReplicationRepo, ReplicationSettings as ProtoReplicationSettings,
 };
 use crate::replication::replication_task::ReplicationTask;
-use crate::replication::{ManageReplications, TransactionNotification};
+use crate::replication::{
+    prepend_when_conditions, ManageReplications, ReplicationSourceIdentity, TransactionNotification,
+};
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::WhenFilter;
+use crate::syslog::SystemEventSink;
 use async_trait::async_trait;
 use bytes::Bytes;
 use log::{debug, error, warn};
 use prost::Message;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::replication_api::{
-    FullReplicationInfo, ReplicationInfo, ReplicationMode, ReplicationSettings,
+    FullReplicationInfo, ReplicationCompression, ReplicationInfo, ReplicationMode,
+    ReplicationSettings,
 };
 use reduct_base::{not_found, unprocessable_entity};
 use std::collections::HashMap;
@@ -44,74 +47,160 @@ impl From<ReplicationSettings> for ProtoReplicationSettings {
             dst_host: settings.dst_host,
             dst_token: settings.dst_token.unwrap_or_default(),
             entries: settings.entries,
-            include: settings
-                .include
-                .into_iter()
-                .map(|(k, v)| ProtoLabel { name: k, value: v })
-                .collect(),
-            exclude: settings
-                .exclude
-                .into_iter()
-                .map(|(k, v)| ProtoLabel { name: k, value: v })
-                .collect(),
-            each_s: settings.each_s.unwrap_or(0.0),
-            each_n: settings.each_n.unwrap_or(0),
+            dst_prefix: settings.dst_prefix,
+            include: Vec::new(),
+            exclude: Vec::new(),
+            each_n: 0, // Deprecated field, always set to 0 (migration to $each_n in when condition)
+            each_s: 0.0, // Deprecated field, always set to 0.0 (migration to $each_t in when condition)
             when: settings.when.map(|value| value.to_string()),
             mode: ProtoReplicationMode::from(&settings.mode) as i32,
+            compression: ProtoReplicationCompression::from(&settings.compression) as i32,
         }
+    }
+}
+
+impl ProtoReplicationSettings {
+    /// Convert ProtoReplicationSettings to ReplicationSettings with migration support
+    /// Returns (ReplicationSettings, migrated: bool)
+    fn into_settings(self) -> (ReplicationSettings, bool) {
+        let mut migrated = false;
+
+        // Parse the when condition first
+        let mut when: Option<serde_json::Value> = if let Some(when_str) = self.when {
+            match serde_json::from_str(&when_str) {
+                Ok(value) => Some(value),
+                Err(err) => {
+                    error!(
+                        "Failed to parse 'when' field: {} in replication settings: {}",
+                        err, when_str
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
+        // Migrate deprecated each_s to $each_t by injecting it into the when condition
+        if self.each_s > 0.0 {
+            migrated = true;
+            warn!(
+                "The 'each_s' field is deprecated and will be migrated to 'when' condition using $each_t operator. Value: {}",
+                self.each_s
+            );
+
+            if let Some(when_value) = &mut when {
+                // Inject $each_t into the existing when condition
+                if let Some(obj) = when_value.as_object_mut() {
+                    obj.insert("$each_t".to_string(), serde_json::json!(self.each_s));
+                } else {
+                    error!(
+                        "Existing 'when' condition is not an object, cannot inject $each_t. Using only $each_t condition."
+                    );
+                    when = Some(serde_json::json!({"$each_t": self.each_s}));
+                }
+            } else {
+                // No when condition exists, create one with just $each_t
+                when = Some(serde_json::json!({"$each_t": self.each_s}));
+            }
+        }
+
+        // Migrate deprecated each_n to $each_n by injecting it into the when condition
+        if self.each_n > 0 {
+            migrated = true;
+            warn!(
+                "The 'each_n' field is deprecated and will be migrated to 'when' condition using $each_n operator. Value: {}",
+                self.each_n
+            );
+
+            if let Some(when_value) = &mut when {
+                if let Some(obj) = when_value.as_object_mut() {
+                    obj.insert("$each_n".to_string(), serde_json::json!(self.each_n));
+                } else {
+                    error!(
+                        "Existing 'when' condition is not an object, cannot inject $each_n. Using only $each_n condition."
+                    );
+                    when = Some(serde_json::json!({"$each_n": self.each_n}));
+                }
+            } else {
+                when = Some(serde_json::json!({"$each_n": self.each_n}));
+            }
+        }
+
+        let mut legacy_label_conditions = vec![];
+
+        // Migrate deprecated "include" to guarded label equality conditions.
+        if !self.include.is_empty() {
+            migrated = true;
+            warn!(
+                "The 'include' field is deprecated and will be migrated to 'when' condition using $has and $eq operators. Value: {:?}",
+                self.include
+            );
+            for include in &self.include {
+                legacy_label_conditions.push(serde_json::json!({
+                    "$and": [
+                        {"$has": &include.name},
+                        {"$eq": [format!("&{}", include.name), &include.value]}
+                    ]
+                }));
+            }
+        }
+
+        // Migrate deprecated "exclude" to a condition that keeps records unless all labels match.
+        if !self.exclude.is_empty() {
+            migrated = true;
+            warn!(
+                "The 'exclude' field is deprecated and will be migrated to 'when' condition using $has and $ne operators. Value: {:?}",
+                self.exclude
+            );
+            let mut exclude_conditions = vec![];
+            for exclude in &self.exclude {
+                exclude_conditions.push(serde_json::json!({
+                    "$or": [
+                        {"$not": [{"$has": &exclude.name}]},
+                        {"$ne": [format!("&{}", exclude.name), &exclude.value]}
+                    ]
+                }));
+            }
+            legacy_label_conditions.push(if exclude_conditions.len() == 1 {
+                exclude_conditions.into_iter().next().unwrap()
+            } else {
+                serde_json::json!({"$or": exclude_conditions})
+            });
+        }
+        if prepend_when_conditions(&mut when, legacy_label_conditions) {
+            error!(
+                "Existing 'when' condition is not an object, cannot prepend migrated conditions. Using only migrated conditions."
+            );
+        }
+
+        let settings = ReplicationSettings {
+            src_bucket: self.src_bucket,
+            dst_bucket: self.dst_bucket,
+            dst_host: self.dst_host,
+            dst_token: if self.dst_token.is_empty() {
+                None
+            } else {
+                Some(self.dst_token)
+            },
+            entries: self.entries,
+            dst_prefix: self.dst_prefix,
+            when,
+            mode: ProtoReplicationMode::try_from(self.mode)
+                .unwrap_or(ProtoReplicationMode::Enabled)
+                .into(),
+            compression: ProtoReplicationCompression::try_from(self.compression)
+                .unwrap_or(ProtoReplicationCompression::None)
+                .into(),
+        };
+
+        (settings, migrated)
     }
 }
 
 impl From<ProtoReplicationSettings> for ReplicationSettings {
     fn from(settings: ProtoReplicationSettings) -> Self {
-        Self {
-            src_bucket: settings.src_bucket,
-            dst_bucket: settings.dst_bucket,
-            dst_host: settings.dst_host,
-            dst_token: if settings.dst_token.is_empty() {
-                None
-            } else {
-                Some(settings.dst_token)
-            },
-            entries: settings.entries,
-            include: settings
-                .include
-                .into_iter()
-                .map(|label| (label.name, label.value))
-                .collect(),
-            exclude: settings
-                .exclude
-                .into_iter()
-                .map(|label| (label.name, label.value))
-                .collect(),
-            each_s: if settings.each_s > 0.0 {
-                Some(settings.each_s)
-            } else {
-                None
-            },
-            each_n: if settings.each_n > 0 {
-                Some(settings.each_n)
-            } else {
-                None
-            },
-            when: if let Some(when) = settings.when {
-                match serde_json::from_str(&when) {
-                    Ok(value) => Some(value),
-                    Err(err) => {
-                        error!(
-                            "Failed to parse 'when' field: {} in replication settings: {}",
-                            err, when
-                        );
-                        None
-                    }
-                }
-            } else {
-                None
-            },
-            mode: ProtoReplicationMode::try_from(settings.mode)
-                .unwrap_or(ProtoReplicationMode::Enabled)
-                .into(),
-        }
+        settings.into_settings().0
     }
 }
 
@@ -135,6 +224,26 @@ impl From<ProtoReplicationMode> for ReplicationMode {
     }
 }
 
+impl From<&ReplicationCompression> for ProtoReplicationCompression {
+    fn from(compression: &ReplicationCompression) -> Self {
+        match compression {
+            ReplicationCompression::None => ProtoReplicationCompression::None,
+            ReplicationCompression::Zstd => ProtoReplicationCompression::Zstd,
+            ReplicationCompression::Gzip => ProtoReplicationCompression::Gzip,
+        }
+    }
+}
+
+impl From<ProtoReplicationCompression> for ReplicationCompression {
+    fn from(compression: ProtoReplicationCompression) -> Self {
+        match compression {
+            ProtoReplicationCompression::None => ReplicationCompression::None,
+            ProtoReplicationCompression::Zstd => ReplicationCompression::Zstd,
+            ProtoReplicationCompression::Gzip => ReplicationCompression::Gzip,
+        }
+    }
+}
+
 /// A repository for managing replications from HTTP API
 
 enum NotificationCommand {
@@ -148,6 +257,7 @@ pub(crate) struct ReplicationRepository {
     repo_path: PathBuf,
     config: Cfg,
     system_event_sink: Option<SystemEventSink>,
+    source_identity: ReplicationSourceIdentity,
     started: bool,
     notification_tx: UnboundedSender<NotificationCommand>,
     notification_worker: Option<JoinHandle<()>>,
@@ -156,7 +266,7 @@ pub(crate) struct ReplicationRepository {
 #[async_trait]
 impl ManageReplications for ReplicationRepository {
     async fn create_replication(
-        &mut self,
+        &self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
@@ -172,7 +282,7 @@ impl ManageReplications for ReplicationRepository {
     }
 
     async fn update_replication(
-        &mut self,
+        &self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
@@ -243,7 +353,7 @@ impl ManageReplications for ReplicationRepository {
     }
 
     async fn set_replication_provisioned(
-        &mut self,
+        &self,
         name: &str,
         provisioned: bool,
     ) -> Result<(), ReductError> {
@@ -255,7 +365,7 @@ impl ManageReplications for ReplicationRepository {
         Ok(())
     }
 
-    async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError> {
+    async fn remove_replication(&self, name: &str) -> Result<(), ReductError> {
         let mut guard = self.replications.write().await?;
         let repl = guard.get(name).ok_or_else(|| {
             ReductError::not_found(&format!("Replication '{}' does not exist", name))
@@ -275,7 +385,7 @@ impl ManageReplications for ReplicationRepository {
         self.remove_transaction_logs_for_replication(name).await
     }
 
-    async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
+    async fn set_mode(&self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
         let mut guard = self.replications.write().await?;
         let replication = guard.get_mut(name).ok_or_else(|| {
             ReductError::not_found(&format!("Replication '{}' does not exist", name))
@@ -285,7 +395,7 @@ impl ManageReplications for ReplicationRepository {
         self.save_repo().await
     }
 
-    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError> {
+    async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
         let should_enqueue = {
             let guard = self.replications.read().await?;
             guard
@@ -326,6 +436,7 @@ impl ReplicationRepository {
         storage: Arc<StorageEngine>,
         config: Cfg,
         system_event_sink: Option<SystemEventSink>,
+        source_identity: ReplicationSourceIdentity,
     ) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
         let replications = Arc::new(AsyncRwLock::new(HashMap::<String, ReplicationTask>::new()));
@@ -358,12 +469,13 @@ impl ReplicationRepository {
             }
         });
 
-        let mut repo = Self {
+        let repo = Self {
             replications,
             storage,
             repo_path,
             config,
             system_event_sink,
+            source_identity,
             started: false,
             notification_tx,
             notification_worker: Some(notification_worker),
@@ -388,10 +500,8 @@ impl ReplicationRepository {
                 let proto_repo = ProtoReplicationRepo::decode(&mut Bytes::from(buf))
                     .expect("Error decoding replication repository");
                 for item in proto_repo.replications {
-                    if let Err(err) = repo
-                        .create_replication(&item.name, item.settings.unwrap().into())
-                        .await
-                    {
+                    let (settings, _migrated) = item.settings.unwrap().into_settings();
+                    if let Err(err) = repo.create_replication(&item.name, settings).await {
                         error!("Failed to load replication '{}': {}", item.name, err);
                     }
                 }
@@ -435,7 +545,7 @@ impl ReplicationRepository {
     }
 
     async fn create_or_update_replication_task(
-        &mut self,
+        &self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
@@ -516,6 +626,7 @@ impl ReplicationRepository {
             conf,
             Arc::clone(&self.storage),
             self.system_event_sink.clone(),
+            self.source_identity.clone(),
         )?;
         let mut replication = replication;
         if self.started {
@@ -725,19 +836,28 @@ mod tests {
         #[tokio::test]
         async fn create_and_load_replications(
             #[future] storage: Arc<StorageEngine>,
-            settings: ReplicationSettings,
+            mut settings: ReplicationSettings,
         ) {
+            settings.dst_prefix = "robot-1".to_string();
             let storage = storage.await;
-            let mut repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
-                    .await;
+            let mut repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+            )
+            .await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
 
-            let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
-                    .await;
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+            )
+            .await;
             assert_eq!(repo.replications().await.unwrap().len(), 1);
             assert_eq!(
                 repo.get_replication_settings("test").await.unwrap(),
@@ -992,9 +1112,13 @@ mod tests {
             assert!(!log_path.exists(), "Should remove transaction log");
 
             // check if replication is removed from file
-            let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
-                    .await;
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+            )
+            .await;
             assert_eq!(
                 repo.replications().await.unwrap().len(),
                 0,
@@ -1117,8 +1241,8 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_non_existing_replication(#[future] mut repo: ReplicationRepository) {
-            let mut repo = repo.await;
+        async fn test_remove_non_existing_replication(#[future] repo: ReplicationRepository) {
+            let repo = repo.await;
             assert_eq!(
                 repo.remove_replication("test-2").await,
                 Err(not_found!("Replication 'test-2' does not exist")),
@@ -1501,6 +1625,425 @@ mod tests {
         }
     }
 
+    mod include_migration {
+        use super::*;
+        use crate::replication::proto::{
+            Label as ProtoLabel, ReplicationSettings as ProtoReplicationSettings,
+        };
+        use crate::storage::query::condition::Context;
+        use std::collections::HashMap;
+
+        fn create_proto_settings(
+            include: Vec<ProtoLabel>,
+            when: Option<String>,
+        ) -> ProtoReplicationSettings {
+            ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "token".to_string(),
+                entries: vec![],
+                dst_prefix: String::new(),
+                include,
+                exclude: vec![],
+                each_n: 0,
+                each_s: 0.0,
+                when,
+                mode: ProtoReplicationMode::Enabled as i32,
+                compression: ProtoReplicationCompression::None as i32,
+            }
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_migrated_to_eq_without_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "temp".to_string(),
+                }],
+                None,
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "$and": [
+                        {"$has": "sensor"},
+                        {"$eq": ["&sensor", "temp"]}
+                    ]
+                })),
+                "Should migrate include to a guarded equality condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_migrated_to_eq_with_existing_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "temp".to_string(),
+                }],
+                Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "$and": [
+                        {
+                            "$and": [
+                                {"$has": "sensor"},
+                                {"$eq": ["&sensor", "temp"]}
+                            ]
+                        },
+                        {"$eq": ["&status", "active"]}
+                    ]
+                })),
+                "Should add the include condition to the existing when condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_with_multiple_labels() {
+            let proto_settings = create_proto_settings(
+                vec![
+                    ProtoLabel {
+                        name: "sensor".to_string(),
+                        value: "temp".to_string(),
+                    },
+                    ProtoLabel {
+                        name: "location".to_string(),
+                        value: "warehouse".to_string(),
+                    },
+                ],
+                None,
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "$and": [
+                        {
+                            "$and": [
+                                {"$has": "sensor"},
+                                {"$eq": ["&sensor", "temp"]}
+                            ]
+                        },
+                        {
+                            "$and": [
+                                {"$has": "location"},
+                                {"$eq": ["&location", "warehouse"]}
+                            ]
+                        }
+                    ]
+                })),
+                "Should require every included label"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_migration_when_include_empty() {
+            let proto_settings = create_proto_settings(
+                vec![],
+                Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(
+                !migrated,
+                "Should not indicate migration when include is empty"
+            );
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"$eq": ["&status", "active"]})),
+                "Should preserve original when condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_with_non_object_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "temp".to_string(),
+                }],
+                Some(r#"["invalid", "array"]"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "$and": [
+                        {"$has": "sensor"},
+                        {"$eq": ["&sensor", "temp"]}
+                    ]
+                })),
+                "Should replace non-object when with the include condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_include_skips_missing_label() {
+            let (settings, _) = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "temp".to_string(),
+                }],
+                None,
+            )
+            .into_settings();
+            let (mut condition, _) = Parser::new().parse(settings.when.unwrap()).unwrap();
+
+            assert!(!condition
+                .apply(&Context::new(0, HashMap::new(), HashMap::new()))
+                .unwrap()
+                .as_bool()
+                .unwrap());
+        }
+    }
+
+    mod exclude_migration {
+        use super::*;
+        use crate::replication::proto::{
+            Label as ProtoLabel, ReplicationSettings as ProtoReplicationSettings,
+        };
+        use crate::storage::query::condition::Context;
+        use std::collections::HashMap;
+
+        fn create_proto_settings(
+            exclude: Vec<ProtoLabel>,
+            when: Option<String>,
+        ) -> ProtoReplicationSettings {
+            ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "token".to_string(),
+                entries: vec![],
+                dst_prefix: String::new(),
+                include: vec![],
+                exclude,
+                each_n: 0,
+                each_s: 0.0,
+                when,
+                mode: ProtoReplicationMode::Enabled as i32,
+                compression: ProtoReplicationCompression::None as i32,
+            }
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_migrated_to_ne_without_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "error".to_string(),
+                }],
+                None,
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "$or": [
+                        {"$not": [{"$has": "sensor"}]},
+                        {"$ne": ["&sensor", "error"]}
+                    ]
+                })),
+                "Should migrate exclude to a guarded inequality condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_migrated_to_ne_with_existing_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "error".to_string(),
+                }],
+                Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "$and": [
+                        {
+                            "$or": [
+                                {"$not": [{"$has": "sensor"}]},
+                                {"$ne": ["&sensor", "error"]}
+                            ]
+                        },
+                        {"$eq": ["&status", "active"]}
+                    ]
+                })),
+                "Should add the exclude condition to the existing when condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_with_multiple_labels() {
+            let proto_settings = create_proto_settings(
+                vec![
+                    ProtoLabel {
+                        name: "sensor".to_string(),
+                        value: "error".to_string(),
+                    },
+                    ProtoLabel {
+                        name: "location".to_string(),
+                        value: "maintenance".to_string(),
+                    },
+                ],
+                None,
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "$or": [
+                        {
+                            "$or": [
+                                {"$not": [{"$has": "sensor"}]},
+                                {"$ne": ["&sensor", "error"]}
+                            ]
+                        },
+                        {
+                            "$or": [
+                                {"$not": [{"$has": "location"}]},
+                                {"$ne": ["&location", "maintenance"]}
+                            ]
+                        }
+                    ]
+                })),
+                "Should keep records unless every excluded label matches"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_with_multiple_labels_keeps_partial_match() {
+            let (settings, _) = create_proto_settings(
+                vec![
+                    ProtoLabel {
+                        name: "sensor".to_string(),
+                        value: "error".to_string(),
+                    },
+                    ProtoLabel {
+                        name: "location".to_string(),
+                        value: "maintenance".to_string(),
+                    },
+                ],
+                None,
+            )
+            .into_settings();
+            let (mut condition, _) = Parser::new().parse(settings.when.unwrap()).unwrap();
+            let labels = HashMap::from([("sensor", "error"), ("location", "production")]);
+
+            assert!(condition
+                .apply(&Context::new(0, labels, HashMap::new()))
+                .unwrap()
+                .as_bool()
+                .unwrap());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_migration_when_exclude_empty() {
+            let proto_settings = create_proto_settings(
+                vec![],
+                Some(r#"{"$eq": ["&status", "active"]}"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(
+                !migrated,
+                "Should not indicate migration when exclude is empty"
+            );
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"$eq": ["&status", "active"]})),
+                "Should preserve original when condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_with_non_object_when() {
+            let proto_settings = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "error".to_string(),
+                }],
+                Some(r#"["invalid", "array"]"#.to_string()),
+            );
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should indicate migration occurred");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "$or": [
+                        {"$not": [{"$has": "sensor"}]},
+                        {"$ne": ["&sensor", "error"]}
+                    ]
+                })),
+                "Should replace non-object when with the exclude condition"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_exclude_keeps_missing_label() {
+            let (settings, _) = create_proto_settings(
+                vec![ProtoLabel {
+                    name: "sensor".to_string(),
+                    value: "error".to_string(),
+                }],
+                None,
+            )
+            .into_settings();
+            let (mut condition, _) = Parser::new().parse(settings.when.unwrap()).unwrap();
+
+            assert!(condition
+                .apply(&Context::new(0, HashMap::new(), HashMap::new()))
+                .unwrap()
+                .as_bool()
+                .unwrap());
+        }
+    }
+
     #[fixture]
     fn settings() -> ReplicationSettings {
         ReplicationSettings {
@@ -1509,12 +2052,10 @@ mod tests {
             dst_host: "http://localhost".to_string(),
             dst_token: Some("token".to_string()),
             entries: vec!["entry-1".to_string()],
-            include: Labels::default(),
-            exclude: Labels::default(),
-            each_n: None,
-            each_s: None,
+            dst_prefix: String::new(),
             when: None,
             mode: ReplicationMode::Enabled,
+            compression: Default::default(),
         }
     }
 
@@ -1543,6 +2084,236 @@ mod tests {
     #[fixture]
     async fn repo(#[future] storage: Arc<StorageEngine>) -> ReplicationRepository {
         let storage = storage.await;
-        ReplicationRepository::load_or_create(storage, Cfg::default(), None).await
+        ReplicationRepository::load_or_create(
+            storage,
+            Cfg::default(),
+            None,
+            ReplicationSourceIdentity::default(),
+        )
+        .await
+    }
+
+    mod each_s_migration {
+
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_s_migrated_to_each_t_without_when() {
+            let proto_settings = get_proto_replication_settings(2.5, None).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 2.5})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_s_migrated_to_each_t_with_existing_when() {
+            let proto_settings =
+                get_proto_replication_settings(2.0, Some(r#"{"&label": {"$eq": 1}}"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "&label": {"$eq": 1},
+                    "$each_t": 2.0
+                }))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_migration_when_each_s_is_zero() {
+            let proto_settings =
+                get_proto_replication_settings(0.0, Some(r#"{"&label": {"$eq": 1}}"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(!migrated, "Should not mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"&label": {"$eq": 1}}))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_parsing_error_with_each_s() {
+            let proto_settings =
+                get_proto_replication_settings(1.5, Some("invalid json".to_string())).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            // When parsing fails, should use only $each_t
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 1.5})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_parsing_error_without_each_s() {
+            let proto_settings =
+                get_proto_replication_settings(0.0, Some("invalid json".to_string())).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(!migrated, "Should not mark as migrated");
+            assert_eq!(settings.when, None);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_s_with_non_object_when() {
+            let proto_settings =
+                get_proto_replication_settings(1.5, Some(r#"["invalid", "array"]"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            // When the existing 'when' is not an object (e.g., an array),
+            // it should be replaced with just the $each_t condition
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 1.5})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_is_not_object_with_each_s() {
+            let proto_settings = get_proto_replication_settings(
+                3.0,
+                Some(r#"["array", "not", "object"]"#.to_string()),
+            )
+            .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            // When existing condition is not an object, replace with $each_t
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_t": 3.0})));
+        }
+
+        async fn get_proto_replication_settings(
+            each_s: f64,
+            when: ::core::option::Option<::prost::alloc::string::String>,
+        ) -> ProtoReplicationSettings {
+            ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                dst_prefix: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n: 0,
+                each_s: each_s,
+                when: when,
+                mode: ProtoReplicationMode::Enabled as i32,
+                compression: ProtoReplicationCompression::None as i32,
+            }
+        }
+    }
+
+    mod each_n_migration {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_n_migrated_to_each_n_without_when() {
+            let proto_settings = get_proto_replication_settings(2, None).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_n": 2})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_n_migrated_to_each_n_with_existing_when() {
+            let proto_settings =
+                get_proto_replication_settings(2, Some(r#"{"&label": {"$eq": 1}}"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({
+                    "&label": {"$eq": 1},
+                    "$each_n": 2
+                }))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_no_migration_when_each_n_is_zero() {
+            let proto_settings =
+                get_proto_replication_settings(0, Some(r#"{"&label": {"$eq": 1}}"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(!migrated, "Should not mark as migrated");
+            assert_eq!(
+                settings.when,
+                Some(serde_json::json!({"&label": {"$eq": 1}}))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_when_parsing_error_with_each_n() {
+            let proto_settings =
+                get_proto_replication_settings(2, Some("invalid json".to_string())).await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_n": 2})));
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_each_n_with_non_object_when() {
+            let proto_settings =
+                get_proto_replication_settings(2, Some(r#"["invalid", "array"]"#.to_string()))
+                    .await;
+
+            let (settings, migrated) = proto_settings.into_settings();
+
+            assert!(migrated, "Should mark as migrated");
+            assert_eq!(settings.when, Some(serde_json::json!({"$each_n": 2})));
+        }
+
+        async fn get_proto_replication_settings(
+            each_n: u64,
+            when: Option<String>,
+        ) -> ProtoReplicationSettings {
+            ProtoReplicationSettings {
+                src_bucket: "bucket-1".to_string(),
+                dst_bucket: "bucket-2".to_string(),
+                dst_host: "http://localhost".to_string(),
+                dst_token: "".to_string(),
+                dst_prefix: "".to_string(),
+                entries: vec![],
+                include: vec![],
+                exclude: vec![],
+                each_n,
+                each_s: 0.0,
+                when,
+                mode: ProtoReplicationMode::Enabled as i32,
+                compression: ProtoReplicationCompression::None as i32,
+            }
+        }
     }
 }

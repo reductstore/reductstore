@@ -6,7 +6,6 @@ pub(crate) mod condition;
 mod continuous;
 pub(crate) mod filters;
 mod historical;
-mod limited;
 
 use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
@@ -48,15 +47,7 @@ pub(in crate::storage) fn build_query(
         return Err(unprocessable_entity!("Start time must be before stop time",));
     }
 
-    Ok(if let Some(_) = options.limit {
-        Box::new(limited::LimitedQuery::try_new(
-            entry_name,
-            start,
-            stop,
-            options,
-            io_defaults,
-        )?)
-    } else if options.continuous {
+    Ok(if options.continuous {
         Box::new(continuous::ContinuousQuery::try_new(
             entry_name,
             start,

@@ -5,10 +5,12 @@ mod client_wrapper;
 mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
+use crate::replication::ReplicationSourceIdentity;
 use crate::replication::Transaction;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
+use reduct_base::msg::replication_api::ReplicationCompression;
 use std::collections::BTreeMap;
 use std::path::PathBuf;
 
@@ -19,6 +21,8 @@ pub(super) struct RemoteBucketConfig {
     pub(super) api_token: String,
     pub(super) verify_ssl: bool,
     pub(super) ca_path: Option<PathBuf>,
+    pub(super) compression: ReplicationCompression,
+    pub(super) source_identity: ReplicationSourceIdentity,
 }
 
 pub(super) struct RemoteBucketBuilder {
@@ -57,6 +61,16 @@ impl RemoteBucketBuilder {
 
     pub fn ca_path(mut self, ca_path: Option<PathBuf>) -> Self {
         self.config.ca_path = ca_path;
+        self
+    }
+
+    pub fn compression(mut self, compression: ReplicationCompression) -> Self {
+        self.config.compression = compression;
+        self
+    }
+
+    pub fn source_identity(mut self, source_identity: ReplicationSourceIdentity) -> Self {
+        self.config.source_identity = source_identity;
         self
     }
 
@@ -150,6 +164,8 @@ pub(super) mod tests {
         #[async_trait]
         impl ReductClientApi for ReductClientApi {
             async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
+
+            async fn create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
 
             fn url(&self) -> &str;
         }

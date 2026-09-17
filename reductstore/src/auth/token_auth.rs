@@ -111,7 +111,7 @@ mod tests {
 
     async fn setup() -> (BoxedTokenRepository, TokenAuthorization) {
         let cfg = Cfg {
-            api_token: "test".to_string(),
+            api_token: crate::cfg::ApiToken::Provisioned("test".to_string()),
             ..Cfg::default()
         };
         let repo = TokenRepositoryBuilder::new(cfg)

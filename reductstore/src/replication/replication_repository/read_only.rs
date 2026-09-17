@@ -20,7 +20,7 @@ impl ReadOnlyReplicationRepository {
 #[async_trait]
 impl ManageReplications for ReadOnlyReplicationRepository {
     async fn create_replication(
-        &mut self,
+        &self,
         _name: &str,
         _settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
@@ -28,7 +28,7 @@ impl ManageReplications for ReadOnlyReplicationRepository {
     }
 
     async fn update_replication(
-        &mut self,
+        &self,
         _name: &str,
         _settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
@@ -57,7 +57,7 @@ impl ManageReplications for ReadOnlyReplicationRepository {
     }
 
     async fn set_replication_provisioned(
-        &mut self,
+        &self,
         _name: &str,
         _provisioned: bool,
     ) -> Result<(), ReductError> {
@@ -66,17 +66,17 @@ impl ManageReplications for ReadOnlyReplicationRepository {
         ))
     }
 
-    async fn remove_replication(&mut self, _name: &str) -> Result<(), ReductError> {
+    async fn remove_replication(&self, _name: &str) -> Result<(), ReductError> {
         Err(forbidden!("Cannot remove replication in read-only mode"))
     }
 
-    async fn set_mode(&mut self, _name: &str, _mode: ReplicationMode) -> Result<(), ReductError> {
+    async fn set_mode(&self, _name: &str, _mode: ReplicationMode) -> Result<(), ReductError> {
         Err(forbidden!(
             "Cannot update replication mode in read-only mode"
         ))
     }
 
-    async fn notify(&mut self, _notification: TransactionNotification) -> Result<(), ReductError> {
+    async fn notify(&self, _notification: TransactionNotification) -> Result<(), ReductError> {
         Err(forbidden!("Cannot notify replication in read-only mode"))
     }
 
@@ -193,7 +193,7 @@ mod tests {
         use reduct_base::io::RecordMeta;
         #[rstest]
         #[tokio::test]
-        async fn test_notify_forbidden(mut repo: ReadOnlyReplicationRepository) {
+        async fn test_notify_forbidden(repo: ReadOnlyReplicationRepository) {
             let notification = TransactionNotification {
                 bucket: "bucket".to_string(),
                 entry: "entry".to_string(),

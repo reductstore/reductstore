@@ -15,10 +15,9 @@
 //! the single-threaded replication worker loop. It emits straight through the
 //! [`SystemEventSink`], the same way the lifecycle module does.
 
-use crate::api::audit::aggregator::{AGGREGATION_WINDOW_SECS, FORCE_FLUSH_TIMEOUT_SECS};
-use crate::lifecycle::SystemEventSink;
-use crate::replication::replication_event_payload::ReplicationSystemEventPayload;
-use crate::syslog::SystemEvent;
+use super::{AGGREGATION_WINDOW_SECS, FORCE_FLUSH_TIMEOUT_SECS};
+use crate::syslog::payload::replication::ReplicationSystemEventPayload;
+use crate::syslog::{SystemEvent, SystemEventKind, SystemEventSink};
 use log::error;
 use reduct_base::error::ReductError;
 use std::collections::BTreeMap;
@@ -57,6 +56,7 @@ fn now_micros() -> u64 {
 fn make_event(
     instance: &str,
     replication_name: &str,
+    replicate: bool,
     aggregate: ReplicationAggregate,
 ) -> SystemEvent {
     let payload = ReplicationSystemEventPayload {
@@ -69,6 +69,8 @@ fn make_event(
     };
 
     SystemEvent {
+        kind: SystemEventKind::Replication,
+        replicate,
         event_type: REPLICATION_EVENT_TYPE.to_string(),
         timestamp: aggregate.first_timestamp,
         instance: instance.to_string(),
@@ -80,18 +82,22 @@ fn make_event(
 }
 
 /// Per-task replication diagnostics aggregator.
-pub(super) struct ReplicationEventAggregator {
+pub(crate) struct ReplicationEventAggregator {
     sink: SystemEventSink,
     replication_name: String,
+    /// `false` for a `$system`-source replication: its own diagnostics must
+    /// not feed it new transactions.
+    replicate: bool,
     active: Option<ReplicationAggregate>,
     last_event_timestamp: u64,
 }
 
 impl ReplicationEventAggregator {
-    pub(super) fn new(sink: SystemEventSink, replication_name: String) -> Self {
+    pub(crate) fn new(sink: SystemEventSink, replication_name: String, src_bucket: &str) -> Self {
         Self {
             sink,
             replication_name,
+            replicate: src_bucket != crate::syslog::SYSTEM_BUCKET_NAME,
             active: None,
             last_event_timestamp: 0,
         }
@@ -109,7 +115,7 @@ impl ReplicationEventAggregator {
     /// swallowed and logged. The pass `duration` is attributed once, to the
     /// lowest-status observation, so it is never double-counted when a single
     /// pass produces several status codes.
-    pub(super) async fn record_pass(
+    pub(crate) async fn record_pass(
         &mut self,
         pending_records: u64,
         duration: f64,
@@ -189,7 +195,7 @@ impl ReplicationEventAggregator {
     /// Flush the open bucket if its idle window elapsed (condition 2) or it hit
     /// the time cap (condition 3). Called every worker iteration so an idle
     /// bucket is flushed even when no new records arrive.
-    pub(super) async fn flush_if_due(&mut self) {
+    pub(crate) async fn flush_if_due(&mut self) {
         let now = Instant::now();
         if self
             .active
@@ -201,11 +207,16 @@ impl ReplicationEventAggregator {
     }
 
     /// Emit the open bucket (if any) as a `$system` event and clear it.
-    pub(super) async fn flush(&mut self) {
+    pub(crate) async fn flush(&mut self) {
         let Some(aggregate) = self.active.take() else {
             return;
         };
-        let event = make_event(&self.sink.instance_name, &self.replication_name, aggregate);
+        let event = make_event(
+            &self.sink.instance_name,
+            &self.replication_name,
+            self.replicate,
+            aggregate,
+        );
 
         match self.sink.system_logger.write().await {
             Ok(mut logger) => {
@@ -257,7 +268,7 @@ mod tests {
             )),
             instance_name: "instance-1".to_string(),
         };
-        ReplicationEventAggregator::new(sink, "repl-1".to_string())
+        ReplicationEventAggregator::new(sink, "repl-1".to_string(), "bucket-1")
     }
 
     #[fixture]
@@ -424,6 +435,32 @@ mod tests {
     }
 
     #[rstest]
+    #[case::system_source(crate::syslog::SYSTEM_BUCKET_NAME, false)]
+    #[case::user_source("bucket-1", true)]
+    #[tokio::test]
+    async fn system_source_diagnostics_are_not_replicable(
+        events: Arc<Mutex<Vec<SystemEvent>>>,
+        #[case] src_bucket: &str,
+        #[case] expected_replicate: bool,
+    ) {
+        let sink = SystemEventSink {
+            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingLogger {
+                events: Arc::clone(&events),
+                fail: false,
+            })
+                as Box<dyn LogSystemEvent + Send + Sync>)),
+            instance_name: "instance-1".to_string(),
+        };
+        let mut agg = ReplicationEventAggregator::new(sink, "repl-1".to_string(), src_bucket);
+        agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
+        agg.flush().await;
+
+        let captured = events.lock().unwrap();
+        assert_eq!(captured.len(), 1);
+        assert_eq!(captured[0].replicate, expected_replicate);
+    }
+
+    #[rstest]
     #[tokio::test]
     async fn empty_pass_is_ignored(events: Arc<Mutex<Vec<SystemEvent>>>) {
         let mut agg = aggregator(Arc::clone(&events), false);
@@ -465,7 +502,7 @@ mod tests {
             system_logger: Arc::new(AsyncRwLock::new(logger)),
             instance_name: "instance-1".to_string(),
         };
-        let mut agg = ReplicationEventAggregator::new(sink, "repl-1".to_string());
+        let mut agg = ReplicationEventAggregator::new(sink, "repl-1".to_string(), "bucket-1");
 
         agg.record_pass(2, 0.5, &[(Ok(()), 3, 120)]).await;
         agg.flush().await;

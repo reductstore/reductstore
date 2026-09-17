@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use async_trait::async_trait;
+use axum::http::HeaderName;
 use reduct_base::error::ReductError;
 use reduct_base::io::RecordMeta;
 use reduct_base::msg::replication_api::{
@@ -11,13 +12,35 @@ use reduct_base::msg::replication_api::{
 mod diagnostics;
 pub mod proto;
 mod remote_bucket;
-mod replication_aggregator;
-mod replication_event_payload;
 mod replication_repository;
 mod replication_sender;
 mod replication_task;
 mod transaction_filter;
 mod transaction_log;
+
+pub(crate) const REPLICATION_NODE_ID_HEADER: HeaderName =
+    HeaderName::from_static("x-reduct-node-id");
+pub(crate) const REPLICATION_STORE_ID_HEADER: HeaderName =
+    HeaderName::from_static("x-reduct-store-id");
+pub(crate) const REPLICATION_LICENSE_HASH_HEADER: HeaderName =
+    HeaderName::from_static("x-reduct-license-hash");
+
+#[derive(Clone, Debug, Default)]
+pub(crate) struct ReplicationSourceIdentity {
+    pub(crate) node_id: String,
+    pub(crate) store_id: String,
+    pub(crate) license_hash: String,
+}
+
+impl ReplicationSourceIdentity {
+    pub(crate) fn new(node_id: String, store_id: String, license_hash: Option<String>) -> Self {
+        Self {
+            node_id,
+            store_id,
+            license_hash: license_hash.unwrap_or_else(|| "null".to_string()),
+        }
+    }
+}
 
 /// Replication event to be synchronized.
 #[derive(Debug, Clone, PartialEq)]
@@ -90,7 +113,7 @@ pub trait ManageReplications {
     /// * `ReductError::BadRequest` - Invalid destination host.
     /// * `ReductError::NotFound` - Source bucket does not exist.
     async fn create_replication(
-        &mut self,
+        &self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError>;
@@ -106,7 +129,7 @@ pub trait ManageReplications {
     ///
     /// A `ReductError` is returned if the update fails.
     async fn update_replication(
-        &mut self,
+        &self,
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError>;
@@ -128,16 +151,16 @@ pub trait ManageReplications {
 
     /// Mark replication as provisioned/unprovisioned.
     async fn set_replication_provisioned(
-        &mut self,
+        &self,
         name: &str,
         provisioned: bool,
     ) -> Result<(), ReductError>;
 
     /// Remove a replication task
-    async fn remove_replication(&mut self, name: &str) -> Result<(), ReductError>;
+    async fn remove_replication(&self, name: &str) -> Result<(), ReductError>;
 
     /// Update replication mode
-    async fn set_mode(&mut self, name: &str, mode: ReplicationMode) -> Result<(), ReductError>;
+    async fn set_mode(&self, name: &str, mode: ReplicationMode) -> Result<(), ReductError>;
 
     /// Notify replication task about a new transaction.
     ///
@@ -148,7 +171,7 @@ pub trait ManageReplications {
     /// # Errors
     ///
     /// A `ReductError` is returned if the notification fails.
-    async fn notify(&mut self, notification: TransactionNotification) -> Result<(), ReductError>;
+    async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError>;
 
     /// Start background workers if they are not running yet.
     fn start(&mut self);
@@ -158,3 +181,24 @@ pub trait ManageReplications {
 }
 
 pub(crate) use replication_repository::ReplicationRepoBuilder;
+
+pub(crate) fn prepend_when_conditions(
+    when: &mut Option<serde_json::Value>,
+    conditions: Vec<serde_json::Value>,
+) -> bool {
+    if conditions.is_empty() {
+        return false;
+    }
+
+    let condition = if conditions.len() == 1 {
+        conditions.into_iter().next().unwrap()
+    } else {
+        serde_json::json!({"$and": conditions})
+    };
+    let invalid_when = when.as_ref().is_some_and(|when| !when.is_object());
+    *when = Some(match when.take() {
+        Some(when) if when.is_object() => serde_json::json!({"$and": [condition, when]}),
+        _ => condition,
+    });
+    invalid_when
+}
