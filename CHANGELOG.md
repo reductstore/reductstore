@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## 1.21.1 - 2026-09-22
+
+### Changes
+
+- Allow runtime updates to the license reported by `/api/v1/info`, [PR-1621](https://github.com/reductstore/reductstore/pull/1621)
+
 ## 1.21.0 - 2026-09-17
 
 ### Breaking Changes
