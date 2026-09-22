@@ -76,7 +76,7 @@ aes-siv = "0.8.0-rc.1"
 uuid = { version = "1.21.0", features = ["v4"] }
 parking_lot="0.12.5"
 zenoh = { version = "1.10.1", optional = true }
-zstd = "0.13.3"
+zstd = "0.14.0"
 fs4 = "1.1"
 
 
@@ -89,7 +89,7 @@ serde_json = "1.0.150"
 
 [dev-dependencies]
 mockall = "0.15.0"
-rstest = "0.26.1"
+rstest = "0.27.0"
 serial_test = "3.2.0"
 test-log = "0.2.19"
 tower = "0.5.2"

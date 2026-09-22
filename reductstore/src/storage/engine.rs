@@ -106,7 +106,7 @@ impl StorageEngineBuilder {
             data_path,
             start_time: Instant::now(),
             buckets: Arc::new(AsyncRwLock::new(buckets)),
-            license: self.license,
+            license: Arc::new(AsyncRwLock::new(self.license)),
             cfg,
             folder_keeper: Arc::new(folder_keeper),
             io_limiter,
@@ -120,7 +120,7 @@ pub struct StorageEngine {
     data_path: PathBuf,
     start_time: Instant,
     buckets: Arc<AsyncRwLock<BTreeMap<String, Arc<Bucket>>>>,
-    license: Option<License>,
+    license: Arc<AsyncRwLock<Option<License>>>,
     cfg: Cfg,
     folder_keeper: Arc<FolderKeeper>,
     io_limiter: InFlightIoLimiter,
@@ -157,6 +157,12 @@ impl StorageEngine {
 
     async fn reload(&self) -> Result<(), ReductError> {
         // Replica reloading is driven by the launcher background task.
+        Ok(())
+    }
+
+    /// Update license information reported by the server at runtime.
+    pub async fn set_runtime_license(&self, license: License) -> Result<(), ReductError> {
+        *self.license.write().await? = Some(license);
         Ok(())
     }
 
@@ -212,7 +218,7 @@ impl StorageEngine {
             defaults: Defaults {
                 bucket: self.cfg.bucket_defaults.clone(),
             },
-            license: self.license.clone(),
+            license: self.license.read().await?.clone(),
         })
     }
 
@@ -835,6 +841,24 @@ mod tests {
                 .await,
         );
         assert_eq!(storage.info().await.unwrap().license, Some(license));
+
+        let subscription_license = License {
+            licensee: "Subscription".to_string(),
+            invoice: "lic-123".to_string(),
+            expiry_date: chrono::Utc::now(),
+            plan: "Unlimited".to_string(),
+            device_number: 0,
+            disk_quota: 0,
+            fingerprint: String::new(),
+        };
+        storage
+            .set_runtime_license(subscription_license.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            storage.info().await.unwrap().license,
+            Some(subscription_license)
+        );
     }
 
     #[rstest]
