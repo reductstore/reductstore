@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Expose `FILE_CACHE` so downstream crates manage store files through the same cache, [PR-1622](https://github.com/reductstore/reductstore/pull/1622)
+
 ## 1.21.1 - 2026-09-22
 
 ### Changes

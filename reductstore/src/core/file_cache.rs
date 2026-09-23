@@ -23,7 +23,7 @@ const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 const FILE_CACHE_SYNC_INTERVAL: Duration = Duration::from_millis(10);
 const FILE_CACHE_SYNC_BATCH_SIZE: usize = 16;
 
-pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
+pub static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
     #[allow(unused_mut)]
     let mut cache = FileCache::new(
         FILE_CACHE_MAX_SIZE,
@@ -52,7 +52,7 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
 });
 
 pub(crate) type FileLock = Arc<AsyncRwLock<File>>;
-pub(crate) type FileGuard = OwnedRwLockWriteGuard<File>;
+pub type FileGuard = OwnedRwLockWriteGuard<File>;
 
 /// A cache to keep file descriptors open
 ///
@@ -60,7 +60,7 @@ pub(crate) type FileGuard = OwnedRwLockWriteGuard<File>;
 /// and closing files for writing causes synchronization overhead.
 ///
 /// Additionally, it periodically syncs files to disk to ensure data integrity.
-pub(crate) struct FileCache {
+pub struct FileCache {
     cache: Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
     stop_sync_worker: Arc<AtomicBool>,
     backend: Arc<AsyncRwLock<Backend>>,
