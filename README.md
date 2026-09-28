@@ -13,6 +13,20 @@
   <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
 </p>
 
+<p align="center">
+  <strong>🚀 60k+</strong> downloads
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <strong>🏭 100+</strong> production deployments
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <strong>📦 1 PB+</strong> managed data
+</p>
+
+<p align="center">
+  <strong>⭐ 350+</strong> GitHub stars
+  &nbsp;&nbsp;•&nbsp;&nbsp;
+  <strong>🛠️ 4+</strong> years of active development
+</p>
+
 ## Make robotics and industrial data queryable
 
 ReductStore is high-performance, time-indexed object storage for robotics and industrial IoT.
@@ -37,22 +51,6 @@ We built ReductStore for robotics and industrial systems that continuously produ
 ReductStore keeps the timestamp, labels, and binary payload in one record. The same labels drive queries, deletion policies, and replication, so edge devices can retain a bounded local history and send only relevant data upstream.
 
 This comparison covers native capabilities for continuously recorded multimodal data. A partial result means the capability requires a custom schema, restricted rule model, batch workflow, or additional setup rather than being a first class feature of the storage model.
-
-## Proof Points
-
-<p align="center">
-  <strong>🚀 60k+</strong> downloads
-  &nbsp;&nbsp;•&nbsp;&nbsp;
-  <strong>🏭 100+</strong> production deployments
-  &nbsp;&nbsp;•&nbsp;&nbsp;
-  <strong>📦 1 PB+</strong> managed data
-</p>
-
-<p align="center">
-  <strong>⭐ 350+</strong> GitHub stars
-  &nbsp;&nbsp;•&nbsp;&nbsp;
-  <strong>🛠️ 4+</strong> years of active development
-</p>
 
 ## When You Should Use It
 
