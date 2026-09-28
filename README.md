@@ -21,12 +21,22 @@ Store terabytes of images, video, sensor readings, logs, files, and ROS bags in 
 
 Instead of combining a time-series database, generic object storage, metadata indexes, and custom retention jobs, ReductStore provides one system for ingesting, organizing, retaining, and querying multimodal time-series data.
 
-## Why Teams Pick ReductStore
+## Why ReductStore
 
-- Make binary-first robotics and industrial data queryable by time range and labels
-- Built for workloads such as camera frames, sensor payloads, logs, files, and ROS bags
-- Replicate only selected records to the cloud to reduce bandwidth and storage cost
-- Apply quotas and lifecycle policies in the same system that stores the data
+We built ReductStore for robotics and industrial systems that continuously produce images, video, sensor readings, logs, files, and ROS bags. These workloads need the time index of a time series database and the payload flexibility of object storage without maintaining both systems.
+
+| Capability | ReductStore | [MinIO](https://www.reduct.store/blog/comparisons/computer-vision/iot/performance-comparison-reductstore-vs-minio) | [TimescaleDB](https://www.reduct.store/blog/comparisons/iot/reductstore-vs-timescaledb) | [MongoDB](https://www.reduct.store/blog/comparisons/iot/reductstore-vs-mongodb) |
+| --- | --- | --- | --- | --- |
+| Store arbitrary binary payloads | ✅ Native records | ✅ Native objects | 🟡 `BYTEA` rows | 🟡 `BinData` or GridFS |
+| Index binary data by timestamp | ✅ Built in | ❌ Object key index | ✅ Hypertable time index | 🟡 Schema and index required |
+| Query by time range and metadata | ✅ Time and label query | ❌ Key listing or external index | ✅ SQL schema required | 🟡 Metadata query plus GridFS retrieval |
+| Manage a fixed disk as a ring buffer | ✅ Capacity based FIFO quota | ❌ Age based expiration | ❌ Time based retention | 🟡 Capped collections |
+| Replicate selected data upstream | ✅ Entry and label conditions | 🟡 Prefix and object tag rules | 🟡 Separate logical replication setup | ❌ Application pipeline required |
+| Compress and delete historical data | ✅ Lifecycle policies | 🟡 Expiration or storage tiering | ✅ Columnstore and retention policies | 🟡 TTL expiration |
+
+ReductStore keeps the timestamp, labels, and binary payload in one record. The same labels drive queries, deletion policies, and replication, so edge devices can retain a bounded local history and send only relevant data upstream.
+
+This comparison covers native capabilities for continuously recorded multimodal data. A partial result means the capability requires a separate subsystem, custom schema, or narrower rule model.
 
 ## Proof Points
 
