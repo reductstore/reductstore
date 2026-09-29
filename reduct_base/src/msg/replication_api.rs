@@ -42,9 +42,12 @@ pub struct ReplicationSettings {
     pub src_bucket: String,
     /// Destination bucket
     pub dst_bucket: String,
-    /// Destination host URL (e.g. https://reductstore.com)
+    /// Destination host URL (e.g. https://reductstore.com).
+    /// If empty, the destination bucket is in the same instance
+    /// and records are copied to it directly, without any URL or token.
+    #[serde(default)]
     pub dst_host: String,
-    /// Destination access token
+    /// Destination access token. It is not used if the destination bucket is in the same instance.
     pub dst_token: Option<String>,
     /// Entries to replicate. If empty, all entries are replicated. Supports exact names,
     /// glob-like `*` and `**` wildcards, and `!` exclusion patterns.
@@ -102,4 +105,54 @@ pub struct FullReplicationInfo {
     pub settings: ReplicationSettings,
     /// Diagnostics
     pub diagnostics: Diagnostics,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rstest::rstest;
+
+    #[rstest]
+    #[case::omitted(r#"{"src_bucket":"bucket-1","dst_bucket":"bucket-2"}"#)]
+    #[case::null_token(r#"{"src_bucket":"bucket-1","dst_bucket":"bucket-2","dst_token":null}"#)]
+    #[case::empty_host(r#"{"src_bucket":"bucket-1","dst_bucket":"bucket-2","dst_host":""}"#)]
+    fn settings_without_host_and_token_are_local(#[case] json: &str) {
+        let settings: ReplicationSettings = serde_json::from_str(json).unwrap();
+
+        assert_eq!(settings.src_bucket, "bucket-1");
+        assert_eq!(settings.dst_bucket, "bucket-2");
+        assert_eq!(settings.dst_host, "");
+        assert_eq!(settings.dst_token, None);
+    }
+
+    #[test]
+    fn settings_keep_host_and_token() {
+        let settings: ReplicationSettings = serde_json::from_str(
+            r#"{
+                "src_bucket": "bucket-1",
+                "dst_bucket": "bucket-2",
+                "dst_host": "http://localhost:8383",
+                "dst_token": "token"
+            }"#,
+        )
+        .unwrap();
+
+        assert_eq!(settings.dst_host, "http://localhost:8383");
+        assert_eq!(settings.dst_token, Some("token".to_string()));
+    }
+
+    #[test]
+    fn local_settings_roundtrip() {
+        let settings = ReplicationSettings {
+            src_bucket: "bucket-1".to_string(),
+            dst_bucket: "bucket-2".to_string(),
+            ..Default::default()
+        };
+
+        let json = serde_json::to_string(&settings).unwrap();
+        assert_eq!(
+            serde_json::from_str::<ReplicationSettings>(&json).unwrap(),
+            settings
+        );
+    }
 }

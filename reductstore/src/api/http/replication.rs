@@ -184,6 +184,21 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_replication_settings_without_host_and_token() {
+            use crate::api::http::replication::ReplicationSettingsAxum;
+
+            let json = r#"{"src_bucket":"b1","dst_bucket":"b2"}"#;
+            let req = Request::builder().body(Body::from(json)).unwrap();
+
+            let payload = ReplicationSettingsAxum::from_request(req, &())
+                .await
+                .expect("parse settings");
+            assert_eq!(payload.0.dst_host, "", "Should be a local replication");
+            assert_eq!(payload.0.dst_token, None);
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_replication_settings_invalid_json() {
             use crate::api::http::replication::ReplicationSettingsAxum;
 
