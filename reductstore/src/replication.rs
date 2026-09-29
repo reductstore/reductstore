@@ -99,6 +99,9 @@ pub struct TransactionNotification {
     pub event: Transaction,
 }
 
+/// Notifies replications about a record written by a local replication.
+pub(crate) type TransactionNotifier = std::sync::Arc<dyn Fn(TransactionNotification) + Send + Sync>;
+
 #[async_trait]
 pub trait ManageReplications {
     /// Create a new replication.

@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::replication::remote_bucket::client_wrapper::{BoxedBucketApi, BoxedClientApi};
+use crate::replication::remote_bucket::client::{BoxedBucketApi, BoxedClientApi};
 use crate::replication::remote_bucket::states::bucket_unavailable::BucketUnavailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
@@ -43,7 +43,7 @@ impl BucketAvailableState {
             | ErrorCode::TooManyRequests => {
                 debug!(
                     "Failed to write record to remote bucket {}{}: {}",
-                    self.bucket.server_url(),
+                    self.bucket.endpoint(),
                     self.bucket.name(),
                     err
                 );
@@ -95,7 +95,7 @@ impl RemoteBucketState for BucketAvailableState {
                 Err(err) => {
                     debug!(
                         "Failed to update records to remote bucket {}/{}: {}",
-                        self.bucket.server_url(),
+                        self.bucket.endpoint(),
                         self.bucket.name(),
                         err
                     );
@@ -105,7 +105,7 @@ impl RemoteBucketState for BucketAvailableState {
                             warn!(
                                 "Entry {} not found on remote bucket {}/{}: {}",
                                 entry_name,
-                                self.bucket.server_url(),
+                                self.bucket.endpoint(),
                                 self.bucket.name(),
                                 err
                             );
@@ -140,7 +140,7 @@ impl RemoteBucketState for BucketAvailableState {
                 Err(err) => {
                     debug!(
                         "Failed to write record to remote bucket {}/{}: {}",
-                        self.bucket.server_url(),
+                        self.bucket.endpoint(),
                         self.bucket.name(),
                         err
                     );
@@ -171,7 +171,7 @@ impl RemoteBucketState for BucketAvailableState {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::replication::remote_bucket::client_wrapper::tests::MockRecordReader;
+    use crate::replication::remote_bucket::client::tests::MockRecordReader;
     use crate::replication::remote_bucket::tests::{
         bucket, client, MockReductBucketApi, MockReductClientApi,
     };

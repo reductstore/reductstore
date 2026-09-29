@@ -13,7 +13,7 @@ message Label {
 message  ReplicationSettings {
   string src_bucket = 2;      // source bucket
   string dst_bucket = 3;      // destination bucket
-  string dst_host = 4;        // URL of destination host
+  string dst_host = 4;        // URL of destination host, empty means a bucket in the same instance
   string dst_token = 5;       // access token for destination host
   repeated string entries = 6;// list of entries to replicate, empty means all. Wildcards are allowed.
   repeated Label include = 7; // DEPRECATED: list of labels to include

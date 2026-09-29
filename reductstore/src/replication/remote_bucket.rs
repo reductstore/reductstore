@@ -1,18 +1,22 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-mod client_wrapper;
+mod client;
 mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
-use crate::replication::ReplicationSourceIdentity;
 use crate::replication::Transaction;
+use crate::replication::{ReplicationSourceIdentity, TransactionNotifier};
+use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::replication_api::ReplicationCompression;
 use std::collections::BTreeMap;
+use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct RemoteBucketConfig {
@@ -23,6 +27,26 @@ pub(super) struct RemoteBucketConfig {
     pub(super) ca_path: Option<PathBuf>,
     pub(super) compression: ReplicationCompression,
     pub(super) source_identity: ReplicationSourceIdentity,
+    /// Destination bucket in the same instance; if set, HTTP settings are ignored
+    pub(super) local: Option<LocalDestination>,
+}
+
+/// Destination bucket in the same instance, written directly through the storage engine.
+#[derive(Clone)]
+pub(super) struct LocalDestination {
+    pub(super) storage: Arc<StorageEngine>,
+    /// Notifies replications about records written to the destination bucket
+    pub(super) notifier: TransactionNotifier,
+    /// Timeout to write a chunk of a record
+    pub(super) io_timeout: Duration,
+}
+
+impl Debug for LocalDestination {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalDestination")
+            .field("io_timeout", &self.io_timeout)
+            .finish()
+    }
 }
 
 pub(super) struct RemoteBucketBuilder {
@@ -71,6 +95,11 @@ impl RemoteBucketBuilder {
 
     pub fn source_identity(mut self, source_identity: ReplicationSourceIdentity) -> Self {
         self.config.source_identity = source_identity;
+        self
+    }
+
+    pub fn local(mut self, destination: LocalDestination) -> Self {
+        self.config.local = Some(destination);
         self
     }
 
@@ -144,13 +173,13 @@ impl RemoteBucket for RemoteBucketImpl {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::replication::remote_bucket::client_wrapper::{
+    use crate::replication::remote_bucket::client::{
         BoxedBucketApi, ReductBucketApi, ReductClientApi,
     };
     use crate::storage::proto::Record;
     use async_trait::async_trait;
 
-    use crate::replication::remote_bucket::client_wrapper::tests::MockRecordReader;
+    use crate::replication::remote_bucket::client::tests::MockRecordReader;
 
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
@@ -167,7 +196,7 @@ pub(super) mod tests {
 
             async fn create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
 
-            fn url(&self) -> &str;
+            fn endpoint(&self) -> &str;
         }
     }
 
@@ -188,7 +217,7 @@ pub(super) mod tests {
                 records: &Vec<BoxedReadRecord>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
-            fn server_url(&self) -> &str;
+            fn endpoint(&self) -> &str;
 
             fn name(&self) -> &str;
         }
@@ -217,7 +246,7 @@ pub(super) mod tests {
     pub(super) fn bucket() -> MockReductBucketApi {
         let mut bucket = MockReductBucketApi::new();
         bucket
-            .expect_server_url()
+            .expect_endpoint()
             .return_const("http://localhost:8080".to_string());
         bucket.expect_name().return_const("test".to_string());
         bucket
@@ -227,7 +256,7 @@ pub(super) mod tests {
     pub(super) fn client() -> MockReductClientApi {
         let mut client = MockReductClientApi::new();
         client
-            .expect_url()
+            .expect_endpoint()
             .return_const("http://localhost:8080".to_string());
         client
     }

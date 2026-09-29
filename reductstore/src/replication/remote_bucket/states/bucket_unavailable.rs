@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::replication::remote_bucket::client_wrapper::BoxedClientApi;
+use crate::replication::remote_bucket::client::BoxedClientApi;
 use crate::replication::remote_bucket::states::bucket_available::BucketAvailableState;
 use crate::replication::remote_bucket::states::RemoteBucketState;
 use crate::replication::remote_bucket::ErrorRecordMap;
@@ -36,7 +36,7 @@ impl RemoteBucketState for BucketUnavailableState {
                 Err(err) => {
                     error!(
                         "Failed to get remote bucket {}{}: {}",
-                        self.client.url(),
+                        self.client.endpoint(),
                         self.bucket_name,
                         err
                     );

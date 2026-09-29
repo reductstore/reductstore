@@ -11,7 +11,8 @@ use crate::replication::proto::{
 };
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{
-    prepend_when_conditions, ManageReplications, ReplicationSourceIdentity, TransactionNotification,
+    prepend_when_conditions, ManageReplications, ReplicationSourceIdentity,
+    TransactionNotification, TransactionNotifier,
 };
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
@@ -27,13 +28,14 @@ use reduct_base::msg::replication_api::{
     ReplicationSettings,
 };
 use reduct_base::{not_found, unprocessable_entity};
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::convert::TryFrom;
 use std::io::SeekFrom::Start;
 use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use url::Url;
 
@@ -261,6 +263,8 @@ pub(crate) struct ReplicationRepository {
     started: bool,
     notification_tx: UnboundedSender<NotificationCommand>,
     notification_worker: Option<JoinHandle<()>>,
+    /// Serializes creating and updating replications, so that the loop check sees all local replications
+    update_lock: Mutex<()>,
 }
 
 #[async_trait]
@@ -398,9 +402,7 @@ impl ManageReplications for ReplicationRepository {
     async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
         let should_enqueue = {
             let guard = self.replications.read().await?;
-            guard
-                .iter()
-                .any(|(_, replication)| replication.settings().src_bucket == notification.bucket)
+            Self::is_source_bucket(&guard, &notification.bucket)
         };
         if should_enqueue {
             self.notification_tx
@@ -417,16 +419,18 @@ impl ManageReplications for ReplicationRepository {
     }
 
     async fn stop(&mut self) {
+        // A local replication notifies the replications of its destination bucket about every
+        // record it writes until its task is stopped, and the worker delivers these notifications.
+        // So the tasks are stopped first. Otherwise the records, which the local replication has
+        // already acknowledged, never reach the next replication of the chain.
+        self.stop_tasks().await;
+
+        // The queue is FIFO: the worker delivers all pending notifications before it gets the command.
         let _ = self.notification_tx.send(NotificationCommand::Stop);
         if let Some(worker) = self.notification_worker.take() {
             if let Err(err) = worker.await {
                 error!("Failed to join replication notification worker: {:?}", err);
             }
-        }
-
-        let mut guard = self.replications.write().await.unwrap();
-        for (_, task) in guard.iter_mut() {
-            task.stop().await;
         }
     }
 }
@@ -479,6 +483,7 @@ impl ReplicationRepository {
             started: false,
             notification_tx,
             notification_worker: Some(notification_worker),
+            update_lock: Mutex::new(()),
         };
 
         let read_conf_file = async || {
@@ -549,15 +554,24 @@ impl ReplicationRepository {
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
-        // check if destination host is valid
-        let dest_url = match Url::parse(&settings.dst_host) {
-            Ok(url) => url,
+        let _update_guard = self.update_lock.lock().await;
 
-            Err(_) => {
-                return Err(unprocessable_entity!(
-                    "Invalid destination host '{}'",
-                    settings.dst_host
-                ))
+        // an empty destination host means a bucket in the same instance
+        let is_local = settings.dst_host.is_empty();
+
+        // check if destination host is valid
+        let dest_url = if is_local {
+            None
+        } else {
+            match Url::parse(&settings.dst_host) {
+                Ok(url) => Some(url),
+
+                Err(_) => {
+                    return Err(unprocessable_entity!(
+                        "Invalid destination host '{}'",
+                        settings.dst_host
+                    ))
+                }
             }
         };
 
@@ -571,14 +585,26 @@ impl ReplicationRepository {
         }
 
         // check if target and source buckets are the same
-        if settings.src_bucket == settings.dst_bucket
-            && self.config.replication_conf.listening_port
-                == dest_url.port_or_known_default().unwrap_or(DEFAULT_PORT)
-            && ["127.0.0.1", "localhost", "0.0.0.0"].contains(&dest_url.host_str().unwrap_or(""))
-        {
+        let is_same_bucket = settings.src_bucket == settings.dst_bucket
+            && match &dest_url {
+                // a local replication always writes to this instance
+                None => true,
+                Some(dest_url) => {
+                    self.config.replication_conf.listening_port
+                        == dest_url.port_or_known_default().unwrap_or(DEFAULT_PORT)
+                        && ["127.0.0.1", "localhost", "0.0.0.0"]
+                            .contains(&dest_url.host_str().unwrap_or(""))
+                }
+            };
+        if is_same_bucket {
             return Err(unprocessable_entity!(
                 "Source and destination buckets must be different",
             ));
+        }
+
+        // check that local replications don't copy records in a circle
+        if is_local {
+            self.check_no_local_loop(name, &settings).await?;
         }
 
         // check syntax of when condition
@@ -606,12 +632,17 @@ impl ReplicationRepository {
         // remove old replication because before creating new one
         let mut removed = self.replications.write().await?.remove(name);
 
-        // we keep the old token if the new one is empty (meaning not updated)
-        let init_token = settings.dst_token.clone().or_else(|| {
-            removed
-                .as_ref()
-                .and_then(|r| r.settings().dst_token.clone())
-        });
+        // we keep the old token if the new one is empty (meaning not updated),
+        // but a local replication has no token and must not get the old one
+        let init_token = if is_local {
+            None
+        } else {
+            settings.dst_token.clone().or_else(|| {
+                removed
+                    .as_ref()
+                    .and_then(|r| r.settings().dst_token.clone())
+            })
+        };
 
         if let Some(mut old) = removed.take() {
             old.stop().await;
@@ -625,6 +656,7 @@ impl ReplicationRepository {
             settings,
             conf,
             Arc::clone(&self.storage),
+            self.transaction_notifier(),
             self.system_event_sink.clone(),
             self.source_identity.clone(),
         )?;
@@ -637,6 +669,115 @@ impl ReplicationRepository {
             .await?
             .insert(name.to_string(), replication);
         self.save_repo().await
+    }
+
+    /// Notifier for records written by local replications, so that they are replicated further.
+    ///
+    /// The sender of a local replication calls it for every written record, so it never blocks:
+    /// it doesn't wait for the map of replications and only pushes to the unbounded queue.
+    fn transaction_notifier(&self) -> TransactionNotifier {
+        let notification_tx = self.notification_tx.clone();
+        // The tasks in the map own the notifier, so a strong reference would make a cycle.
+        let replications = Arc::downgrade(&self.replications);
+        Arc::new(move |notification| {
+            // The repository is dropped, so nobody is going to replicate the record.
+            let Some(replications) = replications.upgrade() else {
+                return;
+            };
+
+            // Like `notify`, don't wake up the worker if no replication reads the bucket, because
+            // it takes the exclusive lock of the map for every notification. When the map is
+            // busy, we can't tell, so we let the worker check the bucket again.
+            let is_source_bucket = match replications.try_read() {
+                Some(tasks) => Self::is_source_bucket(&tasks, &notification.bucket),
+                None => true,
+            };
+            if !is_source_bucket {
+                return;
+            }
+
+            if notification_tx
+                .send(NotificationCommand::Notify(notification))
+                .is_err()
+            {
+                warn!("Failed to enqueue replication notification: the repository is stopped");
+            }
+        })
+    }
+
+    /// Reject a local replication that closes a loop with the other local replications.
+    ///
+    /// Records copied from `a` to `b` and back from `b` to `a` would bounce between the buckets
+    /// forever. The new replication `src -> dst` closes a loop if `dst` already leads to `src`.
+    /// Replications with a destination host are not checked, because they may point to another
+    /// instance.
+    async fn check_no_local_loop(
+        &self,
+        name: &str,
+        settings: &ReplicationSettings,
+    ) -> Result<(), ReductError> {
+        // A local replication counts in any mode, because a mode change doesn't validate anything.
+        // The replication with the same name is being replaced, so its old edge is skipped.
+        // The lock is released before the caller takes the write lock.
+        let edges: BTreeSet<(String, String)> = {
+            let replications = self.replications.read().await?;
+            replications
+                .iter()
+                .filter(|(other_name, _)| other_name.as_str() != name)
+                .map(|(_, replication)| replication.settings())
+                .filter(|other| other.dst_host.is_empty())
+                .map(|other| (other.src_bucket.clone(), other.dst_bucket.clone()))
+                .collect()
+        };
+
+        // The message is sent in the `x-reduct-error` header, so it must be ASCII only.
+        match Self::find_path(&edges, &settings.dst_bucket, &settings.src_bucket) {
+            Some(path) => Err(unprocessable_entity!(
+                "Replication '{}' creates a loop: {} -> {}",
+                name,
+                settings.src_bucket,
+                path.join(" -> ")
+            )),
+            None => Ok(()),
+        }
+    }
+
+    /// Find the shortest path between two buckets along the replication edges `(src, dst)`.
+    /// The path includes both ends.
+    fn find_path(edges: &BTreeSet<(String, String)>, from: &str, to: &str) -> Option<Vec<String>> {
+        let mut next_buckets: HashMap<&str, Vec<&str>> = HashMap::new();
+        for (src, dst) in edges {
+            next_buckets
+                .entry(src.as_str())
+                .or_default()
+                .push(dst.as_str());
+        }
+
+        // breadth-first search, every bucket remembers where we came from to restore the path
+        let mut parents: HashMap<&str, &str> = HashMap::new();
+        let mut visited: HashSet<&str> = HashSet::from([from]);
+        let mut queue: VecDeque<&str> = VecDeque::from([from]);
+        while let Some(bucket) = queue.pop_front() {
+            if bucket == to {
+                let mut path = vec![bucket.to_string()];
+                let mut current = bucket;
+                while let Some(&parent) = parents.get(current) {
+                    path.push(parent.to_string());
+                    current = parent;
+                }
+                path.reverse();
+                return Some(path);
+            }
+
+            for &next in next_buckets.get(bucket).into_iter().flatten() {
+                if visited.insert(next) {
+                    parents.insert(next, bucket);
+                    queue.push_back(next);
+                }
+            }
+        }
+
+        None
     }
 }
 
@@ -703,6 +844,29 @@ impl ReplicationRepository {
         }
 
         Ok(())
+    }
+
+    /// Stop all tasks and wait until their workers finish.
+    ///
+    /// The map is locked until the last task is stopped. It is released before the function
+    /// returns, so that the caller can wait for the notification worker, which needs the map
+    /// to deliver the notifications of the stopped tasks.
+    async fn stop_tasks(&self) {
+        match self.replications.write().await {
+            Ok(mut tasks) => {
+                for (_, task) in tasks.iter_mut() {
+                    task.stop().await;
+                }
+            }
+            Err(err) => error!("Failed to lock replication map to stop the tasks: {}", err),
+        }
+    }
+
+    /// Check if some replication reads records from the bucket.
+    fn is_source_bucket(replications: &HashMap<String, ReplicationTask>, bucket: &str) -> bool {
+        replications
+            .values()
+            .any(|replication| replication.settings().src_bucket == bucket)
     }
 }
 
@@ -1622,6 +1786,766 @@ mod tests {
                 repo.set_mode("test-1", ReplicationMode::Paused).await,
                 Err(not_found!("Replication 'test-1' does not exist"))
             );
+        }
+    }
+
+    mod local {
+        use super::*;
+        use reduct_base::io::RecordMeta;
+        use tokio::sync::mpsc::UnboundedReceiver;
+        use tokio::time::timeout;
+
+        #[rstest]
+        #[tokio::test]
+        async fn create_local_replication_without_host_and_token(
+            #[future] repo: ReplicationRepository,
+        ) {
+            let repo = repo.await;
+            let settings = local_settings("bucket-1", "bucket-2");
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
+
+            let info = repo.get_info("test").await.unwrap();
+            assert_eq!(info.info.name, "test");
+            assert_eq!(info.settings.dst_host, "");
+            assert_eq!(info.settings.dst_token, None);
+            assert_eq!(
+                repo.get_replication_settings("test").await.unwrap(),
+                settings,
+                "Should create replication with the same settings"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn create_local_replication_to_same_bucket(#[future] repo: ReplicationRepository) {
+            let repo = repo.await;
+
+            assert_eq!(
+                repo.create_replication("test", local_settings("bucket-1", "bucket-1"))
+                    .await,
+                Err(unprocessable_entity!(
+                    "Source and destination buckets must be different"
+                )),
+                "Should not create replication to the same bucket"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn update_local_replication_to_same_bucket(#[future] repo: ReplicationRepository) {
+            let repo = repo.await;
+            repo.create_replication("test", local_settings("bucket-1", "bucket-2"))
+                .await
+                .unwrap();
+
+            assert_eq!(
+                repo.update_replication("test", local_settings("bucket-1", "bucket-1"))
+                    .await,
+                Err(unprocessable_entity!(
+                    "Source and destination buckets must be different"
+                )),
+                "Should not update replication to the same bucket"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn create_local_replication_with_missing_source_bucket(
+            #[future] repo: ReplicationRepository,
+        ) {
+            let repo = repo.await;
+
+            assert_eq!(
+                repo.create_replication("test", local_settings("bucket-2", "bucket-1"))
+                    .await,
+                Err(not_found!(
+                    "Source bucket 'bucket-2' for replication 'test' does not exist"
+                )),
+                "Should not create replication with non existing source bucket"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn create_local_replication_with_invalid_when_condition(
+            #[future] repo: ReplicationRepository,
+        ) {
+            let repo = repo.await;
+            let mut settings = local_settings("bucket-1", "bucket-2");
+            settings.when = Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y"]}));
+
+            assert_eq!(
+                repo.create_replication("test", settings).await,
+                Err(unprocessable_entity!(
+                    "Invalid replication condition: Operator '$UNKNOWN_OP' not supported"
+                )),
+                "Should not create replication with invalid when condition"
+            );
+        }
+
+        #[rstest]
+        #[case::direct(
+            &[("r1", "bucket-1", "bucket-2")],
+            ("r2", "bucket-2", "bucket-1"),
+            "bucket-2 -> bucket-1 -> bucket-2"
+        )]
+        #[case::transitive(
+            &[("r1", "bucket-1", "bucket-2"), ("r2", "bucket-2", "bucket-3")],
+            ("r3", "bucket-3", "bucket-1"),
+            "bucket-3 -> bucket-1 -> bucket-2 -> bucket-3"
+        )]
+        #[case::long_chain(
+            &[
+                ("r1", "bucket-1", "bucket-2"),
+                ("r2", "bucket-2", "bucket-3"),
+                ("r3", "bucket-3", "bucket-4"),
+            ],
+            ("r4", "bucket-4", "bucket-2"),
+            "bucket-4 -> bucket-2 -> bucket-3 -> bucket-4"
+        )]
+        #[tokio::test]
+        async fn reject_local_replication_making_loop(
+            #[future] repo_with_buckets: ReplicationRepository,
+            #[case] existing: &[(&str, &str, &str)],
+            #[case] new: (&str, &str, &str),
+            #[case] loop_path: &str,
+        ) {
+            let repo = repo_with_buckets.await;
+            for (name, src_bucket, dst_bucket) in existing {
+                repo.create_replication(name, local_settings(src_bucket, dst_bucket))
+                    .await
+                    .unwrap();
+            }
+
+            let (name, src_bucket, dst_bucket) = new;
+            let err = repo
+                .create_replication(name, local_settings(src_bucket, dst_bucket))
+                .await
+                .unwrap_err();
+
+            assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+            assert!(err.message().contains("loop"), "{}", err.message());
+            assert_eq!(
+                err.message(),
+                format!("Replication '{}' creates a loop: {}", name, loop_path)
+            );
+            assert!(
+                err.message().is_ascii(),
+                "Should be sendable in the error header"
+            );
+            assert_eq!(
+                repo.replications().await.unwrap().len(),
+                existing.len(),
+                "Should not create the replication"
+            );
+        }
+
+        #[rstest]
+        #[case::chain(&[("r1", "bucket-1", "bucket-2"), ("r2", "bucket-2", "bucket-3")])]
+        #[case::fan_out(&[("r1", "bucket-1", "bucket-2"), ("r2", "bucket-1", "bucket-3")])]
+        #[case::fan_in(&[("r1", "bucket-1", "bucket-3"), ("r2", "bucket-2", "bucket-3")])]
+        #[case::diamond(&[
+            ("r1", "bucket-1", "bucket-2"),
+            ("r2", "bucket-1", "bucket-3"),
+            ("r3", "bucket-2", "bucket-4"),
+            ("r4", "bucket-3", "bucket-4"),
+        ])]
+        #[case::same_buckets(&[("r1", "bucket-1", "bucket-2"), ("r2", "bucket-1", "bucket-2")])]
+        #[tokio::test]
+        async fn allow_local_replications_without_loop(
+            #[future] repo_with_buckets: ReplicationRepository,
+            #[case] replications: &[(&str, &str, &str)],
+        ) {
+            let repo = repo_with_buckets.await;
+
+            for (name, src_bucket, dst_bucket) in replications {
+                repo.create_replication(name, local_settings(src_bucket, dst_bucket))
+                    .await
+                    .unwrap();
+            }
+
+            assert_eq!(repo.replications().await.unwrap().len(), replications.len());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn update_local_replication_ignores_its_own_old_edge(
+            #[future] repo_with_buckets: ReplicationRepository,
+        ) {
+            let repo = repo_with_buckets.await;
+            repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                .await
+                .unwrap();
+
+            repo.update_replication("r1", local_settings("bucket-2", "bucket-1"))
+                .await
+                .unwrap();
+
+            assert_eq!(
+                repo.get_replication_settings("r1").await.unwrap(),
+                local_settings("bucket-2", "bucket-1"),
+                "Should reverse the direction of the only replication"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn reject_local_update_making_loop_and_keep_old_replication(
+            #[future] repo_with_buckets: ReplicationRepository,
+        ) {
+            let repo = repo_with_buckets.await;
+            repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                .await
+                .unwrap();
+            repo.create_replication("r2", local_settings("bucket-2", "bucket-3"))
+                .await
+                .unwrap();
+
+            assert_eq!(
+                repo.update_replication("r2", local_settings("bucket-2", "bucket-1"))
+                    .await,
+                Err(unprocessable_entity!(
+                    "Replication 'r2' creates a loop: bucket-2 -> bucket-1 -> bucket-2"
+                )),
+                "Should not update replication to make a loop"
+            );
+            assert_eq!(
+                repo.get_replication_settings("r2").await.unwrap(),
+                local_settings("bucket-2", "bucket-3"),
+                "Should keep the old replication"
+            );
+        }
+
+        #[rstest]
+        #[case::paused(ReplicationMode::Paused)]
+        #[case::disabled(ReplicationMode::Disabled)]
+        #[tokio::test]
+        async fn count_inactive_local_replication_in_loop_detection(
+            #[future] repo_with_buckets: ReplicationRepository,
+            #[case] mode: ReplicationMode,
+        ) {
+            let repo = repo_with_buckets.await;
+            repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                .await
+                .unwrap();
+            repo.set_mode("r1", mode).await.unwrap();
+
+            let err = repo
+                .create_replication("r2", local_settings("bucket-2", "bucket-1"))
+                .await
+                .unwrap_err();
+
+            assert_eq!(err.status(), ErrorCode::UnprocessableEntity);
+            assert!(err.message().contains("loop"), "{}", err.message());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn ignore_http_replications_in_loop_detection(
+            #[future] repo_with_buckets: ReplicationRepository,
+            settings: ReplicationSettings,
+        ) {
+            let repo = repo_with_buckets.await;
+            // HTTP replication: bucket-1 -> bucket-2
+            repo.create_replication("http-1", settings.clone())
+                .await
+                .unwrap();
+
+            repo.create_replication("local", local_settings("bucket-2", "bucket-1"))
+                .await
+                .expect("Should not treat an HTTP replication as a part of a local loop");
+
+            let http_settings = ReplicationSettings {
+                src_bucket: "bucket-2".to_string(),
+                dst_bucket: "bucket-1".to_string(),
+                ..settings
+            };
+            repo.create_replication("http-2", http_settings)
+                .await
+                .expect("Should not check HTTP replications for loops");
+
+            assert_eq!(repo.replications().await.unwrap().len(), 3);
+        }
+
+        #[rstest]
+        #[case::without_token(None)]
+        #[case::with_token(Some("ignored".to_string()))]
+        #[tokio::test]
+        async fn switch_http_replication_to_local_drops_token(
+            #[future] repo: ReplicationRepository,
+            settings: ReplicationSettings,
+            #[case] local_token: Option<String>,
+        ) {
+            let repo = repo.await;
+            repo.create_replication("test", settings.clone())
+                .await
+                .unwrap();
+            assert_eq!(
+                repo.get_replication_settings("test")
+                    .await
+                    .unwrap()
+                    .dst_token,
+                Some("token".to_string())
+            );
+
+            let mut local = local_settings("bucket-1", "bucket-2");
+            local.dst_token = local_token;
+            repo.update_replication("test", local).await.unwrap();
+
+            let updated = repo.get_replication_settings("test").await.unwrap();
+            assert_eq!(updated.dst_host, "");
+            assert_eq!(
+                updated.dst_token, None,
+                "Should not keep the token of the HTTP replication"
+            );
+
+            // the dropped token must not come back
+            let http = ReplicationSettings {
+                dst_token: None,
+                ..settings
+            };
+            repo.update_replication("test", http.clone()).await.unwrap();
+            assert_eq!(
+                repo.get_replication_settings("test").await.unwrap(),
+                http,
+                "Should not restore the token of the HTTP replication"
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn create_and_load_local_replications(#[future] storage: Arc<StorageEngine>) {
+            let storage = storage.await;
+            for bucket in ["bucket-2", "bucket-3"] {
+                storage
+                    .create_bucket(bucket, BucketSettings::default())
+                    .await
+                    .unwrap();
+            }
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+            )
+            .await;
+            repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                .await
+                .unwrap();
+            repo.create_replication("r2", local_settings("bucket-2", "bucket-3"))
+                .await
+                .unwrap();
+
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+            )
+            .await;
+            assert_eq!(repo.replications().await.unwrap().len(), 2);
+            assert_eq!(
+                repo.get_replication_settings("r1").await.unwrap(),
+                local_settings("bucket-1", "bucket-2"),
+                "Should load local replication from file"
+            );
+            assert_eq!(
+                repo.get_replication_settings("r2").await.unwrap(),
+                local_settings("bucket-2", "bucket-3"),
+                "Should load local replication from file"
+            );
+        }
+
+        mod notifier {
+            use super::*;
+
+            #[rstest]
+            #[case::source_bucket("bucket-1", &["bucket-1"])]
+            #[case::destination_bucket("bucket-2", &[])]
+            #[case::unrelated_bucket("bucket-4", &[])]
+            #[tokio::test]
+            async fn enqueues_notifications_only_for_source_buckets(
+                #[future] repo_with_buckets: ReplicationRepository,
+                #[case] bucket: &str,
+                #[case] queued: &[&str],
+            ) {
+                let mut repo = repo_with_buckets.await;
+                let mut queue = intercept_notifications(&mut repo);
+                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                    .await
+                    .unwrap();
+
+                let notifier = repo.transaction_notifier();
+                notifier(notification(bucket));
+
+                assert_eq!(
+                    queued_buckets(&mut queue),
+                    queued,
+                    "Should wake up the worker only if a replication reads the bucket"
+                );
+            }
+
+            #[rstest]
+            #[tokio::test]
+            async fn enqueues_notification_without_waiting_when_replications_are_locked(
+                #[future] repo_with_buckets: ReplicationRepository,
+            ) {
+                let mut repo = repo_with_buckets.await;
+                let mut queue = intercept_notifications(&mut repo);
+                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                    .await
+                    .unwrap();
+                let notifier = repo.transaction_notifier();
+
+                // a blocking notifier would hang here, because the map is locked until we release it
+                let tasks = repo.replications.write().await.unwrap();
+                let call = tokio::task::spawn_blocking(move || notifier(notification("bucket-4")));
+                timeout(Duration::from_secs(5), call)
+                    .await
+                    .expect("Should not wait for the map of replications")
+                    .unwrap();
+                drop(tasks);
+
+                assert_eq!(
+                    queued_buckets(&mut queue),
+                    ["bucket-4"],
+                    "Should let the worker check the bucket when the map is busy"
+                );
+            }
+
+            #[rstest]
+            #[tokio::test]
+            async fn skips_notifications_after_repository_is_dropped(
+                #[future] repo_with_buckets: ReplicationRepository,
+            ) {
+                let mut repo = repo_with_buckets.await;
+                let mut queue = intercept_notifications(&mut repo);
+                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                    .await
+                    .unwrap();
+                let notifier = repo.transaction_notifier();
+
+                // the worker owns the map too, but it exits because its queue is closed
+                repo.notification_worker.take().unwrap().await.unwrap();
+                drop(repo);
+                notifier(notification("bucket-1"));
+
+                assert!(
+                    queued_buckets(&mut queue).is_empty(),
+                    "Should skip notifications when there are no replications anymore"
+                );
+            }
+
+            #[rstest]
+            #[tokio::test]
+            async fn does_not_keep_replications_alive(
+                #[future] repo_with_buckets: ReplicationRepository,
+            ) {
+                let mut repo = repo_with_buckets.await;
+                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                    .await
+                    .unwrap();
+                let replications = Arc::downgrade(&repo.replications);
+
+                // the worker owns the map too, so wait until it exits
+                repo.stop().await;
+                drop(repo);
+
+                assert!(
+                    replications.upgrade().is_none(),
+                    "Should free the replications, because the notifier of a task must not own them"
+                );
+            }
+        }
+
+        mod stop {
+            use super::*;
+
+            #[rstest]
+            #[case::chained_replication("bucket-2", 0, 1)]
+            #[case::first_replication("bucket-1", 1, 0)]
+            #[case::bucket_without_replications("bucket-4", 0, 0)]
+            #[tokio::test]
+            async fn delivers_queued_notifications_to_replications_of_their_bucket(
+                #[future] repo_with_buckets: ReplicationRepository,
+                #[case] bucket: &str,
+                #[case] pending_in_first: u64,
+                #[case] pending_in_chained: u64,
+            ) {
+                let mut repo = repo_with_buckets.await;
+                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                    .await
+                    .unwrap();
+                repo.create_replication("r2", local_settings("bucket-2", "bucket-3"))
+                    .await
+                    .unwrap();
+                create_entry(&repo, "bucket-2", "entry-1").await;
+
+                let notifier = repo.transaction_notifier();
+                notifier(notification(bucket));
+                repo.stop().await;
+
+                assert_eq!(pending_records(&repo, "r1").await, pending_in_first);
+                assert_eq!(pending_records(&repo, "r2").await, pending_in_chained);
+            }
+
+            #[rstest]
+            #[tokio::test]
+            #[serial]
+            async fn delivers_notifications_written_while_tasks_are_stopping(
+                #[future] repo_with_buckets: ReplicationRepository,
+            ) {
+                let mut repo = repo_with_buckets.await;
+                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                    .await
+                    .unwrap();
+                repo.create_replication("r2", local_settings("bucket-2", "bucket-3"))
+                    .await
+                    .unwrap();
+                create_entry(&repo, "bucket-2", "entry-1").await;
+                let replications = Arc::clone(&repo.replications);
+                // it is called by the sender of r1 after it has written a record to bucket-2
+                let notifier = repo.transaction_notifier();
+
+                // stop() has to wait for the map, so we know that it has not stopped the tasks yet
+                let tasks = replications.read().await.unwrap();
+                let stopping = tokio::spawn(async move {
+                    repo.stop().await;
+                    repo
+                });
+                // a waiting writer refuses new readers
+                timeout(Duration::from_secs(5), async {
+                    while replications.try_read().is_some() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("Should wait for the map of replications");
+
+                // the sender of r1 is still running and acknowledges the record after the notification
+                notifier(notification("bucket-2"));
+                drop(tasks);
+
+                let repo = stopping.await.unwrap();
+                assert_eq!(
+                    pending_records(&repo, "r2").await,
+                    1,
+                    "Should deliver the notification of a running task before the worker exits"
+                );
+                assert_eq!(pending_records(&repo, "r1").await, 0);
+            }
+
+            #[rstest]
+            #[tokio::test(flavor = "multi_thread")]
+            #[serial]
+            async fn delivers_notifications_of_all_records_copied_by_running_replication(
+                #[future] repo_with_buckets: ReplicationRepository,
+            ) {
+                const RECORDS: u64 = 100;
+                let mut repo = repo_with_buckets.await;
+                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
+                    .await
+                    .unwrap();
+                repo.create_replication("r2", local_settings("bucket-2", "bucket-3"))
+                    .await
+                    .unwrap();
+                // r2 sends nothing, so its transaction logs show the records it has learned about
+                repo.set_mode("r2", ReplicationMode::Paused).await.unwrap();
+
+                let bucket = repo
+                    .storage
+                    .get_bucket("bucket-1")
+                    .await
+                    .unwrap()
+                    .upgrade_and_unwrap();
+                for time in 1..=RECORDS {
+                    let mut writer = bucket
+                        .begin_write(
+                            "entry-1",
+                            time,
+                            4,
+                            "text/plain".to_string(),
+                            Labels::default(),
+                        )
+                        .await
+                        .unwrap();
+                    writer
+                        .send(Ok(Some(bytes::Bytes::from_static(b"data"))))
+                        .await
+                        .unwrap();
+                    writer.send(Ok(None)).await.unwrap();
+
+                    let mut record = notification("bucket-1");
+                    record.meta = RecordMeta::builder().timestamp(time).build();
+                    record.event = WriteRecord(time);
+                    repo.notify(record).await.unwrap();
+                }
+                // the worker delivers the notifications asynchronously
+                wait_until("r1 gets all notifications", async || {
+                    pending_records(&repo, "r1").await == RECORDS
+                })
+                .await;
+
+                // stop while r1 is copying: some records are written, some are not yet
+                repo.start();
+                wait_until("r2 learns about a copied record", async || {
+                    pending_records(&repo, "r2").await > 0
+                })
+                .await;
+                timeout(Duration::from_secs(10), repo.stop())
+                    .await
+                    .expect("Should stop the running replications without a deadlock");
+
+                let copied = repo
+                    .storage
+                    .get_bucket("bucket-2")
+                    .await
+                    .unwrap()
+                    .upgrade_and_unwrap()
+                    .get_entry("entry-1")
+                    .await
+                    .unwrap()
+                    .upgrade_and_unwrap()
+                    .info()
+                    .await
+                    .unwrap()
+                    .record_count;
+                assert!(copied > 0);
+                assert_eq!(
+                    pending_records(&repo, "r2").await,
+                    copied,
+                    "Should notify r2 about every record that r1 has copied and acknowledged"
+                );
+            }
+        }
+
+        /// A replication to a bucket of the same instance: no host, no token.
+        fn local_settings(src_bucket: &str, dst_bucket: &str) -> ReplicationSettings {
+            ReplicationSettings {
+                src_bucket: src_bucket.to_string(),
+                dst_bucket: dst_bucket.to_string(),
+                ..Default::default()
+            }
+        }
+
+        /// A repository with `bucket-1` .. `bucket-4`.
+        /// It builds the base fixtures directly, because one more level of `#[future]`
+        /// fixtures overflows the stack of a test thread in debug builds.
+        #[fixture]
+        async fn repo_with_buckets() -> ReplicationRepository {
+            let repo = repo(storage()).await;
+            for bucket in ["bucket-2", "bucket-3", "bucket-4"] {
+                repo.storage
+                    .create_bucket(bucket, BucketSettings::default())
+                    .await
+                    .unwrap();
+            }
+            repo
+        }
+
+        /// A notification about a record written to `entry-1` of the bucket.
+        fn notification(bucket: &str) -> TransactionNotification {
+            TransactionNotification {
+                bucket: bucket.to_string(),
+                entry: "entry-1".to_string(),
+                meta: RecordMeta::builder().build(),
+                event: WriteRecord(0),
+            }
+        }
+
+        /// Create an entry, because the transaction log of a replication lives in its directory.
+        async fn create_entry(repo: &ReplicationRepository, bucket: &str, entry: &str) {
+            let bucket = repo
+                .storage
+                .get_bucket(bucket)
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let _ = bucket.get_or_create_entry(entry).await.unwrap();
+        }
+
+        /// Redirect the notifications of local replications to a queue that the test reads
+        /// instead of the worker. Call it before creating replications, so that they use the queue.
+        fn intercept_notifications(
+            repo: &mut ReplicationRepository,
+        ) -> UnboundedReceiver<NotificationCommand> {
+            let (notification_tx, queue) = unbounded_channel();
+            repo.notification_tx = notification_tx;
+            queue
+        }
+
+        /// Take the buckets of all notifications from the queue.
+        fn queued_buckets(queue: &mut UnboundedReceiver<NotificationCommand>) -> Vec<String> {
+            let mut buckets = Vec::new();
+            while let Ok(command) = queue.try_recv() {
+                if let NotificationCommand::Notify(notification) = command {
+                    buckets.push(notification.bucket);
+                }
+            }
+            buckets
+        }
+
+        async fn pending_records(repo: &ReplicationRepository, name: &str) -> u64 {
+            repo.get_info(name).await.unwrap().info.pending_records
+        }
+
+        /// Wait until the condition holds. The timeout is generous, it only bounds a failing test.
+        async fn wait_until(what: &str, mut condition: impl AsyncFnMut() -> bool) {
+            let wait = async {
+                while !condition().await {
+                    sleep(Duration::from_millis(5)).await;
+                }
+            };
+            if timeout(Duration::from_secs(10), wait).await.is_err() {
+                panic!("Timeout while waiting until {}", what);
+            }
+        }
+    }
+
+    mod find_path {
+        use super::*;
+
+        #[rstest]
+        #[case::direct(&[("a", "b")], "a", "b", Some(vec!["a", "b"]))]
+        #[case::chain(&[("a", "b"), ("b", "c")], "a", "c", Some(vec!["a", "b", "c"]))]
+        #[case::shortest(
+            &[("a", "b"), ("b", "c"), ("c", "d"), ("a", "d")],
+            "a",
+            "d",
+            Some(vec!["a", "d"])
+        )]
+        #[case::first_of_equal_paths(
+            &[("a", "c"), ("c", "d"), ("a", "b"), ("b", "d")],
+            "a",
+            "d",
+            Some(vec!["a", "b", "d"])
+        )]
+        #[case::through_cycle(
+            &[("a", "b"), ("b", "c"), ("c", "b"), ("c", "d")],
+            "a",
+            "d",
+            Some(vec!["a", "b", "c", "d"])
+        )]
+        #[case::same_bucket(&[], "a", "a", Some(vec!["a"]))]
+        #[case::opposite_direction(&[("b", "a")], "a", "b", None)]
+        #[case::disconnected(&[("a", "b"), ("c", "d")], "a", "d", None)]
+        #[case::unreachable_in_cycle(&[("a", "b"), ("b", "a")], "a", "c", None)]
+        fn find_shortest_path(
+            #[case] edges: &[(&str, &str)],
+            #[case] from: &str,
+            #[case] to: &str,
+            #[case] expected: Option<Vec<&str>>,
+        ) {
+            let edges: BTreeSet<(String, String)> = edges
+                .iter()
+                .map(|(src, dst)| (src.to_string(), dst.to_string()))
+                .collect();
+            let expected: Option<Vec<String>> =
+                expected.map(|path| path.into_iter().map(String::from).collect());
+
+            assert_eq!(ReplicationRepository::find_path(&edges, from, to), expected);
         }
     }
 
