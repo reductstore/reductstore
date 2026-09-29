@@ -8,7 +8,7 @@ use async_trait::async_trait;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::{WriteChunk, WriteRecord};
-use reduct_base::Labels;
+use reduct_base::{conflict, Labels};
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
 
@@ -128,10 +128,7 @@ impl Entry {
                         return if record.state != record::State::Errored as i32
                             || record.end - record.begin != content_size as u64
                         {
-                            Err(ReductError::conflict(&format!(
-                                "A record with timestamp {} already exists",
-                                time
-                            )))
+                            Err(conflict!("A record with timestamp {} already exists", time))
                         } else {
                             {
                                 let mut block = block_ref.write().await?;

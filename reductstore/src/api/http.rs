@@ -35,6 +35,7 @@ use middleware::{
     attach_client_ip, audit_requests, check_api_rate_limit, default_headers, print_statuses,
     validate_replication_identity,
 };
+use reduct_base::bad_request;
 pub use reduct_base::error::ErrorCode;
 use reduct_base::error::ReductError;
 use replication::create_replication_api_routes;
@@ -157,7 +158,7 @@ impl From<HttpError> for ReductError {
 
 impl From<axum::Error> for HttpError {
     fn from(err: axum::Error) -> Self {
-        HttpError::from(ReductError::bad_request(&format!("{}", err)))
+        HttpError::from(bad_request!("{}", err))
     }
 }
 

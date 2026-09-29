@@ -17,10 +17,12 @@ impl BlockManager {
         } else if let Some(block_id) = active_tree.range(..start).rev().next() {
             Ok(*block_id)
         } else {
-            Err(ReductError::not_found(&format!(
+            Err(not_found!(
                 "Record {} not found in entry {}/{}",
-                start, self.bucket, self.entry
-            )))
+                start,
+                self.bucket,
+                self.entry
+            ))
         }
     }
 

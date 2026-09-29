@@ -387,9 +387,7 @@ impl StorageEngine {
                 bucket.ensure_not_deleting().await?;
                 Ok(Arc::clone(bucket).into())
             }
-            None => Err(ReductError::not_found(
-                format!("Bucket '{}' is not found", name).as_str(),
-            )),
+            None => Err(not_found!("Bucket '{}' is not found", name)),
         }
     }
 
