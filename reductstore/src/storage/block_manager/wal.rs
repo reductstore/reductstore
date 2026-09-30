@@ -230,7 +230,7 @@ impl Wal for WalImpl {
 
     async fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError> {
         let path = self.block_wal_path(block_id);
-        let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+        let mut file = FILE_CACHE.read_managed(&path, SeekFrom::Start(0)).await?;
 
         let mut entries = Vec::new();
         loop {

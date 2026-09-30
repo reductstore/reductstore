@@ -88,7 +88,6 @@ impl EntryBuilder {
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
         let block_index_path = path.join(BLOCK_INDEX_FILE);
-        FILE_CACHE.register_managed_entry(path.clone());
         let block_index = BlockIndex::new(block_index_path.clone());
 
         let is_new = !FILE_CACHE.try_exists(&block_index_path).await?;
@@ -129,7 +128,6 @@ impl EntryBuilder {
 
     pub(crate) async fn restore(self) -> Result<Option<Entry>, ReductError> {
         let path = self.path.expect("Entry path must be set");
-        FILE_CACHE.register_managed_entry(path.clone());
         let entry_name = self
             .name
             .unwrap_or_else(|| path.file_name().unwrap().to_str().unwrap().to_string());

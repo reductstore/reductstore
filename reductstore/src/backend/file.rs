@@ -16,6 +16,13 @@ pub enum AccessMode {
     ReadWrite,
 }
 
+/// Selects which component may publish a dirty file to the storage backend.
+#[derive(PartialEq, Clone, Copy, Debug)]
+pub enum SyncOwnership {
+    FileCache,
+    EntryPublication,
+}
+
 pub struct File {
     inner: StdFile,
     backend: Arc<BoxedBackend>,
@@ -24,6 +31,7 @@ pub struct File {
     is_synced: bool,
     mode: AccessMode,
     ignore_write: bool, // read-only mode, write operations are ignored
+    sync_ownership: SyncOwnership,
 }
 
 pub struct OpenOptions {
@@ -32,6 +40,7 @@ pub struct OpenOptions {
     create: bool,
     mode: AccessMode,
     ignore_write: bool,
+    sync_ownership: SyncOwnership,
 }
 
 impl OpenOptions {
@@ -42,6 +51,7 @@ impl OpenOptions {
             create: false,
             mode: AccessMode::Read,
             ignore_write: false,
+            sync_ownership: SyncOwnership::FileCache,
         }
     }
 
@@ -69,6 +79,11 @@ impl OpenOptions {
         if create {
             self.mode = AccessMode::ReadWrite;
         }
+        self
+    }
+
+    pub fn sync_ownership(&mut self, ownership: SyncOwnership) -> &mut Self {
+        self.sync_ownership = ownership;
         self
     }
 
@@ -110,6 +125,7 @@ impl OpenOptions {
             is_synced: true,
             mode: self.mode.clone(),
             ignore_write: self.ignore_write,
+            sync_ownership: self.sync_ownership,
         })
     }
 }
@@ -183,6 +199,17 @@ impl File {
 
     pub fn mode(&self) -> &AccessMode {
         &self.mode
+    }
+
+    pub fn sync_ownership(&self) -> SyncOwnership {
+        self.sync_ownership
+    }
+
+    /// Preserve entry-owned publication when a cached descriptor is reopened.
+    pub fn set_sync_ownership(&mut self, ownership: SyncOwnership) {
+        if ownership == SyncOwnership::EntryPublication {
+            self.sync_ownership = ownership;
+        }
     }
 
     pub async fn access(&self) -> std::io::Result<()> {

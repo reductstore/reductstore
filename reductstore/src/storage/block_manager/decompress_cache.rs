@@ -116,7 +116,9 @@ impl DecompressCache {
     ) -> Result<PathBuf, ReductError> {
         let mut compressed = vec![];
         {
-            let mut file = FILE_CACHE.read(compressed_path, SeekFrom::Start(0)).await?;
+            let mut file = FILE_CACHE
+                .read_managed(compressed_path, SeekFrom::Start(0))
+                .await?;
             file.read_to_end(&mut compressed).map_err(|err| {
                 internal_server_error!(
                     "Failed to read compressed file {:?}: {}",

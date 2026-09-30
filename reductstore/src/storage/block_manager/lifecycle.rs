@@ -101,21 +101,25 @@ impl BlockManager {
         self.block_cache.remove(&block_id);
 
         let path = self.path_to_desc(block_id);
-        let descriptor = if let Ok(mut file) = FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
-            let mut buf = Vec::new();
-            if file.read_to_end(&mut buf).is_ok() {
-                BlockProto::decode(Bytes::from(buf)).ok()
+        let descriptor =
+            if let Ok(mut file) = FILE_CACHE.read_managed(&path, SeekFrom::Start(0)).await {
+                let mut buf = Vec::new();
+                if file.read_to_end(&mut buf).is_ok() {
+                    BlockProto::decode(Bytes::from(buf)).ok()
+                } else {
+                    None
+                }
             } else {
                 None
-            }
-        } else {
-            None
-        };
+            };
 
         if let Some(mut proto) = descriptor {
             proto.corrupted = Some(true);
             let new_buf = proto.encode_to_vec();
-            if let Ok(mut writer) = FILE_CACHE.write_or_create(&path, SeekFrom::Start(0)).await {
+            if let Ok(mut writer) = FILE_CACHE
+                .write_or_create_managed(&path, SeekFrom::Start(0))
+                .await
+            {
                 let _ = writer.set_len(new_buf.len() as u64);
                 let _ = writer.write_all(&new_buf);
                 let _ = writer.flush_local().await;

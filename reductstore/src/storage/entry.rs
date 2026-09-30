@@ -429,8 +429,6 @@ impl Entry {
                 internal_server_error!("Failed to publish entry file {:?}: {}", path, err)
             })?;
         }
-        FILE_CACHE.publish_managed_deletions(&self.path).await?;
-
         let even_generation = odd_generation.checked_add(1).ok_or_else(|| {
             internal_server_error!(
                 "Entry '{}/{}' publication generation overflow",

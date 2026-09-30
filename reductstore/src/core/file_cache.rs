@@ -1,14 +1,13 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::backend::file::{AccessMode, File};
+use crate::backend::file::{AccessMode, File, SyncOwnership};
 use crate::backend::{Backend, ObjectMetadata};
 use crate::core::cache::Cache;
 use crate::core::sync::{AsyncRwLock, RwLock};
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
-use std::collections::HashSet;
 use std::fs;
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
@@ -51,13 +50,6 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
 
     cache
 });
-
-// Managed entries publish through Entry::sync_fs. The descriptor cache must
-// not independently upload one of their files between the odd and even index.
-static MANAGED_ENTRY_PATHS: LazyLock<std::sync::RwLock<HashSet<PathBuf>>> =
-    LazyLock::new(|| std::sync::RwLock::new(HashSet::new()));
-static MANAGED_DELETIONS: LazyLock<std::sync::Mutex<HashSet<PathBuf>>> =
-    LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
 
 pub(crate) type FileLock = Arc<AsyncRwLock<File>>;
 pub(crate) type FileGuard = OwnedRwLockWriteGuard<File>;
@@ -148,13 +140,12 @@ impl FileCache {
             .invalidate_locally_cached_files()
             .await;
         for path in invalidated_files {
-            if Self::is_managed_entry_file(&path) {
-                // Publication owns eviction of entry sources. Removing one here
-                // could race an in-flight connector upload.
-                continue;
-            }
             let mut cache = cache.write().await?;
             if let Some(file) = cache.remove(&path) {
+                if file.read().await?.sync_ownership() == SyncOwnership::EntryPublication {
+                    cache.insert(path, file);
+                    continue;
+                }
                 if let Err(err) = file.write_owned().await?.sync_all().await {
                     warn!("Failed to sync invalidated file {:?}: {}", path, err);
                 }
@@ -197,7 +188,7 @@ impl FileCache {
         }
 
         for (path, file, _) in files_to_sync {
-            if Self::is_managed_entry_file(&path) {
+            if file.read().await?.sync_ownership() == SyncOwnership::EntryPublication {
                 continue;
             }
             let mut file_lock = if force {
@@ -222,7 +213,17 @@ impl FileCache {
         Ok(())
     }
 
+    #[cfg(test)]
     async fn open_read_file(&self, path: &PathBuf) -> Result<Arc<AsyncRwLock<File>>, ReductError> {
+        self.open_read_file_with_ownership(path, SyncOwnership::FileCache)
+            .await
+    }
+
+    async fn open_read_file_with_ownership(
+        &self,
+        path: &PathBuf,
+        ownership: SyncOwnership,
+    ) -> Result<Arc<AsyncRwLock<File>>, ReductError> {
         let file = self
             .backend
             .read()
@@ -230,16 +231,28 @@ impl FileCache {
             .open_options()
             .read(true)
             .ignore_write(self.read_only.load(Ordering::Relaxed))
+            .sync_ownership(ownership)
             .open(path)
             .await?;
         let arc = Arc::new(AsyncRwLock::new(file));
         Ok(arc)
     }
 
+    #[cfg(test)]
     async fn open_write_file(
         &self,
         path: &PathBuf,
         create: bool,
+    ) -> Result<Arc<AsyncRwLock<File>>, ReductError> {
+        self.open_write_file_with_ownership(path, create, SyncOwnership::FileCache)
+            .await
+    }
+
+    async fn open_write_file_with_ownership(
+        &self,
+        path: &PathBuf,
+        create: bool,
+        ownership: SyncOwnership,
     ) -> Result<Arc<AsyncRwLock<File>>, ReductError> {
         let file = self
             .backend
@@ -250,6 +263,7 @@ impl FileCache {
             .write(true)
             .ignore_write(self.read_only.load(Ordering::Relaxed))
             .read(true)
+            .sync_ownership(ownership)
             .open(path)
             .await?;
         let arc = Arc::new(AsyncRwLock::new(file));
@@ -272,7 +286,7 @@ impl FileCache {
         for (path, file) in discarded {
             if let Some(mut lock) = file.try_write_owned() {
                 discarded_count += 1;
-                if !Self::is_managed_entry_file(&path)
+                if lock.sync_ownership() != SyncOwnership::EntryPublication
                     && lock.mode() == &AccessMode::ReadWrite
                     && !lock.is_synced()
                 {
@@ -295,10 +309,6 @@ impl FileCache {
     pub async fn set_storage_backend(&self, backpack: Backend) {
         let mut backend = self.backend.write().await.unwrap();
         *backend = backpack;
-    }
-
-    pub(crate) fn register_managed_entry(&self, path: PathBuf) {
-        MANAGED_ENTRY_PATHS.write().unwrap().insert(path);
     }
 
     /// Set sync interval
@@ -324,12 +334,32 @@ impl FileCache {
     ///
     /// A file reference
     pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileGuard, ReductError> {
+        self.read_with_ownership(path, pos, SyncOwnership::FileCache)
+            .await
+    }
+
+    pub(crate) async fn read_managed(
+        &self,
+        path: &PathBuf,
+        pos: SeekFrom,
+    ) -> Result<FileGuard, ReductError> {
+        self.read_with_ownership(path, pos, SyncOwnership::EntryPublication)
+            .await
+    }
+
+    async fn read_with_ownership(
+        &self,
+        path: &PathBuf,
+        pos: SeekFrom,
+        ownership: SyncOwnership,
+    ) -> Result<FileGuard, ReductError> {
         let file = {
             let file = self.cache.read().await?.get(path).cloned();
             if let Some(file) = file {
+                file.write().await?.set_sync_ownership(ownership);
                 Arc::clone(&file)
             } else {
-                let file = self.open_read_file(path).await?;
+                let file = self.open_read_file_with_ownership(path, ownership).await?;
                 self.insert_file_cached(path, file.clone()).await?;
                 file
             }
@@ -362,6 +392,25 @@ impl FileCache {
         path: &PathBuf,
         pos: SeekFrom,
     ) -> Result<FileGuard, ReductError> {
+        self.write_or_create_with_ownership(path, pos, SyncOwnership::FileCache)
+            .await
+    }
+
+    pub(crate) async fn write_or_create_managed(
+        &self,
+        path: &PathBuf,
+        pos: SeekFrom,
+    ) -> Result<FileGuard, ReductError> {
+        self.write_or_create_with_ownership(path, pos, SyncOwnership::EntryPublication)
+            .await
+    }
+
+    async fn write_or_create_with_ownership(
+        &self,
+        path: &PathBuf,
+        pos: SeekFrom,
+        ownership: SyncOwnership,
+    ) -> Result<FileGuard, ReductError> {
         let file = {
             let file = self.cache.read().await?.get(path).cloned();
             if let Some(file) = file {
@@ -372,15 +421,21 @@ impl FileCache {
                     ))?
                 };
                 if lock.mode() == &AccessMode::ReadWrite {
+                    drop(lock);
+                    file.write().await?.set_sync_ownership(ownership);
                     Arc::clone(&file)
                 } else {
                     drop(lock);
-                    let file = self.open_write_file(path, false).await?;
+                    let file = self
+                        .open_write_file_with_ownership(path, false, ownership)
+                        .await?;
                     self.insert_file_cached(path, file.clone()).await?;
                     file
                 }
             } else {
-                let file = self.open_write_file(path, true).await?;
+                let file = self
+                    .open_write_file_with_ownership(path, true, ownership)
+                    .await?;
                 self.insert_file_cached(path, file.clone()).await?;
                 file
             }
@@ -419,17 +474,7 @@ impl FileCache {
             return Ok(());
         }
 
-        let managed = Self::is_managed_entry_file(path);
         let remove_from_backend = async |path: &PathBuf| {
-            if managed {
-                if let Err(err) = tokio::fs::remove_file(path).await {
-                    if err.kind() != std::io::ErrorKind::NotFound {
-                        return Err(err.into());
-                    }
-                }
-                MANAGED_DELETIONS.lock().unwrap().insert(path.clone());
-                return Ok::<(), ReductError>(());
-            }
             let backend = self.backend.read().await?.clone();
             backend.remove(path).await?;
             Ok::<(), ReductError>(())
@@ -508,7 +553,10 @@ impl FileCache {
         for file_path in files_to_remove {
             if let Some(file) = cache.remove(&file_path) {
                 let mut lock = file.write_owned().await?;
-                if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
+                if lock.sync_ownership() != SyncOwnership::EntryPublication
+                    && lock.mode() == &AccessMode::ReadWrite
+                    && !lock.is_synced()
+                {
                     if let Err(err) = lock.sync_all().await {
                         warn!("Failed to sync file {}: {}", file_path.display(), err);
                     }
@@ -578,45 +626,6 @@ impl FileCache {
         file.flush_local().await?;
         file.sync_all().await?;
         Ok(())
-    }
-
-    /// Applies the deletion portion of a captured entry publication interval.
-    pub async fn publish_managed_deletions(&self, entry_path: &PathBuf) -> Result<(), ReductError> {
-        let paths = {
-            let mut pending = MANAGED_DELETIONS.lock().unwrap();
-            let paths = pending
-                .iter()
-                .filter(|path| path.starts_with(entry_path))
-                .cloned()
-                .collect::<Vec<_>>();
-            for path in &paths {
-                pending.remove(path);
-            }
-            paths
-        };
-
-        let backend = self.backend.read().await?.clone();
-        let mut paths = paths;
-        while let Some(path) = paths.pop() {
-            if let Err(err) = backend.remove(&path).await {
-                if err.kind() == std::io::ErrorKind::NotFound {
-                    continue;
-                }
-                let mut pending = MANAGED_DELETIONS.lock().unwrap();
-                pending.insert(path);
-                pending.extend(paths);
-                return Err(err.into());
-            }
-        }
-        Ok(())
-    }
-
-    fn is_managed_entry_file(path: &PathBuf) -> bool {
-        MANAGED_ENTRY_PATHS
-            .read()
-            .unwrap()
-            .iter()
-            .any(|entry_path| path.starts_with(entry_path))
     }
 
     pub async fn create_dir_all(&self, path: &PathBuf) -> Result<(), ReductError> {

@@ -177,7 +177,7 @@ impl BlockIndex {
             return Err(internal_server_error!("Block index {:?} not found", path));
         }
 
-        let mut lock = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+        let mut lock = FILE_CACHE.read_managed(&path, SeekFrom::Start(0)).await?;
         let mut buf = Vec::new();
         if let Err(err) = lock.read_to_end(&mut buf) {
             return Err(internal_server_error!(
@@ -318,7 +318,7 @@ impl BlockIndex {
         let buf = block_index_proto.encode_to_vec();
 
         let mut lock = FILE_CACHE
-            .write_or_create(&self.path_buf, SeekFrom::Start(0))
+            .write_or_create_managed(&self.path_buf, SeekFrom::Start(0))
             .await?;
         lock.set_len(0)?;
         lock.write_all(&buf).map_err(|err| {
@@ -352,7 +352,7 @@ impl BlockIndex {
 
     pub async fn sync_all(&mut self) -> Result<(), ReductError> {
         let mut lock = FILE_CACHE
-            .write_or_create(&self.path_buf, SeekFrom::Start(0))
+            .write_or_create_managed(&self.path_buf, SeekFrom::Start(0))
             .await?;
         lock.sync_all().await?;
         Ok(())

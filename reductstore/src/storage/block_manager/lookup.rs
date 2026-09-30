@@ -35,7 +35,7 @@ impl BlockManager {
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
             let path = self.resolve_desc_path(block_id).await?;
-            let buf = match FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
+            let buf = match FILE_CACHE.read_managed(&path, SeekFrom::Start(0)).await {
                 Ok(mut file) => {
                     let mut buf = vec![];
                     file.read_to_end(&mut buf)?;
