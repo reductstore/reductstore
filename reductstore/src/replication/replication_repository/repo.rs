@@ -26,7 +26,7 @@ use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationCompression, ReplicationInfo, ReplicationMode,
     ReplicationSettings,
 };
-use reduct_base::{not_found, unprocessable_entity};
+use reduct_base::{conflict, not_found, unprocessable_entity};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::SeekFrom::Start;
@@ -272,10 +272,7 @@ impl ManageReplications for ReplicationRepository {
     ) -> Result<(), ReductError> {
         // check if replication already exists
         if self.replications.read().await?.contains_key(name) {
-            return Err(ReductError::conflict(&format!(
-                "Replication '{}' already exists",
-                name
-            )));
+            return Err(conflict!("Replication '{}' already exists", name));
         }
 
         self.create_or_update_replication_task(name, settings).await
@@ -290,18 +287,12 @@ impl ManageReplications for ReplicationRepository {
         match self.replications.read().await?.get(name) {
             Some(replication) => {
                 if replication.is_provisioned() {
-                    Err(ReductError::conflict(&format!(
-                        "Can't update provisioned replication '{}'",
-                        name
-                    )))
+                    Err(conflict!("Can't update provisioned replication '{}'", name))
                 } else {
                     Ok(())
                 }
             }
-            None => Err(ReductError::not_found(&format!(
-                "Replication '{}' does not exist",
-                name
-            ))),
+            None => Err(not_found!("Replication '{}' does not exist", name)),
         }?;
 
         self.create_or_update_replication_task(name, settings).await
@@ -318,9 +309,9 @@ impl ManageReplications for ReplicationRepository {
 
     async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError> {
         let guard = self.replications.read().await?;
-        let replication = guard.get(name).ok_or_else(|| {
-            ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })?;
+        let replication = guard
+            .get(name)
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))?;
         let info = FullReplicationInfo {
             info: replication.info().await?,
             settings: replication.masked_settings().clone(),
@@ -337,9 +328,7 @@ impl ManageReplications for ReplicationRepository {
         guard
             .get(name)
             .map(|replication| replication.settings().clone())
-            .ok_or_else(|| {
-                ReductError::not_found(&format!("Replication '{}' does not exist", name))
-            })
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))
     }
 
     async fn is_replication_running(&self, name: &str) -> Result<bool, ReductError> {
@@ -347,9 +336,7 @@ impl ManageReplications for ReplicationRepository {
         guard
             .get(name)
             .map(|replication| replication.is_running())
-            .ok_or_else(|| {
-                ReductError::not_found(&format!("Replication '{}' does not exist", name))
-            })
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))
     }
 
     async fn set_replication_provisioned(
@@ -358,23 +345,20 @@ impl ManageReplications for ReplicationRepository {
         provisioned: bool,
     ) -> Result<(), ReductError> {
         let mut guard = self.replications.write().await?;
-        let replication = guard.get_mut(name).ok_or_else(|| {
-            ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })?;
+        let replication = guard
+            .get_mut(name)
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))?;
         replication.set_provisioned(provisioned);
         Ok(())
     }
 
     async fn remove_replication(&self, name: &str) -> Result<(), ReductError> {
         let mut guard = self.replications.write().await?;
-        let repl = guard.get(name).ok_or_else(|| {
-            ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })?;
+        let repl = guard
+            .get(name)
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))?;
         if repl.is_provisioned() {
-            return Err(ReductError::conflict(&format!(
-                "Can't remove provisioned replication '{}'",
-                name
-            )));
+            return Err(conflict!("Can't remove provisioned replication '{}'", name));
         }
         let removed = guard.remove(name);
         drop(guard);
@@ -387,9 +371,9 @@ impl ManageReplications for ReplicationRepository {
 
     async fn set_mode(&self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
         let mut guard = self.replications.write().await?;
-        let replication = guard.get_mut(name).ok_or_else(|| {
-            ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })?;
+        let replication = guard
+            .get_mut(name)
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))?;
         replication.set_mode(mode);
         drop(guard);
         self.save_repo().await

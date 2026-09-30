@@ -10,6 +10,7 @@ use tempfile::{tempdir, TempDir};
 use zip::ZipArchive;
 
 use reduct_base::error::ReductError;
+use reduct_base::not_found;
 
 pub trait ManageStaticAsset {
     /// Read a file from the zip archive.
@@ -87,9 +88,7 @@ impl ManageStaticAsset for ZipAssetManager {
 
         trace!("Reading file {:?}", path);
         if !path.try_exists()? {
-            return Err(ReductError::not_found(
-                format!("File {:?} not found", path).as_str(),
-            ));
+            return Err(not_found!("File {:?} not found", path));
         }
 
         // read file
@@ -103,9 +102,7 @@ impl ManageStaticAsset for ZipAssetManager {
     fn absolut_path(&self, relative_path: &str) -> Result<PathBuf, ReductError> {
         let path = self.path.path().join(relative_path);
         if !path.try_exists()? {
-            return Err(ReductError::not_found(
-                format!("File {:?} not found", path).as_str(),
-            ));
+            return Err(not_found!("File {:?} not found", path));
         }
         Ok(path)
     }
