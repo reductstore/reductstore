@@ -96,7 +96,7 @@ impl EntryBuilder {
             block_index.save().await?;
         }
 
-        let publication = PublicationCoordinator::for_path(path.clone());
+        let publication = PublicationCoordinator::new();
         let entry = Entry {
             name: name.clone(),
             bucket_name: bucket_name.clone(),

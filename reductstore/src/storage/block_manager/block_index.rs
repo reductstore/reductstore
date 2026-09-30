@@ -402,9 +402,7 @@ impl BlockIndex {
     fn write_publication_crc(crc: &mut Digest, publication: &Publication) {
         // Legacy indexes omit these bytes entirely. The tag and explicit length
         // make the extension unambiguous without changing legacy CRCs.
-        crc.write(b"publication\0");
         crc.write(&publication.generation.to_be_bytes());
-        crc.write(&(publication.incarnation.len() as u64).to_be_bytes());
         crc.write(publication.incarnation.as_bytes());
     }
 

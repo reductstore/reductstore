@@ -329,7 +329,7 @@ impl EntryLoader {
         }
 
         block_index.save().await?;
-        let publication = PublicationCoordinator::for_path(path.clone());
+        let publication = PublicationCoordinator::new();
         Ok(Entry {
             name: entry_name.clone(),
             bucket_name: bucket_name.clone(),
@@ -367,7 +367,7 @@ impl EntryLoader {
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
 
-        let publication = PublicationCoordinator::for_path(path.clone());
+        let publication = PublicationCoordinator::new();
         Ok(Entry {
             name: entry_name.clone(),
             bucket_name: bucket_name.clone(),

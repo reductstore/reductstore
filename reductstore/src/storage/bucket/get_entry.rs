@@ -39,22 +39,27 @@ impl Bucket {
                 entry
             } else {
                 self.folder_keeper.add_folder(&prefix).await?;
-                let entry = Arc::new(
-                    Entry::builder()
-                        .name(&prefix)
-                        .bucket_path(self.path.clone())
-                        .settings(settings_for_entry(&prefix, &settings))
-                        .cfg(self.cfg.clone())
-                        .io_limiter(self.io_limiter.clone())
-                        .usage_counters(Arc::clone(&self.usage_counters))
-                        .build()
-                        .await?,
-                );
                 let mut entries = self.entries.write().await?;
-                entries
-                    .entry(prefix.clone())
-                    .or_insert_with(|| Arc::clone(&entry))
-                    .clone()
+                if let Some(entry) = entries.get(&prefix).cloned() {
+                    entry
+                } else {
+                    // Keep construction within the entry-map critical section.
+                    // A discarded competing Entry could otherwise publish through
+                    // a different coordinator before the map selects a winner.
+                    let entry = Arc::new(
+                        Entry::builder()
+                            .name(&prefix)
+                            .bucket_path(self.path.clone())
+                            .settings(settings_for_entry(&prefix, &settings))
+                            .cfg(self.cfg.clone())
+                            .io_limiter(self.io_limiter.clone())
+                            .usage_counters(Arc::clone(&self.usage_counters))
+                            .build()
+                            .await?,
+                    );
+                    entries.insert(prefix.clone(), Arc::clone(&entry));
+                    entry
+                }
             };
 
             if prefix == key {
