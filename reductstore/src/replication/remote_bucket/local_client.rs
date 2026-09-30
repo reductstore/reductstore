@@ -1,7 +1,9 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::replication::remote_bucket::client::{BoxedBucketApi, ReductBucketApi, ReductClientApi};
+use crate::replication::remote_bucket::client_wrapper::{
+    BoxedBucketApi, ReductBucketApi, ReductClientApi,
+};
 use crate::replication::remote_bucket::{ErrorRecordMap, LocalDestination};
 use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::update_labels::UpdateLabels;
@@ -49,7 +51,7 @@ impl ReductClientApi for LocalClient {
         Ok(self.bucket(bucket_name))
     }
 
-    fn endpoint(&self) -> &str {
+    fn url(&self) -> &str {
         LOCAL_ENDPOINT
     }
 }
@@ -129,7 +131,7 @@ impl ReductBucketApi for LocalBucket {
         Ok(errors)
     }
 
-    fn endpoint(&self) -> &str {
+    fn server_url(&self) -> &str {
         LOCAL_ENDPOINT
     }
 
@@ -222,7 +224,7 @@ fn labels_update(meta: &RecordMeta) -> UpdateLabels {
 mod tests {
     use super::*;
     use crate::cfg::Cfg;
-    use crate::replication::remote_bucket::client::tests::MockRecordReader;
+    use crate::replication::remote_bucket::client_wrapper::tests::MockRecordReader;
     use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketBuilder};
     use crate::storage::engine::{StorageEngine, CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
     use crate::storage::proto::record::Label;
@@ -590,8 +592,8 @@ mod tests {
 
             let bucket = client.get_bucket(BUCKET).await.unwrap();
             assert_eq!(bucket.name(), BUCKET);
-            assert_eq!(bucket.endpoint(), "local://");
-            assert_eq!(client.endpoint(), "local://");
+            assert_eq!(bucket.server_url(), "local://");
+            assert_eq!(client.url(), "local://");
 
             let err = client.get_bucket("missing").await.err().unwrap();
             assert_eq!(err, not_found!("Bucket 'missing' is not found"));

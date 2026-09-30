@@ -35,7 +35,6 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
-use tokio::sync::Mutex;
 use tokio::task::JoinHandle;
 use url::Url;
 
@@ -263,8 +262,6 @@ pub(crate) struct ReplicationRepository {
     started: bool,
     notification_tx: UnboundedSender<NotificationCommand>,
     notification_worker: Option<JoinHandle<()>>,
-    /// Serializes creating and updating replications, so that the loop check sees all local replications
-    update_lock: Mutex<()>,
 }
 
 #[async_trait]
@@ -402,7 +399,9 @@ impl ManageReplications for ReplicationRepository {
     async fn notify(&self, notification: TransactionNotification) -> Result<(), ReductError> {
         let should_enqueue = {
             let guard = self.replications.read().await?;
-            Self::is_source_bucket(&guard, &notification.bucket)
+            guard
+                .iter()
+                .any(|(_, replication)| replication.settings().src_bucket == notification.bucket)
         };
         if should_enqueue {
             self.notification_tx
@@ -419,18 +418,16 @@ impl ManageReplications for ReplicationRepository {
     }
 
     async fn stop(&mut self) {
-        // A local replication notifies the replications of its destination bucket about every
-        // record it writes until its task is stopped, and the worker delivers these notifications.
-        // So the tasks are stopped first. Otherwise the records, which the local replication has
-        // already acknowledged, never reach the next replication of the chain.
-        self.stop_tasks().await;
-
-        // The queue is FIFO: the worker delivers all pending notifications before it gets the command.
         let _ = self.notification_tx.send(NotificationCommand::Stop);
         if let Some(worker) = self.notification_worker.take() {
             if let Err(err) = worker.await {
                 error!("Failed to join replication notification worker: {:?}", err);
             }
+        }
+
+        let mut guard = self.replications.write().await.unwrap();
+        for (_, task) in guard.iter_mut() {
+            task.stop().await;
         }
     }
 }
@@ -483,7 +480,6 @@ impl ReplicationRepository {
             started: false,
             notification_tx,
             notification_worker: Some(notification_worker),
-            update_lock: Mutex::new(()),
         };
 
         let read_conf_file = async || {
@@ -554,8 +550,6 @@ impl ReplicationRepository {
         name: &str,
         settings: ReplicationSettings,
     ) -> Result<(), ReductError> {
-        let _update_guard = self.update_lock.lock().await;
-
         // an empty destination host means a bucket in the same instance
         let is_local = settings.dst_host.is_empty();
 
@@ -672,30 +666,9 @@ impl ReplicationRepository {
     }
 
     /// Notifier for records written by local replications, so that they are replicated further.
-    ///
-    /// The sender of a local replication calls it for every written record, so it never blocks:
-    /// it doesn't wait for the map of replications and only pushes to the unbounded queue.
     fn transaction_notifier(&self) -> TransactionNotifier {
         let notification_tx = self.notification_tx.clone();
-        // The tasks in the map own the notifier, so a strong reference would make a cycle.
-        let replications = Arc::downgrade(&self.replications);
         Arc::new(move |notification| {
-            // The repository is dropped, so nobody is going to replicate the record.
-            let Some(replications) = replications.upgrade() else {
-                return;
-            };
-
-            // Like `notify`, don't wake up the worker if no replication reads the bucket, because
-            // it takes the exclusive lock of the map for every notification. When the map is
-            // busy, we can't tell, so we let the worker check the bucket again.
-            let is_source_bucket = match replications.try_read() {
-                Some(tasks) => Self::is_source_bucket(&tasks, &notification.bucket),
-                None => true,
-            };
-            if !is_source_bucket {
-                return;
-            }
-
             if notification_tx
                 .send(NotificationCommand::Notify(notification))
                 .is_err()
@@ -844,29 +817,6 @@ impl ReplicationRepository {
         }
 
         Ok(())
-    }
-
-    /// Stop all tasks and wait until their workers finish.
-    ///
-    /// The map is locked until the last task is stopped. It is released before the function
-    /// returns, so that the caller can wait for the notification worker, which needs the map
-    /// to deliver the notifications of the stopped tasks.
-    async fn stop_tasks(&self) {
-        match self.replications.write().await {
-            Ok(mut tasks) => {
-                for (_, task) in tasks.iter_mut() {
-                    task.stop().await;
-                }
-            }
-            Err(err) => error!("Failed to lock replication map to stop the tasks: {}", err),
-        }
-    }
-
-    /// Check if some replication reads records from the bucket.
-    fn is_source_bucket(replications: &HashMap<String, ReplicationTask>, bucket: &str) -> bool {
-        replications
-            .values()
-            .any(|replication| replication.settings().src_bucket == bucket)
     }
 }
 
@@ -1791,9 +1741,6 @@ mod tests {
 
     mod local {
         use super::*;
-        use reduct_base::io::RecordMeta;
-        use tokio::sync::mpsc::UnboundedReceiver;
-        use tokio::time::timeout;
 
         #[rstest]
         #[tokio::test]
@@ -2158,269 +2105,6 @@ mod tests {
             );
         }
 
-        mod notifier {
-            use super::*;
-
-            #[rstest]
-            #[case::source_bucket("bucket-1", &["bucket-1"])]
-            #[case::destination_bucket("bucket-2", &[])]
-            #[case::unrelated_bucket("bucket-4", &[])]
-            #[tokio::test]
-            async fn enqueues_notifications_only_for_source_buckets(
-                #[future] repo_with_buckets: ReplicationRepository,
-                #[case] bucket: &str,
-                #[case] queued: &[&str],
-            ) {
-                let mut repo = repo_with_buckets.await;
-                let mut queue = intercept_notifications(&mut repo);
-                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
-                    .await
-                    .unwrap();
-
-                let notifier = repo.transaction_notifier();
-                notifier(notification(bucket));
-
-                assert_eq!(
-                    queued_buckets(&mut queue),
-                    queued,
-                    "Should wake up the worker only if a replication reads the bucket"
-                );
-            }
-
-            #[rstest]
-            #[tokio::test]
-            async fn enqueues_notification_without_waiting_when_replications_are_locked(
-                #[future] repo_with_buckets: ReplicationRepository,
-            ) {
-                let mut repo = repo_with_buckets.await;
-                let mut queue = intercept_notifications(&mut repo);
-                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
-                    .await
-                    .unwrap();
-                let notifier = repo.transaction_notifier();
-
-                // a blocking notifier would hang here, because the map is locked until we release it
-                let tasks = repo.replications.write().await.unwrap();
-                let call = tokio::task::spawn_blocking(move || notifier(notification("bucket-4")));
-                timeout(Duration::from_secs(5), call)
-                    .await
-                    .expect("Should not wait for the map of replications")
-                    .unwrap();
-                drop(tasks);
-
-                assert_eq!(
-                    queued_buckets(&mut queue),
-                    ["bucket-4"],
-                    "Should let the worker check the bucket when the map is busy"
-                );
-            }
-
-            #[rstest]
-            #[tokio::test]
-            async fn skips_notifications_after_repository_is_dropped(
-                #[future] repo_with_buckets: ReplicationRepository,
-            ) {
-                let mut repo = repo_with_buckets.await;
-                let mut queue = intercept_notifications(&mut repo);
-                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
-                    .await
-                    .unwrap();
-                let notifier = repo.transaction_notifier();
-
-                // the worker owns the map too, but it exits because its queue is closed
-                repo.notification_worker.take().unwrap().await.unwrap();
-                drop(repo);
-                notifier(notification("bucket-1"));
-
-                assert!(
-                    queued_buckets(&mut queue).is_empty(),
-                    "Should skip notifications when there are no replications anymore"
-                );
-            }
-
-            #[rstest]
-            #[tokio::test]
-            async fn does_not_keep_replications_alive(
-                #[future] repo_with_buckets: ReplicationRepository,
-            ) {
-                let mut repo = repo_with_buckets.await;
-                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
-                    .await
-                    .unwrap();
-                let replications = Arc::downgrade(&repo.replications);
-
-                // the worker owns the map too, so wait until it exits
-                repo.stop().await;
-                drop(repo);
-
-                assert!(
-                    replications.upgrade().is_none(),
-                    "Should free the replications, because the notifier of a task must not own them"
-                );
-            }
-        }
-
-        mod stop {
-            use super::*;
-
-            #[rstest]
-            #[case::chained_replication("bucket-2", 0, 1)]
-            #[case::first_replication("bucket-1", 1, 0)]
-            #[case::bucket_without_replications("bucket-4", 0, 0)]
-            #[tokio::test]
-            async fn delivers_queued_notifications_to_replications_of_their_bucket(
-                #[future] repo_with_buckets: ReplicationRepository,
-                #[case] bucket: &str,
-                #[case] pending_in_first: u64,
-                #[case] pending_in_chained: u64,
-            ) {
-                let mut repo = repo_with_buckets.await;
-                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
-                    .await
-                    .unwrap();
-                repo.create_replication("r2", local_settings("bucket-2", "bucket-3"))
-                    .await
-                    .unwrap();
-                create_entry(&repo, "bucket-2", "entry-1").await;
-
-                let notifier = repo.transaction_notifier();
-                notifier(notification(bucket));
-                repo.stop().await;
-
-                assert_eq!(pending_records(&repo, "r1").await, pending_in_first);
-                assert_eq!(pending_records(&repo, "r2").await, pending_in_chained);
-            }
-
-            #[rstest]
-            #[tokio::test]
-            #[serial]
-            async fn delivers_notifications_written_while_tasks_are_stopping(
-                #[future] repo_with_buckets: ReplicationRepository,
-            ) {
-                let mut repo = repo_with_buckets.await;
-                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
-                    .await
-                    .unwrap();
-                repo.create_replication("r2", local_settings("bucket-2", "bucket-3"))
-                    .await
-                    .unwrap();
-                create_entry(&repo, "bucket-2", "entry-1").await;
-                let replications = Arc::clone(&repo.replications);
-                // it is called by the sender of r1 after it has written a record to bucket-2
-                let notifier = repo.transaction_notifier();
-
-                // stop() has to wait for the map, so we know that it has not stopped the tasks yet
-                let tasks = replications.read().await.unwrap();
-                let stopping = tokio::spawn(async move {
-                    repo.stop().await;
-                    repo
-                });
-                // a waiting writer refuses new readers
-                timeout(Duration::from_secs(5), async {
-                    while replications.try_read().is_some() {
-                        tokio::task::yield_now().await;
-                    }
-                })
-                .await
-                .expect("Should wait for the map of replications");
-
-                // the sender of r1 is still running and acknowledges the record after the notification
-                notifier(notification("bucket-2"));
-                drop(tasks);
-
-                let repo = stopping.await.unwrap();
-                assert_eq!(
-                    pending_records(&repo, "r2").await,
-                    1,
-                    "Should deliver the notification of a running task before the worker exits"
-                );
-                assert_eq!(pending_records(&repo, "r1").await, 0);
-            }
-
-            #[rstest]
-            #[tokio::test(flavor = "multi_thread")]
-            #[serial]
-            async fn delivers_notifications_of_all_records_copied_by_running_replication(
-                #[future] repo_with_buckets: ReplicationRepository,
-            ) {
-                const RECORDS: u64 = 100;
-                let mut repo = repo_with_buckets.await;
-                repo.create_replication("r1", local_settings("bucket-1", "bucket-2"))
-                    .await
-                    .unwrap();
-                repo.create_replication("r2", local_settings("bucket-2", "bucket-3"))
-                    .await
-                    .unwrap();
-                // r2 sends nothing, so its transaction logs show the records it has learned about
-                repo.set_mode("r2", ReplicationMode::Paused).await.unwrap();
-
-                let bucket = repo
-                    .storage
-                    .get_bucket("bucket-1")
-                    .await
-                    .unwrap()
-                    .upgrade_and_unwrap();
-                for time in 1..=RECORDS {
-                    let mut writer = bucket
-                        .begin_write(
-                            "entry-1",
-                            time,
-                            4,
-                            "text/plain".to_string(),
-                            Labels::default(),
-                        )
-                        .await
-                        .unwrap();
-                    writer
-                        .send(Ok(Some(bytes::Bytes::from_static(b"data"))))
-                        .await
-                        .unwrap();
-                    writer.send(Ok(None)).await.unwrap();
-
-                    let mut record = notification("bucket-1");
-                    record.meta = RecordMeta::builder().timestamp(time).build();
-                    record.event = WriteRecord(time);
-                    repo.notify(record).await.unwrap();
-                }
-                // the worker delivers the notifications asynchronously
-                wait_until("r1 gets all notifications", async || {
-                    pending_records(&repo, "r1").await == RECORDS
-                })
-                .await;
-
-                // stop while r1 is copying: some records are written, some are not yet
-                repo.start();
-                wait_until("r2 learns about a copied record", async || {
-                    pending_records(&repo, "r2").await > 0
-                })
-                .await;
-                timeout(Duration::from_secs(10), repo.stop())
-                    .await
-                    .expect("Should stop the running replications without a deadlock");
-
-                let copied = repo
-                    .storage
-                    .get_bucket("bucket-2")
-                    .await
-                    .unwrap()
-                    .upgrade_and_unwrap()
-                    .get_entry("entry-1")
-                    .await
-                    .unwrap()
-                    .upgrade_and_unwrap()
-                    .info()
-                    .await
-                    .unwrap()
-                    .record_count;
-                assert!(copied > 0);
-                assert_eq!(
-                    pending_records(&repo, "r2").await,
-                    copied,
-                    "Should notify r2 about every record that r1 has copied and acknowledged"
-                );
-            }
-        }
-
         /// A replication to a bucket of the same instance: no host, no token.
         fn local_settings(src_bucket: &str, dst_bucket: &str) -> ReplicationSettings {
             ReplicationSettings {
@@ -2443,64 +2127,6 @@ mod tests {
                     .unwrap();
             }
             repo
-        }
-
-        /// A notification about a record written to `entry-1` of the bucket.
-        fn notification(bucket: &str) -> TransactionNotification {
-            TransactionNotification {
-                bucket: bucket.to_string(),
-                entry: "entry-1".to_string(),
-                meta: RecordMeta::builder().build(),
-                event: WriteRecord(0),
-            }
-        }
-
-        /// Create an entry, because the transaction log of a replication lives in its directory.
-        async fn create_entry(repo: &ReplicationRepository, bucket: &str, entry: &str) {
-            let bucket = repo
-                .storage
-                .get_bucket(bucket)
-                .await
-                .unwrap()
-                .upgrade_and_unwrap();
-            let _ = bucket.get_or_create_entry(entry).await.unwrap();
-        }
-
-        /// Redirect the notifications of local replications to a queue that the test reads
-        /// instead of the worker. Call it before creating replications, so that they use the queue.
-        fn intercept_notifications(
-            repo: &mut ReplicationRepository,
-        ) -> UnboundedReceiver<NotificationCommand> {
-            let (notification_tx, queue) = unbounded_channel();
-            repo.notification_tx = notification_tx;
-            queue
-        }
-
-        /// Take the buckets of all notifications from the queue.
-        fn queued_buckets(queue: &mut UnboundedReceiver<NotificationCommand>) -> Vec<String> {
-            let mut buckets = Vec::new();
-            while let Ok(command) = queue.try_recv() {
-                if let NotificationCommand::Notify(notification) = command {
-                    buckets.push(notification.bucket);
-                }
-            }
-            buckets
-        }
-
-        async fn pending_records(repo: &ReplicationRepository, name: &str) -> u64 {
-            repo.get_info(name).await.unwrap().info.pending_records
-        }
-
-        /// Wait until the condition holds. The timeout is generous, it only bounds a failing test.
-        async fn wait_until(what: &str, mut condition: impl AsyncFnMut() -> bool) {
-            let wait = async {
-                while !condition().await {
-                    sleep(Duration::from_millis(5)).await;
-                }
-            };
-            if timeout(Duration::from_secs(10), wait).await.is_err() {
-                panic!("Timeout while waiting until {}", what);
-            }
         }
     }
 

@@ -28,39 +28,32 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .with_source_identity(source_identity)
             .build(Arc::clone(&storage))
             .await;
-        // Provision in the order of names and retry the failed replications while a pass makes
-        // progress. The loop check of a local replication sees the old settings of the
-        // replications which are not provisioned yet, so it may reject a replication which is fine
-        // once the others are updated. Then the result doesn't depend on the order.
-        let mut pending: Vec<_> = self.cfg.replications.iter().collect();
-        pending.sort_by_key(|(name, _)| *name);
-        while !pending.is_empty() {
-            let mut failed = vec![];
-            for &(name, replication) in &pending {
-                match create_or_update_replication(repo.as_ref(), name, replication).await {
-                    Ok(()) => {
-                        repo.set_replication_provisioned(name, true).await?;
-
-                        let info_data = repo.get_info(name).await?;
-                        info!(
-                            "Provisioned replication '{}' with {:?}",
-                            name, info_data.settings
-                        );
+        for (name, replication) in &self.cfg.replications {
+            if let Err(e) = repo
+                .create_replication(name, replication.settings.clone())
+                .await
+            {
+                if e.status() == ErrorCode::Conflict {
+                    let mut settings = replication.settings.clone();
+                    if replication.mode_override.is_none() {
+                        if let Ok(info) = repo.get_info(name).await {
+                            settings.mode = info.info.mode;
+                        }
                     }
-                    Err(err) => failed.push((name, replication, err)),
+                    repo.update_replication(name, settings).await?;
+                } else {
+                    error!("Failed to provision replication '{}': {}", name, e);
+                    continue;
                 }
             }
 
-            if failed.len() == pending.len() {
-                for (name, _, err) in failed {
-                    error!("Failed to provision replication '{}': {}", name, err);
-                }
-                break;
-            }
-            pending = failed
-                .into_iter()
-                .map(|(name, replication, _)| (name, replication))
-                .collect();
+            repo.set_replication_provisioned(name, true).await?;
+
+            let info_data = repo.get_info(name).await?;
+            info!(
+                "Provisioned replication '{}' with {:?}",
+                name, info_data.settings
+            );
         }
         Ok(repo)
     }
@@ -135,14 +128,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
             let token = env
                 .get_masked::<String>(&format!("RS_REPLICATION_{}_DST_TOKEN", id), "".to_string());
-            if !replication.settings.dst_host.is_empty() {
-                replication.settings.dst_token = if token.is_empty() { None } else { Some(token) };
-            } else if !token.is_empty() {
-                warn!(
-                    "Replication '{}' has no remote host, its destination token is ignored.",
-                    name
-                );
-            }
+            replication.settings.dst_token = if token.is_empty() { None } else { Some(token) };
 
             if let Some(entries) =
                 env.get_optional::<String>(&format!("RS_REPLICATION_{}_ENTRIES", id))
@@ -283,30 +269,6 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             .filter(|(id, _)| !unfinished_replications.contains(id))
             .map(|(_, (name, replication))| (name, replication))
             .collect()
-    }
-}
-
-/// Create the replication or, if it is already persisted, update it.
-/// The persisted mode is kept unless the mode is set explicitly.
-async fn create_or_update_replication(
-    repo: &(dyn ManageReplications + Send + Sync),
-    name: &str,
-    replication: &ProvisionedReplication,
-) -> Result<(), ReductError> {
-    match repo
-        .create_replication(name, replication.settings.clone())
-        .await
-    {
-        Err(err) if err.status() == ErrorCode::Conflict => {
-            let mut settings = replication.settings.clone();
-            if replication.mode_override.is_none() {
-                if let Ok(info) = repo.get_info(name).await {
-                    settings.mode = info.info.mode;
-                }
-            }
-            repo.update_replication(name, settings).await
-        }
-        result => result,
     }
 }
 
@@ -1292,211 +1254,6 @@ mod tests {
                 .return_const(Ok(exclude_value.to_string()));
 
             env
-        }
-    }
-
-    #[cfg(test)]
-    mod local_loop {
-
-        use super::*;
-        use std::collections::BTreeSet;
-        use std::path::Path;
-
-        /// Name, source bucket and destination bucket of a local replication
-        type LocalReplication = (&'static str, &'static str, &'static str);
-
-        #[log_test(rstest)]
-        #[tokio::test]
-        async fn test_replications_drop_local_replication_making_loop() {
-            let path = tempfile::tempdir().unwrap().keep();
-            let mut env = env_with_local_replications(
-                path,
-                &[
-                    ("replication1", "bucket1", "bucket2"),
-                    ("replication2", "bucket2", "bucket1"),
-                ],
-            );
-            env.expect_get().return_const(Err(VarError::NotPresent));
-
-            let components = CfgParser::from_env(env, "0.0.0")
-                .await
-                .build()
-                .await
-                .unwrap();
-            let repo = components.replication_repo.read().await.unwrap();
-
-            // replications are provisioned in the order of names
-            assert!(repo.get_info("replication1").await.is_ok());
-            assert_eq!(
-                repo.get_info("replication2")
-                    .await
-                    .err()
-                    .map(|err| err.status()),
-                Some(ErrorCode::NotFound),
-                "Should drop the local replication which makes a loop"
-            );
-        }
-
-        /// Each case has the replications persisted by the previous run, the replications
-        /// provisioned by the environment and the expected replications with the provisioned flag.
-        #[log_test(rstest)]
-        // The new replication1 closes a loop with the old replication2 until replication2 is
-        // updated: a -> b, b -> c becomes c -> b, b -> d.
-        #[case::regardless_of_order(
-            &[("replication1", "a", "b"), ("replication2", "b", "c")],
-            &[("replication1", "c", "b"), ("replication2", "b", "d")],
-            &[("replication1", "c", "b", true), ("replication2", "b", "d", true)],
-        )]
-        // replication1 waits for replication2, which waits for replication3, so it takes 3 passes:
-        // a -> b, b -> c, c -> d becomes c -> b, d -> c, c -> e.
-        #[case::while_passes_make_progress(
-            &[("replication1", "a", "b"), ("replication2", "b", "c"), ("replication3", "c", "d")],
-            &[("replication1", "c", "b"), ("replication2", "d", "c"), ("replication3", "c", "e")],
-            &[
-                ("replication1", "c", "b", true),
-                ("replication2", "d", "c", true),
-                ("replication3", "c", "e", true),
-            ],
-        )]
-        // The new replication1 closes a loop with the unchanged replication2 for good:
-        // a -> b, b -> c stays, c -> b is skipped.
-        #[case::skip_update_making_loop(
-            &[("replication1", "a", "b"), ("replication2", "b", "c")],
-            &[("replication1", "c", "b"), ("replication2", "b", "c")],
-            &[("replication1", "a", "b", false), ("replication2", "b", "c", true)],
-        )]
-        #[tokio::test]
-        async fn test_reprovision_local_replications(
-            #[case] persisted: &[LocalReplication],
-            #[case] provisioned: &[LocalReplication],
-            #[case] expected: &[(&str, &str, &str, bool)],
-        ) {
-            let path = tempfile::tempdir().unwrap().keep();
-            persist_local_replications(&path, persisted).await;
-
-            let mut env = env_with_local_replications(path, provisioned);
-            env.expect_get().return_const(Err(VarError::NotPresent));
-
-            let components = CfgParser::from_env(env, "0.0.0")
-                .await
-                .build()
-                .await
-                .expect("Should skip a rejected replication instead of aborting the start");
-            let repo = components.replication_repo.read().await.unwrap();
-
-            assert_eq!(repo.replications().await.unwrap().len(), expected.len());
-            for &(name, src_bucket, dst_bucket, is_provisioned) in expected {
-                let settings = repo.get_replication_settings(name).await.unwrap();
-                let info = repo.get_info(name).await.unwrap();
-                assert_eq!(
-                    (
-                        settings.src_bucket.as_str(),
-                        settings.dst_bucket.as_str(),
-                        info.info.is_provisioned
-                    ),
-                    (src_bucket, dst_bucket, is_provisioned),
-                    "Unexpected source, destination and provisioned flag of '{}'",
-                    name
-                );
-            }
-        }
-
-        /// Persists local replications in the data path like the previous run of the server.
-        async fn persist_local_replications(path: &Path, replications: &[LocalReplication]) {
-            let cfg = Cfg {
-                data_path: path.to_path_buf(),
-                ..Default::default()
-            };
-            let storage = Arc::new(
-                StorageEngine::builder()
-                    .with_data_path(cfg.data_path.clone())
-                    .with_cfg(cfg.clone())
-                    .build()
-                    .await,
-            );
-            let src_buckets: BTreeSet<_> = replications
-                .iter()
-                .map(|(_, src_bucket, _)| *src_bucket)
-                .collect();
-            for bucket in src_buckets {
-                storage
-                    .create_bucket(bucket, Default::default())
-                    .await
-                    .unwrap();
-            }
-
-            let repo = create_replication_repo(storage, cfg).await;
-            for (name, src_bucket, dst_bucket) in replications {
-                repo.create_replication(name, local_settings(src_bucket, dst_bucket))
-                    .await
-                    .unwrap();
-            }
-        }
-
-        /// Creates a base MockEnvGetter with local replications, which have no remote host,
-        /// and with all their buckets.
-        /// Caller must add the catch-all expectation (last).
-        fn env_with_local_replications(
-            path: PathBuf,
-            replications: &[LocalReplication],
-        ) -> MockEnvGetter {
-            let mut env = MockEnvGetter::new();
-            env.expect_get()
-                .with(eq("RS_DISABLE_AUTH"))
-                .return_const(Ok("true".to_string()));
-            env.expect_get()
-                .with(eq("RS_DATA_PATH"))
-                .return_const(Ok(path.to_str().unwrap().to_string()));
-
-            let buckets: BTreeSet<_> = replications
-                .iter()
-                .flat_map(|(_, src_bucket, dst_bucket)| [*src_bucket, *dst_bucket])
-                .collect();
-            let mut vars = BTreeMap::new();
-            for (i, bucket) in buckets.into_iter().enumerate() {
-                vars.insert(format!("RS_BUCKET_{}_NAME", i + 1), bucket.to_string());
-            }
-            for (i, (name, src_bucket, dst_bucket)) in replications.iter().enumerate() {
-                let id = i + 1;
-                vars.insert(format!("RS_REPLICATION_{}_NAME", id), name.to_string());
-                vars.insert(
-                    format!("RS_REPLICATION_{}_SRC_BUCKET", id),
-                    src_bucket.to_string(),
-                );
-                vars.insert(
-                    format!("RS_REPLICATION_{}_DST_BUCKET", id),
-                    dst_bucket.to_string(),
-                );
-            }
-
-            for (key, value) in &vars {
-                env.expect_get()
-                    .with(eq(key.clone()))
-                    .return_const(Ok(value.clone()));
-            }
-            // the names are listed to find the buckets and replications, the rest is read by key
-            env.expect_all().returning(move || {
-                vars.iter()
-                    .filter(|(key, _)| key.ends_with("_NAME"))
-                    .map(|(key, value)| (key.clone(), value.clone()))
-                    .collect()
-            });
-
-            env
-        }
-
-        fn local_settings(src_bucket: &str, dst_bucket: &str) -> ReplicationSettings {
-            ReplicationSettings {
-                src_bucket: src_bucket.to_string(),
-                dst_bucket: dst_bucket.to_string(),
-                dst_host: String::new(),
-                dst_token: None,
-                entries: vec![],
-                dst_prefix: String::new(),
-                when: None,
-                mode: ReplicationMode::Enabled,
-                compression: ReplicationCompression::None,
-            }
         }
     }
 

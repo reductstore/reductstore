@@ -1,7 +1,8 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-mod client;
+mod client_wrapper;
+mod local_client;
 mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
@@ -173,13 +174,13 @@ impl RemoteBucket for RemoteBucketImpl {
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::replication::remote_bucket::client::{
+    use crate::replication::remote_bucket::client_wrapper::{
         BoxedBucketApi, ReductBucketApi, ReductClientApi,
     };
     use crate::storage::proto::Record;
     use async_trait::async_trait;
 
-    use crate::replication::remote_bucket::client::tests::MockRecordReader;
+    use crate::replication::remote_bucket::client_wrapper::tests::MockRecordReader;
 
     use mockall::{mock, predicate};
     use prost_wkt_types::Timestamp;
@@ -196,7 +197,7 @@ pub(super) mod tests {
 
             async fn create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
 
-            fn endpoint(&self) -> &str;
+            fn url(&self) -> &str;
         }
     }
 
@@ -217,7 +218,7 @@ pub(super) mod tests {
                 records: &Vec<BoxedReadRecord>,
             ) -> Result<ErrorRecordMap, ReductError>;
 
-            fn endpoint(&self) -> &str;
+            fn server_url(&self) -> &str;
 
             fn name(&self) -> &str;
         }
@@ -246,7 +247,7 @@ pub(super) mod tests {
     pub(super) fn bucket() -> MockReductBucketApi {
         let mut bucket = MockReductBucketApi::new();
         bucket
-            .expect_endpoint()
+            .expect_server_url()
             .return_const("http://localhost:8080".to_string());
         bucket.expect_name().return_const("test".to_string());
         bucket
@@ -256,7 +257,7 @@ pub(super) mod tests {
     pub(super) fn client() -> MockReductClientApi {
         let mut client = MockReductClientApi::new();
         client
-            .expect_endpoint()
+            .expect_url()
             .return_const("http://localhost:8080".to_string());
         client
     }

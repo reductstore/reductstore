@@ -4,9 +4,7 @@
 use crate::core::internal_client::{
     ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
 };
-use crate::replication::remote_bucket::client::{
-    BoxedBucketApi, BoxedClientApi, ReductBucketApi, ReductClientApi,
-};
+use crate::replication::remote_bucket::local_client::LocalClient;
 use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucketConfig};
 use crate::replication::{
     ReplicationSourceIdentity, REPLICATION_LICENSE_HASH_HEADER, REPLICATION_NODE_ID_HEADER,
@@ -28,7 +26,57 @@ use reqwest::{Body, Client, Error, Method, Response};
 use std::collections::BTreeMap;
 use std::str::FromStr;
 
-struct HttpClient {
+// A wrapper around the Reduct client API to make it easier to mock.
+#[async_trait]
+pub(super) trait ReductClientApi {
+    async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
+
+    async fn create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError>;
+
+    async fn get_or_create_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
+        match self.get_bucket(bucket_name).await {
+            Ok(bucket) => Ok(bucket),
+            Err(err) if err.status() == ErrorCode::NotFound => {
+                match self.create_bucket(bucket_name).await {
+                    Ok(bucket) => Ok(bucket),
+                    Err(err) if err.status() == ErrorCode::Conflict => {
+                        self.get_bucket(bucket_name).await
+                    }
+                    Err(err) => Err(err),
+                }
+            }
+            Err(err) => Err(err),
+        }
+    }
+
+    fn url(&self) -> &str;
+}
+
+pub(super) type BoxedClientApi = Box<dyn ReductClientApi + Sync + Send>;
+
+// A wrapper around the Reduct bucket API to make it easier to mock.
+#[async_trait]
+pub(super) trait ReductBucketApi {
+    async fn write_batch(
+        &self,
+        entry: &str,
+        records: Vec<BoxedReadRecord>,
+    ) -> Result<ErrorRecordMap, ReductError>;
+
+    async fn update_batch(
+        &self,
+        entry: &str,
+        records: &Vec<BoxedReadRecord>,
+    ) -> Result<ErrorRecordMap, ReductError>;
+
+    fn server_url(&self) -> &str;
+
+    fn name(&self) -> &str;
+}
+
+pub(super) type BoxedBucketApi = Box<dyn ReductBucketApi + Sync + Send>;
+
+struct ReductClient {
     client_api: InternalClientApi,
     server_url: String,
     compression: ReplicationCompression,
@@ -40,7 +88,7 @@ static API_PATH: &str = "api/v1";
 /// `Content-Encoding`.
 const MIN_COMPRESSION_API_VERSION: (u64, u64) = (1, 21);
 
-impl HttpClient {
+impl ReductClient {
     fn new(
         url: &str,
         api_token: &str,
@@ -97,14 +145,14 @@ impl HttpClient {
 type BoxedByteStream =
     std::pin::Pin<Box<dyn Stream<Item = std::io::Result<Bytes>> + Send + Sync + 'static>>;
 
-struct HttpBucket {
+struct BucketWrapper {
     server_url: String,
     bucket_name: String,
     client: Client,
     compression: ReplicationCompression,
 }
 
-impl HttpBucket {
+impl BucketWrapper {
     fn build_headers(records: &Vec<BoxedReadRecord>, update_only: bool) -> HeaderMap {
         let mut headers = HeaderMap::new();
         let content_length: u64 = if update_only {
@@ -254,7 +302,7 @@ fn check_response(response: Result<Response, Error>) -> Result<Response, ReductE
 }
 
 #[async_trait]
-impl ReductClientApi for HttpClient {
+impl ReductClientApi for ReductClient {
     async fn get_bucket(&self, bucket_name: &str) -> Result<BoxedBucketApi, ReductError> {
         let request = self.client_api.client().request(
             Method::GET,
@@ -275,7 +323,7 @@ impl ReductClientApi for HttpClient {
             compression = ReplicationCompression::None;
         }
 
-        Ok(Box::new(HttpBucket {
+        Ok(Box::new(BucketWrapper {
             server_url: self.server_url.clone(),
             bucket_name: bucket_name.to_string(),
             client: self.client_api.client().clone(),
@@ -303,7 +351,7 @@ impl ReductClientApi for HttpClient {
             compression = ReplicationCompression::None;
         }
 
-        Ok(Box::new(HttpBucket {
+        Ok(Box::new(BucketWrapper {
             server_url: self.server_url.clone(),
             bucket_name: bucket_name.to_string(),
             client: self.client_api.client().clone(),
@@ -311,13 +359,13 @@ impl ReductClientApi for HttpClient {
         }))
     }
 
-    fn endpoint(&self) -> &str {
+    fn url(&self) -> &str {
         self.server_url.as_str()
     }
 }
 
 #[async_trait]
-impl ReductBucketApi for HttpBucket {
+impl ReductBucketApi for BucketWrapper {
     async fn write_batch(
         &self,
         entry: &str,
@@ -361,7 +409,7 @@ impl ReductBucketApi for HttpBucket {
         Self::parse_record_errors(response)
     }
 
-    fn endpoint(&self) -> &str {
+    fn server_url(&self) -> &str {
         &self.server_url
     }
 
@@ -370,9 +418,13 @@ impl ReductBucketApi for HttpBucket {
     }
 }
 
-/// Create a new HTTP client of a remote instance.
+/// Create a new Reduct client wrapper: the storage engine for a local destination, HTTP otherwise.
 pub(super) fn create_client(config: &RemoteBucketConfig) -> Result<BoxedClientApi, ReductError> {
-    Ok(Box::new(HttpClient::new(
+    if let Some(destination) = &config.local {
+        return Ok(Box::new(LocalClient::new(destination.clone())));
+    }
+
+    Ok(Box::new(ReductClient::new(
         &config.url,
         &config.api_token,
         config.verify_ssl,
@@ -403,14 +455,15 @@ fn identity_headers(source_identity: &ReplicationSourceIdentity) -> Result<Heade
 #[cfg(test)]
 pub(super) mod tests {
     use super::*;
-    use crate::replication::remote_bucket::client::tests::MockRecordReader;
+    use crate::core::sync::RwLock;
     use crate::replication::remote_bucket::RemoteBucketConfig;
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{us_to_ts, Record};
     use axum::{extract::State, http::StatusCode, routing::any, Router};
-    use crossbeam_channel::Sender;
+    use crossbeam_channel::{Receiver, Sender};
     use futures_util::StreamExt;
     use hyper::http;
+    use reduct_base::io::{ReadChunk, ReadRecord, RecordMeta};
     use rstest::*;
     use std::io::{Read, Seek, SeekFrom};
     use std::path::PathBuf;
@@ -422,7 +475,7 @@ pub(super) mod tests {
     #[tokio::test]
     async fn test_prepare_batch_to_write(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
         let (records, mut txs) = records;
-        let (headers, stream) = HttpBucket::prepare_batch_to_write(records);
+        let (headers, stream) = BucketWrapper::prepare_batch_to_write(records);
 
         assert_eq!(headers.len(), 4);
         assert_eq!(
@@ -456,7 +509,7 @@ pub(super) mod tests {
     #[rstest]
     fn test_prepare_batch_to_update(records: (Vec<BoxedReadRecord>, Vec<Tx>)) {
         let (records, _) = records;
-        let headers = HttpBucket::prepare_batch_to_update(&records);
+        let headers = BucketWrapper::prepare_batch_to_update(&records);
 
         assert_eq!(headers.len(), 4);
         assert_eq!(
@@ -473,7 +526,7 @@ pub(super) mod tests {
 
     #[rstest]
     fn test_add_slash_to_url() {
-        let client = HttpClient::new(
+        let client = ReductClient::new(
             "http://localhost:8080",
             "",
             true,
@@ -495,7 +548,7 @@ pub(super) mod tests {
             "f2f3931e-faca-4db5-84ed-d23bc1b09bda".to_string(),
             Some("license-fingerprint".to_string()),
         );
-        let client = HttpClient::new(
+        let client = ReductClient::new(
             &url,
             "token",
             true,
@@ -506,7 +559,7 @@ pub(super) mod tests {
         .unwrap();
 
         let api_client = client.client_api.client();
-        let bucket = HttpBucket {
+        let bucket = BucketWrapper {
             server_url: client.server_url.clone(),
             bucket_name: "bucket".to_string(),
             client: api_client.clone(),
@@ -562,7 +615,7 @@ pub(super) mod tests {
             "f2f3931e-faca-4db5-84ed-d23bc1b09bda".to_string(),
             None,
         );
-        let client = HttpClient::new(
+        let client = ReductClient::new(
             &url,
             "",
             true,
@@ -607,7 +660,7 @@ pub(super) mod tests {
 
     #[rstest]
     fn test_invalid_ca_path() {
-        let err = HttpClient::new(
+        let err = ReductClient::new(
             "https://localhost:8080",
             "",
             true,
@@ -647,7 +700,7 @@ pub(super) mod tests {
 
         let client = create_client(&config).unwrap();
 
-        assert_eq!(client.endpoint(), "https://localhost:8080/");
+        assert_eq!(client.url(), "https://localhost:8080/");
     }
 
     #[rstest]
@@ -660,7 +713,7 @@ pub(super) mod tests {
         )
         .unwrap();
 
-        let err = HttpClient::new(
+        let err = ReductClient::new(
             "https://localhost:8080",
             "",
             true,
@@ -682,7 +735,7 @@ pub(super) mod tests {
             .body(Bytes::new())
             .unwrap();
         let response = Ok(response).map(|r| r.into());
-        let failed_records = HttpBucket::parse_record_errors(response).unwrap();
+        let failed_records = BucketWrapper::parse_record_errors(response).unwrap();
         assert_eq!(failed_records.len(), 1);
         assert_eq!(
             failed_records.get(&1).unwrap().status(),
@@ -699,7 +752,7 @@ pub(super) mod tests {
             .body(Bytes::new())
             .unwrap();
         let response = Ok(response).map(|r| r.into());
-        let failed_records = HttpBucket::parse_record_errors(response);
+        let failed_records = BucketWrapper::parse_record_errors(response);
         assert_eq!(
             failed_records.unwrap_err().status(),
             ErrorCode::UnprocessableEntity
@@ -736,7 +789,7 @@ pub(super) mod tests {
                 Ok(Bytes::from("record56")),
             ]);
 
-            let compressed_stream = HttpBucket::compress_body(&mut headers, body, compression);
+            let compressed_stream = BucketWrapper::compress_body(&mut headers, body, compression);
 
             assert_eq!(
                 headers.get(CONTENT_LENGTH),
@@ -780,7 +833,7 @@ pub(super) mod tests {
             )]);
 
             let compressed_stream =
-                HttpBucket::compress_body(&mut headers, body, ReplicationCompression::Zstd);
+                BucketWrapper::compress_body(&mut headers, body, ReplicationCompression::Zstd);
             let mut compressed_stream = std::pin::pin!(compressed_stream);
             let mut last = None;
             while let Some(chunk) = compressed_stream.next().await {
@@ -800,12 +853,12 @@ pub(super) mod tests {
         fn test_supports_compression(#[case] version: &str, #[case] expected: bool) {
             let mut headers = HeaderMap::new();
             headers.insert("x-reduct-api", HeaderValue::from_str(version).unwrap());
-            assert_eq!(HttpClient::supports_compression(&headers), expected);
+            assert_eq!(ReductClient::supports_compression(&headers), expected);
         }
 
         #[rstest]
         fn test_supports_compression_no_header() {
-            assert!(!HttpClient::supports_compression(&HeaderMap::new()));
+            assert!(!ReductClient::supports_compression(&HeaderMap::new()));
         }
     }
 
@@ -870,6 +923,58 @@ pub(super) mod tests {
             let mut buf = [0; 10];
             let err = record.read(&mut buf).unwrap_err();
             assert_eq!(err.kind(), std::io::ErrorKind::Unsupported);
+        }
+    }
+
+    pub struct MockRecordReader {
+        meta: RecordMeta,
+        rx: RwLock<Receiver<Result<Bytes, ReductError>>>,
+    }
+
+    impl MockRecordReader {
+        pub(crate) fn form_record_with_rx(
+            rx: Receiver<Result<Bytes, ReductError>>,
+            record: Record,
+        ) -> BoxedReadRecord {
+            Box::new(Self {
+                meta: record.into(),
+                rx: RwLock::new(rx),
+            })
+        }
+    }
+
+    impl Read for MockRecordReader {
+        fn read(&mut self, _buf: &mut [u8]) -> std::io::Result<usize> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "not implemented",
+            ))
+        }
+    }
+
+    impl Seek for MockRecordReader {
+        fn seek(&mut self, _pos: SeekFrom) -> std::io::Result<u64> {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::Unsupported,
+                "not implemented",
+            ))
+        }
+    }
+
+    impl ReadRecord for MockRecordReader {
+        fn read_chunk(&mut self) -> ReadChunk {
+            match self.rx.write().unwrap().recv() {
+                Ok(chunk) => Some(chunk),
+                Err(_) => None,
+            }
+        }
+
+        fn meta(&self) -> &RecordMeta {
+            &self.meta
+        }
+
+        fn meta_mut(&mut self) -> &mut RecordMeta {
+            &mut self.meta
         }
     }
 
