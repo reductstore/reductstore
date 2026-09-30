@@ -56,7 +56,7 @@ impl BlockManager {
         let mut data_block = FILE_CACHE
             .write_or_create(&path, SeekFrom::Current(0))
             .await?;
-        data_block.sync_all().await?;
+        data_block.flush_local().await?;
         Ok(())
     }
 

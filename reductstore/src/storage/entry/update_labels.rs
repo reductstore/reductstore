@@ -38,6 +38,7 @@ impl Entry {
         updates: Vec<UpdateLabels>,
     ) -> Result<UpdateResult, ReductError> {
         self.ensure_not_deleting().await?;
+        let _mutation = self.publication.admit().await;
         let mut result = UpdateResult::new();
         let mut records_per_block = BTreeMap::new();
         for UpdateLabels {

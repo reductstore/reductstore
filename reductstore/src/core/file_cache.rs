@@ -8,6 +8,7 @@ use crate::core::sync::{AsyncRwLock, RwLock};
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::collections::HashSet;
 use std::fs;
 use std::io::{Seek, SeekFrom};
 use std::path::PathBuf;
@@ -50,6 +51,13 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
 
     cache
 });
+
+// Managed entries publish through Entry::sync_fs. The descriptor cache must
+// not independently upload one of their files between the odd and even index.
+static MANAGED_ENTRY_PATHS: LazyLock<std::sync::RwLock<HashSet<PathBuf>>> =
+    LazyLock::new(|| std::sync::RwLock::new(HashSet::new()));
+static MANAGED_DELETIONS: LazyLock<std::sync::Mutex<HashSet<PathBuf>>> =
+    LazyLock::new(|| std::sync::Mutex::new(HashSet::new()));
 
 pub(crate) type FileLock = Arc<AsyncRwLock<File>>;
 pub(crate) type FileGuard = OwnedRwLockWriteGuard<File>;
@@ -140,6 +148,11 @@ impl FileCache {
             .invalidate_locally_cached_files()
             .await;
         for path in invalidated_files {
+            if Self::is_managed_entry_file(&path) {
+                // Publication owns eviction of entry sources. Removing one here
+                // could race an in-flight connector upload.
+                continue;
+            }
             let mut cache = cache.write().await?;
             if let Some(file) = cache.remove(&path) {
                 if let Err(err) = file.write_owned().await?.sync_all().await {
@@ -184,6 +197,9 @@ impl FileCache {
         }
 
         for (path, file, _) in files_to_sync {
+            if Self::is_managed_entry_file(&path) {
+                continue;
+            }
             let mut file_lock = if force {
                 file.write().await?
             } else {
@@ -256,7 +272,10 @@ impl FileCache {
         for (path, file) in discarded {
             if let Some(mut lock) = file.try_write_owned() {
                 discarded_count += 1;
-                if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
+                if !Self::is_managed_entry_file(&path)
+                    && lock.mode() == &AccessMode::ReadWrite
+                    && !lock.is_synced()
+                {
                     lock.sync_all().await.unwrap_or_else(|err| {
                         debug!("Failed to sync discarded file {:?}: {}", path, err);
                     });
@@ -276,6 +295,10 @@ impl FileCache {
     pub async fn set_storage_backend(&self, backpack: Backend) {
         let mut backend = self.backend.write().await.unwrap();
         *backend = backpack;
+    }
+
+    pub(crate) fn register_managed_entry(&self, path: PathBuf) {
+        MANAGED_ENTRY_PATHS.write().unwrap().insert(path);
     }
 
     /// Set sync interval
@@ -396,7 +419,17 @@ impl FileCache {
             return Ok(());
         }
 
-        let remove_from_backend = async |path| {
+        let managed = Self::is_managed_entry_file(path);
+        let remove_from_backend = async |path: &PathBuf| {
+            if managed {
+                if let Err(err) = tokio::fs::remove_file(path).await {
+                    if err.kind() != std::io::ErrorKind::NotFound {
+                        return Err(err.into());
+                    }
+                }
+                MANAGED_DELETIONS.lock().unwrap().insert(path.clone());
+                return Ok::<(), ReductError>(());
+            }
             let backend = self.backend.read().await?.clone();
             backend.remove(path).await?;
             Ok::<(), ReductError>(())
@@ -533,6 +566,57 @@ impl FileCache {
 
     pub async fn force_sync_all(&self) -> Result<(), ReductError> {
         Self::sync_rw_and_unused_files(&self.read_only, &self.backend, &self.cache, &None).await
+    }
+
+    /// Upload one locally materialized file. Entry publication uses this instead
+    /// of the cache worker so it can control the order of remote mutations.
+    pub async fn sync_file(&self, path: &PathBuf) -> Result<(), ReductError> {
+        let mut file = self.write_or_create(path, SeekFrom::Current(0)).await?;
+        // A pathname can have been replaced while an older descriptor remained
+        // cached. Marking the handle dirty makes sync_all upload the current
+        // pathname after flushing the descriptor it owns.
+        file.flush_local().await?;
+        file.sync_all().await?;
+        Ok(())
+    }
+
+    /// Applies the deletion portion of a captured entry publication interval.
+    pub async fn publish_managed_deletions(&self, entry_path: &PathBuf) -> Result<(), ReductError> {
+        let paths = {
+            let mut pending = MANAGED_DELETIONS.lock().unwrap();
+            let paths = pending
+                .iter()
+                .filter(|path| path.starts_with(entry_path))
+                .cloned()
+                .collect::<Vec<_>>();
+            for path in &paths {
+                pending.remove(path);
+            }
+            paths
+        };
+
+        let backend = self.backend.read().await?.clone();
+        let mut paths = paths;
+        while let Some(path) = paths.pop() {
+            if let Err(err) = backend.remove(&path).await {
+                if err.kind() == std::io::ErrorKind::NotFound {
+                    continue;
+                }
+                let mut pending = MANAGED_DELETIONS.lock().unwrap();
+                pending.insert(path);
+                pending.extend(paths);
+                return Err(err.into());
+            }
+        }
+        Ok(())
+    }
+
+    fn is_managed_entry_file(path: &PathBuf) -> bool {
+        MANAGED_ENTRY_PATHS
+            .read()
+            .unwrap()
+            .iter()
+            .any(|entry_path| path.starts_with(entry_path))
     }
 
     pub async fn create_dir_all(&self, path: &PathBuf) -> Result<(), ReductError> {

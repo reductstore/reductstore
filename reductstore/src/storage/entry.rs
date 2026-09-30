@@ -6,6 +6,7 @@ mod compress;
 mod entry_loader;
 pub(crate) mod io;
 mod pattern;
+pub(crate) mod publication;
 mod read_record;
 mod remove_records;
 mod system;
@@ -17,7 +18,9 @@ use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
+use crate::storage::block_manager::block_index::Publication;
 use crate::storage::block_manager::BlockManager;
+use crate::storage::block_manager::BLOCK_INDEX_FILE;
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
@@ -25,6 +28,7 @@ use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryR
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 use log::debug;
+use publication::PublicationCoordinator;
 use reduct_base::error::ReductError;
 use reduct_base::msg::entry_api::{EntryInfo, QueryEntry};
 use reduct_base::msg::status::ResourceStatus;
@@ -67,6 +71,7 @@ pub(crate) struct Entry {
     path: PathBuf,
     cfg: Arc<Cfg>,
     io_limiter: InFlightIoLimiter,
+    publication: Arc<PublicationCoordinator>,
 }
 
 #[derive(PartialEq)]
@@ -272,7 +277,12 @@ impl Entry {
     }
 
     pub(super) async fn remove_all_blocks(&self) -> Result<(), ReductError> {
-        if !FILE_CACHE.try_exists(&self.path).await? {
+        let _mutation = self.publication.admit().await;
+        if !FILE_CACHE
+            .try_exists(&self.path)
+            .await
+            .map_err(|err| internal_server_error!("Failed to inspect entry path: {}", err))?
+        {
             return Ok(());
         }
 
@@ -305,6 +315,7 @@ impl Entry {
     ///
     /// HTTTPError - The error if any.
     pub async fn try_remove_oldest_block(&self) -> Result<(), ReductError> {
+        let _mutation = self.publication.admit().await;
         let bm = self.block_manager.read().await?;
         let index_tree = bm.index().tree();
         if index_tree.is_empty() {
@@ -345,7 +356,9 @@ impl Entry {
         }
 
         if let Some(mut bm) = self.block_manager.try_write() {
-            bm.save_cache_metadata_on_disk().await
+            bm.save_cache_metadata_on_disk().await?;
+            drop(bm);
+            self.sync_fs().await
         } else {
             // Avoid blocking writers; we'll try again on the next sync tick
             debug!(
@@ -361,7 +374,11 @@ impl Entry {
     /// Unlike [`Self::compact`], this method waits for the block manager lock and
     /// must be used for strict sync points (e.g. graceful shutdown).
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
-        if !FILE_CACHE.try_exists(&self.path).await? {
+        if !FILE_CACHE
+            .try_exists(&self.path)
+            .await
+            .map_err(|err| internal_server_error!("Failed to inspect entry path: {}", err))?
+        {
             debug!(
                 "Skipping sync for {}/{} because entry folder is missing",
                 self.bucket_name, self.name
@@ -369,8 +386,66 @@ impl Entry {
             return Ok(());
         }
 
-        let mut bm = self.block_manager.write().await?;
-        bm.save_cache_on_disk().await
+        let _publication = self.publication.begin_publication().await;
+        let (odd_generation, incarnation) = {
+            let mut bm = self.block_manager.write().await?;
+            bm.save_cache_on_disk()
+                .await
+                .map_err(|err| internal_server_error!("Failed to materialize entry: {}", err))?;
+
+            match bm.index().publication() {
+                Some(publication) if publication.generation % 2 == 1 => {
+                    return Err(internal_server_error!(
+                        "Entry '{}/{}' requires recovery because publication {} is unfinished",
+                        self.bucket_name,
+                        self.name,
+                        publication.generation
+                    ));
+                }
+                Some(publication) => (
+                    publication.generation.checked_add(1).ok_or_else(|| {
+                        internal_server_error!(
+                            "Entry '{}/{}' publication generation overflow",
+                            self.bucket_name,
+                            self.name
+                        )
+                    })?,
+                    publication.incarnation,
+                ),
+                None => (1, uuid::Uuid::new_v4().to_string()),
+            }
+        };
+
+        self.save_and_publish_index(odd_generation, incarnation.clone())
+            .await
+            .map_err(|err| internal_server_error!("Failed to publish odd block index: {}", err))?;
+
+        for path in self
+            .publication_files()
+            .await
+            .map_err(|err| internal_server_error!("Failed to collect publication files: {}", err))?
+        {
+            FILE_CACHE.sync_file(&path).await.map_err(|err| {
+                internal_server_error!("Failed to publish entry file {:?}: {}", path, err)
+            })?;
+        }
+        FILE_CACHE.publish_managed_deletions(&self.path).await?;
+
+        let even_generation = odd_generation.checked_add(1).ok_or_else(|| {
+            internal_server_error!(
+                "Entry '{}/{}' publication generation overflow",
+                self.bucket_name,
+                self.name
+            )
+        })?;
+        self.save_and_publish_index(even_generation, incarnation)
+            .await
+            .map_err(|err| internal_server_error!("Failed to publish even block index: {}", err))?;
+        debug!(
+            "Published entry {}/{} generation {}",
+            self.bucket_name, self.name, even_generation
+        );
+        Ok(())
     }
 
     pub fn name(&self) -> &str {
@@ -409,6 +484,45 @@ impl Entry {
 
     pub fn path(&self) -> &PathBuf {
         &self.path
+    }
+
+    async fn save_and_publish_index(
+        &self,
+        generation: u64,
+        incarnation: String,
+    ) -> Result<(), ReductError> {
+        let index_path = self.path.join(BLOCK_INDEX_FILE);
+        {
+            let mut bm = self.block_manager.write().await?;
+            bm.index_mut().set_publication(Publication {
+                generation,
+                incarnation,
+            })?;
+            bm.index().save().await?;
+        }
+        FILE_CACHE.sync_file(&index_path).await
+    }
+
+    async fn publication_files(&self) -> Result<Vec<PathBuf>, ReductError> {
+        let mut files = Vec::new();
+        let index_path = self.path.join(BLOCK_INDEX_FILE);
+        let mut directories = vec![self.path.clone()];
+
+        while let Some(directory) = directories.pop() {
+            for path in FILE_CACHE.read_dir(&directory).await? {
+                if path == index_path {
+                    continue;
+                }
+                // Nested entries own their own publication interval. WALs are
+                // part of this entry and must be uploaded before its even index.
+                if path.file_name().is_some_and(|name| name == ".wal") {
+                    directories.push(path);
+                } else if !path.is_dir() {
+                    files.push(path);
+                }
+            }
+        }
+        Ok(files)
     }
 
     async fn remove_expired_query(
@@ -656,6 +770,26 @@ mod tests {
 
             drop(guard);
             sync_task.await.unwrap().unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_sync_fs_publishes_ready_index(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+
+            entry.sync_fs().await.unwrap();
+
+            let index = entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .index()
+                .publication();
+            assert!(
+                matches!(index, Some(Publication { generation, .. }) if generation > 0 && generation % 2 == 0)
+            );
         }
     }
 

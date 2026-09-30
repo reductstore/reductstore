@@ -36,6 +36,7 @@ impl Entry {
         timestamps: Vec<u64>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         self.ensure_not_deleting().await?;
+        let _mutation = self.publication.admit().await;
         let block_manager = self.block_manager.clone();
         Ok(
             Self::inner_remove_records(timestamps, block_manager, &self.bucket_name, &self.name)
@@ -68,6 +69,7 @@ impl Entry {
         mut options: QueryEntry,
     ) -> Result<RecordQueryStats, ReductError> {
         self.ensure_not_deleting().await?;
+        let _mutation = self.publication.admit().await;
         options.continuous = None; // force non-continuous query
 
         let rx = async || {

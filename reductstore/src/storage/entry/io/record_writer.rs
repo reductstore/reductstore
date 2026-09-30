@@ -5,6 +5,7 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
+use crate::storage::entry::publication::MutationGuard;
 use crate::storage::proto::record;
 use async_trait::async_trait;
 use bytes::Bytes;
@@ -36,6 +37,7 @@ struct WriteContext {
     offset: u64,
     content_size: u64,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
+    _mutation: Option<MutationGuard>,
 }
 
 impl RecordWriter {
@@ -52,10 +54,20 @@ impl RecordWriter {
     /// # Returns
     ///
     /// * `RecordWriter` - The record writer.
+    #[cfg(test)]
     pub(in crate::storage) async fn try_new(
         block_manager: Arc<AsyncRwLock<BlockManager>>,
         block_ref: BlockRef,
         time: u64,
+    ) -> Result<Self, ReductError> {
+        Self::try_new_with_mutation(block_manager, block_ref, time, None).await
+    }
+
+    pub(in crate::storage) async fn try_new_with_mutation(
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+        block_ref: BlockRef,
+        time: u64,
+        mutation: Option<MutationGuard>,
     ) -> Result<Self, ReductError> {
         let (file_path, offset, bucket_name, entry_name, usage_counters) = {
             let mut bm = block_manager.write().await?;
@@ -96,6 +108,7 @@ impl RecordWriter {
             offset,
             content_size,
             block_manager,
+            _mutation: mutation,
         };
 
         let me = if content_size >= MAX_IO_BUFFER_SIZE as u64 {

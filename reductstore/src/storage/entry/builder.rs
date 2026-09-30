@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use super::{strategy_for_entry, Entry, EntrySettings};
+use super::{strategy_for_entry, Entry, EntrySettings, PublicationCoordinator};
 use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
@@ -88,14 +88,17 @@ impl EntryBuilder {
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
         let block_index_path = path.join(BLOCK_INDEX_FILE);
+        FILE_CACHE.register_managed_entry(path.clone());
         let block_index = BlockIndex::new(block_index_path.clone());
 
-        if !FILE_CACHE.try_exists(&block_index_path).await? {
+        let is_new = !FILE_CACHE.try_exists(&block_index_path).await?;
+        if is_new {
             FILE_CACHE.create_dir_all(&path).await?;
             block_index.save().await?;
         }
 
-        Ok(Entry {
+        let publication = PublicationCoordinator::for_path(path.clone());
+        let entry = Entry {
             name: name.clone(),
             bucket_name: bucket_name.clone(),
             settings: AsyncRwLock::new(settings),
@@ -116,11 +119,17 @@ impl EntryBuilder {
             path,
             cfg,
             io_limiter,
-        })
+            publication,
+        };
+        if is_new {
+            entry.sync_fs().await?;
+        }
+        Ok(entry)
     }
 
     pub(crate) async fn restore(self) -> Result<Option<Entry>, ReductError> {
         let path = self.path.expect("Entry path must be set");
+        FILE_CACHE.register_managed_entry(path.clone());
         let entry_name = self
             .name
             .unwrap_or_else(|| path.file_name().unwrap().to_str().unwrap().to_string());

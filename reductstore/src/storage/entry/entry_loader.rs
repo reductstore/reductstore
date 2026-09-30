@@ -24,7 +24,7 @@ use crate::storage::block_manager::{
     DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::entry::strategy_for_entry;
-use crate::storage::entry::{Entry, EntrySettings};
+use crate::storage::entry::{Entry, EntrySettings, PublicationCoordinator};
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
 use crate::storage::usage::UsageCounters;
@@ -75,6 +75,19 @@ impl EntryLoader {
         usage_counters: Arc<UsageCounters>,
     ) -> Result<Option<Entry>, ReductError> {
         let start_time = Instant::now();
+        let index_path = path.join(BLOCK_INDEX_FILE);
+        if let Ok(index) = BlockIndex::try_load(index_path).await {
+            if let Some(publication) = index.publication() {
+                if publication.generation % 2 == 1 {
+                    return Err(internal_server_error!(
+                        "Entry '{}/{}' requires recovery because publication {} is unfinished",
+                        bucket_name,
+                        entry_name,
+                        publication.generation
+                    ));
+                }
+            }
+        }
 
         let mut entry = match Self::try_restore_entry_from_index(
             path.clone(),
@@ -316,6 +329,7 @@ impl EntryLoader {
         }
 
         block_index.save().await?;
+        let publication = PublicationCoordinator::for_path(path.clone());
         Ok(Entry {
             name: entry_name.clone(),
             bucket_name: bucket_name.clone(),
@@ -337,6 +351,7 @@ impl EntryLoader {
             path,
             cfg,
             io_limiter,
+            publication,
         })
     }
 
@@ -352,6 +367,7 @@ impl EntryLoader {
     ) -> Result<Entry, ReductError> {
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
 
+        let publication = PublicationCoordinator::for_path(path.clone());
         Ok(Entry {
             name: entry_name.clone(),
             bucket_name: bucket_name.clone(),
@@ -373,6 +389,7 @@ impl EntryLoader {
             path,
             cfg,
             io_limiter,
+            publication,
         })
     }
 

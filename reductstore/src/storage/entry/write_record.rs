@@ -66,6 +66,7 @@ impl Entry {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_not_deleting().await?;
+        let mutation = self.publication.admit().await;
         let permit = self.acquire_writer_slot().await?;
         // Strategy validates labels and can perform pre-write maintenance.
         self.system_behavior.prepare_write(self, &labels).await?;
@@ -144,10 +145,11 @@ impl Entry {
                                 block.insert_or_update_record(record);
                             }
 
-                            let writer = RecordWriter::try_new(
+                            let writer = RecordWriter::try_new_with_mutation(
                                 Arc::clone(&self.block_manager),
                                 block_ref,
                                 time,
+                                Some(mutation),
                             )
                             .await?;
 
@@ -191,8 +193,13 @@ impl Entry {
         Self::prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)
             .await?;
 
-        let writer =
-            RecordWriter::try_new(Arc::clone(&self.block_manager), block_ref, time).await?;
+        let writer = RecordWriter::try_new_with_mutation(
+            Arc::clone(&self.block_manager),
+            block_ref,
+            time,
+            Some(mutation),
+        )
+        .await?;
         Ok(Box::new(InFlightWriteRecord::new(Box::new(writer), permit)))
     }
 

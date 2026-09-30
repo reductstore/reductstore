@@ -23,6 +23,14 @@ pub(in crate::storage) struct BlockIndex {
     path_buf: PathBuf,
     index_info: HashMap<u64, BlockEntry>,
     index: BTreeSet<u64>,
+    publication_generation: Option<u64>,
+    publication_incarnation: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::storage) struct Publication {
+    pub generation: u64,
+    pub incarnation: String,
 }
 
 impl Into<BlockEntry> for MinimalBlock {
@@ -79,6 +87,8 @@ impl BlockIndex {
             path_buf,
             index_info: HashMap::new(),
             index: BTreeSet::new(),
+            publication_generation: None,
+            publication_incarnation: None,
         };
 
         index
@@ -207,7 +217,11 @@ impl BlockIndex {
             path_buf: path.clone(),
             index_info: HashMap::new(),
             index: BTreeSet::new(),
+            publication_generation: value.publication_generation,
+            publication_incarnation: value.publication_incarnation,
         };
+
+        block_index.validate_publication()?;
 
         let mut crc = Digest::new();
         value.blocks.into_iter().for_each(|block| {
@@ -235,6 +249,10 @@ impl BlockIndex {
             block_index.index_info.insert(block.block_id, block);
         });
 
+        if let Some(publication) = block_index.publication() {
+            Self::write_publication_crc(&mut crc, &publication);
+        }
+
         if crc.sum64() != value.crc64 {
             return Err(internal_server_error!(
                 "Block index {:?} is corrupted",
@@ -249,6 +267,8 @@ impl BlockIndex {
         let mut block_index_proto = BlockIndexProto {
             blocks: Vec::new(),
             crc64: 0,
+            publication_generation: self.publication_generation,
+            publication_incarnation: self.publication_incarnation.clone(),
         };
 
         block_index_proto.blocks = self
@@ -289,6 +309,10 @@ impl BlockIndex {
                 crc.write(&version.to_be_bytes());
             }
         });
+
+        if let Some(publication) = self.publication() {
+            Self::write_publication_crc(&mut crc, &publication);
+        }
 
         block_index_proto.crc64 = crc.sum64();
         let buf = block_index_proto.encode_to_vec();
@@ -334,6 +358,56 @@ impl BlockIndex {
         Ok(())
     }
 
+    pub fn publication(&self) -> Option<Publication> {
+        match (
+            self.publication_generation,
+            self.publication_incarnation.as_ref(),
+        ) {
+            (Some(generation), Some(incarnation)) => Some(Publication {
+                generation,
+                incarnation: incarnation.clone(),
+            }),
+            _ => None,
+        }
+    }
+
+    pub fn set_publication(&mut self, publication: Publication) -> Result<(), ReductError> {
+        if publication.generation == 0 || publication.incarnation.is_empty() {
+            return Err(internal_server_error!(
+                "Invalid block index publication state"
+            ));
+        }
+
+        self.publication_generation = Some(publication.generation);
+        self.publication_incarnation = Some(publication.incarnation);
+        Ok(())
+    }
+
+    fn validate_publication(&self) -> Result<(), ReductError> {
+        match (
+            self.publication_generation,
+            self.publication_incarnation.as_deref(),
+        ) {
+            (None, None) => Ok(()),
+            (Some(0), _) | (_, Some("")) | (None, Some(_)) | (Some(_), None) => {
+                Err(internal_server_error!(
+                    "Block index {:?} has invalid publication state",
+                    self.path_buf
+                ))
+            }
+            (Some(_), Some(_)) => Ok(()),
+        }
+    }
+
+    fn write_publication_crc(crc: &mut Digest, publication: &Publication) {
+        // Legacy indexes omit these bytes entirely. The tag and explicit length
+        // make the extension unambiguous without changing legacy CRCs.
+        crc.write(b"publication\0");
+        crc.write(&publication.generation.to_be_bytes());
+        crc.write(&(publication.incarnation.len() as u64).to_be_bytes());
+        crc.write(publication.incarnation.as_bytes());
+    }
+
     fn insert(&mut self, block: BlockEntry) {
         self.index_info.insert(block.block_id, block);
         self.index.insert(block.block_id);
@@ -373,6 +447,8 @@ mod tests {
                     version: None,
                 }],
                 crc64: 294433432134063049,
+                publication_generation: None,
+                publication_incarnation: None,
             };
             fs::write(&path, block_index_proto.encode_to_vec()).unwrap();
 
@@ -412,6 +488,8 @@ mod tests {
                     version: None,
                 }],
                 crc64: 0,
+                publication_generation: None,
+                publication_incarnation: None,
             };
             fs::write(&path, block_index_proto.encode_to_vec()).unwrap();
 
@@ -491,6 +569,54 @@ mod tests {
             assert!(block_index.is_corrupted(1));
             assert_eq!(block_index.corrupted_block_count(), 1);
             assert_eq!(block_index.corrupted_block_ids(), vec![1]);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn preserves_publication_state_and_includes_it_in_crc() {
+            let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
+            let mut block_index = BlockIndex::new(path.clone());
+            block_index
+                .set_publication(Publication {
+                    generation: 2,
+                    incarnation: "writer-a".to_string(),
+                })
+                .unwrap();
+
+            block_index.save().await.unwrap();
+
+            let index = BlockIndex::try_load(path.clone()).await.unwrap();
+            assert_eq!(
+                index.publication(),
+                Some(Publication {
+                    generation: 2,
+                    incarnation: "writer-a".to_string(),
+                })
+            );
+
+            let mut proto = BlockIndexProto::decode(fs::read(&path).unwrap().as_slice()).unwrap();
+            proto.publication_generation = Some(4);
+            fs::write(&path, proto.encode_to_vec()).unwrap();
+            assert!(BlockIndex::try_load(path).await.is_err());
+        }
+
+        #[rstest]
+        #[case(None, Some("writer"))]
+        #[case(Some(2), None)]
+        #[case(Some(0), Some("writer"))]
+        #[case(Some(2), Some(""))]
+        fn rejects_invalid_publication_state(
+            #[case] generation: Option<u64>,
+            #[case] incarnation: Option<&str>,
+        ) {
+            let proto = BlockIndexProto {
+                blocks: vec![],
+                crc64: 0,
+                publication_generation: generation,
+                publication_incarnation: incarnation.map(str::to_string),
+            };
+
+            assert!(BlockIndex::from_proto(PathBuf::from("blocks.idx"), proto).is_err());
         }
     }
 }

@@ -30,6 +30,7 @@ impl Entry {
         start: Option<u64>,
         stop: Option<u64>,
     ) -> Result<CompressionStats, ReductError> {
+        let _mutation = self.publication.admit().await;
         let blocks = {
             let bm = self.block_manager.read().await?;
             let index = bm.index();
