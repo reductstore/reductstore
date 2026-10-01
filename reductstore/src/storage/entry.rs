@@ -6,6 +6,8 @@ mod compress;
 mod entry_loader;
 pub(crate) mod io;
 mod pattern;
+mod publication;
+mod publication_coordinator;
 mod read_record;
 mod remove_records;
 mod system;
@@ -67,6 +69,7 @@ pub(crate) struct Entry {
     path: PathBuf,
     cfg: Arc<Cfg>,
     io_limiter: InFlightIoLimiter,
+    publication: publication_coordinator::PublicationCoordinator,
 }
 
 #[derive(PartialEq)]
@@ -345,7 +348,9 @@ impl Entry {
         }
 
         if let Some(mut bm) = self.block_manager.try_write() {
-            bm.save_cache_metadata_on_disk().await
+            bm.save_cache_metadata_on_disk().await?;
+            self.publication.try_publish(&self.path).await?;
+            Ok(())
         } else {
             // Avoid blocking writers; we'll try again on the next sync tick
             debug!(
@@ -370,7 +375,9 @@ impl Entry {
         }
 
         let mut bm = self.block_manager.write().await?;
-        bm.save_cache_on_disk().await
+        bm.save_cache_on_disk().await?;
+        drop(bm);
+        self.publication.publish(&self.path).await
     }
 
     pub fn name(&self) -> &str {

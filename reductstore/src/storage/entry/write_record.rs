@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::storage::block_manager::BlockRef;
+use crate::storage::entry::publication_coordinator::MutationAdmission;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
 use async_trait::async_trait;
@@ -15,16 +16,19 @@ use tokio::sync::OwnedSemaphorePermit;
 struct InFlightWriteRecord {
     inner: Box<dyn WriteRecord + Sync + Send>,
     _permit: Option<OwnedSemaphorePermit>,
+    _publication: MutationAdmission,
 }
 
 impl InFlightWriteRecord {
     fn new(
         inner: Box<dyn WriteRecord + Sync + Send>,
         permit: Option<OwnedSemaphorePermit>,
+        publication: MutationAdmission,
     ) -> Self {
         Self {
             inner,
             _permit: permit,
+            _publication: publication,
         }
     }
 }
@@ -66,6 +70,7 @@ impl Entry {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_not_deleting().await?;
+        let publication = self.publication.begin_mutation().await?;
         let permit = self.acquire_writer_slot().await?;
         // Strategy validates labels and can perform pre-write maintenance.
         self.system_behavior.prepare_write(self, &labels).await?;
@@ -151,6 +156,7 @@ impl Entry {
                             return Ok(Box::new(InFlightWriteRecord::new(
                                 Box::new(writer),
                                 permit,
+                                publication,
                             )));
                         };
                     }
@@ -190,7 +196,11 @@ impl Entry {
 
         let writer =
             RecordWriter::try_new(Arc::clone(&self.block_manager), block_ref, time).await?;
-        Ok(Box::new(InFlightWriteRecord::new(Box::new(writer), permit)))
+        Ok(Box::new(InFlightWriteRecord::new(
+            Box::new(writer),
+            permit,
+            publication,
+        )))
     }
 
     async fn prepare_block_for_writing(

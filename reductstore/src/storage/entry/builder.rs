@@ -116,6 +116,7 @@ impl EntryBuilder {
             path,
             cfg,
             io_limiter,
+            publication: super::publication_coordinator::PublicationCoordinator::new(),
         })
     }
 

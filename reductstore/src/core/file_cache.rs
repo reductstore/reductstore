@@ -61,10 +61,10 @@ type BatchId = u64;
 struct BatchRegistry {
     next_id: BatchId,
     active: HashMap<BatchId, ActiveBatch>,
+    path_owners: HashMap<PathBuf, BatchId>,
 }
 
 struct ActiveBatch {
-    scope: PathBuf,
     dirty_files: HashMap<PathBuf, u64>,
     pending_deletes: HashSet<PathBuf>,
     state: BatchState,
@@ -76,10 +76,15 @@ enum BatchState {
     Failed,
 }
 
-/// Coordinates remote mutations below one path prefix.
-pub(crate) struct FileBatch {
+/// Identifies an active batch. A token can be cloned for cooperating writers.
+#[derive(Clone)]
+pub(crate) struct BatchToken {
     id: BatchId,
-    scope: PathBuf,
+}
+
+/// Owns synchronization and completion of one batch.
+pub(crate) struct FileBatch {
+    token: BatchToken,
     cache: Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
     backend: Arc<AsyncRwLock<Backend>>,
     batches: Arc<AsyncRwLock<BatchRegistry>>,
@@ -337,38 +342,25 @@ impl FileCache {
         self.read_only.store(read_only, Ordering::Relaxed);
     }
 
-    /// Starts an exclusive batch for `scope`, waiting for overlapping batches to finish.
-    pub async fn begin_batch(&self, scope: &Path) -> Result<FileBatch, ReductError> {
-        let scope = scope.to_path_buf();
-        loop {
-            let mut batches = self.batches.write().await?;
-            if !batches
-                .active
-                .values()
-                .any(|batch| paths_overlap(&scope, &batch.scope))
-            {
-                let id = batches.next_id;
-                batches.next_id += 1;
-                batches.active.insert(
-                    id,
-                    ActiveBatch {
-                        scope: scope.clone(),
-                        dirty_files: HashMap::new(),
-                        pending_deletes: HashSet::new(),
-                        state: BatchState::Active,
-                    },
-                );
-                return Ok(FileBatch {
-                    id,
-                    scope,
-                    cache: Arc::clone(&self.cache),
-                    backend: Arc::clone(&self.backend),
-                    batches: Arc::clone(&self.batches),
-                });
-            }
-            drop(batches);
-            sleep(Duration::from_millis(10)).await;
-        }
+    /// Starts a batch. Paths are claimed explicitly by batch-aware mutations.
+    pub async fn begin_batch(&self) -> Result<FileBatch, ReductError> {
+        let mut batches = self.batches.write().await?;
+        let id = batches.next_id;
+        batches.next_id += 1;
+        batches.active.insert(
+            id,
+            ActiveBatch {
+                dirty_files: HashMap::new(),
+                pending_deletes: HashSet::new(),
+                state: BatchState::Active,
+            },
+        );
+        Ok(FileBatch {
+            token: BatchToken { id },
+            cache: Arc::clone(&self.cache),
+            backend: Arc::clone(&self.backend),
+            batches: Arc::clone(&self.batches),
+        })
     }
 
     /// Get a file descriptor for reading
@@ -396,6 +388,7 @@ impl FileCache {
         };
 
         let mut lock = file.write_owned().await?;
+        lock.set_batch_owner(self.path_owner(path).await?);
         if pos != SeekFrom::Current(0) {
             lock.seek(pos)?;
         }
@@ -447,13 +440,34 @@ impl FileCache {
         };
 
         let mut lock = file.write_owned().await?;
+        lock.set_batch_owner(self.path_owner(path).await?);
         if pos != SeekFrom::Current(0) {
             lock.seek(pos)?;
         }
 
         lock.access().await?;
-        self.mark_batched_dirty(path).await?;
+        self.mark_owned_dirty(path).await?;
         Ok(lock)
+    }
+
+    /// Writes a file as part of `batch`, claiming its exact path if necessary.
+    pub async fn write_or_create_in_batch(
+        &self,
+        batch: &BatchToken,
+        path: &PathBuf,
+        pos: SeekFrom,
+    ) -> Result<FileGuard, ReductError> {
+        self.claim_path(batch, path).await?;
+        match self.write_or_create(path, pos).await {
+            Ok(mut file) => {
+                file.set_batch_owner(Some(batch.id));
+                Ok(file)
+            }
+            Err(err) => {
+                self.release_claim_if_unused(batch, path).await?;
+                Err(err)
+            }
+        }
     }
 
     /// Removes a file from the file system and the cache.
@@ -480,7 +494,7 @@ impl FileCache {
             return Ok(());
         }
 
-        let deferred = self.defer_batched_delete(path).await?;
+        let deferred = self.defer_owned_delete(path).await?;
         let remove_from_backend = async |path| {
             let backend = self.backend.read().await?.clone();
             backend.remove(path).await?;
@@ -516,6 +530,16 @@ impl FileCache {
         }
 
         Ok(())
+    }
+
+    /// Removes a file as part of `batch`, deferring its remote deletion.
+    pub async fn remove_in_batch(
+        &self,
+        batch: &BatchToken,
+        path: &PathBuf,
+    ) -> Result<(), ReductError> {
+        self.claim_path(batch, path).await?;
+        self.remove(path).await
     }
 
     pub async fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
@@ -567,6 +591,10 @@ impl FileCache {
             .collect::<Vec<PathBuf>>();
 
         for file_path in files_to_remove {
+            // A batch owns publication of this exact path, including its cached descriptor.
+            if Self::is_batched(&self.batches, &file_path).await? {
+                continue;
+            }
             if let Some(file) = cache.remove(&file_path) {
                 let mut lock = file.write_owned().await?;
                 if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
@@ -670,21 +698,19 @@ impl FileCache {
         batches: &Arc<AsyncRwLock<BatchRegistry>>,
         path: &Path,
     ) -> Result<bool, ReductError> {
-        Ok(batches
-            .read()
-            .await?
-            .active
-            .values()
-            .any(|batch| path.starts_with(&batch.scope)))
+        Ok(batches.read().await?.path_owners.contains_key(path))
     }
 
-    async fn mark_batched_dirty(&self, path: &Path) -> Result<(), ReductError> {
+    async fn mark_owned_dirty(&self, path: &Path) -> Result<(), ReductError> {
         let mut batches = self.batches.write().await?;
-        if let Some(batch) = batches
-            .active
-            .values_mut()
-            .find(|batch| path.starts_with(&batch.scope))
-        {
+        if let Some(owner) = batches.path_owners.get(path).copied() {
+            let batch = batches
+                .active
+                .get_mut(&owner)
+                .ok_or(internal_server_error!(
+                    "File {} is owned by an inactive batch",
+                    path.display()
+                ))?;
             let version = batch.dirty_files.get(path).copied().unwrap_or(0) + 1;
             batch.dirty_files.insert(path.to_path_buf(), version);
             batch.pending_deletes.remove(path);
@@ -692,13 +718,16 @@ impl FileCache {
         Ok(())
     }
 
-    async fn defer_batched_delete(&self, path: &Path) -> Result<bool, ReductError> {
+    async fn defer_owned_delete(&self, path: &Path) -> Result<bool, ReductError> {
         let mut batches = self.batches.write().await?;
-        if let Some(batch) = batches
-            .active
-            .values_mut()
-            .find(|batch| path.starts_with(&batch.scope))
-        {
+        if let Some(owner) = batches.path_owners.get(path).copied() {
+            let batch = batches
+                .active
+                .get_mut(&owner)
+                .ok_or(internal_server_error!(
+                    "File {} is owned by an inactive batch",
+                    path.display()
+                ))?;
             batch.dirty_files.remove(path);
             batch.pending_deletes.insert(path.to_path_buf());
             return Ok(true);
@@ -707,26 +736,67 @@ impl FileCache {
     }
 
     async fn reject_batched_operation(&self, path: &Path) -> Result<(), ReductError> {
-        if Self::is_batched(&self.batches, path).await? {
+        let batches = self.batches.read().await?;
+        if batches.path_owners.contains_key(path)
+            || batches
+                .path_owners
+                .keys()
+                .any(|owned_path| owned_path.starts_with(path))
+        {
             return Err(internal_server_error!(
-                "Cannot modify {} because it overlaps an active file batch",
+                "Cannot modify {} because it affects an active file batch",
                 path.display()
             ));
+        }
+        Ok(())
+    }
+
+    async fn claim_path(&self, batch: &BatchToken, path: &Path) -> Result<(), ReductError> {
+        let mut batches = self.batches.write().await?;
+        if !batches.active.contains_key(&batch.id) {
+            return Err(internal_server_error!("File batch is no longer active"));
+        }
+        match batches.path_owners.get(path) {
+            Some(owner) if *owner != batch.id => Err(internal_server_error!(
+                "File {} is owned by another active file batch",
+                path.display()
+            )),
+            _ => {
+                batches.path_owners.insert(path.to_path_buf(), batch.id);
+                Ok(())
+            }
+        }
+    }
+
+    async fn path_owner(&self, path: &Path) -> Result<Option<BatchId>, ReductError> {
+        Ok(self.batches.read().await?.path_owners.get(path).copied())
+    }
+
+    async fn release_claim_if_unused(
+        &self,
+        batch: &BatchToken,
+        path: &Path,
+    ) -> Result<(), ReductError> {
+        let mut batches = self.batches.write().await?;
+        let active = batches
+            .active
+            .get(&batch.id)
+            .ok_or(internal_server_error!("File batch is no longer active"))?;
+        if !active.dirty_files.contains_key(path) && !active.pending_deletes.contains(path) {
+            batches.path_owners.remove(path);
         }
         Ok(())
     }
 }
 
 impl FileBatch {
+    pub fn token(&self) -> BatchToken {
+        self.token.clone()
+    }
+
     /// Synchronizes one file and waits until its remote upload completes.
     pub async fn sync_file(&mut self, path: &Path) -> Result<(), ReductError> {
-        if !path.starts_with(&self.scope) {
-            return Err(internal_server_error!(
-                "File {} is outside batch scope {}",
-                path.display(),
-                self.scope.display()
-            ));
-        }
+        self.validate_path_owner(path).await?;
         let result = self.sync_path(path).await;
         if result.is_err() {
             self.set_state(BatchState::Failed).await?;
@@ -779,19 +849,54 @@ impl FileBatch {
         Ok(BatchSyncResult { uploaded, deleted })
     }
 
-    /// Releases this batch scope after the publication protocol completes.
+    /// Releases owned paths after all pending remote mutations are published.
     pub async fn commit(self) -> Result<(), ReductError> {
-        let mut batches = self.batches.write().await?;
-        let batch = batches
-            .active
-            .get(&self.id)
-            .ok_or(internal_server_error!("File batch is no longer active"))?;
-        if matches!(batch.state, BatchState::Failed) {
+        let paths = {
+            let mut batches = self.batches.write().await?;
+            let batch = batches
+                .active
+                .get(&self.token.id)
+                .ok_or(internal_server_error!("File batch is no longer active"))?;
+            if matches!(batch.state, BatchState::Failed) {
+                return Err(internal_server_error!(
+                    "Cannot commit failed file batch; retry synchronization first"
+                ));
+            }
+            if !batch.dirty_files.is_empty() || !batch.pending_deletes.is_empty() {
+                return Err(internal_server_error!(
+                    "Cannot commit file batch with pending remote mutations"
+                ));
+            }
+            let paths = batches
+                .path_owners
+                .iter()
+                .filter_map(|(path, owner)| (*owner == self.token.id).then(|| path.clone()))
+                .collect::<Vec<_>>();
+            for path in &paths {
+                batches.path_owners.remove(path);
+            }
+            batches.active.remove(&self.token.id);
+            paths
+        };
+        for path in paths {
+            if let Some(file) = self.cache.read().await?.get(&path).cloned() {
+                file.write().await?.set_batch_owner(None);
+            }
+        }
+        Ok(())
+    }
+
+    async fn validate_path_owner(&self, path: &Path) -> Result<(), ReductError> {
+        let batches = self.batches.read().await?;
+        if !batches.active.contains_key(&self.token.id) {
+            return Err(internal_server_error!("File batch is no longer active"));
+        }
+        if batches.path_owners.get(path) != Some(&self.token.id) {
             return Err(internal_server_error!(
-                "Cannot commit failed file batch; retry synchronization first"
+                "File {} is not owned by this file batch",
+                path.display()
             ));
         }
-        batches.active.remove(&self.id);
         Ok(())
     }
 
@@ -802,7 +907,7 @@ impl FileBatch {
         };
         let file = self.cache.read().await?.get(&path.to_path_buf()).cloned();
         if let Some(file) = file {
-            file.write().await?.sync_all().await?;
+            file.write().await?.sync_all_in_batch(self.token.id).await?;
         } else {
             let mut file = self
                 .backend
@@ -814,7 +919,7 @@ impl FileBatch {
                 .open(path)
                 .await?;
             file.flush_local().await?;
-            file.sync_all().await?;
+            file.sync_all_in_batch(self.token.id).await?;
         }
         if let Some(version) = version {
             let mut batches = self.batches.write().await?;
@@ -829,7 +934,7 @@ impl FileBatch {
     fn active_batch<'a>(&self, batches: &'a BatchRegistry) -> Result<&'a ActiveBatch, ReductError> {
         batches
             .active
-            .get(&self.id)
+            .get(&self.token.id)
             .ok_or(internal_server_error!("File batch is no longer active"))
     }
 
@@ -839,7 +944,7 @@ impl FileBatch {
     ) -> Result<&'a mut ActiveBatch, ReductError> {
         batches
             .active
-            .get_mut(&self.id)
+            .get_mut(&self.token.id)
             .ok_or(internal_server_error!("File batch is no longer active"))
     }
 
@@ -848,10 +953,6 @@ impl FileBatch {
         self.active_batch_mut(&mut batches)?.state = state;
         Ok(())
     }
-}
-
-fn paths_overlap(first: &Path, second: &Path) -> bool {
-    first.starts_with(second) || second.starts_with(first)
 }
 
 impl Drop for FileCache {
@@ -989,10 +1090,11 @@ mod tests {
             expect_upload(mock, &file_path, 1);
         });
         let cache = build_cache(backend);
-        let mut batch = cache.begin_batch(&scope).await.unwrap();
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
         {
             let mut file = cache
-                .write_or_create(&file_path, SeekFrom::Start(0))
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
                 .await
                 .unwrap();
             file.write_all(b"index").unwrap();
@@ -1011,6 +1113,23 @@ mod tests {
             .unwrap()
             .is_synced());
 
+        assert_eq!(
+            cache
+                .cache
+                .read()
+                .await
+                .unwrap()
+                .get(&file_path)
+                .unwrap()
+                .write()
+                .await
+                .unwrap()
+                .sync_all()
+                .await
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
         batch.sync_file(&file_path).await.unwrap();
         assert!(cache
             .cache
@@ -1041,9 +1160,10 @@ mod tests {
                 .times(1);
         });
         let cache = build_cache(backend);
-        let mut batch = cache.begin_batch(&scope).await.unwrap();
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
 
-        cache.remove(&file_path).await.unwrap();
+        cache.remove_in_batch(&token, &file_path).await.unwrap();
         assert!(!file_path.exists());
 
         let result = batch.sync_all().await.unwrap();
@@ -1054,19 +1174,37 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn batch_rejects_overlapping_directory_operations(tmp_dir: PathBuf) {
+    async fn batch_rejects_directory_operations_affecting_owned_files(tmp_dir: PathBuf) {
         let scope = tmp_dir.join("entry");
-        let cache = build_cache(build_backend(|_mock| {}));
-        let batch = cache.begin_batch(&scope).await.unwrap();
+        let file_path = scope.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            mock.expect_create_dir_all().returning(|path| {
+                fs::create_dir_all(path)?;
+                Ok(())
+            });
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        drop(
+            cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap(),
+        );
 
         let err = cache.remove_dir(&scope).await.unwrap_err();
         assert_eq!(
             err,
             internal_server_error!(
-                "Cannot modify {} because it overlaps an active file batch",
+                "Cannot modify {} because it affects an active file batch",
                 scope.display()
             )
         );
+        batch.sync_all().await.unwrap();
         batch.commit().await.unwrap();
     }
 
