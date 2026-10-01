@@ -26,6 +26,7 @@ use crate::storage::block_manager::compress::CompressionAlgorithm;
 use crate::storage::block_manager::decompress_cache::{DecompressCache, DecompressedFileType};
 use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
+use crate::storage::entry::publication::PublicationId;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
 use crate::storage::usage::UsageCounters;
 use block_index::BlockIndex;
@@ -63,6 +64,22 @@ pub(in crate::storage) struct BlockManager {
     cfg: Arc<Cfg>,
     usage_counters: Arc<UsageCounters>,
     last_replica_sync: Instant,
+    accepted_publication: ReplicaPublication,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::storage) enum ReplicaPublication {
+    Legacy,
+    Published(PublicationId),
+}
+
+impl ReplicaPublication {
+    pub(in crate::storage) fn id(&self) -> Option<&PublicationId> {
+        match self {
+            Self::Legacy => None,
+            Self::Published(id) => Some(id),
+        }
+    }
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -120,6 +137,7 @@ impl BlockManager {
             cfg,
             usage_counters,
             last_replica_sync: Instant::now(),
+            accepted_publication: ReplicaPublication::Legacy,
         })
     }
 }

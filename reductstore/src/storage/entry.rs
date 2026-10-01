@@ -6,7 +6,7 @@ mod compress;
 mod entry_loader;
 pub(crate) mod io;
 mod pattern;
-mod publication;
+pub(crate) mod publication;
 mod publication_coordinator;
 mod read_record;
 mod remove_records;
@@ -110,34 +110,83 @@ impl Entry {
     }
 
     pub(crate) async fn reload_index_on_replica(&self) -> Result<(), ReductError> {
-        let reload = {
-            let Some(block_manager) = self.block_manager.try_read() else {
-                debug!(
-                    "Skipping replica index reload for {}/{} because block manager is busy",
-                    self.bucket_name, self.name
-                );
+        const RELOAD_ATTEMPTS: usize = 3;
+
+        for attempt in 1..=RELOAD_ATTEMPTS {
+            let reload = {
+                let Some(block_manager) = self.block_manager.try_read() else {
+                    if attempt == RELOAD_ATTEMPTS {
+                        debug!(
+                            "Skipping replica index reload for {}/{} because block manager remained busy",
+                            self.bucket_name, self.name
+                        );
+                        return Ok(());
+                    }
+                    tokio::task::yield_now().await;
+                    continue;
+                };
+
+                block_manager.prepare_replica_index_reload()
+            };
+
+            let Some(reload) = reload else {
                 return Ok(());
             };
 
-            block_manager.prepare_replica_index_reload()
-        };
+            let result = async {
+                let before = publication::load_fresh(&self.path).await?;
+                if matches!(
+                    before,
+                    Some(publication::Publication {
+                        state: publication::PublicationState::Updating,
+                        ..
+                    })
+                ) {
+                    return Err(reduct_base::too_early!("Entry publication is updating"));
+                }
 
-        let Some(reload) = reload else {
-            return Ok(());
-        };
+                if before.as_ref().and_then(publication::Publication::id)
+                    == reload.accepted_publication().id().cloned()
+                {
+                    return Ok(());
+                }
 
-        let updated_index = reload.load_updated_index().await?;
+                let updated_index = reload.load_candidate().await?;
+                let after = publication::load_fresh(&self.path).await?;
+                let publication = publication::validate_window(before, after)?;
+                reload.validate_successor(&publication)?;
 
-        let Some(mut block_manager) = self.block_manager.try_write() else {
-            debug!(
-                "Skipping replica index swap for {}/{} because block manager is busy",
-                self.bucket_name, self.name
-            );
-            return Ok(());
-        };
+                let Some(mut block_manager) = self.block_manager.try_write() else {
+                    return Err(reduct_base::too_early!(
+                        "Block manager is busy while installing replica index"
+                    ));
+                };
 
-        block_manager.apply_replica_index_reload(updated_index);
-        Ok(())
+                block_manager
+                    .apply_replica_index_reload(reload, updated_index, publication)
+                    .await
+            }
+            .await;
+
+            match result {
+                Ok(()) => return Ok(()),
+                Err(err)
+                    if err.status() == reduct_base::error::ErrorCode::TooEarly
+                        && attempt < RELOAD_ATTEMPTS =>
+                {
+                    debug!(
+                        "Retrying replica index reload for {}/{} after transient publication state (attempt {}/{})",
+                        self.bucket_name, self.name, attempt, RELOAD_ATTEMPTS
+                    );
+                    tokio::task::yield_now().await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        Err(reduct_base::too_early!(
+            "Replica index reload did not observe a stable publication"
+        ))
     }
 
     /// Query records for a time range.

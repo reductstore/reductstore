@@ -6,22 +6,29 @@ use crate::storage::proto::{entry_publication, EntryPublication};
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use reduct_base::too_early;
 use std::io::{Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
-pub(super) const PUBLICATION_FILE: &str = ".publication";
+pub(crate) const PUBLICATION_FILE: &str = ".publication";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) enum PublicationState {
+pub(crate) enum PublicationState {
     Updating,
     Ready,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct Publication {
+pub(crate) struct Publication {
     pub(super) incarnation: String,
     pub(super) generation: u64,
     pub(super) state: PublicationState,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PublicationId {
+    pub(crate) incarnation: String,
+    pub(crate) generation: u64,
 }
 
 impl Publication {
@@ -67,6 +74,13 @@ impl Publication {
         .encode_to_vec()
     }
 
+    pub(crate) fn id(&self) -> Option<PublicationId> {
+        (self.state == PublicationState::Ready).then(|| PublicationId {
+            incarnation: self.incarnation.clone(),
+            generation: self.generation,
+        })
+    }
+
     fn decode(bytes: &[u8], path: &Path) -> Result<Self, ReductError> {
         let marker = EntryPublication::decode(bytes).map_err(|err| {
             internal_server_error!("Failed to decode entry publication {:?}: {}", path, err)
@@ -89,6 +103,17 @@ impl Publication {
             }
         };
 
+        let valid_parity = match state {
+            PublicationState::Updating => marker.generation % 2 == 1,
+            PublicationState::Ready => marker.generation % 2 == 0,
+        };
+        if !valid_parity {
+            return Err(internal_server_error!(
+                "Entry publication {:?} has invalid generation parity",
+                path
+            ));
+        }
+
         Ok(Self {
             incarnation: marker.incarnation,
             generation: marker.generation,
@@ -97,7 +122,7 @@ impl Publication {
     }
 }
 
-pub(super) fn path(entry_path: &Path) -> PathBuf {
+pub(crate) fn path(entry_path: &Path) -> PathBuf {
     entry_path.join(PUBLICATION_FILE)
 }
 
@@ -112,6 +137,53 @@ pub(super) async fn load(entry_path: &Path) -> Result<Option<Publication>, Reduc
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
     Publication::decode(&bytes, &path).map(Some)
+}
+
+/// Loads a marker from the backend rather than a potentially stale local copy.
+pub(crate) async fn load_fresh(entry_path: &Path) -> Result<Option<Publication>, ReductError> {
+    let marker_path = path(entry_path);
+    FILE_CACHE.invalidate_local_cache_file(&marker_path).await?;
+    if !FILE_CACHE.try_exists(&marker_path).await? {
+        return Ok(None);
+    }
+
+    let mut file = FILE_CACHE
+        .read(&marker_path, SeekFrom::Start(0))
+        .await
+        .map_err(|err| {
+            too_early!(
+                "Entry publication {:?} disappeared while being read: {}",
+                marker_path,
+                err
+            )
+        })?;
+    let mut bytes = Vec::new();
+    file.read_to_end(&mut bytes)?;
+    Publication::decode(&bytes, &marker_path).map(Some)
+}
+
+/// Validates that no publication occurred while a replica loaded an index.
+pub(in crate::storage) fn validate_window(
+    before: Option<Publication>,
+    after: Option<Publication>,
+) -> Result<crate::storage::block_manager::ReplicaPublication, ReductError> {
+    match (before, after) {
+        (None, None) => Ok(crate::storage::block_manager::ReplicaPublication::Legacy),
+        (Some(before), Some(after))
+            if before.state == PublicationState::Ready
+                && after.state == PublicationState::Ready
+                && before.id() == after.id() =>
+        {
+            Ok(
+                crate::storage::block_manager::ReplicaPublication::Published(
+                    before.id().expect("ready publication has an identity"),
+                ),
+            )
+        }
+        _ => Err(too_early!(
+            "Entry publication changed while reloading replica index"
+        )),
+    }
 }
 
 pub(super) async fn write_local(
