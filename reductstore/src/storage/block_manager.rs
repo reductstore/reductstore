@@ -35,6 +35,7 @@ use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use reduct_base::not_found;
 use reduct_base::too_early;
 use std::fs::OpenOptions;
 use std::io::{Read, SeekFrom, Write};

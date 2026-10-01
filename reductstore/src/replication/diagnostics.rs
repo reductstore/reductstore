@@ -118,6 +118,7 @@ impl DiagnosticsCounter {
 mod tests {
     use super::*;
     use reduct_base::error::ReductError;
+    use reduct_base::{bad_request, internal_server_error};
     use rstest::{fixture, rstest};
     use std::collections::HashMap;
     use std::thread::sleep;
@@ -325,11 +326,8 @@ mod tests {
 
         for i in 0..DEFAULT_FRAME_COUNT / 2 {
             sleep(Duration::from_millis(FRAME_INTERVAL_MS * 2));
-            counter.count(
-                Err(ReductError::internal_server_error(&format!("test-{}", i))),
-                1,
-            );
-            counter.count(Err(ReductError::bad_request(&format!("test-{}", i))), 1);
+            counter.count(Err(internal_server_error!("test-{}", i)), 1);
+            counter.count(Err(bad_request!("test-{}", i)), 1);
         }
 
         assert_eq!(

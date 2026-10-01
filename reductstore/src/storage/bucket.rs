@@ -32,7 +32,7 @@ use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::status::ResourceStatus;
-use reduct_base::{conflict, forbidden, Labels};
+use reduct_base::{conflict, forbidden, not_found, Labels};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -123,12 +123,9 @@ impl Bucket {
     pub async fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
         self.reload().await?;
         let entries = self.entries.read().await?;
-        let entry = entries.get(name).ok_or_else(|| {
-            ReductError::not_found(&format!(
-                "Entry '{}' not found in bucket '{}'",
-                name, self.name
-            ))
-        })?;
+        let entry = entries
+            .get(name)
+            .ok_or_else(|| not_found!("Entry '{}' not found in bucket '{}'", name, self.name))?;
         entry.ensure_not_deleting().await?;
         Ok(entry.clone().into())
     }
