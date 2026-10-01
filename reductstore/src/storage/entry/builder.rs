@@ -116,7 +116,7 @@ impl EntryBuilder {
             path,
             cfg,
             io_limiter,
-            publication: super::publication_coordinator::PublicationCoordinator::new(),
+            publication: Arc::new(super::publication_coordinator::PublicationCoordinator::new()),
         })
     }
 

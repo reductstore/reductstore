@@ -110,6 +110,8 @@ pub(in crate::storage) trait Wal {
 
     fn set_batch_token(&mut self, token: BatchToken);
 
+    fn clear_batch_token(&mut self);
+
     /// Read all WAL entries for a block
     ///
     /// # Arguments
@@ -192,6 +194,10 @@ const STOP_MARKER: u8 = 255;
 impl Wal for WalImpl {
     fn set_batch_token(&mut self, token: BatchToken) {
         self.batch_token = Some(token);
+    }
+
+    fn clear_batch_token(&mut self) {
+        self.batch_token = None;
     }
 
     async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {

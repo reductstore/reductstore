@@ -149,6 +149,12 @@ impl BlockManager {
         self.mutation_batch = Some(token);
     }
 
+    pub(in crate::storage) fn clear_mutation_batch(&mut self) {
+        self.block_index.clear_batch_token();
+        self.wal.clear_batch_token();
+        self.mutation_batch = None;
+    }
+
     pub(super) async fn write_or_create_mutation(
         &self,
         path: &PathBuf,

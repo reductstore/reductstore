@@ -69,7 +69,7 @@ pub(crate) struct Entry {
     path: PathBuf,
     cfg: Arc<Cfg>,
     io_limiter: InFlightIoLimiter,
-    publication: publication_coordinator::PublicationCoordinator,
+    publication: Arc<publication_coordinator::PublicationCoordinator>,
 }
 
 #[derive(PartialEq)]
@@ -437,7 +437,9 @@ impl Entry {
             bm.set_mutation_batch(publication.token.clone());
             bm.save_cache_on_disk().await?;
         }
-        self.publication.publish(&self.path).await
+        self.publication.publish(&self.path).await?;
+        self.block_manager.write().await?.clear_mutation_batch();
+        Ok(())
     }
 
     pub fn name(&self) -> &str {

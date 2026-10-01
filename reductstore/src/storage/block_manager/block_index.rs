@@ -90,6 +90,10 @@ impl BlockIndex {
         self.batch_token = Some(token);
     }
 
+    pub(crate) fn clear_batch_token(&mut self) {
+        self.batch_token = None;
+    }
+
     /// Insert  or update a new block entry into the index.
     ///
     /// # Arguments

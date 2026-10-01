@@ -10,7 +10,7 @@ use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{Seek, SeekFrom};
+use std::io::{ErrorKind, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -836,7 +836,11 @@ impl FileBatch {
         let backend = self.backend.read().await?.clone();
         let mut deleted = 0;
         for path in &deletes {
-            backend.remove(path).await?;
+            if let Err(err) = backend.remove(path).await {
+                if err.kind() != ErrorKind::NotFound {
+                    return Err(err.into());
+                }
+            }
             let mut batches = self.batches.write().await?;
             self.active_batch_mut(&mut batches)?
                 .pending_deletes
