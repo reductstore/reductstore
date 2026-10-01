@@ -8,9 +8,10 @@ use crate::core::sync::{AsyncRwLock, RwLock};
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{Seek, SeekFrom};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -54,6 +55,41 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
 pub(crate) type FileLock = Arc<AsyncRwLock<File>>;
 pub(crate) type FileGuard = OwnedRwLockWriteGuard<File>;
 
+type BatchId = u64;
+
+#[derive(Default)]
+struct BatchRegistry {
+    next_id: BatchId,
+    active: HashMap<BatchId, ActiveBatch>,
+}
+
+struct ActiveBatch {
+    scope: PathBuf,
+    dirty_files: HashMap<PathBuf, u64>,
+    pending_deletes: HashSet<PathBuf>,
+    state: BatchState,
+}
+
+#[derive(Clone, Copy)]
+enum BatchState {
+    Active,
+    Failed,
+}
+
+/// Coordinates remote mutations below one path prefix.
+pub(crate) struct FileBatch {
+    id: BatchId,
+    scope: PathBuf,
+    cache: Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
+    backend: Arc<AsyncRwLock<Backend>>,
+    batches: Arc<AsyncRwLock<BatchRegistry>>,
+}
+
+pub(crate) struct BatchSyncResult {
+    pub uploaded: usize,
+    pub deleted: usize,
+}
+
 /// A cache to keep file descriptors open
 ///
 /// This optimization is needed for network file systems because opening
@@ -64,6 +100,7 @@ pub(crate) struct FileCache {
     cache: Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
     stop_sync_worker: Arc<AtomicBool>,
     backend: Arc<AsyncRwLock<Backend>>,
+    batches: Arc<AsyncRwLock<BatchRegistry>>,
     sync_interval: Arc<RwLock<Duration>>,
     read_only: Arc<AtomicBool>,
 }
@@ -85,6 +122,8 @@ impl FileCache {
         let stop_sync_worker_clone = Arc::clone(&stop_sync_worker);
         let backpack = Arc::new(AsyncRwLock::new(Backend::default()));
         let backpack_clone = Arc::clone(&backpack);
+        let batches = Arc::new(AsyncRwLock::new(BatchRegistry::default()));
+        let batches_clone = Arc::clone(&batches);
         let sync_interval = Arc::new(RwLock::new(sync_interval));
         let sync_interval_clone = Some(Arc::clone(&sync_interval));
         let read_only = Arc::new(AtomicBool::new(false));
@@ -99,6 +138,7 @@ impl FileCache {
                     &read_only_clone,
                     &backpack_clone,
                     &cache,
+                    &batches_clone,
                     &sync_interval_clone,
                 )
                 .await
@@ -115,6 +155,7 @@ impl FileCache {
             cache: cache_clone,
             stop_sync_worker: stop_sync_worker_clone,
             backend: backpack,
+            batches,
             sync_interval,
             read_only,
         }
@@ -124,6 +165,7 @@ impl FileCache {
         read_only: &Arc<AtomicBool>,
         backend: &Arc<AsyncRwLock<Backend>>,
         cache: &Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
+        batches: &Arc<AsyncRwLock<BatchRegistry>>,
         sync_interval: &Option<Arc<RwLock<Duration>>>,
     ) -> Result<(), ReductError> {
         if read_only.load(Ordering::Relaxed) {
@@ -140,6 +182,9 @@ impl FileCache {
             .invalidate_locally_cached_files()
             .await;
         for path in invalidated_files {
+            if Self::is_batched(batches, &path).await? {
+                continue;
+            }
             let mut cache = cache.write().await?;
             if let Some(file) = cache.remove(&path) {
                 if let Err(err) = file.write_owned().await?.sync_all().await {
@@ -173,7 +218,9 @@ impl FileCache {
                     continue;
                 }
 
-                files_to_sync.push((path.clone(), file.clone(), file_lock.last_synced()));
+                if !Self::is_batched(batches, path).await? {
+                    files_to_sync.push((path.clone(), file.clone(), file_lock.last_synced()));
+                }
             }
         }
 
@@ -257,10 +304,12 @@ impl FileCache {
             if let Some(mut lock) = file.try_write_owned() {
                 discarded_count += 1;
                 if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
-                    lock.sync_all().await.unwrap_or_else(|err| {
-                        debug!("Failed to sync discarded file {:?}: {}", path, err);
-                    });
-                    synced_count += 1;
+                    if !Self::is_batched(&self.batches, &path).await? {
+                        lock.sync_all().await.unwrap_or_else(|err| {
+                            debug!("Failed to sync discarded file {:?}: {}", path, err);
+                        });
+                        synced_count += 1;
+                    }
                 }
             } else {
                 // return the file to the cache if it is still in use
@@ -286,6 +335,40 @@ impl FileCache {
     /// Set read-only mode
     pub fn set_read_only(&self, read_only: bool) {
         self.read_only.store(read_only, Ordering::Relaxed);
+    }
+
+    /// Starts an exclusive batch for `scope`, waiting for overlapping batches to finish.
+    pub async fn begin_batch(&self, scope: &Path) -> Result<FileBatch, ReductError> {
+        let scope = scope.to_path_buf();
+        loop {
+            let mut batches = self.batches.write().await?;
+            if !batches
+                .active
+                .values()
+                .any(|batch| paths_overlap(&scope, &batch.scope))
+            {
+                let id = batches.next_id;
+                batches.next_id += 1;
+                batches.active.insert(
+                    id,
+                    ActiveBatch {
+                        scope: scope.clone(),
+                        dirty_files: HashMap::new(),
+                        pending_deletes: HashSet::new(),
+                        state: BatchState::Active,
+                    },
+                );
+                return Ok(FileBatch {
+                    id,
+                    scope,
+                    cache: Arc::clone(&self.cache),
+                    backend: Arc::clone(&self.backend),
+                    batches: Arc::clone(&self.batches),
+                });
+            }
+            drop(batches);
+            sleep(Duration::from_millis(10)).await;
+        }
     }
 
     /// Get a file descriptor for reading
@@ -369,6 +452,7 @@ impl FileCache {
         }
 
         lock.access().await?;
+        self.mark_batched_dirty(path).await?;
         Ok(lock)
     }
 
@@ -396,6 +480,7 @@ impl FileCache {
             return Ok(());
         }
 
+        let deferred = self.defer_batched_delete(path).await?;
         let remove_from_backend = async |path| {
             let backend = self.backend.read().await?.clone();
             backend.remove(path).await?;
@@ -409,7 +494,11 @@ impl FileCache {
             match file.write().await {
                 Ok(_) => {
                     self.cache.write().await?.remove(path);
-                    remove_from_backend(path).await?;
+                    if deferred {
+                        tokio::fs::remove_file(path).await?;
+                    } else {
+                        remove_from_backend(path).await?;
+                    }
                 }
                 Err(_) => {
                     return Err(internal_server_error!(
@@ -419,7 +508,11 @@ impl FileCache {
                 }
             }
         } else {
-            remove_from_backend(path).await?;
+            if deferred {
+                tokio::fs::remove_file(path).await?;
+            } else {
+                remove_from_backend(path).await?;
+            }
         }
 
         Ok(())
@@ -429,6 +522,7 @@ impl FileCache {
         if self.read_only.load(Ordering::Relaxed) {
             return Ok(());
         }
+        self.reject_batched_operation(path).await?;
 
         let mut cache = self.cache.write().await?;
         self.discard_recursive_with_locked_cache(path, &mut cache)
@@ -509,6 +603,8 @@ impl FileCache {
         if self.read_only.load(Ordering::Relaxed) {
             return Ok(());
         }
+        self.reject_batched_operation(old_path).await?;
+        self.reject_batched_operation(new_path).await?;
 
         // important to keep cache preventing race conditions
         let mut cache = self.cache.write().await?;
@@ -532,7 +628,14 @@ impl FileCache {
     }
 
     pub async fn force_sync_all(&self) -> Result<(), ReductError> {
-        Self::sync_rw_and_unused_files(&self.read_only, &self.backend, &self.cache, &None).await
+        Self::sync_rw_and_unused_files(
+            &self.read_only,
+            &self.backend,
+            &self.cache,
+            &self.batches,
+            &None,
+        )
+        .await
     }
 
     pub async fn create_dir_all(&self, path: &PathBuf) -> Result<(), ReductError> {
@@ -562,6 +665,193 @@ impl FileCache {
     pub fn stop_sync_worker(&self) {
         self.stop_sync_worker.store(true, Ordering::Relaxed);
     }
+
+    async fn is_batched(
+        batches: &Arc<AsyncRwLock<BatchRegistry>>,
+        path: &Path,
+    ) -> Result<bool, ReductError> {
+        Ok(batches
+            .read()
+            .await?
+            .active
+            .values()
+            .any(|batch| path.starts_with(&batch.scope)))
+    }
+
+    async fn mark_batched_dirty(&self, path: &Path) -> Result<(), ReductError> {
+        let mut batches = self.batches.write().await?;
+        if let Some(batch) = batches
+            .active
+            .values_mut()
+            .find(|batch| path.starts_with(&batch.scope))
+        {
+            let version = batch.dirty_files.get(path).copied().unwrap_or(0) + 1;
+            batch.dirty_files.insert(path.to_path_buf(), version);
+            batch.pending_deletes.remove(path);
+        }
+        Ok(())
+    }
+
+    async fn defer_batched_delete(&self, path: &Path) -> Result<bool, ReductError> {
+        let mut batches = self.batches.write().await?;
+        if let Some(batch) = batches
+            .active
+            .values_mut()
+            .find(|batch| path.starts_with(&batch.scope))
+        {
+            batch.dirty_files.remove(path);
+            batch.pending_deletes.insert(path.to_path_buf());
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn reject_batched_operation(&self, path: &Path) -> Result<(), ReductError> {
+        if Self::is_batched(&self.batches, path).await? {
+            return Err(internal_server_error!(
+                "Cannot modify {} because it overlaps an active file batch",
+                path.display()
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl FileBatch {
+    /// Synchronizes one file and waits until its remote upload completes.
+    pub async fn sync_file(&mut self, path: &Path) -> Result<(), ReductError> {
+        if !path.starts_with(&self.scope) {
+            return Err(internal_server_error!(
+                "File {} is outside batch scope {}",
+                path.display(),
+                self.scope.display()
+            ));
+        }
+        let result = self.sync_path(path).await;
+        if result.is_err() {
+            self.set_state(BatchState::Failed).await?;
+        }
+        result
+    }
+
+    /// Synchronizes every pending upload and deferred delete in this batch.
+    pub async fn sync_all(&mut self) -> Result<BatchSyncResult, ReductError> {
+        let result = self.sync_all_inner().await;
+        if result.is_err() {
+            self.set_state(BatchState::Failed).await?;
+        }
+        result
+    }
+
+    async fn sync_all_inner(&mut self) -> Result<BatchSyncResult, ReductError> {
+        let (files, deletes) = {
+            let batches = self.batches.read().await?;
+            let batch = self.active_batch(&batches)?;
+            (
+                batch
+                    .dirty_files
+                    .iter()
+                    .map(|(path, version)| (path.clone(), *version))
+                    .collect::<Vec<_>>(),
+                batch.pending_deletes.iter().cloned().collect::<Vec<_>>(),
+            )
+        };
+
+        let mut uploaded = 0;
+        for (path, _) in &files {
+            self.sync_path(path).await?;
+            uploaded += 1;
+        }
+
+        let backend = self.backend.read().await?.clone();
+        let mut deleted = 0;
+        for path in &deletes {
+            backend.remove(path).await?;
+            let mut batches = self.batches.write().await?;
+            self.active_batch_mut(&mut batches)?
+                .pending_deletes
+                .remove(path);
+            deleted += 1;
+        }
+
+        let mut batches = self.batches.write().await?;
+        self.active_batch_mut(&mut batches)?.state = BatchState::Active;
+        Ok(BatchSyncResult { uploaded, deleted })
+    }
+
+    /// Releases this batch scope after the publication protocol completes.
+    pub async fn commit(self) -> Result<(), ReductError> {
+        let mut batches = self.batches.write().await?;
+        let batch = batches
+            .active
+            .get(&self.id)
+            .ok_or(internal_server_error!("File batch is no longer active"))?;
+        if matches!(batch.state, BatchState::Failed) {
+            return Err(internal_server_error!(
+                "Cannot commit failed file batch; retry synchronization first"
+            ));
+        }
+        batches.active.remove(&self.id);
+        Ok(())
+    }
+
+    async fn sync_path(&mut self, path: &Path) -> Result<(), ReductError> {
+        let version = {
+            let batches = self.batches.read().await?;
+            self.active_batch(&batches)?.dirty_files.get(path).copied()
+        };
+        let file = self.cache.read().await?.get(&path.to_path_buf()).cloned();
+        if let Some(file) = file {
+            file.write().await?.sync_all().await?;
+        } else {
+            let mut file = self
+                .backend
+                .read()
+                .await?
+                .open_options()
+                .write(true)
+                .read(true)
+                .open(path)
+                .await?;
+            file.flush_local().await?;
+            file.sync_all().await?;
+        }
+        if let Some(version) = version {
+            let mut batches = self.batches.write().await?;
+            let batch = self.active_batch_mut(&mut batches)?;
+            if batch.dirty_files.get(path) == Some(&version) {
+                batch.dirty_files.remove(path);
+            }
+        }
+        Ok(())
+    }
+
+    fn active_batch<'a>(&self, batches: &'a BatchRegistry) -> Result<&'a ActiveBatch, ReductError> {
+        batches
+            .active
+            .get(&self.id)
+            .ok_or(internal_server_error!("File batch is no longer active"))
+    }
+
+    fn active_batch_mut<'a>(
+        &self,
+        batches: &'a mut BatchRegistry,
+    ) -> Result<&'a mut ActiveBatch, ReductError> {
+        batches
+            .active
+            .get_mut(&self.id)
+            .ok_or(internal_server_error!("File batch is no longer active"))
+    }
+
+    async fn set_state(&self, state: BatchState) -> Result<(), ReductError> {
+        let mut batches = self.batches.write().await?;
+        self.active_batch_mut(&mut batches)?.state = state;
+        Ok(())
+    }
+}
+
+fn paths_overlap(first: &Path, second: &Path) -> bool {
+    first.starts_with(second) || second.starts_with(first)
 }
 
 impl Drop for FileCache {
@@ -678,6 +968,106 @@ mod tests {
         });
         cache.stop_sync_worker.store(true, Ordering::Relaxed);
         cache
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_defers_background_sync_until_explicitly_published(tmp_dir: PathBuf) {
+        let scope = tmp_dir.join("entry");
+        let file_path = scope.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            mock.expect_create_dir_all().returning(|path| {
+                fs::create_dir_all(path)?;
+                Ok(())
+            });
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            mock.expect_invalidate_locally_cached_files()
+                .returning(Vec::new)
+                .times(1);
+            expect_upload(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch(&scope).await.unwrap();
+        {
+            let mut file = cache
+                .write_or_create(&file_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            file.write_all(b"index").unwrap();
+        }
+
+        cache.force_sync_all().await.unwrap();
+        assert!(!cache
+            .cache
+            .read()
+            .await
+            .unwrap()
+            .get(&file_path)
+            .unwrap()
+            .read()
+            .await
+            .unwrap()
+            .is_synced());
+
+        batch.sync_file(&file_path).await.unwrap();
+        assert!(cache
+            .cache
+            .read()
+            .await
+            .unwrap()
+            .get(&file_path)
+            .unwrap()
+            .read()
+            .await
+            .unwrap()
+            .is_synced());
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_defers_remote_delete_until_sync_all(tmp_dir: PathBuf) {
+        let scope = tmp_dir.join("entry");
+        let file_path = scope.join("old.blk");
+        fs::create_dir_all(&scope).unwrap();
+        fs::write(&file_path, b"old").unwrap();
+        let backend = build_backend(|mock| {
+            let expected = file_path.clone();
+            mock.expect_remove()
+                .withf(move |path| path == expected.as_path())
+                .returning(|_| Ok(()))
+                .times(1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch(&scope).await.unwrap();
+
+        cache.remove(&file_path).await.unwrap();
+        assert!(!file_path.exists());
+
+        let result = batch.sync_all().await.unwrap();
+        assert_eq!(result.uploaded, 0);
+        assert_eq!(result.deleted, 1);
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_rejects_overlapping_directory_operations(tmp_dir: PathBuf) {
+        let scope = tmp_dir.join("entry");
+        let cache = build_cache(build_backend(|_mock| {}));
+        let batch = cache.begin_batch(&scope).await.unwrap();
+
+        let err = cache.remove_dir(&scope).await.unwrap_err();
+        assert_eq!(
+            err,
+            internal_server_error!(
+                "Cannot modify {} because it overlaps an active file batch",
+                scope.display()
+            )
+        );
+        batch.commit().await.unwrap();
     }
 
     #[rstest]
@@ -1227,6 +1617,7 @@ mod tests {
                 &cache.read_only,
                 &cache.backend,
                 &cache.cache,
+                &cache.batches,
                 &sync_interval,
             )
             .await
@@ -1272,6 +1663,7 @@ mod tests {
                 &cache.read_only,
                 &cache.backend,
                 &cache.cache,
+                &cache.batches,
                 &sync_interval,
             )
             .await
@@ -1342,6 +1734,7 @@ mod tests {
                 &cache.read_only,
                 &cache.backend,
                 &cache.cache,
+                &cache.batches,
                 &sync_interval,
             )
             .await
