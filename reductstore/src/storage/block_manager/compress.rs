@@ -109,7 +109,6 @@ impl BlockManager {
         })?;
         block.compression = Some(i32::from(algorithm));
         self.block_index.save().await?;
-        self.block_index.sync_all().await?;
 
         let data_path = self.path_to_data(block_id);
         let desc_path = self.path_to_desc(block_id);
@@ -131,7 +130,10 @@ impl BlockManager {
         let data_path = self.path_to_data(block_id);
         let desc_path = self.path_to_desc(block_id);
 
-        if let Err(err) = decompress_file_zstd(&compressed_data_path, &data_path).await {
+        if let Err(err) = self
+            .decompress_file_zstd(&compressed_data_path, &data_path)
+            .await
+        {
             if let Err(mark_err) = self.mark_block_corrupted(block_id).await {
                 log::error!(
                     "Failed to mark block {}/{}/{} as corrupted after decompression error: {}",
@@ -143,7 +145,10 @@ impl BlockManager {
             }
             return Err(err);
         }
-        if let Err(err) = decompress_file_zstd(&compressed_desc_path, &desc_path).await {
+        if let Err(err) = self
+            .decompress_file_zstd(&compressed_desc_path, &desc_path)
+            .await
+        {
             if let Err(mark_err) = self.mark_block_corrupted(block_id).await {
                 log::error!(
                     "Failed to mark block {}/{}/{} as corrupted after decompression error: {}",
@@ -156,8 +161,8 @@ impl BlockManager {
             return Err(err);
         }
 
-        FILE_CACHE.remove(&compressed_data_path).await?;
-        FILE_CACHE.remove(&compressed_desc_path).await?;
+        self.remove_mutation(&compressed_data_path).await?;
+        self.remove_mutation(&compressed_desc_path).await?;
         FILE_CACHE.discard_recursive(&compressed_data_path).await?;
         FILE_CACHE.discard_recursive(&compressed_desc_path).await?;
 
@@ -262,16 +267,14 @@ impl BlockManager {
         {
             // we need to sync files after rename,
             // which doesn't work for S3 storage
-            let mut file = FILE_CACHE
-                .write_or_create(&compressed_data_path, SeekFrom::Start(0))
+            let mut file = self
+                .write_or_create_mutation(&compressed_data_path, SeekFrom::Start(0))
                 .await?;
             file.flush_local().await?;
-            file.sync_all().await?;
-            let mut file = FILE_CACHE
-                .write_or_create(&compressed_desc_path, SeekFrom::Start(0))
+            let mut file = self
+                .write_or_create_mutation(&compressed_desc_path, SeekFrom::Start(0))
                 .await?;
             file.flush_local().await?;
-            file.sync_all().await?;
         }
 
         let compressed_data_size = tokio::fs::metadata(&compressed_data_path)
@@ -296,6 +299,35 @@ impl BlockManager {
             .len();
 
         Ok((compressed_data_size, compressed_desc_size))
+    }
+
+    async fn decompress_file_zstd(
+        &self,
+        compressed_path: &PathBuf,
+        output_path: &PathBuf,
+    ) -> Result<(), ReductError> {
+        let mut compressed = vec![];
+        {
+            let mut file = FILE_CACHE.read(compressed_path, SeekFrom::Start(0)).await?;
+            file.read_to_end(&mut compressed).map_err(|err| {
+                internal_server_error!(
+                    "Failed to read compressed file {:?}: {}",
+                    compressed_path,
+                    err
+                )
+            })?;
+        }
+
+        let decompressed = zstd::decode_all(compressed.as_slice()).map_err(|err| {
+            internal_server_error!("Failed to decompress file {:?}: {}", compressed_path, err)
+        })?;
+
+        let mut out = self
+            .write_or_create_mutation(output_path, SeekFrom::Start(0))
+            .await?;
+        out.write_all(&decompressed)?;
+        out.flush_local().await?;
+        Ok(())
     }
 }
 
@@ -356,36 +388,29 @@ async fn compress_file_zstd(
     Ok(())
 }
 
+fn cleanup_tmp(path: &Path) {
+    let _ = std::fs::remove_file(path);
+}
+
+#[cfg(test)]
 async fn decompress_file_zstd(
     compressed_path: &PathBuf,
     output_path: &PathBuf,
 ) -> Result<(), ReductError> {
     let mut compressed = vec![];
-    {
-        let mut file = FILE_CACHE.read(compressed_path, SeekFrom::Start(0)).await?;
-        file.read_to_end(&mut compressed).map_err(|err| {
-            internal_server_error!(
-                "Failed to read compressed file {:?}: {}",
-                compressed_path,
-                err
-            )
-        })?;
-    }
-
+    FILE_CACHE
+        .read(compressed_path, SeekFrom::Start(0))
+        .await?
+        .read_to_end(&mut compressed)?;
     let decompressed = zstd::decode_all(compressed.as_slice()).map_err(|err| {
         internal_server_error!("Failed to decompress file {:?}: {}", compressed_path, err)
     })?;
-
-    let mut out = FILE_CACHE
+    let mut output = FILE_CACHE
         .write_or_create(output_path, SeekFrom::Start(0))
         .await?;
-    out.write_all(&decompressed)?;
-    out.sync_all().await?;
+    output.write_all(&decompressed)?;
+    output.flush_local().await?;
     Ok(())
-}
-
-fn cleanup_tmp(path: &Path) {
-    let _ = std::fs::remove_file(path);
 }
 
 #[cfg(test)]

@@ -18,7 +18,7 @@ pub(in crate::storage) mod wal;
 
 use crate::backend::BackendType;
 use crate::cfg::{Cfg, InstanceRole};
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::{BatchToken, FILE_CACHE};
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
@@ -65,6 +65,7 @@ pub(in crate::storage) struct BlockManager {
     usage_counters: Arc<UsageCounters>,
     last_replica_sync: Instant,
     accepted_publication: ReplicaPublication,
+    mutation_batch: Option<BatchToken>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -138,7 +139,32 @@ impl BlockManager {
             usage_counters,
             last_replica_sync: Instant::now(),
             accepted_publication: ReplicaPublication::Legacy,
+            mutation_batch: None,
         })
+    }
+
+    pub(in crate::storage) fn set_mutation_batch(&mut self, token: BatchToken) {
+        self.block_index.set_batch_token(token.clone());
+        self.wal.set_batch_token(token.clone());
+        self.mutation_batch = Some(token);
+    }
+
+    pub(super) async fn write_or_create_mutation(
+        &self,
+        path: &PathBuf,
+        pos: SeekFrom,
+    ) -> Result<crate::core::file_cache::FileGuard, ReductError> {
+        match &self.mutation_batch {
+            Some(token) => FILE_CACHE.write_or_create_in_batch(token, path, pos).await,
+            None => FILE_CACHE.write_or_create(path, pos).await,
+        }
+    }
+
+    pub(super) async fn remove_mutation(&self, path: &PathBuf) -> Result<(), ReductError> {
+        match &self.mutation_batch {
+            Some(token) => FILE_CACHE.remove_in_batch(token, path).await,
+            None => FILE_CACHE.remove(path).await,
+        }
     }
 }
 

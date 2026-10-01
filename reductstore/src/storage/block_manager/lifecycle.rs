@@ -13,8 +13,8 @@ impl BlockManager {
 
         // create a block with data
         {
-            let mut file = FILE_CACHE
-                .write_or_create(&self.path_to_data(block_id), SeekFrom::Start(0))
+            let mut file = self
+                .write_or_create_mutation(&self.path_to_data(block_id), SeekFrom::Start(0))
                 .await?;
 
             if self.cfg.backend_config.backend_type == BackendType::Filesystem {
@@ -54,53 +54,17 @@ impl BlockManager {
 
         {
             // resize imminently for better testing.
-            let mut data_block = FILE_CACHE
-                .write_or_create(&data_path, SeekFrom::Current(0))
+            let mut data_block = self
+                .write_or_create_mutation(&data_path, SeekFrom::Current(0))
                 .await?;
             data_block.set_len(block_size)?;
         }
 
         self.save_meta_on_disk(block.clone()).await?;
 
-        let sync_block = async move {
-            /* sync descriptor and data */
-            {
-                let mut data_block = FILE_CACHE
-                    .write_or_create(&data_path, SeekFrom::Current(0))
-                    .await?;
-                data_block.sync_all().await?;
-            }
-
-            {
-                let mut descr_block = FILE_CACHE
-                    .write_or_create(&desc_path, SeekFrom::Current(0))
-                    .await?;
-                descr_block.sync_all().await?;
-            }
-
-            {
-                let mut descr_block = FILE_CACHE
-                    .write_or_create(&desc_path, SeekFrom::Current(0))
-                    .await?;
-                descr_block.sync_all().await?;
-            }
-
-            {
-                let mut index_file = FILE_CACHE
-                    .write_or_create(&index_path, SeekFrom::Current(0))
-                    .await?;
-                index_file.sync_all().await?;
-            }
-
-            Ok::<(), ReductError>(())
-        };
-
-        tokio::spawn(async move {
-            // spawn to avoid blocking entry
-            if let Err(err) = sync_block.await {
-                error!("{}", err)
-            }
-        });
+        // Publication batches own remote synchronization. Do not bypass their
+        // ordering by synchronizing individual files here.
+        let _ = (desc_path, index_path);
 
         Ok(())
     }
@@ -122,7 +86,7 @@ impl BlockManager {
         for path in all_block_file_paths(&self.path, block_id) {
             if FILE_CACHE.try_exists(&path).await? {
                 // The block may still exist only in WAL during recovery.
-                FILE_CACHE.remove(&path).await?;
+                self.remove_mutation(&path).await?;
             }
         }
 

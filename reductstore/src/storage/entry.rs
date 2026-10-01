@@ -328,6 +328,7 @@ impl Entry {
             return Ok(());
         }
 
+        let publication = self.publication.begin_mutation().await?;
         let block_ids = {
             let block_manager = self.block_manager.read().await?;
             Ok::<BTreeSet<u64>, ReductError>(block_manager.index().tree().clone())
@@ -335,6 +336,7 @@ impl Entry {
 
         for block_id in block_ids? {
             let mut block_manager = self.block_manager.write().await?;
+            block_manager.set_mutation_batch(publication.token.clone());
             if let Err(err) = block_manager.remove_block(block_id).await {
                 if !FILE_CACHE.try_exists(&self.path).await? {
                     return Ok(());
@@ -357,6 +359,7 @@ impl Entry {
     ///
     /// HTTTPError - The error if any.
     pub async fn try_remove_oldest_block(&self) -> Result<(), ReductError> {
+        let publication = self.publication.begin_mutation().await?;
         let bm = self.block_manager.read().await?;
         let index_tree = bm.index().tree();
         if index_tree.is_empty() {
@@ -377,6 +380,7 @@ impl Entry {
             }
         };
 
+        bm.set_mutation_batch(publication.token.clone());
         bm.remove_block(oldest_block_id).await?;
         debug!(
             "Removing the oldest block {}.blk",
@@ -396,11 +400,15 @@ impl Entry {
             return Ok(());
         }
 
+        let publication = self.publication.begin_mutation().await?;
         if let Some(mut bm) = self.block_manager.try_write() {
+            bm.set_mutation_batch(publication.token.clone());
             bm.save_cache_metadata_on_disk().await?;
+            drop(publication);
             self.publication.try_publish(&self.path).await?;
             Ok(())
         } else {
+            drop(publication);
             // Avoid blocking writers; we'll try again on the next sync tick
             debug!(
                 "Skipping compact for {}/{} because block manager is busy",
@@ -423,9 +431,12 @@ impl Entry {
             return Ok(());
         }
 
-        let mut bm = self.block_manager.write().await?;
-        bm.save_cache_on_disk().await?;
-        drop(bm);
+        {
+            let publication = self.publication.begin_mutation().await?;
+            let mut bm = self.block_manager.write().await?;
+            bm.set_mutation_batch(publication.token.clone());
+            bm.save_cache_on_disk().await?;
+        }
         self.publication.publish(&self.path).await
     }
 

@@ -200,10 +200,10 @@ impl BlockManager {
         tokio::fs::rename(&temp_block_path, &block_path).await?;
 
         FILE_CACHE.discard_recursive(&block_path).await?;
-        let mut block_file = FILE_CACHE
-            .write_or_create(&block_path, SeekFrom::Start(0))
+        let mut block_file = self
+            .write_or_create_mutation(&block_path, SeekFrom::Start(0))
             .await?;
-        block_file.sync_all().await?;
+        block_file.flush_local().await?;
 
         self.save_meta_on_disk(block_ref).await
     }
