@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::{BatchToken, FILE_CACHE};
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
@@ -36,6 +36,7 @@ struct WriteContext {
     offset: u64,
     content_size: u64,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
+    batch_token: Option<BatchToken>,
 }
 
 impl RecordWriter {
@@ -52,10 +53,29 @@ impl RecordWriter {
     /// # Returns
     ///
     /// * `RecordWriter` - The record writer.
+    #[cfg(test)]
     pub(in crate::storage) async fn try_new(
         block_manager: Arc<AsyncRwLock<BlockManager>>,
         block_ref: BlockRef,
         time: u64,
+    ) -> Result<Self, ReductError> {
+        Self::try_new_inner(block_manager, block_ref, time, None).await
+    }
+
+    pub(in crate::storage) async fn try_new_in_batch(
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+        block_ref: BlockRef,
+        time: u64,
+        batch_token: BatchToken,
+    ) -> Result<Self, ReductError> {
+        Self::try_new_inner(block_manager, block_ref, time, Some(batch_token)).await
+    }
+
+    async fn try_new_inner(
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+        block_ref: BlockRef,
+        time: u64,
+        batch_token: Option<BatchToken>,
     ) -> Result<Self, ReductError> {
         let (file_path, offset, bucket_name, entry_name, usage_counters) = {
             let mut bm = block_manager.write().await?;
@@ -96,6 +116,7 @@ impl RecordWriter {
             offset,
             content_size,
             block_manager,
+            batch_token,
         };
 
         let me = if content_size >= MAX_IO_BUFFER_SIZE as u64 {
@@ -134,14 +155,16 @@ impl RecordWriter {
                         }
 
                         {
-                            let mut lock = FILE_CACHE
-                                .write_or_create(
-                                    &ctx.file_path,
-                                    SeekFrom::Start(
-                                        ctx.offset + written_bytes - chunk.len() as u64,
-                                    ),
-                                )
-                                .await?;
+                            let offset =
+                                SeekFrom::Start(ctx.offset + written_bytes - chunk.len() as u64);
+                            let mut lock = match &ctx.batch_token {
+                                Some(token) => {
+                                    FILE_CACHE
+                                        .write_or_create_in_batch(token, &ctx.file_path, offset)
+                                        .await?
+                                }
+                                None => FILE_CACHE.write_or_create(&ctx.file_path, offset).await?,
+                            };
 
                             lock.write_all(chunk.as_ref())?;
                         }

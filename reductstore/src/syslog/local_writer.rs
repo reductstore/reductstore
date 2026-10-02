@@ -192,7 +192,7 @@ mod tests {
             .create_system_bucket(SYSTEM_BUCKET_NAME, BucketSettings::default())
             .await
             .unwrap();
-        let mut repo = ReplicationRepoBuilder::new(Cfg::default())
+        let repo = ReplicationRepoBuilder::new(Cfg::default())
             .build(Arc::clone(&storage))
             .await;
         repo.create_replication(

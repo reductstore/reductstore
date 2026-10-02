@@ -36,7 +36,12 @@ impl Entry {
         timestamps: Vec<u64>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         self.ensure_not_deleting().await?;
+        let publication = self.publication.begin_mutation().await?;
         let block_manager = self.block_manager.clone();
+        block_manager
+            .write()
+            .await?
+            .set_mutation_batch(publication.token.clone());
         Ok(
             Self::inner_remove_records(timestamps, block_manager, &self.bucket_name, &self.name)
                 .await?
@@ -68,6 +73,7 @@ impl Entry {
         mut options: QueryEntry,
     ) -> Result<RecordQueryStats, ReductError> {
         self.ensure_not_deleting().await?;
+        let publication = self.publication.begin_mutation().await?;
         options.continuous = None; // force non-continuous query
 
         let rx = async || {
@@ -82,6 +88,10 @@ impl Entry {
         };
 
         let block_manager = self.block_manager.clone();
+        block_manager
+            .write()
+            .await?
+            .set_mutation_batch(publication.token.clone());
         let max_block_records = self.settings().await?.max_block_records; // max records per block
 
         // Loop until the query is done

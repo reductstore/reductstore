@@ -10,7 +10,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::{BatchToken, FILE_CACHE};
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::{COMPRESSED_DESCRIPTOR_FILE_EXT, DESCRIPTOR_FILE_EXT};
 use crate::storage::proto::block_index::Block as BlockEntry;
@@ -23,6 +23,7 @@ pub(in crate::storage) struct BlockIndex {
     path_buf: PathBuf,
     index_info: HashMap<u64, BlockEntry>,
     index: BTreeSet<u64>,
+    batch_token: Option<BatchToken>,
 }
 
 impl Into<BlockEntry> for MinimalBlock {
@@ -79,9 +80,18 @@ impl BlockIndex {
             path_buf,
             index_info: HashMap::new(),
             index: BTreeSet::new(),
+            batch_token: None,
         };
 
         index
+    }
+
+    pub(crate) fn set_batch_token(&mut self, token: BatchToken) {
+        self.batch_token = Some(token);
+    }
+
+    pub(crate) fn clear_batch_token(&mut self) {
+        self.batch_token = None;
     }
 
     /// Insert  or update a new block entry into the index.
@@ -207,6 +217,7 @@ impl BlockIndex {
             path_buf: path.clone(),
             index_info: HashMap::new(),
             index: BTreeSet::new(),
+            batch_token: None,
         };
 
         let mut crc = Digest::new();
@@ -293,9 +304,18 @@ impl BlockIndex {
         block_index_proto.crc64 = crc.sum64();
         let buf = block_index_proto.encode_to_vec();
 
-        let mut lock = FILE_CACHE
-            .write_or_create(&self.path_buf, SeekFrom::Start(0))
-            .await?;
+        let mut lock = match &self.batch_token {
+            Some(token) => {
+                FILE_CACHE
+                    .write_or_create_in_batch(token, &self.path_buf, SeekFrom::Start(0))
+                    .await?
+            }
+            None => {
+                FILE_CACHE
+                    .write_or_create(&self.path_buf, SeekFrom::Start(0))
+                    .await?
+            }
+        };
         lock.set_len(0)?;
         lock.write_all(&buf).map_err(|err| {
             internal_server_error!("Failed to write block index {:?}: {}", self.path_buf, err)
@@ -324,14 +344,6 @@ impl BlockIndex {
 
     pub fn info(&self) -> &HashMap<u64, BlockEntry> {
         &self.index_info
-    }
-
-    pub async fn sync_all(&mut self) -> Result<(), ReductError> {
-        let mut lock = FILE_CACHE
-            .write_or_create(&self.path_buf, SeekFrom::Start(0))
-            .await?;
-        lock.sync_all().await?;
-        Ok(())
     }
 
     fn insert(&mut self, block: BlockEntry) {

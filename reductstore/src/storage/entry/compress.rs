@@ -30,6 +30,11 @@ impl Entry {
         start: Option<u64>,
         stop: Option<u64>,
     ) -> Result<CompressionStats, ReductError> {
+        let publication = self.publication.begin_mutation().await?;
+        self.block_manager
+            .write()
+            .await?
+            .set_mutation_batch(publication.token.clone());
         let blocks = {
             let bm = self.block_manager.read().await?;
             let index = bm.index();

@@ -104,7 +104,7 @@ mod tests {
         use super::*;
         #[rstest]
         #[tokio::test]
-        async fn test_create_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
+        async fn test_create_replication_forbidden(repo: ReadOnlyReplicationRepository) {
             let settings = ReplicationSettings::default();
             let result = repo.create_replication("test", settings).await;
             assert_eq!(
@@ -118,7 +118,7 @@ mod tests {
         use super::*;
         #[rstest]
         #[tokio::test]
-        async fn test_update_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
+        async fn test_update_replication_forbidden(repo: ReadOnlyReplicationRepository) {
             let settings = ReplicationSettings::default();
             let result = repo.update_replication("test", settings).await;
             assert_eq!(
@@ -175,7 +175,7 @@ mod tests {
         use super::*;
         #[rstest]
         #[tokio::test]
-        async fn test_get_mut_replication_forbidden(mut repo: ReadOnlyReplicationRepository) {
+        async fn test_get_mut_replication_forbidden(repo: ReadOnlyReplicationRepository) {
             let err = repo
                 .set_replication_provisioned("test", true)
                 .await
@@ -212,7 +212,7 @@ mod tests {
         use super::*;
         #[rstest]
         #[tokio::test]
-        async fn test_set_mode_forbidden(mut repo: ReadOnlyReplicationRepository) {
+        async fn test_set_mode_forbidden(repo: ReadOnlyReplicationRepository) {
             let err = repo
                 .set_mode("test", ReplicationMode::Paused)
                 .await

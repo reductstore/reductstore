@@ -3,8 +3,8 @@
 
 use super::{settings_for_entry, Bucket};
 use crate::storage::entry::Entry;
-use log::error;
-use reduct_base::error::ReductError;
+use log::{debug, error};
+use reduct_base::error::{ErrorCode, ReductError};
 use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 
@@ -85,12 +85,21 @@ impl Bucket {
 
         for entry in entry_snapshot {
             if let Err(err) = entry.reload_index_on_replica().await {
-                error!(
-                    "Failed to reload replica index for entry '{}' in bucket '{}': {}",
-                    entry.name(),
-                    self.name(),
-                    err
-                );
+                if err.status() == ErrorCode::TooEarly {
+                    debug!(
+                        "Replica index for entry '{}' in bucket '{}' is not published yet: {}",
+                        entry.name(),
+                        self.name(),
+                        err
+                    );
+                } else {
+                    error!(
+                        "Failed to reload replica index for entry '{}' in bucket '{}': {}",
+                        entry.name(),
+                        self.name(),
+                        err
+                    );
+                }
             }
         }
 

@@ -49,7 +49,6 @@ impl BlockManager {
                     if self.cfg.role == InstanceRole::Replica
                         && !FILE_CACHE.try_exists(&path).await?
                     {
-                        self.block_index.remove_block(block_id);
                         return Err(too_early!(
                             "Block descriptor {:?} can't be read on replica yet: {}. Reload index and retry",
                             path,
@@ -81,7 +80,6 @@ impl BlockManager {
                                 crc.sum64()
                             );
                             self.invalidate_replica_block_cache(block_id).await?;
-                            self.block_index.remove_block(block_id);
                             return Err(too_early!(
                                 "Block descriptor {:?} CRC mismatch on replica. Reload index and retry",
                                 path
