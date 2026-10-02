@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 ARG BUILDPLATFORM
-ARG BASE_IMAGE=reduct/debian-base:trixie@sha256:1e8eec385f969973a9e3387aca4e40e689186098b4d14770dae39cea60b8495d
-FROM --platform=${BUILDPLATFORM} ${BASE_IMAGE} AS builder
+ARG FINAL_BASE_IMAGE=reduct/debian-base:trixie@sha256:1e8eec385f969973a9e3387aca4e40e689186098b4d14770dae39cea60b8495d
+FROM --platform=${BUILDPLATFORM} ${FINAL_BASE_IMAGE} AS builder
 ARG BUILDPLATFORM
 
 RUN groupadd --gid 10001 reduct \
@@ -9,7 +9,7 @@ RUN groupadd --gid 10001 reduct \
 
 RUN mkdir -p /data && chown 10001:10001 /data
 
-FROM ${BASE_IMAGE}
+FROM ${FINAL_BASE_IMAGE}
 
 # Binaries are prepared on GitHub runner.
 COPY .image-build/usr/local/bin/reductstore /usr/local/bin/reductstore
