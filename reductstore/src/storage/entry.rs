@@ -729,6 +729,33 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_compact_keeps_mutation_batch_when_another_mutation_is_active(
+            #[future] entry: Arc<Entry>,
+        ) {
+            let entry = entry.await;
+            let admission = entry.publication.begin_mutation().await.unwrap();
+
+            entry.compact().await.unwrap();
+
+            assert!(entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+
+            drop(admission);
+            entry.sync_fs().await.unwrap();
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_sync_fs_waits_for_block_manager(#[future] entry: Arc<Entry>) {
             let entry = entry.await;
             write_stub_record(&entry, 1).await;
@@ -745,6 +772,38 @@ mod tests {
 
             drop(guard);
             sync_task.await.unwrap().unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compact_and_sync_fs_skip_missing_entry_directory(
+            #[future] entry: Arc<Entry>,
+        ) {
+            let entry = entry.await;
+            std::fs::remove_dir_all(&entry.path).unwrap();
+
+            entry.compact().await.unwrap();
+            entry.sync_fs().await.unwrap();
+            assert_eq!(publication::load(&entry.path).await.unwrap(), None);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_sync_fs_publishes_and_clears_mutation_batch(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+
+            entry.sync_fs().await.unwrap();
+
+            let publication = publication::load(&entry.path).await.unwrap().unwrap();
+            assert_eq!(publication.state, publication::PublicationState::Ready);
+            assert_eq!(publication.generation, 4);
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
         }
     }
 
@@ -1114,6 +1173,104 @@ mod tests {
             assert_eq!(entry.info().await.unwrap().block_count, 0);
             assert_eq!(entry.info().await.unwrap().record_count, 0);
             assert_eq!(entry.info().await.unwrap().size, 0);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_removal_is_published_by_sync_fs(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+
+            entry.try_remove_oldest_block().await.unwrap();
+            assert!(entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+
+            entry.sync_fs().await.unwrap();
+
+            assert_eq!(entry.info().await.unwrap().block_count, 0);
+            assert_eq!(
+                publication::load(&entry.path)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .generation,
+                4
+            );
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+        }
+    }
+
+    mod remove_all_blocks {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn removes_every_block_in_one_mutation_batch(path: PathBuf) {
+            let entry = Arc::new(
+                Entry::builder()
+                    .name("entry")
+                    .bucket_path(path)
+                    .settings(EntrySettings {
+                        max_block_size: 10000,
+                        max_block_records: 1,
+                    })
+                    .cfg(Cfg::default().into())
+                    .usage_counters(Default::default())
+                    .build()
+                    .await
+                    .unwrap(),
+            );
+            write_stub_record(&entry, 1).await;
+            write_stub_record(&entry, 2).await;
+
+            entry.remove_all_blocks().await.unwrap();
+            assert_eq!(entry.info().await.unwrap().block_count, 0);
+            assert!(entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+
+            entry.sync_fs().await.unwrap();
+            assert_eq!(
+                publication::load(&entry.path)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .generation,
+                6
+            );
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn skips_missing_entry_directory(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            std::fs::remove_dir_all(&entry.path).unwrap();
+
+            entry.remove_all_blocks().await.unwrap();
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
         }
     }
 
