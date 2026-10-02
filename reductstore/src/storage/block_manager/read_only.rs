@@ -56,6 +56,11 @@ impl ReplicaIndexReload {
 
 impl BlockManager {
     #[cfg(test)]
+    pub(in crate::storage) fn has_mutation_batch(&self) -> bool {
+        self.mutation_batch.is_some()
+    }
+
+    #[cfg(test)]
     pub(super) async fn reload_if_readonly(&mut self) -> Result<(), ReductError> {
         // Replica index refresh is driven by the launcher background task.
         Ok(())
@@ -259,6 +264,49 @@ mod tests {
             .unwrap();
 
         assert!(block_manager.block_index.info().get(&1).is_some());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replica_index_reload_accepts_published_transition(#[future] path: PathBuf) {
+        let path = path.await;
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            data_path: path.clone(),
+            ..Default::default()
+        };
+        let index_path = path.join(BLOCK_INDEX_FILE);
+        let index = BlockIndex::new(index_path.clone());
+        index.save().await.unwrap();
+        let mut block_manager = BlockManager::build(
+            path,
+            index,
+            "bucket".to_string(),
+            "entry".to_string(),
+            Arc::new(cfg),
+            Default::default(),
+        )
+        .await
+        .unwrap();
+
+        let mut updated_index = BlockIndex::new(index_path);
+        updated_index.insert_or_update(Block::new(1));
+        updated_index.save().await.unwrap();
+
+        let reload = block_manager.prepare_replica_index_reload().unwrap();
+        let updated_index = reload.load_candidate().await.unwrap();
+        let publication =
+            ReplicaPublication::Published(crate::storage::entry::publication::PublicationId {
+                incarnation: "test-incarnation".to_string(),
+                generation: 2,
+            });
+        block_manager
+            .apply_replica_index_reload(reload, updated_index, publication.clone())
+            .await
+            .unwrap();
+
+        assert_eq!(block_manager.accepted_publication, publication);
+        assert!(block_manager.block_index.info().contains_key(&1));
     }
 
     #[rstest]

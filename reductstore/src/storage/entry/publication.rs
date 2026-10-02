@@ -200,3 +200,151 @@ pub(super) async fn write_local_in_batch(
     file.flush_local().await?;
     Ok(path)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::block_manager::ReplicaPublication;
+    use prost::Message;
+
+    fn publication(generation: u64, state: PublicationState) -> Publication {
+        Publication {
+            incarnation: "test-incarnation".to_owned(),
+            generation,
+            state,
+        }
+    }
+
+    fn entry_path() -> PathBuf {
+        let path = tempfile::tempdir().unwrap().keep().join("entry");
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[test]
+    fn transitions_publication_from_ready_to_updating_to_ready() {
+        let initial = publication(0, PublicationState::Ready);
+
+        let updating = initial.updating().unwrap();
+        assert_eq!(updating, publication(1, PublicationState::Updating));
+        assert_eq!(updating.id(), None);
+
+        let ready = updating.ready().unwrap();
+        assert_eq!(ready, publication(2, PublicationState::Ready));
+        assert_eq!(
+            ready.id(),
+            Some(PublicationId {
+                incarnation: "test-incarnation".to_owned(),
+                generation: 2,
+            })
+        );
+    }
+
+    #[test]
+    fn rejects_generation_overflow_during_transitions() {
+        assert!(publication(u64::MAX, PublicationState::Ready)
+            .updating()
+            .is_err());
+        assert!(publication(u64::MAX, PublicationState::Updating)
+            .ready()
+            .is_err());
+    }
+
+    #[test]
+    fn rejects_invalid_publication_markers() {
+        let path = Path::new("publication-marker");
+        let cases = [
+            (vec![0xff], "Failed to decode entry publication"),
+            (
+                EntryPublication {
+                    incarnation: String::new(),
+                    generation: 0,
+                    state: entry_publication::State::Ready as i32,
+                }
+                .encode_to_vec(),
+                "has no incarnation",
+            ),
+            (
+                EntryPublication {
+                    incarnation: "incarnation".to_owned(),
+                    generation: 0,
+                    state: 99,
+                }
+                .encode_to_vec(),
+                "has an invalid state",
+            ),
+            (
+                EntryPublication {
+                    incarnation: "incarnation".to_owned(),
+                    generation: 1,
+                    state: entry_publication::State::Ready as i32,
+                }
+                .encode_to_vec(),
+                "has invalid generation parity",
+            ),
+            (
+                EntryPublication {
+                    incarnation: "incarnation".to_owned(),
+                    generation: 0,
+                    state: entry_publication::State::Updating as i32,
+                }
+                .encode_to_vec(),
+                "has invalid generation parity",
+            ),
+        ];
+
+        for (encoded, message) in cases {
+            assert!(Publication::decode(&encoded, path)
+                .unwrap_err()
+                .to_string()
+                .contains(message));
+        }
+    }
+
+    #[test]
+    fn validates_only_stable_publication_windows() {
+        assert_eq!(
+            validate_window(None, None).unwrap(),
+            ReplicaPublication::Legacy
+        );
+
+        let ready = publication(2, PublicationState::Ready);
+        assert_eq!(
+            validate_window(Some(ready.clone()), Some(ready.clone())).unwrap(),
+            ReplicaPublication::Published(ready.id().unwrap())
+        );
+
+        for (before, after) in [
+            (None, Some(ready.clone())),
+            (Some(ready.clone()), None),
+            (
+                Some(publication(1, PublicationState::Updating)),
+                Some(publication(1, PublicationState::Updating)),
+            ),
+            (
+                Some(ready.clone()),
+                Some(Publication {
+                    generation: 4,
+                    ..ready.clone()
+                }),
+            ),
+        ] {
+            assert!(validate_window(before, after).is_err());
+        }
+    }
+
+    #[tokio::test]
+    async fn persists_and_loads_publication_marker() {
+        let entry_path = entry_path();
+        let expected = publication(2, PublicationState::Ready);
+        let mut batch = FILE_CACHE.begin_batch().await.unwrap();
+        let marker_path = write_local_in_batch(&batch.token(), &entry_path, &expected)
+            .await
+            .unwrap();
+
+        batch.sync_file(&marker_path).await.unwrap();
+        batch.commit().await.unwrap();
+
+        assert_eq!(load(&entry_path).await.unwrap(), Some(expected));
+    }
+}

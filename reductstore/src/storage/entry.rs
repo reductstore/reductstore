@@ -699,6 +699,24 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_compact_publishes_and_clears_mutation_batch(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+
+            entry.compact().await.unwrap();
+
+            let publication = publication::load(&entry.path).await.unwrap().unwrap();
+            assert_eq!(publication.state, publication::PublicationState::Ready);
+            assert_eq!(publication.generation, 2);
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_compact_skips_when_block_manager_busy(#[future] entry: Arc<Entry>) {
             let entry = entry.await;
             let _guard = entry.block_manager.write().await.unwrap();

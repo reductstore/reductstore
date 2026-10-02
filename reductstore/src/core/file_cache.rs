@@ -1202,6 +1202,187 @@ mod tests {
     }
 
     #[rstest]
+    #[tokio::test]
+    async fn batch_rejects_commit_with_pending_upload(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+        });
+        let cache = build_cache(backend);
+        let batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+
+        drop(
+            cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap(),
+        );
+
+        assert_eq!(
+            batch.commit().await.unwrap_err(),
+            internal_server_error!("Cannot commit file batch with pending remote mutations")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn failed_batch_upload_blocks_commit(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            mock.expect_upload()
+                .returning(|_| Err(std::io::Error::from(ErrorKind::Other)))
+                .times(1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        {
+            let mut file = cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            file.write_all(b"index").unwrap();
+        }
+
+        assert_eq!(
+            batch.sync_file(&file_path).await.err().unwrap(),
+            internal_server_error!("other error")
+        );
+        assert_eq!(
+            batch.commit().await.unwrap_err(),
+            internal_server_error!("Cannot commit failed file batch; retry synchronization first")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_rejects_path_owned_by_competing_batch(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+        });
+        let cache = build_cache(backend);
+        let first_batch = cache.begin_batch().await.unwrap();
+        let second_batch = cache.begin_batch().await.unwrap();
+
+        drop(
+            cache
+                .write_or_create_in_batch(&first_batch.token(), &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap(),
+        );
+
+        assert_eq!(
+            cache
+                .write_or_create_in_batch(&second_batch.token(), &file_path, SeekFrom::Start(0))
+                .await
+                .err()
+                .unwrap(),
+            internal_server_error!(
+                "File {} is owned by another active file batch",
+                file_path.display()
+            )
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_rejects_stale_token(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let cache = build_cache(build_backend(|_mock| {}));
+        let batch = cache.begin_batch().await.unwrap();
+        let stale_token = batch.token();
+        batch.commit().await.unwrap();
+
+        assert_eq!(
+            cache
+                .write_or_create_in_batch(&stale_token, &file_path, SeekFrom::Start(0))
+                .await
+                .err()
+                .unwrap(),
+            internal_server_error!("File batch is no longer active")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_syncs_dirty_file_evicted_from_cache(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 2);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            expect_upload(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        {
+            let mut file = cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            file.write_all(b"index").unwrap();
+        }
+        cache.cache.write().await.unwrap().remove(&file_path);
+
+        batch.sync_file(&file_path).await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_ignores_not_found_for_deferred_delete(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("old.blk");
+        fs::write(&file_path, b"old").unwrap();
+        let backend = build_backend(|mock| {
+            mock.expect_remove()
+                .returning(|_| Err(std::io::Error::from(ErrorKind::NotFound)))
+                .times(1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+
+        cache.remove_in_batch(&token, &file_path).await.unwrap();
+        batch.sync_all().await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn failed_deferred_delete_blocks_commit(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("old.blk");
+        fs::write(&file_path, b"old").unwrap();
+        let backend = build_backend(|mock| {
+            mock.expect_remove()
+                .returning(|_| Err(std::io::Error::from(ErrorKind::PermissionDenied)))
+                .times(1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+
+        cache.remove_in_batch(&token, &file_path).await.unwrap();
+        assert_eq!(
+            batch.sync_all().await.err().unwrap(),
+            internal_server_error!("permission denied")
+        );
+        assert_eq!(
+            batch.commit().await.unwrap_err(),
+            internal_server_error!("Cannot commit failed file batch; retry synchronization first")
+        );
+    }
+
+    #[rstest]
     #[tokio::test(flavor = "multi_thread")]
     async fn test_read(tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("test_read.txt");

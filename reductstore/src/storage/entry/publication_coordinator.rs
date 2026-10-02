@@ -88,3 +88,39 @@ impl PublicationCoordinator {
         batch.commit().await
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::storage::entry::publication::{load, PublicationState};
+    use std::sync::Arc;
+
+    fn entry_path() -> std::path::PathBuf {
+        let path = tempfile::tempdir().unwrap().keep().join("entry");
+        std::fs::create_dir_all(&path).unwrap();
+        path
+    }
+
+    #[tokio::test]
+    async fn blocks_try_publish_during_mutation_then_publishes_marker() {
+        let coordinator = Arc::new(PublicationCoordinator::new());
+        let path = entry_path();
+        let admission = coordinator.begin_mutation().await.unwrap();
+
+        assert!(!coordinator.try_publish(&path).await.unwrap());
+        let publisher = tokio::spawn({
+            let coordinator = Arc::clone(&coordinator);
+            let path = path.clone();
+            async move { coordinator.publish(&path).await }
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(load(&path).await.unwrap(), None);
+        drop(admission);
+
+        publisher.await.unwrap().unwrap();
+        let marker = load(&path).await.unwrap().unwrap();
+        assert_eq!(marker.generation, 2);
+        assert_eq!(marker.state, PublicationState::Ready);
+        assert!(!marker.incarnation.is_empty());
+    }
+}
