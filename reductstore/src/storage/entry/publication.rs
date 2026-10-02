@@ -186,20 +186,6 @@ pub(in crate::storage) fn validate_window(
     }
 }
 
-pub(super) async fn write_local(
-    entry_path: &Path,
-    publication: &Publication,
-) -> Result<(), ReductError> {
-    let path = path(entry_path);
-    let mut file = FILE_CACHE
-        .write_or_create(&path, SeekFrom::Start(0))
-        .await?;
-    file.set_len(0)?;
-    file.write_all(&publication.encode())?;
-    file.flush_local().await?;
-    Ok(())
-}
-
 pub(super) async fn write_local_in_batch(
     token: &BatchToken,
     entry_path: &Path,

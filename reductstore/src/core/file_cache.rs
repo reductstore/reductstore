@@ -90,11 +90,6 @@ pub(crate) struct FileBatch {
     batches: Arc<AsyncRwLock<BatchRegistry>>,
 }
 
-pub(crate) struct BatchSyncResult {
-    pub uploaded: usize,
-    pub deleted: usize,
-}
-
 /// A cache to keep file descriptors open
 ///
 /// This optimization is needed for network file systems because opening
@@ -805,7 +800,7 @@ impl FileBatch {
     }
 
     /// Synchronizes every pending upload and deferred delete in this batch.
-    pub async fn sync_all(&mut self) -> Result<BatchSyncResult, ReductError> {
+    pub async fn sync_all(&mut self) -> Result<(), ReductError> {
         let result = self.sync_all_inner().await;
         if result.is_err() {
             self.set_state(BatchState::Failed).await?;
@@ -813,7 +808,7 @@ impl FileBatch {
         result
     }
 
-    async fn sync_all_inner(&mut self) -> Result<BatchSyncResult, ReductError> {
+    async fn sync_all_inner(&mut self) -> Result<(), ReductError> {
         let (files, deletes) = {
             let batches = self.batches.read().await?;
             let batch = self.active_batch(&batches)?;
@@ -827,14 +822,11 @@ impl FileBatch {
             )
         };
 
-        let mut uploaded = 0;
         for (path, _) in &files {
             self.sync_path(path).await?;
-            uploaded += 1;
         }
 
         let backend = self.backend.read().await?.clone();
-        let mut deleted = 0;
         for path in &deletes {
             if let Err(err) = backend.remove(path).await {
                 if err.kind() != ErrorKind::NotFound {
@@ -845,12 +837,11 @@ impl FileBatch {
             self.active_batch_mut(&mut batches)?
                 .pending_deletes
                 .remove(path);
-            deleted += 1;
         }
 
         let mut batches = self.batches.write().await?;
         self.active_batch_mut(&mut batches)?.state = BatchState::Active;
-        Ok(BatchSyncResult { uploaded, deleted })
+        Ok(())
     }
 
     /// Releases owned paths after all pending remote mutations are published.
@@ -1170,9 +1161,7 @@ mod tests {
         cache.remove_in_batch(&token, &file_path).await.unwrap();
         assert!(!file_path.exists());
 
-        let result = batch.sync_all().await.unwrap();
-        assert_eq!(result.uploaded, 0);
-        assert_eq!(result.deleted, 1);
+        batch.sync_all().await.unwrap();
         batch.commit().await.unwrap();
     }
 

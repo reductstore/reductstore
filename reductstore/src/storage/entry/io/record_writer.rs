@@ -53,6 +53,7 @@ impl RecordWriter {
     /// # Returns
     ///
     /// * `RecordWriter` - The record writer.
+    #[cfg(test)]
     pub(in crate::storage) async fn try_new(
         block_manager: Arc<AsyncRwLock<BlockManager>>,
         block_ref: BlockRef,

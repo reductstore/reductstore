@@ -905,7 +905,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-        let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
+        let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
         replication_repo

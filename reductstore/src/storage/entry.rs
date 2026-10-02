@@ -405,7 +405,9 @@ impl Entry {
             bm.set_mutation_batch(publication.token.clone());
             bm.save_cache_metadata_on_disk().await?;
             drop(publication);
-            self.publication.try_publish(&self.path).await?;
+            if self.publication.try_publish(&self.path).await? {
+                bm.clear_mutation_batch();
+            }
             Ok(())
         } else {
             drop(publication);
