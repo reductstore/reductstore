@@ -265,7 +265,7 @@ async fn serve_http(app: Router, cfg: Cfg, handle: Handle<SocketAddr>) {
     } else {
         rustls::crypto::aws_lc_rs::default_provider()
             .install_default()
-            .expect("Failed to install rustls crypto provider");
+            .ok();
         let config = RustlsConfig::from_pem_file(
             cfg.cert_path.expect("Cert path must be set"),
             cfg.cert_key_path.expect("Cert key path must be set"),
@@ -417,7 +417,7 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     #[serial]
     async fn prepare_server_exposes_configuration_and_unready_listener_before_launch() {
-        struct EnvRestore([(&'static str, Option<OsString>); 5]);
+        struct EnvRestore([(&'static str, Option<OsString>); 7]);
 
         impl Drop for EnvRestore {
             fn drop(&mut self) {
@@ -436,6 +436,8 @@ mod tests {
             ("RS_PORT", env::var_os("RS_PORT")),
             ("RS_INSTANCE_ROLE", env::var_os("RS_INSTANCE_ROLE")),
             ("RS_DISABLE_AUTH", env::var_os("RS_DISABLE_AUTH")),
+            ("RS_CERT_PATH", env::var_os("RS_CERT_PATH")),
+            ("RS_CERT_KEY_PATH", env::var_os("RS_CERT_KEY_PATH")),
         ]);
 
         let data_path = tempdir().unwrap().keep();
@@ -447,6 +449,8 @@ mod tests {
         env::set_var("RS_PORT", port.to_string());
         env::set_var("RS_INSTANCE_ROLE", "STANDALONE");
         env::set_var("RS_DISABLE_AUTH", "true");
+        env::remove_var("RS_CERT_PATH");
+        env::remove_var("RS_CERT_KEY_PATH");
 
         let prepared = prepare_server(CoreExtCfgParser).await.unwrap();
 
@@ -588,6 +592,7 @@ mod tests {
             .create_bucket("bucket-2", BucketSettings::default())
             .await
             .unwrap();
+        primary_storage.sync_fs().await.unwrap();
 
         let handler = tokio::spawn(periodical_replica_reload(
             replica_storage.clone(),

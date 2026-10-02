@@ -123,4 +123,42 @@ mod tests {
         assert_eq!(marker.state, PublicationState::Ready);
         assert!(!marker.incarnation.is_empty());
     }
+
+    #[tokio::test]
+    async fn try_publish_without_mutations_is_a_noop() {
+        let coordinator = PublicationCoordinator::new();
+        let path = entry_path();
+
+        assert!(coordinator.try_publish(&path).await.unwrap());
+        assert_eq!(load(&path).await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn finishes_an_existing_updating_publication() {
+        let path = entry_path();
+        let updating = publication::Publication {
+            incarnation: "test-incarnation".to_owned(),
+            generation: 1,
+            state: PublicationState::Updating,
+        };
+        let mut batch = FILE_CACHE.begin_batch().await.unwrap();
+        let marker_path = publication::write_local_in_batch(&batch.token(), &path, &updating)
+            .await
+            .unwrap();
+        batch.sync_file(&marker_path).await.unwrap();
+        batch.commit().await.unwrap();
+
+        let coordinator = PublicationCoordinator::new();
+        drop(coordinator.begin_mutation().await.unwrap());
+        coordinator.publish(&path).await.unwrap();
+
+        assert_eq!(
+            load(&path).await.unwrap().unwrap(),
+            publication::Publication {
+                incarnation: "test-incarnation".to_owned(),
+                generation: 2,
+                state: PublicationState::Ready,
+            }
+        );
+    }
 }
