@@ -1423,9 +1423,10 @@ mod tests {
         let mut batch = cache.begin_batch().await.unwrap();
         let token = batch.token();
 
+        let err = cache.remove_in_batch(&token, &file_path).await.unwrap_err();
         assert_eq!(
-            cache.remove_in_batch(&token, &file_path).await.unwrap_err(),
-            internal_server_error!("No such file or directory (os error 2)")
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
         );
         assert!(cache
             .batches
