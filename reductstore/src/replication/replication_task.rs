@@ -11,7 +11,7 @@ use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::{TransactionLog, TransactionLogMap, TransactionLogRef};
 use crate::replication::ReplicationSourceIdentity;
-use crate::replication::{TransactionNotification, TransactionNotifier};
+use crate::replication::TransactionNotification;
 use crate::storage::engine::StorageEngine;
 use crate::syslog::aggregate::replication::ReplicationEventAggregator;
 use crate::syslog::SystemEventSink;
@@ -70,7 +70,6 @@ impl ReplicationTask {
         settings: ReplicationSettings,
         config: Cfg,
         storage: Arc<StorageEngine>,
-        notifier: TransactionNotifier,
         system_event_sink: Option<SystemEventSink>,
         source_identity: ReplicationSourceIdentity,
     ) -> Result<Self, ReductError> {
@@ -98,7 +97,6 @@ impl ReplicationTask {
         if is_local {
             remote_bucket_builder = remote_bucket_builder.local(LocalDestination {
                 storage: Arc::clone(&storage),
-                notifier,
                 io_timeout: config.io_conf.operation_timeout,
             });
         }
@@ -586,7 +584,7 @@ mod tests {
     use rstest::*;
 
     use crate::replication::remote_bucket::ErrorRecordMap;
-    use crate::replication::Transaction;
+    use crate::replication::{ReplicationNotifier, Transaction};
 
     use crate::core::sync::rwlock_timeout;
     use crate::storage::bucket::Bucket;
@@ -1130,19 +1128,20 @@ mod tests {
         }
 
         let notified = Arc::new(std::sync::Mutex::new(Vec::new()));
-        let notifier: TransactionNotifier = {
+        let notifier: ReplicationNotifier = {
             let notified = Arc::clone(&notified);
             Arc::new(move |notification: TransactionNotification| {
-                notified.lock().unwrap().push(notification)
+                notified.lock().unwrap().push(notification);
+                Box::pin(async { Ok(()) })
             })
         };
+        storage.set_replication_notifier(Some(notifier)).unwrap();
         let dst_name = settings.dst_bucket.clone();
         let mut replication = ReplicationTask::new(
             "test".to_string(),
             settings,
             cfg,
             Arc::clone(&storage),
-            notifier,
             None,
             Default::default(),
         )

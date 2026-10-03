@@ -1,11 +1,13 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
+mod notification;
 mod read_only;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FILE_CACHE;
-use crate::core::sync::AsyncRwLock;
+use crate::core::sync::{AsyncRwLock, RwLock};
 use crate::core::weak::Weak;
+use crate::replication::ReplicationNotifier;
 use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use crate::storage::in_flight::InFlightIoLimiter;
@@ -111,6 +113,7 @@ impl StorageEngineBuilder {
             folder_keeper: Arc::new(folder_keeper),
             io_limiter,
             usage_counters,
+            replication_notifier: RwLock::new(None),
         }
     }
 }
@@ -127,6 +130,8 @@ pub struct StorageEngine {
     /// Usage traffic counters owned by the engine and shared with the usage
     /// statistics logger, which drains them periodically.
     usage_counters: Arc<UsageCounters>,
+    /// Notified about written and updated records, see [`StorageEngine::set_replication_notifier`]
+    replication_notifier: RwLock<Option<ReplicationNotifier>>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -222,7 +227,32 @@ impl StorageEngine {
         })
     }
 
+    /// Begin writing a record and notify replications when it is written completely.
     pub(crate) async fn begin_write(
+        &self,
+        bucket_name: &str,
+        entry_name: &str,
+        time: u64,
+        content_size: u64,
+        content_type: String,
+        labels: Labels,
+    ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        let writer = self
+            .begin_write_without_notification(
+                bucket_name,
+                entry_name,
+                time,
+                content_size,
+                content_type,
+                labels.clone(),
+            )
+            .await?;
+        self.notify_on_finish(writer, bucket_name, entry_name, time, labels)
+    }
+
+    /// Begin writing a record without notifying replications,
+    /// e.g. a log record of the replication itself, which must not replicate.
+    pub(crate) async fn begin_write_without_notification(
         &self,
         bucket_name: &str,
         entry_name: &str,

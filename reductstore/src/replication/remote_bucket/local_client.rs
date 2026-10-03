@@ -5,7 +5,6 @@ use crate::replication::remote_bucket::client_wrapper::{
     BoxedBucketApi, ReductBucketApi, ReductClientApi,
 };
 use crate::replication::remote_bucket::{ErrorRecordMap, LocalDestination};
-use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::update_labels::UpdateLabels;
 use async_trait::async_trait;
 use log::debug;
@@ -81,15 +80,12 @@ impl ReductBucketApi for LocalBucket {
 
         records.sort_by_key(|record| record.meta().timestamp());
 
+        // the storage engine notifies replications about every written record
         let mut errors = ErrorRecordMap::new();
         for record in records {
             let time = record.meta().timestamp();
-            let labels = record.meta().labels().clone();
-            match self.write_record(entry, record).await {
-                Ok(()) => self.notify(entry, Transaction::WriteRecord(time), labels),
-                Err(err) => {
-                    errors.insert(time, err);
-                }
+            if let Err(err) = self.write_record(entry, record).await {
+                errors.insert(time, err);
             }
         }
 
@@ -101,32 +97,24 @@ impl ReductBucketApi for LocalBucket {
         entry: &str,
         records: &Vec<BoxedReadRecord>,
     ) -> Result<ErrorRecordMap, ReductError> {
-        // a missing bucket or entry fails the whole batch,
-        // so that the caller can write the records instead of updating them
-        let entry_to_update = self
-            .destination
-            .storage
-            .get_bucket(&self.bucket_name)
-            .await?
-            .upgrade()?
-            .get_entry(entry)
-            .await?
-            .upgrade()?;
-
         let updates = records
             .iter()
             .map(|record| labels_update(record.meta()))
             .collect();
 
-        let mut errors = ErrorRecordMap::new();
-        for (time, result) in entry_to_update.update_labels(updates).await? {
-            match result {
-                Ok(labels) => self.notify(entry, Transaction::UpdateRecord(time), labels),
-                Err(err) => {
-                    errors.insert(time, err);
-                }
-            }
-        }
+        // a missing bucket or entry fails the whole batch,
+        // so that the caller can write the records instead of updating them;
+        // the storage engine notifies replications about every updated record
+        let results = self
+            .destination
+            .storage
+            .update_labels(&self.bucket_name, entry, updates)
+            .await?;
+
+        let errors = results
+            .into_iter()
+            .filter_map(|(time, result)| result.err().map(|err| (time, err)))
+            .collect();
 
         Ok(errors)
     }
@@ -183,21 +171,6 @@ impl LocalBucket {
 
         writer.send_timeout(Ok(None), io_timeout).await
     }
-
-    /// Notify the replications of the instance about a change in the destination bucket.
-    fn notify(&self, entry: &str, event: Transaction, labels: Labels) {
-        let meta = RecordMeta::builder()
-            .timestamp(*event.timestamp())
-            .labels(labels)
-            .build();
-
-        (self.destination.notifier)(TransactionNotification {
-            bucket: self.bucket_name.clone(),
-            entry: entry.to_string(),
-            meta,
-            event,
-        });
-    }
 }
 
 /// Convert labels of a source record to an update in the same way as the HTTP API does:
@@ -226,6 +199,7 @@ mod tests {
     use crate::cfg::Cfg;
     use crate::replication::remote_bucket::client_wrapper::tests::MockRecordReader;
     use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketBuilder};
+    use crate::replication::{ReplicationNotifier, Transaction, TransactionNotification};
     use crate::storage::engine::{StorageEngine, CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
     use crate::storage::proto::record::Label;
     use crate::storage::proto::{us_to_ts, Record};
@@ -710,7 +684,7 @@ mod tests {
         }
     }
 
-    /// The destination bucket and the notifications sent by the local client.
+    /// The destination bucket and the notifications sent by the storage engine.
     struct Env {
         storage: Arc<StorageEngine>,
         destination: LocalDestination,
@@ -730,6 +704,7 @@ mod tests {
         }
 
         /// Write a record to the destination bucket directly through the storage engine.
+        /// The notification of this seed record is dropped, only the tested calls are captured.
         async fn write(&self, entry: &str, time: u64, body: &str, labels: &[(&str, &str)]) {
             let mut writer = self
                 .storage
@@ -748,6 +723,7 @@ mod tests {
                 .await
                 .unwrap();
             writer.send(Ok(None)).await.unwrap();
+            self.notifications.lock().unwrap().clear();
         }
 
         /// Read a record back through the storage engine.
@@ -796,9 +772,14 @@ mod tests {
 
         let notifications = Arc::new(Mutex::new(Vec::new()));
         let captured = Arc::clone(&notifications);
+        let notifier: ReplicationNotifier = Arc::new(move |notification| {
+            captured.lock().unwrap().push(notification);
+            Box::pin(async { Ok(()) })
+        });
+        storage.set_replication_notifier(Some(notifier)).unwrap();
+
         let destination = LocalDestination {
             storage: Arc::clone(&storage),
-            notifier: Arc::new(move |notification| captured.lock().unwrap().push(notification)),
             io_timeout: Duration::from_secs(5),
         };
 

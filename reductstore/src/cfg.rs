@@ -471,16 +471,15 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             )
             .await?,
         ));
-        // Register the replication notifier so `$system` writes replicate
-        // like API writes.
+        // Register the replication notifier in the storage engine: every record
+        // written or updated through it (HTTP and Zenoh API, system events and
+        // local replications) notifies replications.
         {
             let repo = Arc::clone(&replication_engine);
-            system_events
-                .set_replication_notifier(Some(Arc::new(move |notification| {
-                    let repo = Arc::clone(&repo);
-                    Box::pin(async move { repo.read().await?.notify(notification).await })
-                })))
-                .await;
+            storage.set_replication_notifier(Some(Arc::new(move |notification| {
+                let repo = Arc::clone(&repo);
+                Box::pin(async move { repo.read().await?.notify(notification).await })
+            })))?;
         }
         let ext_path = if let Some(ext_path) = &self.cfg.ext_path {
             Some(PathBuf::try_from(ext_path).map_err(|e| {
@@ -656,10 +655,13 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> Display for CfgParser<EnvGetter, E
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bytes::Bytes;
     use futures::FutureExt;
 
     use mockall::mock;
     use mockall::predicate::eq;
+    use reduct_base::msg::replication_api::ReplicationMode;
+    use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use serial_test::serial;
     use std::collections::BTreeMap;
@@ -750,6 +752,90 @@ mod tests {
         assert_eq!(components.store_id, initialized_store_id);
         assert_eq!(components.node_id, initialized_node_id);
         assert_eq!(components.storage.info().await.unwrap().usage, 0);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn storage_notifies_replications_about_written_records() {
+        let data_path = tempfile::tempdir().unwrap().keep();
+        let parser = CfgParser {
+            cfg: Cfg {
+                data_path: data_path.clone(),
+                role: InstanceRole::Primary,
+                ..Cfg::default()
+            },
+            env: Env::new(MockEnvGetter::new()),
+            license: None,
+            ext_cfg: CoreExtCfg {
+                role: InstanceRole::Primary,
+                data_path: data_path.clone(),
+            },
+        };
+        parser.init_storage_backend().await.unwrap();
+        let components = parser.build().await.unwrap();
+        components
+            .storage
+            .create_bucket("src", BucketSettings::default())
+            .await
+            .unwrap();
+        components
+            .replication_repo
+            .write()
+            .await
+            .unwrap()
+            .create_replication(
+                "repl",
+                ReplicationSettings {
+                    src_bucket: "src".to_string(),
+                    dst_bucket: "dst".to_string(),
+                    dst_host: "http://localhost".to_string(),
+                    dst_token: None,
+                    entries: vec![],
+                    dst_prefix: String::new(),
+                    when: None,
+                    mode: ReplicationMode::Enabled,
+                    compression: Default::default(),
+                },
+            )
+            .await
+            .unwrap();
+
+        let mut writer = components
+            .storage
+            .begin_write(
+                "src",
+                "entry",
+                1,
+                4,
+                "text/plain".to_string(),
+                Labels::new(),
+            )
+            .await
+            .unwrap();
+        writer.send(Ok(Some(Bytes::from("test")))).await.unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let mut pending_records = 0;
+        for _ in 0..50 {
+            pending_records = components
+                .replication_repo
+                .read()
+                .await
+                .unwrap()
+                .get_info("repl")
+                .await
+                .unwrap()
+                .info
+                .pending_records;
+            if pending_records > 0 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+        assert_eq!(
+            pending_records, 1,
+            "a record written through the storage must notify the replication"
+        );
     }
 
     #[rstest]

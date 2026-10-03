@@ -316,7 +316,7 @@ pub(crate) mod tests {
     use crate::ext::ext_repository::create_ext_repository;
     use crate::lifecycle::LifecycleRepoBuilder;
     use crate::lock_file::{LockFile, LockFileBuilder};
-    use crate::replication::ReplicationRepoBuilder;
+    use crate::replication::{ManageReplications, ReplicationRepoBuilder};
     use crate::storage::engine::StorageEngine;
     use crate::syslog::{build_system_event_logger, SystemEventLogger};
     use axum::body::Body;
@@ -784,6 +784,21 @@ pub(crate) mod tests {
         (store_id, node_id)
     }
 
+    /// Registers the notifier like production does, so writes and updates through
+    /// the storage engine reach the replications of the test components.
+    fn register_replication_notifier(
+        storage: &StorageEngine,
+        replication_repo: &Arc<AsyncRwLock<Box<dyn ManageReplications + Send + Sync>>>,
+    ) {
+        let repo = Arc::clone(replication_repo);
+        storage
+            .set_replication_notifier(Some(Arc::new(move |notification| {
+                let repo = Arc::clone(&repo);
+                Box::pin(async move { repo.read().await?.notify(notification).await })
+            })))
+            .unwrap();
+    }
+
     async fn test_components(cfg: Cfg) -> Components {
         let cfg_for_storage = cfg.clone();
         let storage = Arc::new(
@@ -800,6 +815,8 @@ pub(crate) mod tests {
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
+        let replication_repo = Arc::new(AsyncRwLock::new(replication_repo));
+        register_replication_notifier(&storage, &replication_repo);
         let lifecycle_repo = LifecycleRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -821,7 +838,7 @@ pub(crate) mod tests {
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
+            replication_repo,
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             system_events,
             ext_repo: create_ext_repository(
@@ -905,7 +922,7 @@ pub(crate) mod tests {
             .await
             .unwrap();
 
-        let mut replication_repo = ReplicationRepoBuilder::new(cfg.clone())
+        let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
         replication_repo
@@ -925,6 +942,8 @@ pub(crate) mod tests {
             )
             .await
             .unwrap();
+        let replication_repo = Arc::new(AsyncRwLock::new(replication_repo));
+        register_replication_notifier(&storage, &replication_repo);
         let lifecycle_repo = LifecycleRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -946,7 +965,7 @@ pub(crate) mod tests {
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
+            replication_repo,
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             system_events,
             ext_repo: create_ext_repository(
@@ -1039,6 +1058,8 @@ pub(crate) mod tests {
         let replication_repo = ReplicationRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
+        let replication_repo = Arc::new(AsyncRwLock::new(replication_repo));
+        register_replication_notifier(&storage, &replication_repo);
         let lifecycle_repo = LifecycleRepoBuilder::new(cfg.clone())
             .build(Arc::clone(&storage))
             .await;
@@ -1060,7 +1081,7 @@ pub(crate) mod tests {
             auth: TokenAuthorization::new("init-token"),
             token_repo: AsyncRwLock::new(token_repo),
             console: create_asset_manager(console_bytes),
-            replication_repo: Arc::new(AsyncRwLock::new(replication_repo)),
+            replication_repo,
             lifecycle_repo: AsyncRwLock::new(lifecycle_repo),
             ext_repo: create_ext_repository(
                 None,

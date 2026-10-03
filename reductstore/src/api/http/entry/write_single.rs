@@ -13,12 +13,9 @@ use crate::api::http::entry::common::{
 };
 use crate::api::http::StateKeeper;
 use crate::api::limits::limit_scope_from_client_ip;
-use crate::replication::Transaction::WriteRecord;
-use crate::replication::TransactionNotification;
 use futures_util::StreamExt;
 use log::{debug, error};
 use reduct_base::error::ReductError;
-use reduct_base::io::RecordMeta;
 use reduct_base::{bad_request, unprocessable_entity, Labels};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -88,16 +85,16 @@ pub(super) async fn write_record(
                     ts,
                     content_size,
                     content_type,
-                    labels.clone(),
+                    labels,
                 )
                 .await?
         };
-        Ok((ts, labels, sender))
+        Ok(sender)
     };
 
     let io_timeout = components.cfg.io_conf.operation_timeout;
     match check_request_and_get_sender.await {
-        Ok((ts, labels, mut writer)) => {
+        Ok(mut writer) => {
             macro_rules! send_chunk {
                 ($chunk:expr) => {
                     writer.send_timeout($chunk, io_timeout).await?;
@@ -125,17 +122,6 @@ pub(super) async fn write_record(
                 debug!("Timeout while sending EOF: {}", err);
             }
 
-            components
-                .replication_repo
-                .read()
-                .await?
-                .notify(TransactionNotification {
-                    bucket: bucket.clone(),
-                    entry: path.get("entry_name").unwrap().to_string(),
-                    meta: RecordMeta::builder().timestamp(ts).labels(labels).build(),
-                    event: WriteRecord(ts),
-                })
-                .await?;
             Ok(())
         }
         Err(e) => {

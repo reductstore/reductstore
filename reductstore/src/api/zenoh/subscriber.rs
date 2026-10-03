@@ -5,11 +5,9 @@ use crate::api::limits::LimitScope;
 use crate::api::zenoh::attachments;
 use crate::api::Components;
 use crate::cfg::zenoh::ZenohApiConfig;
-use crate::replication::{Transaction, TransactionNotification};
 use bytes::Bytes;
 use log::{debug, info, warn};
 use reduct_base::error::ReductError;
-use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 use std::error::Error;
 use std::fmt::{Display, Formatter};
@@ -33,7 +31,8 @@ impl SubscriberPipeline {
         }
     }
 
-    /// Handles a single Zenoh sample by writing it into storage and notifying replications.
+    /// Handles a single Zenoh sample by writing it into storage.
+    /// The storage engine notifies replications about the written record.
     pub(crate) async fn handle_sample(
         &self,
         key_expr: &str,
@@ -89,40 +88,13 @@ impl SubscriberPipeline {
                 ts,
                 content_size,
                 content_type,
-                labels.clone(),
+                labels,
             )
             .await?;
 
         writer.send(Ok(Some(payload))).await?;
         writer.send(Ok(None)).await?;
 
-        self.notify_replication(&self.bucket, &entry_name, ts, labels)
-            .await?;
-
-        Ok(())
-    }
-
-    async fn notify_replication(
-        &self,
-        bucket: &str,
-        entry: &str,
-        timestamp: u64,
-        labels: Labels,
-    ) -> Result<(), ReductError> {
-        self.components
-            .replication_repo
-            .read()
-            .await?
-            .notify(TransactionNotification {
-                bucket: bucket.to_string(),
-                entry: entry.to_string(),
-                meta: RecordMeta::builder()
-                    .timestamp(timestamp)
-                    .labels(labels)
-                    .build(),
-                event: Transaction::WriteRecord(timestamp),
-            })
-            .await?;
         Ok(())
     }
 
@@ -174,7 +146,7 @@ fn current_time_us() -> u64 {
 mod tests {
     use super::*;
     use crate::api::components::StateKeeper;
-    use crate::api::http::tests::{api_limited_keeper, ingress_limited_keeper};
+    use crate::api::http::tests::{api_limited_keeper, ingress_limited_keeper, keeper};
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
     use std::sync::Arc;
@@ -210,6 +182,46 @@ mod tests {
         let IngestError::Storage(err) = err;
         assert_eq!(err.status, ErrorCode::TooManyRequests);
         assert!(err.message.contains("ingress bytes"));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn handle_sample_notifies_replications_through_storage(
+        #[future] keeper: Arc<StateKeeper>,
+    ) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let pipeline = SubscriberPipeline::new(config(), Arc::clone(&components));
+
+        pipeline
+            .handle_sample(
+                "/entry-zenoh-replicated",
+                Bytes::from("ab"),
+                None,
+                Some(100),
+                "text/plain".to_string(),
+                Labels::from_iter(vec![("x".to_string(), "y".to_string())]),
+            )
+            .await
+            .unwrap();
+
+        let mut pending_records = 0;
+        for _ in 0..20 {
+            pending_records = components
+                .replication_repo
+                .read()
+                .await
+                .unwrap()
+                .get_info("api-test")
+                .await
+                .unwrap()
+                .info
+                .pending_records;
+            if pending_records >= 1 {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        }
+        assert!(pending_records >= 1);
     }
 
     #[rstest]

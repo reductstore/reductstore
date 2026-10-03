@@ -11,8 +11,7 @@ use crate::replication::proto::{
 };
 use crate::replication::replication_task::ReplicationTask;
 use crate::replication::{
-    prepend_when_conditions, ManageReplications, ReplicationSourceIdentity,
-    TransactionNotification, TransactionNotifier,
+    prepend_when_conditions, ManageReplications, ReplicationSourceIdentity, TransactionNotification,
 };
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
@@ -634,7 +633,6 @@ impl ReplicationRepository {
             settings,
             conf,
             Arc::clone(&self.storage),
-            self.transaction_notifier(),
             self.system_event_sink.clone(),
             self.source_identity.clone(),
         )?;
@@ -647,19 +645,6 @@ impl ReplicationRepository {
             .await?
             .insert(name.to_string(), replication);
         self.save_repo().await
-    }
-
-    /// Notifier for records written by local replications, so that they are replicated further.
-    fn transaction_notifier(&self) -> TransactionNotifier {
-        let notification_tx = self.notification_tx.clone();
-        Arc::new(move |notification| {
-            if notification_tx
-                .send(NotificationCommand::Notify(notification))
-                .is_err()
-            {
-                warn!("Failed to enqueue replication notification: the repository is stopped");
-            }
-        })
     }
 
     /// Reject a local replication that closes a loop with the other local replications.

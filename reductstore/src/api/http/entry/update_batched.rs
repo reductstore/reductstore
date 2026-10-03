@@ -10,7 +10,6 @@ use axum_extra::headers::HeaderMap;
 
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time};
 use reduct_base::error::ReductError;
-use reduct_base::io::RecordMeta;
 use reduct_base::unprocessable_entity;
 use reduct_base::Labels;
 
@@ -18,7 +17,6 @@ use crate::api::http::entry::common::err_to_batched_header;
 use crate::api::http::HttpError;
 use crate::api::http::StateKeeper;
 use crate::auth::policy::WriteAccessPolicy;
-use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::update_labels::UpdateLabels;
 
 // PATCH /:bucket/:entry/batch
@@ -68,39 +66,17 @@ pub(super) async fn update_batched_records(
         });
     }
 
-    let result = {
-        let entry = components
-            .storage
-            .get_bucket(bucket_name)
-            .await?
-            .upgrade()?
-            .get_entry(entry_name)
-            .await?
-            .upgrade()?;
-        entry.update_labels(records_to_update).await?
-    };
+    let result = components
+        .storage
+        .update_labels(bucket_name, entry_name, records_to_update)
+        .await?;
 
+    // the engine has already notified replications about the updated records
     let mut headers = HeaderMap::new();
     for (time, result) in result {
-        match result {
-            Err(err) => {
-                err_to_batched_header(&mut headers, time, &err);
-            }
-            Ok(new_labels) => {
-                let replication_repo = components.replication_repo.read().await?;
-                replication_repo
-                    .notify(TransactionNotification {
-                        bucket: bucket_name.clone(),
-                        entry: entry_name.clone(),
-                        meta: RecordMeta::builder()
-                            .timestamp(time)
-                            .labels(new_labels)
-                            .build(),
-                        event: Transaction::UpdateRecord(time),
-                    })
-                    .await?;
-            }
-        };
+        if let Err(err) = result {
+            err_to_batched_header(&mut headers, time, &err);
+        }
     }
 
     Ok(headers.into())

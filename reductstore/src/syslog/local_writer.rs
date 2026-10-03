@@ -1,26 +1,21 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::engine::StorageEngine;
 use crate::syslog::path::{entry_path, record_labels};
-use crate::syslog::sink::ReplicationNotifier;
 use crate::syslog::{LogSystemEvent, SystemEvent};
 use async_trait::async_trait;
 use bytes::Bytes;
-use log::warn;
 use reduct_base::error::{ErrorCode, ReductError};
-use reduct_base::io::RecordMeta;
+use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::BucketSettings;
+use reduct_base::Labels;
 use std::sync::Arc;
 
 pub(super) struct LocalSystemLogger {
     bucket_name: &'static str,
     bucket_settings: BucketSettings,
     storage: Arc<StorageEngine>,
-    /// Notifies replication about `$system` writes; registered once the
-    /// replication repo exists.
-    replication_notifier: Option<ReplicationNotifier>,
 }
 
 impl LocalSystemLogger {
@@ -33,7 +28,6 @@ impl LocalSystemLogger {
             bucket_name,
             bucket_settings,
             storage,
-            replication_notifier: None,
         }
     }
 
@@ -42,15 +36,7 @@ impl LocalSystemLogger {
         let labels = record_labels(&event);
         let payload = event.to_flat_json()?;
         let mut writer = match self
-            .storage
-            .begin_write(
-                self.bucket_name,
-                &entry_name,
-                event.timestamp,
-                payload.len() as u64,
-                "application/json".to_string(),
-                labels.clone(),
-            )
+            .begin_write(&event, &entry_name, payload.len() as u64, labels.clone())
             .await
         {
             Ok(writer) => writer,
@@ -64,55 +50,49 @@ impl LocalSystemLogger {
                 if let Ok(bucket) = bucket.upgrade() {
                     bucket.set_provisioned(true);
                 }
-                self.storage
-                    .begin_write(
-                        self.bucket_name,
-                        &entry_name,
-                        event.timestamp,
-                        payload.len() as u64,
-                        "application/json".to_string(),
-                        labels.clone(),
-                    )
+                self.begin_write(&event, &entry_name, payload.len() as u64, labels)
                     .await?
             }
             Err(err) => return Err(err),
         };
         writer.send(Ok(Some(Bytes::from(payload)))).await?;
         writer.send(Ok(None)).await?;
-
-        self.notify_replication(&event, entry_name, labels).await;
         Ok(())
     }
 
-    /// Notify replication about a successful `$system` write. Skips events
-    /// with a cleared `replicate` flag; failures are logged, never propagated.
-    async fn notify_replication(
+    /// Begin writing the record of an event. The storage engine notifies
+    /// replications about the written record unless the event has its
+    /// `replicate` flag cleared, e.g. logs of the replication module itself.
+    async fn begin_write(
         &self,
         event: &SystemEvent,
-        entry_name: String,
-        labels: reduct_base::Labels,
-    ) {
-        if !event.replicate {
-            return;
-        }
-        let Some(notifier) = &self.replication_notifier else {
-            return;
-        };
-
-        let notification = TransactionNotification {
-            bucket: self.bucket_name.to_string(),
-            entry: entry_name,
-            meta: RecordMeta::builder()
-                .timestamp(event.timestamp)
-                .labels(labels)
-                .build(),
-            event: Transaction::WriteRecord(event.timestamp),
-        };
-        if let Err(err) = notifier(notification).await {
-            warn!(
-                "Failed to notify replication about system event '{}': {}",
-                event.entry_name, err
-            );
+        entry_name: &str,
+        content_size: u64,
+        labels: Labels,
+    ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
+        let content_type = "application/json".to_string();
+        if event.replicate {
+            self.storage
+                .begin_write(
+                    self.bucket_name,
+                    entry_name,
+                    event.timestamp,
+                    content_size,
+                    content_type,
+                    labels,
+                )
+                .await
+        } else {
+            self.storage
+                .begin_write_without_notification(
+                    self.bucket_name,
+                    entry_name,
+                    event.timestamp,
+                    content_size,
+                    content_type,
+                    labels,
+                )
+                .await
         }
     }
 }
@@ -121,10 +101,6 @@ impl LocalSystemLogger {
 impl LogSystemEvent for LocalSystemLogger {
     async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError> {
         self.log_local(event).await
-    }
-
-    async fn set_replication_notifier(&mut self, notifier: Option<ReplicationNotifier>) {
-        self.replication_notifier = notifier;
     }
 }
 
@@ -192,7 +168,7 @@ mod tests {
             .create_system_bucket(SYSTEM_BUCKET_NAME, BucketSettings::default())
             .await
             .unwrap();
-        let mut repo = ReplicationRepoBuilder::new(Cfg::default())
+        let repo = ReplicationRepoBuilder::new(Cfg::default())
             .build(Arc::clone(&storage))
             .await;
         repo.create_replication(
@@ -214,12 +190,16 @@ mod tests {
         Arc::new(AsyncRwLock::new(repo))
     }
 
-    fn notifier_for(repo: &SystemReplicationRepo) -> ReplicationNotifier {
+    /// Register the replication repo as the notifier of the storage engine,
+    /// the same way the components do it.
+    fn attach_notifier(storage: &StorageEngine, repo: &SystemReplicationRepo) {
         let repo = Arc::clone(repo);
-        Arc::new(move |notification| {
-            let repo = Arc::clone(&repo);
-            Box::pin(async move { repo.read().await?.notify(notification).await })
-        })
+        storage
+            .set_replication_notifier(Some(Arc::new(move |notification| {
+                let repo = Arc::clone(&repo);
+                Box::pin(async move { repo.read().await?.notify(notification).await })
+            })))
+            .unwrap();
     }
 
     async fn pending_records(repo: &SystemReplicationRepo) -> u64 {
@@ -238,10 +218,8 @@ mod tests {
     async fn usage_event_notifies_replication(#[future] storage: Arc<StorageEngine>) {
         let storage = storage.await;
         let repo = system_replication_repo(Arc::clone(&storage)).await;
+        attach_notifier(&storage, &repo);
         let mut writer = writer(storage);
-        writer
-            .set_replication_notifier(Some(notifier_for(&repo)))
-            .await;
 
         writer
             .log_event(system_event(SystemEventKind::Usage, true))
@@ -267,10 +245,8 @@ mod tests {
 
         let storage = storage.await;
         let repo = system_replication_repo(Arc::clone(&storage)).await;
+        attach_notifier(&storage, &repo);
         let mut writer = writer(storage);
-        writer
-            .set_replication_notifier(Some(notifier_for(&repo)))
-            .await;
 
         let guard = repo.read().await.unwrap();
         writer
@@ -299,10 +275,8 @@ mod tests {
 
         let storage = storage.await;
         let repo = system_replication_repo(Arc::clone(&storage)).await;
+        attach_notifier(&storage, &repo);
         let mut writer = writer(storage);
-        writer
-            .set_replication_notifier(Some(notifier_for(&repo)))
-            .await;
 
         let update_repo = Arc::clone(&repo);
         let update = async move {
@@ -350,10 +324,8 @@ mod tests {
     ) {
         let storage = storage.await;
         let repo = system_replication_repo(Arc::clone(&storage)).await;
+        attach_notifier(&storage, &repo);
         let mut writer = writer(storage);
-        writer
-            .set_replication_notifier(Some(notifier_for(&repo)))
-            .await;
 
         writer.log_event(system_event(kind, false)).await.unwrap();
         sleep(Duration::from_millis(50)).await;
@@ -370,11 +342,9 @@ mod tests {
     async fn cleared_notifier_stops_notifications(#[future] storage: Arc<StorageEngine>) {
         let storage = storage.await;
         let repo = system_replication_repo(Arc::clone(&storage)).await;
+        attach_notifier(&storage, &repo);
+        storage.set_replication_notifier(None).unwrap();
         let mut writer = writer(storage);
-        writer
-            .set_replication_notifier(Some(notifier_for(&repo)))
-            .await;
-        writer.set_replication_notifier(None).await;
 
         writer
             .log_event(system_event(SystemEventKind::Usage, true))
@@ -393,21 +363,56 @@ mod tests {
     #[tokio::test]
     async fn notification_error_is_swallowed(#[future] storage: Arc<StorageEngine>) {
         let storage = storage.await;
-        let mut writer = writer(storage);
         let calls = Arc::new(AtomicUsize::new(0));
         let seen = Arc::clone(&calls);
-        writer
+        storage
             .set_replication_notifier(Some(Arc::new(move |_notification| {
                 seen.fetch_add(1, Ordering::SeqCst);
                 Box::pin(async { Err(internal_server_error!("replication is down")) })
             })))
-            .await;
+            .unwrap();
+        let mut writer = writer(storage);
 
         writer
             .log_event(system_event(SystemEventKind::Usage, true))
             .await
             .expect("a replication failure must never fail the system-event write");
         assert_eq!(calls.load(Ordering::SeqCst), 1, "notifier must be invoked");
+    }
+
+    #[rstest]
+    #[case::replicable(true, 1)]
+    #[case::not_replicable(false, 0)]
+    #[tokio::test]
+    async fn lazily_created_system_bucket_notifies_once(
+        #[future] storage: Arc<StorageEngine>,
+        #[case] replicate: bool,
+        #[case] expected_calls: usize,
+    ) {
+        let storage = storage.await;
+        let calls = Arc::new(AtomicUsize::new(0));
+        let seen = Arc::clone(&calls);
+        storage
+            .set_replication_notifier(Some(Arc::new(move |notification| {
+                assert_eq!(notification.bucket, SYSTEM_BUCKET_NAME);
+                seen.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            })))
+            .unwrap();
+        let mut writer = writer(Arc::clone(&storage));
+        assert!(storage.get_bucket(SYSTEM_BUCKET_NAME).await.is_err());
+
+        writer
+            .log_event(system_event(SystemEventKind::Usage, replicate))
+            .await
+            .unwrap();
+
+        assert!(storage.get_bucket(SYSTEM_BUCKET_NAME).await.is_ok());
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            expected_calls,
+            "the retried write after creating the bucket must notify at most once"
+        );
     }
 
     #[rstest]

@@ -6,8 +6,8 @@ mod local_client;
 mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
+use crate::replication::ReplicationSourceIdentity;
 use crate::replication::Transaction;
-use crate::replication::{ReplicationSourceIdentity, TransactionNotifier};
 use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
@@ -36,8 +36,6 @@ pub(super) struct RemoteBucketConfig {
 #[derive(Clone)]
 pub(super) struct LocalDestination {
     pub(super) storage: Arc<StorageEngine>,
-    /// Notifies replications about records written to the destination bucket
-    pub(super) notifier: TransactionNotifier,
     /// Timeout to write a chunk of a record
     pub(super) io_timeout: Duration,
 }

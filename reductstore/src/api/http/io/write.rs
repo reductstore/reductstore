@@ -7,7 +7,6 @@ use crate::api::http::Components;
 use crate::api::http::{HttpError, StateKeeper};
 use crate::api::limits::limit_scope_from_client_ip;
 use crate::auth::policy::WriteAccessPolicy;
-use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::RecordDrainer;
 use axum::body::Body;
 use axum::body::BodyDataStream;
@@ -24,7 +23,7 @@ use reduct_base::batch::v2::{
     EntryRecordHeader, ENTRIES_HEADER, START_TS_HEADER,
 };
 use reduct_base::error::ReductError;
-use reduct_base::io::{RecordMeta, WriteRecord};
+use reduct_base::io::WriteRecord;
 use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -33,8 +32,6 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 struct WriteContext {
-    entry_name: String,
-    time: u64,
     header: EntryRecordHeader,
     writer: Box<dyn WriteRecord + Sync + Send>,
 }
@@ -79,14 +76,8 @@ pub(super) async fn write_batched_records(
         let (rx_writer, spawn_handler) =
             spawn_getting_writers(&components, bucket, parsed_headers).await?;
 
-        receive_body_and_write_records(
-            bucket,
-            components,
-            content_length as i64,
-            &mut stream,
-            rx_writer,
-        )
-        .await?;
+        receive_body_and_write_records(components, content_length as i64, &mut stream, rx_writer)
+            .await?;
 
         Ok(spawn_handler
             .await
@@ -172,30 +163,7 @@ fn check_and_get_content_length(
     Ok(total_content_length)
 }
 
-async fn notify_replication_write(
-    components: &Arc<Components>,
-    bucket: &str,
-    ctx: &WriteContext,
-) -> Result<(), ReductError> {
-    components
-        .replication_repo
-        .read()
-        .await?
-        .notify(TransactionNotification {
-            bucket: bucket.to_string(),
-            entry: ctx.entry_name.clone(),
-            meta: RecordMeta::builder()
-                .timestamp(ctx.time)
-                .labels(ctx.header.header.labels.clone())
-                .build(),
-            event: Transaction::WriteRecord(ctx.time),
-        })
-        .await?;
-    Ok(())
-}
-
 async fn receive_body_and_write_records(
-    bucket: &String,
     components: Arc<Components>,
     mut total_content_len: i64,
     stream: &mut BodyDataStream,
@@ -256,7 +224,6 @@ async fn receive_body_and_write_records(
                         debug!("Timeout while sending EOF: {}", err);
                     }
 
-                    notify_replication_write(&components, bucket, &ctx).await?;
                     chunk = rest;
                     break;
                 }
@@ -298,8 +265,6 @@ async fn spawn_getting_writers(
 
             tx_writer
                 .send(WriteContext {
-                    entry_name: entry_name.clone(),
-                    time: timestamp,
                     header: record.record,
                     writer,
                 })
@@ -738,8 +703,6 @@ mod tests {
         });
 
         tx.send(WriteContext {
-            entry_name: "entry-1".to_string(),
-            time: 0,
             header: make_entry_header(5),
             writer,
         })
@@ -748,11 +711,10 @@ mod tests {
 
         let body = Body::from("abc");
         let mut stream = body.into_data_stream();
-        let err =
-            receive_body_and_write_records(&"bucket-1".to_string(), components, 5, &mut stream, rx)
-                .await
-                .err()
-                .unwrap();
+        let err = receive_body_and_write_records(components, 5, &mut stream, rx)
+            .await
+            .err()
+            .unwrap();
 
         assert_eq!(
             err,
@@ -772,8 +734,6 @@ mod tests {
         });
 
         tx.send(WriteContext {
-            entry_name: "entry-1".to_string(),
-            time: 0,
             header: make_entry_header(1),
             writer,
         })
@@ -784,11 +744,10 @@ mod tests {
             "Simulated chunk error"
         ))]));
         let mut stream = body.into_data_stream();
-        let err =
-            receive_body_and_write_records(&"bucket-1".to_string(), components, 1, &mut stream, rx)
-                .await
-                .err()
-                .unwrap();
+        let err = receive_body_and_write_records(components, 1, &mut stream, rx)
+            .await
+            .err()
+            .unwrap();
 
         assert_eq!(
             err,
