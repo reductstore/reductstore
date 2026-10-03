@@ -8,9 +8,10 @@ use crate::core::sync::{AsyncRwLock, RwLock};
 use log::{debug, warn};
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use std::collections::{HashMap, HashSet};
 use std::fs;
-use std::io::{Seek, SeekFrom};
-use std::path::PathBuf;
+use std::io::{ErrorKind, Seek, SeekFrom};
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -54,6 +55,41 @@ pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
 pub(crate) type FileLock = Arc<AsyncRwLock<File>>;
 pub(crate) type FileGuard = OwnedRwLockWriteGuard<File>;
 
+type BatchId = u64;
+
+#[derive(Default)]
+struct BatchRegistry {
+    next_id: BatchId,
+    active: HashMap<BatchId, ActiveBatch>,
+    path_owners: HashMap<PathBuf, BatchId>,
+}
+
+struct ActiveBatch {
+    dirty_files: HashMap<PathBuf, u64>,
+    pending_deletes: HashSet<PathBuf>,
+    state: BatchState,
+}
+
+#[derive(Clone, Copy)]
+enum BatchState {
+    Active,
+    Failed,
+}
+
+/// Identifies an active batch. A token can be cloned for cooperating writers.
+#[derive(Clone, Debug)]
+pub(crate) struct BatchToken {
+    id: BatchId,
+}
+
+/// Owns synchronization and completion of one batch.
+pub(crate) struct FileBatch {
+    token: BatchToken,
+    cache: Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
+    backend: Arc<AsyncRwLock<Backend>>,
+    batches: Arc<AsyncRwLock<BatchRegistry>>,
+}
+
 /// A cache to keep file descriptors open
 ///
 /// This optimization is needed for network file systems because opening
@@ -64,6 +100,7 @@ pub(crate) struct FileCache {
     cache: Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
     stop_sync_worker: Arc<AtomicBool>,
     backend: Arc<AsyncRwLock<Backend>>,
+    batches: Arc<AsyncRwLock<BatchRegistry>>,
     sync_interval: Arc<RwLock<Duration>>,
     read_only: Arc<AtomicBool>,
 }
@@ -85,6 +122,8 @@ impl FileCache {
         let stop_sync_worker_clone = Arc::clone(&stop_sync_worker);
         let backpack = Arc::new(AsyncRwLock::new(Backend::default()));
         let backpack_clone = Arc::clone(&backpack);
+        let batches = Arc::new(AsyncRwLock::new(BatchRegistry::default()));
+        let batches_clone = Arc::clone(&batches);
         let sync_interval = Arc::new(RwLock::new(sync_interval));
         let sync_interval_clone = Some(Arc::clone(&sync_interval));
         let read_only = Arc::new(AtomicBool::new(false));
@@ -99,6 +138,7 @@ impl FileCache {
                     &read_only_clone,
                     &backpack_clone,
                     &cache,
+                    &batches_clone,
                     &sync_interval_clone,
                 )
                 .await
@@ -115,6 +155,7 @@ impl FileCache {
             cache: cache_clone,
             stop_sync_worker: stop_sync_worker_clone,
             backend: backpack,
+            batches,
             sync_interval,
             read_only,
         }
@@ -124,6 +165,7 @@ impl FileCache {
         read_only: &Arc<AtomicBool>,
         backend: &Arc<AsyncRwLock<Backend>>,
         cache: &Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
+        batches: &Arc<AsyncRwLock<BatchRegistry>>,
         sync_interval: &Option<Arc<RwLock<Duration>>>,
     ) -> Result<(), ReductError> {
         if read_only.load(Ordering::Relaxed) {
@@ -140,6 +182,9 @@ impl FileCache {
             .invalidate_locally_cached_files()
             .await;
         for path in invalidated_files {
+            if Self::is_batched(batches, &path).await? {
+                continue;
+            }
             let mut cache = cache.write().await?;
             if let Some(file) = cache.remove(&path) {
                 if let Err(err) = file.write_owned().await?.sync_all().await {
@@ -173,7 +218,9 @@ impl FileCache {
                     continue;
                 }
 
-                files_to_sync.push((path.clone(), file.clone(), file_lock.last_synced()));
+                if !Self::is_batched(batches, path).await? {
+                    files_to_sync.push((path.clone(), file.clone(), file_lock.last_synced()));
+                }
             }
         }
 
@@ -257,10 +304,12 @@ impl FileCache {
             if let Some(mut lock) = file.try_write_owned() {
                 discarded_count += 1;
                 if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
-                    lock.sync_all().await.unwrap_or_else(|err| {
-                        debug!("Failed to sync discarded file {:?}: {}", path, err);
-                    });
-                    synced_count += 1;
+                    if !Self::is_batched(&self.batches, &path).await? {
+                        lock.sync_all().await.unwrap_or_else(|err| {
+                            debug!("Failed to sync discarded file {:?}: {}", path, err);
+                        });
+                        synced_count += 1;
+                    }
                 }
             } else {
                 // return the file to the cache if it is still in use
@@ -288,6 +337,27 @@ impl FileCache {
         self.read_only.store(read_only, Ordering::Relaxed);
     }
 
+    /// Starts a batch. Paths are claimed explicitly by batch-aware mutations.
+    pub async fn begin_batch(&self) -> Result<FileBatch, ReductError> {
+        let mut batches = self.batches.write().await?;
+        let id = batches.next_id;
+        batches.next_id += 1;
+        batches.active.insert(
+            id,
+            ActiveBatch {
+                dirty_files: HashMap::new(),
+                pending_deletes: HashSet::new(),
+                state: BatchState::Active,
+            },
+        );
+        Ok(FileBatch {
+            token: BatchToken { id },
+            cache: Arc::clone(&self.cache),
+            backend: Arc::clone(&self.backend),
+            batches: Arc::clone(&self.batches),
+        })
+    }
+
     /// Get a file descriptor for reading
     ///
     /// If the file is not in the cache, it will be opened and added to the cache.
@@ -313,6 +383,7 @@ impl FileCache {
         };
 
         let mut lock = file.write_owned().await?;
+        lock.set_batch_owner(self.path_owner(path).await?);
         if pos != SeekFrom::Current(0) {
             lock.seek(pos)?;
         }
@@ -364,12 +435,34 @@ impl FileCache {
         };
 
         let mut lock = file.write_owned().await?;
+        lock.set_batch_owner(self.path_owner(path).await?);
         if pos != SeekFrom::Current(0) {
             lock.seek(pos)?;
         }
 
         lock.access().await?;
+        self.mark_owned_dirty(path).await?;
         Ok(lock)
+    }
+
+    /// Writes a file as part of `batch`, claiming its exact path if necessary.
+    pub async fn write_or_create_in_batch(
+        &self,
+        batch: &BatchToken,
+        path: &PathBuf,
+        pos: SeekFrom,
+    ) -> Result<FileGuard, ReductError> {
+        self.claim_path(batch, path).await?;
+        match self.write_or_create(path, pos).await {
+            Ok(mut file) => {
+                file.set_batch_owner(Some(batch.id));
+                Ok(file)
+            }
+            Err(err) => {
+                self.release_claim_if_unused(batch, path).await?;
+                Err(err)
+            }
+        }
     }
 
     /// Removes a file from the file system and the cache.
@@ -396,6 +489,7 @@ impl FileCache {
             return Ok(());
         }
 
+        let deferred = self.defer_owned_delete(path).await?;
         let remove_from_backend = async |path| {
             let backend = self.backend.read().await?.clone();
             backend.remove(path).await?;
@@ -409,7 +503,11 @@ impl FileCache {
             match file.write().await {
                 Ok(_) => {
                     self.cache.write().await?.remove(path);
-                    remove_from_backend(path).await?;
+                    if deferred {
+                        tokio::fs::remove_file(path).await?;
+                    } else {
+                        remove_from_backend(path).await?;
+                    }
                 }
                 Err(_) => {
                     return Err(internal_server_error!(
@@ -419,16 +517,31 @@ impl FileCache {
                 }
             }
         } else {
-            remove_from_backend(path).await?;
+            if deferred {
+                tokio::fs::remove_file(path).await?;
+            } else {
+                remove_from_backend(path).await?;
+            }
         }
 
         Ok(())
+    }
+
+    /// Removes a file as part of `batch`, deferring its remote deletion.
+    pub async fn remove_in_batch(
+        &self,
+        batch: &BatchToken,
+        path: &PathBuf,
+    ) -> Result<(), ReductError> {
+        self.claim_path(batch, path).await?;
+        self.remove(path).await
     }
 
     pub async fn remove_dir(&self, path: &PathBuf) -> Result<(), ReductError> {
         if self.read_only.load(Ordering::Relaxed) {
             return Ok(());
         }
+        self.reject_batched_operation(path).await?;
 
         let mut cache = self.cache.write().await?;
         self.discard_recursive_with_locked_cache(path, &mut cache)
@@ -473,6 +586,10 @@ impl FileCache {
             .collect::<Vec<PathBuf>>();
 
         for file_path in files_to_remove {
+            // A batch owns publication of this exact path, including its cached descriptor.
+            if Self::is_batched(&self.batches, &file_path).await? {
+                continue;
+            }
             if let Some(file) = cache.remove(&file_path) {
                 let mut lock = file.write_owned().await?;
                 if lock.mode() == &AccessMode::ReadWrite && !lock.is_synced() {
@@ -509,6 +626,8 @@ impl FileCache {
         if self.read_only.load(Ordering::Relaxed) {
             return Ok(());
         }
+        self.reject_batched_operation(old_path).await?;
+        self.reject_batched_operation(new_path).await?;
 
         // important to keep cache preventing race conditions
         let mut cache = self.cache.write().await?;
@@ -532,7 +651,14 @@ impl FileCache {
     }
 
     pub async fn force_sync_all(&self) -> Result<(), ReductError> {
-        Self::sync_rw_and_unused_files(&self.read_only, &self.backend, &self.cache, &None).await
+        Self::sync_rw_and_unused_files(
+            &self.read_only,
+            &self.backend,
+            &self.cache,
+            &self.batches,
+            &None,
+        )
+        .await
     }
 
     pub async fn create_dir_all(&self, path: &PathBuf) -> Result<(), ReductError> {
@@ -561,6 +687,266 @@ impl FileCache {
 
     pub fn stop_sync_worker(&self) {
         self.stop_sync_worker.store(true, Ordering::Relaxed);
+    }
+
+    async fn is_batched(
+        batches: &Arc<AsyncRwLock<BatchRegistry>>,
+        path: &Path,
+    ) -> Result<bool, ReductError> {
+        Ok(batches.read().await?.path_owners.contains_key(path))
+    }
+
+    async fn mark_owned_dirty(&self, path: &Path) -> Result<(), ReductError> {
+        let mut batches = self.batches.write().await?;
+        if let Some(owner) = batches.path_owners.get(path).copied() {
+            let batch = batches
+                .active
+                .get_mut(&owner)
+                .ok_or(internal_server_error!(
+                    "File {} is owned by an inactive batch",
+                    path.display()
+                ))?;
+            let version = batch.dirty_files.get(path).copied().unwrap_or(0) + 1;
+            batch.dirty_files.insert(path.to_path_buf(), version);
+            batch.pending_deletes.remove(path);
+        }
+        Ok(())
+    }
+
+    async fn defer_owned_delete(&self, path: &Path) -> Result<bool, ReductError> {
+        let mut batches = self.batches.write().await?;
+        if let Some(owner) = batches.path_owners.get(path).copied() {
+            let batch = batches
+                .active
+                .get_mut(&owner)
+                .ok_or(internal_server_error!(
+                    "File {} is owned by an inactive batch",
+                    path.display()
+                ))?;
+            batch.dirty_files.remove(path);
+            batch.pending_deletes.insert(path.to_path_buf());
+            return Ok(true);
+        }
+        Ok(false)
+    }
+
+    async fn reject_batched_operation(&self, path: &Path) -> Result<(), ReductError> {
+        let batches = self.batches.read().await?;
+        if batches.path_owners.contains_key(path)
+            || batches
+                .path_owners
+                .keys()
+                .any(|owned_path| owned_path.starts_with(path))
+        {
+            return Err(internal_server_error!(
+                "Cannot modify {} because it affects an active file batch",
+                path.display()
+            ));
+        }
+        Ok(())
+    }
+
+    async fn claim_path(&self, batch: &BatchToken, path: &Path) -> Result<(), ReductError> {
+        let mut batches = self.batches.write().await?;
+        if !batches.active.contains_key(&batch.id) {
+            return Err(internal_server_error!("File batch is no longer active"));
+        }
+        match batches.path_owners.get(path) {
+            Some(owner) if *owner != batch.id => Err(internal_server_error!(
+                "File {} is owned by another active file batch",
+                path.display()
+            )),
+            _ => {
+                batches.path_owners.insert(path.to_path_buf(), batch.id);
+                Ok(())
+            }
+        }
+    }
+
+    async fn path_owner(&self, path: &Path) -> Result<Option<BatchId>, ReductError> {
+        Ok(self.batches.read().await?.path_owners.get(path).copied())
+    }
+
+    async fn release_claim_if_unused(
+        &self,
+        batch: &BatchToken,
+        path: &Path,
+    ) -> Result<(), ReductError> {
+        let mut batches = self.batches.write().await?;
+        let active = batches
+            .active
+            .get(&batch.id)
+            .ok_or(internal_server_error!("File batch is no longer active"))?;
+        if !active.dirty_files.contains_key(path) && !active.pending_deletes.contains(path) {
+            batches.path_owners.remove(path);
+        }
+        Ok(())
+    }
+}
+
+impl FileBatch {
+    pub fn token(&self) -> BatchToken {
+        self.token.clone()
+    }
+
+    /// Synchronizes one file and waits until its remote upload completes.
+    pub async fn sync_file(&mut self, path: &Path) -> Result<(), ReductError> {
+        self.validate_path_owner(path).await?;
+        let result = self.sync_path(path).await;
+        if result.is_err() {
+            self.set_state(BatchState::Failed).await?;
+        }
+        result
+    }
+
+    /// Synchronizes every pending upload and deferred delete in this batch.
+    pub async fn sync_all(&mut self) -> Result<(), ReductError> {
+        let result = self.sync_all_inner().await;
+        if result.is_err() {
+            self.set_state(BatchState::Failed).await?;
+        }
+        result
+    }
+
+    async fn sync_all_inner(&mut self) -> Result<(), ReductError> {
+        let (files, deletes) = {
+            let batches = self.batches.read().await?;
+            let batch = self.active_batch(&batches)?;
+            (
+                batch
+                    .dirty_files
+                    .iter()
+                    .map(|(path, version)| (path.clone(), *version))
+                    .collect::<Vec<_>>(),
+                batch.pending_deletes.iter().cloned().collect::<Vec<_>>(),
+            )
+        };
+
+        for (path, _) in &files {
+            self.sync_path(path).await?;
+        }
+
+        let backend = self.backend.read().await?.clone();
+        for path in &deletes {
+            if let Err(err) = backend.remove(path).await {
+                if err.kind() != ErrorKind::NotFound {
+                    return Err(err.into());
+                }
+            }
+            let mut batches = self.batches.write().await?;
+            self.active_batch_mut(&mut batches)?
+                .pending_deletes
+                .remove(path);
+        }
+
+        let mut batches = self.batches.write().await?;
+        self.active_batch_mut(&mut batches)?.state = BatchState::Active;
+        Ok(())
+    }
+
+    /// Releases owned paths after all pending remote mutations are published.
+    pub async fn commit(self) -> Result<(), ReductError> {
+        let paths = {
+            let mut batches = self.batches.write().await?;
+            let batch = batches
+                .active
+                .get(&self.token.id)
+                .ok_or(internal_server_error!("File batch is no longer active"))?;
+            if matches!(batch.state, BatchState::Failed) {
+                return Err(internal_server_error!(
+                    "Cannot commit failed file batch; retry synchronization first"
+                ));
+            }
+            if !batch.dirty_files.is_empty() || !batch.pending_deletes.is_empty() {
+                return Err(internal_server_error!(
+                    "Cannot commit file batch with pending remote mutations"
+                ));
+            }
+            let paths = batches
+                .path_owners
+                .iter()
+                .filter_map(|(path, owner)| (*owner == self.token.id).then(|| path.clone()))
+                .collect::<Vec<_>>();
+            for path in &paths {
+                batches.path_owners.remove(path);
+            }
+            batches.active.remove(&self.token.id);
+            paths
+        };
+        for path in paths {
+            if let Some(file) = self.cache.read().await?.get(&path).cloned() {
+                file.write().await?.set_batch_owner(None);
+            }
+        }
+        Ok(())
+    }
+
+    async fn validate_path_owner(&self, path: &Path) -> Result<(), ReductError> {
+        let batches = self.batches.read().await?;
+        if !batches.active.contains_key(&self.token.id) {
+            return Err(internal_server_error!("File batch is no longer active"));
+        }
+        if batches.path_owners.get(path) != Some(&self.token.id) {
+            return Err(internal_server_error!(
+                "File {} is not owned by this file batch",
+                path.display()
+            ));
+        }
+        Ok(())
+    }
+
+    async fn sync_path(&mut self, path: &Path) -> Result<(), ReductError> {
+        let version = {
+            let batches = self.batches.read().await?;
+            self.active_batch(&batches)?.dirty_files.get(path).copied()
+        };
+        let file = self.cache.read().await?.get(&path.to_path_buf()).cloned();
+        if let Some(file) = file {
+            file.write().await?.sync_all_in_batch(self.token.id).await?;
+        } else {
+            let mut file = self
+                .backend
+                .read()
+                .await?
+                .open_options()
+                .write(true)
+                .read(true)
+                .open(path)
+                .await?;
+            file.flush_local().await?;
+            file.sync_all_in_batch(self.token.id).await?;
+        }
+        if let Some(version) = version {
+            let mut batches = self.batches.write().await?;
+            let batch = self.active_batch_mut(&mut batches)?;
+            if batch.dirty_files.get(path) == Some(&version) {
+                batch.dirty_files.remove(path);
+            }
+        }
+        Ok(())
+    }
+
+    fn active_batch<'a>(&self, batches: &'a BatchRegistry) -> Result<&'a ActiveBatch, ReductError> {
+        batches
+            .active
+            .get(&self.token.id)
+            .ok_or(internal_server_error!("File batch is no longer active"))
+    }
+
+    fn active_batch_mut<'a>(
+        &self,
+        batches: &'a mut BatchRegistry,
+    ) -> Result<&'a mut ActiveBatch, ReductError> {
+        batches
+            .active
+            .get_mut(&self.token.id)
+            .ok_or(internal_server_error!("File batch is no longer active"))
+    }
+
+    async fn set_state(&self, state: BatchState) -> Result<(), ReductError> {
+        let mut batches = self.batches.write().await?;
+        self.active_batch_mut(&mut batches)?.state = state;
+        Ok(())
     }
 }
 
@@ -678,6 +1064,529 @@ mod tests {
         });
         cache.stop_sync_worker.store(true, Ordering::Relaxed);
         cache
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_defers_background_sync_until_explicitly_published(tmp_dir: PathBuf) {
+        let scope = tmp_dir.join("entry");
+        let file_path = scope.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            mock.expect_create_dir_all().returning(|path| {
+                fs::create_dir_all(path)?;
+                Ok(())
+            });
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            mock.expect_invalidate_locally_cached_files()
+                .returning(Vec::new)
+                .times(1);
+            expect_upload(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        {
+            let mut file = cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            file.write_all(b"index").unwrap();
+        }
+
+        cache.force_sync_all().await.unwrap();
+        assert!(!cache
+            .cache
+            .read()
+            .await
+            .unwrap()
+            .get(&file_path)
+            .unwrap()
+            .read()
+            .await
+            .unwrap()
+            .is_synced());
+
+        assert_eq!(
+            cache
+                .cache
+                .read()
+                .await
+                .unwrap()
+                .get(&file_path)
+                .unwrap()
+                .write()
+                .await
+                .unwrap()
+                .sync_all()
+                .await
+                .unwrap_err()
+                .kind(),
+            std::io::ErrorKind::PermissionDenied
+        );
+        batch.sync_file(&file_path).await.unwrap();
+        assert!(cache
+            .cache
+            .read()
+            .await
+            .unwrap()
+            .get(&file_path)
+            .unwrap()
+            .read()
+            .await
+            .unwrap()
+            .is_synced());
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_defers_remote_delete_until_sync_all(tmp_dir: PathBuf) {
+        let scope = tmp_dir.join("entry");
+        let file_path = scope.join("old.blk");
+        fs::create_dir_all(&scope).unwrap();
+        fs::write(&file_path, b"old").unwrap();
+        let backend = build_backend(|mock| {
+            let expected = file_path.clone();
+            mock.expect_remove()
+                .withf(move |path| path == expected.as_path())
+                .returning(|_| Ok(()))
+                .times(1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+
+        cache.remove_in_batch(&token, &file_path).await.unwrap();
+        assert!(!file_path.exists());
+
+        batch.sync_all().await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_rejects_directory_operations_affecting_owned_files(tmp_dir: PathBuf) {
+        let scope = tmp_dir.join("entry");
+        let file_path = scope.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            mock.expect_create_dir_all().returning(|path| {
+                fs::create_dir_all(path)?;
+                Ok(())
+            });
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        drop(
+            cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap(),
+        );
+
+        let err = cache.remove_dir(&scope).await.unwrap_err();
+        assert_eq!(
+            err,
+            internal_server_error!(
+                "Cannot modify {} because it affects an active file batch",
+                scope.display()
+            )
+        );
+        batch.sync_all().await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_rejects_commit_with_pending_upload(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+        });
+        let cache = build_cache(backend);
+        let batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+
+        drop(
+            cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap(),
+        );
+
+        assert_eq!(
+            batch.commit().await.unwrap_err(),
+            internal_server_error!("Cannot commit file batch with pending remote mutations")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn failed_batch_upload_blocks_commit(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            mock.expect_upload()
+                .returning(|_| Err(std::io::Error::from(ErrorKind::Other)))
+                .times(1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        {
+            let mut file = cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            file.write_all(b"index").unwrap();
+        }
+
+        assert_eq!(
+            batch.sync_file(&file_path).await.err().unwrap(),
+            internal_server_error!("other error")
+        );
+        assert_eq!(
+            batch.commit().await.unwrap_err(),
+            internal_server_error!("Cannot commit failed file batch; retry synchronization first")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_rejects_path_owned_by_competing_batch(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+        });
+        let cache = build_cache(backend);
+        let first_batch = cache.begin_batch().await.unwrap();
+        let second_batch = cache.begin_batch().await.unwrap();
+
+        drop(
+            cache
+                .write_or_create_in_batch(&first_batch.token(), &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap(),
+        );
+
+        assert_eq!(
+            cache
+                .write_or_create_in_batch(&second_batch.token(), &file_path, SeekFrom::Start(0))
+                .await
+                .err()
+                .unwrap(),
+            internal_server_error!(
+                "File {} is owned by another active file batch",
+                file_path.display()
+            )
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_rejects_stale_token(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let cache = build_cache(build_backend(|_mock| {}));
+        let batch = cache.begin_batch().await.unwrap();
+        let stale_token = batch.token();
+        batch.commit().await.unwrap();
+
+        assert_eq!(
+            cache
+                .write_or_create_in_batch(&stale_token, &file_path, SeekFrom::Start(0))
+                .await
+                .err()
+                .unwrap(),
+            internal_server_error!("File batch is no longer active")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_syncs_dirty_file_evicted_from_cache(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 2);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            expect_upload(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        {
+            let mut file = cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            file.write_all(b"index").unwrap();
+        }
+        cache.cache.write().await.unwrap().remove(&file_path);
+
+        batch.sync_file(&file_path).await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_ignores_not_found_for_deferred_delete(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("old.blk");
+        fs::write(&file_path, b"old").unwrap();
+        let backend = build_backend(|mock| {
+            mock.expect_remove()
+                .returning(|_| Err(std::io::Error::from(ErrorKind::NotFound)))
+                .times(1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+
+        cache.remove_in_batch(&token, &file_path).await.unwrap();
+        batch.sync_all().await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn failed_deferred_delete_blocks_commit(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("old.blk");
+        fs::write(&file_path, b"old").unwrap();
+        let backend = build_backend(|mock| {
+            mock.expect_remove()
+                .returning(|_| Err(std::io::Error::from(ErrorKind::PermissionDenied)))
+                .times(1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+
+        cache.remove_in_batch(&token, &file_path).await.unwrap();
+        assert_eq!(
+            batch.sync_all().await.err().unwrap(),
+            internal_server_error!("permission denied")
+        );
+        assert_eq!(
+            batch.commit().await.unwrap_err(),
+            internal_server_error!("Cannot commit failed file batch; retry synchronization first")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_releases_claim_after_failed_file_open(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("missing").join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            mock.expect_create_dir_all()
+                .returning(|_| Err(std::io::Error::from(ErrorKind::PermissionDenied)))
+                .times(1);
+        });
+        let cache = build_cache(backend);
+        let batch = cache.begin_batch().await.unwrap();
+
+        assert_eq!(
+            cache
+                .write_or_create_in_batch(&batch.token(), &file_path, SeekFrom::Start(0))
+                .await
+                .err()
+                .unwrap(),
+            internal_server_error!("permission denied")
+        );
+        assert!(!cache
+            .batches
+            .read()
+            .await
+            .unwrap()
+            .path_owners
+            .contains_key(&file_path));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_keeps_pending_delete_after_local_delete_failure(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("missing.blk");
+        let backend = build_backend(|mock| {
+            expect_remove(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+
+        let err = cache.remove_in_batch(&token, &file_path).await.unwrap_err();
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        assert!(cache
+            .batches
+            .read()
+            .await
+            .unwrap()
+            .active
+            .get(&token.id)
+            .unwrap()
+            .pending_deletes
+            .contains(&file_path));
+
+        batch.sync_all().await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_sync_all_retries_failed_upload_and_clears_failed_state(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let first_upload = Arc::new(AtomicBool::new(true));
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            let first_upload = Arc::clone(&first_upload);
+            mock.expect_upload().returning(move |_| {
+                if first_upload.swap(false, Ordering::Relaxed) {
+                    Err(std::io::Error::from(ErrorKind::Other))
+                } else {
+                    Ok(())
+                }
+            });
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        {
+            let mut file = cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            file.write_all(b"index").unwrap();
+        }
+
+        assert_eq!(
+            batch.sync_all().await.unwrap_err(),
+            internal_server_error!("other error")
+        );
+        assert!(matches!(
+            cache
+                .batches
+                .read()
+                .await
+                .unwrap()
+                .active
+                .get(&token.id)
+                .unwrap()
+                .state,
+            BatchState::Failed
+        ));
+
+        batch.sync_all().await.unwrap();
+        assert!(matches!(
+            cache
+                .batches
+                .read()
+                .await
+                .unwrap()
+                .active
+                .get(&token.id)
+                .unwrap()
+                .state,
+            BatchState::Active
+        ));
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_commit_releases_cached_file_owner(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            expect_upload(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        {
+            let mut file = cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            file.write_all(b"index").unwrap();
+        }
+
+        batch.sync_all().await.unwrap();
+        batch.commit().await.unwrap();
+
+        cache
+            .cache
+            .read()
+            .await
+            .unwrap()
+            .get(&file_path)
+            .unwrap()
+            .write()
+            .await
+            .unwrap()
+            .sync_all()
+            .await
+            .unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_sync_file_rejects_stale_and_foreign_paths(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+        });
+        let cache = build_cache(backend);
+
+        let batch = cache.begin_batch().await.unwrap();
+        let mut stale_batch = FileBatch {
+            token: batch.token(),
+            cache: Arc::clone(&cache.cache),
+            backend: Arc::clone(&cache.backend),
+            batches: Arc::clone(&cache.batches),
+        };
+        batch.commit().await.unwrap();
+        assert_eq!(
+            stale_batch.sync_file(&file_path).await.unwrap_err(),
+            internal_server_error!("File batch is no longer active")
+        );
+        assert_eq!(
+            stale_batch.sync_all().await.unwrap_err(),
+            internal_server_error!("File batch is no longer active")
+        );
+
+        let first_batch = cache.begin_batch().await.unwrap();
+        let mut foreign_batch = cache.begin_batch().await.unwrap();
+        drop(
+            cache
+                .write_or_create_in_batch(&first_batch.token(), &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap(),
+        );
+        assert_eq!(
+            foreign_batch.sync_file(&file_path).await.unwrap_err(),
+            internal_server_error!(
+                "File {} is not owned by this file batch",
+                file_path.display()
+            )
+        );
     }
 
     #[rstest]
@@ -1227,6 +2136,7 @@ mod tests {
                 &cache.read_only,
                 &cache.backend,
                 &cache.cache,
+                &cache.batches,
                 &sync_interval,
             )
             .await
@@ -1272,6 +2182,7 @@ mod tests {
                 &cache.read_only,
                 &cache.backend,
                 &cache.cache,
+                &cache.batches,
                 &sync_interval,
             )
             .await
@@ -1342,6 +2253,7 @@ mod tests {
                 &cache.read_only,
                 &cache.backend,
                 &cache.cache,
+                &cache.batches,
                 &sync_interval,
             )
             .await

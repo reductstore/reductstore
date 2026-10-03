@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- Use the shared ReductStore Debian base image for runtime containers, [PR-1639](https://github.com/reductstore/reductstore/pull/1639)
+- Publish entry mutations atomically for read-only replicas, [PR-1637](https://github.com/reductstore/reductstore/pull/1637) by @atimin
 - Replace formatted `ReductError` constructors with error macros, [PR-1631](https://github.com/reductstore/reductstore/pull/1631) by @vintcessun
 
 ## 1.21.1 - 2026-09-22

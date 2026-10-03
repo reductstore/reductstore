@@ -117,6 +117,13 @@ impl Bucket {
                     }
                 }
 
+                if let Err(err) = entry.sync_fs().await {
+                    warn!(
+                        "Failed to publish entry '{}' in bucket '{}' before removal: {}",
+                        entry_name, bucket_name, err
+                    );
+                }
+
                 let folder_removed = match folder_keeper.remove_folder(&entry_name).await {
                     Ok(()) => true,
                     Err(err) if err.status() == ErrorCode::NotFound => true,
@@ -190,6 +197,7 @@ impl Bucket {
             }
 
             entry.remove_all_blocks().await?;
+            entry.sync_fs().await?;
             if crate::core::file_cache::FILE_CACHE
                 .try_exists(&self.path.join(name))
                 .await?

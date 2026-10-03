@@ -1,7 +1,11 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
+use crate::core::sync::AsyncRwLock;
+use crate::storage::block_manager::BlockManager;
 use crate::storage::block_manager::BlockRef;
+use crate::storage::entry::publication_coordinator::MutationAdmission;
+use crate::storage::entry::publication_coordinator::PublicationCoordinator;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
 use async_trait::async_trait;
@@ -9,30 +13,56 @@ use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::{WriteChunk, WriteRecord};
 use reduct_base::{conflict, Labels};
+use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
 
 struct InFlightWriteRecord {
     inner: Box<dyn WriteRecord + Sync + Send>,
     _permit: Option<OwnedSemaphorePermit>,
+    publication: Option<MutationAdmission>,
+    coordinator: Arc<PublicationCoordinator>,
+    entry_path: PathBuf,
+    block_manager: Arc<AsyncRwLock<BlockManager>>,
 }
 
 impl InFlightWriteRecord {
     fn new(
         inner: Box<dyn WriteRecord + Sync + Send>,
         permit: Option<OwnedSemaphorePermit>,
+        publication: MutationAdmission,
+        coordinator: Arc<PublicationCoordinator>,
+        entry_path: PathBuf,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Self {
         Self {
             inner,
             _permit: permit,
+            publication: Some(publication),
+            coordinator,
+            entry_path,
+            block_manager,
         }
+    }
+
+    async fn release_publication_after(&mut self, terminal: bool) -> Result<(), ReductError> {
+        if terminal {
+            self.publication.take();
+            if self.coordinator.try_publish(&self.entry_path).await? {
+                self.block_manager.write().await?.clear_mutation_batch();
+            }
+        }
+        Ok(())
     }
 }
 
 #[async_trait]
 impl WriteRecord for InFlightWriteRecord {
     async fn send(&mut self, chunk: WriteChunk) -> Result<(), ReductError> {
-        self.inner.send(chunk).await
+        let terminal = chunk.is_err() || chunk.as_ref().is_ok_and(Option::is_none);
+        let result = self.inner.send(chunk).await;
+        self.release_publication_after(terminal).await?;
+        result
     }
 
     async fn send_timeout(
@@ -40,7 +70,10 @@ impl WriteRecord for InFlightWriteRecord {
         chunk: WriteChunk,
         timeout: std::time::Duration,
     ) -> Result<(), ReductError> {
-        self.inner.send_timeout(chunk, timeout).await
+        let terminal = chunk.is_err() || chunk.as_ref().is_ok_and(Option::is_none);
+        let result = self.inner.send_timeout(chunk, timeout).await;
+        self.release_publication_after(terminal).await?;
+        result
     }
 }
 
@@ -66,6 +99,11 @@ impl Entry {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_not_deleting().await?;
+        let publication = self.publication.begin_mutation().await?;
+        {
+            let mut block_manager = self.block_manager.write().await?;
+            block_manager.set_mutation_batch(publication.token.clone());
+        }
         let permit = self.acquire_writer_slot().await?;
         // Strategy validates labels and can perform pre-write maintenance.
         self.system_behavior.prepare_write(self, &labels).await?;
@@ -141,16 +179,21 @@ impl Entry {
                                 block.insert_or_update_record(record);
                             }
 
-                            let writer = RecordWriter::try_new(
+                            let writer = RecordWriter::try_new_in_batch(
                                 Arc::clone(&self.block_manager),
                                 block_ref,
                                 time,
+                                publication.token.clone(),
                             )
                             .await?;
 
                             return Ok(Box::new(InFlightWriteRecord::new(
                                 Box::new(writer),
                                 permit,
+                                publication,
+                                Arc::clone(&self.publication),
+                                self.path.clone(),
+                                Arc::clone(&self.block_manager),
                             )));
                         };
                     }
@@ -188,9 +231,21 @@ impl Entry {
         Self::prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)
             .await?;
 
-        let writer =
-            RecordWriter::try_new(Arc::clone(&self.block_manager), block_ref, time).await?;
-        Ok(Box::new(InFlightWriteRecord::new(Box::new(writer), permit)))
+        let writer = RecordWriter::try_new_in_batch(
+            Arc::clone(&self.block_manager),
+            block_ref,
+            time,
+            publication.token.clone(),
+        )
+        .await?;
+        Ok(Box::new(InFlightWriteRecord::new(
+            Box::new(writer),
+            permit,
+            publication,
+            Arc::clone(&self.publication),
+            self.path.clone(),
+            Arc::clone(&self.block_manager),
+        )))
     }
 
     async fn prepare_block_for_writing(

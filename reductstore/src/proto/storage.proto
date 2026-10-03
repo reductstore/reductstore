@@ -106,3 +106,15 @@ message FolderMap {
   }
   repeated Item items = 1;
 }
+
+// Publishes an atomically visible entry generation to replicas.
+message EntryPublication {
+  enum State {
+    UPDATING = 0;
+    READY = 1;
+  }
+
+  string incarnation = 1;
+  uint64 generation = 2;
+  State state = 3;
+}

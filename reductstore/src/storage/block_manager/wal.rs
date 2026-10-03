@@ -15,7 +15,7 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::{BatchToken, FILE_CACHE};
 use crate::storage::proto::Record;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
 
@@ -108,6 +108,10 @@ pub(in crate::storage) trait Wal {
     /// * `Ok(())` if the entry was successfully appended
     async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError>;
 
+    fn set_batch_token(&mut self, token: BatchToken);
+
+    fn clear_batch_token(&mut self);
+
     /// Read all WAL entries for a block
     ///
     /// # Arguments
@@ -130,6 +134,7 @@ struct WalImpl {
     root_path: PathBuf,
     file_positions: HashMap<u64, u64>,
     known_blocks: BTreeSet<u64>,
+    batch_token: Option<BatchToken>,
 }
 
 impl WalImpl {
@@ -138,6 +143,7 @@ impl WalImpl {
             root_path: path_buf,
             file_positions: HashMap::new(), // we need to keep track of the file positions for each block because of file cache
             known_blocks: BTreeSet::new(),
+            batch_token: None,
         };
 
         let mut blocks = BTreeSet::new();
@@ -186,12 +192,18 @@ const STOP_MARKER: u8 = 255;
 
 #[async_trait]
 impl Wal for WalImpl {
+    fn set_batch_token(&mut self, token: BatchToken) {
+        self.batch_token = Some(token);
+    }
+
+    fn clear_batch_token(&mut self) {
+        self.batch_token = None;
+    }
+
     async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
         let mut file = if !FILE_CACHE.try_exists(&path).await? {
-            let mut file = FILE_CACHE
-                .write_or_create(&path, SeekFrom::Current(0))
-                .await?;
+            let mut file = self.write_or_create(&path, SeekFrom::Current(0)).await?;
             file.set_len(WAL_FILE_SIZE)?;
             self.file_positions.insert(block_id, 0);
             file
@@ -207,9 +219,7 @@ impl Wal for WalImpl {
                 }
             };
 
-            FILE_CACHE
-                .write_or_create(&path, SeekFrom::Start(pos))
-                .await?
+            self.write_or_create(&path, SeekFrom::Start(pos)).await?
         };
 
         if file.stream_position()? > 0 {
@@ -269,7 +279,7 @@ impl Wal for WalImpl {
     async fn remove(&mut self, block_id: u64) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
         if FILE_CACHE.try_exists(&path).await? {
-            FILE_CACHE.remove(&path).await?;
+            self.remove_file(&path).await?;
         }
         self.known_blocks.remove(&block_id);
         Ok(())
@@ -277,6 +287,26 @@ impl Wal for WalImpl {
 
     async fn list(&self) -> Result<Vec<u64>, ReductError> {
         Ok(self.known_blocks.iter().copied().collect())
+    }
+}
+
+impl WalImpl {
+    async fn write_or_create(
+        &self,
+        path: &PathBuf,
+        pos: SeekFrom,
+    ) -> Result<crate::core::file_cache::FileGuard, ReductError> {
+        match &self.batch_token {
+            Some(token) => FILE_CACHE.write_or_create_in_batch(token, path, pos).await,
+            None => FILE_CACHE.write_or_create(path, pos).await,
+        }
+    }
+
+    async fn remove_file(&self, path: &PathBuf) -> Result<(), ReductError> {
+        match &self.batch_token {
+            Some(token) => FILE_CACHE.remove_in_batch(token, path).await,
+            None => FILE_CACHE.remove(path).await,
+        }
     }
 }
 

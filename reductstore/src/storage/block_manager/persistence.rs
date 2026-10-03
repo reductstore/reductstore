@@ -53,10 +53,10 @@ impl BlockManager {
             return Ok(());
         }
 
-        let mut data_block = FILE_CACHE
-            .write_or_create(&path, SeekFrom::Current(0))
+        let mut data_block = self
+            .write_or_create_mutation(&path, SeekFrom::Current(0))
             .await?;
-        data_block.sync_all().await?;
+        data_block.flush_local().await?;
         Ok(())
     }
 
@@ -98,8 +98,8 @@ impl BlockManager {
         trace!("Writing block descriptor {:?}", path);
 
         if self.cfg.role != InstanceRole::Replica {
-            let mut lock = FILE_CACHE
-                .write_or_create(&path, SeekFrom::Start(0))
+            let mut lock = self
+                .write_or_create_mutation(&path, SeekFrom::Start(0))
                 .await?;
             lock.set_len(len)?;
             lock.write_all(&buf)?;

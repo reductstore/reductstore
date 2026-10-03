@@ -38,6 +38,11 @@ impl Entry {
         updates: Vec<UpdateLabels>,
     ) -> Result<UpdateResult, ReductError> {
         self.ensure_not_deleting().await?;
+        let publication = self.publication.begin_mutation().await?;
+        self.block_manager
+            .write()
+            .await?
+            .set_mutation_batch(publication.token.clone());
         let mut result = UpdateResult::new();
         let mut records_per_block = BTreeMap::new();
         for UpdateLabels {

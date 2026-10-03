@@ -24,7 +24,7 @@ use crate::storage::block_manager::{
     DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::entry::strategy_for_entry;
-use crate::storage::entry::{Entry, EntrySettings};
+use crate::storage::entry::{publication, Entry, EntrySettings};
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
 use crate::storage::usage::UsageCounters;
@@ -75,6 +75,18 @@ impl EntryLoader {
         usage_counters: Arc<UsageCounters>,
     ) -> Result<Option<Entry>, ReductError> {
         let start_time = Instant::now();
+        let publication_before = if cfg.role == Replica {
+            match Self::load_replica_publication(&path).await {
+                Ok(publication) => publication,
+                Err(err) if err.status() == reduct_base::error::ErrorCode::TooEarly => {
+                    debug!("Skipping replica entry {:?}: {}", path, err);
+                    return Ok(None);
+                }
+                Err(err) => return Err(err),
+            }
+        } else {
+            None
+        };
 
         let mut entry = match Self::try_restore_entry_from_index(
             path.clone(),
@@ -147,6 +159,25 @@ impl EntryLoader {
                 )
                 .await?;
             }
+        }
+
+        if cfg.role == Replica {
+            let publication_after = publication::load_fresh(&path).await?;
+            let accepted_publication =
+                match publication::validate_window(publication_before, publication_after) {
+                    Ok(publication) => publication,
+                    Err(err) if err.status() == reduct_base::error::ErrorCode::TooEarly => {
+                        debug!("Skipping replica entry {:?}: {}", path, err);
+                        return Ok(None);
+                    }
+                    Err(err) => return Err(err),
+                };
+            entry
+                .block_manager
+                .write()
+                .await?
+                .initialize_replica_publication(accepted_publication)
+                .await?;
         }
 
         {
@@ -337,6 +368,7 @@ impl EntryLoader {
             path,
             cfg,
             io_limiter,
+            publication: Arc::new(super::publication_coordinator::PublicationCoordinator::new()),
         })
     }
 
@@ -350,6 +382,11 @@ impl EntryLoader {
         io_limiter: InFlightIoLimiter,
         usage_counters: Arc<UsageCounters>,
     ) -> Result<Entry, ReductError> {
+        if cfg.role == Replica {
+            FILE_CACHE
+                .invalidate_local_cache_file(&path.join(BLOCK_INDEX_FILE))
+                .await?;
+        }
         let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
 
         Ok(Entry {
@@ -373,7 +410,39 @@ impl EntryLoader {
             path,
             cfg,
             io_limiter,
+            publication: Arc::new(super::publication_coordinator::PublicationCoordinator::new()),
         })
+    }
+
+    async fn load_replica_publication(
+        path: &PathBuf,
+    ) -> Result<Option<publication::Publication>, ReductError> {
+        const PUBLICATION_ATTEMPTS: usize = 3;
+
+        for attempt in 1..=PUBLICATION_ATTEMPTS {
+            let publication = publication::load_fresh(path).await?;
+            if !matches!(
+                publication,
+                Some(publication::Publication {
+                    state: publication::PublicationState::Updating,
+                    ..
+                })
+            ) {
+                return Ok(publication);
+            }
+
+            if attempt < PUBLICATION_ATTEMPTS {
+                debug!(
+                    "Retrying replica entry {:?} while publication is updating (attempt {}/{})",
+                    path, attempt, PUBLICATION_ATTEMPTS
+                );
+                tokio::task::yield_now().await;
+            }
+        }
+
+        Err(reduct_base::too_early!(
+            "Entry publication remained updating while restoring replica entry"
+        ))
     }
 
     fn check_descriptor_count(
