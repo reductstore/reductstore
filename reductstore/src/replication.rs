@@ -99,6 +99,17 @@ pub struct TransactionNotification {
     pub event: Transaction,
 }
 
+/// Notifies replications about a written or updated record, e.g. `ManageReplications::notify`.
+/// The storage engine calls it for every record written or updated through it.
+pub(crate) type ReplicationNotifier = std::sync::Arc<
+    dyn Fn(
+            TransactionNotification,
+        )
+            -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ReductError>> + Send>>
+        + Send
+        + Sync,
+>;
+
 #[async_trait]
 pub trait ManageReplications {
     /// Create a new replication.

@@ -99,6 +99,7 @@ mod tests {
             ca_path: None,
             compression: Default::default(),
             source_identity: Default::default(),
+            local: None,
         })
         .unwrap();
         assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));

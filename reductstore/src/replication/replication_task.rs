@@ -6,7 +6,7 @@ use crate::cfg::Cfg;
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
 use crate::replication::diagnostics::DiagnosticsCounter;
-use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketBuilder};
+use crate::replication::remote_bucket::{LocalDestination, RemoteBucket, RemoteBucketBuilder};
 use crate::replication::replication_sender::{ReplicationSender, SyncState};
 use crate::replication::transaction_filter::TransactionFilter;
 use crate::replication::transaction_log::{TransactionLog, TransactionLogMap, TransactionLogRef};
@@ -79,6 +79,8 @@ impl ReplicationTask {
             dst_token: remote_token,
             ..
         } = settings.clone();
+        // an empty destination host means a bucket in the same instance
+        let is_local = remote_host.is_empty();
 
         let mut remote_bucket_builder = RemoteBucketBuilder::new()
             .url(remote_host)
@@ -90,6 +92,13 @@ impl ReplicationTask {
 
         if let Some(token) = remote_token {
             remote_bucket_builder = remote_bucket_builder.api_token(token);
+        }
+
+        if is_local {
+            remote_bucket_builder = remote_bucket_builder.local(LocalDestination {
+                storage: Arc::clone(&storage),
+                io_timeout: config.io_conf.operation_timeout,
+            });
         }
 
         let remote_bucket = remote_bucket_builder.build()?;
@@ -571,11 +580,11 @@ mod tests {
 
     use crate::core::file_cache::FILE_CACHE;
     use mockall::mock;
-    use reduct_base::io::{BoxedReadRecord, RecordMeta};
+    use reduct_base::io::{BoxedReadRecord, ReadRecord, RecordMeta};
     use rstest::*;
 
     use crate::replication::remote_bucket::ErrorRecordMap;
-    use crate::replication::Transaction;
+    use crate::replication::{ReplicationNotifier, Transaction};
 
     use crate::core::sync::rwlock_timeout;
     use crate::storage::bucket::Bucket;
@@ -1077,6 +1086,118 @@ mod tests {
         );
     }
 
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_replicates_records_to_bucket_of_same_instance(
+        notification: TransactionNotification,
+        mut settings: ReplicationSettings,
+        path: PathBuf,
+    ) {
+        // an empty host makes the replication copy records through the storage engine
+        settings.dst_host = String::new();
+        settings.dst_token = None;
+        settings.dst_prefix = "mirror".to_string();
+        settings.entries = vec!["test1".to_string()];
+
+        let mut cfg = Cfg {
+            data_path: path.clone(),
+            ..Default::default()
+        };
+        cfg.replication_conf.replication_log_size = 1000;
+        let storage = Arc::new(
+            StorageEngine::builder()
+                .with_data_path(path)
+                .with_cfg(cfg.clone())
+                .build()
+                .await,
+        );
+
+        let labels = Labels::from_iter([("origin".to_string(), "edge".to_string())]);
+        let src_bucket = storage
+            .create_bucket(&settings.src_bucket, BucketSettings::default())
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        for entry in ["test1", "other"] {
+            let mut writer = src_bucket
+                .begin_write(entry, 10, 7, "text/plain".to_string(), labels.clone())
+                .await
+                .unwrap();
+            writer.send(Ok(Some(Bytes::from("payload")))).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
+        }
+
+        let notified = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let notifier: ReplicationNotifier = {
+            let notified = Arc::clone(&notified);
+            Arc::new(move |notification: TransactionNotification| {
+                notified.lock().unwrap().push(notification);
+                Box::pin(async { Ok(()) })
+            })
+        };
+        storage.set_replication_notifier(Some(notifier)).unwrap();
+        let dst_name = settings.dst_bucket.clone();
+        let mut replication = ReplicationTask::new(
+            "test".to_string(),
+            settings,
+            cfg,
+            Arc::clone(&storage),
+            None,
+            Default::default(),
+        )
+        .unwrap();
+
+        // fill the transaction logs before the worker loads them, so that it can't replace them
+        let other = TransactionNotification {
+            entry: "other".to_string(),
+            ..notification.clone()
+        };
+        replication.notify(other).await.unwrap();
+        replication.notify(notification).await.unwrap();
+        replication.start();
+
+        let (meta, body) = eventually("the record is replicated", async || {
+            read_record(&storage, &dst_name, "mirror/test1", 10)
+                .await
+                .ok()
+        })
+        .await;
+        assert_eq!(body, b"payload");
+        assert_eq!(meta.content_type(), "text/plain");
+        assert_eq!(meta.labels(), &labels);
+
+        eventually("the transaction log is drained", async || {
+            (replication.info().await.unwrap().pending_records == 0).then_some(())
+        })
+        .await;
+        let diagnostics = eventually("the record is counted as replicated", async || {
+            let diagnostics = replication.diagnostics().await.unwrap();
+            (diagnostics.hourly.ok > 0).then_some(diagnostics)
+        })
+        .await;
+        assert_eq!(diagnostics.hourly.errored, 0);
+        assert!(diagnostics.hourly.errors.is_empty());
+        assert!(replication.info().await.unwrap().is_active);
+
+        let notified = notified.lock().unwrap().clone();
+        assert_eq!(notified.len(), 1, "only the replicated record is notified");
+        assert_eq!(notified[0].bucket, dst_name);
+        assert_eq!(notified[0].entry, "mirror/test1");
+        assert_eq!(notified[0].event, Transaction::WriteRecord(10));
+        assert_eq!(notified[0].meta.labels(), &labels);
+
+        let dst_bucket = storage
+            .get_bucket(&dst_name)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        assert!(
+            dst_bucket.get_entry("mirror/other").await.is_err(),
+            "entries which don't match the filter are not replicated"
+        );
+        replication.stop().await;
+    }
+
     #[derive(Clone)]
     struct CapturingSystemLogger {
         events: Arc<std::sync::Mutex<Vec<crate::syslog::SystemEvent>>>,
@@ -1327,5 +1448,40 @@ mod tests {
             .front(10)
             .await
             .unwrap()
+    }
+
+    async fn read_record(
+        storage: &StorageEngine,
+        bucket: &str,
+        entry: &str,
+        time: u64,
+    ) -> Result<(RecordMeta, Vec<u8>), ReductError> {
+        let mut reader = storage
+            .get_bucket(bucket)
+            .await?
+            .upgrade()?
+            .get_entry(entry)
+            .await?
+            .upgrade()?
+            .begin_read(time)
+            .await?;
+
+        let mut body = Vec::new();
+        while let Some(chunk) = reader.read_chunk() {
+            body.extend_from_slice(&chunk?);
+        }
+        Ok((reader.meta().clone(), body))
+    }
+
+    /// Poll until the probe returns a value; fail the test if it doesn't happen in time.
+    async fn eventually<T>(what: &str, mut probe: impl AsyncFnMut() -> Option<T>) -> T {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(value) = probe().await {
+                return value;
+            }
+            assert!(Instant::now() < deadline, "timed out waiting: {what}");
+            tokio_sleep(Duration::from_millis(25)).await;
+        }
     }
 }

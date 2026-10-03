@@ -2,17 +2,22 @@
 // Licensed under the Apache License, Version 2.0
 
 mod client_wrapper;
+mod local_client;
 mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
 use crate::replication::ReplicationSourceIdentity;
 use crate::replication::Transaction;
+use crate::storage::engine::StorageEngine;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::msg::replication_api::ReplicationCompression;
 use std::collections::BTreeMap;
+use std::fmt::{Debug, Formatter};
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 
 #[derive(Clone, Debug, Default)]
 pub(super) struct RemoteBucketConfig {
@@ -23,6 +28,24 @@ pub(super) struct RemoteBucketConfig {
     pub(super) ca_path: Option<PathBuf>,
     pub(super) compression: ReplicationCompression,
     pub(super) source_identity: ReplicationSourceIdentity,
+    /// Destination bucket in the same instance; if set, HTTP settings are ignored
+    pub(super) local: Option<LocalDestination>,
+}
+
+/// Destination bucket in the same instance, written directly through the storage engine.
+#[derive(Clone)]
+pub(super) struct LocalDestination {
+    pub(super) storage: Arc<StorageEngine>,
+    /// Timeout to write a chunk of a record
+    pub(super) io_timeout: Duration,
+}
+
+impl Debug for LocalDestination {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("LocalDestination")
+            .field("io_timeout", &self.io_timeout)
+            .finish()
+    }
 }
 
 pub(super) struct RemoteBucketBuilder {
@@ -71,6 +94,11 @@ impl RemoteBucketBuilder {
 
     pub fn source_identity(mut self, source_identity: ReplicationSourceIdentity) -> Self {
         self.config.source_identity = source_identity;
+        self
+    }
+
+    pub fn local(mut self, destination: LocalDestination) -> Self {
+        self.config.local = Some(destination);
         self
     }
 

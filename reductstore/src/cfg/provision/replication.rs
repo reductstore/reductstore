@@ -67,7 +67,8 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 settings: ReplicationSettings {
                     src_bucket: "".to_string(),
                     dst_bucket: "".to_string(),
-                    dst_host: "http://localhost".to_string(),
+                    // stays empty, which means a bucket in the same instance, unless a host is set
+                    dst_host: String::new(),
                     dst_token: None,
                     entries: vec![],
                     dst_prefix: String::new(),
@@ -102,8 +103,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 continue;
             }
 
-            if let Some(remote_host) =
-                env.get_optional::<String>(&format!("RS_REPLICATION_{}_DST_HOST", id))
+            // an absent or empty remote host means a bucket in the same instance
+            if let Some(remote_host) = env
+                .get_optional::<String>(&format!("RS_REPLICATION_{}_DST_HOST", id))
+                .filter(|host| !host.is_empty())
             {
                 match url::Url::parse(&remote_host) {
                     Ok(url) => replication.settings.dst_host = url.to_string(),
@@ -117,9 +120,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                     }
                 }
             } else {
-                error!("Replication '{}' has no remote host. Drop it.", name);
-                unfinished_replications.push(id.clone());
-                continue;
+                info!(
+                    "Replication '{}' has no remote host, it replicates to bucket '{}' of the same instance.",
+                    name, replication.settings.dst_bucket
+                );
             }
 
             let token = env
@@ -525,12 +529,17 @@ mod tests {
     }
 
     #[log_test(rstest)]
+    #[case::absent(Err(VarError::NotPresent))]
+    #[case::empty(Ok(String::new()))]
     #[tokio::test]
-    async fn test_replications_needs_dst_host(mut env_with_replications: MockEnvGetter) {
+    async fn test_replications_without_dst_host_are_local(
+        mut env_with_replications: MockEnvGetter,
+        #[case] dst_host: Result<String, VarError>,
+    ) {
         env_with_replications
             .expect_get()
             .with(eq("RS_REPLICATION_1_SRC_BUCKET"))
-            .return_const(Err(VarError::NotPresent));
+            .return_const(Ok("bucket1".to_string()));
 
         env_with_replications
             .expect_get()
@@ -539,7 +548,7 @@ mod tests {
         env_with_replications
             .expect_get()
             .with(eq("RS_REPLICATION_1_DST_HOST"))
-            .return_const(Err(VarError::NotPresent));
+            .return_const(dst_host);
 
         env_with_replications
             .expect_get()
@@ -551,7 +560,20 @@ mod tests {
             .await
             .unwrap();
         let repo = components.replication_repo.read().await.unwrap();
-        assert_eq!(repo.replications().await.unwrap().len(), 0);
+        let replication = repo.get_replication_settings("replication1").await.unwrap();
+        let repl_info = repo.get_info("replication1").await.unwrap();
+
+        assert_eq!(replication.src_bucket, "bucket1");
+        assert_eq!(replication.dst_bucket, "bucket2");
+        assert_eq!(
+            replication.dst_host, "",
+            "Should write to a bucket of the same instance"
+        );
+        assert_eq!(
+            replication.dst_token, None,
+            "Should ignore the token of a local replication"
+        );
+        assert!(repl_info.info.is_provisioned);
     }
 
     #[log_test(rstest)]

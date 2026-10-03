@@ -14,12 +14,11 @@ use futures_util::StreamExt;
 use crate::api::http::entry::common::{err_to_batched_header, parse_content_length_from_header};
 use crate::api::http::StateKeeper;
 use crate::api::limits::limit_scope_from_client_ip;
-use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::RecordDrainer;
 use log::debug;
 use reduct_base::batch::{parse_batched_header, sort_headers_by_time, RecordHeader};
 use reduct_base::error::ReductError;
-use reduct_base::io::{RecordMeta, WriteRecord};
+use reduct_base::io::WriteRecord;
 use reduct_base::{bad_request, internal_server_error, unprocessable_entity};
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
@@ -28,7 +27,6 @@ use tokio::task::JoinHandle;
 use tokio::time::timeout;
 
 struct WriteContext {
-    time: u64,
     header: RecordHeader,
     writer: Box<dyn WriteRecord + Sync + Send>,
 }
@@ -76,15 +74,8 @@ pub(super) async fn write_batched_records(
             .await?;
         let (rx_writer, spawn_handler) =
             spawn_getting_writers(&components, &bucket, &entry_name, timed_headers).await?;
-        receive_body_and_write_records(
-            bucket,
-            entry_name,
-            components,
-            content_length as i64,
-            &mut stream,
-            rx_writer,
-        )
-        .await?;
+        receive_body_and_write_records(components, content_length as i64, &mut stream, rx_writer)
+            .await?;
 
         Ok(spawn_handler
             .await
@@ -111,32 +102,7 @@ pub(super) async fn write_batched_records(
     }
 }
 
-async fn notify_replication_write(
-    components: &Arc<Components>,
-    bucket: &str,
-    entry_name: &str,
-    ctx: &WriteContext,
-) -> Result<(), ReductError> {
-    components
-        .replication_repo
-        .read()
-        .await?
-        .notify(TransactionNotification {
-            bucket: bucket.to_string(),
-            entry: entry_name.to_string(),
-            meta: RecordMeta::builder()
-                .timestamp(ctx.time)
-                .labels(ctx.header.labels.clone())
-                .build(),
-            event: Transaction::WriteRecord(ctx.time),
-        })
-        .await?;
-    Ok(())
-}
-
 async fn receive_body_and_write_records(
-    bucket: &String,
-    entry_name: String,
     components: Arc<Components>,
     mut total_content_len: i64,
     stream: &mut BodyDataStream,
@@ -197,7 +163,6 @@ async fn receive_body_and_write_records(
                         debug!("Timeout while sending EOF: {}", err);
                     }
 
-                    notify_replication_write(&components, bucket, &entry_name, &ctx).await?;
                     chunk = rest;
                     break;
                 }
@@ -235,11 +200,7 @@ async fn spawn_getting_writers(
             .await;
 
             tx_writer
-                .send(WriteContext {
-                    time,
-                    header,
-                    writer,
-                })
+                .send(WriteContext { header, writer })
                 .await
                 .map_err(|err| {
                     debug!(

@@ -3,7 +3,6 @@
 
 use crate::api::http::{HttpError, StateKeeper};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::bucket::update_records::UpdateLabelsMulti;
 use axum::extract::{Path, State};
 use axum_extra::headers::HeaderMap;
@@ -13,7 +12,6 @@ use reduct_base::batch::v2::{
     START_TS_HEADER,
 };
 use reduct_base::error::ReductError;
-use reduct_base::io::RecordMeta;
 use reduct_base::unprocessable_entity;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -44,12 +42,10 @@ pub(super) async fn update_batched_records(
         })
         .collect::<Vec<_>>();
 
-    let bucket = components
+    let result = components
         .storage
-        .get_bucket(bucket_name)
-        .await?
-        .upgrade()?;
-    let result = bucket.update_labels(updates.clone()).await?;
+        .update_labels_multi(bucket_name, updates.clone())
+        .await?;
 
     let mut resp_headers = HeaderMap::new();
     let start_ts = parse_start_timestamp(&headers)?;
@@ -57,41 +53,26 @@ pub(super) async fn update_batched_records(
     resp_headers.insert(START_TS_HEADER, make_start_timestamp_header(start_ts));
     resp_headers.insert(ENTRIES_HEADER, make_entries_header(&entries));
 
+    // the engine has already notified replications about the updated records
     for update in updates {
-        if let Some(entry_results) = result.get(&update.entry_name) {
-            if let Some(res) = entry_results.get(&update.time) {
-                match res {
-                    Ok(labels) => {
-                        let replication_repo = components.replication_repo.read().await?;
-                        replication_repo
-                            .notify(TransactionNotification {
-                                bucket: bucket_name.clone(),
-                                entry: update.entry_name.clone(),
-                                meta: RecordMeta::builder()
-                                    .timestamp(update.time)
-                                    .labels(labels.clone())
-                                    .build(),
-                                event: Transaction::UpdateRecord(update.time),
-                            })
-                            .await?;
-                    }
-                    Err(err) => {
-                        let entry_index = entries
-                            .iter()
-                            .position(|entry| entry == &update.entry_name)
-                            .ok_or_else(|| {
-                                HttpError::from(unprocessable_entity!(
-                                    "Entry '{}' is missing in x-reduct-entries",
-                                    update.entry_name
-                                ))
-                            })?;
-                        let (name, value) =
-                            make_error_batched_header(entry_index, update.time - start_ts, err);
-                        resp_headers.insert(name, value);
-                    }
-                }
-            }
-        }
+        let Some(Err(err)) = result
+            .get(&update.entry_name)
+            .and_then(|entry_results| entry_results.get(&update.time))
+        else {
+            continue;
+        };
+
+        let entry_index = entries
+            .iter()
+            .position(|entry| entry == &update.entry_name)
+            .ok_or_else(|| {
+                HttpError::from(unprocessable_entity!(
+                    "Entry '{}' is missing in x-reduct-entries",
+                    update.entry_name
+                ))
+            })?;
+        let (name, value) = make_error_batched_header(entry_index, update.time - start_ts, err);
+        resp_headers.insert(name, value);
     }
 
     Ok(resp_headers)

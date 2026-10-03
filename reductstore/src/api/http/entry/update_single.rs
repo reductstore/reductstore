@@ -7,13 +7,11 @@ use std::sync::Arc;
 use axum::body::Body;
 use axum::extract::{Path, Query, State};
 use axum_extra::headers::HeaderMap;
-use reduct_base::io::RecordMeta;
 use reduct_base::Labels;
 
 use crate::api::http::entry::common::parse_timestamp_from_query;
 use crate::api::http::{ErrorCode, HttpError, StateKeeper};
 use crate::auth::policy::WriteAccessPolicy;
-use crate::replication::{Transaction, TransactionNotification};
 use crate::storage::entry::update_labels::UpdateLabels;
 
 // PATCH /:bucket/:entry?ts=<number>
@@ -55,37 +53,24 @@ pub(super) async fn update_record(
     }
 
     let entry_name = path.get("entry_name").unwrap();
-    let batched_result = components
+    let mut result = components
         .storage
-        .get_bucket(bucket)
-        .await?
-        .upgrade()?
-        .get_entry(entry_name)
-        .await?
-        .upgrade()?
-        .update_labels(vec![UpdateLabels {
-            time: ts,
-            update: labels_to_update,
-            remove: labels_to_remove,
-        }])
-        .await;
-
-    components
-        .replication_repo
-        .read()
-        .await?
-        .notify(TransactionNotification {
-            bucket: bucket.clone(),
-            entry: entry_name.clone(),
-            meta: RecordMeta::builder()
-                .timestamp(ts)
-                .labels(batched_result?.get(&ts).unwrap().clone()?.clone())
-                .build(),
-            event: Transaction::UpdateRecord(ts),
-        })
+        .update_labels(
+            bucket,
+            entry_name,
+            vec![UpdateLabels {
+                time: ts,
+                update: labels_to_update,
+                remove: labels_to_remove,
+            }],
+        )
         .await?;
 
-    Ok(())
+    // the engine has already notified replications about the updated record
+    match result.remove(&ts) {
+        Some(Err(err)) => Err(err.into()),
+        _ => Ok(()),
+    }
 }
 
 #[cfg(test)]
@@ -189,6 +174,46 @@ mod tests {
         assert_eq!(
             err,
             HttpError::new(ErrorCode::NotFound, "Bucket 'XXX' is not found")
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_update_record_not_found(
+        #[future] keeper: Arc<StateKeeper>,
+        headers: HeaderMap,
+        path_to_entry_1: Path<HashMap<String, String>>,
+        #[future] empty_body: Body,
+    ) {
+        let keeper = keeper.await;
+        let err = update_record(
+            State(Arc::clone(&keeper)),
+            headers,
+            path_to_entry_1,
+            Query(HashMap::from_iter(vec![(
+                "ts".to_string(),
+                "999".to_string(),
+            )])),
+            empty_body.await,
+        )
+        .await
+        .err()
+        .unwrap();
+
+        assert_eq!(err.status(), ErrorCode::NotFound);
+
+        let components = keeper.get_anonymous().await.unwrap();
+        let info = components
+            .replication_repo
+            .read()
+            .await
+            .unwrap()
+            .get_info("api-test")
+            .await
+            .unwrap();
+        assert_eq!(
+            info.info.pending_records, 0,
+            "failed update must not be replicated"
         );
     }
 

@@ -163,8 +163,8 @@ impl StateKeeper {
             error!("Failed to stop lifecycle policies: {}", err);
         }
 
-        // Detach the notifier before stopping replication so final telemetry
-        // flushes do not notify a stopped repo.
+        // Detach the notifier from the storage engine before stopping replication
+        // so final writes (e.g. telemetry flushes) do not notify a stopped repo.
         if let Err(err) = self.detach_replication_notifier().await {
             error!("Failed to detach replication notifier: {}", err);
         }
@@ -184,10 +184,7 @@ impl StateKeeper {
 
     async fn detach_replication_notifier(&self) -> Result<(), ReductError> {
         let components = self.wait_components().await?.clone();
-        components
-            .system_events
-            .set_replication_notifier(None)
-            .await;
+        components.storage.set_replication_notifier(None)?;
         Ok(())
     }
 
@@ -309,6 +306,7 @@ mod tests {
     use rstest::rstest;
     use serial_test::serial;
     use std::collections::HashMap;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::sync::Arc;
     use std::time::Duration;
 
@@ -390,6 +388,48 @@ mod tests {
         writer.send(Ok(None)).await.unwrap();
 
         keeper.sync_storage().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_detach_replication_notifier(#[future] keeper: Arc<StateKeeper>) {
+        let keeper = keeper.await;
+        let components = keeper.get_anonymous().await.unwrap();
+        let notifications = Arc::new(AtomicUsize::new(0));
+        let counter = Arc::clone(&notifications);
+        components
+            .storage
+            .set_replication_notifier(Some(Arc::new(move |_| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                Box::pin(async { Ok(()) })
+            })))
+            .unwrap();
+
+        write_record(&components, 1).await;
+        assert_eq!(notifications.load(Ordering::SeqCst), 1);
+
+        keeper.detach_replication_notifier().await.unwrap();
+
+        write_record(&components, 2).await;
+        assert_eq!(
+            notifications.load(Ordering::SeqCst),
+            1,
+            "no notifications are expected after the notifier is detached from the storage"
+        );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_detach_replication_notifier_not_ready(
+        #[future] not_ready_keeper: Arc<StateKeeper>,
+    ) {
+        let err = not_ready_keeper
+            .await
+            .detach_replication_notifier()
+            .await
+            .err()
+            .unwrap();
+        assert_eq!(err.status, ErrorCode::ServiceUnavailable);
     }
 
     #[rstest]
@@ -480,5 +520,22 @@ mod tests {
         let ce = ComponentError::new(ErrorCode::UnprocessableEntity, "bad data");
         let re: ReductError = ce.into();
         assert_eq!(re.status, ErrorCode::UnprocessableEntity);
+    }
+
+    async fn write_record(components: &Components, time: u64) {
+        let mut writer = components
+            .storage
+            .begin_write(
+                "bucket-1",
+                "entry-notify",
+                time,
+                4,
+                "text/plain".to_string(),
+                HashMap::new(),
+            )
+            .await
+            .unwrap();
+        writer.send(Ok(Some(Bytes::from("test")))).await.unwrap();
+        writer.send(Ok(None)).await.unwrap();
     }
 }

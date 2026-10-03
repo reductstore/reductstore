@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Replicate to a bucket of the same instance directly through the storage engine when `dst_host` is empty, rejecting loops between local replications, [Issue-1625](https://github.com/reductstore/reductstore/issues/1625) by @DibbayajyotiRoy
+
 ### Internal
 
 - Use the shared ReductStore Debian base image for runtime containers, [PR-1639](https://github.com/reductstore/reductstore/pull/1639)

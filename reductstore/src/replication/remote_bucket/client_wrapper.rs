@@ -4,6 +4,7 @@
 use crate::core::internal_client::{
     ClientBuildErrorContext, ClientBuildErrorKind, InternalClientApi, InternalClientBuilder,
 };
+use crate::replication::remote_bucket::local_client::LocalClient;
 use crate::replication::remote_bucket::{ErrorRecordMap, RemoteBucketConfig};
 use crate::replication::{
     ReplicationSourceIdentity, REPLICATION_LICENSE_HASH_HEADER, REPLICATION_NODE_ID_HEADER,
@@ -417,8 +418,12 @@ impl ReductBucketApi for BucketWrapper {
     }
 }
 
-/// Create a new Reduct client wrapper.
+/// Create a new Reduct client wrapper: the storage engine for a local destination, HTTP otherwise.
 pub(super) fn create_client(config: &RemoteBucketConfig) -> Result<BoxedClientApi, ReductError> {
+    if let Some(destination) = &config.local {
+        return Ok(Box::new(LocalClient::new(destination.clone())));
+    }
+
     Ok(Box::new(ReductClient::new(
         &config.url,
         &config.api_token,
@@ -690,6 +695,7 @@ pub(super) mod tests {
             ca_path: Some(ca_path),
             compression: ReplicationCompression::None,
             source_identity: Default::default(),
+            local: None,
         };
 
         let client = create_client(&config).unwrap();
