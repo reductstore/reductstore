@@ -36,6 +36,7 @@ use crate::lock_file::{BoxedLockFile, LockFileBuilder};
 use crate::replication::ReplicationSourceIdentity;
 use crate::storage::bucket::Bucket;
 use crate::storage::usage::UsageCounters;
+use crate::storage::DECOMPRESS_CACHE;
 use crate::syslog::build_system_event_logger;
 use async_trait::async_trait;
 use log::{info, warn};
@@ -557,6 +558,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         FILE_CACHE.set_storage_backend(backend).await;
         FILE_CACHE.set_sync_interval(self.cfg.backend_config.sync_interval);
         FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::Replica);
+        DECOMPRESS_CACHE.set_max_size(self.cfg.engine_config.decompress_cache_size);
         Ok(())
     }
 

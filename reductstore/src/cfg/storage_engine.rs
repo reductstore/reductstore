@@ -3,6 +3,7 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
+use crate::storage::DECOMPRESS_CACHE_DEFAULT_SIZE;
 use bytesize::ByteSize;
 use std::time::Duration;
 
@@ -12,6 +13,8 @@ pub struct StorageEngineConfig {
     pub replica_update_interval: Duration,
     pub enable_integrity_checks: bool,
     pub max_storage_size: Option<u64>,
+    /// Disk space limit in bytes for decompressed copies of compressed blocks, shared by all entries.
+    pub decompress_cache_size: u64,
 }
 
 const DEFAULT_COMPACTION_INTERVAL_SECS: u64 = 60;
@@ -24,6 +27,7 @@ impl Default for StorageEngineConfig {
             replica_update_interval: Duration::from_secs(DEFAULT_REPLICA_UPDATE_INTERVAL_SECS),
             enable_integrity_checks: true,
             max_storage_size: None,
+            decompress_cache_size: DECOMPRESS_CACHE_DEFAULT_SIZE,
         }
     }
 }
@@ -45,6 +49,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             max_storage_size: env
                 .get_optional::<ByteSize>("RS_ENGINE_MAX_STORAGE_SIZE")
                 .map(|size| size.as_u64()),
+            decompress_cache_size: env
+                .get_optional::<ByteSize>("RS_ENGINE_DECOMPRESS_CACHE_SIZE")
+                .map(|size| size.as_u64())
+                .unwrap_or(DECOMPRESS_CACHE_DEFAULT_SIZE),
         }
     }
 }
@@ -77,12 +85,17 @@ mod tests {
             .expect_get()
             .with(eq("RS_ENGINE_MAX_STORAGE_SIZE"))
             .return_const(Ok("10GB".to_string()));
+        env_getter
+            .expect_get()
+            .with(eq("RS_ENGINE_DECOMPRESS_CACHE_SIZE"))
+            .return_const(Ok("2GB".to_string()));
 
         let expected = StorageEngineConfig {
             compaction_interval: Duration::from_secs(120),
             replica_update_interval: Duration::from_secs(45),
             enable_integrity_checks: false,
             max_storage_size: Some(10_000_000_000),
+            decompress_cache_size: 2_000_000_000,
         };
 
         assert_eq!(

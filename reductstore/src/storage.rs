@@ -11,3 +11,5 @@ pub mod query;
 
 pub(crate) mod in_flight;
 pub(crate) mod usage;
+
+pub(crate) use block_manager::decompress_cache::{DECOMPRESS_CACHE, DECOMPRESS_CACHE_DEFAULT_SIZE};
