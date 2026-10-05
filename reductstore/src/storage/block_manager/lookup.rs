@@ -36,7 +36,23 @@ impl BlockManager {
         // first check if we have the block in write cache
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
-            let path = self.resolve_desc_path(block_id).await?;
+            let path = match self.resolve_desc_path(block_id).await {
+                Ok(path) => path,
+                Err(err) if self.cfg.role == InstanceRole::Replica => {
+                    debug!(
+                        "Block descriptor {}/{}/{} can't be resolved on replica: {}. Treat as transient and reload index",
+                        self.bucket, self.entry, block_id, err
+                    );
+                    self.invalidate_replica_block_cache(block_id).await?;
+                    return Err(too_early!(
+                        "Block descriptor {}/{}/{} can't be resolved on replica. Reload index and retry",
+                        self.bucket,
+                        self.entry,
+                        block_id
+                    ));
+                }
+                Err(err) => return Err(err),
+            };
             let buf = match FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
                 Ok(mut file) => {
                     let mut buf = vec![];
@@ -73,7 +89,7 @@ impl BlockManager {
                     // we check crc if the crc is stored in the index for backward compatibility
                     if block_crc != crc.sum64() {
                         if self.cfg.role == InstanceRole::Replica {
-                            warn!(
+                            debug!(
                                 "Block descriptor {:?} CRC mismatch on replica: index CRC {} mismatch with calculated CRC {}. Treat as transient and reload index",
                                 path,
                                 block_crc,
