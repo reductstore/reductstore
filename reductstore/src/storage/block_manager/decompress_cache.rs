@@ -509,6 +509,16 @@ mod tests {
         path
     }
 
+    fn cached_files(temp_dir: &Path) -> Vec<PathBuf> {
+        let mut files = std::fs::read_dir(temp_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.file_name().unwrap() != LOCK_FILE_NAME)
+            .collect::<Vec<_>>();
+        files.sort();
+        files
+    }
+
     #[rstest]
     #[tokio::test]
     #[serial]
@@ -840,5 +850,159 @@ mod tests {
         remove_stale_temp_dirs(&dir, Duration::ZERO);
 
         assert!(path.exists());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn concurrent_readers_of_same_block_keep_one_file(dir: PathBuf) {
+        let compressed_path = compressed(&dir, "1.blk.zst", "content");
+        let cache = Arc::new(cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL));
+
+        // Hold the compressed file: both readers check the cache in their first poll
+        // and wait for the file, so the second one finds the block already cached
+        let guard = FILE_CACHE
+            .read(&compressed_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        let readers = (0..2)
+            .map(|_| {
+                let (cache, dir, compressed_path) =
+                    (Arc::clone(&cache), dir.clone(), compressed_path.clone());
+                tokio::spawn(async move {
+                    cache
+                        .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+                        .await
+                        .unwrap()
+                })
+            })
+            .collect::<Vec<_>>();
+        for _ in 0..10 {
+            tokio::task::yield_now().await;
+        }
+        drop(guard);
+
+        let mut paths = vec![];
+        for reader in readers {
+            paths.push(reader.await.unwrap());
+        }
+
+        assert_eq!(paths[0], paths[1]);
+        assert_eq!(
+            cached_files(&cache.inner.temp_dir),
+            vec![paths[0].clone()],
+            "the second decompressed copy is removed"
+        );
+        assert_eq!(cache.inner.state.lock().total_size, 7);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn get_or_decompress_returns_error_when_block_is_unreadable(dir: PathBuf) {
+        // A directory instead of the compressed block: it can't be read as a file
+        let compressed_path = dir.join("1.blk.zst");
+        std::fs::create_dir(&compressed_path).unwrap();
+        let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
+
+        let result = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+            .await;
+
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        // On Windows a directory can't even be opened, so the read itself isn't reached
+        if !cfg!(windows) {
+            assert!(err.message.contains("Failed to read compressed file"));
+        }
+        assert!(!cache.inner.temp_dir.exists(), "nothing decompressed");
+        assert_eq!(cache.inner.state.lock().total_size, 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn get_or_decompress_returns_error_when_lock_file_cannot_be_created(dir: PathBuf) {
+        let compressed_path = compressed(&dir, "1.blk.zst", "content");
+        let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
+        std::fs::create_dir_all(cache.inner.temp_dir.join(LOCK_FILE_NAME)).unwrap();
+
+        let err = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(err.message.contains("Failed to create lock file"));
+        assert!(cached_files(&cache.inner.temp_dir).is_empty());
+        assert!(cache.inner.state.lock().dir_lock.is_none());
+    }
+
+    #[cfg(unix)]
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn failed_temp_file_create_is_not_cached(dir: PathBuf) {
+        use std::os::unix::fs::PermissionsExt;
+
+        let first_path = compressed(&dir, "1.blk.zst", "first");
+        let second_path = compressed(&dir, "2.blk.zst", "second");
+        let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
+        let first = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &first_path)
+            .await
+            .unwrap();
+
+        let temp_dir = cache.inner.temp_dir.clone();
+        std::fs::set_permissions(&temp_dir, std::fs::Permissions::from_mode(0o555)).unwrap();
+        if File::create(temp_dir.join("probe")).is_ok() {
+            // Running as root: permissions don't prevent writing
+            std::fs::set_permissions(&temp_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+            return;
+        }
+        let result = cache
+            .get_or_decompress(&dir, 2, DecompressedFileType::Data, &second_path)
+            .await;
+        std::fs::set_permissions(&temp_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
+
+        let err = result.unwrap_err();
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+        assert!(err
+            .message
+            .contains("Failed to create decompressed temporary file"));
+        assert_eq!(cached_files(&temp_dir), vec![first]);
+        assert_eq!(cache.inner.state.lock().total_size, 5);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn cleanup_worker_stops_when_cache_is_dropped(dir: PathBuf) {
+        let compressed_path = compressed(&dir, "1.blk.zst", "content");
+        // Initialize the global file cache first, it starts its own worker
+        drop(
+            FILE_CACHE
+                .read(&compressed_path, SeekFrom::Start(0))
+                .await
+                .unwrap(),
+        );
+        let metrics = tokio::runtime::Handle::current().metrics();
+        let tasks_before = metrics.num_alive_tasks();
+
+        let cache = cache_in(&dir, 1000, Duration::from_millis(20));
+        cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+            .await
+            .unwrap();
+        assert_eq!(metrics.num_alive_tasks(), tasks_before + 1);
+
+        drop(cache);
+        for _ in 0..100 {
+            if metrics.num_alive_tasks() == tasks_before {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(20)).await;
+        }
+        assert_eq!(metrics.num_alive_tasks(), tasks_before);
     }
 }
