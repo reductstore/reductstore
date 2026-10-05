@@ -7,7 +7,7 @@ mod block_cache;
 pub(in crate::storage) mod block_index;
 mod cache;
 pub(in crate::storage) mod compress;
-pub(in crate::storage) mod decompress_cache;
+mod decompress_cache;
 mod lifecycle;
 mod lookup;
 mod paths;
@@ -133,7 +133,7 @@ impl BlockManager {
                 READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
             ),
-            decompress_cache: DecompressCache::default(),
+            decompress_cache: DecompressCache::shared(cfg.engine_config.decompress_cache_size),
             wal: create_wal(path.clone()).await?,
             cfg,
             usage_counters,
