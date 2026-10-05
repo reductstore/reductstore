@@ -13,10 +13,9 @@ use std::hash::{Hash, Hasher};
 use std::io::{Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock, Weak};
+use std::sync::{Arc, Once, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-pub(crate) const DECOMPRESS_CACHE_DEFAULT_SIZE: u64 = 1_000_000_000;
 const DECOMPRESS_CACHE_TTL: Duration = Duration::from_secs(30);
 const DECOMPRESS_CACHE_CLEANUP_INTERVAL: Duration = Duration::from_secs(5);
 
@@ -33,19 +32,16 @@ const UNLOCKED_DIR_MAX_IDLE: Duration = Duration::from_secs(3600);
 /// - A single cache limited by bytes keeps the worst case predictable and evicts cold
 ///   blocks of all entries under shared pressure (the same idea as the global block read cache).
 ///
-/// Block managers use their own handles (see [`DecompressCache::handle`]), so a re-created entry
-/// never gets files decompressed for the previous one under the same path.
-pub(crate) static DECOMPRESS_CACHE: LazyLock<DecompressCache> = LazyLock::new(|| {
-    remove_stale_temp_dirs(&std::env::temp_dir(), UNLOCKED_DIR_MAX_IDLE);
-    DecompressCache::new(
-        temp_dir_path(&std::env::temp_dir()),
-        DECOMPRESS_CACHE_DEFAULT_SIZE,
-        DECOMPRESS_CACHE_TTL,
-    )
-});
+/// Block managers own the cache through their handles (see [`DecompressCache::shared`]), and this
+/// static keeps only a weak reference. When the last block manager is dropped, `Drop for Inner`
+/// removes the temporary directory. Each handle has its own keys, so a re-created entry never gets
+/// files decompressed for the previous one under the same path.
+static SHARED_CACHE: Mutex<Weak<Inner>> = parking_lot::const_mutex(Weak::new());
+/// Directories of killed processes are removed once per process, before the first cache is created.
+static REMOVE_STALE_DIRS: Once = Once::new();
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum DecompressedFileType {
+pub(super) enum DecompressedFileType {
     Data,
     Descriptor,
 }
@@ -93,7 +89,7 @@ static NEXT_OWNER_ID: AtomicU64 = AtomicU64::new(1);
 /// (1 µs resolution on macOS), so file names get a counter.
 static NEXT_FILE_ID: AtomicU64 = AtomicU64::new(1);
 
-pub(crate) struct DecompressCache {
+pub(super) struct DecompressCache {
     /// Unique owner id, part of every key of this handle.
     owner: u64,
     inner: Arc<Inner>,
@@ -117,25 +113,38 @@ impl DecompressCache {
         }
     }
 
+    /// Get a handle to the process-wide cache, creating the cache if no handle is alive.
+    ///
+    /// `max_size` applies only when the cache is created: all block managers share one config.
+    pub(super) fn shared(max_size: u64) -> Self {
+        let parent = std::env::temp_dir();
+        REMOVE_STALE_DIRS.call_once(|| remove_stale_temp_dirs(&parent, UNLOCKED_DIR_MAX_IDLE));
+        Self::shared_in(&SHARED_CACHE, &parent, max_size, DECOMPRESS_CACHE_TTL)
+    }
+
+    fn shared_in(slot: &Mutex<Weak<Inner>>, parent: &Path, max_size: u64, ttl: Duration) -> Self {
+        let mut shared = slot.lock();
+        if let Some(inner) = shared.upgrade() {
+            return Self {
+                owner: NEXT_OWNER_ID.fetch_add(1, Ordering::Relaxed),
+                inner,
+            };
+        }
+
+        let cache = Self::new(temp_dir_path(parent), max_size, ttl);
+        *shared = Arc::downgrade(&cache.inner);
+        cache.handle()
+    }
+
     /// Create a handle with its own keys that shares the files and the size limit with this cache.
-    pub(crate) fn handle(&self) -> Self {
+    fn handle(&self) -> Self {
         Self {
             owner: NEXT_OWNER_ID.fetch_add(1, Ordering::Relaxed),
             inner: Arc::clone(&self.inner),
         }
     }
 
-    /// Set the maximum total size of decompressed files on disk in bytes.
-    pub(crate) fn set_max_size(&self, max_size: u64) {
-        let evicted = {
-            let mut state = self.inner.state.lock();
-            state.max_size = max_size;
-            state.evict_over_limit(None)
-        };
-        remove_cached_files(evicted);
-    }
-
-    pub(crate) async fn get_or_decompress(
+    pub(super) async fn get_or_decompress(
         &self,
         entry_path: &Path,
         block_id: u64,
@@ -162,7 +171,7 @@ impl DecompressCache {
                 (existing, vec![CachedFile::new(path, size)])
             } else {
                 state.insert(key.clone(), CachedFile::new(path.clone(), size));
-                (path, state.evict_over_limit(Some(&key)))
+                (path, state.evict_over_limit(&key))
             }
         };
 
@@ -171,7 +180,7 @@ impl DecompressCache {
     }
 
     /// Remove cached decompressed files for a block.
-    pub(crate) async fn invalidate(&self, entry_path: &Path, block_id: u64) {
+    pub(super) async fn invalidate(&self, entry_path: &Path, block_id: u64) {
         let removed = {
             let mut state = self.inner.state.lock();
             [DecompressedFileType::Data, DecompressedFileType::Descriptor]
@@ -180,15 +189,6 @@ impl DecompressCache {
                 .collect::<Vec<_>>()
         };
         remove_cached_files(removed);
-    }
-
-    /// Remove all decompressed files and the temporary directory (on shutdown).
-    pub(crate) fn clear(&self) {
-        let mut state = self.inner.state.lock();
-        state.files.clear();
-        state.total_size = 0;
-        state.dir_lock = None;
-        cleanup_tmp_dir(&self.inner.temp_dir);
     }
 
     /// Expired files are removed in the background, so they don't stay on disk until the next read.
@@ -367,13 +367,13 @@ impl CacheState {
     ///
     /// The file in `keep` has just been handed out to a reader, so it stays
     /// even if it alone is larger than the limit.
-    fn evict_over_limit(&mut self, keep: Option<&str>) -> Vec<CachedFile> {
+    fn evict_over_limit(&mut self, keep: &str) -> Vec<CachedFile> {
         let mut evicted = Vec::new();
         while self.total_size > self.max_size {
             let oldest = self
                 .files
                 .iter()
-                .filter(|(key, _)| Some(key.as_str()) != keep)
+                .filter(|(key, _)| key.as_str() != keep)
                 .min_by_key(|(_, file)| file.last_access)
                 .map(|(key, _)| key.clone());
             match oldest.and_then(|key| self.remove(&key)) {
@@ -703,23 +703,6 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn set_max_size_evicts_files_over_new_limit(dir: PathBuf) {
-        let compressed_path = compressed(&dir, "1.blk.zst", "1234");
-        let cache = cache_in(&dir, 100, DECOMPRESS_CACHE_TTL);
-        let path = cache
-            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
-            .await
-            .unwrap();
-
-        cache.set_max_size(2);
-
-        assert!(!path.exists());
-        assert_eq!(cache.inner.state.lock().total_size, 0);
-    }
-
-    #[rstest]
-    #[tokio::test]
-    #[serial]
     async fn removes_expired_files_without_next_read(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let cache = cache_in(&dir, 1000, Duration::from_millis(20));
@@ -778,25 +761,51 @@ mod tests {
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn clear_and_drop_remove_temp_dir(dir: PathBuf) {
+    async fn drop_removes_temp_dir(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
-        for clear in [true, false] {
-            let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
-            let temp_dir = cache.inner.temp_dir.clone();
-            cache
-                .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
-                .await
-                .unwrap();
-            assert!(temp_dir.exists());
+        let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
+        let temp_dir = cache.inner.temp_dir.clone();
+        cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+            .await
+            .unwrap();
+        assert!(temp_dir.exists());
 
-            if clear {
-                cache.clear();
-            } else {
-                drop(cache);
-            }
+        drop(cache);
 
-            assert!(!temp_dir.exists());
-        }
+        assert!(!temp_dir.exists());
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn shared_cache_lives_while_any_handle_is_alive(dir: PathBuf) {
+        let compressed_path = compressed(&dir, "1.blk.zst", "content");
+        let slot = parking_lot::const_mutex(Weak::new());
+        let first = DecompressCache::shared_in(&slot, &dir, 1000, DECOMPRESS_CACHE_TTL);
+        let second = DecompressCache::shared_in(&slot, &dir, 500, DECOMPRESS_CACHE_TTL);
+        assert!(Arc::ptr_eq(&first.inner, &second.inner));
+        assert_ne!(first.owner, second.owner);
+        assert_eq!(
+            first.inner.state.lock().max_size,
+            1000,
+            "the limit is set on creation"
+        );
+
+        let temp_dir = first.inner.temp_dir.clone();
+        first
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
+            .await
+            .unwrap();
+
+        drop(first);
+        assert!(temp_dir.exists(), "the second handle still uses the cache");
+
+        drop(second);
+        assert!(!temp_dir.exists(), "the last handle removes the directory");
+
+        let next = DecompressCache::shared_in(&slot, &dir, 1000, DECOMPRESS_CACHE_TTL);
+        assert_ne!(next.inner.temp_dir, temp_dir);
     }
 
     #[rstest]

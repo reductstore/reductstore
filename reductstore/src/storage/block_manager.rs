@@ -7,7 +7,7 @@ mod block_cache;
 pub(in crate::storage) mod block_index;
 mod cache;
 pub(in crate::storage) mod compress;
-pub(in crate::storage) mod decompress_cache;
+mod decompress_cache;
 mod lifecycle;
 mod lookup;
 mod paths;
@@ -23,9 +23,7 @@ use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
 use crate::storage::block_manager::compress::CompressionAlgorithm;
-use crate::storage::block_manager::decompress_cache::{
-    DecompressCache, DecompressedFileType, DECOMPRESS_CACHE,
-};
+use crate::storage::block_manager::decompress_cache::{DecompressCache, DecompressedFileType};
 use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
 use crate::storage::entry::publication::PublicationId;
@@ -135,7 +133,7 @@ impl BlockManager {
                 READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
             ),
-            decompress_cache: DECOMPRESS_CACHE.handle(),
+            decompress_cache: DecompressCache::shared(cfg.engine_config.decompress_cache_size),
             wal: create_wal(path.clone()).await?,
             cfg,
             usage_counters,

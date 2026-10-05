@@ -3,7 +3,6 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
-use crate::storage::DECOMPRESS_CACHE_DEFAULT_SIZE;
 use bytesize::ByteSize;
 use std::time::Duration;
 
@@ -19,6 +18,7 @@ pub struct StorageEngineConfig {
 
 const DEFAULT_COMPACTION_INTERVAL_SECS: u64 = 60;
 const DEFAULT_REPLICA_UPDATE_INTERVAL_SECS: u64 = 60;
+const DEFAULT_DECOMPRESS_CACHE_SIZE: u64 = 1_000_000_000;
 
 impl Default for StorageEngineConfig {
     fn default() -> Self {
@@ -27,7 +27,7 @@ impl Default for StorageEngineConfig {
             replica_update_interval: Duration::from_secs(DEFAULT_REPLICA_UPDATE_INTERVAL_SECS),
             enable_integrity_checks: true,
             max_storage_size: None,
-            decompress_cache_size: DECOMPRESS_CACHE_DEFAULT_SIZE,
+            decompress_cache_size: DEFAULT_DECOMPRESS_CACHE_SIZE,
         }
     }
 }
@@ -52,7 +52,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             decompress_cache_size: env
                 .get_optional::<ByteSize>("RS_ENGINE_DECOMPRESS_CACHE_SIZE")
                 .map(|size| size.as_u64())
-                .unwrap_or(DECOMPRESS_CACHE_DEFAULT_SIZE),
+                .unwrap_or(DEFAULT_DECOMPRESS_CACHE_SIZE),
         }
     }
 }

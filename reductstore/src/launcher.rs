@@ -11,7 +11,6 @@ use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::set_rwlock_timeout;
 use crate::lock_file::BoxedLockFile;
 use crate::storage::engine::StorageEngine;
-use crate::storage::DECOMPRESS_CACHE;
 use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
@@ -172,7 +171,6 @@ impl<ExtCfg: ExtCfgBounds> PreparedServer<ExtCfg> {
         set_rwlock_timeout(RW_LOCK_SHUTDOWN_TIMEOUT);
         state_keeper.shutdown().await;
         FILE_CACHE.stop_sync_worker();
-        DECOMPRESS_CACHE.clear();
         drop(lock_file);
         info!("Server has been shut down.");
     }
