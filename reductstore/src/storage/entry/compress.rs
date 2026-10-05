@@ -527,14 +527,7 @@ mod tests {
         settings: EntrySettings,
         bucket_path: PathBuf,
     ) -> Entry {
-        entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await
-            .unwrap();
+        entry.sync_fs().await.unwrap();
 
         Entry::builder()
             .path(bucket_path.join(entry.name()))

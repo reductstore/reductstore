@@ -717,6 +717,55 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_compact_batches_completed_writes(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+            write_stub_record(&entry, 2).await;
+
+            assert!(entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+            assert_eq!(publication::load(&entry.path).await.unwrap(), None);
+
+            entry.compact().await.unwrap();
+
+            let publication = publication::load(&entry.path).await.unwrap().unwrap();
+            assert_eq!(publication.state, publication::PublicationState::Ready);
+            assert_eq!(publication.generation, 2);
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compact_publishes_after_errored_write(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            let mut writer = entry
+                .begin_write(1, 10, "text/plain".to_string(), Labels::new())
+                .await
+                .unwrap();
+
+            writer
+                .send(Err(ReductError::internal_server_error("write failed")))
+                .await
+                .unwrap();
+
+            entry.compact().await.unwrap();
+
+            let publication = publication::load(&entry.path).await.unwrap().unwrap();
+            assert_eq!(publication.state, publication::PublicationState::Ready);
+            assert_eq!(publication.generation, 2);
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_compact_skips_when_block_manager_busy(#[future] entry: Arc<Entry>) {
             let entry = entry.await;
             let _guard = entry.block_manager.write().await.unwrap();
@@ -797,7 +846,7 @@ mod tests {
 
             let publication = publication::load(&entry.path).await.unwrap().unwrap();
             assert_eq!(publication.state, publication::PublicationState::Ready);
-            assert_eq!(publication.generation, 4);
+            assert_eq!(publication.generation, 2);
             assert!(!entry
                 .block_manager
                 .read()
@@ -1198,7 +1247,7 @@ mod tests {
                     .unwrap()
                     .unwrap()
                     .generation,
-                4
+                2
             );
             assert!(!entry
                 .block_manager
@@ -1248,7 +1297,7 @@ mod tests {
                     .unwrap()
                     .unwrap()
                     .generation,
-                6
+                2
             );
             assert!(!entry
                 .block_manager
