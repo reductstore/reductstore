@@ -3,15 +3,24 @@
 
 use super::publication::{self, Publication};
 use crate::core::file_cache::{BatchToken, FileBatch, FILE_CACHE};
+use crate::core::sync::AsyncRwLock;
+use crate::storage::block_manager::BlockManager;
+use log::error;
 use reduct_base::error::ReductError;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 use tokio::sync::{Mutex, OwnedRwLockReadGuard, RwLock};
+
+const IDLE_PUBLICATION_DELAY: Duration = Duration::from_millis(50);
 
 pub(super) struct PublicationCoordinator {
     admission: Arc<RwLock<()>>,
     batch: Mutex<Option<FileBatch>>,
     marker: Mutex<Option<Publication>>,
+    publication_revision: AtomicU64,
+    publisher_running: AtomicBool,
 }
 
 pub(super) struct MutationAdmission {
@@ -25,10 +34,13 @@ impl PublicationCoordinator {
             admission: Arc::new(RwLock::new(())),
             batch: Mutex::new(None),
             marker: Mutex::new(None),
+            publication_revision: AtomicU64::new(0),
+            publisher_running: AtomicBool::new(false),
         }
     }
 
     pub(super) async fn begin_mutation(&self) -> Result<MutationAdmission, ReductError> {
+        self.publication_revision.fetch_add(1, Ordering::AcqRel);
         let guard = Arc::clone(&self.admission).read_owned().await;
         let mut batch = self.batch.lock().await;
         if batch.is_none() {
@@ -50,14 +62,87 @@ impl PublicationCoordinator {
 
     pub(super) async fn publish(&self, path: &Path) -> Result<(), ReductError> {
         let _guard = Arc::clone(&self.admission).write_owned().await;
-        self.publish_locked(path).await
+        self.publish_locked(path).await.map(|_| ())
     }
 
-    async fn publish_locked(&self, path: &Path) -> Result<(), ReductError> {
+    /// Publishes a completed mutation burst after a short idle period.
+    ///
+    /// Every completed mutation advances the revision. The single background
+    /// publisher waits until the revision stops changing, so adjacent records
+    /// and HTTP batches share one publication while an idle entry becomes
+    /// visible to replicas without waiting for the periodic compaction tick.
+    pub(super) fn schedule_publish(
+        self: &Arc<Self>,
+        path: PathBuf,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        self.publication_revision.fetch_add(1, Ordering::AcqRel);
+        if self
+            .publisher_running
+            .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+            .is_err()
+        {
+            return;
+        }
+
+        let coordinator = Arc::clone(self);
+        tokio::spawn(async move {
+            coordinator
+                .run_scheduled_publisher(path, block_manager)
+                .await;
+        });
+    }
+
+    async fn run_scheduled_publisher(
+        self: Arc<Self>,
+        path: PathBuf,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        loop {
+            let observed_revision = self.publication_revision.load(Ordering::Acquire);
+            tokio::time::sleep(IDLE_PUBLICATION_DELAY).await;
+            if self.publication_revision.load(Ordering::Acquire) != observed_revision {
+                continue;
+            }
+
+            if let Err(err) = self.publish_scheduled_batch(&path, &block_manager).await {
+                error!("Failed to publish entry {}: {}", path.display(), err);
+            }
+
+            self.publisher_running.store(false, Ordering::Release);
+            if self.publication_revision.load(Ordering::Acquire) == observed_revision {
+                break;
+            }
+
+            if self
+                .publisher_running
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_err()
+            {
+                break;
+            }
+        }
+    }
+
+    async fn publish_scheduled_batch(
+        &self,
+        path: &Path,
+        block_manager: &AsyncRwLock<BlockManager>,
+    ) -> Result<(), ReductError> {
+        let _guard = Arc::clone(&self.admission).write_owned().await;
+        let mut block_manager = block_manager.write().await?;
+        if let Some(token) = self.publish_locked(path).await? {
+            block_manager.clear_mutation_batch_if(&token);
+        }
+        Ok(())
+    }
+
+    async fn publish_locked(&self, path: &Path) -> Result<Option<BatchToken>, ReductError> {
         let mut stored_batch = self.batch.lock().await;
         let Some(batch) = stored_batch.as_mut() else {
-            return Ok(());
+            return Ok(None);
         };
+        let token = batch.token();
 
         let current = {
             let mut marker = self.marker.lock().await;
@@ -85,7 +170,8 @@ impl PublicationCoordinator {
         *self.marker.lock().await = Some(ready);
 
         let batch = stored_batch.take().expect("active batch disappeared");
-        batch.commit().await
+        batch.commit().await?;
+        Ok(Some(token))
     }
 }
 
