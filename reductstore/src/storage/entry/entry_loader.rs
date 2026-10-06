@@ -1060,6 +1060,7 @@ mod tests {
                 .await
                 .unwrap();
         }
+        entry.sync_fs().await.unwrap();
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
         FILE_CACHE.remove(&block_index_path).await.unwrap();
