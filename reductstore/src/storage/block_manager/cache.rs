@@ -32,3 +32,51 @@ impl BlockManager {
         self.block_cache.clear();
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::core::sync::{reset_rwlock_config, set_rwlock_timeout};
+    use crate::storage::block_manager::test_utils::{block_id, block_manager};
+    use serial_test::serial;
+
+    struct RwLockConfigGuard;
+
+    impl Drop for RwLockConfigGuard {
+        fn drop(&mut self) {
+            reset_rwlock_config();
+        }
+    }
+
+    #[rstest::rstest]
+    #[tokio::test]
+    #[serial]
+    async fn test_invalidate_replica_block_cache_returns_first_error(
+        #[future] block_manager: BlockManager,
+        block_id: u64,
+    ) {
+        let block_manager = block_manager.await;
+        let _reset = RwLockConfigGuard;
+        set_rwlock_timeout(Duration::from_millis(10));
+
+        let data_path = block_manager.path_to_data(block_id);
+        let data_guard = FILE_CACHE
+            .read(&data_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+
+        let err = block_manager
+            .invalidate_replica_block_cache(block_id)
+            .await
+            .unwrap_err();
+
+        assert_eq!(
+            err.status(),
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        assert!(err
+            .message
+            .contains("Failed to acquire async owned write lock"));
+        drop(data_guard);
+    }
+}

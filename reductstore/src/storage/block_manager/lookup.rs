@@ -190,6 +190,7 @@ impl BlockManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::storage::block_manager::compress::CompressionAlgorithm;
     use crate::storage::block_manager::test_utils::{block_id, block_manager};
     use crate::storage::block_manager::BlockManager;
     use crate::storage::proto::Block as BlockProto;
@@ -276,6 +277,26 @@ mod tests {
 
         assert_eq!(err.status(), ErrorCode::InternalServerError);
         assert!(block_manager.is_block_corrupted(block_id));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_load_block_invalid_compressed_descriptor_returns_error(
+        #[future] block_manager: BlockManager,
+        block_id: u64,
+    ) {
+        let mut block_manager = block_manager.await;
+        block_manager.block_cache.remove(&block_id);
+        block_manager
+            .index_mut()
+            .get_block_mut(block_id)
+            .unwrap()
+            .compression = Some(i32::from(CompressionAlgorithm::Zstd));
+        std::fs::write(block_manager.path_to_compressed_desc(block_id), b"not-zstd").unwrap();
+
+        let err = block_manager.load_block(block_id).await.err().unwrap();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
     }
 
     #[rstest]
