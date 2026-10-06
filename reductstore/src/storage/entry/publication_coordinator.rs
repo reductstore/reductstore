@@ -40,6 +40,7 @@ impl PublicationCoordinator {
     }
 
     pub(super) async fn begin_mutation(&self) -> Result<MutationAdmission, ReductError> {
+        self.publication_revision.fetch_add(1, Ordering::AcqRel);
         let guard = Arc::clone(&self.admission).read_owned().await;
         let mut batch = self.batch.lock().await;
         if batch.is_none() {

@@ -272,14 +272,7 @@ mod tests {
     ) {
         let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1000000).await;
-        entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await
-            .unwrap();
+        entry.sync_fs().await.unwrap();
 
         let data_path = {
             let bm = entry.block_manager.read().await.unwrap();
