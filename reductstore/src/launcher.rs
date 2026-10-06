@@ -15,14 +15,14 @@ use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use log::{error, info, warn};
-use reduct_base::error::ReductError;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::logger::Logger;
 use std::net::{IpAddr, SocketAddr};
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
 
 static SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
@@ -65,6 +65,7 @@ struct ServerRuntime {
     component_sender: Option<mpsc::Sender<Components>>,
     listener: Option<ListenerTask>,
     state_keeper: Option<Arc<StateKeeper>>,
+    shutdown_receiver: watch::Receiver<()>,
 }
 
 impl ServerRuntime {
@@ -109,6 +110,7 @@ impl<ExtCfg: ExtCfgBounds> PreparedServer<ExtCfg> {
             runtime,
         } = self;
         let (component_sender, mut listener, state_keeper) = runtime.into_parts();
+        #[cfg(any(feature = "zenoh-api", test))]
         let handle = listener.handle.clone();
         let engine_config = cfg.engine_config.clone();
         let instance_role = cfg.role.clone();
@@ -142,9 +144,6 @@ impl<ExtCfg: ExtCfgBounds> PreparedServer<ExtCfg> {
             ));
         }
 
-        tokio::spawn(shutdown_ctrl_c(handle.clone()));
-        #[cfg(unix)]
-        tokio::spawn(shutdown_signal(handle.clone()));
         #[cfg(test)]
         tokio::spawn(tests::shutdown_server(handle.clone()));
 
@@ -194,11 +193,9 @@ where
     let parser =
         CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_parser, version).await;
     let lock_file = Arc::new(parser.build_lock_file()?);
-    let runtime = start_listener(parser.cfg.clone(), Arc::clone(&lock_file));
+    let mut runtime = start_listener(parser.cfg.clone(), Arc::clone(&lock_file));
 
-    while lock_file.is_waiting().await.unwrap_or(false) {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-    }
+    wait_for_lock_file(&lock_file, &mut runtime.shutdown_receiver).await?;
 
     if lock_file.is_failed().await.unwrap_or(true) {
         panic!("Another ReductStore instance is holding the lock. Exiting.");
@@ -217,6 +214,7 @@ where
 
 fn start_listener(cfg: Cfg, lock_file: Arc<BoxedLockFile>) -> ServerRuntime {
     let handle = Handle::new();
+    let (shutdown_sender, shutdown_receiver) = watch::channel(());
     let (component_sender, component_receiver) = mpsc::channel(1);
     let (app, state_keeper) = AxumAppBuilder::new()
         .with_cfg(cfg.clone())
@@ -226,6 +224,9 @@ fn start_listener(cfg: Cfg, lock_file: Arc<BoxedLockFile>) -> ServerRuntime {
 
     info!("Public URL: {}", cfg.public_url);
     let server_task = tokio::spawn(serve_http(app, cfg, handle.clone()));
+    tokio::spawn(shutdown_ctrl_c(handle.clone(), shutdown_sender.clone()));
+    #[cfg(unix)]
+    tokio::spawn(shutdown_signal(handle.clone(), shutdown_sender));
     ServerRuntime {
         component_sender: Some(component_sender),
         listener: Some(ListenerTask {
@@ -233,7 +234,27 @@ fn start_listener(cfg: Cfg, lock_file: Arc<BoxedLockFile>) -> ServerRuntime {
             task: server_task,
         }),
         state_keeper: Some(state_keeper),
+        shutdown_receiver,
     }
+}
+
+async fn wait_for_lock_file(
+    lock_file: &BoxedLockFile,
+    shutdown_receiver: &mut watch::Receiver<()>,
+) -> Result<(), ReductError> {
+    while lock_file.is_waiting().await.unwrap_or(false) {
+        tokio::select! {
+            _ = shutdown_receiver.changed() => {
+                return Err(ReductError::new(
+                    ErrorCode::Interrupt,
+                    "Server shutdown requested while waiting for lock file",
+                ));
+            }
+            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+        }
+    }
+
+    Ok(())
 }
 
 async fn serve_http(app: Router, cfg: Cfg, handle: Handle<SocketAddr>) {
@@ -279,20 +300,22 @@ async fn serve_http(app: Router, cfg: Cfg, handle: Handle<SocketAddr>) {
     };
 }
 
-async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>) {
+async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>, shutdown_sender: watch::Sender<()>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Received Ctrl-C, shutting down server...");
     server_handle.graceful_shutdown(Some(SHUTDOWN_TIMEOUT));
+    let _ = shutdown_sender.send(());
 }
 
 #[cfg(unix)]
-async fn shutdown_signal(server_handle: Handle<SocketAddr>) {
+async fn shutdown_signal(server_handle: Handle<SocketAddr>, shutdown_sender: watch::Sender<()>) {
     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .unwrap()
         .recv()
         .await;
     info!("Received termination signal, shutting down server...");
     server_handle.graceful_shutdown(Some(SHUTDOWN_TIMEOUT));
+    let _ = shutdown_sender.send(());
 }
 
 #[cfg(test)]
@@ -388,6 +411,8 @@ mod tests {
     use crate::cfg::storage_engine::StorageEngineConfig;
     use crate::cfg::Cfg;
     use crate::cfg::CoreExtCfgParser;
+    use crate::lock_file::LockFile;
+    use async_trait::async_trait;
     use log::warn;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::rstest;
@@ -412,6 +437,36 @@ mod tests {
         }
         warn!("Shutting down server");
         handle.shutdown();
+    }
+
+    struct WaitingLockFile;
+
+    #[async_trait]
+    impl LockFile for WaitingLockFile {
+        async fn is_locked(&self) -> Result<bool, ReductError> {
+            Ok(false)
+        }
+
+        async fn is_failed(&self) -> Result<bool, ReductError> {
+            Ok(false)
+        }
+
+        async fn is_waiting(&self) -> Result<bool, ReductError> {
+            Ok(true)
+        }
+    }
+
+    #[tokio::test]
+    async fn wait_for_lock_file_stops_when_shutdown_is_requested() {
+        let lock_file: BoxedLockFile = Box::new(WaitingLockFile);
+        let (shutdown_sender, mut shutdown_receiver) = watch::channel(());
+        shutdown_sender.send(()).unwrap();
+
+        let error = wait_for_lock_file(&lock_file, &mut shutdown_receiver)
+            .await
+            .unwrap_err();
+
+        assert_eq!(error.status, ErrorCode::Interrupt);
     }
 
     #[tokio::test(flavor = "multi_thread")]

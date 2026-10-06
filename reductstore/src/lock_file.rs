@@ -39,6 +39,7 @@ pub type BoxedLockFile = Box<dyn LockFile + Sync + Send>;
 struct ImplLockFile {
     path: PathBuf,
     stop_on_drop: Arc<AtomicBool>,
+    owns_lock: Arc<AtomicBool>,
     handle: tokio::task::JoinHandle<()>,
     state: Arc<AsyncRwLock<State>>,
 }
@@ -75,6 +76,8 @@ impl LockFileBuilder {
         // Atomic flag to signal the background task to stop
         let stop_on_drop = Arc::new(AtomicBool::new(false));
         let stop_flag = Arc::clone(&stop_on_drop);
+        let owns_lock = Arc::new(AtomicBool::new(false));
+        let ownership_flag = Arc::clone(&owns_lock);
         let file_path = path.clone();
         let state = Arc::new(AsyncRwLock::new(State::Waiting));
         let state_clone = Arc::clone(&state);
@@ -82,13 +85,15 @@ impl LockFileBuilder {
         let mut this = Box::new(ImplLockFile {
             path,
             stop_on_drop,
+            owns_lock,
             handle: tokio::spawn(async {}),
             state,
         });
 
         let handle = tokio::spawn(async move {
             if let Err(err) =
-                Self::run_lock_task(file_path, cfg, role, state_clone, stop_flag).await
+                Self::run_lock_task(file_path, cfg, role, state_clone, stop_flag, ownership_flag)
+                    .await
             {
                 error!("Lock file task failed: {}", err);
             }
@@ -104,6 +109,7 @@ impl LockFileBuilder {
         role: InstanceRole,
         state: Arc<AsyncRwLock<State>>,
         stop_flag: Arc<AtomicBool>,
+        owns_lock: Arc<AtomicBool>,
     ) -> Result<(), ReductError> {
         // Each process instance keeps its own owner token in the lock file.
         let unique_id = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
@@ -183,8 +189,9 @@ impl LockFileBuilder {
         // so we need to keep the file locked as long as the process is running and recreate it if it gets deleted
         // during deployments
         while !stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
-            if let Err(e) = Self::write_lock_owner_id(&file_path, &unique_id).await {
-                error!("Error while recreating lock file: {}", e);
+            match Self::write_lock_owner_id(&file_path, &unique_id).await {
+                Ok(()) => owns_lock.store(true, std::sync::atomic::Ordering::SeqCst),
+                Err(e) => error!("Error while recreating lock file: {}", e),
             }
 
             if locked {
@@ -295,6 +302,10 @@ impl Drop for ImplLockFile {
     fn drop(&mut self) {
         self.stop_on_drop
             .store(true, std::sync::atomic::Ordering::SeqCst);
+
+        if !self.owns_lock.load(std::sync::atomic::Ordering::SeqCst) {
+            return;
+        }
 
         let path = self.path.clone();
         // Use block_in_place to handle async cleanup in drop
@@ -489,6 +500,41 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    async fn test_dropping_waiting_secondary_keeps_primary_lock(lock_file_path: PathBuf) {
+        let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(10),
+                    ..Default::default()
+                },
+                InstanceRole::Primary,
+            ))
+            .build();
+        wait_new_state(&primary_lock_file).await.unwrap();
+
+        let secondary_lock_file = LockFileBuilder::new(lock_file_path.clone())
+            .with_config(test_cfg(
+                LockFileConfig {
+                    polling_interval: Duration::from_millis(10),
+                    ..Default::default()
+                },
+                InstanceRole::Secondary,
+            ))
+            .build();
+        drop(secondary_lock_file);
+
+        tokio::time::sleep(Duration::from_millis(150)).await;
+        assert!(
+            lock_file_path.exists(),
+            "Secondary must not remove primary lock"
+        );
+
+        drop(primary_lock_file);
+        wait_for_lock_file_cleanup(&lock_file_path).await;
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
     async fn test_ttl_removes_stale_lock(lock_file_path: PathBuf) {
         fs::write(&lock_file_path, "dummy").unwrap();
         let lock_file = LockFileBuilder::new(lock_file_path.clone())
@@ -619,6 +665,7 @@ mod tests {
             InstanceRole::Secondary,
             Arc::clone(&state),
             Arc::clone(&stop_flag),
+            Arc::new(AtomicBool::new(false)),
         ));
 
         tokio::time::sleep(Duration::from_millis(1300)).await;
@@ -652,6 +699,7 @@ mod tests {
             InstanceRole::Replica,
             state,
             Arc::clone(&stop_flag),
+            Arc::new(AtomicBool::new(false)),
         ));
 
         tokio::task::yield_now().await;
@@ -686,6 +734,7 @@ mod tests {
             InstanceRole::Primary,
             Arc::clone(&state),
             Arc::clone(&stop_flag),
+            Arc::new(AtomicBool::new(false)),
         ));
 
         tokio::time::sleep(Duration::from_millis(250)).await;
