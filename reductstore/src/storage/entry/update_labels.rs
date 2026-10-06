@@ -115,6 +115,9 @@ impl Entry {
             handler.await.unwrap()?;
         }
 
+        drop(publication);
+        self.publication
+            .schedule_publish(self.path.clone(), Arc::clone(&self.block_manager));
         Ok(result)
     }
 

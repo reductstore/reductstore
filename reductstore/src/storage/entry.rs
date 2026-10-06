@@ -697,6 +697,27 @@ mod tests {
     mod compact {
         use super::*;
 
+        async fn wait_for_publication(entry: &Entry, generation: u64) {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let published = publication::load(&entry.path).await.unwrap();
+                    if published.as_ref().map(|marker| marker.generation) == Some(generation)
+                        && !entry
+                            .block_manager
+                            .read()
+                            .await
+                            .unwrap()
+                            .has_mutation_batch()
+                    {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("entry mutation burst was not published");
+        }
+
         #[rstest]
         #[tokio::test]
         async fn test_compact_publishes_and_clears_mutation_batch(#[future] entry: Arc<Entry>) {
@@ -741,6 +762,46 @@ mod tests {
                 .await
                 .unwrap()
                 .has_mutation_batch());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_idle_publisher_batches_completed_writes(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+            write_stub_record(&entry, 2).await;
+
+            assert_eq!(publication::load(&entry.path).await.unwrap(), None);
+            wait_for_publication(&entry, 2).await;
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_idle_publisher_batches_label_updates(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+            entry.sync_fs().await.unwrap();
+
+            entry
+                .clone()
+                .update_labels(vec![update_labels::UpdateLabels {
+                    time: 1,
+                    update: Labels::from_iter([("first".to_string(), "1".to_string())]),
+                    remove: Default::default(),
+                }])
+                .await
+                .unwrap();
+            entry
+                .clone()
+                .update_labels(vec![update_labels::UpdateLabels {
+                    time: 1,
+                    update: Labels::from_iter([("second".to_string(), "2".to_string())]),
+                    remove: Default::default(),
+                }])
+                .await
+                .unwrap();
+
+            wait_for_publication(&entry, 4).await;
         }
 
         #[rstest]

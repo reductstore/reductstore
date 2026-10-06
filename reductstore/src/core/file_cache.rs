@@ -77,7 +77,7 @@ enum BatchState {
 }
 
 /// Identifies an active batch. A token can be cloned for cooperating writers.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct BatchToken {
     id: BatchId,
 }
