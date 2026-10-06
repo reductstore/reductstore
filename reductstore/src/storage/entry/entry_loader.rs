@@ -1249,7 +1249,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_check_integrity_block_index(path: PathBuf, entry_settings: EntrySettings) {
+    async fn test_rebuilt_block_index_survives_restart(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+    ) {
         let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
@@ -1284,21 +1287,44 @@ mod tests {
         file.write_all(&block_index.encode_to_vec()).unwrap();
         file.sync_all().unwrap();
 
-        EntryLoader::restore_entry(
+        let restored_entry = EntryLoader::restore_entry(
+            path.join(entry.name()),
+            entry_settings.clone(),
+            Cfg::default().into(),
+            Default::default(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        let rebuilt_index = fs::read(&block_index_path).unwrap();
+        let block_index = BlockIndexProto::decode(Bytes::from(rebuilt_index.clone())).unwrap();
+        assert_eq!(
+            block_index.blocks[0].size, 20,
+            "should restore the block index from the blocks"
+        );
+
+        let info = restored_entry.info().await.unwrap();
+        assert_eq!(info.record_count, 2);
+        drop(restored_entry);
+
+        // A clean restart must be able to restore the entry from the persisted
+        // rebuilt index without changing it or losing access to its records.
+        let restarted_entry = EntryLoader::restore_entry(
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
             Default::default(),
         )
         .await
+        .unwrap()
         .unwrap();
 
-        let buf = fs::read(block_index_path).unwrap();
-        let block_index = BlockIndexProto::decode(Bytes::from(buf)).unwrap();
-        assert_eq!(
-            block_index.blocks[0].size, 20,
-            "should restore the block index from the blocks"
-        );
+        assert_eq!(fs::read(&block_index_path).unwrap(), rebuilt_index);
+        let info = restarted_entry.info().await.unwrap();
+        assert_eq!(info.record_count, 2);
+        assert!(restarted_entry.begin_read(1).await.is_ok());
+        assert!(restarted_entry.begin_read(2000010).await.is_ok());
     }
 
     #[rstest]
