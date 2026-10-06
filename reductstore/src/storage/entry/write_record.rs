@@ -1,11 +1,8 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::sync::AsyncRwLock;
-use crate::storage::block_manager::BlockManager;
 use crate::storage::block_manager::BlockRef;
 use crate::storage::entry::publication_coordinator::MutationAdmission;
-use crate::storage::entry::publication_coordinator::PublicationCoordinator;
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
 use async_trait::async_trait;
@@ -13,7 +10,6 @@ use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::{WriteChunk, WriteRecord};
 use reduct_base::{conflict, Labels};
-use std::path::PathBuf;
 use std::sync::Arc;
 use tokio::sync::OwnedSemaphorePermit;
 
@@ -21,9 +17,6 @@ struct InFlightWriteRecord {
     inner: Box<dyn WriteRecord + Sync + Send>,
     _permit: Option<OwnedSemaphorePermit>,
     publication: Option<MutationAdmission>,
-    coordinator: Arc<PublicationCoordinator>,
-    entry_path: PathBuf,
-    block_manager: Arc<AsyncRwLock<BlockManager>>,
 }
 
 impl InFlightWriteRecord {
@@ -31,28 +24,18 @@ impl InFlightWriteRecord {
         inner: Box<dyn WriteRecord + Sync + Send>,
         permit: Option<OwnedSemaphorePermit>,
         publication: MutationAdmission,
-        coordinator: Arc<PublicationCoordinator>,
-        entry_path: PathBuf,
-        block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Self {
         Self {
             inner,
             _permit: permit,
             publication: Some(publication),
-            coordinator,
-            entry_path,
-            block_manager,
         }
     }
 
-    async fn release_publication_after(&mut self, terminal: bool) -> Result<(), ReductError> {
+    fn release_publication_after(&mut self, terminal: bool) {
         if terminal {
             self.publication.take();
-            if self.coordinator.try_publish(&self.entry_path).await? {
-                self.block_manager.write().await?.clear_mutation_batch();
-            }
         }
-        Ok(())
     }
 }
 
@@ -61,7 +44,7 @@ impl WriteRecord for InFlightWriteRecord {
     async fn send(&mut self, chunk: WriteChunk) -> Result<(), ReductError> {
         let terminal = chunk.is_err() || chunk.as_ref().is_ok_and(Option::is_none);
         let result = self.inner.send(chunk).await;
-        self.release_publication_after(terminal).await?;
+        self.release_publication_after(terminal);
         result
     }
 
@@ -72,7 +55,7 @@ impl WriteRecord for InFlightWriteRecord {
     ) -> Result<(), ReductError> {
         let terminal = chunk.is_err() || chunk.as_ref().is_ok_and(Option::is_none);
         let result = self.inner.send_timeout(chunk, timeout).await;
-        self.release_publication_after(terminal).await?;
+        self.release_publication_after(terminal);
         result
     }
 }
@@ -191,9 +174,6 @@ impl Entry {
                                 Box::new(writer),
                                 permit,
                                 publication,
-                                Arc::clone(&self.publication),
-                                self.path.clone(),
-                                Arc::clone(&self.block_manager),
                             )));
                         };
                     }
@@ -242,9 +222,6 @@ impl Entry {
             Box::new(writer),
             permit,
             publication,
-            Arc::clone(&self.publication),
-            self.path.clone(),
-            Arc::clone(&self.block_manager),
         )))
     }
 

@@ -1236,6 +1236,7 @@ mod tests {
 
             time += 10;
         }
+        storage.sync_fs().await.unwrap();
 
         let mut repl = ReplicationTask::build(
             "test".to_string(),

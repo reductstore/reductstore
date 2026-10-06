@@ -471,6 +471,7 @@ mod tests {
         let bucket = bucket.await;
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        entry.sync_fs().await.unwrap();
 
         FILE_CACHE.remove_dir(entry.path()).await.unwrap();
         bucket.remove_entry("test-1").await.unwrap();
@@ -491,6 +492,7 @@ mod tests {
         let bucket = bucket.await;
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        entry.sync_fs().await.unwrap();
 
         FILE_CACHE.remove_dir(entry.path()).await.unwrap();
         bucket.compact().await.unwrap();
@@ -509,6 +511,7 @@ mod tests {
         let bucket = bucket.await;
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        entry.sync_fs().await.unwrap();
 
         FILE_CACHE.remove_dir(entry.path()).await.unwrap();
         bucket.sync_fs().await.unwrap();
@@ -561,6 +564,7 @@ mod tests {
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
         entry.mark_deleting().await.unwrap();
+        entry.sync_fs().await.unwrap();
         FILE_CACHE.remove_dir(entry.path()).await.unwrap();
 
         let cfg = Arc::new(Cfg {
@@ -604,6 +608,7 @@ mod tests {
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
         entry.mark_deleting().await.unwrap();
+        entry.sync_fs().await.unwrap();
         FILE_CACHE.remove_dir(entry.path()).await.unwrap();
 
         Bucket::recover_entry_after_failed_removal(

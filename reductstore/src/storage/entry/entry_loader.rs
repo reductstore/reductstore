@@ -719,14 +719,7 @@ mod tests {
     async fn test_restore_replica_skips_wal_recovery(entry_settings: EntrySettings, path: PathBuf) {
         let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
-        entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await
-            .unwrap();
+        entry.sync_fs().await.unwrap();
 
         let entry_path = path.join(entry.name());
         let mut wal = create_wal(entry_path.clone()).await.unwrap();
@@ -777,14 +770,7 @@ mod tests {
     ) {
         let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
-        entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await
-            .unwrap();
+        entry.sync_fs().await.unwrap();
 
         let entry_path = path.join(entry.name());
         {
