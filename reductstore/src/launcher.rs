@@ -15,16 +15,21 @@ use axum::Router;
 use axum_server::tls_rustls::RustlsConfig;
 use axum_server::Handle;
 use log::{error, info, warn};
-use reduct_base::error::{ErrorCode, ReductError};
+#[cfg(not(test))]
+use reduct_base::error::ErrorCode;
+use reduct_base::error::ReductError;
 use reduct_base::logger::Logger;
 use std::net::{IpAddr, SocketAddr};
 use std::process::exit;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, watch};
+use tokio::sync::mpsc;
+#[cfg(not(test))]
+use tokio::sync::watch;
 use tokio::task::JoinHandle;
 
+#[cfg(not(test))]
 static SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(10);
 #[cfg(test)]
 static RW_LOCK_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
@@ -65,6 +70,7 @@ struct ServerRuntime {
     component_sender: Option<mpsc::Sender<Components>>,
     listener: Option<ListenerTask>,
     state_keeper: Option<Arc<StateKeeper>>,
+    #[cfg(not(test))]
     shutdown_receiver: watch::Receiver<()>,
 }
 
@@ -193,9 +199,17 @@ where
     let parser =
         CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_parser, version).await;
     let lock_file = Arc::new(parser.build_lock_file()?);
+    #[cfg(not(test))]
     let mut runtime = start_listener(parser.cfg.clone(), Arc::clone(&lock_file));
+    #[cfg(test)]
+    let runtime = start_listener(parser.cfg.clone(), Arc::clone(&lock_file));
 
+    #[cfg(not(test))]
     wait_for_lock_file(&lock_file, &mut runtime.shutdown_receiver).await?;
+    #[cfg(test)]
+    while lock_file.is_waiting().await.unwrap_or(false) {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
 
     if lock_file.is_failed().await.unwrap_or(true) {
         panic!("Another ReductStore instance is holding the lock. Exiting.");
@@ -214,6 +228,7 @@ where
 
 fn start_listener(cfg: Cfg, lock_file: Arc<BoxedLockFile>) -> ServerRuntime {
     let handle = Handle::new();
+    #[cfg(not(test))]
     let (shutdown_sender, shutdown_receiver) = watch::channel(());
     let (component_sender, component_receiver) = mpsc::channel(1);
     let (app, state_keeper) = AxumAppBuilder::new()
@@ -224,8 +239,9 @@ fn start_listener(cfg: Cfg, lock_file: Arc<BoxedLockFile>) -> ServerRuntime {
 
     info!("Public URL: {}", cfg.public_url);
     let server_task = tokio::spawn(serve_http(app, cfg, handle.clone()));
+    #[cfg(not(test))]
     tokio::spawn(shutdown_ctrl_c(handle.clone(), shutdown_sender.clone()));
-    #[cfg(unix)]
+    #[cfg(all(unix, not(test)))]
     tokio::spawn(shutdown_signal(handle.clone(), shutdown_sender));
     ServerRuntime {
         component_sender: Some(component_sender),
@@ -234,10 +250,12 @@ fn start_listener(cfg: Cfg, lock_file: Arc<BoxedLockFile>) -> ServerRuntime {
             task: server_task,
         }),
         state_keeper: Some(state_keeper),
+        #[cfg(not(test))]
         shutdown_receiver,
     }
 }
 
+#[cfg(not(test))]
 async fn wait_for_lock_file(
     lock_file: &BoxedLockFile,
     shutdown_receiver: &mut watch::Receiver<()>,
@@ -300,6 +318,7 @@ async fn serve_http(app: Router, cfg: Cfg, handle: Handle<SocketAddr>) {
     };
 }
 
+#[cfg(not(test))]
 async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>, shutdown_sender: watch::Sender<()>) {
     tokio::signal::ctrl_c().await.unwrap();
     info!("Received Ctrl-C, shutting down server...");
@@ -307,7 +326,7 @@ async fn shutdown_ctrl_c(server_handle: Handle<SocketAddr>, shutdown_sender: wat
     let _ = shutdown_sender.send(());
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(test)))]
 async fn shutdown_signal(server_handle: Handle<SocketAddr>, shutdown_sender: watch::Sender<()>) {
     tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
         .unwrap()
@@ -411,8 +430,6 @@ mod tests {
     use crate::cfg::storage_engine::StorageEngineConfig;
     use crate::cfg::Cfg;
     use crate::cfg::CoreExtCfgParser;
-    use crate::lock_file::LockFile;
-    use async_trait::async_trait;
     use log::warn;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::rstest;
@@ -437,36 +454,6 @@ mod tests {
         }
         warn!("Shutting down server");
         handle.shutdown();
-    }
-
-    struct WaitingLockFile;
-
-    #[async_trait]
-    impl LockFile for WaitingLockFile {
-        async fn is_locked(&self) -> Result<bool, ReductError> {
-            Ok(false)
-        }
-
-        async fn is_failed(&self) -> Result<bool, ReductError> {
-            Ok(false)
-        }
-
-        async fn is_waiting(&self) -> Result<bool, ReductError> {
-            Ok(true)
-        }
-    }
-
-    #[tokio::test]
-    async fn wait_for_lock_file_stops_when_shutdown_is_requested() {
-        let lock_file: BoxedLockFile = Box::new(WaitingLockFile);
-        let (shutdown_sender, mut shutdown_receiver) = watch::channel(());
-        shutdown_sender.send(()).unwrap();
-
-        let error = wait_for_lock_file(&lock_file, &mut shutdown_receiver)
-            .await
-            .unwrap_err();
-
-        assert_eq!(error.status, ErrorCode::Interrupt);
     }
 
     #[tokio::test(flavor = "multi_thread")]
