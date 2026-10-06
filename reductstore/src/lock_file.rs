@@ -302,6 +302,7 @@ impl Drop for ImplLockFile {
     fn drop(&mut self) {
         self.stop_on_drop
             .store(true, std::sync::atomic::Ordering::SeqCst);
+        self.handle.abort();
 
         if !self.owns_lock.load(std::sync::atomic::Ordering::SeqCst) {
             return;
@@ -344,6 +345,7 @@ mod tests {
     use crate::cfg::lock_file::LockFileConfig;
     use crate::cfg::{Cfg, InstanceRole};
     use rstest::{fixture, rstest};
+    use serial_test::serial;
     use std::fs;
     use tempfile::tempdir;
     use test_log::test as test_log;
@@ -500,6 +502,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
+    #[serial]
     async fn test_dropping_waiting_secondary_keeps_primary_lock(lock_file_path: PathBuf) {
         let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
             .with_config(test_cfg(
