@@ -64,11 +64,6 @@ impl PublicationCoordinator {
         self.publish_locked(path).await.map(|_| ())
     }
 
-    async fn publish_batch(&self, path: &Path) -> Result<Option<BatchToken>, ReductError> {
-        let _guard = Arc::clone(&self.admission).write_owned().await;
-        self.publish_locked(path).await
-    }
-
     /// Publishes a completed mutation burst after a short idle period.
     ///
     /// Every completed mutation advances the revision. The single background
@@ -109,19 +104,8 @@ impl PublicationCoordinator {
                 continue;
             }
 
-            match self.publish_batch(&path).await {
-                Ok(Some(token)) => match block_manager.write().await {
-                    Ok(mut block_manager) => block_manager.clear_mutation_batch_if(&token),
-                    Err(err) => {
-                        error!(
-                            "Failed to clear mutation batch for {}: {}",
-                            path.display(),
-                            err
-                        )
-                    }
-                },
-                Ok(None) => {}
-                Err(err) => error!("Failed to publish entry {}: {}", path.display(), err),
+            if let Err(err) = self.publish_scheduled_batch(&path, &block_manager).await {
+                error!("Failed to publish entry {}: {}", path.display(), err);
             }
 
             self.publisher_running.store(false, Ordering::Release);
@@ -137,6 +121,19 @@ impl PublicationCoordinator {
                 break;
             }
         }
+    }
+
+    async fn publish_scheduled_batch(
+        &self,
+        path: &Path,
+        block_manager: &AsyncRwLock<BlockManager>,
+    ) -> Result<(), ReductError> {
+        let _guard = Arc::clone(&self.admission).write_owned().await;
+        let mut block_manager = block_manager.write().await?;
+        if let Some(token) = self.publish_locked(path).await? {
+            block_manager.clear_mutation_batch_if(&token);
+        }
+        Ok(())
     }
 
     async fn publish_locked(&self, path: &Path) -> Result<Option<BatchToken>, ReductError> {

@@ -777,6 +777,20 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_idle_publisher_waits_for_block_manager(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+
+            let block_manager = entry.block_manager.write().await.unwrap();
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            assert_eq!(publication::load(&entry.path).await.unwrap(), None);
+            drop(block_manager);
+
+            wait_for_publication(&entry, 2).await;
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_idle_publisher_batches_label_updates(#[future] entry: Arc<Entry>) {
             let entry = entry.await;
             write_stub_record(&entry, 1).await;
