@@ -25,5 +25,5 @@ runs:
             continue
           fi
           chmod +x $f
-          $f --quiet
+          RUST_TEST_THREADS=1 $f --quiet
         done
