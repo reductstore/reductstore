@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Limit disk usage of decompressed blocks across all entries (`RS_ENGINE_DECOMPRESS_CACHE_SIZE`, default 1GB) and clean up expired, partial and leftover files, [PR-1640](https://github.com/reductstore/reductstore/pull/1640) by @ragen1337
+- Recover read-only replicas from stale compressed block cache entries without returning HTTP 500, [PR-1643](https://github.com/reductstore/reductstore/pull/1643)
 
 ### Internal
 

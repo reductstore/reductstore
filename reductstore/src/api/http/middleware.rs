@@ -174,7 +174,7 @@ mod tests {
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
     use std::sync::Arc;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{sleep, Duration, Instant};
     use tower::ServiceExt;
 
     #[test_log::test]
@@ -495,34 +495,35 @@ mod tests {
             .ok()?;
         let bucket = bucket.upgrade_and_unwrap();
         let info = Arc::clone(&bucket).info().await.unwrap();
-        let available_entries: Vec<String> = info
-            .entries
-            .iter()
-            .map(|entry| entry.name.clone())
-            .collect();
         let entry = info.entries.into_iter().find(|entry| {
             entry
                 .name
                 .starts_with(&format!("{}/", SYSTEM_AUDIT_ENTRY_PREFIX))
                 && entry.name.ends_with(&format!("/{}", token_name))
-        });
-
-        let entry = match entry {
-            Some(entry) => entry,
-            None => {
-                eprintln!(
-                    "audit entry lookup failed: token='{}', available_entries={:?}",
-                    token_name, available_entries
-                );
-                return None;
-            }
-        };
+        })?;
         let mut reader = bucket
             .begin_read(&entry.name, entry.oldest_record)
             .await
             .unwrap();
         let record = reader.read_chunk().unwrap().unwrap();
         Some(serde_json::from_slice(&record).unwrap())
+    }
+
+    async fn wait_for_audit_event(
+        keeper: &Arc<StateKeeper>,
+        token_name: &str,
+    ) -> serde_json::Value {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            if let Some(event) = read_audit_event(keeper, token_name).await {
+                return event;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "audit event for token '{token_name}' did not appear within 5 seconds"
+            );
+            sleep(Duration::from_millis(50)).await;
+        }
     }
 
     async fn audit_bucket_exists(keeper: &Arc<StateKeeper>) -> bool {
@@ -578,8 +579,7 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
 
-        wait_for_audit_flush().await;
-        let event = read_audit_event(&keeper, "unauthorized").await.unwrap();
+        let event = wait_for_audit_event(&keeper, "unauthorized").await;
         assert_eq!(event["token_name"], "unauthorized");
         assert_eq!(event["method"], "GET");
         assert_eq!(event["path"], "/protected");
@@ -617,8 +617,7 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::INTERNAL_SERVER_ERROR);
 
-        wait_for_audit_flush().await;
-        let event = read_audit_event(&keeper, "init-token").await.unwrap();
+        let event = wait_for_audit_event(&keeper, "init-token").await;
         assert_eq!(event["status"], StatusCode::INTERNAL_SERVER_ERROR.as_u16());
         assert_eq!(event["message"], "database unavailable");
     }
@@ -650,8 +649,7 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::OK);
 
-        wait_for_audit_flush().await;
-        let event = read_audit_event(&keeper, "init-token").await.unwrap();
+        let event = wait_for_audit_event(&keeper, "init-token").await;
         let duration = event["duration"].as_f64().unwrap();
         assert!(
             (0.03..1.0).contains(&duration),
