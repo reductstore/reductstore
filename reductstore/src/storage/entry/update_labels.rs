@@ -49,7 +49,7 @@ impl Entry {
             // Find the block/record first, then apply a label update.
             let located = {
                 let mut bm = self.block_manager.write().await?;
-                match bm.find_block(time).await {
+                match bm.find_block_with_record(time).await {
                     Ok(block_ref) => {
                         let block = block_ref.read().await?;
                         block
