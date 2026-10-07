@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Preserve direct reads and historical queries for belated records written after their target block is full, [PR-1653](https://github.com/reductstore/reductstore/pull/1653)
+### Internal
+
+- Use the shared ReductStore Debian base image for stable runtime containers, [PR-1654](https://github.com/reductstore/reductstore/pull/1654)
 
 ## 1.21.1 - 2026-09-22
 

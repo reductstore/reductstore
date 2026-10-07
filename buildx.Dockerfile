@@ -1,18 +1,15 @@
 # syntax=docker/dockerfile:1
 ARG BUILDPLATFORM
-FROM --platform=${BUILDPLATFORM} debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2 AS builder
+ARG FINAL_BASE_IMAGE=reduct/debian-base:trixie@sha256:1e8eec385f969973a9e3387aca4e40e689186098b4d14770dae39cea60b8495d
+FROM --platform=${BUILDPLATFORM} ${FINAL_BASE_IMAGE} AS builder
 ARG BUILDPLATFORM
-
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    ca-certificates \
-    && rm -rf /var/lib/apt/lists/*
 
 RUN groupadd --gid 10001 reduct \
     && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /nonexistent --shell /usr/sbin/nologin reduct
 
 RUN mkdir -p /data && chown 10001:10001 /data
 
-FROM debian:trixie-slim@sha256:28de0877c2189802884ccd20f15ee41c203573bd87bb6b883f5f46362d24c5c2
+FROM ${FINAL_BASE_IMAGE}
 
 # Binaries are prepared on GitHub runner.
 COPY .image-build/usr/local/bin/reductstore /usr/local/bin/reductstore
@@ -23,9 +20,6 @@ COPY --from=builder /etc/shadow /etc/shadow
 COPY --from=builder /etc/gshadow /etc/gshadow
 COPY --chown=10001:10001 --from=builder /data /data
 COPY docker/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-
-COPY --from=builder /etc/ssl/certs /etc/ssl/certs
-COPY --from=builder /usr/share/ca-certificates /usr/share/ca-certificates
 
 ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 ENV SSL_CERT_DIR=/etc/ssl/certs
