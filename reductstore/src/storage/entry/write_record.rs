@@ -110,7 +110,7 @@ impl Entry {
                     block_ref = bm.start_new_block(time, settings.max_block_size).await?;
                     RecordType::BelatedFirst
                 } else {
-                    block_ref = bm.find_block(time).await?;
+                    block_ref = bm.find_block_candidate(time).await?;
                     let block_id = block_ref.read().await?.block_id();
                     if bm.block_is_compressed(block_id) {
                         bm.decompress_block(block_id).await?;

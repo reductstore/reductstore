@@ -722,6 +722,56 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn reads_and_queries_records_after_belated_write_starts_overlapping_block(
+            path: PathBuf,
+        ) {
+            let entry = entry(
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 2,
+                },
+                path,
+            )
+            .await;
+
+            // The belated write must start a block between the first and second blocks.
+            for timestamp in [1000, 2000, 3000, 1500] {
+                write_stub_record(&entry, timestamp).await;
+            }
+
+            for timestamp in [1000, 1500, 2000, 3000] {
+                assert!(
+                    entry.begin_read(timestamp).await.is_ok(),
+                    "record {timestamp} must be readable by timestamp"
+                );
+            }
+
+            let id = entry
+                .query(QueryEntry {
+                    start: Some(0),
+                    stop: Some(10000),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let (rx, _) = entry.get_query_receiver(id).await.unwrap();
+            let rx = rx.upgrade_and_unwrap();
+            let mut rx = rx.write().await.unwrap();
+
+            for timestamp in [1000, 1500, 2000, 3000] {
+                assert_eq!(
+                    rx.recv().await.unwrap().unwrap().meta().timestamp(),
+                    timestamp
+                );
+            }
+            assert_eq!(
+                rx.recv().await.unwrap().err(),
+                Some(no_content!("No content"))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn reject_reversed_historical_query_range(#[future] entry: Arc<Entry>) {
             let entry = entry.await;
             write_stub_record(&entry, 1000000).await;

@@ -194,7 +194,7 @@ impl Entry {
                         .block_manager
                         .write()
                         .await?
-                        .find_block(rec.meta().timestamp())
+                        .find_block_candidate(rec.meta().timestamp())
                         .await?;
                     affected_blocks.insert(block_ref.read().await?.block_id());
                 }
@@ -228,7 +228,12 @@ impl Entry {
             for time in timestamps {
                 // Find the block that contains the record
                 // TODO: Try to avoid the lookup for each record
-                match block_manager.write().await?.find_block(time).await {
+                match block_manager
+                    .write()
+                    .await?
+                    .find_block_with_record(time)
+                    .await
+                {
                     Ok(block_ref) => {
                         // Check if the record exists
                         let block = block_ref.read().await?;

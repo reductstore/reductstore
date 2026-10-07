@@ -4,9 +4,43 @@
 use super::*;
 
 impl BlockManager {
-    pub async fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
+    pub async fn find_block_candidate(&mut self, start: u64) -> Result<BlockRef, ReductError> {
         let id = self.find_block_id(start)?;
         self.load_block(id).await
+    }
+
+    /// Finds the block which contains a record with the exact timestamp.
+    ///
+    /// A belated write can create a block whose time range overlaps an earlier block. Search
+    /// predecessor blocks from newest to oldest rather than relying on the index floor lookup.
+    pub async fn find_block_with_record(&mut self, time: u64) -> Result<BlockRef, ReductError> {
+        let block_ref = self.find_block_candidate(time).await?;
+        let (block_id, has_record) = {
+            let block = block_ref.read().await?;
+            (block.block_id(), block.get_record(time).is_some())
+        };
+
+        if has_record {
+            return Ok(block_ref);
+        }
+
+        // search for a block with belated data
+        let block_ids = self
+            .block_index
+            .active_tree()
+            .range(..block_id)
+            .rev()
+            .copied()
+            .collect::<Vec<_>>();
+
+        for block_id in block_ids {
+            let block_ref = self.load_block(block_id).await?;
+            if block_ref.read().await?.get_record(time).is_some() {
+                return Ok(block_ref);
+            }
+        }
+
+        Ok(block_ref)
     }
 
     fn find_block_id(&self, start: u64) -> Result<u64, ReductError> {

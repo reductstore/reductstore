@@ -64,7 +64,7 @@ impl Entry {
 
     async fn find_record_for_read(&self, time: u64) -> Result<(BlockRef, Record), ReductError> {
         let mut bm = self.block_manager.write().await?;
-        let block_ref = bm.find_block(time).await?;
+        let block_ref = bm.find_block_with_record(time).await?;
         let block = block_ref.read().await?;
         let record = block
             .get_record(time)
@@ -211,7 +211,7 @@ mod tests {
 
         {
             let mut bm = entry.block_manager.write().await.unwrap();
-            let _ = bm.find_block(1000000).await.unwrap();
+            let _ = bm.find_block_candidate(1000000).await.unwrap();
         }
         let reader = entry.begin_read(2000000).await;
         assert_eq!(
@@ -373,7 +373,7 @@ mod tests {
 
         {
             let mut bm = entry.block_manager.write().await.unwrap();
-            let _ = bm.find_block(1000000).await.unwrap();
+            let _ = bm.find_block_candidate(1000000).await.unwrap();
         }
 
         let mut reader = entry.begin_read(1000000).await.unwrap();
