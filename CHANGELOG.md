@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Preserve direct reads and historical queries for belated records written after their target block is full, [PR-1653](https://github.com/reductstore/reductstore/pull/1653)
+
 ## 1.21.1 - 2026-09-22
 
 ### Changes
