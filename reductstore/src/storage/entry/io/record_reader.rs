@@ -3,7 +3,7 @@
 
 use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::AsyncRwLock;
-use crate::storage::block_manager::{BlockManager, BlockRef};
+use crate::storage::block_manager::{BlockFilePath, BlockManager, BlockRef};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::proto::Record;
 use bytes::Bytes;
@@ -21,7 +21,7 @@ use tokio::sync::OwnedSemaphorePermit;
 /// RecordReader is responsible for reading the content of a record from the storage.
 pub(crate) struct RecordReader {
     meta: RecordMeta,
-    file_path: Option<PathBuf>,
+    file_path: Option<BlockFilePath>,
     offset: u64,
     content_size: u64,
     pos: u64,
@@ -71,15 +71,18 @@ impl RecordReader {
         };
 
         let file_path = if content_size > 0 {
-            if !FILE_CACHE.try_exists(&file_path).await? {
+            if !FILE_CACHE.try_exists(file_path.path()).await? {
                 if bm.is_replica() {
                     return Err(too_early!(
                         "Data block {} is not available on replica yet",
-                        file_path.display()
+                        file_path.path().display()
                     ));
                 }
 
-                return Err(not_found!("Data block {} not found", file_path.display()));
+                return Err(not_found!(
+                    "Data block {} not found",
+                    file_path.path().display()
+                ));
             }
             Some(file_path)
         } else {
@@ -135,7 +138,7 @@ impl RecordReader {
 
         let offset = self.offset;
         let pos = self.pos;
-        let path = file_path.clone();
+        let path = file_path.path().clone();
 
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
