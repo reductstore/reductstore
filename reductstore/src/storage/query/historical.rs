@@ -56,6 +56,10 @@ pub struct HistoricalQuery {
     entry_name: String,
     /// The records from the current block that have not been read yet.
     records_from_current_block: VecDeque<Record>,
+    /// Records from overlapping blocks, ordered across all participating blocks.
+    records_from_overlapping_blocks: VecDeque<(BlockRef, Record)>,
+    /// Whether the query spans overlapping blocks.
+    has_overlapping_blocks: bool,
     /// The current block that is being read. Cached to avoid loading the same block multiple times.
     current_block: Option<BlockRef>,
     /// Filters
@@ -108,6 +112,8 @@ impl HistoricalQuery {
             start_time,
             stop_time,
             records_from_current_block: VecDeque::new(),
+            records_from_overlapping_blocks: VecDeque::new(),
+            has_overlapping_blocks: false,
             current_block: None,
             filters,
             only_metadata,
@@ -123,7 +129,10 @@ impl Query for HistoricalQuery {
         &mut self,
         block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) -> Result<RecordReader, ReductError> {
-        if self.records_from_current_block.is_empty() && !self.is_interrupted {
+        if self.records_from_current_block.is_empty()
+            && !self.has_overlapping_blocks
+            && !self.is_interrupted
+        {
             let start = if let Some(block) = &self.current_block {
                 let block = block.read().await?;
                 block.latest_record_time()
@@ -133,7 +142,7 @@ impl Query for HistoricalQuery {
 
             let block_range = {
                 let mut bm = block_manager.write().await?;
-                let first_block = match bm.find_block(start).await {
+                let first_block = match bm.find_block_candidate(start).await {
                     Ok(block) => block.read().await?.block_id(),
                     Err(err) if err.status() == ErrorCode::TooEarly => {
                         debug!(
@@ -147,17 +156,36 @@ impl Query for HistoricalQuery {
                 if first_block > self.stop_time {
                     Vec::new()
                 } else {
-                    bm.index()
-                        .active_tree()
-                        .range(first_block..self.stop_time)
-                        .map(|k| *k)
+                    let active_tree = bm.index().active_tree();
+                    self.has_overlapping_blocks = active_tree
+                        .iter()
+                        .zip(active_tree.iter().skip(1))
+                        .any(|(block_id, next_block_id)| {
+                            bm.index()
+                                .get_block(*block_id)
+                                .and_then(|block| block.latest_record_time.as_ref())
+                                .is_some_and(|latest| ts_to_us(latest) > *next_block_id)
+                        });
+                    let range_start = if self.has_overlapping_blocks {
+                        0
+                    } else {
+                        first_block
+                    };
+                    active_tree
+                        .range(range_start..self.stop_time)
+                        .copied()
                         .collect::<Vec<u64>>()
                 }
             };
 
+            let mut overlapping_records = Vec::new();
             for block_id in block_range {
                 let mut bm = block_manager.write().await?;
-                let block_ref = match bm.load_block(block_id).await {
+                let block_result = match bm.find_cached_block(block_id) {
+                    Some(block_ref) => Ok(block_ref),
+                    None => bm.load_block(block_id).await,
+                };
+                let block_ref = match block_result {
                     Ok(block_ref) => block_ref,
                     Err(err) if err.status() == ErrorCode::TooEarly => {
                         debug!(
@@ -177,6 +205,19 @@ impl Query for HistoricalQuery {
                 };
 
                 self.current_block = Some(block_ref);
+                if self.has_overlapping_blocks {
+                    let block_ref = self.current_block.as_ref().unwrap().clone();
+                    let block = block_ref.read().await?;
+                    overlapping_records.extend(
+                        block
+                            .record_index()
+                            .values()
+                            .cloned()
+                            .map(|record| (block_ref.clone(), record)),
+                    );
+                    continue;
+                }
+
                 let mut found_records = self.filter_records_from_current_block().await?;
                 found_records.sort_by_key(|rec| ts_to_us(rec.timestamp.as_ref().unwrap()));
 
@@ -185,21 +226,48 @@ impl Query for HistoricalQuery {
                     break;
                 }
             }
+
+            if self.has_overlapping_blocks {
+                overlapping_records
+                    .sort_by_key(|(_, record)| ts_to_us(record.timestamp.as_ref().unwrap()));
+                for (block_ref, record) in overlapping_records {
+                    match apply_filters_recursively(self.filters.as_mut_slice(), vec![record], 0)? {
+                        Some(records) => self.records_from_overlapping_blocks.extend(
+                            records
+                                .into_iter()
+                                .map(|record| (block_ref.clone(), record)),
+                        ),
+                        None => {
+                            self.is_interrupted = true;
+                            break;
+                        }
+                    }
+                }
+            }
         }
 
-        if self.records_from_current_block.is_empty() {
+        if self.records_from_current_block.is_empty()
+            && self.records_from_overlapping_blocks.is_empty()
+        {
             return Err(ReductError::no_content("No content"));
         }
 
-        let record = self.records_from_current_block.pop_front().unwrap();
-        let block = self.current_block.as_ref().unwrap();
+        let (block, record) = self
+            .records_from_overlapping_blocks
+            .pop_front()
+            .unwrap_or_else(|| {
+                (
+                    self.current_block.as_ref().unwrap().clone(),
+                    self.records_from_current_block.pop_front().unwrap(),
+                )
+            });
 
         if self.only_metadata {
             Ok(RecordReader::form_record(&self.entry_name, record))
         } else {
             RecordReader::try_new(
                 Arc::clone(&block_manager),
-                block.clone(),
+                block,
                 ts_to_us(&record.timestamp.unwrap()),
                 Some(record),
                 None,
