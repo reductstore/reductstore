@@ -644,6 +644,7 @@ mod tests {
     async fn test_write_to_compressed_latest_block_decompresses(#[future] entry: Arc<Entry>) {
         let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
             bm.save_cache_on_disk().await.unwrap();
@@ -685,6 +686,7 @@ mod tests {
         .await;
         write_record_with_size(&entry, 1000000, 20).await;
         write_record_with_size(&entry, 3000000, 20).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
             bm.save_cache_on_disk().await.unwrap();

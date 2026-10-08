@@ -1053,6 +1053,7 @@ mod tests {
         let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
             bm.save_cache_on_disk().await.unwrap();
@@ -1101,6 +1102,7 @@ mod tests {
     ) {
         let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
             bm.save_cache_on_disk().await.unwrap();
@@ -1143,6 +1145,7 @@ mod tests {
     ) {
         let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
             bm.save_cache_on_disk().await.unwrap();
@@ -1178,6 +1181,7 @@ mod tests {
     ) {
         let entry = entry(entry_settings.clone(), path.clone()).await;
         write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
             bm.save_cache_on_disk().await.unwrap();
