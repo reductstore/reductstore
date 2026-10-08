@@ -7,7 +7,6 @@ use crate::api::http::AxumAppBuilder;
 use crate::api::zenoh;
 use crate::cfg::{Cfg, CfgParser, ExtCfgBounds, ExtCfgParser, InstanceRole};
 use crate::core::env::StdEnvGetter;
-use crate::core::file_cache::FILE_CACHE;
 use crate::core::sync::set_rwlock_timeout;
 use crate::lock_file::BoxedLockFile;
 use crate::storage::engine::StorageEngine;
@@ -112,6 +111,7 @@ impl<ExtCfg: ExtCfgBounds> PreparedServer<ExtCfg> {
         let handle = listener.handle.clone();
         let engine_config = cfg.engine_config.clone();
         let instance_role = cfg.role.clone();
+        let file_cache = Arc::clone(components.storage.file_cache());
 
         #[cfg(not(test))]
         {
@@ -170,7 +170,7 @@ impl<ExtCfg: ExtCfgBounds> PreparedServer<ExtCfg> {
 
         set_rwlock_timeout(RW_LOCK_SHUTDOWN_TIMEOUT);
         state_keeper.shutdown().await;
-        FILE_CACHE.stop_sync_worker();
+        file_cache.stop_sync_worker();
         drop(lock_file);
         info!("Server has been shut down.");
     }

@@ -37,9 +37,15 @@ impl LifecycleRepoBuilder {
         if self.cfg.role == Replica {
             Box::new(ReadOnlyLifecycleRepository::new())
         } else {
+            let file_cache = Arc::clone(storage.file_cache());
             Box::new(
-                LifecycleRepository::load_or_create(storage, self.cfg, self.system_event_sink)
-                    .await,
+                LifecycleRepository::load_or_create(
+                    storage,
+                    self.cfg,
+                    self.system_event_sink,
+                    file_cache,
+                )
+                .await,
             )
         }
     }

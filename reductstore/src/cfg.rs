@@ -29,7 +29,9 @@ use crate::cfg::zenoh::ZenohApiConfig;
 use crate::core::cache::Cache;
 use crate::core::deployment_id::{NodeId, StoreId};
 use crate::core::env::{Env, GetEnv, StdEnvGetter};
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::{
+    FileCache, FILE_CACHE_MAX_SIZE, FILE_CACHE_SYNC_INTERVAL, FILE_CACHE_TIME_TO_LIVE,
+};
 use crate::core::sync::{set_rwlock_failure_action, set_rwlock_timeout, AsyncRwLock};
 use crate::ext::ext_repository::create_ext_repository;
 use crate::lock_file::{BoxedLockFile, LockFileBuilder};
@@ -229,6 +231,7 @@ pub struct CfgParser<EnvGetter: GetEnv = StdEnvGetter, ExtCfg: ExtCfgBounds = Co
     pub license: Option<License>,
     pub env: Env<EnvGetter>,
     pub ext_cfg: ExtCfg,
+    pub(crate) file_cache: Arc<FileCache>,
 }
 
 #[async_trait]
@@ -371,6 +374,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             env,
             license,
             ext_cfg,
+            file_cache: Arc::new(FileCache::new(
+                FILE_CACHE_MAX_SIZE,
+                FILE_CACHE_TIME_TO_LIVE,
+                FILE_CACHE_SYNC_INTERVAL,
+            )),
         };
 
         Logger::init(&me.cfg.log_level);
@@ -427,7 +435,7 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             return Ok(LockFileBuilder::noop());
         }
 
-        let lock_file = LockFileBuilder::new(data_path.join(".lock"))
+        let lock_file = LockFileBuilder::new(data_path.join(".lock"), Arc::clone(&self.file_cache))
             .with_config(self.cfg.clone())
             .build();
 
@@ -436,11 +444,15 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
     pub async fn build(&self) -> Result<Components, ReductError> {
         let data_path = self.get_data_path()?;
-        let store_id = StoreId::builder(&data_path, self.cfg.role.clone())
-            .retry_interval(Duration::from_secs(30))
-            .retry_timeout(Duration::from_secs(5))
-            .load_or_create()
-            .await?;
+        let store_id = StoreId::builder(
+            &data_path,
+            self.cfg.role.clone(),
+            Arc::clone(&self.file_cache),
+        )
+        .retry_interval(Duration::from_secs(30))
+        .retry_timeout(Duration::from_secs(5))
+        .load_or_create()
+        .await?;
         let node_id = NodeId::from_instance_name(&self.cfg.instance_name);
         let replication_source_identity = ReplicationSourceIdentity::new(
             node_id.to_string(),
@@ -453,8 +465,12 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         // points, the usage aggregator drains it.
         let usage_counters = Arc::new(UsageCounters::default());
         let storage = Arc::new(
-            self.provision_buckets(&data_path, Arc::clone(&usage_counters))
-                .await,
+            self.provision_buckets(
+                &data_path,
+                Arc::clone(&usage_counters),
+                Arc::clone(&self.file_cache),
+            )
+            .await,
         );
         let token_repo = self.provision_tokens(&data_path, Arc::clone(&storage));
         let console = create_asset_manager(load_console());
@@ -554,9 +570,11 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             internal_server_error!("Failed to initialize storage backend: {}", e.message)
         })?;
 
-        FILE_CACHE.set_storage_backend(backend).await;
-        FILE_CACHE.set_sync_interval(self.cfg.backend_config.sync_interval);
-        FILE_CACHE.set_read_only(self.cfg.role == InstanceRole::Replica);
+        self.file_cache.set_storage_backend(backend).await;
+        self.file_cache
+            .set_sync_interval(self.cfg.backend_config.sync_interval);
+        self.file_cache
+            .set_read_only(self.cfg.role == InstanceRole::Replica);
         Ok(())
     }
 
@@ -694,10 +712,28 @@ mod tests {
         assert!(!fallback.is_empty());
     }
 
+    async fn build_test_file_cache_for_path(path: &std::path::Path) -> Arc<FileCache> {
+        use crate::backend::Backend;
+        let cache = Arc::new(FileCache::new(
+            FILE_CACHE_MAX_SIZE,
+            FILE_CACHE_TIME_TO_LIVE,
+            FILE_CACHE_SYNC_INTERVAL,
+        ));
+        let backend = Backend::builder()
+            .local_data_path(path.to_path_buf())
+            .try_build()
+            .await
+            .unwrap();
+        cache.set_storage_backend(backend).await;
+        cache.set_read_only(false);
+        cache
+    }
+
     #[tokio::test]
     #[serial]
     async fn initializes_store_id_for_core_configuration() {
         let data_path = tempfile::tempdir().unwrap().keep();
+        let file_cache = build_test_file_cache_for_path(&data_path).await;
         let parser = CfgParser {
             cfg: Cfg {
                 data_path: data_path.clone(),
@@ -710,6 +746,7 @@ mod tests {
                 role: InstanceRole::Primary,
                 data_path: data_path.clone(),
             },
+            file_cache,
         };
 
         parser.init_storage_backend().await.unwrap();
@@ -723,6 +760,7 @@ mod tests {
     async fn component_construction_preserves_initialized_ids_and_usable_storage() {
         let data_path = tempfile::tempdir().unwrap().keep();
         let instance_name = "test-node".to_string();
+        let file_cache = build_test_file_cache_for_path(&data_path).await;
         let parser = CfgParser {
             cfg: Cfg {
                 data_path: data_path.clone(),
@@ -736,13 +774,15 @@ mod tests {
                 role: InstanceRole::Primary,
                 data_path: data_path.clone(),
             },
+            file_cache: Arc::clone(&file_cache),
         };
 
         parser.init_storage_backend().await.unwrap();
-        let initialized_store_id = StoreId::builder(&data_path, InstanceRole::Primary)
-            .load_or_create()
-            .await
-            .unwrap();
+        let initialized_store_id =
+            StoreId::builder(&data_path, InstanceRole::Primary, Arc::clone(&file_cache))
+                .load_or_create()
+                .await
+                .unwrap();
         let initialized_node_id = NodeId::from_instance_name(&instance_name);
 
         let components = parser.build().await.unwrap();

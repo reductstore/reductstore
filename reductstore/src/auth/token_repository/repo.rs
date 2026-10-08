@@ -12,7 +12,7 @@ use crate::auth::token_secret::{
 };
 use crate::cfg::ApiToken;
 use crate::core::cache::Cache;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::storage::engine::StorageEngine;
 use crate::syslog::{SYSTEM_AUDIT_ENTRY_PREFIX, SYSTEM_BUCKET_NAME};
 use async_trait::async_trait;
@@ -45,6 +45,7 @@ pub(super) struct TokenRepository {
     last_access_cache: HashMap<String, u64>,
     last_access_cache_updated_at: Option<Instant>,
     auth_cache: Cache<String, Token>,
+    file_cache: Arc<FileCache>,
 }
 
 const AUTH_CACHE_SIZE: usize = 1024;
@@ -65,6 +66,7 @@ impl TokenRepository {
         data_path: PathBuf,
         api_token: ApiToken,
         storage: Option<Arc<StorageEngine>>,
+        file_cache: Arc<FileCache>,
     ) -> TokenRepository {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
         let repo = HashMap::new();
@@ -80,9 +82,11 @@ impl TokenRepository {
             last_access_cache: HashMap::new(),
             last_access_cache_updated_at: None,
             auth_cache: Cache::new(AUTH_CACHE_SIZE, AUTH_CACHE_TTL),
+            file_cache,
         };
 
-        let file = FILE_CACHE
+        let file = token_repository
+            .file_cache
             .read(&token_repository.config_path, SeekFrom::Start(0))
             .await;
         match file {
@@ -247,7 +251,8 @@ impl TokenRepository {
         repo.encode(&mut buf)
             .map_err(|_| ReductError::internal_server_error("Could not encode token repository"))?;
 
-        let mut file = FILE_CACHE
+        let mut file = self
+            .file_cache
             .write_or_create(&self.config_path, SeekFrom::Start(0))
             .await?;
         file.set_len(0)?;
@@ -1665,8 +1670,9 @@ mod tests {
     }
 
     async fn build_repo_at(path: &PathBuf, cfg: &Cfg) -> BoxedTokenRepository {
+        let file_cache = crate::core::file_cache::build_test_file_cache();
         TokenRepositoryBuilder::new(cfg.clone())
-            .build(path.clone())
+            .build_with_file_cache(path.clone(), file_cache)
             .await
     }
 }

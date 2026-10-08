@@ -311,7 +311,6 @@ mod tests {
 
     use crate::cfg::io::IoConfig;
     use crate::cfg::{Cfg, InstanceRole};
-    use crate::core::file_cache::FILE_CACHE;
     use crate::storage::block_manager::block::Block;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::record;
@@ -464,24 +463,27 @@ mod tests {
         #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) {
         let source_block_manager = block_manager.await;
-        let (path, bucket, entry) = {
+        let (path, bucket, entry, file_cache) = {
             let mut bm = source_block_manager.write().await.unwrap();
             bm.save_cache_on_disk().await.unwrap();
             (
                 bm.path().clone(),
                 bm.bucket_name().to_string(),
                 bm.entry_name().to_string(),
+                Arc::clone(bm.file_cache()),
             )
         };
 
-        FILE_CACHE.remove(&path.join("1000.meta")).await.unwrap();
+        file_cache.remove(&path.join("1000.meta")).await.unwrap();
 
         let cfg = Cfg {
             role: InstanceRole::Replica,
             ..Default::default()
         };
 
-        let index = BlockIndex::try_load(path.join("index")).await.unwrap();
+        let index = BlockIndex::try_load(path.join("index"), Arc::clone(&file_cache))
+            .await
+            .unwrap();
         let block_manager = Arc::new(AsyncRwLock::new(
             BlockManager::build(
                 path,
@@ -490,6 +492,7 @@ mod tests {
                 entry,
                 Arc::new(cfg),
                 Default::default(),
+                Arc::clone(&file_cache),
             )
             .await
             .unwrap(),
@@ -585,13 +588,14 @@ mod tests {
         #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) {
         let source_block_manager = block_manager.await;
-        let (path, bucket, entry) = {
+        let (path, bucket, entry, file_cache) = {
             let mut bm = source_block_manager.write().await.unwrap();
             bm.save_cache_on_disk().await.unwrap();
             (
                 bm.path().clone(),
                 bm.bucket_name().to_string(),
                 bm.entry_name().to_string(),
+                Arc::clone(bm.file_cache()),
             )
         };
 
@@ -600,7 +604,9 @@ mod tests {
             ..Default::default()
         };
 
-        let index = BlockIndex::try_load(path.join("index")).await.unwrap();
+        let index = BlockIndex::try_load(path.join("index"), Arc::clone(&file_cache))
+            .await
+            .unwrap();
         let replica_block_manager = Arc::new(AsyncRwLock::new(
             BlockManager::build(
                 path,
@@ -609,6 +615,7 @@ mod tests {
                 entry,
                 Arc::new(cfg),
                 Default::default(),
+                Arc::clone(&file_cache),
             )
             .await
             .unwrap(),

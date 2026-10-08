@@ -3,6 +3,7 @@
 
 use crate::cfg::{CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
+use crate::core::file_cache::FileCache;
 use crate::storage::bucket::Bucket;
 use crate::storage::engine::StorageEngine;
 use crate::storage::usage::UsageCounters;
@@ -19,11 +20,13 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
         &self,
         data_path: &PathBuf,
         usage_counters: Arc<UsageCounters>,
+        file_cache: Arc<FileCache>,
     ) -> StorageEngine {
         let builder = StorageEngine::builder()
             .with_cfg(self.cfg.clone())
             .with_data_path(data_path.clone())
-            .with_usage_counters(usage_counters);
+            .with_usage_counters(usage_counters)
+            .with_file_cache(file_cache);
 
         let storage = if let Some(license) = self.license.clone() {
             builder.with_license(license).build().await

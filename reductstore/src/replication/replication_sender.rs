@@ -883,9 +883,13 @@ mod tests {
         log_map.write().await.unwrap().insert(
             "gone".to_string(),
             Arc::new(AsyncRwLock::new(
-                TransactionLog::try_load_or_create(&storage.data_path().join("gone.log"), 10)
-                    .await
-                    .unwrap(),
+                TransactionLog::try_load_or_create(
+                    &storage.data_path().join("gone.log"),
+                    10,
+                    Arc::clone(storage.file_cache()),
+                )
+                .await
+                .unwrap(),
             )),
         );
         log_map.write().await.unwrap().remove("gone");
@@ -1123,6 +1127,7 @@ mod tests {
                 TransactionLog::try_load_or_create(
                     &storage.data_path().join(format!("{}.log", entry)),
                     1000,
+                    Arc::clone(storage.file_cache()),
                 )
                 .await
                 .unwrap(),

@@ -10,7 +10,7 @@ impl BlockManager {
     ) -> Result<(), ReductError> {
         let mut first_err = None;
         for path in all_block_file_paths(&self.path, block_id) {
-            if let Err(err) = FILE_CACHE.invalidate_local_cache_file(&path).await {
+            if let Err(err) = self.file_cache.invalidate_local_cache_file(&path).await {
                 if first_err.is_none() {
                     first_err = Some(err);
                 }
@@ -60,7 +60,8 @@ mod tests {
         set_rwlock_timeout(Duration::from_millis(10));
 
         let data_path = block_manager.path_to_data(block_id);
-        let data_guard = FILE_CACHE
+        let data_guard = block_manager
+            .file_cache()
             .read(&data_path, SeekFrom::Start(0))
             .await
             .unwrap();

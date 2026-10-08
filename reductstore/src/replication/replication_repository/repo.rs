@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::cfg::{Cfg, DEFAULT_PORT};
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
@@ -261,6 +261,7 @@ pub(crate) struct ReplicationRepository {
     started: bool,
     notification_tx: UnboundedSender<NotificationCommand>,
     notification_worker: Option<JoinHandle<()>>,
+    file_cache: Arc<FileCache>,
 }
 
 #[async_trait]
@@ -421,6 +422,7 @@ impl ReplicationRepository {
         config: Cfg,
         system_event_sink: Option<SystemEventSink>,
         source_identity: ReplicationSourceIdentity,
+        file_cache: Arc<FileCache>,
     ) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
         let replications = Arc::new(AsyncRwLock::new(HashMap::<String, ReplicationTask>::new()));
@@ -463,10 +465,12 @@ impl ReplicationRepository {
             started: false,
             notification_tx,
             notification_worker: Some(notification_worker),
+            file_cache,
         };
 
         let read_conf_file = async || {
-            let mut lock = FILE_CACHE
+            let mut lock = repo
+                .file_cache
                 .write_or_create(&repo.repo_path, Start(0))
                 .await?;
 
@@ -518,7 +522,8 @@ impl ReplicationRepository {
             .encode(&mut buf)
             .expect("Error encoding replication repository");
 
-        let mut file = FILE_CACHE
+        let mut file = self
+            .file_cache
             .write_or_create(&self.repo_path, Start(0))
             .await?;
         file.set_len(0)?;
@@ -678,7 +683,7 @@ impl ReplicationRepository {
                     continue;
                 }
 
-                match FILE_CACHE.remove(&path).await {
+                match self.file_cache.remove(&path).await {
                     Ok(()) => {}
                     Err(err) if err.status() == ErrorCode::NotFound => {}
                     Err(err) => return Err(err),
@@ -824,11 +829,13 @@ mod tests {
         ) {
             settings.dst_prefix = "robot-1".to_string();
             let storage = storage.await;
+            let file_cache = Arc::clone(storage.file_cache());
             let repo = ReplicationRepository::load_or_create(
                 Arc::clone(&storage),
                 Cfg::default(),
                 None,
                 ReplicationSourceIdentity::default(),
+                file_cache,
             )
             .await;
             repo.create_replication("test", settings.clone())
@@ -840,6 +847,7 @@ mod tests {
                 Cfg::default(),
                 None,
                 ReplicationSourceIdentity::default(),
+                Arc::clone(storage.file_cache()),
             )
             .await;
             assert_eq!(repo.replications().await.unwrap().len(), 1);
@@ -1101,6 +1109,7 @@ mod tests {
                 Cfg::default(),
                 None,
                 ReplicationSourceIdentity::default(),
+                Arc::clone(storage.file_cache()),
             )
             .await;
             assert_eq!(
@@ -2068,11 +2077,13 @@ mod tests {
     #[fixture]
     async fn repo(#[future] storage: Arc<StorageEngine>) -> ReplicationRepository {
         let storage = storage.await;
+        let file_cache = Arc::clone(storage.file_cache());
         ReplicationRepository::load_or_create(
             storage,
             Cfg::default(),
             None,
             ReplicationSourceIdentity::default(),
+            file_cache,
         )
         .await
     }

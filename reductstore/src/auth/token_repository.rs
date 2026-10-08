@@ -10,6 +10,7 @@ use crate::auth::token_repository::read_only::ReadOnlyTokenRepository;
 use crate::auth::token_repository::repo::TokenRepository;
 use crate::auth::token_secret::verify_token_secret;
 use crate::cfg::{ApiToken, Cfg, InstanceRole};
+use crate::core::file_cache::FileCache;
 use crate::storage::engine::StorageEngine;
 use crate::syslog::SYSTEM_AUDIT_ENTRY_PREFIX;
 use async_trait::async_trait;
@@ -394,7 +395,21 @@ impl TokenRepositoryBuilder {
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub async fn build(self, config_path: PathBuf) -> BoxedTokenRepository {
-        self.build_internal(config_path, None).await
+        let file_cache = Arc::new(FileCache::new(
+            crate::core::file_cache::FILE_CACHE_MAX_SIZE,
+            crate::core::file_cache::FILE_CACHE_TIME_TO_LIVE,
+            crate::core::file_cache::FILE_CACHE_SYNC_INTERVAL,
+        ));
+        self.build_internal(config_path, None, file_cache).await
+    }
+
+    #[cfg(test)]
+    pub async fn build_with_file_cache(
+        self,
+        config_path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) -> BoxedTokenRepository {
+        self.build_internal(config_path, None, file_cache).await
     }
 
     pub async fn build_with_storage(
@@ -402,24 +417,30 @@ impl TokenRepositoryBuilder {
         config_path: PathBuf,
         storage: Arc<StorageEngine>,
     ) -> BoxedTokenRepository {
-        self.build_internal(config_path, Some(storage)).await
+        let file_cache = Arc::clone(storage.file_cache());
+        self.build_internal(config_path, Some(storage), file_cache)
+            .await
     }
 
     async fn build_internal(
         self,
         config_path: PathBuf,
         storage: Option<Arc<StorageEngine>>,
+        file_cache: Arc<FileCache>,
     ) -> BoxedTokenRepository {
         if self.cfg.role == InstanceRole::Replica {
             return Box::new(
-                ReadOnlyTokenRepository::new(config_path, self.cfg.clone(), storage).await,
+                ReadOnlyTokenRepository::new(config_path, self.cfg.clone(), storage, file_cache)
+                    .await,
             ) as BoxedTokenRepository;
         }
 
         match self.cfg.api_token {
             ApiToken::NoToken => Box::new(NoAuthRepository::new()) as BoxedTokenRepository,
-            api_token => Box::new(TokenRepository::new(config_path, api_token, storage).await)
-                as BoxedTokenRepository,
+            api_token => {
+                Box::new(TokenRepository::new(config_path, api_token, storage, file_cache).await)
+                    as BoxedTokenRepository
+            }
         }
     }
 }

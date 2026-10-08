@@ -272,9 +272,10 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use crate::cfg::Cfg;
+    use crate::core::file_cache::FileCache;
     use crate::storage::block_manager::compress::CompressionAlgorithm;
     use crate::storage::block_manager::{COMPRESSED_DATA_FILE_EXT, COMPRESSED_DESCRIPTOR_FILE_EXT};
-    use crate::storage::entry::tests::{entry, path, write_stub_record};
+    use crate::storage::entry::tests::{entry, file_cache, path, write_stub_record};
     use crate::storage::entry::{Entry, EntrySettings};
     use crate::storage::proto::{record, us_to_ts, Record};
     use bytes::Bytes;
@@ -288,13 +289,14 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_new_block_size(path: PathBuf) {
+    async fn test_begin_write_new_block_size(path: PathBuf, file_cache: Arc<FileCache>) {
         let entry = entry(
             EntrySettings {
                 max_block_size: 10,
                 max_block_records: 10000,
             },
             path,
+            file_cache,
         )
         .await;
 
@@ -346,13 +348,14 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_new_block_records(path: PathBuf) {
+    async fn test_begin_write_new_block_records(path: PathBuf, file_cache: Arc<FileCache>) {
         let entry = entry(
             EntrySettings {
                 max_block_size: 10000,
                 max_block_records: 1,
             },
             path,
+            file_cache,
         )
         .await;
 
@@ -502,13 +505,17 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_belated_new_block_when_full(path: PathBuf) {
+    async fn test_begin_write_belated_new_block_when_full(
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
         let entry = entry(
             EntrySettings {
                 max_block_size: 10000,
                 max_block_records: 2,
             },
             path,
+            file_cache,
         )
         .await;
 
@@ -674,13 +681,17 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_belated_write_to_compressed_block_decompresses(path: PathBuf) {
+    async fn test_belated_write_to_compressed_block_decompresses(
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
         let entry = entry(
             EntrySettings {
                 max_block_size: 30,
                 max_block_records: 10000,
             },
             path,
+            file_cache,
         )
         .await;
         write_record_with_size(&entry, 1000000, 20).await;

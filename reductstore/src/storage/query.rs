@@ -180,6 +180,7 @@ mod tests {
     use super::*;
 
     use crate::cfg::Cfg;
+    use crate::core::file_cache::build_test_file_cache;
 
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::Record;
@@ -448,13 +449,15 @@ mod tests {
             .keep()
             .join("bucket")
             .join("entry");
+        let file_cache = build_test_file_cache();
         let mut block_manager = BlockManager::build(
             path.clone(),
-            BlockIndex::new(path.join("index")),
+            BlockIndex::new(path.join("index"), Arc::clone(&file_cache)),
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
             Default::default(),
+            file_cache,
         )
         .await
         .unwrap();

@@ -6,7 +6,7 @@ use super::{
     MultiEntryQuery,
 };
 use crate::cfg::Cfg;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::bucket::settings::SETTINGS_NAME;
 use crate::storage::entry::Entry;
@@ -37,6 +37,7 @@ pub(crate) struct BucketBuilder {
     io_limiter: Option<InFlightIoLimiter>,
     usage_counters: Option<Arc<UsageCounters>>,
     free_space_fn: Option<FreeSpaceFn>,
+    file_cache: Option<Arc<FileCache>>,
 }
 
 impl BucketBuilder {
@@ -75,6 +76,11 @@ impl BucketBuilder {
         self
     }
 
+    pub(crate) fn file_cache(mut self, file_cache: Arc<FileCache>) -> Self {
+        self.file_cache = Some(file_cache);
+        self
+    }
+
     /// Override the free-space provider. Used in tests to simulate a filesystem
     /// with a limited amount of free disk space.
     #[cfg(test)]
@@ -93,12 +99,19 @@ impl BucketBuilder {
         let usage_counters = self
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
+        let file_cache = self.file_cache.unwrap_or_else(|| {
+            Arc::new(FileCache::new(
+                crate::core::file_cache::FILE_CACHE_MAX_SIZE,
+                crate::core::file_cache::FILE_CACHE_TIME_TO_LIVE,
+                crate::core::file_cache::FILE_CACHE_SYNC_INTERVAL,
+            ))
+        });
         let settings = Bucket::fill_settings(
             self.settings.unwrap_or_default(),
             cfg.bucket_defaults.clone(),
         );
         let path = data_path.join(&name);
-        let folder_keeper = FolderKeeper::new(path.clone(), &cfg).await;
+        let folder_keeper = FolderKeeper::new(path.clone(), &cfg, Arc::clone(&file_cache)).await;
 
         let bucket = Bucket {
             name,
@@ -113,6 +126,7 @@ impl BucketBuilder {
             io_limiter,
             usage_counters,
             free_space_fn: self.free_space_fn.unwrap_or_else(default_free_space_fn),
+            file_cache,
         };
 
         bucket.save_settings().await?;
@@ -128,8 +142,15 @@ impl BucketBuilder {
         let usage_counters = self
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
+        let file_cache = self.file_cache.unwrap_or_else(|| {
+            Arc::new(FileCache::new(
+                crate::core::file_cache::FILE_CACHE_MAX_SIZE,
+                crate::core::file_cache::FILE_CACHE_TIME_TO_LIVE,
+                crate::core::file_cache::FILE_CACHE_SYNC_INTERVAL,
+            ))
+        });
 
-        let mut file = FILE_CACHE
+        let mut file = file_cache
             .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))
             .await?;
         let mut buf = Vec::new();
@@ -144,7 +165,8 @@ impl BucketBuilder {
 
         let mut entries = BTreeMap::new();
         let mut task_set = Vec::new();
-        let folder_keeper = FolderKeeper::new(path.clone(), cfg.as_ref()).await;
+        let folder_keeper =
+            FolderKeeper::new(path.clone(), cfg.as_ref(), Arc::clone(&file_cache)).await;
 
         for entry_path in folder_keeper.list_folders().await? {
             let entry_name = normalize_entry_name(
@@ -160,6 +182,7 @@ impl BucketBuilder {
                 .cfg(cfg.clone())
                 .io_limiter(io_limiter.clone())
                 .usage_counters(Arc::clone(&usage_counters))
+                .file_cache(Arc::clone(&file_cache))
                 .restore();
 
             task_set.push((entry_name, handler));
@@ -195,6 +218,7 @@ impl BucketBuilder {
             io_limiter,
             usage_counters,
             free_space_fn: self.free_space_fn.unwrap_or_else(default_free_space_fn),
+            file_cache,
         })
     }
 }

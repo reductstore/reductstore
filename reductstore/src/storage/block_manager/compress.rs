@@ -3,7 +3,7 @@
 
 #![allow(dead_code)]
 
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::storage::block_manager::{
     BlockManager, COMPRESSED_DATA_FILE_EXT, COMPRESSED_DESCRIPTOR_FILE_EXT,
 };
@@ -18,6 +18,7 @@ use std::cmp::min;
 use std::fs::OpenOptions;
 use std::io::{Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use zstd::stream::write::Encoder as ZstdEncoder;
 
 const ZSTD_COMPRESSION_LEVEL: i32 = 3;
@@ -112,10 +113,10 @@ impl BlockManager {
 
         let data_path = self.path_to_data(block_id);
         let desc_path = self.path_to_desc(block_id);
-        FILE_CACHE.remove(&data_path).await?;
-        FILE_CACHE.remove(&desc_path).await?;
-        FILE_CACHE.discard_recursive(&data_path).await?;
-        FILE_CACHE.discard_recursive(&desc_path).await?;
+        self.file_cache.remove(&data_path).await?;
+        self.file_cache.remove(&desc_path).await?;
+        self.file_cache.discard_recursive(&data_path).await?;
+        self.file_cache.discard_recursive(&desc_path).await?;
 
         Ok(())
     }
@@ -163,8 +164,12 @@ impl BlockManager {
 
         self.remove_mutation(&compressed_data_path).await?;
         self.remove_mutation(&compressed_desc_path).await?;
-        FILE_CACHE.discard_recursive(&compressed_data_path).await?;
-        FILE_CACHE.discard_recursive(&compressed_desc_path).await?;
+        self.file_cache
+            .discard_recursive(&compressed_data_path)
+            .await?;
+        self.file_cache
+            .discard_recursive(&compressed_desc_path)
+            .await?;
 
         let data_size = tokio::fs::metadata(&data_path)
             .await
@@ -205,7 +210,8 @@ impl BlockManager {
 
     async fn compress_block_zstd(&self, block_id: u64) -> Result<(u64, u64), ReductError> {
         let data_path = self.path_to_data(block_id);
-        let data_size = FILE_CACHE
+        let data_size = self
+            .file_cache
             .read(&data_path, SeekFrom::Start(0))
             .await?
             .metadata()?
@@ -223,18 +229,31 @@ impl BlockManager {
             block_id, COMPRESSED_DESCRIPTOR_FILE_EXT
         ));
 
-        if let Err(err) = compress_file_zstd(&data_path, &compressed_data_tmp_path, data_size).await
+        if let Err(err) = compress_file_zstd(
+            &data_path,
+            &compressed_data_tmp_path,
+            data_size,
+            &self.file_cache,
+        )
+        .await
         {
             cleanup_tmp(&compressed_data_tmp_path);
             return Err(err);
         }
 
-        let desc_size = FILE_CACHE
+        let desc_size = self
+            .file_cache
             .read(&desc_path, SeekFrom::Start(0))
             .await?
             .metadata()?
             .len();
-        if let Err(err) = compress_file_zstd(&desc_path, &compressed_desc_tmp_path, desc_size).await
+        if let Err(err) = compress_file_zstd(
+            &desc_path,
+            &compressed_desc_tmp_path,
+            desc_size,
+            &self.file_cache,
+        )
+        .await
         {
             cleanup_tmp(&compressed_data_tmp_path);
             cleanup_tmp(&compressed_desc_tmp_path);
@@ -308,7 +327,10 @@ impl BlockManager {
     ) -> Result<(), ReductError> {
         let mut compressed = vec![];
         {
-            let mut file = FILE_CACHE.read(compressed_path, SeekFrom::Start(0)).await?;
+            let mut file = self
+                .file_cache
+                .read(compressed_path, SeekFrom::Start(0))
+                .await?;
             file.read_to_end(&mut compressed).map_err(|err| {
                 internal_server_error!(
                     "Failed to read compressed file {:?}: {}",
@@ -335,6 +357,7 @@ async fn compress_file_zstd(
     source_path: &PathBuf,
     temp_path: &PathBuf,
     source_size: u64,
+    file_cache: &Arc<FileCache>,
 ) -> Result<(), ReductError> {
     let temp_file = OpenOptions::new()
         .create(true)
@@ -359,7 +382,7 @@ async fn compress_file_zstd(
         let bytes_to_read = min(MAX_IO_BUFFER_SIZE as u64, source_size - read_bytes) as usize;
         let mut buf = vec![0; bytes_to_read];
         {
-            let mut source = FILE_CACHE
+            let mut source = file_cache
                 .read(source_path, SeekFrom::Start(read_bytes))
                 .await?;
             source.read_exact(&mut buf).map_err(|err| {
@@ -396,16 +419,17 @@ fn cleanup_tmp(path: &Path) {
 async fn decompress_file_zstd(
     compressed_path: &PathBuf,
     output_path: &PathBuf,
+    file_cache: &Arc<FileCache>,
 ) -> Result<(), ReductError> {
     let mut compressed = vec![];
-    FILE_CACHE
+    file_cache
         .read(compressed_path, SeekFrom::Start(0))
         .await?
         .read_to_end(&mut compressed)?;
     let decompressed = zstd::decode_all(compressed.as_slice()).map_err(|err| {
         internal_server_error!("Failed to decompress file {:?}: {}", compressed_path, err)
     })?;
-    let mut output = FILE_CACHE
+    let mut output = file_cache
         .write_or_create(output_path, SeekFrom::Start(0))
         .await?;
     output.write_all(&decompressed)?;
@@ -417,6 +441,7 @@ async fn decompress_file_zstd(
 mod tests {
     use super::*;
     use crate::cfg::Cfg;
+    use crate::core::file_cache::build_test_file_cache;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::block_manager::decompress_cache::DecompressedFileType;
     use crate::storage::block_manager::{BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT};
@@ -541,14 +566,16 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_compress_block_not_found() {
+        let file_cache = build_test_file_cache();
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
         let mut block_manager = BlockManager::build(
             path.clone(),
-            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            BlockIndex::new(path.join(BLOCK_INDEX_FILE), file_cache.clone()),
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
             Default::default(),
+            file_cache,
         )
         .await
         .unwrap();
@@ -566,9 +593,10 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_compress_block_cleans_temp_when_data_compression_fails() {
+        let file_cache = build_test_file_cache();
         let (mut block_manager, block_id, _, _) =
             block_manager_with_data(b"missing source".to_vec()).await;
-        FILE_CACHE
+        file_cache
             .remove(&block_manager.path_to_data(block_id))
             .await
             .unwrap();
@@ -615,6 +643,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_decompress_block_restores_files() {
+        let file_cache = build_test_file_cache();
         let data = b"decompress me".to_vec();
         let (mut block_manager, block_id, original_data, original_descriptor) =
             block_manager_with_data(data).await;
@@ -631,6 +660,7 @@ mod tests {
                 block_id,
                 DecompressedFileType::Data,
                 &compressed_data_path,
+                &file_cache,
             )
             .await
             .unwrap();
@@ -732,6 +762,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_decompress_block_missing_compressed_data_marks_corrupted() {
+        let file_cache = build_test_file_cache();
         let (mut block_manager, block_id, _, _) =
             block_manager_with_data(b"missing file".to_vec()).await;
 
@@ -740,7 +771,7 @@ mod tests {
             .await
             .unwrap();
 
-        FILE_CACHE
+        file_cache
             .remove(&block_manager.path_to_compressed_data(block_id))
             .await
             .unwrap();
@@ -759,6 +790,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_decompress_block_missing_compressed_descriptor_marks_corrupted() {
+        let file_cache = build_test_file_cache();
         let (mut block_manager, block_id, _, _) =
             block_manager_with_data(b"missing descriptor".to_vec()).await;
 
@@ -767,7 +799,7 @@ mod tests {
             .await
             .unwrap();
 
-        FILE_CACHE
+        file_cache
             .remove(&block_manager.path_to_compressed_desc(block_id))
             .await
             .unwrap();
@@ -786,12 +818,13 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_compress_file_zstd_missing_temp_parent() {
+        let file_cache = build_test_file_cache();
         let dir = tempdir().unwrap().keep();
         let source_path = dir.join("source.blk");
         let temp_path = dir.join("missing").join("source.blk.zst.tmp");
         std::fs::write(&source_path, b"data").unwrap();
 
-        let err = compress_file_zstd(&source_path, &temp_path, 4)
+        let err = compress_file_zstd(&source_path, &temp_path, 4, &file_cache)
             .await
             .err()
             .unwrap();
@@ -803,12 +836,13 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_compress_file_zstd_short_source() {
+        let file_cache = build_test_file_cache();
         let dir = tempdir().unwrap().keep();
         let source_path = dir.join("source.blk");
         let temp_path = dir.join("source.blk.zst.tmp");
         std::fs::write(&source_path, b"a").unwrap();
 
-        let err = compress_file_zstd(&source_path, &temp_path, 2)
+        let err = compress_file_zstd(&source_path, &temp_path, 2, &file_cache)
             .await
             .err()
             .unwrap();
@@ -822,6 +856,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_decompress_file_zstd_creates_output_parent() {
+        let file_cache = build_test_file_cache();
         let dir = tempdir().unwrap().keep();
         let compressed_path = dir.join("source.blk.zst");
         let output_path = dir.join("missing").join("source.blk");
@@ -831,7 +866,7 @@ mod tests {
         )
         .unwrap();
 
-        decompress_file_zstd(&compressed_path, &output_path)
+        decompress_file_zstd(&compressed_path, &output_path, &file_cache)
             .await
             .unwrap();
 
@@ -883,6 +918,7 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_read_record_from_compressed_block() {
+        let file_cache = build_test_file_cache();
         let data = b"read compressed data".to_vec();
         let (mut block_manager, block_id, original_data, _) = block_manager_with_data(data).await;
 
@@ -895,24 +931,32 @@ mod tests {
         let block_ref = block_manager.load_block(block_id).await.unwrap();
         let block = block_ref.read().await.unwrap();
         let (file_path, offset) = block_manager.begin_read_record(&block, 0).await.unwrap();
-        let (content, read) = read_in_chunks(&file_path, offset, original_data.len() as u64, 0)
-            .await
-            .unwrap();
+        let (content, read) = read_in_chunks(
+            &file_path,
+            offset,
+            original_data.len() as u64,
+            0,
+            &file_cache,
+        )
+        .await
+        .unwrap();
 
         assert_eq!(read, original_data.len());
         assert_eq!(content, original_data);
     }
 
     async fn block_manager_with_data(data: Vec<u8>) -> (BlockManager, u64, Vec<u8>, Vec<u8>) {
+        let file_cache = build_test_file_cache();
         let block_id = 1;
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
         let mut block_manager = BlockManager::build(
             path.clone(),
-            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            BlockIndex::new(path.join(BLOCK_INDEX_FILE), file_cache.clone()),
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
@@ -937,7 +981,7 @@ mod tests {
         let (file, offset) = block_manager.begin_write_record(&block, 0).unwrap();
         drop(block);
 
-        let mut data_file = FILE_CACHE
+        let mut data_file = file_cache
             .write_or_create(&file, SeekFrom::Start(offset))
             .await
             .unwrap();
@@ -954,7 +998,7 @@ mod tests {
             .await
             .unwrap();
 
-        FILE_CACHE.force_sync_all().await.unwrap();
+        file_cache.force_sync_all().await.unwrap();
 
         let original_descriptor = std::fs::read(block_manager.path_to_desc(block_id)).unwrap();
         assert!(block_manager
