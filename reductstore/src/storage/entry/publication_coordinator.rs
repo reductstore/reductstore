@@ -130,9 +130,8 @@ impl PublicationCoordinator {
         block_manager: &AsyncRwLock<BlockManager>,
     ) -> Result<(), ReductError> {
         let _guard = Arc::clone(&self.admission).write_owned().await;
-        let mut block_manager = block_manager.write().await?;
         if let Some(token) = self.publish_locked(path).await? {
-            block_manager.clear_mutation_batch_if(&token);
+            block_manager.write().await?.clear_mutation_batch_if(&token);
         }
         Ok(())
     }
