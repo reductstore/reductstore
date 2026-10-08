@@ -13,44 +13,16 @@ use std::fs;
 use std::io::{ErrorKind, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{OwnedRwLockWriteGuard, RwLockWriteGuard};
 use tokio::time::sleep;
 
-const FILE_CACHE_MAX_SIZE: usize = 512;
-const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
+pub(crate) const FILE_CACHE_MAX_SIZE: usize = 512;
+pub(crate) const FILE_CACHE_TIME_TO_LIVE: Duration = Duration::from_secs(60);
 
-const FILE_CACHE_SYNC_INTERVAL: Duration = Duration::from_millis(10);
+pub(crate) const FILE_CACHE_SYNC_INTERVAL: Duration = Duration::from_millis(10);
 const FILE_CACHE_SYNC_BATCH_SIZE: usize = 16;
-
-pub(crate) static FILE_CACHE: LazyLock<FileCache> = LazyLock::new(|| {
-    #[allow(unused_mut)]
-    let mut cache = FileCache::new(
-        FILE_CACHE_MAX_SIZE,
-        FILE_CACHE_TIME_TO_LIVE,
-        FILE_CACHE_SYNC_INTERVAL,
-    );
-
-    #[cfg(test)]
-    {
-        use futures::executor;
-
-        // Use an isolated filesystem backend for tests to avoid relying on
-        // other tests to initialise the global cache.
-        let temp_dir = tempfile::tempdir()
-            .expect("Failed to create temporary directory for FILE_CACHE")
-            .keep();
-        executor::block_on(async {
-            let mut backend = cache.backend.write().await.unwrap();
-            *backend = (Backend::builder().local_data_path(temp_dir).try_build())
-                .await
-                .expect("Failed to initialise FILE_CACHE backend for tests");
-        });
-    }
-
-    cache
-});
 
 pub(crate) type FileLock = Arc<AsyncRwLock<File>>;
 pub(crate) type FileGuard = OwnedRwLockWriteGuard<File>;
@@ -113,7 +85,7 @@ impl FileCache {
     /// * `max_size` - The maximum number of file descriptors to keep open
     /// * `ttl` - The time to live for a file descriptor
     /// * `sync_interval` - The interval to sync files from cache to disk
-    fn new(max_size: usize, ttl: Duration, sync_interval: Duration) -> Self {
+    pub(crate) fn new(max_size: usize, ttl: Duration, sync_interval: Duration) -> Self {
         let cache = Arc::new(AsyncRwLock::new(Cache::<PathBuf, FileLock>::new(
             max_size, ttl,
         )));
@@ -954,6 +926,27 @@ impl Drop for FileCache {
     fn drop(&mut self) {
         self.stop_sync_worker.store(true, Ordering::Relaxed);
     }
+}
+
+#[cfg(test)]
+pub(crate) fn build_test_file_cache() -> Arc<FileCache> {
+    use futures::executor;
+
+    let temp_dir = tempfile::tempdir()
+        .expect("Failed to create temporary directory for test FileCache")
+        .keep();
+    let cache = FileCache::new(
+        FILE_CACHE_MAX_SIZE,
+        FILE_CACHE_TIME_TO_LIVE,
+        FILE_CACHE_SYNC_INTERVAL,
+    );
+    executor::block_on(async {
+        let backend = (Backend::builder().local_data_path(temp_dir).try_build())
+            .await
+            .expect("Failed to initialise test FileCache backend");
+        cache.set_storage_backend(backend).await;
+    });
+    Arc::new(cache)
 }
 
 #[cfg(test)]

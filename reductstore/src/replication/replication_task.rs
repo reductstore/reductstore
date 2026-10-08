@@ -3,7 +3,7 @@
 
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::replication::diagnostics::DiagnosticsCounter;
 use crate::replication::remote_bucket::{RemoteBucket, RemoteBucketBuilder};
@@ -43,6 +43,7 @@ pub struct ReplicationTask {
     filter_map: HashMap<String, TransactionFilter>,
     log_map: TransactionLogMap,
     storage: Arc<StorageEngine>,
+    file_cache: Arc<FileCache>,
     hourly_diagnostics: Arc<AsyncRwLock<DiagnosticsCounter>>,
     system_event_sink: Option<SystemEventSink>,
     stop_flag: Arc<AtomicBool>,
@@ -106,7 +107,8 @@ impl ReplicationTask {
             system_options,
             config.io_conf,
             remote_bucket,
-            storage,
+            storage.clone(),
+            Arc::clone(storage.file_cache()),
             system_event_sink,
         ))
     }
@@ -118,6 +120,7 @@ impl ReplicationTask {
         io_config: IoConfig,
         remote_bucket: Box<dyn RemoteBucket + Send + Sync>,
         storage: Arc<StorageEngine>,
+        file_cache: Arc<FileCache>,
         system_event_sink: Option<SystemEventSink>,
     ) -> Self {
         let log_map: TransactionLogMap =
@@ -138,6 +141,7 @@ impl ReplicationTask {
             system_options,
             io_config,
             storage,
+            file_cache,
             filter_map: HashMap::new(),
             log_map,
             hourly_diagnostics,
@@ -161,6 +165,7 @@ impl ReplicationTask {
         let thr_io_config = self.io_config.clone();
         let thr_log_map = Arc::clone(&self.log_map);
         let thr_storage = Arc::clone(&self.storage);
+        let thr_file_cache = Arc::clone(&self.file_cache);
         let thr_hourly_diagnostics = Arc::clone(&self.hourly_diagnostics);
         let thr_system_options = self.system_options.clone();
         let thr_system_event_sink = self.system_event_sink.clone();
@@ -199,6 +204,7 @@ impl ReplicationTask {
                         &path,
                         thr_system_options.transaction_log_size,
                         &entry.name,
+                        Arc::clone(&thr_file_cache),
                     )
                     .await?;
 
@@ -286,7 +292,7 @@ impl ReplicationTask {
                             &entry_name,
                             &replication_name,
                         );
-                        if let Err(err) = FILE_CACHE.remove(&path).await {
+                        if let Err(err) = thr_file_cache.remove(&path).await {
                             error!("Failed to remove transaction log: {:?}", err);
                         }
 
@@ -294,6 +300,7 @@ impl ReplicationTask {
                         match TransactionLog::try_load_or_create(
                             &path,
                             thr_system_options.transaction_log_size,
+                            Arc::clone(&thr_file_cache),
                         )
                         .await
                         {
@@ -402,6 +409,7 @@ impl ReplicationTask {
                 &path,
                 self.system_options.transaction_log_size,
                 &entry_name,
+                Arc::clone(&self.file_cache),
             )
             .await?;
             let mut map = self.log_map.write().await?;
@@ -517,8 +525,11 @@ impl ReplicationTask {
         path: &PathBuf,
         transaction_log_size: usize,
         entry_name: &str,
+        file_cache: Arc<FileCache>,
     ) -> Result<TransactionLog, ReductError> {
-        match TransactionLog::try_load_or_create(path, transaction_log_size).await {
+        match TransactionLog::try_load_or_create(path, transaction_log_size, file_cache.clone())
+            .await
+        {
             Ok(log) => Ok(log),
             Err(err) => {
                 error!(
@@ -526,8 +537,8 @@ impl ReplicationTask {
                     entry_name, err
                 );
                 info!("Creating a new transaction log for entry '{}'", entry_name);
-                FILE_CACHE.remove(path).await?;
-                TransactionLog::try_load_or_create(path, transaction_log_size).await
+                file_cache.remove(path).await?;
+                TransactionLog::try_load_or_create(path, transaction_log_size, file_cache).await
             }
         }
     }
@@ -569,7 +580,7 @@ mod tests {
     use std::io::Write;
     use std::time::Instant;
 
-    use crate::core::file_cache::FILE_CACHE;
+    use crate::core::file_cache::build_test_file_cache;
     use mockall::mock;
     use reduct_base::io::{BoxedReadRecord, RecordMeta};
     use rstest::*;
@@ -639,11 +650,12 @@ mod tests {
             );
 
             // create bucket to avoid error on loading entries
-            FILE_CACHE
+            let file_cache = build_test_file_cache();
+            file_cache
                 .remove_dir(&path.join(&settings.src_bucket))
                 .await
                 .unwrap();
-            FILE_CACHE
+            file_cache
                 .create_dir_all(&path.join(&settings.src_bucket))
                 .await
                 .unwrap();
@@ -982,7 +994,8 @@ mod tests {
             &replication.name,
         );
 
-        FILE_CACHE
+        let file_cache = build_test_file_cache();
+        file_cache
             .remove_dir(&path.parent().unwrap().parent().unwrap().to_path_buf())
             .await
             .unwrap();
@@ -1249,7 +1262,8 @@ mod tests {
             },
             IoConfig::default(),
             Box::new(remote_bucket),
-            storage,
+            Arc::clone(&storage),
+            Arc::clone(storage.file_cache()),
             system_event_sink,
         );
 

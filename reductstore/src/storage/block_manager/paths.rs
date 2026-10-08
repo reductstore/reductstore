@@ -7,13 +7,14 @@ impl BlockManager {
     pub(super) async fn resolve_desc_path(&self, block_id: u64) -> Result<PathBuf, ReductError> {
         if self.block_is_compressed(block_id) {
             let compressed_desc_path = self.path_to_compressed_desc(block_id);
-            if FILE_CACHE.try_exists(&compressed_desc_path).await? {
+            if self.file_cache.try_exists(&compressed_desc_path).await? {
                 self.decompress_cache
                     .get_or_decompress(
                         &self.path,
                         block_id,
                         DecompressedFileType::Descriptor,
                         &compressed_desc_path,
+                        &self.file_cache,
                     )
                     .await
             } else {
@@ -32,6 +33,7 @@ impl BlockManager {
                     block_id,
                     DecompressedFileType::Data,
                     &self.path_to_compressed_data(block_id),
+                    &self.file_cache,
                 )
                 .await
         } else {

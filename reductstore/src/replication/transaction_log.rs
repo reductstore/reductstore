@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::replication::Transaction;
 use log::{debug, warn};
@@ -29,6 +29,7 @@ pub(super) struct TransactionLog {
     capacity_in_bytes: usize,
     write_pos: usize,
     read_pos: usize,
+    file_cache: Arc<FileCache>,
 }
 
 const HEADER_SIZE: usize = 16;
@@ -45,11 +46,15 @@ impl TransactionLog {
     /// # Returns
     ///
     /// A new transaction log instance or an error.
-    pub async fn try_load_or_create(path: &PathBuf, capacity: usize) -> Result<Self, ReductError> {
+    pub async fn try_load_or_create(
+        path: &PathBuf,
+        capacity: usize,
+        file_cache: Arc<FileCache>,
+    ) -> Result<Self, ReductError> {
         let init_capacity_in_bytes = capacity * ENTRY_SIZE + HEADER_SIZE;
 
         let instance = if !path.try_exists()? {
-            let mut file = FILE_CACHE
+            let mut file = file_cache
                 .write_or_create(&path, SeekFrom::Current(0))
                 .await?;
 
@@ -63,10 +68,11 @@ impl TransactionLog {
                 capacity_in_bytes: init_capacity_in_bytes,
                 write_pos: HEADER_SIZE,
                 read_pos: HEADER_SIZE,
+                file_cache,
             }
         } else {
             let (buf, capacity_in_bytes) = {
-                let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+                let mut file = file_cache.read(&path, SeekFrom::Start(0)).await?;
                 let mut buf = [0u8; 16];
                 file.read_exact(&mut buf)?;
                 let capacity_in_bytes = file.metadata()?.len() as usize;
@@ -91,7 +97,7 @@ impl TransactionLog {
                         "Transaction log {:?}' size changed from {} to {} bytes",
                         path, capacity_in_bytes, init_capacity_in_bytes
                     );
-                    let mut file = FILE_CACHE
+                    let mut file = file_cache
                         .write_or_create(&path, SeekFrom::Start(0))
                         .await?;
 
@@ -110,6 +116,7 @@ impl TransactionLog {
                 capacity_in_bytes,
                 write_pos,
                 read_pos,
+                file_cache,
             }
         };
 
@@ -168,7 +175,8 @@ impl TransactionLog {
         transaction: Transaction,
     ) -> Result<Option<Transaction>, ReductError> {
         {
-            let mut file = FILE_CACHE
+            let mut file = self
+                .file_cache
                 .write_or_create(&self.file_path, SeekFrom::Start(self.write_pos as u64))
                 .await?;
             let mut buf = [0u8; ENTRY_SIZE];
@@ -237,7 +245,8 @@ impl TransactionLog {
         let mut buf = [0u8; ENTRY_SIZE];
         let mut read_pos = self.read_pos;
         let mut transactions = Vec::with_capacity(n);
-        let mut file = FILE_CACHE
+        let mut file = self
+            .file_cache
             .read(&self.file_path, SeekFrom::Start(read_pos as u64))
             .await?;
 
@@ -274,7 +283,8 @@ impl TransactionLog {
         }
 
         {
-            let mut file = FILE_CACHE
+            let mut file = self
+                .file_cache
                 .write_or_create(&self.file_path, SeekFrom::Start(8))
                 .await?;
             file.write_all(&self.read_pos.to_be_bytes())?;
@@ -291,10 +301,15 @@ mod tests {
     use std::fs;
     use tempfile::tempdir;
 
+    #[fixture]
+    fn file_cache() -> Arc<FileCache> {
+        crate::core::file_cache::build_test_file_cache()
+    }
+
     #[rstest]
     #[tokio::test]
-    async fn test_new_transaction_log(path: PathBuf) {
-        let transaction_log = TransactionLog::try_load_or_create(&path, 100)
+    async fn test_new_transaction_log(path: PathBuf, file_cache: Arc<FileCache>) {
+        let transaction_log = TransactionLog::try_load_or_create(&path, 100, file_cache)
             .await
             .unwrap();
         assert!(transaction_log.is_empty());
@@ -302,8 +317,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_write_read_transaction_log(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100)
+    async fn test_write_read_transaction_log(path: PathBuf, file_cache: Arc<FileCache>) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100, file_cache)
             .await
             .unwrap();
         assert_eq!(
@@ -338,10 +353,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_write_broken_type(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100)
-            .await
-            .unwrap();
+    async fn test_write_broken_type(path: PathBuf, file_cache: Arc<FileCache>) {
+        let mut transaction_log =
+            TransactionLog::try_load_or_create(&path, 100, file_cache.clone())
+                .await
+                .unwrap();
         assert_eq!(
             transaction_log
                 .push_back(Transaction::WriteRecord(1))
@@ -350,7 +366,7 @@ mod tests {
             None
         );
         {
-            let mut file = FILE_CACHE
+            let mut file = file_cache
                 .write_or_create(
                     &path,
                     SeekFrom::Start((transaction_log.write_pos - ENTRY_SIZE) as u64),
@@ -369,8 +385,8 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_out_of_range(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100)
+    async fn test_out_of_range(path: PathBuf, file_cache: Arc<FileCache>) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 100, file_cache)
             .await
             .unwrap();
         assert_eq!(
@@ -406,8 +422,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_overflow(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
+    async fn test_overflow(path: PathBuf, file_cache: Arc<FileCache>) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3, file_cache)
+            .await
+            .unwrap();
         for i in 1..5 {
             transaction_log
                 .push_back(Transaction::WriteRecord(i))
@@ -424,8 +442,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_recovery(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
+    async fn test_recovery(path: PathBuf, file_cache: Arc<FileCache>) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3, file_cache.clone())
+            .await
+            .unwrap();
         for i in 1..5 {
             transaction_log
                 .push_back(Transaction::WriteRecord(i))
@@ -433,7 +453,9 @@ mod tests {
                 .unwrap();
         }
 
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3, file_cache)
+            .await
+            .unwrap();
         assert_eq!(transaction_log.len(), 2);
         assert_eq!(
             transaction_log.front(2).await.unwrap(),
@@ -446,31 +468,39 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_recovery_init(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
+    async fn test_recovery_init(path: PathBuf, file_cache: Arc<FileCache>) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3, file_cache.clone())
+            .await
+            .unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
             .await
             .unwrap();
         drop(transaction_log);
 
-        let transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
+        let transaction_log = TransactionLog::try_load_or_create(&path, 3, file_cache)
+            .await
+            .unwrap();
         assert_eq!(transaction_log.write_pos, HEADER_SIZE + ENTRY_SIZE);
         assert_eq!(transaction_log.read_pos, HEADER_SIZE);
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_recovery_empty_cache(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
+    async fn test_recovery_empty_cache(path: PathBuf, file_cache: Arc<FileCache>) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3, file_cache.clone())
+            .await
+            .unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
             .await
             .unwrap();
 
-        FILE_CACHE.discard_recursive(&path).await.unwrap(); // discard the cache to simulate restart
+        file_cache.discard_recursive(&path).await.unwrap(); // discard the cache to simulate restart
 
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3, file_cache)
+            .await
+            .unwrap();
 
         // check if the transaction log is still working after cache discard
         assert_eq!(
@@ -483,14 +513,18 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_resize_empty_log(path: PathBuf) {
-        TransactionLog::try_load_or_create(&path, 3).await.unwrap();
+    async fn test_resize_empty_log(path: PathBuf, file_cache: Arc<FileCache>) {
+        TransactionLog::try_load_or_create(&path, 3, file_cache.clone())
+            .await
+            .unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 3 + HEADER_SIZE
         );
 
-        TransactionLog::try_load_or_create(&path, 5).await.unwrap();
+        TransactionLog::try_load_or_create(&path, 5, file_cache)
+            .await
+            .unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 5 + HEADER_SIZE
@@ -499,8 +533,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_resize_non_empty_log(path: PathBuf) {
-        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3).await.unwrap();
+    async fn test_resize_non_empty_log(path: PathBuf, file_cache: Arc<FileCache>) {
+        let mut transaction_log = TransactionLog::try_load_or_create(&path, 3, file_cache.clone())
+            .await
+            .unwrap();
         transaction_log
             .push_back(Transaction::WriteRecord(1))
             .await
@@ -510,7 +546,9 @@ mod tests {
             ENTRY_SIZE * 3 + HEADER_SIZE
         );
 
-        TransactionLog::try_load_or_create(&path, 5).await.unwrap();
+        TransactionLog::try_load_or_create(&path, 5, file_cache)
+            .await
+            .unwrap();
         assert_eq!(
             fs::metadata(&path).unwrap().len() as usize,
             ENTRY_SIZE * 3 + HEADER_SIZE,
@@ -539,9 +577,10 @@ mod tests {
             #[case] buf: [u8; 16],
             #[case] expected_error: &str,
             path: PathBuf,
+            file_cache: Arc<FileCache>,
         ) {
             {
-                let mut file = FILE_CACHE
+                let mut file = file_cache
                     .write_or_create(&path, SeekFrom::Start(0))
                     .await
                     .unwrap();
@@ -549,7 +588,7 @@ mod tests {
                 file.set_len((HEADER_SIZE + ENTRY_SIZE * 2) as u64).unwrap();
             }
 
-            let result = TransactionLog::try_load_or_create(&path, 3);
+            let result = TransactionLog::try_load_or_create(&path, 3, file_cache);
             assert_eq!(
                 result.await.err().unwrap(),
                 internal_server_error!("{} {}", expected_error, path.to_str().unwrap())
@@ -558,9 +597,9 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_invalid_size(path: PathBuf) {
+        async fn test_invalid_size(path: PathBuf, file_cache: Arc<FileCache>) {
             {
-                let mut file = FILE_CACHE
+                let mut file = file_cache
                     .write_or_create(&path, SeekFrom::Start(0))
                     .await
                     .unwrap();
@@ -568,7 +607,7 @@ mod tests {
                 file.set_len((HEADER_SIZE + 1) as u64).unwrap();
             }
 
-            let result = TransactionLog::try_load_or_create(&path, 3);
+            let result = TransactionLog::try_load_or_create(&path, 3, file_cache);
             assert_eq!(
                 result.await.err().unwrap(),
                 internal_server_error!(

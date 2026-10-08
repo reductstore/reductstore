@@ -87,7 +87,7 @@ impl BlockManager {
                 }
                 Err(err) => return Err(err),
             };
-            let buf = match FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
+            let buf = match self.file_cache.read(&path, SeekFrom::Start(0)).await {
                 Ok(mut file) => {
                     let mut buf = vec![];
                     file.read_to_end(&mut buf)?;
@@ -97,7 +97,7 @@ impl BlockManager {
                     // Re-check existence to distinguish a transient TOCTOU race
                     // (descriptor removed after the first check) from a real read failure.
                     if self.cfg.role == InstanceRole::Replica
-                        && !FILE_CACHE.try_exists(&path).await?
+                        && !self.file_cache.try_exists(&path).await?
                     {
                         return Err(too_early!(
                             "Block descriptor {:?} can't be read on replica yet: {}. Reload index and retry",
@@ -223,9 +223,8 @@ impl BlockManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::storage::block_manager::compress::CompressionAlgorithm;
-    use crate::storage::block_manager::test_utils::{block_id, block_manager};
+    use crate::storage::block_manager::test_utils::{block_id, block_manager, file_cache};
     use crate::storage::block_manager::BlockManager;
     use crate::storage::proto::Block as BlockProto;
     use prost::Message;
@@ -369,7 +368,7 @@ mod tests {
         let mut block_manager = block_manager.await;
         assert!(block_manager.index().get_block(block_id).is_some());
 
-        FILE_CACHE
+        file_cache()
             .remove(&block_manager.path_to_desc(block_id))
             .await
             .unwrap();

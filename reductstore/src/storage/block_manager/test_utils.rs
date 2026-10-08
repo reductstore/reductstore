@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use super::*;
+use crate::core::file_cache::{build_test_file_cache, FileCache};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
 use crate::storage::entry::RecordWriter;
 use crate::storage::proto::Record;
@@ -65,22 +66,28 @@ pub(crate) fn block_id() -> u64 {
 }
 
 #[fixture]
+pub(crate) fn file_cache() -> Arc<FileCache> {
+    build_test_file_cache()
+}
+
+#[fixture]
 pub(crate) async fn block(#[future] block_manager: BlockManager, block_id: u64) -> BlockRef {
     let mut block_manager = block_manager.await;
     block_manager.load_block(block_id).await.unwrap()
 }
 
 #[fixture]
-pub(crate) async fn block_manager(block_id: u64) -> BlockManager {
+pub(crate) async fn block_manager(block_id: u64, file_cache: Arc<FileCache>) -> BlockManager {
     let path = tempdir().unwrap().keep().join("bucket").join("entry");
 
     let mut bm = BlockManager::build(
         path.clone(),
-        BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+        BlockIndex::new(path.join(BLOCK_INDEX_FILE), Arc::clone(&file_cache)),
         "bucket".to_string(),
         "entry".to_string(),
         Cfg::default().into(),
         Default::default(),
+        Arc::clone(&file_cache),
     )
     .await
     .unwrap();
@@ -102,7 +109,7 @@ pub(crate) async fn block_manager(block_id: u64) -> BlockManager {
     let (file, offset) = bm.begin_write_record(&block, 0).unwrap();
     drop(block);
 
-    FILE_CACHE
+    file_cache
         .write_or_create(&file, SeekFrom::Start(offset))
         .await
         .unwrap()

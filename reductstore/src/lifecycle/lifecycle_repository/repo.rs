@@ -3,7 +3,7 @@
 
 use crate::cfg::Cfg;
 use crate::core::duration::parse_duration_to_micros;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::lifecycle::action::{build_lifecycle_action, LifecycleContext};
 use crate::lifecycle::lifecycle_task::LifecycleTask;
@@ -61,6 +61,7 @@ pub(crate) struct LifecycleRepository {
     started: bool,
     action_builder: LifecycleActionBuilder,
     system_event_sink: Option<SystemEventSink>,
+    file_cache: Arc<FileCache>,
 }
 
 #[async_trait]
@@ -186,6 +187,7 @@ impl LifecycleRepository {
         storage: Arc<StorageEngine>,
         _config: Cfg,
         system_event_sink: Option<SystemEventSink>,
+        file_cache: Arc<FileCache>,
     ) -> Self {
         let repo_path = storage.data_path().join(LIFECYCLE_REPO_FILE_NAME);
         let mut repo = Self {
@@ -195,10 +197,12 @@ impl LifecycleRepository {
             started: false,
             action_builder: Arc::new(build_lifecycle_action),
             system_event_sink,
+            file_cache,
         };
 
         let read_conf_file = async || {
-            let mut lock = FILE_CACHE
+            let mut lock = repo
+                .file_cache
                 .write_or_create(&repo.repo_path, Start(0))
                 .await?;
 
@@ -256,7 +260,8 @@ impl LifecycleRepository {
 
         let buf = serde_json::to_vec_pretty(&data)
             .map_err(|err| ReductError::internal_server_error(&err.to_string()))?;
-        let mut file = FILE_CACHE
+        let mut file = self
+            .file_cache
             .write_or_create(&self.repo_path, Start(0))
             .await?;
         file.set_len(0)?;
@@ -474,13 +479,21 @@ mod tests {
         settings: LifecycleSettings,
     ) {
         let storage = storage.await;
-        let mut repo =
-            LifecycleRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None).await;
+        let file_cache = Arc::clone(storage.file_cache());
+        let mut repo = LifecycleRepository::load_or_create(
+            Arc::clone(&storage),
+            Cfg::default(),
+            None,
+            file_cache,
+        )
+        .await;
         repo.create_lifecycle("test", settings.clone())
             .await
             .unwrap();
 
-        let repo = LifecycleRepository::load_or_create(storage, Cfg::default(), None).await;
+        let file_cache = Arc::clone(storage.file_cache());
+        let repo =
+            LifecycleRepository::load_or_create(storage, Cfg::default(), None, file_cache).await;
         assert_eq!(repo.lifecycles().await.unwrap().len(), 1);
         assert_eq!(repo.get_lifecycle_settings("test").await.unwrap(), settings);
     }
@@ -724,7 +737,9 @@ mod tests {
         repo.remove_lifecycle("test").await.unwrap();
         assert!(repo.lifecycles().await.unwrap().is_empty());
 
-        let repo = LifecycleRepository::load_or_create(storage, Cfg::default(), None).await;
+        let file_cache = Arc::clone(storage.file_cache());
+        let repo =
+            LifecycleRepository::load_or_create(storage, Cfg::default(), None, file_cache).await;
         assert!(repo.lifecycles().await.unwrap().is_empty());
     }
 
@@ -806,9 +821,11 @@ mod tests {
         });
 
         let storage = storage.await;
-        let mut repo = LifecycleRepository::load_or_create(storage, lifecycle_cfg(), None)
-            .await
-            .with_action_builder(action_builder);
+        let file_cache = Arc::clone(storage.file_cache());
+        let mut repo =
+            LifecycleRepository::load_or_create(storage, lifecycle_cfg(), None, file_cache)
+                .await
+                .with_action_builder(action_builder);
         repo.create_lifecycle("test", settings).await.unwrap();
 
         repo.start().await.unwrap();
@@ -842,9 +859,11 @@ mod tests {
         let action_builder: LifecycleActionBuilder = Arc::new(move |_| Arc::clone(&action));
 
         let storage = storage.await;
-        let mut repo = LifecycleRepository::load_or_create(storage, lifecycle_cfg(), None)
-            .await
-            .with_action_builder(action_builder);
+        let file_cache = Arc::clone(storage.file_cache());
+        let mut repo =
+            LifecycleRepository::load_or_create(storage, lifecycle_cfg(), None, file_cache)
+                .await
+                .with_action_builder(action_builder);
         repo.start().await.unwrap();
         repo.create_lifecycle("test", settings).await.unwrap();
 
@@ -874,9 +893,11 @@ mod tests {
         let action_builder: LifecycleActionBuilder = Arc::new(move |_| Arc::clone(&action));
 
         let storage = storage.await;
-        let mut repo = LifecycleRepository::load_or_create(storage, lifecycle_cfg(), None)
-            .await
-            .with_action_builder(action_builder);
+        let file_cache = Arc::clone(storage.file_cache());
+        let mut repo =
+            LifecycleRepository::load_or_create(storage, lifecycle_cfg(), None, file_cache)
+                .await
+                .with_action_builder(action_builder);
 
         let settings = LifecycleSettings {
             mode: LifecycleMode::Disabled,
@@ -898,14 +919,22 @@ mod tests {
         settings: LifecycleSettings,
     ) {
         let storage = storage.await;
-        let mut repo =
-            LifecycleRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None).await;
+        let file_cache = Arc::clone(storage.file_cache());
+        let mut repo = LifecycleRepository::load_or_create(
+            Arc::clone(&storage),
+            Cfg::default(),
+            None,
+            file_cache,
+        )
+        .await;
         repo.create_lifecycle("test", settings).await.unwrap();
         repo.set_mode("test", LifecycleMode::Disabled)
             .await
             .unwrap();
 
-        let repo = LifecycleRepository::load_or_create(storage, Cfg::default(), None).await;
+        let file_cache = Arc::clone(storage.file_cache());
+        let repo =
+            LifecycleRepository::load_or_create(storage, Cfg::default(), None, file_cache).await;
         let info = repo.get_info("test").await.unwrap();
         assert_eq!(info.info.mode, LifecycleMode::Disabled);
         assert_eq!(info.settings.mode, LifecycleMode::Disabled);
@@ -968,6 +997,8 @@ mod tests {
 
     #[fixture]
     async fn repo(#[future] storage: Arc<StorageEngine>) -> LifecycleRepository {
-        LifecycleRepository::load_or_create(storage.await, lifecycle_cfg(), None).await
+        let storage = storage.await;
+        let file_cache = Arc::clone(storage.file_cache());
+        LifecycleRepository::load_or_create(storage, lifecycle_cfg(), None, file_cache).await
     }
 }

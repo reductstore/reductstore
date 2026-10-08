@@ -44,12 +44,14 @@ impl ReplicationRepoBuilder {
         if self.cfg.role == Replica {
             Box::new(ReadOnlyReplicationRepository::new())
         } else {
+            let file_cache = Arc::clone(storage.file_cache());
             Box::new(
                 ReplicationRepository::load_or_create(
                     storage,
                     self.cfg,
                     self.system_event_sink,
                     self.source_identity,
+                    file_cache,
                 )
                 .await,
             )

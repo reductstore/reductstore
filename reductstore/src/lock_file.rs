@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::cfg::{Cfg, InstanceRole};
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use async_trait::async_trait;
 use log::{error, info, warn};
@@ -41,21 +41,24 @@ struct ImplLockFile {
     stop_on_drop: Arc<AtomicBool>,
     handle: tokio::task::JoinHandle<()>,
     state: Arc<AsyncRwLock<State>>,
+    file_cache: Arc<FileCache>,
 }
 
 pub(crate) struct LockFileBuilder {
     path_buf: PathBuf,
     config: Cfg,
+    file_cache: Arc<FileCache>,
 }
 impl LockFileBuilder {
     pub fn noop() -> BoxedLockFile {
         Box::new(NoopLockFile {})
     }
 
-    pub fn new(path_buf: PathBuf) -> Self {
+    pub fn new(path_buf: PathBuf, file_cache: Arc<FileCache>) -> Self {
         Self {
             path_buf,
             config: Cfg::default(),
+            file_cache,
         }
     }
 
@@ -65,10 +68,10 @@ impl LockFileBuilder {
     }
 
     pub fn build(self) -> BoxedLockFile {
-        Self::from_config(self.path_buf, self.config)
+        Self::from_config(self.path_buf, self.config, self.file_cache)
     }
 
-    fn from_config(path: PathBuf, cfg: Cfg) -> BoxedLockFile {
+    fn from_config(path: PathBuf, cfg: Cfg, file_cache: Arc<FileCache>) -> BoxedLockFile {
         let role = cfg.role;
         let cfg = cfg.lock_file_config;
 
@@ -78,17 +81,19 @@ impl LockFileBuilder {
         let file_path = path.clone();
         let state = Arc::new(AsyncRwLock::new(State::Waiting));
         let state_clone = Arc::clone(&state);
+        let cache_clone = Arc::clone(&file_cache);
 
         let mut this = Box::new(ImplLockFile {
             path,
             stop_on_drop,
             handle: tokio::spawn(async {}),
             state,
+            file_cache,
         });
 
         let handle = tokio::spawn(async move {
             if let Err(err) =
-                Self::run_lock_task(file_path, cfg, role, state_clone, stop_flag).await
+                Self::run_lock_task(file_path, cfg, role, state_clone, stop_flag, cache_clone).await
             {
                 error!("Lock file task failed: {}", err);
             }
@@ -104,6 +109,7 @@ impl LockFileBuilder {
         role: InstanceRole,
         state: Arc<AsyncRwLock<State>>,
         stop_flag: Arc<AtomicBool>,
+        file_cache: Arc<FileCache>,
     ) -> Result<(), ReductError> {
         // Each process instance keeps its own owner token in the lock file.
         let unique_id = format!("{}-{}", std::process::id(), uuid::Uuid::new_v4());
@@ -114,10 +120,10 @@ impl LockFileBuilder {
         while !(locked || stop_flag.load(std::sync::atomic::Ordering::SeqCst)) {
             // Check if the file is already locked
             let time_start = std::time::Instant::now();
-            while FILE_CACHE.try_exists(&file_path).await?
+            while file_cache.try_exists(&file_path).await?
                 && !stop_flag.load(std::sync::atomic::Ordering::SeqCst)
             {
-                if let Some(last_modified) = FILE_CACHE
+                if let Some(last_modified) = file_cache
                     .get_stats(&file_path)
                     .await?
                     .and_then(|meta| meta.modified_time)
@@ -131,7 +137,7 @@ impl LockFileBuilder {
                             last_modified.elapsed().unwrap(),
                             file_path
                         );
-                        if let Err(err) = FILE_CACHE.remove(&file_path).await {
+                        if let Err(err) = file_cache.remove(&file_path).await {
                             error!("Failed to remove stale lock file: {:?}", err);
                         }
                         break;
@@ -168,7 +174,7 @@ impl LockFileBuilder {
                 InstanceRole::Secondary => {
                     // Secondary instance waits a bit to ensure the primary has created the lock file
                     tokio::time::sleep(cfg.polling_interval * 3).await;
-                    if !FILE_CACHE.try_exists(&file_path).await? {
+                    if !file_cache.try_exists(&file_path).await? {
                         locked = true;
                     } else {
                         info!("Secondary instance could not acquire lock file (already held by primary): {:?}", file_path);
@@ -183,7 +189,7 @@ impl LockFileBuilder {
         // so we need to keep the file locked as long as the process is running and recreate it if it gets deleted
         // during deployments
         while !stop_flag.load(std::sync::atomic::Ordering::SeqCst) {
-            if let Err(e) = Self::write_lock_owner_id(&file_path, &unique_id).await {
+            if let Err(e) = Self::write_lock_owner_id(&file_path, &unique_id, &file_cache).await {
                 error!("Error while recreating lock file: {}", e);
             }
 
@@ -193,22 +199,25 @@ impl LockFileBuilder {
             }
 
             tokio::time::sleep(cfg.polling_interval).await;
-            Self::check_lock_owner_id(&file_path, &unique_id, role.clone()).await?;
+            Self::check_lock_owner_id(&file_path, &unique_id, role.clone(), &file_cache).await?;
         }
 
         Ok(())
     }
 
-    async fn read_lock_owner_id(file_path: &PathBuf) -> Result<Option<String>, ReductError> {
+    async fn read_lock_owner_id(
+        file_path: &PathBuf,
+        file_cache: &Arc<FileCache>,
+    ) -> Result<Option<String>, ReductError> {
         // we need to download lockfile in case it is cached with stale content
-        if let Err(err) = FILE_CACHE.invalidate_local_cache_file(file_path).await {
+        if let Err(err) = file_cache.invalidate_local_cache_file(file_path).await {
             warn!(
                 "Failed to invalidate local cache for lock file {:?}: {}",
                 file_path, err
             );
         }
 
-        let mut file = match FILE_CACHE.read(file_path, Start(0)).await {
+        let mut file = match file_cache.read(file_path, Start(0)).await {
             Ok(file) => file,
             Err(err) => {
                 warn!("Failed to read lock file {:?}: {}", file_path, err);
@@ -227,8 +236,12 @@ impl LockFileBuilder {
         }
     }
 
-    async fn write_lock_owner_id(file_path: &PathBuf, owner_id: &str) -> Result<(), ReductError> {
-        let mut file = FILE_CACHE.write_or_create(file_path, Start(0)).await?;
+    async fn write_lock_owner_id(
+        file_path: &PathBuf,
+        owner_id: &str,
+        file_cache: &Arc<FileCache>,
+    ) -> Result<(), ReductError> {
+        let mut file = file_cache.write_or_create(file_path, Start(0)).await?;
         file.set_len(0)?;
         file.write_all(owner_id.as_bytes())?;
         file.sync_all().await?;
@@ -239,8 +252,9 @@ impl LockFileBuilder {
         file_path: &PathBuf,
         unique_id: &str,
         role: InstanceRole,
+        file_cache: &Arc<FileCache>,
     ) -> Result<(), ReductError> {
-        if let Some(owner_id) = Self::read_lock_owner_id(file_path).await? {
+        if let Some(owner_id) = Self::read_lock_owner_id(file_path, file_cache).await? {
             if owner_id != unique_id {
                 match role {
                     InstanceRole::Primary => {
@@ -269,8 +283,8 @@ impl LockFileBuilder {
 }
 
 impl ImplLockFile {
-    async fn remove_lock_file(path: &PathBuf) {
-        if let Err(err) = FILE_CACHE.remove(path).await {
+    async fn remove_lock_file(path: &PathBuf, file_cache: &Arc<FileCache>) {
+        if let Err(err) = file_cache.remove(path).await {
             error!("Failed to remove lock file: {:?}", err);
         }
     }
@@ -297,13 +311,14 @@ impl Drop for ImplLockFile {
             .store(true, std::sync::atomic::Ordering::SeqCst);
 
         let path = self.path.clone();
+        let file_cache = Arc::clone(&self.file_cache);
         // Use block_in_place to handle async cleanup in drop
         let handle =
             tokio::runtime::Handle::try_current().expect("Failed to get current Tokio handle");
         let _ = std::thread::spawn(move || {
             handle.block_on(async {
                 tokio::time::sleep(Duration::from_millis(100)).await;
-                ImplLockFile::remove_lock_file(&path).await;
+                ImplLockFile::remove_lock_file(&path, &file_cache).await;
             });
         })
         .join();
@@ -330,8 +345,12 @@ impl LockFile for NoopLockFile {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::backend::Backend;
     use crate::cfg::lock_file::LockFileConfig;
     use crate::cfg::{Cfg, InstanceRole};
+    use crate::core::file_cache::{
+        FileCache, FILE_CACHE_MAX_SIZE, FILE_CACHE_SYNC_INTERVAL, FILE_CACHE_TIME_TO_LIVE,
+    };
     use rstest::{fixture, rstest};
     use std::fs;
     use tempfile::tempdir;
@@ -339,11 +358,37 @@ mod tests {
     use tokio::time::error::Elapsed;
     use tokio::time::timeout;
 
+    async fn build_test_file_cache(path: &std::path::Path) -> Arc<FileCache> {
+        let cache = Arc::new(FileCache::new(
+            FILE_CACHE_MAX_SIZE,
+            FILE_CACHE_TIME_TO_LIVE,
+            FILE_CACHE_SYNC_INTERVAL,
+        ));
+        let backend = Backend::builder()
+            .local_data_path(path.to_path_buf())
+            .try_build()
+            .await
+            .unwrap();
+        cache.set_storage_backend(backend).await;
+        cache.set_read_only(false);
+        cache
+    }
+
+    #[fixture]
+    async fn file_cache(lock_file_path: PathBuf) -> Arc<FileCache> {
+        build_test_file_cache(lock_file_path.parent().unwrap()).await
+    }
+
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_lock_file_acquire_and_drop(lock_file_path: PathBuf) {
+    async fn test_lock_file_acquire_and_drop(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         {
-            let lock_file = LockFileBuilder::new(lock_file_path.clone()).build();
+            let lock_file =
+                LockFileBuilder::new(lock_file_path.clone(), Arc::clone(&file_cache)).build();
 
             // The lock may be acquired quickly; only wait if we observe it waiting.
             if lock_file.is_waiting().await.unwrap() {
@@ -370,9 +415,13 @@ mod tests {
 
     #[test_log(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_lock_file_timeout_abort(lock_file_path: PathBuf) {
+    async fn test_lock_file_timeout_abort(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         fs::write(&lock_file_path, "dummy").unwrap();
-        let lock_file = LockFileBuilder::new(lock_file_path.clone())
+        let lock_file = LockFileBuilder::new(lock_file_path.clone(), Arc::clone(&file_cache))
             .with_config(test_cfg(
                 LockFileConfig {
                     polling_interval: Duration::from_millis(500),
@@ -402,9 +451,13 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_lock_file_timeout_proceed(lock_file_path: PathBuf) {
+    async fn test_lock_file_timeout_proceed(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         fs::write(&lock_file_path, "dummy").unwrap();
-        let lock_file = LockFileBuilder::new(lock_file_path.clone())
+        let lock_file = LockFileBuilder::new(lock_file_path.clone(), Arc::clone(&file_cache))
             .with_config(test_cfg(
                 LockFileConfig {
                     polling_interval: Duration::from_millis(500),
@@ -435,16 +488,21 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_secondary_instance_waits(lock_file_path: PathBuf) {
-        let primary_lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(test_cfg(
-                LockFileConfig {
-                    polling_interval: Duration::from_millis(500),
-                    ..Default::default()
-                },
-                InstanceRole::Primary,
-            ))
-            .build();
+    async fn test_secondary_instance_waits(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
+        let primary_lock_file =
+            LockFileBuilder::new(lock_file_path.clone(), Arc::clone(&file_cache))
+                .with_config(test_cfg(
+                    LockFileConfig {
+                        polling_interval: Duration::from_millis(500),
+                        ..Default::default()
+                    },
+                    InstanceRole::Primary,
+                ))
+                .build();
 
         // Wait for the primary to acquire the lock
         let primary_acquired = wait_new_state(&primary_lock_file).await;
@@ -458,15 +516,16 @@ mod tests {
         // startup existence check deterministically sees the lock file. (Built
         // earlier, its grace window can expire before a slow primary creates
         // the file, and it acquires the lock instead of waiting.)
-        let secondary_lock_file = LockFileBuilder::new(lock_file_path.clone())
-            .with_config(test_cfg(
-                LockFileConfig {
-                    polling_interval: Duration::from_millis(500),
-                    ..Default::default()
-                },
-                InstanceRole::Secondary,
-            ))
-            .build();
+        let secondary_lock_file =
+            LockFileBuilder::new(lock_file_path.clone(), Arc::clone(&file_cache))
+                .with_config(test_cfg(
+                    LockFileConfig {
+                        polling_interval: Duration::from_millis(500),
+                        ..Default::default()
+                    },
+                    InstanceRole::Secondary,
+                ))
+                .build();
 
         // Secondary should wait while primary lock exists.
         let secondary_acquired = wait_new_state(&secondary_lock_file).await;
@@ -489,9 +548,13 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_ttl_removes_stale_lock(lock_file_path: PathBuf) {
+    async fn test_ttl_removes_stale_lock(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         fs::write(&lock_file_path, "dummy").unwrap();
-        let lock_file = LockFileBuilder::new(lock_file_path.clone())
+        let lock_file = LockFileBuilder::new(lock_file_path.clone(), Arc::clone(&file_cache))
             .with_config(test_cfg(
                 LockFileConfig {
                     polling_interval: Duration::from_millis(500),
@@ -513,11 +576,15 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_read_lock_owner_id_returns_none_for_empty_file(lock_file_path: PathBuf) {
+    async fn test_read_lock_owner_id_returns_none_for_empty_file(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         fs::write(&lock_file_path, "").unwrap();
 
         assert_eq!(
-            LockFileBuilder::read_lock_owner_id(&lock_file_path)
+            LockFileBuilder::read_lock_owner_id(&lock_file_path, &file_cache)
                 .await
                 .unwrap(),
             None
@@ -526,11 +593,15 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_read_lock_owner_id_returns_none_when_read_fails(lock_file_path: PathBuf) {
+    async fn test_read_lock_owner_id_returns_none_when_read_fails(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         let _ = fs::remove_file(&lock_file_path);
 
         assert_eq!(
-            LockFileBuilder::read_lock_owner_id(&lock_file_path)
+            LockFileBuilder::read_lock_owner_id(&lock_file_path, &file_cache)
                 .await
                 .unwrap(),
             None
@@ -539,13 +610,22 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_check_lock_owner_id_allows_same_owner(lock_file_path: PathBuf) {
+    async fn test_check_lock_owner_id_allows_same_owner(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         let owner_id = format!("owner-{}", uuid::Uuid::new_v4());
         fs::write(&lock_file_path, &owner_id).unwrap();
 
-        LockFileBuilder::check_lock_owner_id(&lock_file_path, &owner_id, InstanceRole::Secondary)
-            .await
-            .unwrap();
+        LockFileBuilder::check_lock_owner_id(
+            &lock_file_path,
+            &owner_id,
+            InstanceRole::Secondary,
+            &file_cache,
+        )
+        .await
+        .unwrap();
     }
 
     #[rstest]
@@ -553,12 +633,15 @@ mod tests {
     #[should_panic(expected = "secondary cannot acquire it")]
     async fn test_check_lock_owner_id_panics_for_secondary_with_foreign_uid(
         lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
     ) {
+        let file_cache = file_cache.await;
         fs::write(&lock_file_path, format!("foreign-{}", uuid::Uuid::new_v4())).unwrap();
         let _ = LockFileBuilder::check_lock_owner_id(
             &lock_file_path,
             &format!("secondary-{}", uuid::Uuid::new_v4()),
             InstanceRole::Secondary,
+            &file_cache,
         )
         .await
         .unwrap();
@@ -568,19 +651,30 @@ mod tests {
     #[tokio::test(flavor = "multi_thread")]
     async fn test_check_lock_owner_id_allows_primary_to_overwrite_foreign_uid(
         lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
     ) {
+        let file_cache = file_cache.await;
         let owner_id = format!("primary-{}", uuid::Uuid::new_v4());
         fs::write(&lock_file_path, format!("foreign-{}", uuid::Uuid::new_v4())).unwrap();
 
-        LockFileBuilder::check_lock_owner_id(&lock_file_path, &owner_id, InstanceRole::Primary)
-            .await
-            .unwrap();
+        LockFileBuilder::check_lock_owner_id(
+            &lock_file_path,
+            &owner_id,
+            InstanceRole::Primary,
+            &file_cache,
+        )
+        .await
+        .unwrap();
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_secondary_acquires_if_file_missing(lock_file_path: PathBuf) {
-        let lock_file = LockFileBuilder::new(lock_file_path.clone())
+    async fn test_secondary_acquires_if_file_missing(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
+        let lock_file = LockFileBuilder::new(lock_file_path.clone(), Arc::clone(&file_cache))
             .with_config(test_cfg(
                 LockFileConfig {
                     polling_interval: Duration::from_millis(100),
@@ -600,7 +694,9 @@ mod tests {
     #[tokio::test]
     async fn test_run_lock_task_secondary_timeout_proceed_does_not_acquire_when_file_exists(
         lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
     ) {
+        let file_cache = file_cache.await;
         fs::write(&lock_file_path, "dummy").unwrap();
 
         let stop_flag = Arc::new(AtomicBool::new(false));
@@ -619,6 +715,7 @@ mod tests {
             InstanceRole::Secondary,
             Arc::clone(&state),
             Arc::clone(&stop_flag),
+            Arc::clone(&file_cache),
         ));
 
         tokio::time::sleep(Duration::from_millis(1300)).await;
@@ -634,7 +731,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_run_lock_task_replica_runs_once_and_stops(lock_file_path: PathBuf) {
+    async fn test_run_lock_task_replica_runs_once_and_stops(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         let _ = fs::remove_file(&lock_file_path);
         let _ = fs::remove_dir_all(&lock_file_path);
 
@@ -652,6 +753,7 @@ mod tests {
             InstanceRole::Replica,
             state,
             Arc::clone(&stop_flag),
+            Arc::clone(&file_cache),
         ));
 
         tokio::task::yield_now().await;
@@ -666,7 +768,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_run_lock_task_recreate_error_when_path_is_directory(lock_file_path: PathBuf) {
+    async fn test_run_lock_task_recreate_error_when_path_is_directory(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         let _ = fs::remove_file(&lock_file_path);
         fs::create_dir(&lock_file_path).unwrap();
 
@@ -686,6 +792,7 @@ mod tests {
             InstanceRole::Primary,
             Arc::clone(&state),
             Arc::clone(&stop_flag),
+            Arc::clone(&file_cache),
         ));
 
         tokio::time::sleep(Duration::from_millis(250)).await;
@@ -724,39 +831,52 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_remove_lock_file_when_path_exists(lock_file_path: PathBuf) {
+    async fn test_remove_lock_file_when_path_exists(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         fs::write(&lock_file_path, "lock").unwrap();
 
-        ImplLockFile::remove_lock_file(&lock_file_path).await;
+        ImplLockFile::remove_lock_file(&lock_file_path, &file_cache).await;
 
         assert!(!lock_file_path.exists());
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_remove_lock_file_when_already_removed(lock_file_path: PathBuf) {
+    async fn test_remove_lock_file_when_already_removed(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         let _ = fs::remove_file(&lock_file_path);
 
-        ImplLockFile::remove_lock_file(&lock_file_path).await;
+        ImplLockFile::remove_lock_file(&lock_file_path, &file_cache).await;
 
         assert!(!lock_file_path.exists());
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_remove_lock_file_when_path_is_directory(lock_file_path: PathBuf) {
+    async fn test_remove_lock_file_when_path_is_directory(
+        lock_file_path: PathBuf,
+        #[future] file_cache: Arc<FileCache>,
+    ) {
+        let file_cache = file_cache.await;
         let _ = fs::remove_file(&lock_file_path);
         fs::create_dir(&lock_file_path).unwrap();
 
-        ImplLockFile::remove_lock_file(&lock_file_path).await;
+        ImplLockFile::remove_lock_file(&lock_file_path, &file_cache).await;
 
         assert!(lock_file_path.exists());
     }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_drops_lock_file(lock_file_path: PathBuf) {
-        let lock_file = LockFileBuilder::new(lock_file_path.clone())
+    async fn test_drops_lock_file(lock_file_path: PathBuf, #[future] file_cache: Arc<FileCache>) {
+        let file_cache = file_cache.await;
+        let lock_file = LockFileBuilder::new(lock_file_path.clone(), Arc::clone(&file_cache))
             .with_config(test_cfg(
                 LockFileConfig {
                     polling_interval: Duration::from_millis(500),

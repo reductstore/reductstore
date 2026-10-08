@@ -10,7 +10,7 @@ use crate::auth::token_repository::{
 use crate::auth::token_secret::{hash_token_secret, matched_hashed_token_secret};
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::cache::Cache;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::internal_client::{
     check_response, map_request_error, ClientBuildErrorContext, ClientBuildErrorKind,
     InternalClientApi, InternalClientBuilder,
@@ -46,6 +46,7 @@ pub(super) struct ReadOnlyTokenRepository {
     audit_client: Option<InternalClientApi>,
     last_access_cache: HashMap<String, u64>,
     last_access_cache_updated_at: Option<Instant>,
+    file_cache: Arc<FileCache>,
 }
 
 const AUTH_CACHE_SIZE: usize = 1024;
@@ -62,7 +63,12 @@ impl ReadOnlyTokenRepository {
     /// # Returns
     ///
     /// The repository
-    pub async fn new(data_path: PathBuf, cfg: Cfg, _storage: Option<Arc<StorageEngine>>) -> Self {
+    pub async fn new(
+        data_path: PathBuf,
+        cfg: Cfg,
+        _storage: Option<Arc<StorageEngine>>,
+        file_cache: Arc<FileCache>,
+    ) -> Self {
         let config_path = data_path.join(TOKEN_REPO_FILE_NAME);
         let audit_client = Self::build_audit_client(&cfg);
 
@@ -75,6 +81,7 @@ impl ReadOnlyTokenRepository {
             audit_client,
             last_access_cache: HashMap::new(),
             last_access_cache_updated_at: None,
+            file_cache,
         };
         let repo = token_repository
             .load_repo()
@@ -121,9 +128,13 @@ impl ReadOnlyTokenRepository {
     async fn load_repo(&self) -> Result<HashMap<String, Token>, ReductError> {
         let api_token = self.cfg.api_token.as_str().to_string();
 
-        FILE_CACHE.discard_recursive(&self.config_path).await?; // ensure we update it from backend
+        self.file_cache.discard_recursive(&self.config_path).await?; // ensure we update it from backend
         let mut repo: HashMap<String, Token> = HashMap::new();
-        match FILE_CACHE.read(&self.config_path, SeekFrom::Start(0)).await {
+        match self
+            .file_cache
+            .read(&self.config_path, SeekFrom::Start(0))
+            .await
+        {
             Ok(mut lock) => {
                 debug!(
                     "Loading token repository from {}",
@@ -754,7 +765,13 @@ mod tests {
         };
         write_token_to_file(&path, &token).await;
 
-        let mut repo = ReadOnlyTokenRepository::new(path, cfg, None).await;
+        let mut repo = ReadOnlyTokenRepository::new(
+            path,
+            cfg,
+            None,
+            crate::core::file_cache::build_test_file_cache(),
+        )
+        .await;
         let token = repo.get_token_with_last_access("file_token").await.unwrap();
         assert_eq!(
             token.last_access,
@@ -791,19 +808,28 @@ mod tests {
 
         write_token_to_file(&path, &token).await;
         (
-            Box::new(ReadOnlyTokenRepository::new(path.clone(), cfg, None).await),
+            Box::new(
+                ReadOnlyTokenRepository::new(
+                    path.clone(),
+                    cfg,
+                    None,
+                    crate::core::file_cache::build_test_file_cache(),
+                )
+                .await,
+            ),
             path,
         )
     }
 
     // Helper to write a token to the token repo file
     async fn write_token_to_file(path: &PathBuf, new_token: &Token) {
+        let file_cache = crate::core::file_cache::build_test_file_cache();
         let mut token_repo = TokenRepo::default();
         token_repo.tokens.push(new_token.clone().into());
         let mut buf = Vec::new();
         token_repo.encode(&mut buf).unwrap();
 
-        let mut lock = FILE_CACHE
+        let mut lock = file_cache
             .write_or_create(&path.join(TOKEN_REPO_FILE_NAME), SeekFrom::Start(0))
             .await
             .unwrap();

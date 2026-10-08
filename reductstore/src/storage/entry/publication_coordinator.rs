@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use super::publication::{self, Publication};
-use crate::core::file_cache::{BatchToken, FileBatch, FILE_CACHE};
+use crate::core::file_cache::{BatchToken, FileBatch, FileCache};
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
 use log::error;
@@ -21,6 +21,7 @@ pub(super) struct PublicationCoordinator {
     marker: Mutex<Option<Publication>>,
     publication_revision: AtomicU64,
     publisher_running: AtomicBool,
+    file_cache: Arc<FileCache>,
 }
 
 pub(super) struct MutationAdmission {
@@ -29,13 +30,14 @@ pub(super) struct MutationAdmission {
 }
 
 impl PublicationCoordinator {
-    pub(super) fn new() -> Self {
+    pub(super) fn new_with_cache(file_cache: Arc<FileCache>) -> Self {
         Self {
             admission: Arc::new(RwLock::new(())),
             batch: Mutex::new(None),
             marker: Mutex::new(None),
             publication_revision: AtomicU64::new(0),
             publisher_running: AtomicBool::new(false),
+            file_cache,
         }
     }
 
@@ -44,7 +46,7 @@ impl PublicationCoordinator {
         let guard = Arc::clone(&self.admission).read_owned().await;
         let mut batch = self.batch.lock().await;
         if batch.is_none() {
-            *batch = Some(FILE_CACHE.begin_batch().await?);
+            *batch = Some(self.file_cache.begin_batch().await?);
         }
         Ok(MutationAdmission {
             token: batch.as_ref().expect("batch was initialized").token(),
@@ -146,7 +148,7 @@ impl PublicationCoordinator {
         let current = {
             let mut marker = self.marker.lock().await;
             if marker.is_none() {
-                *marker = publication::load(path).await?;
+                *marker = publication::load(path, &self.file_cache).await?;
             }
             marker.clone().unwrap_or_else(Publication::new)
         };
@@ -157,14 +159,17 @@ impl PublicationCoordinator {
             current.updating()?
         };
         let marker_path =
-            publication::write_local_in_batch(&batch.token(), path, &updating).await?;
+            publication::write_local_in_batch(&batch.token(), path, &updating, &self.file_cache)
+                .await?;
         batch.sync_file(&marker_path).await?;
         *self.marker.lock().await = Some(updating.clone());
 
         batch.sync_all().await?;
 
         let ready = updating.ready()?;
-        let marker_path = publication::write_local_in_batch(&batch.token(), path, &ready).await?;
+        let marker_path =
+            publication::write_local_in_batch(&batch.token(), path, &ready, &self.file_cache)
+                .await?;
         batch.sync_file(&marker_path).await?;
         *self.marker.lock().await = Some(ready);
 
@@ -177,6 +182,7 @@ impl PublicationCoordinator {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::file_cache::build_test_file_cache;
     use crate::storage::entry::publication::{load, PublicationState};
     use std::sync::Arc;
 
@@ -188,7 +194,8 @@ mod tests {
 
     #[tokio::test]
     async fn blocks_try_publish_during_mutation_then_publishes_marker() {
-        let coordinator = Arc::new(PublicationCoordinator::new());
+        let file_cache = build_test_file_cache();
+        let coordinator = Arc::new(PublicationCoordinator::new_with_cache(file_cache.clone()));
         let path = entry_path();
         let admission = coordinator.begin_mutation().await.unwrap();
 
@@ -199,11 +206,11 @@ mod tests {
             async move { coordinator.publish(&path).await }
         });
         tokio::task::yield_now().await;
-        assert_eq!(load(&path).await.unwrap(), None);
+        assert_eq!(load(&path, &file_cache).await.unwrap(), None);
         drop(admission);
 
         publisher.await.unwrap().unwrap();
-        let marker = load(&path).await.unwrap().unwrap();
+        let marker = load(&path, &file_cache).await.unwrap().unwrap();
         assert_eq!(marker.generation, 2);
         assert_eq!(marker.state, PublicationState::Ready);
         assert!(!marker.incarnation.is_empty());
@@ -211,11 +218,12 @@ mod tests {
 
     #[tokio::test]
     async fn try_publish_without_mutations_is_a_noop() {
-        let coordinator = PublicationCoordinator::new();
+        let file_cache = build_test_file_cache();
+        let coordinator = PublicationCoordinator::new_with_cache(file_cache.clone());
         let path = entry_path();
 
         assert!(coordinator.try_publish(&path).await.unwrap());
-        assert_eq!(load(&path).await.unwrap(), None);
+        assert_eq!(load(&path, &file_cache).await.unwrap(), None);
     }
 
     #[tokio::test]
@@ -226,19 +234,21 @@ mod tests {
             generation: 1,
             state: PublicationState::Updating,
         };
-        let mut batch = FILE_CACHE.begin_batch().await.unwrap();
-        let marker_path = publication::write_local_in_batch(&batch.token(), &path, &updating)
-            .await
-            .unwrap();
+        let file_cache = build_test_file_cache();
+        let mut batch = file_cache.begin_batch().await.unwrap();
+        let marker_path =
+            publication::write_local_in_batch(&batch.token(), &path, &updating, &file_cache)
+                .await
+                .unwrap();
         batch.sync_file(&marker_path).await.unwrap();
         batch.commit().await.unwrap();
 
-        let coordinator = PublicationCoordinator::new();
+        let coordinator = PublicationCoordinator::new_with_cache(file_cache.clone());
         drop(coordinator.begin_mutation().await.unwrap());
         coordinator.publish(&path).await.unwrap();
 
         assert_eq!(
-            load(&path).await.unwrap().unwrap(),
+            load(&path, &file_cache).await.unwrap().unwrap(),
             publication::Publication {
                 incarnation: "test-incarnation".to_owned(),
                 generation: 2,

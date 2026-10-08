@@ -47,6 +47,7 @@ impl Bucket {
                         .cfg(self.cfg.clone())
                         .io_limiter(self.io_limiter.clone())
                         .usage_counters(Arc::clone(&self.usage_counters))
+                        .file_cache(Arc::clone(&self.file_cache))
                         .build()
                         .await?,
                 );
@@ -83,7 +84,7 @@ impl Bucket {
 mod tests {
     use super::*;
     use crate::cfg::Cfg;
-    use crate::core::file_cache::FILE_CACHE;
+    use crate::core::file_cache::{build_test_file_cache, FileCache};
     use crate::storage::block_manager::BLOCK_INDEX_FILE;
     use crate::storage::entry::META_ENTRY_MAX_BLOCK_SIZE;
     use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
@@ -146,22 +147,25 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_get_or_create_entry_creates_parent_entries(#[future] bucket: Arc<Bucket>) {
+    async fn test_get_or_create_entry_creates_parent_entries(
+        #[future] bucket: Arc<Bucket>,
+        file_cache: Arc<FileCache>,
+    ) {
         let bucket = bucket.await;
         bucket.get_or_create_entry("a/b/c").await.unwrap();
 
         assert!(bucket.get_entry("a").await.is_ok());
         assert!(bucket.get_entry("a/b").await.is_ok());
         assert!(bucket.get_entry("a/b/c").await.is_ok());
-        assert!(FILE_CACHE
+        assert!(file_cache
             .try_exists(&bucket.path().join("a").join(BLOCK_INDEX_FILE))
             .await
             .unwrap());
-        assert!(FILE_CACHE
+        assert!(file_cache
             .try_exists(&bucket.path().join("a/b").join(BLOCK_INDEX_FILE))
             .await
             .unwrap());
-        assert!(FILE_CACHE
+        assert!(file_cache
             .try_exists(&bucket.path().join("a/b/c").join(BLOCK_INDEX_FILE))
             .await
             .unwrap());
@@ -213,8 +217,17 @@ mod tests {
     }
 
     #[fixture]
-    pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
-        FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
+    pub fn file_cache() -> Arc<FileCache> {
+        build_test_file_cache()
+    }
+
+    #[fixture]
+    pub async fn bucket(
+        settings: BucketSettings,
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) -> Arc<Bucket> {
+        file_cache.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
             Bucket::builder()
                 .name("test")
@@ -222,6 +235,7 @@ mod tests {
                 .settings(settings)
                 .cfg(Cfg::default())
                 .usage_counters(Default::default())
+                .file_cache(file_cache)
                 .build()
                 .await
                 .unwrap(),

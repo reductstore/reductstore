@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::file_cache::{BatchToken, FILE_CACHE};
+use crate::core::file_cache::{BatchToken, FileCache};
 use crate::storage::proto::{entry_publication, EntryPublication};
 use prost::Message;
 use reduct_base::error::ReductError;
@@ -9,6 +9,7 @@ use reduct_base::internal_server_error;
 use reduct_base::too_early;
 use std::io::{Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 pub(crate) const PUBLICATION_FILE: &str = ".publication";
 
@@ -127,27 +128,33 @@ pub(crate) fn path(entry_path: &Path) -> PathBuf {
 }
 
 /// Missing markers designate legacy entries and intentionally do not mutate them.
-pub(super) async fn load(entry_path: &Path) -> Result<Option<Publication>, ReductError> {
+pub(super) async fn load(
+    entry_path: &Path,
+    file_cache: &Arc<FileCache>,
+) -> Result<Option<Publication>, ReductError> {
     let path = path(entry_path);
-    if !FILE_CACHE.try_exists(&path).await? {
+    if !file_cache.try_exists(&path).await? {
         return Ok(None);
     }
 
-    let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+    let mut file = file_cache.read(&path, SeekFrom::Start(0)).await?;
     let mut bytes = Vec::new();
     file.read_to_end(&mut bytes)?;
     Publication::decode(&bytes, &path).map(Some)
 }
 
 /// Loads a marker from the backend rather than a potentially stale local copy.
-pub(crate) async fn load_fresh(entry_path: &Path) -> Result<Option<Publication>, ReductError> {
+pub(crate) async fn load_fresh(
+    entry_path: &Path,
+    file_cache: &Arc<FileCache>,
+) -> Result<Option<Publication>, ReductError> {
     let marker_path = path(entry_path);
-    FILE_CACHE.invalidate_local_cache_file(&marker_path).await?;
-    if !FILE_CACHE.try_exists(&marker_path).await? {
+    file_cache.invalidate_local_cache_file(&marker_path).await?;
+    if !file_cache.try_exists(&marker_path).await? {
         return Ok(None);
     }
 
-    let mut file = FILE_CACHE
+    let mut file = file_cache
         .read(&marker_path, SeekFrom::Start(0))
         .await
         .map_err(|err| {
@@ -190,9 +197,10 @@ pub(super) async fn write_local_in_batch(
     token: &BatchToken,
     entry_path: &Path,
     publication: &Publication,
+    file_cache: &Arc<FileCache>,
 ) -> Result<PathBuf, ReductError> {
     let path = path(entry_path);
-    let mut file = FILE_CACHE
+    let mut file = file_cache
         .write_or_create_in_batch(token, &path, SeekFrom::Start(0))
         .await?;
     file.set_len(0)?;
@@ -204,6 +212,7 @@ pub(super) async fn write_local_in_batch(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::file_cache::build_test_file_cache;
     use crate::storage::block_manager::ReplicaPublication;
     use prost::Message;
 
@@ -337,14 +346,18 @@ mod tests {
     async fn persists_and_loads_publication_marker() {
         let entry_path = entry_path();
         let expected = publication(2, PublicationState::Ready);
-        let mut batch = FILE_CACHE.begin_batch().await.unwrap();
-        let marker_path = write_local_in_batch(&batch.token(), &entry_path, &expected)
+        let file_cache = build_test_file_cache();
+        let mut batch = file_cache.begin_batch().await.unwrap();
+        let marker_path = write_local_in_batch(&batch.token(), &entry_path, &expected, &file_cache)
             .await
             .unwrap();
 
         batch.sync_file(&marker_path).await.unwrap();
         batch.commit().await.unwrap();
 
-        assert_eq!(load(&entry_path).await.unwrap(), Some(expected));
+        assert_eq!(
+            load(&entry_path, &file_cache).await.unwrap(),
+            Some(expected)
+        );
     }
 }
