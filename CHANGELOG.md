@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Internal
 
+- Verify rebuilt block indexes remain synchronized and restore cleanly after restart, [PR-1649](https://github.com/reductstore/reductstore/pull/1649) by @shubhambhar007
 - Publish completed mutation bursts after a short idle period to restore update-after-write throughput, [PR-1647](https://github.com/reductstore/reductstore/pull/1647)
 - Batch entry mutations until cache compaction publishes them, [PR-1646](https://github.com/reductstore/reductstore/pull/1646)
 - Use the shared ReductStore Debian base image for runtime containers, [PR-1639](https://github.com/reductstore/reductstore/pull/1639)
