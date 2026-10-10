@@ -12,6 +12,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Prevent idle publication from blocking reads after write bursts, [#1657](https://github.com/reductstore/reductstore/pull/1657)
 - Limit disk usage of decompressed blocks across all entries (`RS_ENGINE_DECOMPRESS_CACHE_SIZE`, default 1GB) and clean up expired, partial and leftover files, [PR-1640](https://github.com/reductstore/reductstore/pull/1640) by @ragen1337
 - Recover read-only replicas from stale compressed block cache entries without returning HTTP 500, [PR-1643](https://github.com/reductstore/reductstore/pull/1643)
+- Keep decompressed files on disk while they are read, so eviction from the decompression cache doesn't break reads of compressed records, [PR-1660](https://github.com/reductstore/reductstore/pull/1660) by @ragen1337
 
 ### Internal
 

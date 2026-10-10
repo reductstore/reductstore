@@ -290,15 +290,16 @@ impl BlockManager {
     /// # Returns
     ///
     /// * `Ok(file, offset)` - File to read from and offset to start reading.
+    ///   A decompressed file stays on disk while `file` is alive.
     ///
     /// # Errors
     ///
     /// * `ReductError` - If file system operation failed.
-    pub(crate) async fn begin_read_record(
+    pub(in crate::storage) async fn begin_read_record(
         &self,
         block: &Block,
         record_timestamp: u64,
-    ) -> Result<(PathBuf, u64), ReductError> {
+    ) -> Result<(BlockFilePath, u64), ReductError> {
         let path = self.resolve_data_path(block.block_id()).await?;
         let offset = block.get_record(record_timestamp).unwrap().begin;
         Ok((path, offset))

@@ -8,6 +8,7 @@ use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::fmt::{Debug, Formatter};
 use std::fs::{File, OpenOptions};
 use std::hash::{Hash, Hasher};
 use std::io::{Read, SeekFrom, Write};
@@ -33,9 +34,9 @@ const UNLOCKED_DIR_MAX_IDLE: Duration = Duration::from_secs(3600);
 ///   blocks of all entries under shared pressure (the same idea as the global block read cache).
 ///
 /// Block managers own the cache through their handles (see [`DecompressCache::shared`]), and this
-/// static keeps only a weak reference. When the last block manager is dropped, `Drop for Inner`
-/// removes the temporary directory. Each handle has its own keys, so a re-created entry never gets
-/// files decompressed for the previous one under the same path.
+/// static keeps only a weak reference. When the last block manager and the last reader are
+/// dropped, `Drop for Inner` removes the temporary directory. Each handle has its own keys, so a
+/// re-created entry never gets files decompressed for the previous one under the same path.
 static SHARED_CACHE: Mutex<Weak<Inner>> = parking_lot::const_mutex(Weak::new());
 /// Directories of killed processes are removed once per process, before the first cache is created.
 static REMOVE_STALE_DIRS: Once = Once::new();
@@ -63,14 +64,31 @@ impl DecompressedFileType {
 }
 
 struct CachedFile {
+    file: Arc<DiskFile>,
+    last_access: Instant,
+}
+
+/// A decompressed file on disk. It is removed when neither the cache nor any reader holds it.
+struct DiskFile {
     path: PathBuf,
     size: u64,
-    last_access: Instant,
+    total_size: Arc<AtomicU64>,
+}
+
+/// A decompressed file handed out to a reader.
+///
+/// The cache may evict, expire or invalidate the file in the meantime,
+/// but it stays on disk until the last guard for it is dropped.
+pub(super) struct DecompressedFile {
+    file: Arc<DiskFile>,
+    // Keeps the cache directory as well
+    _cache: Arc<Inner>,
 }
 
 struct CacheState {
     files: HashMap<String, CachedFile>,
-    total_size: u64,
+    /// Size of all decompressed files on disk, including evicted files that are still in use.
+    total_size: Arc<AtomicU64>,
     max_size: u64,
     /// Exclusive lock on `<temp_dir>/.lock`, held while the directory is in use.
     /// Other processes use it to tell a live cache directory from a stale one.
@@ -102,7 +120,7 @@ impl DecompressCache {
             inner: Arc::new(Inner {
                 state: Mutex::new(CacheState {
                     files: HashMap::new(),
-                    total_size: 0,
+                    total_size: Arc::new(AtomicU64::new(0)),
                     max_size,
                     dir_lock: None,
                 }),
@@ -150,12 +168,12 @@ impl DecompressCache {
         block_id: u64,
         file_type: DecompressedFileType,
         compressed_path: &PathBuf,
-    ) -> Result<PathBuf, ReductError> {
+    ) -> Result<DecompressedFile, ReductError> {
         self.start_cleanup_worker();
 
         let key = self.key(entry_path, block_id, file_type);
-        if let Some(path) = self.inner.state.lock().get(&key) {
-            return Ok(path);
+        if let Some(file) = self.inner.state.lock().get(&key) {
+            return Ok(self.guard(file));
         }
 
         // Decompress without holding the lock, so that one slow block doesn't block reads of other entries.
@@ -164,22 +182,25 @@ impl DecompressCache {
             .decompress_to_temp(entry_path, block_id, file_type, compressed_path)
             .await?;
 
-        let (path, evicted) = {
-            let mut state = self.inner.state.lock();
-            if let Some(existing) = state.get(&key) {
-                // Another reader decompressed the same block in the meantime
-                (existing, vec![CachedFile::new(path, size)])
-            } else {
-                state.insert(key.clone(), CachedFile::new(path.clone(), size));
-                (path, state.evict_over_limit(&key))
-            }
-        };
+        let mut state = self.inner.state.lock();
+        if let Some(existing) = state.get(&key) {
+            drop(state);
+            // Another reader decompressed the same block in the meantime
+            cleanup_tmp(&path);
+            return Ok(self.guard(existing));
+        }
 
-        remove_cached_files(evicted);
-        Ok(path)
+        let file = state.insert(key, path, size);
+        let evicted = state.evict_over_limit();
+        drop(state);
+        // Evicted files are removed from disk here, outside the lock
+        drop(evicted);
+        Ok(self.guard(file))
     }
 
     /// Remove cached decompressed files for a block.
+    ///
+    /// Files that are still in use are removed when their readers drop them.
     pub(super) async fn invalidate(&self, entry_path: &Path, block_id: u64) {
         let removed = {
             let mut state = self.inner.state.lock();
@@ -188,7 +209,7 @@ impl DecompressCache {
                 .filter_map(|file_type| state.remove(&self.key(entry_path, block_id, file_type)))
                 .collect::<Vec<_>>()
         };
-        remove_cached_files(removed);
+        drop(removed);
     }
 
     /// Expired files are removed in the background, so they don't stay on disk until the next read.
@@ -205,9 +226,16 @@ impl DecompressCache {
                 let Some(inner) = inner.upgrade() else {
                     break;
                 };
-                inner.discard_expired();
+                inner.cleanup();
             }
         });
+    }
+
+    fn guard(&self, file: Arc<DiskFile>) -> DecompressedFile {
+        DecompressedFile {
+            file,
+            _cache: Arc::clone(&self.inner),
+        }
     }
 
     fn key(&self, entry_path: &Path, block_id: u64, file_type: DecompressedFileType) -> String {
@@ -307,10 +335,28 @@ impl DecompressCache {
     }
 }
 
+impl DecompressedFile {
+    pub(super) fn path(&self) -> &PathBuf {
+        &self.file.path
+    }
+}
+
+impl Debug for DecompressedFile {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("DecompressedFile")
+            .field(self.path())
+            .finish()
+    }
+}
+
 impl Inner {
-    fn discard_expired(&self) {
+    /// Remove expired files and, once readers have released them, files over the size limit.
+    fn cleanup(&self) {
         let expired = self.state.lock().remove_expired(self.ttl);
-        remove_cached_files(expired);
+        // Drop the files outside the lock, so that the total size is up to date for eviction
+        drop(expired);
+        let evicted = self.state.lock().evict_over_limit();
+        drop(evicted);
     }
 }
 
@@ -322,42 +368,61 @@ impl Drop for Inner {
     }
 }
 
+impl Drop for DiskFile {
+    fn drop(&mut self) {
+        // FILE_CACHE may still keep the file open, then the space is freed when it closes the file
+        cleanup_tmp(&self.path);
+        self.total_size.fetch_sub(self.size, Ordering::Relaxed);
+    }
+}
+
 impl CachedFile {
-    fn new(path: PathBuf, size: u64) -> Self {
-        Self {
-            path,
-            size,
-            last_access: Instant::now(),
-        }
+    /// A guard holds another reference to the file.
+    /// New guards are only created from the cache under the state lock.
+    fn in_use(&self) -> bool {
+        Arc::strong_count(&self.file) > 1
     }
 }
 
 impl CacheState {
-    fn get(&mut self, key: &str) -> Option<PathBuf> {
+    fn total_size(&self) -> u64 {
+        self.total_size.load(Ordering::Relaxed)
+    }
+
+    fn get(&mut self, key: &str) -> Option<Arc<DiskFile>> {
         self.files.get_mut(key).map(|file| {
             file.last_access = Instant::now();
-            file.path.clone()
+            Arc::clone(&file.file)
         })
     }
 
-    fn insert(&mut self, key: String, file: CachedFile) {
-        self.total_size += file.size;
-        if let Some(old) = self.files.insert(key, file) {
-            self.total_size -= old.size;
-        }
+    fn insert(&mut self, key: String, path: PathBuf, size: u64) -> Arc<DiskFile> {
+        self.total_size.fetch_add(size, Ordering::Relaxed);
+        let file = Arc::new(DiskFile {
+            path,
+            size,
+            total_size: Arc::clone(&self.total_size),
+        });
+        self.files.insert(
+            key,
+            CachedFile {
+                file: Arc::clone(&file),
+                last_access: Instant::now(),
+            },
+        );
+        file
     }
 
-    fn remove(&mut self, key: &str) -> Option<CachedFile> {
-        let file = self.files.remove(key)?;
-        self.total_size -= file.size;
-        Some(file)
+    fn remove(&mut self, key: &str) -> Option<Arc<DiskFile>> {
+        self.files.remove(key).map(|file| file.file)
     }
 
-    fn remove_expired(&mut self, ttl: Duration) -> Vec<CachedFile> {
+    /// Files in use are skipped, they expire in a later run after their readers are done.
+    fn remove_expired(&mut self, ttl: Duration) -> Vec<Arc<DiskFile>> {
         let expired = self
             .files
             .iter()
-            .filter(|(_, file)| file.last_access.elapsed() > ttl)
+            .filter(|(_, file)| file.last_access.elapsed() > ttl && !file.in_use())
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
         expired.iter().filter_map(|key| self.remove(key)).collect()
@@ -365,19 +430,24 @@ impl CacheState {
 
     /// Evict the least recently used files until the total size fits the limit.
     ///
-    /// The file in `keep` has just been handed out to a reader, so it stays
-    /// even if it alone is larger than the limit.
-    fn evict_over_limit(&mut self, keep: &str) -> Vec<CachedFile> {
+    /// Files in use are not evicted but count toward the limit, so the cache can stay over it
+    /// while they are read, e.g. a file that alone is larger than the limit. After they are
+    /// released, the next insert or cleanup run evicts them.
+    fn evict_over_limit(&mut self) -> Vec<Arc<DiskFile>> {
+        let mut total_size = self.total_size();
         let mut evicted = Vec::new();
-        while self.total_size > self.max_size {
+        while total_size > self.max_size {
             let oldest = self
                 .files
                 .iter()
-                .filter(|(key, _)| key.as_str() != keep)
+                .filter(|(_, file)| !file.in_use())
                 .min_by_key(|(_, file)| file.last_access)
                 .map(|(key, _)| key.clone());
             match oldest.and_then(|key| self.remove(&key)) {
-                Some(file) => evicted.push(file),
+                Some(file) => {
+                    total_size = total_size.saturating_sub(file.size);
+                    evicted.push(file);
+                }
                 None => break,
             }
         }
@@ -413,14 +483,6 @@ fn write_temp_file(path: &PathBuf, content: &[u8]) -> Result<(), ReductError> {
             err
         )
     })
-}
-
-fn remove_cached_files(files: Vec<CachedFile>) {
-    for file in files {
-        // Only unlink the file: a reader in the middle of a record keeps reading it
-        // through the descriptor in FILE_CACHE, which frees the space when it closes the file.
-        cleanup_tmp(&file.path);
-    }
 }
 
 /// Remove cache directories left by processes that terminated without cleanup.
@@ -509,6 +571,17 @@ mod tests {
         path
     }
 
+    async fn wait_until(condition: impl Fn() -> bool) -> bool {
+        let deadline = Instant::now() + Duration::from_secs(5);
+        while !condition() {
+            if Instant::now() > deadline {
+                return false;
+            }
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+        true
+    }
+
     fn cached_files(temp_dir: &Path) -> Vec<PathBuf> {
         let mut files = std::fs::read_dir(temp_dir)
             .unwrap()
@@ -535,9 +608,9 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(path, cached_path);
-        assert_eq!(path.parent().unwrap(), cache.inner.temp_dir);
-        assert_eq!(std::fs::read(path).unwrap(), b"content");
+        assert_eq!(path.path(), cached_path.path());
+        assert_eq!(path.path().parent().unwrap(), cache.inner.temp_dir);
+        assert_eq!(std::fs::read(path.path()).unwrap(), b"content");
     }
 
     #[rstest]
@@ -553,10 +626,10 @@ mod tests {
             .unwrap();
 
         assert_eq!(
-            std::fs::read_to_string(&path).unwrap(),
+            std::fs::read_to_string(path.path()).unwrap(),
             "descriptor content"
         );
-        assert!(path.to_str().unwrap().ends_with(".meta"));
+        assert!(path.path().to_str().unwrap().ends_with(".meta"));
     }
 
     #[rstest]
@@ -573,7 +646,7 @@ mod tests {
             .unwrap_err();
 
         assert_eq!(err.status(), ErrorCode::InternalServerError);
-        assert_eq!(cache.inner.state.lock().total_size, 0);
+        assert_eq!(cache.inner.state.lock().total_size(), 0);
     }
 
     #[rstest]
@@ -604,17 +677,21 @@ mod tests {
         let cached_data = cache
             .get_or_decompress(&dir, 1, DecompressedFileType::Data, &data_path)
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
         let cached_desc = cache
             .get_or_decompress(&dir, 1, DecompressedFileType::Descriptor, &desc_path)
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
 
         cache.invalidate(&dir, 1).await;
 
         assert!(!cached_data.exists());
         assert!(!cached_desc.exists());
-        assert_eq!(cache.inner.state.lock().total_size, 0);
+        assert_eq!(cache.inner.state.lock().total_size(), 0);
     }
 
     #[rstest]
@@ -631,7 +708,9 @@ mod tests {
                 cache
                     .get_or_decompress(entry, 1, DecompressedFileType::Data, &compressed_path)
                     .await
-                    .unwrap(),
+                    .unwrap()
+                    .path()
+                    .clone(),
             );
         }
         // Read the first entry again, so the second one becomes the least recently used
@@ -643,13 +722,15 @@ mod tests {
             cache
                 .get_or_decompress(&entries[2], 1, DecompressedFileType::Data, &compressed_path)
                 .await
-                .unwrap(),
+                .unwrap()
+                .path()
+                .clone(),
         );
 
         assert!(paths[0].exists());
         assert!(!paths[1].exists());
         assert!(paths[2].exists());
-        assert_eq!(cache.inner.state.lock().total_size, 8);
+        assert_eq!(cache.inner.state.lock().total_size(), 8);
     }
 
     #[rstest]
@@ -664,11 +745,15 @@ mod tests {
         let old_path = old_manager
             .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
         let new_path = new_manager
             .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
 
         assert_ne!(
             old_path, new_path,
@@ -690,14 +775,16 @@ mod tests {
         let small = cache
             .get_or_decompress(&dir, 1, DecompressedFileType::Data, &small_path)
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
         let large = cache
             .get_or_decompress(&dir, 2, DecompressedFileType::Data, &large_path)
             .await
             .unwrap();
 
         assert!(!small.exists());
-        assert_eq!(std::fs::read(large).unwrap(), b"1234567890");
+        assert_eq!(std::fs::read(large.path()).unwrap(), b"1234567890");
     }
 
     #[rstest]
@@ -710,7 +797,9 @@ mod tests {
         let path = cache
             .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
         assert!(path.exists());
         // Poll instead of a fixed sleep to stay stable on slow CI runners
         for _ in 0..100 {
@@ -721,41 +810,161 @@ mod tests {
         }
 
         assert!(!path.exists());
-        assert_eq!(cache.inner.state.lock().total_size, 0);
+        assert_eq!(cache.inner.state.lock().total_size(), 0);
     }
 
     #[rstest]
     #[tokio::test]
     #[serial]
-    async fn reader_finishes_record_after_file_expires(dir: PathBuf) {
+    async fn expired_file_in_use_is_removed_after_release(dir: PathBuf) {
+        let file_type = DecompressedFileType::Data;
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let cache = cache_in(&dir, 1000, Duration::from_millis(20));
-        let path = cache
+        let in_use = cache
+            .get_or_decompress(&dir.join("a"), 1, file_type, &compressed_path)
+            .await
+            .unwrap();
+        let released = cache
+            .get_or_decompress(&dir.join("b"), 1, file_type, &compressed_path)
+            .await
+            .unwrap()
+            .path()
+            .clone();
+
+        // Both files have expired when the released one is removed
+        assert!(wait_until(|| !released.exists()).await);
+        assert_eq!(std::fs::read(in_use.path()).unwrap(), b"content");
+
+        let path = in_use.path().clone();
+        drop(in_use);
+        assert!(wait_until(|| !path.exists()).await);
+        assert_eq!(cache.inner.state.lock().total_size(), 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn files_in_use_are_kept_over_limit_until_released(dir: PathBuf) {
+        let file_type = DecompressedFileType::Data;
+        let compressed_path = compressed(&dir, "1.blk.zst", "1234");
+        let cache = cache_in(&dir, 5, DECOMPRESS_CACHE_TTL);
+        let first = cache
+            .get_or_decompress(&dir.join("a"), 1, file_type, &compressed_path)
+            .await
+            .unwrap();
+        let second = cache
+            .get_or_decompress(&dir.join("b"), 1, file_type, &compressed_path)
+            .await
+            .unwrap();
+        cache.inner.cleanup();
+
+        assert_eq!(std::fs::read(first.path()).unwrap(), b"1234");
+        assert_eq!(std::fs::read(second.path()).unwrap(), b"1234");
+        assert_eq!(cache.inner.state.lock().total_size(), 8);
+
+        let (first_path, second_path) = (first.path().clone(), second.path().clone());
+        drop((first, second));
+        cache.inner.cleanup();
+
+        assert!(!first_path.exists());
+        assert_eq!(cache.inner.state.lock().total_size(), 4);
+
+        let _third = cache
+            .get_or_decompress(&dir.join("c"), 1, file_type, &compressed_path)
+            .await
+            .unwrap();
+        assert!(!second_path.exists());
+        assert_eq!(cache.inner.state.lock().total_size(), 4);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    #[serial]
+    async fn invalidated_file_is_removed_after_last_reader(dir: PathBuf) {
+        let compressed_path = compressed(&dir, "1.blk.zst", "old");
+        let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
+        let old = cache
             .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
             .await
             .unwrap();
-        // The reader opens the file for the first chunk, as read_in_chunks does
-        drop(FILE_CACHE.read(&path, SeekFrom::Start(0)).await.unwrap());
 
-        // On Windows a deleted file stays visible while it is open, so check the path elsewhere only
-        let removed =
-            || cache.inner.state.lock().total_size == 0 && (cfg!(windows) || !path.exists());
-        for _ in 0..100 {
-            if removed() {
-                break;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        assert!(removed());
-
-        let mut content = String::new();
-        FILE_CACHE
-            .read(&path, SeekFrom::Start(0))
+        cache.invalidate(&dir, 1).await;
+        let new_path = compressed(&dir, "2.blk.zst", "new");
+        let new = cache
+            .get_or_decompress(&dir, 1, DecompressedFileType::Data, &new_path)
             .await
-            .unwrap()
-            .read_to_string(&mut content)
             .unwrap();
-        assert_eq!(content, "content");
+
+        assert_eq!(std::fs::read(old.path()).unwrap(), b"old");
+        assert_eq!(std::fs::read(new.path()).unwrap(), b"new");
+
+        let old_path = old.path().clone();
+        drop(old);
+        assert!(!old_path.exists());
+        assert_eq!(cache.inner.state.lock().total_size(), 3);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    #[serial]
+    async fn eviction_does_not_remove_file_being_read(dir: PathBuf) {
+        let file_type = DecompressedFileType::Data;
+        let content = "0123456789".repeat(10);
+        let compressed_path = compressed(&dir, "1.blk.zst", &content);
+        // Room for one file only
+        let cache = Arc::new(cache_in(&dir, 150, DECOMPRESS_CACHE_TTL));
+        let file = cache
+            .get_or_decompress(&dir.join("reader"), 1, file_type, &compressed_path)
+            .await
+            .unwrap();
+
+        let added = Arc::new(AtomicU64::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let evictor = {
+            let (cache, dir, compressed_path) =
+                (Arc::clone(&cache), dir.clone(), compressed_path.clone());
+            let (added, stop) = (Arc::clone(&added), Arc::clone(&stop));
+            tokio::spawn(async move {
+                for entry in 0.. {
+                    if stop.load(Ordering::Relaxed) {
+                        break;
+                    }
+                    cache
+                        .get_or_decompress(
+                            &dir.join(entry.to_string()),
+                            1,
+                            file_type,
+                            &compressed_path,
+                        )
+                        .await
+                        .unwrap();
+                    added.fetch_add(1, Ordering::Relaxed);
+                }
+            })
+        };
+
+        // Reopen the file for every chunk, as a reader does after FILE_CACHE has closed it
+        let mut read = vec![];
+        for offset in (0..content.len() as u64).step_by(10) {
+            let target = added.load(Ordering::Relaxed) + 2;
+            assert!(wait_until(|| added.load(Ordering::Relaxed) >= target).await);
+
+            let mut chunk = [0; 10];
+            let mut opened = File::open(file.path()).unwrap();
+            std::io::Seek::seek(&mut opened, SeekFrom::Start(offset)).unwrap();
+            opened.read_exact(&mut chunk).unwrap();
+            read.extend_from_slice(&chunk);
+        }
+        stop.store(true, Ordering::Relaxed);
+        evictor.await.unwrap();
+
+        assert_eq!(read, content.as_bytes());
+        let files = cached_files(&cache.inner.temp_dir);
+        assert!(files.contains(file.path()));
+        assert_eq!(
+            cache.inner.state.lock().total_size(),
+            100 * files.len() as u64
+        );
     }
 
     #[rstest]
@@ -851,14 +1060,14 @@ mod tests {
     async fn live_cache_survives_stale_dir_cleanup(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
-        let path = cache
+        let file = cache
             .get_or_decompress(&dir, 1, DecompressedFileType::Data, &compressed_path)
             .await
             .unwrap();
 
         remove_stale_temp_dirs(&dir, Duration::ZERO);
 
-        assert!(path.exists());
+        assert!(file.path().exists());
     }
 
     #[rstest]
@@ -891,18 +1100,18 @@ mod tests {
         }
         drop(guard);
 
-        let mut paths = vec![];
+        let mut files = vec![];
         for reader in readers {
-            paths.push(reader.await.unwrap());
+            files.push(reader.await.unwrap());
         }
 
-        assert_eq!(paths[0], paths[1]);
+        assert_eq!(files[0].path(), files[1].path());
         assert_eq!(
             cached_files(&cache.inner.temp_dir),
-            vec![paths[0].clone()],
+            vec![files[0].path().clone()],
             "the second decompressed copy is removed"
         );
-        assert_eq!(cache.inner.state.lock().total_size, 7);
+        assert_eq!(cache.inner.state.lock().total_size(), 7);
     }
 
     #[rstest]
@@ -925,7 +1134,7 @@ mod tests {
             assert!(err.message.contains("Failed to read compressed file"));
         }
         assert!(!cache.inner.temp_dir.exists(), "nothing decompressed");
-        assert_eq!(cache.inner.state.lock().total_size, 0);
+        assert_eq!(cache.inner.state.lock().total_size(), 0);
     }
 
     #[rstest]
@@ -979,8 +1188,8 @@ mod tests {
         assert!(err
             .message
             .contains("Failed to create decompressed temporary file"));
-        assert_eq!(cached_files(&temp_dir), vec![first]);
-        assert_eq!(cache.inner.state.lock().total_size, 5);
+        assert_eq!(cached_files(&temp_dir), vec![first.path().clone()]);
+        assert_eq!(cache.inner.state.lock().total_size(), 5);
     }
 
     #[rstest]

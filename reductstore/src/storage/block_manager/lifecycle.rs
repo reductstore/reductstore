@@ -322,7 +322,9 @@ mod tests {
                 &compressed_data_path,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
         let cached_desc_path = block_manager
             .decompress_cache
             .get_or_decompress(
@@ -332,7 +334,9 @@ mod tests {
                 &compressed_desc_path,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
 
         block_manager.remove_block(block_id).await.unwrap();
 

@@ -16,6 +16,8 @@ mod read_only;
 mod records;
 pub(in crate::storage) mod wal;
 
+pub(in crate::storage) use paths::BlockFilePath;
+
 use crate::backend::BackendType;
 use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::{BatchToken, FILE_CACHE};
