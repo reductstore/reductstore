@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 mod read_only;
-use crate::backend::Backend;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
 use crate::core::file_cache::FileCache;
@@ -74,20 +73,9 @@ impl StorageEngineBuilder {
 
         let file_cache = match self.file_cache {
             Some(file_cache) => file_cache,
-            None => {
-                let file_cache = Arc::new(FileCache::new(
-                    crate::core::file_cache::FILE_CACHE_MAX_SIZE,
-                    crate::core::file_cache::FILE_CACHE_TIME_TO_LIVE,
-                    crate::core::file_cache::FILE_CACHE_SYNC_INTERVAL,
-                ));
-                let backend = Backend::builder()
-                    .local_data_path(data_path.clone())
-                    .try_build()
-                    .await
-                    .expect("Failed to initialize default storage backend");
-                file_cache.set_storage_backend(backend).await;
-                file_cache
-            }
+            None => FileCache::with_local_backend(data_path.clone())
+                .await
+                .expect("Failed to initialize default storage backend"),
         };
 
         if !file_cache.try_exists(&data_path).await.unwrap_or(false) {

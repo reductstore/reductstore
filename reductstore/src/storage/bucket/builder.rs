@@ -99,18 +99,15 @@ impl BucketBuilder {
         let usage_counters = self
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
-        let file_cache = self.file_cache.unwrap_or_else(|| {
-            Arc::new(FileCache::new(
-                crate::core::file_cache::FILE_CACHE_MAX_SIZE,
-                crate::core::file_cache::FILE_CACHE_TIME_TO_LIVE,
-                crate::core::file_cache::FILE_CACHE_SYNC_INTERVAL,
-            ))
-        });
         let settings = Bucket::fill_settings(
             self.settings.unwrap_or_default(),
             cfg.bucket_defaults.clone(),
         );
         let path = data_path.join(&name);
+        let file_cache = match self.file_cache {
+            Some(file_cache) => file_cache,
+            None => FileCache::with_local_backend(path.clone()).await?,
+        };
         let folder_keeper = FolderKeeper::new(path.clone(), &cfg, Arc::clone(&file_cache)).await;
 
         let bucket = Bucket {
@@ -142,13 +139,10 @@ impl BucketBuilder {
         let usage_counters = self
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
-        let file_cache = self.file_cache.unwrap_or_else(|| {
-            Arc::new(FileCache::new(
-                crate::core::file_cache::FILE_CACHE_MAX_SIZE,
-                crate::core::file_cache::FILE_CACHE_TIME_TO_LIVE,
-                crate::core::file_cache::FILE_CACHE_SYNC_INTERVAL,
-            ))
-        });
+        let file_cache = match self.file_cache {
+            Some(file_cache) => file_cache,
+            None => FileCache::with_local_backend(path.clone()).await?,
+        };
 
         let mut file = file_cache
             .read(&path.join(SETTINGS_NAME), SeekFrom::Start(0))

@@ -78,6 +78,21 @@ pub(crate) struct FileCache {
 }
 
 impl FileCache {
+    /// Create a file cache backed by the local filesystem at `data_path`.
+    pub(crate) async fn with_local_backend(data_path: PathBuf) -> Result<Arc<Self>, ReductError> {
+        let cache = Arc::new(Self::new(
+            FILE_CACHE_MAX_SIZE,
+            FILE_CACHE_TIME_TO_LIVE,
+            FILE_CACHE_SYNC_INTERVAL,
+        ));
+        let backend = Backend::builder()
+            .local_data_path(data_path)
+            .try_build()
+            .await?;
+        cache.set_storage_backend(backend).await;
+        Ok(cache)
+    }
+
     /// Create a new file cache
     ///
     /// # Arguments

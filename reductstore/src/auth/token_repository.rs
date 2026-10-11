@@ -395,11 +395,9 @@ impl TokenRepositoryBuilder {
 
     #[cfg_attr(not(test), allow(dead_code))]
     pub async fn build(self, config_path: PathBuf) -> BoxedTokenRepository {
-        let file_cache = Arc::new(FileCache::new(
-            crate::core::file_cache::FILE_CACHE_MAX_SIZE,
-            crate::core::file_cache::FILE_CACHE_TIME_TO_LIVE,
-            crate::core::file_cache::FILE_CACHE_SYNC_INTERVAL,
-        ));
+        let file_cache = FileCache::with_local_backend(config_path.clone())
+            .await
+            .expect("Failed to initialize token repository storage backend");
         self.build_internal(config_path, None, file_cache).await
     }
 

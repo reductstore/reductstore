@@ -93,14 +93,11 @@ impl EntryBuilder {
         let usage_counters = self
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
-        let file_cache = self.file_cache.unwrap_or_else(|| {
-            Arc::new(FileCache::new(
-                crate::core::file_cache::FILE_CACHE_MAX_SIZE,
-                crate::core::file_cache::FILE_CACHE_TIME_TO_LIVE,
-                crate::core::file_cache::FILE_CACHE_SYNC_INTERVAL,
-            ))
-        });
         let block_index_path = path.join(BLOCK_INDEX_FILE);
+        let file_cache = match self.file_cache {
+            Some(file_cache) => file_cache,
+            None => FileCache::with_local_backend(path.clone()).await?,
+        };
         let block_index = BlockIndex::new(block_index_path.clone(), Arc::clone(&file_cache));
 
         if !file_cache.try_exists(&block_index_path).await? {
@@ -161,13 +158,10 @@ impl EntryBuilder {
         let usage_counters = self
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
-        let file_cache = self.file_cache.unwrap_or_else(|| {
-            Arc::new(FileCache::new(
-                crate::core::file_cache::FILE_CACHE_MAX_SIZE,
-                crate::core::file_cache::FILE_CACHE_TIME_TO_LIVE,
-                crate::core::file_cache::FILE_CACHE_SYNC_INTERVAL,
-            ))
-        });
+        let file_cache = match self.file_cache {
+            Some(file_cache) => file_cache,
+            None => FileCache::with_local_backend(path.clone()).await?,
+        };
 
         EntryLoader::restore_entry_with_names(
             path,

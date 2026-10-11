@@ -26,7 +26,7 @@ pub(crate) struct RecordReader {
     content_size: u64,
     pos: u64,
     _permit: Option<OwnedSemaphorePermit>,
-    file_cache: Arc<FileCache>,
+    file_cache: Option<Arc<FileCache>>,
 }
 
 impl RecordReader {
@@ -99,7 +99,7 @@ impl RecordReader {
             content_size,
             pos: 0,
             _permit: permit,
-            file_cache,
+            file_cache: Some(file_cache),
         })
     }
 
@@ -126,11 +126,7 @@ impl RecordReader {
             content_size: 0,
             pos: 0,
             _permit: None,
-            file_cache: Arc::new(FileCache::new(
-                crate::core::file_cache::FILE_CACHE_MAX_SIZE,
-                crate::core::file_cache::FILE_CACHE_TIME_TO_LIVE,
-                crate::core::file_cache::FILE_CACHE_SYNC_INTERVAL,
-            )),
+            file_cache: None,
         }
     }
 
@@ -145,7 +141,11 @@ impl RecordReader {
         let pos = self.pos;
         let path = file_path.clone();
 
-        let file_cache = Arc::clone(&self.file_cache);
+        let file_cache = Arc::clone(
+            self.file_cache
+                .as_ref()
+                .expect("record content readers must have a file cache"),
+        );
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let mut file_guard = file_cache
