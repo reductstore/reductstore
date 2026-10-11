@@ -442,15 +442,19 @@ mod tests {
     use super::*;
     use crate::cfg::Cfg;
     use crate::core::file_cache::build_test_file_cache;
+    use crate::core::sync::AsyncRwLock;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::block_manager::decompress_cache::DecompressedFileType;
     use crate::storage::block_manager::{BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT};
     use crate::storage::entry::io::record_reader::read_in_chunks;
+    use crate::storage::entry::RecordReader;
     use crate::storage::proto::{record, Record};
     use prost_wkt_types::Timestamp;
     use reduct_base::error::ErrorCode;
+    use reduct_base::io::ReadRecord;
     use rstest::rstest;
     use serial_test::serial;
+    use std::sync::Arc;
     use tempfile::tempdir;
 
     #[rstest]
@@ -663,7 +667,9 @@ mod tests {
                 &file_cache,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
 
         block_manager.decompress_block(block_id).await.unwrap();
 
@@ -762,7 +768,6 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_decompress_block_missing_compressed_data_marks_corrupted() {
-        let file_cache = build_test_file_cache();
         let (mut block_manager, block_id, _, _) =
             block_manager_with_data(b"missing file".to_vec()).await;
 
@@ -771,7 +776,8 @@ mod tests {
             .await
             .unwrap();
 
-        file_cache
+        block_manager
+            .file_cache()
             .remove(&block_manager.path_to_compressed_data(block_id))
             .await
             .unwrap();
@@ -790,7 +796,6 @@ mod tests {
     #[tokio::test]
     #[serial]
     async fn test_decompress_block_missing_compressed_descriptor_marks_corrupted() {
-        let file_cache = build_test_file_cache();
         let (mut block_manager, block_id, _, _) =
             block_manager_with_data(b"missing descriptor".to_vec()).await;
 
@@ -799,7 +804,8 @@ mod tests {
             .await
             .unwrap();
 
-        file_cache
+        block_manager
+            .file_cache()
             .remove(&block_manager.path_to_compressed_desc(block_id))
             .await
             .unwrap();
@@ -932,7 +938,7 @@ mod tests {
         let block = block_ref.read().await.unwrap();
         let (file_path, offset) = block_manager.begin_read_record(&block, 0).await.unwrap();
         let (content, read) = read_in_chunks(
-            &file_path,
+            file_path.path(),
             offset,
             original_data.len() as u64,
             0,
@@ -940,8 +946,38 @@ mod tests {
         )
         .await
         .unwrap();
-
         assert_eq!(read, original_data.len());
+        assert_eq!(content, original_data);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    #[serial]
+    async fn reader_finishes_record_after_block_is_decompressed() {
+        let data = b"read compressed data".to_vec();
+        let (mut block_manager, block_id, original_data, _) = block_manager_with_data(data).await;
+        block_manager
+            .compress_block(block_id, CompressionAlgorithm::Zstd)
+            .await
+            .unwrap();
+        block_manager.clear_cache_for_test();
+        let block_ref = block_manager.load_block(block_id).await.unwrap();
+        let block_manager = Arc::new(AsyncRwLock::new(block_manager));
+
+        let mut reader =
+            RecordReader::try_new(Arc::clone(&block_manager), block_ref, 0, None, None)
+                .await
+                .unwrap();
+        // A belated write decompresses the block and invalidates the cached copy
+        block_manager
+            .write()
+            .await
+            .unwrap()
+            .decompress_block(block_id)
+            .await
+            .unwrap();
+
+        let content = reader.read_chunk().unwrap().unwrap();
         assert_eq!(content, original_data);
     }
 

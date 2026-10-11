@@ -70,8 +70,9 @@ impl BlockManager {
         // first check if we have the block in write cache
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
-            let path = match self.resolve_desc_path(block_id).await {
-                Ok(path) => path,
+            // Keep the decompressed descriptor on disk until it has been read
+            let desc_file = match self.resolve_desc_path(block_id).await {
+                Ok(file) => file,
                 Err(err) if self.cfg.role == InstanceRole::Replica => {
                     debug!(
                         "Block descriptor {}/{}/{} can't be resolved on replica: {}. Treat as transient and reload index",
@@ -87,7 +88,8 @@ impl BlockManager {
                 }
                 Err(err) => return Err(err),
             };
-            let buf = match self.file_cache.read(&path, SeekFrom::Start(0)).await {
+            let path = desc_file.path();
+            let buf = match self.file_cache.read(path, SeekFrom::Start(0)).await {
                 Ok(mut file) => {
                     let mut buf = vec![];
                     file.read_to_end(&mut buf)?;
@@ -97,7 +99,7 @@ impl BlockManager {
                     // Re-check existence to distinguish a transient TOCTOU race
                     // (descriptor removed after the first check) from a real read failure.
                     if self.cfg.role == InstanceRole::Replica
-                        && !self.file_cache.try_exists(&path).await?
+                        && !self.file_cache.try_exists(path).await?
                     {
                         return Err(too_early!(
                             "Block descriptor {:?} can't be read on replica yet: {}. Reload index and retry",
@@ -224,7 +226,7 @@ impl BlockManager {
 #[cfg(test)]
 mod tests {
     use crate::storage::block_manager::compress::CompressionAlgorithm;
-    use crate::storage::block_manager::test_utils::{block_id, block_manager, file_cache};
+    use crate::storage::block_manager::test_utils::{block_id, block_manager};
     use crate::storage::block_manager::BlockManager;
     use crate::storage::proto::Block as BlockProto;
     use prost::Message;
@@ -368,7 +370,8 @@ mod tests {
         let mut block_manager = block_manager.await;
         assert!(block_manager.index().get_block(block_id).is_some());
 
-        file_cache()
+        block_manager
+            .file_cache()
             .remove(&block_manager.path_to_desc(block_id))
             .await
             .unwrap();
