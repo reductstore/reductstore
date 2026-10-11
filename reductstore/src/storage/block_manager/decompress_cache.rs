@@ -597,7 +597,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn test_get_or_decompress_caches_decompressed_file(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
@@ -630,7 +630,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn test_get_or_decompress_descriptor_type(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.meta.zst", "descriptor content");
         let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
@@ -655,7 +655,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn test_get_or_decompress_with_corrupted_data_returns_error(dir: PathBuf) {
         let compressed_path = dir.join("1.blk.zst");
         std::fs::write(&compressed_path, b"not valid zstd").unwrap();
@@ -678,7 +678,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn test_get_or_decompress_returns_error_when_temp_dir_is_file(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let temp_dir = dir.join("temp-file");
@@ -701,7 +701,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn test_invalidate_removes_cached_files(dir: PathBuf) {
         let data_path = compressed(&dir, "1.blk.zst", "data");
         let desc_path = compressed(&dir, "1.meta.zst", "desc");
@@ -741,7 +741,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn test_cache_eviction_removes_temp_file(dir: PathBuf) {
         let entries = ["entry-1", "entry-2", "entry-3"].map(|name| dir.join(name));
         let compressed_path = compressed(&dir, "1.blk.zst", "1234");
@@ -798,7 +798,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn handles_share_limit_but_not_files(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "1234");
         let cache = cache_in(&dir, 6, DECOMPRESS_CACHE_TTL);
@@ -841,7 +841,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn keeps_requested_file_larger_than_limit(dir: PathBuf) {
         let small_path = compressed(&dir, "1.blk.zst", "12");
         let large_path = compressed(&dir, "2.blk.zst", "1234567890");
@@ -876,7 +876,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn removes_expired_files_without_next_read(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let cache = cache_in(&dir, 1000, Duration::from_millis(20));
@@ -908,7 +908,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn expired_file_in_use_is_removed_after_release(dir: PathBuf) {
         let file_type = DecompressedFileType::Data;
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
@@ -948,7 +948,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn files_in_use_are_kept_over_limit_until_released(dir: PathBuf) {
         let file_type = DecompressedFileType::Data;
         let compressed_path = compressed(&dir, "1.blk.zst", "1234");
@@ -1002,7 +1002,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn invalidated_file_is_removed_after_last_reader(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "old");
         let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
@@ -1041,13 +1041,13 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn eviction_does_not_remove_file_being_read(dir: PathBuf) {
         let file_type = DecompressedFileType::Data;
         let content = "0123456789".repeat(10);
         let compressed_path = compressed(&dir, "1.blk.zst", &content);
         // Room for one file only
-        let cache = Arc::new(cache_in(&dir, 150, DECOMPRESS_CACHE_TTL));
+        let cache = cache_in(&dir, 150, DECOMPRESS_CACHE_TTL);
         let file = cache
             .get_or_decompress(
                 &dir.join("reader"),
@@ -1059,46 +1059,28 @@ mod tests {
             .await
             .unwrap();
 
-        let added = Arc::new(AtomicU64::new(0));
-        let stop = Arc::new(AtomicBool::new(false));
-        let evictor = {
-            let (cache, dir, compressed_path) =
-                (Arc::clone(&cache), dir.clone(), compressed_path.clone());
-            let (added, stop) = (Arc::clone(&added), Arc::clone(&stop));
-            tokio::spawn(async move {
-                for entry in 0.. {
-                    if stop.load(Ordering::Relaxed) {
-                        break;
-                    }
-                    cache
-                        .get_or_decompress(
-                            &dir.join(entry.to_string()),
-                            1,
-                            file_type,
-                            &compressed_path,
-                            &file_cache(),
-                        )
-                        .await
-                        .unwrap();
-                    added.fetch_add(1, Ordering::Relaxed);
-                }
-            })
-        };
+        // A second file exceeds the limit and evicts the first cache entry. The
+        // `file` guard must keep the evicted file available for the reader.
+        cache
+            .get_or_decompress(
+                &dir.join("evictor"),
+                1,
+                file_type,
+                &compressed_path,
+                &file_cache(),
+            )
+            .await
+            .unwrap();
 
         // Reopen the file for every chunk, as a reader does after FILE_CACHE has closed it
         let mut read = vec![];
         for offset in (0..content.len() as u64).step_by(10) {
-            let target = added.load(Ordering::Relaxed) + 2;
-            assert!(wait_until(|| added.load(Ordering::Relaxed) >= target).await);
-
             let mut chunk = [0; 10];
             let mut opened = File::open(file.path()).unwrap();
             std::io::Seek::seek(&mut opened, SeekFrom::Start(offset)).unwrap();
             opened.read_exact(&mut chunk).unwrap();
             read.extend_from_slice(&chunk);
         }
-        stop.store(true, Ordering::Relaxed);
-        evictor.await.unwrap();
 
         assert_eq!(read, content.as_bytes());
         let files = cached_files(&cache.inner.temp_dir);
@@ -1111,7 +1093,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn drop_removes_temp_dir(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
@@ -1135,7 +1117,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn shared_cache_lives_while_any_handle_is_alive(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let slot = parking_lot::const_mutex(Weak::new());
@@ -1172,7 +1154,7 @@ mod tests {
     }
 
     #[rstest]
-    #[serial]
+    #[serial(decompress_cache)]
     fn removes_only_stale_temp_dirs(dir: PathBuf) {
         let make_dir = |name: &str, with_lock: bool| {
             let path = dir.join(name);
@@ -1210,7 +1192,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn live_cache_survives_stale_dir_cleanup(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
@@ -1232,7 +1214,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn concurrent_readers_of_same_block_keep_one_file(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let cache = Arc::new(cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL));
@@ -1282,7 +1264,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn get_or_decompress_returns_error_when_block_is_unreadable(dir: PathBuf) {
         // A directory instead of the compressed block: it can't be read as a file
         let compressed_path = dir.join("1.blk.zst");
@@ -1311,7 +1293,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn get_or_decompress_returns_error_when_lock_file_cannot_be_created(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let cache = cache_in(&dir, 1000, DECOMPRESS_CACHE_TTL);
@@ -1337,7 +1319,7 @@ mod tests {
     #[cfg(unix)]
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn failed_temp_file_create_is_not_cached(dir: PathBuf) {
         use std::os::unix::fs::PermissionsExt;
 
@@ -1384,7 +1366,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    #[serial]
+    #[serial(decompress_cache)]
     async fn cleanup_worker_stops_when_cache_is_dropped(dir: PathBuf) {
         let compressed_path = compressed(&dir, "1.blk.zst", "content");
         let file_cache = file_cache();

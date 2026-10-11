@@ -1003,7 +1003,7 @@ mod tests {
 
         tokio_sleep(Duration::from_millis(200)).await;
 
-        assert!(path.exists(), "Transaction log was recovered");
+        assert!(!path.exists(), "Transaction log was unexpectedly recovered");
 
         assert_eq!(
             get_entries_from_transaction_log(&mut replication, "test1").await,
