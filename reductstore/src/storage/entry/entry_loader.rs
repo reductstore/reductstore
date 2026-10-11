@@ -1175,9 +1175,9 @@ mod tests {
     ) {
         let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
-            bm.save_cache_on_disk().await.unwrap();
             bm.compress_block(1, CompressionAlgorithm::Zstd)
                 .await
                 .unwrap();
@@ -1185,11 +1185,11 @@ mod tests {
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
         file_cache.remove(&block_index_path).await.unwrap();
-        fs::remove_file(
-            path.join("entry")
-                .join(format!("1{}", COMPRESSED_DATA_FILE_EXT)),
-        )
-        .unwrap();
+        let compressed_data_path = path
+            .join("entry")
+            .join(format!("1{}", COMPRESSED_DATA_FILE_EXT));
+        file_cache.remove(&compressed_data_path).await.unwrap();
+        drop(entry);
 
         let err = match EntryLoader::restore_entry(
             path.join("entry"),
