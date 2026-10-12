@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve the last committed attachment when its replacement write fails, [#1664](https://github.com/reductstore/reductstore/pull/1664)
 - Preserve retained record payloads when removing records before an active publication batch is committed, [PR-1663](https://github.com/reductstore/reductstore/pull/1663)
 - Prevent idle publication from blocking reads after write bursts, [#1657](https://github.com/reductstore/reductstore/pull/1657)
 - Limit disk usage of decompressed blocks across all entries (`RS_ENGINE_DECOMPRESS_CACHE_SIZE`, default 1GB) and clean up expired, partial and leftover files, [PR-1640](https://github.com/reductstore/reductstore/pull/1640) by @ragen1337

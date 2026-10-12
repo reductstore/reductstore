@@ -776,6 +776,7 @@ mod tests {
             );
 
             entry.compact().await.unwrap();
+            wait_for_publication(&entry, &file_cache, 2).await;
 
             let publication = publication::load(&entry.path, &file_cache)
                 .await
@@ -884,6 +885,7 @@ mod tests {
                 .unwrap();
 
             entry.compact().await.unwrap();
+            wait_for_publication(&entry, &file_cache, 2).await;
 
             let publication = publication::load(&entry.path, &file_cache)
                 .await
