@@ -1073,6 +1073,7 @@ mod tests {
     ) {
         let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
         entry
             .block_manager
             .write()
