@@ -96,7 +96,7 @@ pub(crate) mod tests {
     use super::*;
 
     use crate::cfg::Cfg;
-    use crate::core::file_cache::FILE_CACHE;
+    use crate::core::file_cache::build_test_file_cache;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::proto::record::{Label, State as RecordState};
     use crate::storage::proto::Record;
@@ -111,14 +111,16 @@ pub(crate) mod tests {
         // the first block has two records: 0, 5
         // the second block has a record: 1000
         let dir = tempdir().unwrap().keep().join("bucket").join("entry");
+        let file_cache = build_test_file_cache();
 
         let mut block_manager = BlockManager::build(
             dir.clone(),
-            BlockIndex::new(dir.join("index")),
+            BlockIndex::new(dir.join("index"), Arc::clone(&file_cache)),
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
             Default::default(),
+            Arc::clone(&file_cache),
         )
         .await
         .unwrap();
@@ -183,7 +185,7 @@ pub(crate) mod tests {
             ($block:expr, $index:expr, $content:expr) => {{
                 let blk = $block.read().await.unwrap();
                 let (path, offset) = block_manager.begin_write_record(&blk, $index).unwrap();
-                let mut file = FILE_CACHE
+                let mut file = file_cache
                     .write_or_create(&path, SeekFrom::Start(offset))
                     .await
                     .unwrap();

@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::file_cache::{BatchToken, FILE_CACHE};
+use crate::core::file_cache::{BatchToken, FileCache};
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
@@ -37,6 +37,7 @@ struct WriteContext {
     content_size: u64,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
     batch_token: Option<BatchToken>,
+    file_cache: Arc<FileCache>,
 }
 
 impl RecordWriter {
@@ -77,7 +78,7 @@ impl RecordWriter {
         time: u64,
         batch_token: Option<BatchToken>,
     ) -> Result<Self, ReductError> {
-        let (file_path, offset, bucket_name, entry_name, usage_counters) = {
+        let (file_path, offset, bucket_name, entry_name, usage_counters, file_cache) = {
             let mut bm = block_manager.write().await?;
             let block = block_ref.read().await?;
 
@@ -94,6 +95,7 @@ impl RecordWriter {
                 bm.bucket_name().to_string(),
                 bm.entry_name().to_string(),
                 bm.usage_counters_arc(),
+                Arc::clone(bm.file_cache()),
             )
         };
 
@@ -117,6 +119,7 @@ impl RecordWriter {
             content_size,
             block_manager,
             batch_token,
+            file_cache,
         };
 
         let me = if content_size >= MAX_IO_BUFFER_SIZE as u64 {
@@ -159,11 +162,15 @@ impl RecordWriter {
                                 SeekFrom::Start(ctx.offset + written_bytes - chunk.len() as u64);
                             let mut lock = match &ctx.batch_token {
                                 Some(token) => {
-                                    FILE_CACHE
+                                    ctx.file_cache
                                         .write_or_create_in_batch(token, &ctx.file_path, offset)
                                         .await?
                                 }
-                                None => FILE_CACHE.write_or_create(&ctx.file_path, offset).await?,
+                                None => {
+                                    ctx.file_cache
+                                        .write_or_create(&ctx.file_path, offset)
+                                        .await?
+                                }
                             };
 
                             lock.write_all(chunk.as_ref())?;
@@ -515,13 +522,15 @@ mod tests {
 
         #[fixture]
         async fn block_manager(path: PathBuf) -> Arc<AsyncRwLock<BlockManager>> {
+            let file_cache = crate::core::file_cache::build_test_file_cache();
             let manager = BlockManager::build(
                 path.clone(),
-                BlockIndex::new(path.clone()),
+                BlockIndex::new(path.clone(), file_cache.clone()),
                 "bucket".to_string(),
                 "entry".to_string(),
                 Cfg::default().into(),
                 Default::default(),
+                file_cache,
             )
             .await
             .unwrap();

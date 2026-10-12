@@ -15,9 +15,10 @@ use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 
-use crate::core::file_cache::{BatchToken, FILE_CACHE};
+use crate::core::file_cache::{BatchToken, FileCache};
 use crate::storage::proto::Record;
 use byteorder::{BigEndian, ReadBytesExt, WriteBytesExt};
+use std::sync::Arc;
 
 const WAL_FILE_SIZE: u64 = 1_000_000;
 const WAL_DIR: &str = ".wal";
@@ -135,22 +136,27 @@ struct WalImpl {
     file_positions: HashMap<u64, u64>,
     known_blocks: BTreeSet<u64>,
     batch_token: Option<BatchToken>,
+    file_cache: Arc<FileCache>,
 }
 
 impl WalImpl {
-    pub async fn try_build(path_buf: PathBuf) -> Result<Self, ReductError> {
+    pub async fn try_build(
+        path_buf: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) -> Result<Self, ReductError> {
         let mut wal = WalImpl {
             root_path: path_buf,
             file_positions: HashMap::new(), // we need to keep track of the file positions for each block because of file cache
             known_blocks: BTreeSet::new(),
             batch_token: None,
+            file_cache,
         };
 
         let mut blocks = BTreeSet::new();
 
         // WAL files can be dirty only in the local cache. Remote backends list
         // objects from remote storage, so check the local WAL directory first to
-        // make strict sync/compaction see WALs before FILE_CACHE uploads them.
+        // make strict sync/compaction see WALs before FileCache uploads them.
         let local_entries = match tokio::fs::read_dir(&wal.root_path).await {
             Ok(entries) => Some(entries),
             Err(err) if err.kind() == ErrorKind::NotFound => None,
@@ -165,7 +171,7 @@ impl WalImpl {
             }
         }
 
-        for path in FILE_CACHE.read_dir(&wal.root_path).await? {
+        for path in wal.file_cache.read_dir(&wal.root_path).await? {
             if let Some(block_id) = Self::parse_wal_block_id(&path) {
                 blocks.insert(block_id);
             }
@@ -202,7 +208,7 @@ impl Wal for WalImpl {
 
     async fn append(&mut self, block_id: u64, entry: WalEntry) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        let mut file = if !FILE_CACHE.try_exists(&path).await? {
+        let mut file = if !self.file_cache.try_exists(&path).await? {
             let mut file = self.write_or_create(&path, SeekFrom::Current(0)).await?;
             file.set_len(WAL_FILE_SIZE)?;
             self.file_positions.insert(block_id, 0);
@@ -240,7 +246,7 @@ impl Wal for WalImpl {
 
     async fn read(&self, block_id: u64) -> Result<Vec<WalEntry>, ReductError> {
         let path = self.block_wal_path(block_id);
-        let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+        let mut file = self.file_cache.read(&path, SeekFrom::Start(0)).await?;
 
         let mut entries = Vec::new();
         loop {
@@ -278,7 +284,7 @@ impl Wal for WalImpl {
 
     async fn remove(&mut self, block_id: u64) -> Result<(), ReductError> {
         let path = self.block_wal_path(block_id);
-        if FILE_CACHE.try_exists(&path).await? {
+        if self.file_cache.try_exists(&path).await? {
             self.remove_file(&path).await?;
         }
         self.known_blocks.remove(&block_id);
@@ -297,15 +303,19 @@ impl WalImpl {
         pos: SeekFrom,
     ) -> Result<crate::core::file_cache::FileGuard, ReductError> {
         match &self.batch_token {
-            Some(token) => FILE_CACHE.write_or_create_in_batch(token, path, pos).await,
-            None => FILE_CACHE.write_or_create(path, pos).await,
+            Some(token) => {
+                self.file_cache
+                    .write_or_create_in_batch(token, path, pos)
+                    .await
+            }
+            None => self.file_cache.write_or_create(path, pos).await,
         }
     }
 
     async fn remove_file(&self, path: &PathBuf) -> Result<(), ReductError> {
         match &self.batch_token {
-            Some(token) => FILE_CACHE.remove_in_batch(token, path).await,
-            None => FILE_CACHE.remove(path).await,
+            Some(token) => self.file_cache.remove_in_batch(token, path).await,
+            None => self.file_cache.remove(path).await,
         }
     }
 }
@@ -325,12 +335,13 @@ impl WalImpl {
 ///
 pub(in crate::storage) async fn create_wal(
     entry_path: PathBuf,
+    file_cache: Arc<FileCache>,
 ) -> Result<Box<dyn Wal + Send + Sync>, ReductError> {
     let wal_folder = entry_path.join(WAL_DIR);
     let legacy_wal_folder = entry_path.join(LEGACY_WAL_DIR);
 
     if !wal_folder.try_exists()? && legacy_wal_folder.try_exists()? {
-        if let Err(err) = FILE_CACHE.rename(&legacy_wal_folder, &wal_folder).await {
+        if let Err(err) = file_cache.rename(&legacy_wal_folder, &wal_folder).await {
             warn!(
                 "Failed to migrate legacy WAL folder {:?} to {:?}: {}",
                 legacy_wal_folder, wal_folder, err
@@ -339,24 +350,31 @@ pub(in crate::storage) async fn create_wal(
     }
 
     if !wal_folder.try_exists()? {
-        FILE_CACHE.create_dir_all(&wal_folder).await?;
+        file_cache.create_dir_all(&wal_folder).await?;
     }
 
     Ok(Box::new(
-        WalImpl::try_build(entry_path.join(WAL_DIR)).await?,
+        WalImpl::try_build(entry_path.join(WAL_DIR), file_cache).await?,
     ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::file_cache::{build_test_file_cache, FileCache};
     use reduct_base::error::ErrorCode;
     use rstest::*;
     use std::fs::OpenOptions;
+    use std::sync::Arc;
+
+    #[fixture]
+    fn file_cache() -> Arc<FileCache> {
+        build_test_file_cache()
+    }
 
     #[rstest]
     #[tokio::test]
-    async fn test_read(#[future] wal: WalImpl) {
+    async fn test_read(#[future] wal: WalImpl, file_cache: Arc<FileCache>) {
         let mut wal = wal.await;
         wal.append(1, WalEntry::WriteRecord(Record::default()))
             .await
@@ -367,9 +385,12 @@ mod tests {
         wal.append(1, WalEntry::RemoveBlock).await.unwrap();
         wal.append(1, WalEntry::RemoveRecord(1)).await.unwrap();
 
-        let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf())
-            .await
-            .unwrap();
+        let wal = create_wal(
+            wal.root_path.parent().unwrap().to_path_buf(),
+            file_cache.clone(),
+        )
+        .await
+        .unwrap();
         let entries = wal.read(1).await.unwrap();
 
         assert_eq!(
@@ -385,7 +406,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_remove(#[future] wal: WalImpl) {
+    async fn test_remove(#[future] wal: WalImpl, file_cache: Arc<FileCache>) {
         let mut wal = wal.await;
         wal.append(1, WalEntry::WriteRecord(Record::default()))
             .await
@@ -394,16 +415,19 @@ mod tests {
         assert_eq!(wal.read(1).await.unwrap().len(), 1);
         wal.remove(1).await.unwrap();
 
-        let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf())
-            .await
-            .unwrap();
+        let wal = create_wal(
+            wal.root_path.parent().unwrap().to_path_buf(),
+            file_cache.clone(),
+        )
+        .await
+        .unwrap();
         let err = wal.read(1).await.err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_list(#[future] wal: WalImpl) {
+    async fn test_list(#[future] wal: WalImpl, file_cache: Arc<FileCache>) {
         let mut wal = wal.await;
         wal.append(1, WalEntry::WriteRecord(Record::default()))
             .await
@@ -412,9 +436,12 @@ mod tests {
             .await
             .unwrap();
 
-        let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf())
-            .await
-            .unwrap();
+        let wal = create_wal(
+            wal.root_path.parent().unwrap().to_path_buf(),
+            file_cache.clone(),
+        )
+        .await
+        .unwrap();
         let blocks = wal.list().await.unwrap();
         assert_eq!(blocks.len(), 2);
         assert!(blocks.contains(&1));
@@ -433,7 +460,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_crc_error(#[future] wal: WalImpl) {
+    async fn test_crc_error(#[future] wal: WalImpl, file_cache: Arc<FileCache>) {
         let mut wal = wal.await;
         wal.append(1, WalEntry::WriteRecord(Record::default()))
             .await
@@ -444,21 +471,24 @@ mod tests {
         file.seek(SeekFrom::Start(0)).unwrap();
         file.write_all(&[0, 0, 0, 0, 0, 0, 0, 0, 0, 1]).unwrap();
 
-        let wal = create_wal(wal.root_path.parent().unwrap().to_path_buf())
-            .await
-            .unwrap();
+        let wal = create_wal(
+            wal.root_path.parent().unwrap().to_path_buf(),
+            file_cache.clone(),
+        )
+        .await
+        .unwrap();
         let err = wal.read(1).await.err().unwrap();
         assert_eq!(&err.status, &ErrorCode::InternalServerError);
     }
 
     #[rstest]
     #[tokio::test]
-    async fn cache_invalidation(#[future] wal: WalImpl) {
+    async fn cache_invalidation(#[future] wal: WalImpl, file_cache: Arc<FileCache>) {
         let mut wal = wal.await;
         wal.append(1, WalEntry::UpdateRecord(Record::default()))
             .await
             .unwrap();
-        FILE_CACHE
+        file_cache
             .discard_recursive(&wal.root_path.join("1.wal"))
             .await
             .unwrap();
@@ -479,13 +509,15 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_migrate_legacy_wal_dir() {
+    async fn test_migrate_legacy_wal_dir(file_cache: Arc<FileCache>) {
         let path = tempfile::tempdir().unwrap().keep();
         let entry_path = path.join("entry");
         std::fs::create_dir_all(entry_path.join(LEGACY_WAL_DIR)).unwrap();
         std::fs::write(entry_path.join(LEGACY_WAL_DIR).join("1.wal"), [STOP_MARKER]).unwrap();
 
-        let wal = create_wal(entry_path.clone()).await.unwrap();
+        let wal = create_wal(entry_path.clone(), file_cache.clone())
+            .await
+            .unwrap();
 
         assert!(entry_path.join(WAL_DIR).exists());
         assert!(!entry_path.join(LEGACY_WAL_DIR).exists());
@@ -494,29 +526,41 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_try_build_returns_error_if_local_wal_path_is_not_directory() {
+    async fn test_try_build_returns_error_if_local_wal_path_is_not_directory(
+        file_cache: Arc<FileCache>,
+    ) {
         let path = tempfile::tempdir().unwrap().keep();
         let wal_path = path.join(WAL_DIR);
         std::fs::write(&wal_path, b"not a directory").unwrap();
 
-        let err = WalImpl::try_build(wal_path).await.err().unwrap();
+        let err = WalImpl::try_build(wal_path, file_cache.clone())
+            .await
+            .err()
+            .unwrap();
         assert_eq!(err.status, ErrorCode::InternalServerError);
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_try_build_missing_local_wal_dir_propagates_backend_error() {
+    async fn test_try_build_missing_local_wal_dir_propagates_backend_error(
+        file_cache: Arc<FileCache>,
+    ) {
         let path = tempfile::tempdir().unwrap().keep();
         let wal_path = path.join(WAL_DIR);
 
-        let err = WalImpl::try_build(wal_path).await.err().unwrap();
+        let err = WalImpl::try_build(wal_path, file_cache.clone())
+            .await
+            .err()
+            .unwrap();
         assert_eq!(err.status, ErrorCode::InternalServerError);
     }
 
     #[fixture]
-    async fn wal() -> WalImpl {
+    async fn wal(file_cache: Arc<FileCache>) -> WalImpl {
         let path = tempfile::tempdir().unwrap().keep();
         std::fs::create_dir_all(path.join(WAL_DIR)).unwrap();
-        WalImpl::try_build(path.join(WAL_DIR)).await.unwrap()
+        WalImpl::try_build(path.join(WAL_DIR), file_cache.clone())
+            .await
+            .unwrap()
     }
 }

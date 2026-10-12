@@ -3,7 +3,7 @@
 
 use super::{strategy_for_entry, Entry, EntrySettings};
 use crate::cfg::Cfg;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
@@ -26,6 +26,7 @@ pub(crate) struct EntryBuilder {
     cfg: Option<Arc<Cfg>>,
     io_limiter: Option<InFlightIoLimiter>,
     usage_counters: Option<Arc<UsageCounters>>,
+    file_cache: Option<Arc<FileCache>>,
 }
 
 impl EntryBuilder {
@@ -69,6 +70,11 @@ impl EntryBuilder {
         self
     }
 
+    pub(crate) fn file_cache(mut self, file_cache: Arc<FileCache>) -> Self {
+        self.file_cache = Some(file_cache);
+        self
+    }
+
     pub(crate) async fn build(self) -> Result<Entry, ReductError> {
         let name = self.name.expect("Entry name must be set");
         let bucket_path = self.bucket_path.expect("Bucket path must be set");
@@ -88,10 +94,14 @@ impl EntryBuilder {
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
         let block_index_path = path.join(BLOCK_INDEX_FILE);
-        let block_index = BlockIndex::new(block_index_path.clone());
+        let file_cache = match self.file_cache {
+            Some(file_cache) => file_cache,
+            None => FileCache::with_local_backend(path.clone()).await?,
+        };
+        let block_index = BlockIndex::new(block_index_path.clone(), Arc::clone(&file_cache));
 
-        if !FILE_CACHE.try_exists(&block_index_path).await? {
-            FILE_CACHE.create_dir_all(&path).await?;
+        if !file_cache.try_exists(&block_index_path).await? {
+            file_cache.create_dir_all(&path).await?;
             block_index.save().await?;
         }
 
@@ -107,6 +117,7 @@ impl EntryBuilder {
                     name.clone(),
                     cfg.clone(),
                     usage_counters,
+                    Arc::clone(&file_cache),
                 )
                 .await?,
             )),
@@ -116,7 +127,12 @@ impl EntryBuilder {
             path,
             cfg,
             io_limiter,
-            publication: Arc::new(super::publication_coordinator::PublicationCoordinator::new()),
+            publication: Arc::new(
+                super::publication_coordinator::PublicationCoordinator::new_with_cache(Arc::clone(
+                    &file_cache,
+                )),
+            ),
+            file_cache,
         })
     }
 
@@ -142,6 +158,10 @@ impl EntryBuilder {
         let usage_counters = self
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
+        let file_cache = match self.file_cache {
+            Some(file_cache) => file_cache,
+            None => FileCache::with_local_backend(path.clone()).await?,
+        };
 
         EntryLoader::restore_entry_with_names(
             path,
@@ -151,6 +171,7 @@ impl EntryBuilder {
             cfg,
             io_limiter,
             usage_counters,
+            file_cache,
         )
         .await
     }

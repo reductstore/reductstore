@@ -137,7 +137,7 @@ impl Bucket {
 #[cfg(test)]
 mod tests {
     use crate::cfg::Cfg;
-    use crate::core::file_cache::FILE_CACHE;
+    use crate::core::file_cache::build_test_file_cache;
     use crate::storage::bucket::tests::{bucket, path, read, write, write_meta};
     use crate::storage::bucket::{Bucket, FreeSpaceFn};
     use reduct_base::error::{ErrorCode, ReductError};
@@ -152,7 +152,8 @@ mod tests {
         path: PathBuf,
         free_space_fn: FreeSpaceFn,
     ) -> Arc<Bucket> {
-        FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
+        let file_cache = build_test_file_cache();
+        file_cache.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
             Bucket::builder()
                 .name("test")
@@ -161,6 +162,7 @@ mod tests {
                 .cfg(Cfg::default())
                 .usage_counters(Default::default())
                 .free_space_fn(free_space_fn)
+                .file_cache(file_cache)
                 .build()
                 .await
                 .unwrap(),

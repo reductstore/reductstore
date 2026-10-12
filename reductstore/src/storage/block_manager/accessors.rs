@@ -43,4 +43,8 @@ impl BlockManager {
     pub fn path(&self) -> &PathBuf {
         &self.path
     }
+
+    pub(in crate::storage) fn file_cache(&self) -> &Arc<crate::core::file_cache::FileCache> {
+        &self.file_cache
+    }
 }

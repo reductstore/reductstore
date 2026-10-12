@@ -53,6 +53,7 @@ impl Bucket {
                 .cfg(self.cfg.clone())
                 .io_limiter(self.io_limiter.clone())
                 .usage_counters(Arc::clone(&self.usage_counters))
+                .file_cache(Arc::clone(&self.file_cache))
                 .restore();
 
             task_set.push((entry_name, handler));
@@ -114,10 +115,10 @@ mod tests {
     use crate::cfg::storage_engine::StorageEngineConfig;
     use crate::cfg::Cfg;
     use crate::cfg::InstanceRole;
+    use crate::core::file_cache::build_test_file_cache;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::block_manager::BLOCK_INDEX_FILE;
     use crate::storage::bucket::tests::write;
-    use crate::storage::bucket::FILE_CACHE;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
@@ -270,7 +271,11 @@ mod tests {
     #[tokio::test]
     async fn test_restore_skips_failed_replica_entry(#[future] primary_bucket: Arc<Bucket>) {
         let primary_bucket = primary_bucket.await;
-        create_entry_with_broken_wal(primary_bucket.path().join("broken-entry")).await;
+        create_entry_with_broken_wal(
+            primary_bucket.path().join("broken-entry"),
+            &primary_bucket.file_cache,
+        )
+        .await;
 
         let mut cfg = primary_bucket.cfg().clone();
         cfg.role = InstanceRole::Replica;
@@ -291,7 +296,11 @@ mod tests {
     #[tokio::test]
     async fn test_restore_skips_failed_primary_entry(#[future] primary_bucket: Arc<Bucket>) {
         let primary_bucket = primary_bucket.await;
-        create_entry_with_broken_wal(primary_bucket.path().join("broken-entry")).await;
+        create_entry_with_broken_wal(
+            primary_bucket.path().join("broken-entry"),
+            &primary_bucket.file_cache,
+        )
+        .await;
 
         let read_write_bucket = Bucket::builder()
             .path(primary_bucket.path().clone())
@@ -322,7 +331,11 @@ mod tests {
                 .unwrap(),
         );
 
-        create_entry_with_broken_wal(primary_bucket.path().join("broken-entry")).await;
+        create_entry_with_broken_wal(
+            primary_bucket.path().join("broken-entry"),
+            &primary_bucket.file_cache,
+        )
+        .await;
         read_only_bucket.reload_entries().await.unwrap();
 
         let entries = read_only_bucket.entries.read().await.unwrap();
@@ -334,7 +347,11 @@ mod tests {
     #[tokio::test]
     async fn test_reload_skips_failed_primary_entry(#[future] primary_bucket: Arc<Bucket>) {
         let primary_bucket = primary_bucket.await;
-        create_entry_with_broken_wal(primary_bucket.path().join("broken-entry")).await;
+        create_entry_with_broken_wal(
+            primary_bucket.path().join("broken-entry"),
+            &primary_bucket.file_cache,
+        )
+        .await;
 
         primary_bucket.reload_entries().await.unwrap();
 
@@ -500,7 +517,8 @@ mod tests {
 
         cfg.role = InstanceRole::Primary;
 
-        FILE_CACHE
+        let file_cache = build_test_file_cache();
+        file_cache
             .create_dir_all(&cfg.data_path.join("bucket"))
             .await
             .unwrap();
@@ -511,6 +529,7 @@ mod tests {
                 .settings(BucketSettings::default())
                 .cfg(cfg)
                 .usage_counters(Default::default())
+                .file_cache(file_cache.clone())
                 .build()
                 .await
                 .unwrap(),
@@ -520,9 +539,12 @@ mod tests {
         bucket
     }
 
-    async fn create_entry_with_broken_wal(entry_path: std::path::PathBuf) {
-        FILE_CACHE.create_dir_all(&entry_path).await.unwrap();
-        BlockIndex::new(entry_path.join(BLOCK_INDEX_FILE))
+    async fn create_entry_with_broken_wal(
+        entry_path: std::path::PathBuf,
+        file_cache: &std::sync::Arc<crate::core::file_cache::FileCache>,
+    ) {
+        file_cache.create_dir_all(&entry_path).await.unwrap();
+        BlockIndex::new(entry_path.join(BLOCK_INDEX_FILE), file_cache.clone())
             .save()
             .await
             .unwrap();

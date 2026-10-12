@@ -775,8 +775,11 @@ pub(crate) mod tests {
         .await
     }
 
-    async fn test_deployment_ids(cfg: &Cfg) -> (StoreId, NodeId) {
-        let store_id = StoreId::builder(&cfg.data_path, cfg.role.clone())
+    async fn test_deployment_ids(
+        cfg: &Cfg,
+        file_cache: &Arc<crate::core::file_cache::FileCache>,
+    ) -> (StoreId, NodeId) {
+        let store_id = StoreId::builder(&cfg.data_path, cfg.role.clone(), Arc::clone(file_cache))
             .load_or_create()
             .await
             .unwrap();
@@ -810,7 +813,7 @@ pub(crate) mod tests {
         let console_bytes: &[u8] = &[];
 
         let system_events = test_system_events(&cfg, &storage).await;
-        let (store_id, node_id) = test_deployment_ids(&cfg).await;
+        let (store_id, node_id) = test_deployment_ids(&cfg, storage.file_cache()).await;
         Components {
             store_id,
             node_id: node_id.clone(),
@@ -935,7 +938,7 @@ pub(crate) mod tests {
         let console_bytes: &[u8] = &[];
 
         let system_events = test_system_events(&cfg, &storage).await;
-        let (store_id, node_id) = test_deployment_ids(&cfg).await;
+        let (store_id, node_id) = test_deployment_ids(&cfg, storage.file_cache()).await;
         let components = Components {
             store_id,
             node_id: node_id.clone(),
@@ -1049,7 +1052,7 @@ pub(crate) mod tests {
         let console_bytes: &[u8] = &[];
 
         let system_events = test_system_events(&cfg, &storage).await;
-        let (store_id, node_id) = test_deployment_ids(&cfg).await;
+        let (store_id, node_id) = test_deployment_ids(&cfg, storage.file_cache()).await;
         let components = Components {
             store_id,
             node_id: node_id.clone(),

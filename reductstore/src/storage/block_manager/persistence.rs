@@ -49,7 +49,7 @@ impl BlockManager {
         }
 
         let path = self.path_to_data(block_id);
-        if !FILE_CACHE.try_exists(&path).await? {
+        if !self.file_cache.try_exists(&path).await? {
             return Ok(());
         }
 
@@ -62,7 +62,7 @@ impl BlockManager {
 
     // Method save descriptor and update index
     // Note: it calls local sync but not sync_all to avoid blocking entry during synchronization with remote backend
-    // the blocks must be synced with backed from FILE_CACHE sync loop
+    // the blocks must be synced with backend from the FileCache sync loop
     pub(super) async fn save_meta_on_disk(
         &mut self,
         block_ref: BlockRef,
@@ -128,7 +128,9 @@ impl BlockManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::file_cache::FileCache;
     use crate::storage::block_manager::block_index::BlockIndex;
+    use crate::storage::block_manager::test_utils::file_cache;
     use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE, DESCRIPTOR_FILE_EXT};
     use crate::storage::proto::Block as BlockProto;
     use prost::Message;
@@ -138,17 +140,18 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_sync_data_block_ok_for_replica() {
+    async fn test_sync_data_block_ok_for_replica(file_cache: Arc<FileCache>) {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
         let mut cfg = Cfg::default();
         cfg.role = InstanceRole::Replica;
         let block_manager = BlockManager::build(
             path.clone(),
-            BlockIndex::new(path.clone()),
+            BlockIndex::new(path.clone(), file_cache.clone()),
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg),
             Default::default(),
+            file_cache,
         )
         .await
         .unwrap();
@@ -157,16 +160,17 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_sync_data_block_ok_for_missing_path() {
+    async fn test_sync_data_block_ok_for_missing_path(file_cache: Arc<FileCache>) {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
         let cfg = Cfg::default();
         let block_manager = BlockManager::build(
             path.clone(),
-            BlockIndex::new(path.clone()),
+            BlockIndex::new(path.clone(), file_cache.clone()),
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg),
             Default::default(),
+            file_cache,
         )
         .await
         .unwrap();
@@ -175,16 +179,17 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_save_meta_stores_version_in_descriptor() {
+    async fn test_save_meta_stores_version_in_descriptor(file_cache: Arc<FileCache>) {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
-        FILE_CACHE.create_dir_all(&path).await.unwrap();
+        file_cache.create_dir_all(&path).await.unwrap();
         let mut block_manager = BlockManager::build(
             path.clone(),
-            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            BlockIndex::new(path.join(BLOCK_INDEX_FILE), file_cache.clone()),
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
             Default::default(),
+            file_cache,
         )
         .await
         .unwrap();
@@ -216,15 +221,16 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_save_cache_metadata_skips_blocks_without_wal() {
+    async fn test_save_cache_metadata_skips_blocks_without_wal(file_cache: Arc<FileCache>) {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
         let mut block_manager = BlockManager::build(
             path.clone(),
-            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            BlockIndex::new(path.join(BLOCK_INDEX_FILE), file_cache.clone()),
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
             Default::default(),
+            file_cache,
         )
         .await
         .unwrap();

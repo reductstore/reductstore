@@ -2,7 +2,6 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::cfg::InstanceRole;
-use crate::core::file_cache::FILE_CACHE;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::{
     all_block_file_paths, BlockManager, ReplicaPublication, BLOCK_INDEX_FILE,
@@ -13,6 +12,7 @@ use reduct_base::too_early;
 use std::collections::BTreeSet;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Instant;
 
 pub(in crate::storage) struct ReplicaIndexReload {
@@ -23,12 +23,15 @@ pub(in crate::storage) struct ReplicaIndexReload {
 }
 
 impl ReplicaIndexReload {
-    pub(in crate::storage) async fn load_candidate(&self) -> Result<BlockIndex, ReductError> {
-        FILE_CACHE
+    pub(in crate::storage) async fn load_candidate(
+        &self,
+        file_cache: &Arc<crate::core::file_cache::FileCache>,
+    ) -> Result<BlockIndex, ReductError> {
+        file_cache
             .invalidate_local_cache_file(&self.index_path)
             .await?;
 
-        BlockIndex::try_load(self.index_path.clone()).await
+        BlockIndex::try_load(self.index_path.clone(), Arc::clone(file_cache)).await
     }
 
     pub(in crate::storage) fn accepted_publication(&self) -> &ReplicaPublication {
@@ -103,7 +106,7 @@ impl BlockManager {
         let mut first_err = None;
         for block_id in ids {
             for path in all_block_file_paths(&reload.entry_path, block_id) {
-                if let Err(err) = FILE_CACHE.invalidate_local_cache_file(&path).await {
+                if let Err(err) = self.file_cache.invalidate_local_cache_file(&path).await {
                     if first_err.is_none() {
                         first_err = Some(err);
                     }
@@ -131,7 +134,7 @@ impl BlockManager {
             let mut first_err = None;
             for block_id in ids {
                 for path in all_block_file_paths(&self.path, block_id) {
-                    if let Err(err) = FILE_CACHE.invalidate_local_cache_file(&path).await {
+                    if let Err(err) = self.file_cache.invalidate_local_cache_file(&path).await {
                         if first_err.is_none() {
                             first_err = Some(err);
                         }
@@ -168,9 +171,11 @@ mod tests {
     use super::*;
     use crate::cfg::storage_engine::StorageEngineConfig;
     use crate::cfg::Cfg;
+    use crate::core::file_cache::FileCache;
     use crate::storage::block_manager::block::Block;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::block_manager::compress::CompressionAlgorithm;
+    use crate::storage::block_manager::test_utils::file_cache;
     use crate::storage::block_manager::{BlockManager, BLOCK_INDEX_FILE};
     use crate::storage::proto::Block as BlockProto;
     use prost::Message;
@@ -183,7 +188,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_reload_if_readonly_is_noop(#[future] path: PathBuf) {
+    async fn test_reload_if_readonly_is_noop(#[future] path: PathBuf, file_cache: Arc<FileCache>) {
         let path = path.await;
         let cfg = Cfg {
             role: InstanceRole::Replica,
@@ -195,7 +200,7 @@ mod tests {
             ..Default::default()
         };
 
-        let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
+        let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE), file_cache.clone());
         index.save().await.unwrap();
         let mut block_manager = BlockManager::build(
             path.clone(),
@@ -204,12 +209,13 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg.clone()),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
 
         // change index on disc
-        let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))
+        let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE), file_cache.clone())
             .await
             .unwrap();
 
@@ -226,7 +232,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_background_replica_index_reload(#[future] path: PathBuf) {
+    async fn test_background_replica_index_reload(
+        #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
         let path = path.await;
         let cfg = Cfg {
             role: InstanceRole::Replica,
@@ -238,7 +247,7 @@ mod tests {
             ..Default::default()
         };
 
-        let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
+        let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE), file_cache.clone());
         index.save().await.unwrap();
         let mut block_manager = BlockManager::build(
             path.clone(),
@@ -247,18 +256,19 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg.clone()),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
 
-        let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))
+        let mut new_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE), file_cache.clone())
             .await
             .unwrap();
         new_index.insert_or_update(Block::new(1));
         new_index.save().await.unwrap();
 
         let reload = block_manager.prepare_replica_index_reload().unwrap();
-        let updated_index = reload.load_candidate().await.unwrap();
+        let updated_index = reload.load_candidate(&file_cache).await.unwrap();
         block_manager
             .apply_replica_index_reload(reload, updated_index, ReplicaPublication::Legacy)
             .await
@@ -269,7 +279,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_replica_index_reload_accepts_published_transition(#[future] path: PathBuf) {
+    async fn test_replica_index_reload_accepts_published_transition(
+        #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
         let path = path.await;
         let cfg = Cfg {
             role: InstanceRole::Replica,
@@ -277,7 +290,7 @@ mod tests {
             ..Default::default()
         };
         let index_path = path.join(BLOCK_INDEX_FILE);
-        let index = BlockIndex::new(index_path.clone());
+        let index = BlockIndex::new(index_path.clone(), file_cache.clone());
         index.save().await.unwrap();
         let mut block_manager = BlockManager::build(
             path,
@@ -286,16 +299,17 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
 
-        let mut updated_index = BlockIndex::new(index_path);
+        let mut updated_index = BlockIndex::new(index_path, file_cache.clone());
         updated_index.insert_or_update(Block::new(1));
         updated_index.save().await.unwrap();
 
         let reload = block_manager.prepare_replica_index_reload().unwrap();
-        let updated_index = reload.load_candidate().await.unwrap();
+        let updated_index = reload.load_candidate(&file_cache).await.unwrap();
         let publication =
             ReplicaPublication::Published(crate::storage::entry::publication::PublicationId {
                 incarnation: "test-incarnation".to_string(),
@@ -312,7 +326,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "current_thread")]
-    async fn test_reload_if_readonly_discards_cache_on_crc_change(#[future] path: PathBuf) {
+    async fn test_reload_if_readonly_discards_cache_on_crc_change(
+        #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
         let path = path.await;
         let entry_path = path.join("bucket").join("entry");
 
@@ -327,7 +344,7 @@ mod tests {
         };
 
         let index_path = entry_path.join(BLOCK_INDEX_FILE);
-        let mut index = BlockIndex::new(index_path.clone());
+        let mut index = BlockIndex::new(index_path.clone(), file_cache.clone());
         index.insert_or_update_with_crc(Block::new(1), 1);
         index.save().await.unwrap();
 
@@ -338,16 +355,17 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg.clone()),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
 
-        let mut updated_index = BlockIndex::new(index_path.clone());
+        let mut updated_index = BlockIndex::new(index_path.clone(), file_cache.clone());
         updated_index.insert_or_update_with_crc(Block::new(1), 2);
         updated_index.save().await.unwrap();
 
         let reload = block_manager.prepare_replica_index_reload().unwrap();
-        let updated_index = reload.load_candidate().await.unwrap();
+        let updated_index = reload.load_candidate(&file_cache).await.unwrap();
         block_manager
             .apply_replica_index_reload(reload, updated_index, ReplicaPublication::Legacy)
             .await
@@ -363,6 +381,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn test_reload_if_readonly_discards_compressed_cache_on_crc_change(
         #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
     ) {
         let path = path.await;
         let entry_path = path.join("bucket").join("entry");
@@ -378,18 +397,18 @@ mod tests {
         };
 
         let index_path = entry_path.join(BLOCK_INDEX_FILE);
-        let mut index = BlockIndex::new(index_path.clone());
+        let mut index = BlockIndex::new(index_path.clone(), file_cache.clone());
         index.insert_or_update_with_crc(Block::new(1), 1);
         index.save().await.unwrap();
 
         std::fs::write(entry_path.join("1.meta.zst"), b"old-meta").unwrap();
         std::fs::write(entry_path.join("1.blk.zst"), b"old-data").unwrap();
 
-        FILE_CACHE
+        file_cache
             .read(&entry_path.join("1.meta.zst"), std::io::SeekFrom::Start(0))
             .await
             .unwrap();
-        FILE_CACHE
+        file_cache
             .read(&entry_path.join("1.blk.zst"), std::io::SeekFrom::Start(0))
             .await
             .unwrap();
@@ -401,11 +420,12 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
 
-        let mut updated_index = BlockIndex::new(index_path.clone());
+        let mut updated_index = BlockIndex::new(index_path.clone(), file_cache.clone());
         updated_index.insert_or_update_with_crc(Block::new(1), 2);
         updated_index.save().await.unwrap();
 
@@ -413,13 +433,13 @@ mod tests {
         std::fs::write(entry_path.join("1.blk.zst"), b"new-data").unwrap();
 
         let reload = block_manager.prepare_replica_index_reload().unwrap();
-        let updated_index = reload.load_candidate().await.unwrap();
+        let updated_index = reload.load_candidate(&file_cache).await.unwrap();
         block_manager
             .apply_replica_index_reload(reload, updated_index, ReplicaPublication::Legacy)
             .await
             .unwrap();
 
-        let mut meta = FILE_CACHE
+        let mut meta = file_cache
             .read(&entry_path.join("1.meta.zst"), std::io::SeekFrom::Start(0))
             .await
             .unwrap();
@@ -427,7 +447,7 @@ mod tests {
         use std::io::Read;
         meta.read_to_end(&mut meta_content).unwrap();
 
-        let mut data = FILE_CACHE
+        let mut data = file_cache
             .read(&entry_path.join("1.blk.zst"), std::io::SeekFrom::Start(0))
             .await
             .unwrap();
@@ -442,6 +462,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn test_load_block_missing_descriptor_on_replica_returns_too_early(
         #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
     ) {
         let path = path.await;
         let entry_path = path.join("bucket").join("entry");
@@ -453,7 +474,7 @@ mod tests {
         };
 
         let index_path = entry_path.join(BLOCK_INDEX_FILE);
-        let mut index = BlockIndex::new(index_path);
+        let mut index = BlockIndex::new(index_path, file_cache.clone());
         index.insert_or_update(Block::new(1));
         index.save().await.unwrap();
 
@@ -464,6 +485,7 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
@@ -475,7 +497,10 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "current_thread")]
-    async fn test_load_block_crc_mismatch_on_replica_returns_too_early(#[future] path: PathBuf) {
+    async fn test_load_block_crc_mismatch_on_replica_returns_too_early(
+        #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
         let path = path.await;
         let entry_path = path.join("bucket").join("entry");
 
@@ -486,7 +511,7 @@ mod tests {
         };
 
         let index_path = entry_path.join(BLOCK_INDEX_FILE);
-        let mut index = BlockIndex::new(index_path);
+        let mut index = BlockIndex::new(index_path, file_cache.clone());
         index.insert_or_update_with_crc(Block::new(1), 1);
         index.save().await.unwrap();
 
@@ -500,6 +525,7 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
@@ -513,6 +539,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn test_load_block_invalid_compressed_descriptor_on_replica_returns_too_early(
         #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
     ) {
         let path = path.await;
         let entry_path = path.join("bucket").join("entry");
@@ -524,7 +551,7 @@ mod tests {
         };
 
         let index_path = entry_path.join(BLOCK_INDEX_FILE);
-        let mut index = BlockIndex::new(index_path);
+        let mut index = BlockIndex::new(index_path, file_cache.clone());
         index.insert_or_update(Block::new(1));
         index.get_block_mut(1).unwrap().compression = Some(i32::from(CompressionAlgorithm::Zstd));
         index.save().await.unwrap();
@@ -537,6 +564,7 @@ mod tests {
             "entry".to_string(),
             Arc::new(cfg),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();

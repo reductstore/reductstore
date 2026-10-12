@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockFilePath, BlockManager, BlockRef};
 use crate::storage::engine::MAX_IO_BUFFER_SIZE;
@@ -26,6 +26,7 @@ pub(crate) struct RecordReader {
     content_size: u64,
     pos: u64,
     _permit: Option<OwnedSemaphorePermit>,
+    file_cache: Option<Arc<FileCache>>,
 }
 
 impl RecordReader {
@@ -70,8 +71,9 @@ impl RecordReader {
                 .build()
         };
 
+        let file_cache = Arc::clone(bm.file_cache());
         let file_path = if content_size > 0 {
-            if !FILE_CACHE.try_exists(file_path.path()).await? {
+            if !file_cache.try_exists(file_path.path()).await? {
                 if bm.is_replica() {
                     return Err(too_early!(
                         "Data block {} is not available on replica yet",
@@ -100,6 +102,7 @@ impl RecordReader {
             content_size,
             pos: 0,
             _permit: permit,
+            file_cache: Some(file_cache),
         })
     }
 
@@ -126,6 +129,7 @@ impl RecordReader {
             content_size: 0,
             pos: 0,
             _permit: None,
+            file_cache: None,
         }
     }
 
@@ -140,9 +144,14 @@ impl RecordReader {
         let pos = self.pos;
         let path = file_path.path().clone();
 
+        let file_cache = Arc::clone(
+            self.file_cache
+                .as_ref()
+                .expect("record content readers must have a file cache"),
+        );
         let result = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
-                let mut file_guard = FILE_CACHE
+                let mut file_guard = file_cache
                     .read(&path, SeekFrom::Start(offset + pos))
                     .await
                     .map_err(|e| io::Error::new(io::ErrorKind::Other, e.to_string()))?;
@@ -235,11 +244,12 @@ pub(in crate::storage) async fn read_in_chunks(
     offset: u64,
     content_size: u64,
     read_bytes: u64,
+    file_cache: &Arc<FileCache>,
 ) -> Result<(Vec<u8>, usize), ReductError<io::Error>> {
     let chunk_size = min(content_size - read_bytes, MAX_IO_BUFFER_SIZE as u64);
     let mut buf = vec![0; chunk_size as usize];
 
-    let mut file = FILE_CACHE
+    let mut file = file_cache
         .read(&file_path, SeekFrom::Start(offset + read_bytes))
         .await
         .map_err(|e| e.with_source(io::Error::new(io::ErrorKind::Deadlock, "")))?;
@@ -271,6 +281,7 @@ pub(in crate::storage) async fn read_in_chunks(
 pub(crate) mod tests {
     use super::*;
 
+    use crate::core::file_cache::build_test_file_cache;
     use crate::storage::engine::MAX_IO_BUFFER_SIZE;
     use crate::storage::entry::tests::{entry, write_record, write_stub_record};
     use async_trait::async_trait;
@@ -284,26 +295,35 @@ pub(crate) mod tests {
 
         #[rstest]
         #[tokio::test(flavor = "multi_thread")]
-        async fn test_ok(#[future] file_to_read: PathBuf, content_size: usize) {
+        async fn test_ok(
+            #[future] file_to_read: PathBuf,
+            content_size: usize,
+            file_cache: Arc<FileCache>,
+        ) {
             let file_to_read = file_to_read.await;
             let content_size = content_size as u64;
-            let (_data, len) = read_in_chunks(&file_to_read, 0, content_size, 0)
+            let (_data, len) = read_in_chunks(&file_to_read, 0, content_size, 0, &file_cache)
                 .await
                 .unwrap();
             assert_eq!(len, MAX_IO_BUFFER_SIZE);
 
-            let (_data, len) = read_in_chunks(&file_to_read, 0, content_size, len as u64)
-                .await
-                .unwrap();
+            let (_data, len) =
+                read_in_chunks(&file_to_read, 0, content_size, len as u64, &file_cache)
+                    .await
+                    .unwrap();
             assert_eq!(len, content_size as usize - MAX_IO_BUFFER_SIZE);
         }
 
         #[rstest]
         #[tokio::test(flavor = "multi_thread")]
-        async fn test_eof(#[future] file_to_read: PathBuf, content_size: usize) {
+        async fn test_eof(
+            #[future] file_to_read: PathBuf,
+            content_size: usize,
+            file_cache: Arc<FileCache>,
+        ) {
             let file_to_read = file_to_read.await;
             let content_size = content_size as u64;
-            let err = read_in_chunks(&file_to_read, content_size, content_size, 0)
+            let err = read_in_chunks(&file_to_read, content_size, content_size, 0, &file_cache)
                 .await
                 .err()
                 .unwrap();
@@ -319,6 +339,11 @@ pub(crate) mod tests {
         #[fixture]
         fn content_size() -> usize {
             MAX_IO_BUFFER_SIZE + 128
+        }
+
+        #[fixture]
+        fn file_cache() -> Arc<FileCache> {
+            build_test_file_cache()
         }
 
         #[fixture]

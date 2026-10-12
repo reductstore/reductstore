@@ -128,7 +128,7 @@ impl Entry {
 mod tests {
     use super::*;
     use crate::cfg::Cfg;
-    use crate::core::file_cache::FILE_CACHE;
+    use crate::core::file_cache::build_test_file_cache;
     use crate::storage::block_manager::DATA_FILE_EXT;
     use crate::storage::entry::EntrySettings;
     use bytes::Bytes;
@@ -457,7 +457,8 @@ mod tests {
         let entry = restore_flushed_entry(&entry, multi_block_settings(), path).await;
         {
             let bm = entry.block_manager.read().await.unwrap();
-            FILE_CACHE
+            entry
+                .file_cache
                 .remove(&bm.path().join(format!("1000000{}", DATA_FILE_EXT)))
                 .await
                 .unwrap();
@@ -489,6 +490,7 @@ mod tests {
                 .settings(settings)
                 .cfg(Cfg::default().into())
                 .usage_counters(Default::default())
+                .file_cache(build_test_file_cache())
                 .build()
                 .await
                 .unwrap(),
@@ -536,6 +538,7 @@ mod tests {
             .settings(settings)
             .cfg(Cfg::default().into())
             .usage_counters(Default::default())
+            .file_cache(entry.file_cache.clone())
             .restore()
             .await
             .unwrap()

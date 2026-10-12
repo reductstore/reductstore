@@ -2,13 +2,13 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::cfg::InstanceRole;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
 use std::fmt::{Display, Formatter};
 use std::io::{Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
 use uuid::Uuid;
@@ -23,10 +23,15 @@ static RUN_ID: LazyLock<String> = LazyLock::new(|| Uuid::new_v4().to_string());
 pub struct StoreId(Uuid);
 
 impl StoreId {
-    pub(crate) fn builder(data_path: &Path, role: InstanceRole) -> StoreIdBuilder<'_> {
+    pub(crate) fn builder(
+        data_path: &Path,
+        role: InstanceRole,
+        file_cache: Arc<FileCache>,
+    ) -> StoreIdBuilder<'_> {
         StoreIdBuilder {
             data_path,
             role,
+            file_cache,
             retry_interval: Duration::from_secs(10),
             retry_timeout: Duration::from_secs(60),
         }
@@ -36,19 +41,23 @@ impl StoreId {
         self.0
     }
 
-    async fn create(data_path: &Path, path: &PathBuf) -> Result<Self, ReductError> {
-        FILE_CACHE.create_dir_all(&data_path.to_path_buf()).await?;
+    async fn create(
+        data_path: &Path,
+        path: &PathBuf,
+        file_cache: &Arc<FileCache>,
+    ) -> Result<Self, ReductError> {
+        file_cache.create_dir_all(&data_path.to_path_buf()).await?;
 
         let id = Self(Uuid::new_v4());
-        let mut file = FILE_CACHE.write_or_create(path, SeekFrom::Start(0)).await?;
+        let mut file = file_cache.write_or_create(path, SeekFrom::Start(0)).await?;
         file.set_len(0)?;
         write!(file, "{id}")?;
         file.sync_all().await?;
         Ok(id)
     }
 
-    async fn read(path: &PathBuf) -> Result<Self, ReductError> {
-        let mut file = FILE_CACHE.read(path, SeekFrom::Start(0)).await?;
+    async fn read(path: &PathBuf, file_cache: &Arc<FileCache>) -> Result<Self, ReductError> {
+        let mut file = file_cache.read(path, SeekFrom::Start(0)).await?;
         let mut value = String::new();
         file.read_to_string(&mut value)?;
         let id = Uuid::parse_str(&value).map_err(|_| Self::invalid_file(path))?;
@@ -76,6 +85,7 @@ impl Display for StoreId {
 pub(crate) struct StoreIdBuilder<'a> {
     data_path: &'a Path,
     role: InstanceRole,
+    file_cache: Arc<FileCache>,
     retry_interval: Duration,
     retry_timeout: Duration,
 }
@@ -97,13 +107,13 @@ impl<'a> StoreIdBuilder<'a> {
         let started_at = Instant::now();
 
         loop {
-            if FILE_CACHE.try_exists(&path).await? {
-                FILE_CACHE.invalidate_local_cache_file(&path).await?;
-                return StoreId::read(&path).await;
+            if self.file_cache.try_exists(&path).await? {
+                self.file_cache.invalidate_local_cache_file(&path).await?;
+                return StoreId::read(&path, &self.file_cache).await;
             }
 
             if matches!(self.role, InstanceRole::Primary | InstanceRole::Standalone) {
-                return StoreId::create(self.data_path, &path).await;
+                return StoreId::create(self.data_path, &path, &self.file_cache).await;
             }
 
             if !self.retry_timeout.is_zero() && started_at.elapsed() >= self.retry_timeout {
@@ -142,36 +152,62 @@ mod tests {
     use super::*;
     use crate::backend::Backend;
     use crate::cfg::InstanceRole;
-    use crate::core::file_cache::FILE_CACHE;
+    use crate::core::file_cache::{
+        FileCache, FILE_CACHE_MAX_SIZE, FILE_CACHE_SYNC_INTERVAL, FILE_CACHE_TIME_TO_LIVE,
+    };
     use serial_test::serial;
     use std::fs;
     use std::time::Duration;
     use tokio::time::sleep;
 
+    async fn build_file_cache(path: &std::path::Path) -> Arc<FileCache> {
+        let cache = Arc::new(FileCache::new(
+            FILE_CACHE_MAX_SIZE,
+            FILE_CACHE_TIME_TO_LIVE,
+            FILE_CACHE_SYNC_INTERVAL,
+        ));
+        let backend = Backend::builder()
+            .local_data_path(path.to_path_buf())
+            .try_build()
+            .await
+            .unwrap();
+        cache.set_storage_backend(backend).await;
+        cache.set_read_only(false);
+        cache
+    }
+
     #[tokio::test]
     #[serial]
     async fn persists_store_id_for_primary_and_reuses_it_for_replica() {
         let directory = tempfile::tempdir().unwrap();
-        configure_file_cache(directory.path()).await;
+        let file_cache = build_file_cache(directory.path()).await;
 
-        let primary = StoreId::builder(directory.path(), InstanceRole::Primary)
-            .retry_interval(Duration::from_millis(1))
-            .retry_timeout(Duration::from_millis(10))
-            .load_or_create()
-            .await
-            .unwrap();
+        let primary = StoreId::builder(
+            directory.path(),
+            InstanceRole::Primary,
+            Arc::clone(&file_cache),
+        )
+        .retry_interval(Duration::from_millis(1))
+        .retry_timeout(Duration::from_millis(10))
+        .load_or_create()
+        .await
+        .unwrap();
 
         assert_eq!(
             fs::read_to_string(directory.path().join(".uuid")).unwrap(),
             primary.to_string()
         );
 
-        let replica = StoreId::builder(directory.path(), InstanceRole::Replica)
-            .retry_interval(Duration::from_millis(1))
-            .retry_timeout(Duration::from_millis(10))
-            .load_or_create()
-            .await
-            .unwrap();
+        let replica = StoreId::builder(
+            directory.path(),
+            InstanceRole::Replica,
+            Arc::clone(&file_cache),
+        )
+        .retry_interval(Duration::from_millis(1))
+        .retry_timeout(Duration::from_millis(10))
+        .load_or_create()
+        .await
+        .unwrap();
 
         assert_eq!(replica, primary);
     }
@@ -180,11 +216,12 @@ mod tests {
     #[serial]
     async fn replica_retries_until_primary_persists_store_id() {
         let directory = tempfile::tempdir().unwrap();
-        configure_file_cache(directory.path()).await;
+        let file_cache = build_file_cache(directory.path()).await;
 
         let path = directory.path().to_path_buf();
+        let cache_clone = Arc::clone(&file_cache);
         let replica = tokio::spawn(async move {
-            StoreId::builder(&path, InstanceRole::Replica)
+            StoreId::builder(&path, InstanceRole::Replica, cache_clone)
                 .retry_interval(Duration::from_millis(1))
                 .retry_timeout(Duration::from_millis(100))
                 .load_or_create()
@@ -192,12 +229,16 @@ mod tests {
         });
 
         sleep(Duration::from_millis(5)).await;
-        let primary = StoreId::builder(directory.path(), InstanceRole::Primary)
-            .retry_interval(Duration::from_millis(1))
-            .retry_timeout(Duration::from_millis(10))
-            .load_or_create()
-            .await
-            .unwrap();
+        let primary = StoreId::builder(
+            directory.path(),
+            InstanceRole::Primary,
+            Arc::clone(&file_cache),
+        )
+        .retry_interval(Duration::from_millis(1))
+        .retry_timeout(Duration::from_millis(10))
+        .load_or_create()
+        .await
+        .unwrap();
 
         assert_eq!(replica.await.unwrap().unwrap(), primary);
     }
@@ -206,9 +247,9 @@ mod tests {
     #[serial]
     async fn replica_rejects_missing_uuid_after_timeout() {
         let directory = tempfile::tempdir().unwrap();
-        configure_file_cache(directory.path()).await;
+        let file_cache = build_file_cache(directory.path()).await;
 
-        let error = StoreId::builder(directory.path(), InstanceRole::Replica)
+        let error = StoreId::builder(directory.path(), InstanceRole::Replica, file_cache)
             .retry_interval(Duration::from_millis(1))
             .retry_timeout(Duration::from_millis(5))
             .load_or_create()
@@ -222,10 +263,10 @@ mod tests {
     #[serial]
     async fn rejects_noncanonical_persisted_uuid() {
         let directory = tempfile::tempdir().unwrap();
-        configure_file_cache(directory.path()).await;
+        let file_cache = build_file_cache(directory.path()).await;
         fs::write(directory.path().join(".uuid"), "invalid").unwrap();
 
-        let error = StoreId::builder(directory.path(), InstanceRole::Primary)
+        let error = StoreId::builder(directory.path(), InstanceRole::Primary, file_cache)
             .retry_interval(Duration::from_millis(1))
             .retry_timeout(Duration::from_millis(10))
             .load_or_create()
@@ -239,8 +280,8 @@ mod tests {
     #[serial]
     async fn store_id_as_uuid_roundtrips() {
         let directory = tempfile::tempdir().unwrap();
-        configure_file_cache(directory.path()).await;
-        let id = StoreId::builder(directory.path(), InstanceRole::Primary)
+        let file_cache = build_file_cache(directory.path()).await;
+        let id = StoreId::builder(directory.path(), InstanceRole::Primary, file_cache)
             .retry_interval(Duration::from_millis(1))
             .retry_timeout(Duration::from_millis(10))
             .load_or_create()
@@ -254,13 +295,17 @@ mod tests {
     #[serial]
     async fn rejects_uuid_with_wrong_case() {
         let directory = tempfile::tempdir().unwrap();
-        configure_file_cache(directory.path()).await;
-        let id = StoreId::builder(directory.path(), InstanceRole::Primary)
-            .retry_interval(Duration::from_millis(1))
-            .retry_timeout(Duration::from_millis(10))
-            .load_or_create()
-            .await
-            .unwrap();
+        let file_cache = build_file_cache(directory.path()).await;
+        let id = StoreId::builder(
+            directory.path(),
+            InstanceRole::Primary,
+            Arc::clone(&file_cache),
+        )
+        .retry_interval(Duration::from_millis(1))
+        .retry_timeout(Duration::from_millis(10))
+        .load_or_create()
+        .await
+        .unwrap();
 
         fs::write(
             directory.path().join(".uuid"),
@@ -268,7 +313,7 @@ mod tests {
         )
         .unwrap();
 
-        let error = StoreId::builder(directory.path(), InstanceRole::Primary)
+        let error = StoreId::builder(directory.path(), InstanceRole::Primary, file_cache)
             .retry_interval(Duration::from_millis(1))
             .retry_timeout(Duration::from_millis(10))
             .load_or_create()
@@ -290,15 +335,5 @@ mod tests {
         let run_uuid = node_id.strip_prefix("instance:edge-pc-1:run:").unwrap();
 
         assert!(uuid::Uuid::parse_str(run_uuid).is_ok());
-    }
-
-    async fn configure_file_cache(path: &std::path::Path) {
-        let backend = Backend::builder()
-            .local_data_path(path.to_path_buf())
-            .try_build()
-            .await
-            .unwrap();
-        FILE_CACHE.set_storage_backend(backend).await;
-        FILE_CACHE.set_read_only(false);
     }
 }

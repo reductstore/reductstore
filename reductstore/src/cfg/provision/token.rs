@@ -176,7 +176,6 @@ mod tests {
     use crate::cfg::tests::MockEnvGetter;
     use crate::cfg::Cfg;
     use crate::core::env::Env;
-    use crate::core::file_cache::FILE_CACHE;
 
     use mockall::predicate::eq;
     use reduct_base::error::ReductError;
@@ -378,10 +377,12 @@ mod tests {
             .await
             .unwrap();
         drop(auth_repo);
-        FILE_CACHE.discard_recursive(&data_path).await.unwrap();
+        let file_cache = build_test_file_cache_for_path(&data_path).await;
+        file_cache.discard_recursive(&data_path).await.unwrap();
         crate::core::deployment_id::StoreId::builder(
             &data_path,
             crate::cfg::InstanceRole::Standalone,
+            Arc::clone(&file_cache),
         )
         .load_or_create()
         .await
@@ -433,9 +434,10 @@ mod tests {
 
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
         let _components = cfg.build().await.unwrap();
-        FILE_CACHE.discard_recursive(&data_path).await.unwrap();
+        let file_cache = build_test_file_cache_for_path(&data_path).await;
+        file_cache.discard_recursive(&data_path).await.unwrap();
 
-        let empty_cfg = cfg_parser_with_tokens(&data_path, HashMap::new());
+        let empty_cfg = cfg_parser_with_tokens(&data_path, HashMap::new()).await;
         let components = empty_cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
@@ -464,9 +466,10 @@ mod tests {
 
         let cfg = CfgParser::from_env(env_with_tokens, "0.0.0").await;
         let _components = cfg.build().await.unwrap();
-        FILE_CACHE.discard_recursive(&data_path).await.unwrap();
+        let file_cache = build_test_file_cache_for_path(&data_path).await;
+        file_cache.discard_recursive(&data_path).await.unwrap();
 
-        let empty_cfg = cfg_parser_with_tokens(&data_path, HashMap::new());
+        let empty_cfg = cfg_parser_with_tokens(&data_path, HashMap::new()).await;
         let components = empty_cfg.build().await.unwrap();
 
         let mut repo = components.token_repo.write().await.unwrap();
@@ -476,10 +479,33 @@ mod tests {
         assert!(verify_token_secret(&init_token.value, "XXX"));
     }
 
-    fn cfg_parser_with_tokens(
+    async fn build_test_file_cache_for_path(
+        path: &std::path::Path,
+    ) -> Arc<crate::core::file_cache::FileCache> {
+        use crate::backend::Backend;
+        use crate::core::file_cache::{
+            FileCache, FILE_CACHE_MAX_SIZE, FILE_CACHE_SYNC_INTERVAL, FILE_CACHE_TIME_TO_LIVE,
+        };
+        let cache = Arc::new(FileCache::new(
+            FILE_CACHE_MAX_SIZE,
+            FILE_CACHE_TIME_TO_LIVE,
+            FILE_CACHE_SYNC_INTERVAL,
+        ));
+        let backend = Backend::builder()
+            .local_data_path(path.to_path_buf())
+            .try_build()
+            .await
+            .unwrap();
+        cache.set_storage_backend(backend).await;
+        cache.set_read_only(false);
+        cache
+    }
+
+    async fn cfg_parser_with_tokens(
         data_path: &PathBuf,
         tokens: HashMap<String, Token>,
     ) -> CfgParser<MockEnvGetter> {
+        let file_cache = build_test_file_cache_for_path(data_path).await;
         CfgParser {
             cfg: Cfg {
                 data_path: data_path.clone(),
@@ -493,6 +519,7 @@ mod tests {
                 role: crate::cfg::InstanceRole::Primary,
                 data_path: data_path.clone(),
             },
+            file_cache,
         }
     }
 

@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::file_cache::FILE_CACHE;
 use crate::storage::bucket::settings::SETTINGS_NAME;
 use crate::storage::bucket::Bucket;
 use crate::storage::engine::StorageEngine;
@@ -24,7 +23,8 @@ impl StorageEngine {
         let mut buckets_to_retain = vec![];
         self.folder_keeper.reload().await?;
         for path in self.folder_keeper.list_folders().await? {
-            if !FILE_CACHE
+            if !self
+                .file_cache()
                 .try_exists(&path.join(SETTINGS_NAME))
                 .await
                 .unwrap_or(false)
@@ -43,6 +43,7 @@ impl StorageEngine {
                 .cfg(self.cfg.clone())
                 .io_limiter(self.io_limiter.clone())
                 .usage_counters(Arc::clone(&self.usage_counters))
+                .file_cache(Arc::clone(self.file_cache()))
                 .restore()
                 .await
             {

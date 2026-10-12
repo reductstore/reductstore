@@ -1,7 +1,6 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::file_cache::FILE_CACHE;
 use crate::storage::bucket::Bucket;
 use crate::storage::entry::EntrySettings;
 use bytes::BytesMut;
@@ -122,7 +121,8 @@ impl Bucket {
             .encode(&mut buf)
             .map_err(|e| internal_server_error!("Failed to encode bucket settings: {}", e))?;
 
-        let mut file = FILE_CACHE
+        let mut file = self
+            .file_cache
             .write_or_create(&path, SeekFrom::Start(0))
             .await?;
 
