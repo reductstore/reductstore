@@ -156,6 +156,28 @@ impl Entry {
         Ok(stats)
     }
 
+    pub(super) async fn query_record_timestamps(
+        &self,
+        mut options: QueryEntry,
+    ) -> Result<Vec<u64>, ReductError> {
+        options.continuous = None;
+        let query_id = self.query(options).await?;
+        let (rx, _) = self.get_query_receiver(query_id).await?;
+        let mut timestamps = vec![];
+
+        loop {
+            match rx.upgrade()?.write().await?.recv().await {
+                Some(Ok(record)) => timestamps.push(record.meta().timestamp()),
+                Some(Err(ReductError {
+                    status: ErrorCode::NoContent,
+                    ..
+                }))
+                | None => return Ok(timestamps),
+                Some(Err(err)) => return Err(err),
+            }
+        }
+    }
+
     /// Query and count multiple records over a range of timestamps.
     ///
     /// # Arguments
@@ -223,6 +245,17 @@ impl Entry {
 
         stats.blocks = affected_blocks.len() as u64;
         Ok(stats)
+    }
+
+    pub(super) async fn remove_records_in_current_mutation(
+        timestamps: Vec<u64>,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+        bucket_name: &str,
+        entry_name: &str,
+    ) -> Result<(), ReductError> {
+        Self::inner_remove_records(timestamps, block_manager, bucket_name, entry_name)
+            .await
+            .map(|_| ())
     }
 
     async fn inner_remove_records(
