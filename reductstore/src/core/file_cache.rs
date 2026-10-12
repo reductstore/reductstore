@@ -452,6 +452,22 @@ impl FileCache {
         }
     }
 
+    /// Evicts a cached descriptor for a file owned by `batch` without releasing
+    /// the batch claim or synchronizing the descriptor.
+    ///
+    /// This is used when a mutation atomically replaces a local file. The old
+    /// descriptor points to the unlinked inode after the replacement and must
+    /// not be reused for subsequent reads or writes.
+    pub async fn evict_in_batch(
+        &self,
+        batch: &BatchToken,
+        path: &PathBuf,
+    ) -> Result<(), ReductError> {
+        self.claim_path(batch, path).await?;
+        self.cache.write().await?.remove(path);
+        Ok(())
+    }
+
     /// Removes a file from the file system and the cache.
     ///
     /// This function attempts to remove a file at the specified path from the file system.

@@ -181,6 +181,13 @@ impl BlockManager {
         }
     }
 
+    pub(super) async fn evict_mutation(&self, path: &PathBuf) -> Result<(), ReductError> {
+        match &self.mutation_batch {
+            Some(token) => self.file_cache.evict_in_batch(token, path).await,
+            None => self.file_cache.discard_recursive(path).await,
+        }
+    }
+
     pub(super) async fn remove_mutation(&self, path: &PathBuf) -> Result<(), ReductError> {
         match &self.mutation_batch {
             Some(token) => self.file_cache.remove_in_batch(token, path).await,
