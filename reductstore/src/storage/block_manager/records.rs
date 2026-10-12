@@ -200,7 +200,7 @@ impl BlockManager {
         tokio::fs::remove_file(&block_path).await?;
         tokio::fs::rename(&temp_block_path, &block_path).await?;
 
-        self.file_cache.discard_recursive(&block_path).await?;
+        self.evict_mutation(&block_path).await?;
         let mut block_file = self
             .write_or_create_mutation(&block_path, SeekFrom::Start(0))
             .await?;
@@ -636,6 +636,46 @@ mod tests {
                 .is_err(),
             "wal must be removed after successful update"
         );
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_remove_records_from_active_batch_preserves_content(
+        #[future] block_manager: BlockManager,
+        #[future] block: BlockRef,
+        block_id: u64,
+    ) {
+        let mut block_manager = block_manager.await;
+        let block_ref = block.await;
+        let batch = block_manager.file_cache.begin_batch().await.unwrap();
+        block_manager.set_mutation_batch(batch.token());
+        let block_manager = Arc::new(AsyncRwLock::new(block_manager));
+        let (record, expected) = write_record(1, 100, &block_manager, block_ref.clone()).await;
+
+        block_manager
+            .write()
+            .await
+            .unwrap()
+            .remove_records(block_id, vec![0])
+            .await
+            .unwrap();
+
+        let record_time = ts_to_us(&record.timestamp.unwrap());
+        let mut reader = RecordReader::try_new(
+            Arc::clone(&block_manager),
+            block_ref,
+            record_time,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let mut received = BytesMut::new();
+        while let Some(Ok(chunk)) = reader.read_chunk() {
+            received.extend_from_slice(&chunk);
+        }
+
+        assert_eq!(received, expected.as_bytes());
     }
 
     #[rstest]
