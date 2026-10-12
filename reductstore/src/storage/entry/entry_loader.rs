@@ -713,7 +713,8 @@ mod tests {
             }
         );
 
-        bm.save_cache_on_disk().await.unwrap();
+        drop(bm);
+        entry.sync_fs().await.unwrap();
         let entry = EntryLoader::restore_entry(
             path.join(entry.name()),
             entry_settings,
@@ -996,7 +997,7 @@ mod tests {
         let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
-        entry.compact().await.unwrap(); // sync WALs
+        entry.sync_fs().await.unwrap(); // sync WALs
 
         {
             let block_file_index = path.join(&entry.name).join(BLOCK_INDEX_FILE);
@@ -1032,14 +1033,7 @@ mod tests {
         let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
-        entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await
-            .unwrap();
+        entry.sync_fs().await.unwrap();
 
         EntryLoader::restore_entry(
             path.join(entry.name()),
@@ -1257,6 +1251,7 @@ mod tests {
     ) {
         let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
             bm.save_cache_on_disk().await.unwrap();
@@ -1342,13 +1337,7 @@ mod tests {
         let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
-        let _ = entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await;
+        entry.sync_fs().await.unwrap();
 
         EntryLoader::restore_entry(
             path.join(entry.name.clone()),
@@ -1425,13 +1414,7 @@ mod tests {
     ) {
         let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
-        let _ = entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await;
+        entry.sync_fs().await.unwrap();
 
         let entry = EntryLoader::restore_entry(
             path.join(entry.name.clone()),
@@ -1486,7 +1469,7 @@ mod tests {
     ) {
         let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
-        entry.compact().await.unwrap();
+        entry.sync_fs().await.unwrap();
 
         // Create a new block but don't add it to the index
         let mut bm = entry.block_manager.write().await.unwrap();
