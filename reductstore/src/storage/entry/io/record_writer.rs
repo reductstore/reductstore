@@ -488,6 +488,82 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_batch_completion_reports_finished_and_errored_writes(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[future] block_ref: BlockRef,
+        ) {
+            let block_manager = block_manager.await;
+            let block_ref = block_ref.await;
+            let file_cache = Arc::clone(block_manager.read().await.unwrap().file_cache());
+
+            let mut batch = file_cache.begin_batch().await.unwrap();
+            let (mut writer, completion) = RecordWriter::try_new_in_batch(
+                block_manager.clone(),
+                block_ref.clone(),
+                SMALL_RECORD_TIME,
+                batch.token(),
+            )
+            .await
+            .unwrap();
+            writer.send(Ok(Some(Bytes::from("test")))).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
+            assert!(completion.await.unwrap());
+            batch.sync_all().await.unwrap();
+            batch.commit().await.unwrap();
+
+            let mut batch = file_cache.begin_batch().await.unwrap();
+            let (mut writer, completion) = RecordWriter::try_new_in_batch(
+                block_manager.clone(),
+                block_ref,
+                BIG_RECORD_TIME,
+                batch.token(),
+            )
+            .await
+            .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+            assert!(!completion.await.unwrap());
+            batch.sync_all().await.unwrap();
+            batch.commit().await.unwrap();
+        }
+
+        #[rstest]
+        #[serial]
+        #[tokio::test]
+        async fn test_batch_completion_reports_block_manager_lock_failure(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[future] block_ref: BlockRef,
+        ) {
+            struct ResetGuard;
+            impl Drop for ResetGuard {
+                fn drop(&mut self) {
+                    reset_rwlock_config();
+                }
+            }
+
+            let _reset = ResetGuard;
+            set_rwlock_failure_action(RwLockFailureAction::Error);
+            set_rwlock_timeout(Duration::from_millis(10));
+
+            let block_manager = block_manager.await;
+            let block_ref = block_ref.await;
+            let file_cache = Arc::clone(block_manager.read().await.unwrap().file_cache());
+            let batch = file_cache.begin_batch().await.unwrap();
+            let (mut writer, completion) = RecordWriter::try_new_in_batch(
+                block_manager.clone(),
+                block_ref,
+                SMALL_RECORD_TIME,
+                batch.token(),
+            )
+            .await
+            .unwrap();
+
+            let _lock = block_manager.write().await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
+            assert!(!completion.await.unwrap());
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_timeout(
             #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
             #[future] block_ref: BlockRef,
