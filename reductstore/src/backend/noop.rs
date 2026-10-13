@@ -54,6 +54,10 @@ impl StorageBackend for NoopBackend {
         vec![]
     }
 
+    async fn remove_from_local_cache_if_unused(&self, _path: &Path) -> std::io::Result<bool> {
+        Ok(false)
+    }
+
     async fn get_stats(&self, _path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
         Ok(None)
     }
