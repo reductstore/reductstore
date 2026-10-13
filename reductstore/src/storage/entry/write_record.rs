@@ -129,7 +129,7 @@ impl Entry {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_not_deleting().await?;
-        let publication = self.publication.begin_mutation().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
         {
             let mut block_manager = self.block_manager.write().await?;
             block_manager.set_mutation_batch(publication.token.clone());

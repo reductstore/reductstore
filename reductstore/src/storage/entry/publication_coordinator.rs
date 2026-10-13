@@ -41,12 +41,15 @@ impl PublicationCoordinator {
         }
     }
 
-    pub(super) async fn begin_mutation(&self) -> Result<MutationAdmission, ReductError> {
+    pub(super) async fn begin_mutation(
+        &self,
+        path: &Path,
+    ) -> Result<MutationAdmission, ReductError> {
         self.publication_revision.fetch_add(1, Ordering::AcqRel);
         let guard = Arc::clone(&self.admission).read_owned().await;
         let mut batch = self.batch.lock().await;
         if batch.is_none() {
-            *batch = Some(self.file_cache.begin_batch().await?);
+            *batch = Some(self.file_cache.begin_batch_for_scope(path).await?);
         }
         Ok(MutationAdmission {
             token: batch.as_ref().expect("batch was initialized").token(),
@@ -197,7 +200,7 @@ mod tests {
         let file_cache = build_test_file_cache();
         let coordinator = Arc::new(PublicationCoordinator::new_with_cache(file_cache.clone()));
         let path = entry_path();
-        let admission = coordinator.begin_mutation().await.unwrap();
+        let admission = coordinator.begin_mutation(&path).await.unwrap();
 
         assert!(!coordinator.try_publish(&path).await.unwrap());
         let publisher = tokio::spawn({
@@ -244,7 +247,7 @@ mod tests {
         batch.commit().await.unwrap();
 
         let coordinator = PublicationCoordinator::new_with_cache(file_cache.clone());
-        drop(coordinator.begin_mutation().await.unwrap());
+        drop(coordinator.begin_mutation(&path).await.unwrap());
         coordinator.publish(&path).await.unwrap();
 
         assert_eq!(

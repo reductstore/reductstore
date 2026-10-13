@@ -552,6 +552,7 @@ mod tests {
             async fn download(&self, path: &Path) -> std::io::Result<()>;
             async fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
             async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+            async fn remove_from_local_cache_if_unused(&self, path: &Path) -> std::io::Result<bool>;
             async fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
             async fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
         }

@@ -30,7 +30,7 @@ impl Entry {
         start: Option<u64>,
         stop: Option<u64>,
     ) -> Result<CompressionStats, ReductError> {
-        let publication = self.publication.begin_mutation().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
         self.block_manager
             .write()
             .await?

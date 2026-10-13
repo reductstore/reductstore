@@ -329,7 +329,7 @@ impl Entry {
             return Ok(());
         }
 
-        let publication = self.publication.begin_mutation().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
         let block_ids = {
             let block_manager = self.block_manager.read().await?;
             Ok::<BTreeSet<u64>, ReductError>(block_manager.index().tree().clone())
@@ -360,7 +360,7 @@ impl Entry {
     ///
     /// HTTTPError - The error if any.
     pub async fn try_remove_oldest_block(&self) -> Result<(), ReductError> {
-        let publication = self.publication.begin_mutation().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
         let bm = self.block_manager.read().await?;
         let index_tree = bm.index().tree();
         if index_tree.is_empty() {
@@ -401,7 +401,7 @@ impl Entry {
             return Ok(());
         }
 
-        let publication = self.publication.begin_mutation().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
         if let Some(mut bm) = self.block_manager.try_write() {
             bm.set_mutation_batch(publication.token.clone());
             bm.save_cache_metadata_on_disk().await?;
@@ -435,7 +435,7 @@ impl Entry {
         }
 
         {
-            let publication = self.publication.begin_mutation().await?;
+            let publication = self.publication.begin_mutation(&self.path).await?;
             let mut bm = self.block_manager.write().await?;
             bm.set_mutation_batch(publication.token.clone());
             bm.save_cache_on_disk().await?;
@@ -913,7 +913,7 @@ mod tests {
             #[future] entry: Arc<Entry>,
         ) {
             let entry = entry.await;
-            let admission = entry.publication.begin_mutation().await.unwrap();
+            let admission = entry.publication.begin_mutation(&entry.path).await.unwrap();
 
             entry.compact().await.unwrap();
 

@@ -47,6 +47,9 @@ pub trait StorageBackend {
 
     async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
 
+    /// Remove a cache eviction candidate only if it is still safe to discard.
+    async fn remove_from_local_cache_if_unused(&self, path: &Path) -> std::io::Result<bool>;
+
     async fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
 
     async fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
@@ -175,6 +178,15 @@ impl Backend {
 
     pub async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf> {
         self.backend.invalidate_locally_cached_files().await
+    }
+
+    pub async fn remove_from_local_cache_if_unused<P: AsRef<Path>>(
+        &self,
+        path: P,
+    ) -> std::io::Result<bool> {
+        self.backend
+            .remove_from_local_cache_if_unused(path.as_ref())
+            .await
     }
 
     /// Remove the file only from local cache, without affecting remote storage.
@@ -381,6 +393,7 @@ mod tests {
             async fn download(&self, path: &Path) -> std::io::Result<()>;
             async fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
             async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+            async fn remove_from_local_cache_if_unused(&self, path: &Path) -> std::io::Result<bool>;
             async fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
             async fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
         }

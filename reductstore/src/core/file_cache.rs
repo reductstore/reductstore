@@ -13,7 +13,7 @@ use std::fs;
 use std::io::{ErrorKind, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::sync::{OwnedRwLockWriteGuard, RwLockWriteGuard};
 use tokio::time::sleep;
@@ -36,9 +36,28 @@ struct BatchRegistry {
     path_owners: HashMap<PathBuf, BatchId>,
 }
 
+struct PathAccessGuard {
+    path: PathBuf,
+    pending_accesses: Arc<Mutex<HashMap<PathBuf, usize>>>,
+}
+
+impl Drop for PathAccessGuard {
+    fn drop(&mut self) {
+        if let Ok(mut pending_accesses) = self.pending_accesses.lock() {
+            if let Some(count) = pending_accesses.get_mut(&self.path) {
+                *count -= 1;
+                if *count == 0 {
+                    pending_accesses.remove(&self.path);
+                }
+            }
+        }
+    }
+}
+
 struct ActiveBatch {
     dirty_files: HashMap<PathBuf, u64>,
     pending_deletes: HashSet<PathBuf>,
+    protected_scopes: HashSet<PathBuf>,
     state: BatchState,
 }
 
@@ -73,6 +92,7 @@ pub(crate) struct FileCache {
     stop_sync_worker: Arc<AtomicBool>,
     backend: Arc<AsyncRwLock<Backend>>,
     batches: Arc<AsyncRwLock<BatchRegistry>>,
+    pending_accesses: Arc<Mutex<HashMap<PathBuf, usize>>>,
     sync_interval: Arc<RwLock<Duration>>,
     read_only: Arc<AtomicBool>,
 }
@@ -111,6 +131,8 @@ impl FileCache {
         let backpack_clone = Arc::clone(&backpack);
         let batches = Arc::new(AsyncRwLock::new(BatchRegistry::default()));
         let batches_clone = Arc::clone(&batches);
+        let pending_accesses = Arc::new(Mutex::new(HashMap::new()));
+        let pending_accesses_clone = Arc::clone(&pending_accesses);
         let sync_interval = Arc::new(RwLock::new(sync_interval));
         let sync_interval_clone = Some(Arc::clone(&sync_interval));
         let read_only = Arc::new(AtomicBool::new(false));
@@ -126,6 +148,7 @@ impl FileCache {
                     &backpack_clone,
                     &cache,
                     &batches_clone,
+                    &pending_accesses_clone,
                     &sync_interval_clone,
                 )
                 .await
@@ -143,6 +166,7 @@ impl FileCache {
             stop_sync_worker: stop_sync_worker_clone,
             backend: backpack,
             batches,
+            pending_accesses,
             sync_interval,
             read_only,
         }
@@ -153,6 +177,7 @@ impl FileCache {
         backend: &Arc<AsyncRwLock<Backend>>,
         cache: &Arc<AsyncRwLock<Cache<PathBuf, FileLock>>>,
         batches: &Arc<AsyncRwLock<BatchRegistry>>,
+        pending_accesses: &Arc<Mutex<HashMap<PathBuf, usize>>>,
         sync_interval: &Option<Arc<RwLock<Duration>>>,
     ) -> Result<(), ReductError> {
         if read_only.load(Ordering::Relaxed) {
@@ -169,18 +194,36 @@ impl FileCache {
             .invalidate_locally_cached_files()
             .await;
         for path in invalidated_files {
-            if Self::is_batched(batches, &path).await? {
+            let mut cache = cache.write().await?;
+            // Keep the registry read lock until the backend has conditionally removed the
+            // candidate. This makes the decision atomic with starting a scoped mutation batch.
+            let batch_registry = batches.read().await?;
+            if Self::registry_protects_path(&batch_registry, &path)
+                || Self::has_pending_access(pending_accesses, &path)?
+            {
                 continue;
             }
-            let mut cache = cache.write().await?;
             if let Some(file) = cache.remove(&path) {
-                if let Err(err) = file.write_owned().await?.sync_all().await {
+                // Do not wait for an active caller: it may write to the descriptor after this
+                // worker unlinks the path. The access/opening reservation above closes the gap
+                // before the caller acquires this lock.
+                let Some(mut file_lock) = file.try_write_owned() else {
+                    cache.insert(path, file);
+                    continue;
+                };
+                if let Err(err) = file_lock.sync_all().await {
                     warn!("Failed to sync invalidated file {:?}: {}", path, err);
                 }
             }
 
-            tokio::fs::remove_file(&path).await.ok();
-            debug!("Removed invalidated file {:?} from cache and storage", path);
+            if backend
+                .read()
+                .await?
+                .remove_from_local_cache_if_unused(&path)
+                .await?
+            {
+                debug!("Removed invalidated file {:?} from cache and storage", path);
+            }
         }
 
         let mut files_to_sync = vec![];
@@ -326,6 +369,18 @@ impl FileCache {
 
     /// Starts a batch. Paths are claimed explicitly by batch-aware mutations.
     pub async fn begin_batch(&self) -> Result<FileBatch, ReductError> {
+        self.begin_batch_with_scope(None).await
+    }
+
+    /// Starts a batch that protects an entire subtree from cache eviction.
+    ///
+    /// Individual paths are still claimed when they are mutated. The scope closes the gaps
+    /// between those operations for transactions that span several related files.
+    pub async fn begin_batch_for_scope(&self, scope: &Path) -> Result<FileBatch, ReductError> {
+        self.begin_batch_with_scope(Some(scope)).await
+    }
+
+    async fn begin_batch_with_scope(&self, scope: Option<&Path>) -> Result<FileBatch, ReductError> {
         let mut batches = self.batches.write().await?;
         let id = batches.next_id;
         batches.next_id += 1;
@@ -334,6 +389,7 @@ impl FileCache {
             ActiveBatch {
                 dirty_files: HashMap::new(),
                 pending_deletes: HashSet::new(),
+                protected_scopes: scope.into_iter().map(Path::to_path_buf).collect(),
                 state: BatchState::Active,
             },
         );
@@ -358,15 +414,16 @@ impl FileCache {
     ///
     /// A file reference
     pub async fn read(&self, path: &PathBuf, pos: SeekFrom) -> Result<FileGuard, ReductError> {
-        let file = {
-            let file = self.cache.read().await?.get(path).cloned();
-            if let Some(file) = file {
-                Arc::clone(&file)
-            } else {
-                let file = self.open_read_file(path).await?;
-                self.insert_file_cached(path, file.clone()).await?;
-                file
-            }
+        let cache = self.cache.read().await?;
+        let _access_guard = Self::reserve_access(&self.pending_accesses, path)?;
+        let cached_file = cache.get(path).cloned();
+        drop(cache);
+        let file = if let Some(file) = cached_file {
+            file
+        } else {
+            let file = self.open_read_file(path).await?;
+            self.insert_file_cached(path, file.clone()).await?;
+            file
         };
 
         let mut lock = file.write_owned().await?;
@@ -397,28 +454,29 @@ impl FileCache {
         path: &PathBuf,
         pos: SeekFrom,
     ) -> Result<FileGuard, ReductError> {
-        let file = {
-            let file = self.cache.read().await?.get(path).cloned();
-            if let Some(file) = file {
-                let Ok(lock) = file.read().await else {
-                    Err(internal_server_error!(
-                        "Failed to acquire read lock for file {}",
-                        path.display()
-                    ))?
-                };
-                if lock.mode() == &AccessMode::ReadWrite {
-                    Arc::clone(&file)
-                } else {
-                    drop(lock);
-                    let file = self.open_write_file(path, false).await?;
-                    self.insert_file_cached(path, file.clone()).await?;
-                    file
-                }
+        let cache = self.cache.read().await?;
+        let _access_guard = Self::reserve_access(&self.pending_accesses, path)?;
+        let cached_file = cache.get(path).cloned();
+        drop(cache);
+        let file = if let Some(file) = cached_file {
+            let Ok(lock) = file.read().await else {
+                Err(internal_server_error!(
+                    "Failed to acquire read lock for file {}",
+                    path.display()
+                ))?
+            };
+            if lock.mode() == &AccessMode::ReadWrite {
+                Arc::clone(&file)
             } else {
-                let file = self.open_write_file(path, true).await?;
+                drop(lock);
+                let file = self.open_write_file(path, false).await?;
                 self.insert_file_cached(path, file.clone()).await?;
                 file
             }
+        } else {
+            let file = self.open_write_file(path, true).await?;
+            self.insert_file_cached(path, file.clone()).await?;
+            file
         };
 
         let mut lock = file.write_owned().await?;
@@ -507,7 +565,7 @@ impl FileCache {
                 Ok(_) => {
                     self.cache.write().await?.remove(path);
                     if deferred {
-                        tokio::fs::remove_file(path).await?;
+                        Self::remove_local_file_if_present(path).await?;
                     } else {
                         remove_from_backend(path).await?;
                     }
@@ -521,13 +579,21 @@ impl FileCache {
             }
         } else {
             if deferred {
-                tokio::fs::remove_file(path).await?;
+                Self::remove_local_file_if_present(path).await?;
             } else {
                 remove_from_backend(path).await?;
             }
         }
 
         Ok(())
+    }
+
+    async fn remove_local_file_if_present(path: &Path) -> Result<(), ReductError> {
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Removes a file as part of `batch`, deferring its remote deletion.
@@ -659,6 +725,7 @@ impl FileCache {
             &self.backend,
             &self.cache,
             &self.batches,
+            &self.pending_accesses,
             &None,
         )
         .await
@@ -696,7 +763,42 @@ impl FileCache {
         batches: &Arc<AsyncRwLock<BatchRegistry>>,
         path: &Path,
     ) -> Result<bool, ReductError> {
-        Ok(batches.read().await?.path_owners.contains_key(path))
+        let batches = batches.read().await?;
+        Ok(Self::registry_protects_path(&batches, path))
+    }
+
+    fn registry_protects_path(batches: &BatchRegistry, path: &Path) -> bool {
+        batches.path_owners.contains_key(path)
+            || batches.active.values().any(|batch| {
+                batch
+                    .protected_scopes
+                    .iter()
+                    .any(|scope| path.starts_with(scope))
+            })
+    }
+
+    fn reserve_access(
+        pending_accesses: &Arc<Mutex<HashMap<PathBuf, usize>>>,
+        path: &Path,
+    ) -> Result<PathAccessGuard, ReductError> {
+        let mut accesses = pending_accesses
+            .lock()
+            .map_err(|err| internal_server_error!("Failed to lock pending accesses: {}", err))?;
+        *accesses.entry(path.to_path_buf()).or_default() += 1;
+        Ok(PathAccessGuard {
+            path: path.to_path_buf(),
+            pending_accesses: Arc::clone(pending_accesses),
+        })
+    }
+
+    fn has_pending_access(
+        pending_accesses: &Arc<Mutex<HashMap<PathBuf, usize>>>,
+        path: &Path,
+    ) -> Result<bool, ReductError> {
+        Ok(pending_accesses
+            .lock()
+            .map_err(|err| internal_server_error!("Failed to lock pending accesses: {}", err))?
+            .contains_key(path))
     }
 
     async fn mark_owned_dirty(&self, path: &Path) -> Result<(), ReductError> {
@@ -1008,6 +1110,7 @@ mod tests {
             async fn download(&self, path: &std::path::Path) -> std::io::Result<()>;
             async fn update_local_cache(&self, path: &std::path::Path, mode: &AccessMode) -> std::io::Result<()>;
             async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+            async fn remove_from_local_cache_if_unused(&self, path: &std::path::Path) -> std::io::Result<bool>;
             async fn get_stats(&self, path: &std::path::Path) -> std::io::Result<Option<crate::backend::ObjectMetadata>>;
             async fn remove_from_local_cache(&self, path: &std::path::Path) -> std::io::Result<()>;
         }
@@ -1439,9 +1542,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn batch_keeps_pending_delete_after_local_delete_failure(tmp_dir: PathBuf) {
-        let file_path = tmp_dir.join("missing.blk");
+        let file_path = tmp_dir.join("not-a-file.blk");
+        fs::create_dir(&file_path).unwrap();
         let backend = build_backend(|mock| {
-            expect_remove(mock, &file_path, 1);
+            let expected = file_path.clone();
+            mock.expect_remove()
+                .withf(move |path| path == expected.as_path())
+                .returning(|_| Ok(()))
+                .times(1);
         });
         let cache = build_cache(backend);
         let mut batch = cache.begin_batch().await.unwrap();
@@ -1452,6 +1560,33 @@ mod tests {
             err.status(),
             reduct_base::error::ErrorCode::InternalServerError
         );
+        assert!(cache
+            .batches
+            .read()
+            .await
+            .unwrap()
+            .active
+            .get(&token.id)
+            .unwrap()
+            .pending_deletes
+            .contains(&file_path));
+
+        batch.sync_all().await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_deletes_remote_object_when_local_copy_is_missing(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("evicted.wal");
+        let backend = build_backend(|mock| {
+            expect_remove(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+
+        cache.remove_in_batch(&token, &file_path).await.unwrap();
         assert!(cache
             .batches
             .read()
@@ -2161,6 +2296,7 @@ mod tests {
                 &cache.backend,
                 &cache.cache,
                 &cache.batches,
+                &cache.pending_accesses,
                 &sync_interval,
             )
             .await
@@ -2207,6 +2343,7 @@ mod tests {
                 &cache.backend,
                 &cache.cache,
                 &cache.batches,
+                &cache.pending_accesses,
                 &sync_interval,
             )
             .await
@@ -2225,12 +2362,145 @@ mod tests {
                 mock.expect_invalidate_locally_cached_files()
                     .returning(move || vec![invalidated_path.clone()])
                     .times(1);
+                let removed_path = file_path.clone();
+                mock.expect_remove_from_local_cache_if_unused()
+                    .withf(move |path| path == removed_path.as_path())
+                    .returning(|path| {
+                        std::fs::remove_file(path)?;
+                        Ok(true)
+                    })
+                    .times(1);
             });
             let cache = build_cache(backend);
             fs::write(&file_path, b"test").unwrap();
 
             cache.force_sync_all().await.unwrap();
             assert!(!file_path.exists(), "invalidated file should be removed");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn continues_after_invalidated_file_sync_fails(tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("invalidated_unsynced_file.txt");
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 1);
+                expect_try_exists(mock, &file_path, false, 1);
+                expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+                let invalidated_path = file_path.clone();
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(move || vec![invalidated_path.clone()])
+                    .times(1);
+                let upload_path = file_path.clone();
+                mock.expect_upload()
+                    .withf(move |path| path == upload_path.as_path())
+                    .returning(|_| Err(std::io::Error::from(ErrorKind::PermissionDenied)))
+                    .times(1);
+                let retained_path = file_path.clone();
+                mock.expect_remove_from_local_cache_if_unused()
+                    .withf(move |path| path == retained_path.as_path())
+                    .returning(|_| Ok(false))
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            {
+                let mut file = cache
+                    .write_or_create(&file_path, SeekFrom::Start(0))
+                    .await
+                    .unwrap();
+                file.write_all(b"dirty").unwrap();
+            }
+
+            cache.force_sync_all().await.unwrap();
+
+            assert!(file_path.exists());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn keeps_invalidated_file_inside_active_batch_scope(tmp_dir: PathBuf) {
+            let entry_path = tmp_dir.join("entry");
+            let file_path = entry_path.join("blocks.idx");
+            let backend = build_backend(|mock| {
+                let invalidated_path = file_path.clone();
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(move || vec![invalidated_path.clone()])
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            fs::create_dir_all(&entry_path).unwrap();
+            fs::write(&file_path, b"index").unwrap();
+            let batch = cache.begin_batch_for_scope(&entry_path).await.unwrap();
+
+            cache.force_sync_all().await.unwrap();
+
+            assert!(file_path.exists());
+            batch.commit().await.unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn keeps_invalidated_file_while_descriptor_is_in_use(tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("active_invalidated_file.txt");
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 1);
+                expect_try_exists(mock, &file_path, false, 1);
+                expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+                let invalidated_path = file_path.clone();
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(move || vec![invalidated_path.clone()])
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            let guard = cache
+                .write_or_create(&file_path, SeekFrom::Start(0))
+                .await
+                .unwrap();
+            let sync_interval = Some(Arc::new(RwLock::new(Duration::from_millis(0))));
+
+            FileCache::sync_rw_and_unused_files(
+                &cache.read_only,
+                &cache.backend,
+                &cache.cache,
+                &cache.batches,
+                &cache.pending_accesses,
+                &sync_interval,
+            )
+            .await
+            .unwrap();
+
+            assert!(file_path.exists());
+            assert!(cache.cache.read().await.unwrap().get(&file_path).is_some());
+            drop(guard);
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn keeps_invalidated_file_while_descriptor_is_opening(tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("opening_invalidated_file.txt");
+            fs::write(&file_path, b"test").unwrap();
+            let backend = build_backend(|mock| {
+                let invalidated_path = file_path.clone();
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(move || vec![invalidated_path.clone()])
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            let _access_guard =
+                FileCache::reserve_access(&cache.pending_accesses, &file_path).unwrap();
+            let sync_interval = Some(Arc::new(RwLock::new(Duration::from_millis(0))));
+
+            FileCache::sync_rw_and_unused_files(
+                &cache.read_only,
+                &cache.backend,
+                &cache.cache,
+                &cache.batches,
+                &cache.pending_accesses,
+                &sync_interval,
+            )
+            .await
+            .unwrap();
+
+            assert!(file_path.exists());
         }
 
         #[rstest]
@@ -2278,6 +2548,7 @@ mod tests {
                 &cache.backend,
                 &cache.cache,
                 &cache.batches,
+                &cache.pending_accesses,
                 &sync_interval,
             )
             .await

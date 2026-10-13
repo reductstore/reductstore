@@ -38,7 +38,7 @@ impl Entry {
         updates: Vec<UpdateLabels>,
     ) -> Result<UpdateResult, ReductError> {
         self.ensure_not_deleting().await?;
-        let publication = self.publication.begin_mutation().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
         self.block_manager
             .write()
             .await?
