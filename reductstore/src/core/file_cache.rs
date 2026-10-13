@@ -565,7 +565,7 @@ impl FileCache {
                 Ok(_) => {
                     self.cache.write().await?.remove(path);
                     if deferred {
-                        tokio::fs::remove_file(path).await?;
+                        Self::remove_local_file_if_present(path).await?;
                     } else {
                         remove_from_backend(path).await?;
                     }
@@ -579,13 +579,21 @@ impl FileCache {
             }
         } else {
             if deferred {
-                tokio::fs::remove_file(path).await?;
+                Self::remove_local_file_if_present(path).await?;
             } else {
                 remove_from_backend(path).await?;
             }
         }
 
         Ok(())
+    }
+
+    async fn remove_local_file_if_present(path: &Path) -> Result<(), ReductError> {
+        match tokio::fs::remove_file(path).await {
+            Ok(()) => Ok(()),
+            Err(err) if err.kind() == ErrorKind::NotFound => Ok(()),
+            Err(err) => Err(err.into()),
+        }
     }
 
     /// Removes a file as part of `batch`, deferring its remote deletion.
@@ -1534,9 +1542,14 @@ mod tests {
     #[rstest]
     #[tokio::test]
     async fn batch_keeps_pending_delete_after_local_delete_failure(tmp_dir: PathBuf) {
-        let file_path = tmp_dir.join("missing.blk");
+        let file_path = tmp_dir.join("not-a-file.blk");
+        fs::create_dir(&file_path).unwrap();
         let backend = build_backend(|mock| {
-            expect_remove(mock, &file_path, 1);
+            let expected = file_path.clone();
+            mock.expect_remove()
+                .withf(move |path| path == expected.as_path())
+                .returning(|_| Ok(()))
+                .times(1);
         });
         let cache = build_cache(backend);
         let mut batch = cache.begin_batch().await.unwrap();
@@ -1547,6 +1560,33 @@ mod tests {
             err.status(),
             reduct_base::error::ErrorCode::InternalServerError
         );
+        assert!(cache
+            .batches
+            .read()
+            .await
+            .unwrap()
+            .active
+            .get(&token.id)
+            .unwrap()
+            .pending_deletes
+            .contains(&file_path));
+
+        batch.sync_all().await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_deletes_remote_object_when_local_copy_is_missing(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("evicted.wal");
+        let backend = build_backend(|mock| {
+            expect_remove(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+
+        cache.remove_in_batch(&token, &file_path).await.unwrap();
         assert!(cache
             .batches
             .read()
