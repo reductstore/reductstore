@@ -57,6 +57,7 @@ impl Drop for PathAccessGuard {
 struct ActiveBatch {
     dirty_files: HashMap<PathBuf, u64>,
     pending_deletes: HashSet<PathBuf>,
+    protected_scopes: HashSet<PathBuf>,
     state: BatchState,
 }
 
@@ -194,7 +195,10 @@ impl FileCache {
             .await;
         for path in invalidated_files {
             let mut cache = cache.write().await?;
-            if Self::is_batched(batches, &path).await?
+            // Keep the registry read lock until the backend has conditionally removed the
+            // candidate. This makes the decision atomic with starting a scoped mutation batch.
+            let batch_registry = batches.read().await?;
+            if Self::registry_protects_path(&batch_registry, &path)
                 || Self::has_pending_access(pending_accesses, &path)?
             {
                 continue;
@@ -365,6 +369,18 @@ impl FileCache {
 
     /// Starts a batch. Paths are claimed explicitly by batch-aware mutations.
     pub async fn begin_batch(&self) -> Result<FileBatch, ReductError> {
+        self.begin_batch_with_scope(None).await
+    }
+
+    /// Starts a batch that protects an entire subtree from cache eviction.
+    ///
+    /// Individual paths are still claimed when they are mutated. The scope closes the gaps
+    /// between those operations for transactions that span several related files.
+    pub async fn begin_batch_for_scope(&self, scope: &Path) -> Result<FileBatch, ReductError> {
+        self.begin_batch_with_scope(Some(scope)).await
+    }
+
+    async fn begin_batch_with_scope(&self, scope: Option<&Path>) -> Result<FileBatch, ReductError> {
         let mut batches = self.batches.write().await?;
         let id = batches.next_id;
         batches.next_id += 1;
@@ -373,6 +389,7 @@ impl FileCache {
             ActiveBatch {
                 dirty_files: HashMap::new(),
                 pending_deletes: HashSet::new(),
+                protected_scopes: scope.into_iter().map(Path::to_path_buf).collect(),
                 state: BatchState::Active,
             },
         );
@@ -738,7 +755,18 @@ impl FileCache {
         batches: &Arc<AsyncRwLock<BatchRegistry>>,
         path: &Path,
     ) -> Result<bool, ReductError> {
-        Ok(batches.read().await?.path_owners.contains_key(path))
+        let batches = batches.read().await?;
+        Ok(Self::registry_protects_path(&batches, path))
+    }
+
+    fn registry_protects_path(batches: &BatchRegistry, path: &Path) -> bool {
+        batches.path_owners.contains_key(path)
+            || batches.active.values().any(|batch| {
+                batch
+                    .protected_scopes
+                    .iter()
+                    .any(|scope| path.starts_with(scope))
+            })
     }
 
     fn reserve_access(
@@ -2308,6 +2336,28 @@ mod tests {
 
             cache.force_sync_all().await.unwrap();
             assert!(!file_path.exists(), "invalidated file should be removed");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn keeps_invalidated_file_inside_active_batch_scope(tmp_dir: PathBuf) {
+            let entry_path = tmp_dir.join("entry");
+            let file_path = entry_path.join("blocks.idx");
+            let backend = build_backend(|mock| {
+                let invalidated_path = file_path.clone();
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(move || vec![invalidated_path.clone()])
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            fs::create_dir_all(&entry_path).unwrap();
+            fs::write(&file_path, b"index").unwrap();
+            let batch = cache.begin_batch_for_scope(&entry_path).await.unwrap();
+
+            cache.force_sync_all().await.unwrap();
+
+            assert!(file_path.exists());
+            batch.commit().await.unwrap();
         }
 
         #[rstest]

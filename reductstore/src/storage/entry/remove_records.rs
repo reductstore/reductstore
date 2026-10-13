@@ -36,7 +36,7 @@ impl Entry {
         timestamps: Vec<u64>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         self.ensure_not_deleting().await?;
-        let publication = self.publication.begin_mutation().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
         let block_manager = self.block_manager.clone();
         block_manager
             .write()
@@ -73,7 +73,7 @@ impl Entry {
         mut options: QueryEntry,
     ) -> Result<RecordQueryStats, ReductError> {
         self.ensure_not_deleting().await?;
-        let publication = self.publication.begin_mutation().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
         options.continuous = None; // force non-continuous query
 
         let rx = async || {
