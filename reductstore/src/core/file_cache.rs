@@ -2380,6 +2380,43 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn continues_after_invalidated_file_sync_fails(tmp_dir: PathBuf) {
+            let file_path = tmp_dir.join("invalidated_unsynced_file.txt");
+            let backend = build_backend(|mock| {
+                expect_path(mock, &tmp_dir, 1);
+                expect_try_exists(mock, &file_path, false, 1);
+                expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+                let invalidated_path = file_path.clone();
+                mock.expect_invalidate_locally_cached_files()
+                    .returning(move || vec![invalidated_path.clone()])
+                    .times(1);
+                let upload_path = file_path.clone();
+                mock.expect_upload()
+                    .withf(move |path| path == upload_path.as_path())
+                    .returning(|_| Err(std::io::Error::from(ErrorKind::PermissionDenied)))
+                    .times(1);
+                let retained_path = file_path.clone();
+                mock.expect_remove_from_local_cache_if_unused()
+                    .withf(move |path| path == retained_path.as_path())
+                    .returning(|_| Ok(false))
+                    .times(1);
+            });
+            let cache = build_cache(backend);
+            {
+                let mut file = cache
+                    .write_or_create(&file_path, SeekFrom::Start(0))
+                    .await
+                    .unwrap();
+                file.write_all(b"dirty").unwrap();
+            }
+
+            cache.force_sync_all().await.unwrap();
+
+            assert!(file_path.exists());
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn keeps_invalidated_file_inside_active_batch_scope(tmp_dir: PathBuf) {
             let entry_path = tmp_dir.join("entry");
             let file_path = entry_path.join("blocks.idx");

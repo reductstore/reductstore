@@ -230,6 +230,15 @@ mod tests {
         }
     }
 
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn does_not_remove_files_from_a_nonexistent_local_cache(fs_backend: FileSystemBackend) {
+        assert!(!fs_backend
+            .remove_from_local_cache_if_unused(Path::new("unused"))
+            .await
+            .unwrap());
+    }
+
     #[fixture]
     fn fs_backend() -> FileSystemBackend {
         let dir = tempdir().unwrap().keep();
