@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Avoid blocking update mutations while a scheduled publication synchronizes its current batch, [PR-1666](https://github.com/reductstore/reductstore/pull/1666)
 - Prevent remote cache eviction from unlinking files while they are being accessed, [PR-1665](https://github.com/reductstore/reductstore/pull/1665)
 - Preserve the last committed attachment when its replacement write fails, [#1664](https://github.com/reductstore/reductstore/pull/1664)
 - Preserve retained record payloads when removing records before an active publication batch is committed, [PR-1663](https://github.com/reductstore/reductstore/pull/1663)
