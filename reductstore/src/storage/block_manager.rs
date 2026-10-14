@@ -7,7 +7,7 @@ mod block_cache;
 pub(in crate::storage) mod block_index;
 mod cache;
 pub(in crate::storage) mod compress;
-pub(in crate::storage) mod decompress_cache;
+mod decompress_cache;
 mod lifecycle;
 mod lookup;
 mod paths;
@@ -16,9 +16,11 @@ mod read_only;
 mod records;
 pub(in crate::storage) mod wal;
 
+pub(in crate::storage) use paths::BlockFilePath;
+
 use crate::backend::BackendType;
 use crate::cfg::{Cfg, InstanceRole};
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::{BatchToken, FileCache};
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::block_cache::BlockCache;
@@ -26,6 +28,7 @@ use crate::storage::block_manager::compress::CompressionAlgorithm;
 use crate::storage::block_manager::decompress_cache::{DecompressCache, DecompressedFileType};
 use crate::storage::block_manager::wal::{create_wal, Wal, WalEntry};
 use crate::storage::entry::io::record_reader::read_in_chunks;
+use crate::storage::entry::publication::PublicationId;
 use crate::storage::proto::{record, ts_to_us, us_to_ts, Block as BlockProto, Record};
 use crate::storage::usage::UsageCounters;
 use block_index::BlockIndex;
@@ -35,6 +38,7 @@ use prost::bytes::{Bytes, BytesMut};
 use prost::Message;
 use reduct_base::error::ReductError;
 use reduct_base::internal_server_error;
+use reduct_base::not_found;
 use reduct_base::too_early;
 use std::fs::OpenOptions;
 use std::io::{Read, SeekFrom, Write};
@@ -62,6 +66,24 @@ pub(in crate::storage) struct BlockManager {
     cfg: Arc<Cfg>,
     usage_counters: Arc<UsageCounters>,
     last_replica_sync: Instant,
+    accepted_publication: ReplicaPublication,
+    mutation_batch: Option<BatchToken>,
+    file_cache: Arc<FileCache>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(in crate::storage) enum ReplicaPublication {
+    Legacy,
+    Published(PublicationId),
+}
+
+impl ReplicaPublication {
+    pub(in crate::storage) fn id(&self) -> Option<&PublicationId> {
+        match self {
+            Self::Legacy => None,
+            Self::Published(id) => Some(id),
+        }
+    }
 }
 
 pub const DESCRIPTOR_FILE_EXT: &str = ".meta";
@@ -102,6 +124,7 @@ impl BlockManager {
         entry: String,
         cfg: Arc<Cfg>,
         usage_counters: Arc<UsageCounters>,
+        file_cache: Arc<FileCache>,
     ) -> Result<Self, ReductError> {
         Ok(Self {
             path: path.clone(),
@@ -114,12 +137,62 @@ impl BlockManager {
                 READ_BLOCK_CACHE_SIZE,
                 Duration::from_secs(30),
             ),
-            decompress_cache: DecompressCache::default(),
-            wal: create_wal(path.clone()).await?,
+            decompress_cache: DecompressCache::shared(cfg.engine_config.decompress_cache_size),
+            wal: create_wal(path.clone(), Arc::clone(&file_cache)).await?,
             cfg,
             usage_counters,
             last_replica_sync: Instant::now(),
+            accepted_publication: ReplicaPublication::Legacy,
+            mutation_batch: None,
+            file_cache,
         })
+    }
+
+    pub(in crate::storage) fn set_mutation_batch(&mut self, token: BatchToken) {
+        self.block_index.set_batch_token(token.clone());
+        self.wal.set_batch_token(token.clone());
+        self.mutation_batch = Some(token);
+    }
+
+    pub(in crate::storage) fn clear_mutation_batch(&mut self) {
+        self.block_index.clear_batch_token();
+        self.wal.clear_batch_token();
+        self.mutation_batch = None;
+    }
+
+    pub(in crate::storage) fn clear_mutation_batch_if(&mut self, token: &BatchToken) {
+        if self.mutation_batch.as_ref() == Some(token) {
+            self.clear_mutation_batch();
+        }
+    }
+
+    pub(super) async fn write_or_create_mutation(
+        &self,
+        path: &PathBuf,
+        pos: SeekFrom,
+    ) -> Result<crate::core::file_cache::FileGuard, ReductError> {
+        match &self.mutation_batch {
+            Some(token) => {
+                self.file_cache
+                    .write_or_create_in_batch(token, path, pos)
+                    .await
+            }
+            None => self.file_cache.write_or_create(path, pos).await,
+        }
+    }
+
+    pub(super) async fn evict_mutation(&self, path: &PathBuf) -> Result<(), ReductError> {
+        match &self.mutation_batch {
+            Some(token) => self.file_cache.evict_in_batch(token, path).await,
+            None => self.file_cache.discard_recursive(path).await,
+        }
+    }
+
+    pub(super) async fn remove_mutation(&self, path: &PathBuf) -> Result<(), ReductError> {
+        match &self.mutation_batch {
+            Some(token) => self.file_cache.remove_in_batch(token, path).await,
+            None => self.file_cache.remove(path).await,
+        }
     }
 }
 

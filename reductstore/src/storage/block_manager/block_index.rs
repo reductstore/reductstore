@@ -10,19 +10,32 @@ use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
 
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::{BatchToken, FileCache};
 use crate::storage::block_manager::block::Block;
 use crate::storage::block_manager::{COMPRESSED_DESCRIPTOR_FILE_EXT, DESCRIPTOR_FILE_EXT};
 use crate::storage::proto::block_index::Block as BlockEntry;
 use crate::storage::proto::{
     ts_to_us, us_to_ts, Block as BlockProto, BlockIndex as BlockIndexProto, MinimalBlock,
 };
+use std::sync::Arc;
 
-#[derive(Debug)]
 pub(in crate::storage) struct BlockIndex {
     path_buf: PathBuf,
     index_info: HashMap<u64, BlockEntry>,
     index: BTreeSet<u64>,
+    batch_token: Option<BatchToken>,
+    file_cache: Arc<FileCache>,
+}
+
+impl std::fmt::Debug for BlockIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BlockIndex")
+            .field("path_buf", &self.path_buf)
+            .field("index_info", &self.index_info)
+            .field("index", &self.index)
+            .field("batch_token", &self.batch_token)
+            .finish()
+    }
 }
 
 impl Into<BlockEntry> for MinimalBlock {
@@ -74,14 +87,24 @@ impl Into<BlockEntry> for Block {
 }
 
 impl BlockIndex {
-    pub fn new(path_buf: PathBuf) -> Self {
+    pub fn new(path_buf: PathBuf, file_cache: Arc<FileCache>) -> Self {
         let index = BlockIndex {
             path_buf,
             index_info: HashMap::new(),
             index: BTreeSet::new(),
+            batch_token: None,
+            file_cache,
         };
 
         index
+    }
+
+    pub(crate) fn set_batch_token(&mut self, token: BatchToken) {
+        self.batch_token = Some(token);
+    }
+
+    pub(crate) fn clear_batch_token(&mut self) {
+        self.batch_token = None;
     }
 
     /// Insert  or update a new block entry into the index.
@@ -162,12 +185,12 @@ impl BlockIndex {
             .collect()
     }
 
-    pub async fn try_load(path: PathBuf) -> Result<Self, ReductError> {
-        if !FILE_CACHE.try_exists(&path).await? {
+    pub async fn try_load(path: PathBuf, file_cache: Arc<FileCache>) -> Result<Self, ReductError> {
+        if !file_cache.try_exists(&path).await? {
             return Err(internal_server_error!("Block index {:?} not found", path));
         }
 
-        let mut lock = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+        let mut lock = file_cache.read(&path, SeekFrom::Start(0)).await?;
         let mut buf = Vec::new();
         if let Err(err) = lock.read_to_end(&mut buf) {
             return Err(internal_server_error!(
@@ -180,7 +203,7 @@ impl BlockIndex {
         if lock.metadata()?.len() == 0 {
             // If the index file is empty, check if there are any block descriptors.
             // If there are, the index file is corrupted.
-            let has_block_descriptors = FILE_CACHE
+            let has_block_descriptors = file_cache
                 .read_dir(&path.parent().unwrap().into())
                 .await?
                 .iter()
@@ -198,15 +221,21 @@ impl BlockIndex {
             internal_server_error!("Failed to decode block index {:?}: {}", path, err)
         })?;
 
-        let block_index: BlockIndex = BlockIndex::from_proto(path, block_index_proto)?;
+        let block_index: BlockIndex = BlockIndex::from_proto(path, block_index_proto, file_cache)?;
         Ok(block_index)
     }
 
-    pub fn from_proto(path: PathBuf, value: BlockIndexProto) -> Result<Self, ReductError> {
+    pub fn from_proto(
+        path: PathBuf,
+        value: BlockIndexProto,
+        file_cache: Arc<FileCache>,
+    ) -> Result<Self, ReductError> {
         let mut block_index = BlockIndex {
             path_buf: path.clone(),
             index_info: HashMap::new(),
             index: BTreeSet::new(),
+            batch_token: None,
+            file_cache,
         };
 
         let mut crc = Digest::new();
@@ -293,9 +322,18 @@ impl BlockIndex {
         block_index_proto.crc64 = crc.sum64();
         let buf = block_index_proto.encode_to_vec();
 
-        let mut lock = FILE_CACHE
-            .write_or_create(&self.path_buf, SeekFrom::Start(0))
-            .await?;
+        let mut lock = match &self.batch_token {
+            Some(token) => {
+                self.file_cache
+                    .write_or_create_in_batch(token, &self.path_buf, SeekFrom::Start(0))
+                    .await?
+            }
+            None => {
+                self.file_cache
+                    .write_or_create(&self.path_buf, SeekFrom::Start(0))
+                    .await?
+            }
+        };
         lock.set_len(0)?;
         lock.write_all(&buf).map_err(|err| {
             internal_server_error!("Failed to write block index {:?}: {}", self.path_buf, err)
@@ -326,14 +364,6 @@ impl BlockIndex {
         &self.index_info
     }
 
-    pub async fn sync_all(&mut self) -> Result<(), ReductError> {
-        let mut lock = FILE_CACHE
-            .write_or_create(&self.path_buf, SeekFrom::Start(0))
-            .await?;
-        lock.sync_all().await?;
-        Ok(())
-    }
-
     fn insert(&mut self, block: BlockEntry) {
         self.index_info.insert(block.block_id, block);
         self.index.insert(block.block_id);
@@ -343,21 +373,28 @@ impl BlockIndex {
 #[cfg(test)]
 mod tests {
     use std::fs;
+    use std::sync::Arc;
 
+    use crate::core::file_cache::{build_test_file_cache, FileCache};
     use crate::storage::block_manager::BLOCK_INDEX_FILE;
     use crate::storage::proto::block_index::Block as BlockEntry;
     use prost_wkt_types::Timestamp;
-    use rstest::rstest;
+    use rstest::{fixture, rstest};
     use tempfile::tempdir;
 
     use super::*;
+
+    #[fixture]
+    fn file_cache() -> Arc<FileCache> {
+        build_test_file_cache()
+    }
 
     mod try_load {
         use super::*;
 
         #[rstest]
         #[tokio::test]
-        async fn test_ok() {
+        async fn test_ok(file_cache: Arc<FileCache>) {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let block_index_proto = BlockIndexProto {
@@ -376,7 +413,9 @@ mod tests {
             };
             fs::write(&path, block_index_proto.encode_to_vec()).unwrap();
 
-            let block_index = BlockIndex::try_load(path.clone()).await.unwrap();
+            let block_index = BlockIndex::try_load(path.clone(), file_cache.clone())
+                .await
+                .unwrap();
             assert_eq!(block_index.size(), 2);
             assert_eq!(block_index.record_count(), 1);
             assert_eq!(block_index.tree().len(), 1);
@@ -385,9 +424,12 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_index_file_not_found() {
+        async fn test_index_file_not_found(file_cache: Arc<FileCache>) {
             let path = PathBuf::from("not_found");
-            let block_index = BlockIndex::try_load(path.clone()).await.err().unwrap();
+            let block_index = BlockIndex::try_load(path.clone(), file_cache.clone())
+                .await
+                .err()
+                .unwrap();
             assert_eq!(
                 block_index,
                 internal_server_error!("Block index {:?} not found", path)
@@ -396,7 +438,7 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_index_file_corrupted() {
+        async fn test_index_file_corrupted(file_cache: Arc<FileCache>) {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
             let block_index_proto = BlockIndexProto {
@@ -415,7 +457,10 @@ mod tests {
             };
             fs::write(&path, block_index_proto.encode_to_vec()).unwrap();
 
-            let block_index = BlockIndex::try_load(path.clone()).await.err().unwrap();
+            let block_index = BlockIndex::try_load(path.clone(), file_cache.clone())
+                .await
+                .err()
+                .unwrap();
             assert_eq!(
                 block_index,
                 internal_server_error!("Block index {:?} is corrupted", path)
@@ -424,11 +469,14 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_decode_err() {
+        async fn test_decode_err(file_cache: Arc<FileCache>) {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
             fs::write(&path, vec![0, 1, 2, 3]).unwrap();
 
-            let block_index = BlockIndex::try_load(path.clone()).await.err().unwrap();
+            let block_index = BlockIndex::try_load(path.clone(), file_cache.clone())
+                .await
+                .err()
+                .unwrap();
             assert_eq!(block_index, internal_server_error!("Failed to decode block index {:?}: failed to decode Protobuf message: invalid tag value: 0", path));
         }
     }
@@ -438,10 +486,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_ok() {
+        async fn test_ok(file_cache: Arc<FileCache>) {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
-            let mut block_index = BlockIndex::new(path.clone());
+            let mut block_index = BlockIndex::new(path.clone(), file_cache.clone());
             block_index.insert_or_update(BlockEntry {
                 block_id: 1,
                 size: 1,
@@ -456,7 +504,9 @@ mod tests {
 
             block_index.save().await.unwrap();
 
-            let block_index_proto = BlockIndex::try_load(path.clone()).await.unwrap();
+            let block_index_proto = BlockIndex::try_load(path.clone(), file_cache.clone())
+                .await
+                .unwrap();
             assert_eq!(block_index_proto.size(), 2);
             assert_eq!(block_index_proto.record_count(), 1);
             assert_eq!(block_index_proto.tree().len(), 1);
@@ -464,10 +514,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_corrupted_round_trip() {
+        async fn test_corrupted_round_trip(file_cache: Arc<FileCache>) {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 
-            let mut block_index = BlockIndex::new(path.clone());
+            let mut block_index = BlockIndex::new(path.clone(), file_cache.clone());
             block_index.insert_or_update(BlockEntry {
                 block_id: 1,
                 size: 1,
@@ -487,7 +537,9 @@ mod tests {
 
             block_index.save().await.unwrap();
 
-            let block_index = BlockIndex::try_load(path).await.unwrap();
+            let block_index = BlockIndex::try_load(path, file_cache.clone())
+                .await
+                .unwrap();
             assert!(block_index.is_corrupted(1));
             assert_eq!(block_index.corrupted_block_count(), 1);
             assert_eq!(block_index.corrupted_block_ids(), vec![1]);

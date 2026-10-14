@@ -7,6 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevent remote cache eviction from unlinking files while they are being accessed, [PR-1665](https://github.com/reductstore/reductstore/pull/1665)
+- Preserve the last committed attachment when its replacement write fails, [#1664](https://github.com/reductstore/reductstore/pull/1664)
+- Preserve retained record payloads when removing records before an active publication batch is committed, [PR-1663](https://github.com/reductstore/reductstore/pull/1663)
+- Prevent idle publication from blocking reads after write bursts, [#1657](https://github.com/reductstore/reductstore/pull/1657)
+- Limit disk usage of decompressed blocks across all entries (`RS_ENGINE_DECOMPRESS_CACHE_SIZE`, default 1GB) and clean up expired, partial and leftover files, [PR-1640](https://github.com/reductstore/reductstore/pull/1640) by @ragen1337
+- Recover read-only replicas from stale compressed block cache entries without returning HTTP 500, [PR-1643](https://github.com/reductstore/reductstore/pull/1643)
+- Keep decompressed files on disk while they are read, so eviction from the decompression cache doesn't break reads of compressed records, [PR-1660](https://github.com/reductstore/reductstore/pull/1660) by @ragen1337
+
+### Internal
+
+- Replace the global file cache singleton with a cache injected through storage components, [PR-1661](https://github.com/reductstore/reductstore/pull/1661)
+- Verify rebuilt block indexes remain synchronized and restore cleanly after restart, [PR-1649](https://github.com/reductstore/reductstore/pull/1649) by @shubhambhar007
+- Publish completed mutation bursts after a short idle period to restore update-after-write throughput, [PR-1647](https://github.com/reductstore/reductstore/pull/1647)
+- Batch entry mutations until cache compaction publishes them, [PR-1646](https://github.com/reductstore/reductstore/pull/1646)
+- Use the shared ReductStore Debian base image for runtime containers, [PR-1639](https://github.com/reductstore/reductstore/pull/1639)
+- Publish entry mutations atomically for read-only replicas, [PR-1637](https://github.com/reductstore/reductstore/pull/1637) by @atimin
+- Replace formatted `ReductError` constructors with error macros, [PR-1631](https://github.com/reductstore/reductstore/pull/1631) by @vintcessun
+
+## 1.21.2 - 2026-10-08
+
+### Fixed
+
+- Preserve direct reads and historical queries for belated records written after their target block is full, [PR-1653](https://github.com/reductstore/reductstore/pull/1653)
+
+### Internal
+
+- Use the shared ReductStore Debian base image for stable runtime containers, [PR-1654](https://github.com/reductstore/reductstore/pull/1654)
+
+## 1.21.1 - 2026-09-22
+
+### Changes
+
+- Allow runtime updates to the license reported by `/api/v1/info`, [PR-1621](https://github.com/reductstore/reductstore/pull/1621)
+
+## 1.21.0 - 2026-09-17
 
 ### Breaking Changes
 
@@ -14,7 +51,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Configure the Zenoh API as `RS_ZENOH_SUB_<ID>_*` and `RS_ZENOH_QUERY_<ID>_*` blocks, each declaring one or more key expressions (`_KEYEXPRS`, comma separated) and its own target bucket (`_BUCKET`); `_ROUTING=key-prefix` additionally lets the first chunk of a key expression select the bucket, bounded by `_BUCKET_ALLOWLIST` and, for subscribers, `_ALLOW_BUCKET_CREATION`. The unindexed `RS_ZENOH_BUCKET` / `RS_ZENOH_SUB_KEYEXPRS` / `RS_ZENOH_QUERY_KEYEXPRS` / `RS_ZENOH_QUERY_LOCALITY` settings keep working as a single static block when no indexed variable is set, [Issue-1590](https://github.com/reductstore/reductstore/issues/1590)
+- Add a snap content interface plug for read-only configuration snaps, [PR-1613](https://github.com/reductstore/reductstore/pull/1613)
+- Send `x-reduct-node-id`, `x-reduct-store-id`, and `x-reduct-license-hash` headers with replication requests, enforcing matching commercial licenses, device limits, and one active node identity per capped device on receivers, [Issue-1580](https://github.com/reductstore/reductstore/issues/1580), [#1611](https://github.com/reductstore/reductstore/pull/1611) by @atimin
+- Persist a deployment UUID in `.uuid` on the configured filesystem, S3, or Azure Blob storage, [PR-1606](https://github.com/reductstore/reductstore/pull/1606) by @anthonycvn
 - Expose the effective instance name and role in the `/api/v1/info` response, [PR-1569](https://github.com/reductstore/reductstore/pull/1569) by @lntutor
 - Automatically create missing destination buckets during replication, [PR-1539](https://github.com/reductstore/reductstore/pull/1539) by @rohankumardubey
 - Add a replication `compression` setting (`none`, `zstd`, `gzip`, default `none`) that compresses batch payloads during transfer using HTTP `Content-Encoding`, [Issue-1348](https://github.com/reductstore/reductstore/issues/1348) by @DibbayajyotiRoy
@@ -31,6 +70,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- Update Web Console to v1.17.2, [PR-1615](https://github.com/reductstore/reductstore/pull/1615)
+- Update Web Console to v1.16.0, [PR-1607](https://github.com/reductstore/reductstore/pull/1607)
 - Default `RS_SYSTEM_EVENTS_QUOTA_SIZE` to 10 GB when it is not set, [PR-1556](https://github.com/reductstore/reductstore/pull/1556) by @LordAizen1
 - Allow fork pull request CI to run without protobuf setup tokens or Docker Hub credentials by vendoring `protoc` and making Docker login optional, [PR-1532](https://github.com/reductstore/reductstore/pull/1532)
 - Pipelined replication batch sending to overlap preparing the next batch with sending the current one, [PR-1527](https://github.com/reductstore/reductstore/pull/1527) by @DibbayajyotiRoy (based on [PR-1415](https://github.com/reductstore/reductstore/pull/1415) by @FirasCh3)
@@ -60,7 +101,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Security
 
-- Invalidate cached bearer credentials after token rotation and store rotated secrets as salted hashes, [CVE-2026-0001](https://github.com/reductstore/reductstore/security/advisories/GHSA-cg68-3m38-wq4c)
+- Invalidate cached bearer credentials after token rotation and store rotated secrets as salted hashes, [CVE-2026-90667](https://github.com/reductstore/reductstore/security/advisories/GHSA-cg68-3m38-wq4c)
 
 ## 1.20.10 - 2026-07-29
 

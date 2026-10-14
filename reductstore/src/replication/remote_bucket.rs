@@ -5,6 +5,7 @@ mod client_wrapper;
 mod states;
 
 use crate::replication::remote_bucket::states::{InitialState, RemoteBucketState};
+use crate::replication::ReplicationSourceIdentity;
 use crate::replication::Transaction;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
@@ -21,6 +22,7 @@ pub(super) struct RemoteBucketConfig {
     pub(super) verify_ssl: bool,
     pub(super) ca_path: Option<PathBuf>,
     pub(super) compression: ReplicationCompression,
+    pub(super) source_identity: ReplicationSourceIdentity,
 }
 
 pub(super) struct RemoteBucketBuilder {
@@ -64,6 +66,11 @@ impl RemoteBucketBuilder {
 
     pub fn compression(mut self, compression: ReplicationCompression) -> Self {
         self.config.compression = compression;
+        self
+    }
+
+    pub fn source_identity(mut self, source_identity: ReplicationSourceIdentity) -> Self {
+        self.config.source_identity = source_identity;
         self
     }
 

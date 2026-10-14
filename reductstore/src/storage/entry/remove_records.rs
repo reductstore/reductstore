@@ -36,7 +36,12 @@ impl Entry {
         timestamps: Vec<u64>,
     ) -> Result<BTreeMap<u64, ReductError>, ReductError> {
         self.ensure_not_deleting().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
         let block_manager = self.block_manager.clone();
+        block_manager
+            .write()
+            .await?
+            .set_mutation_batch(publication.token.clone());
         Ok(
             Self::inner_remove_records(timestamps, block_manager, &self.bucket_name, &self.name)
                 .await?
@@ -68,6 +73,7 @@ impl Entry {
         mut options: QueryEntry,
     ) -> Result<RecordQueryStats, ReductError> {
         self.ensure_not_deleting().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
         options.continuous = None; // force non-continuous query
 
         let rx = async || {
@@ -82,6 +88,10 @@ impl Entry {
         };
 
         let block_manager = self.block_manager.clone();
+        block_manager
+            .write()
+            .await?
+            .set_mutation_batch(publication.token.clone());
         let max_block_records = self.settings().await?.max_block_records; // max records per block
 
         // Loop until the query is done
@@ -146,6 +156,28 @@ impl Entry {
         Ok(stats)
     }
 
+    pub(super) async fn query_record_timestamps(
+        &self,
+        mut options: QueryEntry,
+    ) -> Result<Vec<u64>, ReductError> {
+        options.continuous = None;
+        let query_id = self.query(options).await?;
+        let (rx, _) = self.get_query_receiver(query_id).await?;
+        let mut timestamps = vec![];
+
+        loop {
+            match rx.upgrade()?.write().await?.recv().await {
+                Some(Ok(record)) => timestamps.push(record.meta().timestamp()),
+                Some(Err(ReductError {
+                    status: ErrorCode::NoContent,
+                    ..
+                }))
+                | None => return Ok(timestamps),
+                Some(Err(err)) => return Err(err),
+            }
+        }
+    }
+
     /// Query and count multiple records over a range of timestamps.
     ///
     /// # Arguments
@@ -194,7 +226,7 @@ impl Entry {
                         .block_manager
                         .write()
                         .await?
-                        .find_block(rec.meta().timestamp())
+                        .find_block_candidate(rec.meta().timestamp())
                         .await?;
                     affected_blocks.insert(block_ref.read().await?.block_id());
                 }
@@ -215,6 +247,17 @@ impl Entry {
         Ok(stats)
     }
 
+    pub(super) async fn remove_records_in_current_mutation(
+        timestamps: Vec<u64>,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+        bucket_name: &str,
+        entry_name: &str,
+    ) -> Result<(), ReductError> {
+        Self::inner_remove_records(timestamps, block_manager, bucket_name, entry_name)
+            .await
+            .map(|_| ())
+    }
+
     async fn inner_remove_records(
         timestamps: Vec<u64>,
         block_manager: Arc<AsyncRwLock<BlockManager>>,
@@ -228,7 +271,12 @@ impl Entry {
             for time in timestamps {
                 // Find the block that contains the record
                 // TODO: Try to avoid the lookup for each record
-                match block_manager.write().await?.find_block(time).await {
+                match block_manager
+                    .write()
+                    .await?
+                    .find_block_with_record(time)
+                    .await
+                {
                     Ok(block_ref) => {
                         // Check if the record exists
                         let block = block_ref.read().await?;

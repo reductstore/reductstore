@@ -13,8 +13,8 @@ impl BlockManager {
 
         // create a block with data
         {
-            let mut file = FILE_CACHE
-                .write_or_create(&self.path_to_data(block_id), SeekFrom::Start(0))
+            let mut file = self
+                .write_or_create_mutation(&self.path_to_data(block_id), SeekFrom::Start(0))
                 .await?;
 
             if self.cfg.backend_config.backend_type == BackendType::Filesystem {
@@ -54,53 +54,17 @@ impl BlockManager {
 
         {
             // resize imminently for better testing.
-            let mut data_block = FILE_CACHE
-                .write_or_create(&data_path, SeekFrom::Current(0))
+            let mut data_block = self
+                .write_or_create_mutation(&data_path, SeekFrom::Current(0))
                 .await?;
             data_block.set_len(block_size)?;
         }
 
         self.save_meta_on_disk(block.clone()).await?;
 
-        let sync_block = async move {
-            /* sync descriptor and data */
-            {
-                let mut data_block = FILE_CACHE
-                    .write_or_create(&data_path, SeekFrom::Current(0))
-                    .await?;
-                data_block.sync_all().await?;
-            }
-
-            {
-                let mut descr_block = FILE_CACHE
-                    .write_or_create(&desc_path, SeekFrom::Current(0))
-                    .await?;
-                descr_block.sync_all().await?;
-            }
-
-            {
-                let mut descr_block = FILE_CACHE
-                    .write_or_create(&desc_path, SeekFrom::Current(0))
-                    .await?;
-                descr_block.sync_all().await?;
-            }
-
-            {
-                let mut index_file = FILE_CACHE
-                    .write_or_create(&index_path, SeekFrom::Current(0))
-                    .await?;
-                index_file.sync_all().await?;
-            }
-
-            Ok::<(), ReductError>(())
-        };
-
-        tokio::spawn(async move {
-            // spawn to avoid blocking entry
-            if let Err(err) = sync_block.await {
-                error!("{}", err)
-            }
-        });
+        // Publication batches own remote synchronization. Do not bypass their
+        // ordering by synchronizing individual files here.
+        let _ = (desc_path, index_path);
 
         Ok(())
     }
@@ -120,9 +84,9 @@ impl BlockManager {
         self.wal.append(block_id, WalEntry::RemoveBlock).await?;
 
         for path in all_block_file_paths(&self.path, block_id) {
-            if FILE_CACHE.try_exists(&path).await? {
+            if self.file_cache.try_exists(&path).await? {
                 // The block may still exist only in WAL during recovery.
-                FILE_CACHE.remove(&path).await?;
+                self.remove_mutation(&path).await?;
             }
         }
 
@@ -145,7 +109,8 @@ impl BlockManager {
         self.block_cache.remove(&block_id);
 
         let path = self.path_to_desc(block_id);
-        let descriptor = if let Ok(mut file) = FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
+        let descriptor = if let Ok(mut file) = self.file_cache.read(&path, SeekFrom::Start(0)).await
+        {
             let mut buf = Vec::new();
             if file.read_to_end(&mut buf).is_ok() {
                 BlockProto::decode(Bytes::from(buf)).ok()
@@ -159,7 +124,11 @@ impl BlockManager {
         if let Some(mut proto) = descriptor {
             proto.corrupted = Some(true);
             let new_buf = proto.encode_to_vec();
-            if let Ok(mut writer) = FILE_CACHE.write_or_create(&path, SeekFrom::Start(0)).await {
+            if let Ok(mut writer) = self
+                .file_cache
+                .write_or_create(&path, SeekFrom::Start(0))
+                .await
+            {
                 let _ = writer.set_len(new_buf.len() as u64);
                 let _ = writer.write_all(&new_buf);
                 let _ = writer.flush_local().await;
@@ -183,7 +152,7 @@ impl BlockManager {
     /// Check if a block exists on disk.
     pub async fn exist(&self, block_id: u64) -> Result<bool, ReductError> {
         let path = self.path_to_desc(block_id);
-        Ok(FILE_CACHE.try_exists(&path).await?)
+        Ok(self.file_cache.try_exists(&path).await?)
     }
 }
 
@@ -192,7 +161,7 @@ mod tests {
     use super::*;
     use crate::storage::block_manager::block::Block;
     use crate::storage::block_manager::block_index::BlockIndex;
-    use crate::storage::block_manager::test_utils::{block_id, block_manager};
+    use crate::storage::block_manager::test_utils::{block_id, block_manager, file_cache};
     use crate::storage::block_manager::{
         BlockManager, BLOCK_INDEX_FILE, DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
     };
@@ -237,18 +206,19 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_starting_block_no_preallocation_for_remote_backend() {
+    async fn test_starting_block_no_preallocation_for_remote_backend(file_cache: Arc<FileCache>) {
         let path = tempdir().unwrap().keep().join("bucket").join("entry");
         let mut cfg = Cfg::default();
         cfg.backend_config.backend_type = BackendType::Remote;
 
         let mut block_manager = BlockManager::build(
             path.clone(),
-            BlockIndex::new(path.join(BLOCK_INDEX_FILE)),
+            BlockIndex::new(path.join(BLOCK_INDEX_FILE), file_cache.clone()),
             "bucket".to_string(),
             "entry".to_string(),
             Arc::new(cfg),
             Default::default(),
+            file_cache,
         )
         .await
         .unwrap();
@@ -340,6 +310,7 @@ mod tests {
     async fn test_remove_compressed_block_cleans_files_and_caches(
         #[future] block_manager: BlockManager,
         block_id: u64,
+        file_cache: Arc<FileCache>,
     ) {
         let mut block_manager = block_manager.await;
         block_manager
@@ -356,9 +327,12 @@ mod tests {
                 block_id,
                 DecompressedFileType::Data,
                 &compressed_data_path,
+                &file_cache,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
         let cached_desc_path = block_manager
             .decompress_cache
             .get_or_decompress(
@@ -366,9 +340,12 @@ mod tests {
                 block_id,
                 DecompressedFileType::Descriptor,
                 &compressed_desc_path,
+                &file_cache,
             )
             .await
-            .unwrap();
+            .unwrap()
+            .path()
+            .clone();
 
         block_manager.remove_block(block_id).await.unwrap();
 
@@ -380,13 +357,14 @@ mod tests {
         assert!(!cached_desc_path.exists());
         assert!(block_manager.block_cache.get_read(&block_id).is_none());
         assert!(block_manager.index().get_block(block_id).is_none());
-        assert!(
-            BlockIndex::try_load(block_manager.path.join(BLOCK_INDEX_FILE))
-                .await
-                .unwrap()
-                .get_block(block_id)
-                .is_none()
-        );
+        assert!(BlockIndex::try_load(
+            block_manager.path.join(BLOCK_INDEX_FILE),
+            file_cache.clone(),
+        )
+        .await
+        .unwrap()
+        .get_block(block_id)
+        .is_none());
     }
 
     #[rstest]
@@ -394,11 +372,12 @@ mod tests {
     async fn test_update_index_when_remove_block(
         #[future] block_manager: BlockManager,
         block_id: u64,
+        file_cache: Arc<FileCache>,
     ) {
         let mut bm = block_manager.await;
         bm.remove_block(block_id).await.unwrap();
 
-        let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE))
+        let index = BlockIndex::try_load(bm.path.join(BLOCK_INDEX_FILE), file_cache.clone())
             .await
             .unwrap();
         assert!(index.get_block(block_id).is_none(), "index updated");

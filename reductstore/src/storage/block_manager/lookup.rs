@@ -4,9 +4,43 @@
 use super::*;
 
 impl BlockManager {
-    pub async fn find_block(&mut self, start: u64) -> Result<BlockRef, ReductError> {
+    pub async fn find_block_candidate(&mut self, start: u64) -> Result<BlockRef, ReductError> {
         let id = self.find_block_id(start)?;
         self.load_block(id).await
+    }
+
+    /// Finds the block which contains a record with the exact timestamp.
+    ///
+    /// A belated write can create a block whose time range overlaps an earlier block. Search
+    /// predecessor blocks from newest to oldest rather than relying on the index floor lookup.
+    pub async fn find_block_with_record(&mut self, time: u64) -> Result<BlockRef, ReductError> {
+        let block_ref = self.find_block_candidate(time).await?;
+        let (block_id, has_record) = {
+            let block = block_ref.read().await?;
+            (block.block_id(), block.get_record(time).is_some())
+        };
+
+        if has_record {
+            return Ok(block_ref);
+        }
+
+        // search for a block with belated data
+        let block_ids = self
+            .block_index
+            .active_tree()
+            .range(..block_id)
+            .rev()
+            .copied()
+            .collect::<Vec<_>>();
+
+        for block_id in block_ids {
+            let block_ref = self.load_block(block_id).await?;
+            if block_ref.read().await?.get_record(time).is_some() {
+                return Ok(block_ref);
+            }
+        }
+
+        Ok(block_ref)
     }
 
     fn find_block_id(&self, start: u64) -> Result<u64, ReductError> {
@@ -17,10 +51,12 @@ impl BlockManager {
         } else if let Some(block_id) = active_tree.range(..start).rev().next() {
             Ok(*block_id)
         } else {
-            Err(ReductError::not_found(&format!(
+            Err(not_found!(
                 "Record {} not found in entry {}/{}",
-                start, self.bucket, self.entry
-            )))
+                start,
+                self.bucket,
+                self.entry
+            ))
         }
     }
 
@@ -34,8 +70,26 @@ impl BlockManager {
         // first check if we have the block in write cache
         let mut cached_block = self.block_cache.get_read(&block_id);
         if cached_block.is_none() {
-            let path = self.resolve_desc_path(block_id).await?;
-            let buf = match FILE_CACHE.read(&path, SeekFrom::Start(0)).await {
+            // Keep the decompressed descriptor on disk until it has been read
+            let desc_file = match self.resolve_desc_path(block_id).await {
+                Ok(file) => file,
+                Err(err) if self.cfg.role == InstanceRole::Replica => {
+                    debug!(
+                        "Block descriptor {}/{}/{} can't be resolved on replica: {}. Treat as transient and reload index",
+                        self.bucket, self.entry, block_id, err
+                    );
+                    self.invalidate_replica_block_cache(block_id).await?;
+                    return Err(too_early!(
+                        "Block descriptor {}/{}/{} can't be resolved on replica. Reload index and retry",
+                        self.bucket,
+                        self.entry,
+                        block_id
+                    ));
+                }
+                Err(err) => return Err(err),
+            };
+            let path = desc_file.path();
+            let buf = match self.file_cache.read(path, SeekFrom::Start(0)).await {
                 Ok(mut file) => {
                     let mut buf = vec![];
                     file.read_to_end(&mut buf)?;
@@ -45,9 +99,8 @@ impl BlockManager {
                     // Re-check existence to distinguish a transient TOCTOU race
                     // (descriptor removed after the first check) from a real read failure.
                     if self.cfg.role == InstanceRole::Replica
-                        && !FILE_CACHE.try_exists(&path).await?
+                        && !self.file_cache.try_exists(path).await?
                     {
-                        self.block_index.remove_block(block_id);
                         return Err(too_early!(
                             "Block descriptor {:?} can't be read on replica yet: {}. Reload index and retry",
                             path,
@@ -72,14 +125,13 @@ impl BlockManager {
                     // we check crc if the crc is stored in the index for backward compatibility
                     if block_crc != crc.sum64() {
                         if self.cfg.role == InstanceRole::Replica {
-                            warn!(
+                            debug!(
                                 "Block descriptor {:?} CRC mismatch on replica: index CRC {} mismatch with calculated CRC {}. Treat as transient and reload index",
                                 path,
                                 block_crc,
                                 crc.sum64()
                             );
                             self.invalidate_replica_block_cache(block_id).await?;
-                            self.block_index.remove_block(block_id);
                             return Err(too_early!(
                                 "Block descriptor {:?} CRC mismatch on replica. Reload index and retry",
                                 path
@@ -173,7 +225,7 @@ impl BlockManager {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::storage::block_manager::compress::CompressionAlgorithm;
     use crate::storage::block_manager::test_utils::{block_id, block_manager};
     use crate::storage::block_manager::BlockManager;
     use crate::storage::proto::Block as BlockProto;
@@ -264,6 +316,26 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_load_block_invalid_compressed_descriptor_returns_error(
+        #[future] block_manager: BlockManager,
+        block_id: u64,
+    ) {
+        let mut block_manager = block_manager.await;
+        block_manager.block_cache.remove(&block_id);
+        block_manager
+            .index_mut()
+            .get_block_mut(block_id)
+            .unwrap()
+            .compression = Some(i32::from(CompressionAlgorithm::Zstd));
+        std::fs::write(block_manager.path_to_compressed_desc(block_id), b"not-zstd").unwrap();
+
+        let err = block_manager.load_block(block_id).await.err().unwrap();
+
+        assert_eq!(err.status(), ErrorCode::InternalServerError);
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_recover_being_time_from_id(#[future] block_manager: BlockManager, block_id: u64) {
         let mut block_manager = block_manager.await;
         block_manager.start_new_block(block_id, 1024).await.unwrap();
@@ -298,7 +370,8 @@ mod tests {
         let mut block_manager = block_manager.await;
         assert!(block_manager.index().get_block(block_id).is_some());
 
-        FILE_CACHE
+        block_manager
+            .file_cache()
             .remove(&block_manager.path_to_desc(block_id))
             .await
             .unwrap();

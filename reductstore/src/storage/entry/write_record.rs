@@ -1,30 +1,87 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::storage::block_manager::BlockRef;
+use crate::core::sync::AsyncRwLock;
+use crate::storage::block_manager::{BlockManager, BlockRef};
+use crate::storage::entry::publication_coordinator::{MutationAdmission, PublicationCoordinator};
 use crate::storage::entry::{Entry, RecordType, RecordWriter};
 use crate::storage::proto::{record, us_to_ts, Record};
 use async_trait::async_trait;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::io::{WriteChunk, WriteRecord};
-use reduct_base::Labels;
+use reduct_base::{conflict, Labels};
+use std::path::PathBuf;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 use tokio::sync::OwnedSemaphorePermit;
 
 struct InFlightWriteRecord {
     inner: Box<dyn WriteRecord + Sync + Send>,
     _permit: Option<OwnedSemaphorePermit>,
+    publication: Option<MutationAdmission>,
+    coordinator: Arc<PublicationCoordinator>,
+    entry_path: PathBuf,
+    block_manager: Arc<AsyncRwLock<BlockManager>>,
+    completion: Option<oneshot::Receiver<bool>>,
+    superseded_record_timestamps: Vec<u64>,
+    bucket_name: String,
+    entry_name: String,
 }
 
 impl InFlightWriteRecord {
     fn new(
         inner: Box<dyn WriteRecord + Sync + Send>,
         permit: Option<OwnedSemaphorePermit>,
+        publication: MutationAdmission,
+        coordinator: Arc<PublicationCoordinator>,
+        entry_path: PathBuf,
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+        completion: oneshot::Receiver<bool>,
+        superseded_record_timestamps: Vec<u64>,
+        bucket_name: String,
+        entry_name: String,
     ) -> Self {
         Self {
             inner,
             _permit: permit,
+            publication: Some(publication),
+            coordinator,
+            entry_path,
+            block_manager,
+            completion: Some(completion),
+            superseded_record_timestamps,
+            bucket_name,
+            entry_name,
+        }
+    }
+
+    async fn release_publication_after(&mut self, terminal: bool) {
+        if terminal {
+            let write_succeeded = match self.completion.take() {
+                Some(completion) => completion.await.unwrap_or(false),
+                None => false,
+            };
+            if write_succeeded && !self.superseded_record_timestamps.is_empty() {
+                if let Err(err) = Entry::remove_records_in_current_mutation(
+                    std::mem::take(&mut self.superseded_record_timestamps),
+                    Arc::clone(&self.block_manager),
+                    &self.bucket_name,
+                    &self.entry_name,
+                )
+                .await
+                {
+                    log::error!(
+                        "Failed to remove superseded records from {}/{}: {}",
+                        self.bucket_name,
+                        self.entry_name,
+                        err
+                    );
+                }
+            }
+            self.publication.take();
+            self.coordinator
+                .schedule_publish(self.entry_path.clone(), Arc::clone(&self.block_manager));
         }
     }
 }
@@ -32,7 +89,10 @@ impl InFlightWriteRecord {
 #[async_trait]
 impl WriteRecord for InFlightWriteRecord {
     async fn send(&mut self, chunk: WriteChunk) -> Result<(), ReductError> {
-        self.inner.send(chunk).await
+        let terminal = chunk.is_err() || chunk.as_ref().is_ok_and(Option::is_none);
+        let result = self.inner.send(chunk).await;
+        self.release_publication_after(terminal).await;
+        result
     }
 
     async fn send_timeout(
@@ -40,7 +100,10 @@ impl WriteRecord for InFlightWriteRecord {
         chunk: WriteChunk,
         timeout: std::time::Duration,
     ) -> Result<(), ReductError> {
-        self.inner.send_timeout(chunk, timeout).await
+        let terminal = chunk.is_err() || chunk.as_ref().is_ok_and(Option::is_none);
+        let result = self.inner.send_timeout(chunk, timeout).await;
+        self.release_publication_after(terminal).await;
+        result
     }
 }
 
@@ -66,9 +129,19 @@ impl Entry {
         labels: Labels,
     ) -> Result<Box<dyn WriteRecord + Sync + Send>, ReductError> {
         self.ensure_not_deleting().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
+        {
+            let mut block_manager = self.block_manager.write().await?;
+            block_manager.set_mutation_batch(publication.token.clone());
+        }
         let permit = self.acquire_writer_slot().await?;
-        // Strategy validates labels and can perform pre-write maintenance.
-        self.system_behavior.prepare_write(self, &labels).await?;
+        // Strategy validates labels and identifies records superseded by this write.
+        let mut preparation = self.system_behavior.prepare_write(self, &labels).await?;
+        // Retrying an errored record replaces it in place, so it must not be
+        // removed as though it were an older attachment generation.
+        preparation
+            .superseded_record_timestamps
+            .retain(|timestamp| *timestamp != time);
 
         let settings = self.settings.read().await?;
         let mut block_ref = {
@@ -110,7 +183,7 @@ impl Entry {
                     block_ref = bm.start_new_block(time, settings.max_block_size).await?;
                     RecordType::BelatedFirst
                 } else {
-                    block_ref = bm.find_block(time).await?;
+                    block_ref = bm.find_block_candidate(time).await?;
                     let block_id = block_ref.read().await?.block_id();
                     if bm.block_is_compressed(block_id) {
                         bm.decompress_block(block_id).await?;
@@ -128,10 +201,7 @@ impl Entry {
                         return if record.state != record::State::Errored as i32
                             || record.end - record.begin != content_size as u64
                         {
-                            Err(ReductError::conflict(&format!(
-                                "A record with timestamp {} already exists",
-                                time
-                            )))
+                            Err(conflict!("A record with timestamp {} already exists", time))
                         } else {
                             {
                                 let mut block = block_ref.write().await?;
@@ -144,16 +214,25 @@ impl Entry {
                                 block.insert_or_update_record(record);
                             }
 
-                            let writer = RecordWriter::try_new(
+                            let (writer, completion) = RecordWriter::try_new_in_batch(
                                 Arc::clone(&self.block_manager),
                                 block_ref,
                                 time,
+                                publication.token.clone(),
                             )
                             .await?;
 
                             return Ok(Box::new(InFlightWriteRecord::new(
                                 Box::new(writer),
                                 permit,
+                                publication,
+                                Arc::clone(&self.publication),
+                                self.path.clone(),
+                                Arc::clone(&self.block_manager),
+                                completion,
+                                preparation.superseded_record_timestamps,
+                                self.bucket_name.clone(),
+                                self.name.clone(),
                             )));
                         };
                     }
@@ -191,9 +270,25 @@ impl Entry {
         Self::prepare_block_for_writing(&mut block_ref, time, content_size, content_type, labels)
             .await?;
 
-        let writer =
-            RecordWriter::try_new(Arc::clone(&self.block_manager), block_ref, time).await?;
-        Ok(Box::new(InFlightWriteRecord::new(Box::new(writer), permit)))
+        let (writer, completion) = RecordWriter::try_new_in_batch(
+            Arc::clone(&self.block_manager),
+            block_ref,
+            time,
+            publication.token.clone(),
+        )
+        .await?;
+        Ok(Box::new(InFlightWriteRecord::new(
+            Box::new(writer),
+            permit,
+            publication,
+            Arc::clone(&self.publication),
+            self.path.clone(),
+            Arc::clone(&self.block_manager),
+            completion,
+            preparation.superseded_record_timestamps,
+            self.bucket_name.clone(),
+            self.name.clone(),
+        )))
     }
 
     async fn prepare_block_for_writing(
@@ -224,9 +319,10 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use crate::cfg::Cfg;
+    use crate::core::file_cache::FileCache;
     use crate::storage::block_manager::compress::CompressionAlgorithm;
     use crate::storage::block_manager::{COMPRESSED_DATA_FILE_EXT, COMPRESSED_DESCRIPTOR_FILE_EXT};
-    use crate::storage::entry::tests::{entry, path, write_stub_record};
+    use crate::storage::entry::tests::{entry, file_cache, path, write_stub_record};
     use crate::storage::entry::{Entry, EntrySettings};
     use crate::storage::proto::{record, us_to_ts, Record};
     use bytes::Bytes;
@@ -240,13 +336,14 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_new_block_size(path: PathBuf) {
+    async fn test_begin_write_new_block_size(path: PathBuf, file_cache: Arc<FileCache>) {
         let entry = entry(
             EntrySettings {
                 max_block_size: 10,
                 max_block_records: 10000,
             },
             path,
+            file_cache,
         )
         .await;
 
@@ -298,13 +395,14 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_new_block_records(path: PathBuf) {
+    async fn test_begin_write_new_block_records(path: PathBuf, file_cache: Arc<FileCache>) {
         let entry = entry(
             EntrySettings {
                 max_block_size: 10000,
                 max_block_records: 1,
             },
             path,
+            file_cache,
         )
         .await;
 
@@ -454,13 +552,17 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_begin_write_belated_new_block_when_full(path: PathBuf) {
+    async fn test_begin_write_belated_new_block_when_full(
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
         let entry = entry(
             EntrySettings {
                 max_block_size: 10000,
                 max_block_records: 2,
             },
             path,
+            file_cache,
         )
         .await;
 
@@ -596,9 +698,9 @@ mod tests {
     async fn test_write_to_compressed_latest_block_decompresses(#[future] entry: Arc<Entry>) {
         let entry = entry.await;
         write_stub_record(&entry, 1000000).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
-            bm.save_cache_on_disk().await.unwrap();
             bm.compress_block(1000000, CompressionAlgorithm::Zstd)
                 .await
                 .unwrap();
@@ -626,20 +728,24 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_belated_write_to_compressed_block_decompresses(path: PathBuf) {
+    async fn test_belated_write_to_compressed_block_decompresses(
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
         let entry = entry(
             EntrySettings {
                 max_block_size: 30,
                 max_block_records: 10000,
             },
             path,
+            file_cache,
         )
         .await;
         write_record_with_size(&entry, 1000000, 20).await;
         write_record_with_size(&entry, 3000000, 20).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
-            bm.save_cache_on_disk().await.unwrap();
             bm.compress_block(1000000, CompressionAlgorithm::Zstd)
                 .await
                 .unwrap();
@@ -747,6 +853,55 @@ mod tests {
 
         assert!(entry.begin_read(1).await.is_err());
         assert!(entry.begin_read(2).await.is_ok());
+    }
+
+    #[rstest]
+    #[serial]
+    #[tokio::test]
+    async fn test_meta_entry_keeps_previous_record_when_replacement_fails(path: PathBuf) {
+        let entry = Arc::new(
+            Entry::builder()
+                .name("entry/$meta")
+                .bucket_path(path)
+                .settings(EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 10000,
+                })
+                .cfg(Cfg::default().into())
+                .usage_counters(Default::default())
+                .build()
+                .await
+                .unwrap(),
+        );
+
+        let mut writer = entry
+            .begin_write(
+                1,
+                7,
+                "application/json".to_string(),
+                Labels::from_iter([("key".to_string(), "schema".to_string())]),
+            )
+            .await
+            .unwrap();
+        writer
+            .send(Ok(Some(Bytes::from_static(br#"{"v":1}"#))))
+            .await
+            .unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        let mut writer = entry
+            .begin_write(
+                2,
+                7,
+                "application/json".to_string(),
+                Labels::from_iter([("key".to_string(), "schema".to_string())]),
+            )
+            .await
+            .unwrap();
+        writer.send(Ok(None)).await.unwrap();
+
+        assert!(entry.begin_read(1).await.is_ok());
+        assert!(entry.begin_read(2).await.is_err());
     }
 
     #[rstest]

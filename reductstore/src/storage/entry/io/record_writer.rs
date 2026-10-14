@@ -1,7 +1,7 @@
 // Copyright 2021-2026 ReductSoftware UG
 // Licensed under the Apache License, Version 2.0
 
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::{BatchToken, FileCache};
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::{BlockManager, BlockRef, RecordTx};
 use crate::storage::engine::{CHANNEL_BUFFER_SIZE, MAX_IO_BUFFER_SIZE};
@@ -18,6 +18,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::mpsc::{channel, Receiver};
+use tokio::sync::oneshot;
 
 type Rx = Receiver<WriteChunk>;
 
@@ -36,6 +37,9 @@ struct WriteContext {
     offset: u64,
     content_size: u64,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
+    batch_token: Option<BatchToken>,
+    file_cache: Arc<FileCache>,
+    completion: Option<oneshot::Sender<bool>>,
 }
 
 impl RecordWriter {
@@ -52,12 +56,41 @@ impl RecordWriter {
     /// # Returns
     ///
     /// * `RecordWriter` - The record writer.
+    #[cfg(test)]
     pub(in crate::storage) async fn try_new(
         block_manager: Arc<AsyncRwLock<BlockManager>>,
         block_ref: BlockRef,
         time: u64,
     ) -> Result<Self, ReductError> {
-        let (file_path, offset, bucket_name, entry_name, usage_counters) = {
+        Self::try_new_inner(block_manager, block_ref, time, None, None).await
+    }
+
+    pub(in crate::storage) async fn try_new_in_batch(
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+        block_ref: BlockRef,
+        time: u64,
+        batch_token: BatchToken,
+    ) -> Result<(Self, oneshot::Receiver<bool>), ReductError> {
+        let (completion_tx, completion_rx) = oneshot::channel();
+        let writer = Self::try_new_inner(
+            block_manager,
+            block_ref,
+            time,
+            Some(batch_token),
+            Some(completion_tx),
+        )
+        .await?;
+        Ok((writer, completion_rx))
+    }
+
+    async fn try_new_inner(
+        block_manager: Arc<AsyncRwLock<BlockManager>>,
+        block_ref: BlockRef,
+        time: u64,
+        batch_token: Option<BatchToken>,
+        completion: Option<oneshot::Sender<bool>>,
+    ) -> Result<Self, ReductError> {
+        let (file_path, offset, bucket_name, entry_name, usage_counters, file_cache) = {
             let mut bm = block_manager.write().await?;
             let block = block_ref.read().await?;
 
@@ -74,6 +107,7 @@ impl RecordWriter {
                 bm.bucket_name().to_string(),
                 bm.entry_name().to_string(),
                 bm.usage_counters_arc(),
+                Arc::clone(bm.file_cache()),
             )
         };
 
@@ -96,6 +130,9 @@ impl RecordWriter {
             offset,
             content_size,
             block_manager,
+            batch_token,
+            file_cache,
+            completion,
         };
 
         let me = if content_size >= MAX_IO_BUFFER_SIZE as u64 {
@@ -134,14 +171,20 @@ impl RecordWriter {
                         }
 
                         {
-                            let mut lock = FILE_CACHE
-                                .write_or_create(
-                                    &ctx.file_path,
-                                    SeekFrom::Start(
-                                        ctx.offset + written_bytes - chunk.len() as u64,
-                                    ),
-                                )
-                                .await?;
+                            let offset =
+                                SeekFrom::Start(ctx.offset + written_bytes - chunk.len() as u64);
+                            let mut lock = match &ctx.batch_token {
+                                Some(token) => {
+                                    ctx.file_cache
+                                        .write_or_create_in_batch(token, &ctx.file_path, offset)
+                                        .await?
+                                }
+                                None => {
+                                    ctx.file_cache
+                                        .write_or_create(&ctx.file_path, offset)
+                                        .await?
+                                }
+                            };
 
                             lock.write_all(chunk.as_ref())?;
                         }
@@ -180,15 +223,28 @@ impl RecordWriter {
                     "Failed to acquire block manager lock to finish writing {}/{}/{} record: {}",
                     ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, err
                 );
+                if let Some(completion) = ctx.completion {
+                    let _ = completion.send(false);
+                }
                 return;
             }
         };
 
-        if let Err(err) = result {
-            error!(
-                "Failed to finish writing {}/{}/{} record: {}",
-                ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, err
-            );
+        match result {
+            Ok(()) => {
+                if let Some(completion) = ctx.completion {
+                    let _ = completion.send(state == record::State::Finished);
+                }
+            }
+            Err(err) => {
+                error!(
+                    "Failed to finish writing {}/{}/{} record: {}",
+                    ctx.bucket_name, ctx.entry_name, ctx.record_timestamp, err
+                );
+                if let Some(completion) = ctx.completion {
+                    let _ = completion.send(false);
+                }
+            }
         }
     }
 }
@@ -432,6 +488,82 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_batch_completion_reports_finished_and_errored_writes(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[future] block_ref: BlockRef,
+        ) {
+            let block_manager = block_manager.await;
+            let block_ref = block_ref.await;
+            let file_cache = Arc::clone(block_manager.read().await.unwrap().file_cache());
+
+            let mut batch = file_cache.begin_batch().await.unwrap();
+            let (mut writer, completion) = RecordWriter::try_new_in_batch(
+                block_manager.clone(),
+                block_ref.clone(),
+                SMALL_RECORD_TIME,
+                batch.token(),
+            )
+            .await
+            .unwrap();
+            writer.send(Ok(Some(Bytes::from("test")))).await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
+            assert!(completion.await.unwrap());
+            batch.sync_all().await.unwrap();
+            batch.commit().await.unwrap();
+
+            let mut batch = file_cache.begin_batch().await.unwrap();
+            let (mut writer, completion) = RecordWriter::try_new_in_batch(
+                block_manager.clone(),
+                block_ref,
+                BIG_RECORD_TIME,
+                batch.token(),
+            )
+            .await
+            .unwrap();
+            writer.send(Ok(None)).await.unwrap();
+            assert!(!completion.await.unwrap());
+            batch.sync_all().await.unwrap();
+            batch.commit().await.unwrap();
+        }
+
+        #[rstest]
+        #[serial]
+        #[tokio::test]
+        async fn test_batch_completion_reports_block_manager_lock_failure(
+            #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+            #[future] block_ref: BlockRef,
+        ) {
+            struct ResetGuard;
+            impl Drop for ResetGuard {
+                fn drop(&mut self) {
+                    reset_rwlock_config();
+                }
+            }
+
+            let _reset = ResetGuard;
+            set_rwlock_failure_action(RwLockFailureAction::Error);
+            set_rwlock_timeout(Duration::from_millis(10));
+
+            let block_manager = block_manager.await;
+            let block_ref = block_ref.await;
+            let file_cache = Arc::clone(block_manager.read().await.unwrap().file_cache());
+            let batch = file_cache.begin_batch().await.unwrap();
+            let (mut writer, completion) = RecordWriter::try_new_in_batch(
+                block_manager.clone(),
+                block_ref,
+                SMALL_RECORD_TIME,
+                batch.token(),
+            )
+            .await
+            .unwrap();
+
+            let _lock = block_manager.write().await.unwrap();
+            writer.send(Ok(None)).await.unwrap();
+            assert!(!completion.await.unwrap());
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_timeout(
             #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
             #[future] block_ref: BlockRef,
@@ -492,13 +624,15 @@ mod tests {
 
         #[fixture]
         async fn block_manager(path: PathBuf) -> Arc<AsyncRwLock<BlockManager>> {
+            let file_cache = crate::core::file_cache::build_test_file_cache();
             let manager = BlockManager::build(
                 path.clone(),
-                BlockIndex::new(path.clone()),
+                BlockIndex::new(path.clone(), file_cache.clone()),
                 "bucket".to_string(),
                 "entry".to_string(),
                 Cfg::default().into(),
                 Default::default(),
+                file_cache,
             )
             .await
             .unwrap();

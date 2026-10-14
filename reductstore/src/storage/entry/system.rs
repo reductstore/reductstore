@@ -8,6 +8,10 @@ use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{unprocessable_entity, Labels};
 use serde_json::json;
 
+pub(crate) struct WritePreparation {
+    pub(crate) superseded_record_timestamps: Vec<u64>,
+}
+
 /// Reserved segment for system metadata entries.
 ///
 /// Rules:
@@ -66,7 +70,11 @@ pub(crate) trait SystemEntryBehavior {
         Ok(())
     }
 
-    async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError>;
+    async fn prepare_write(
+        &self,
+        entry: &Entry,
+        labels: &Labels,
+    ) -> Result<WritePreparation, ReductError>;
 
     fn apply_default_query_filters(&self, query: &mut QueryEntry);
 }
@@ -75,8 +83,14 @@ pub(crate) struct RegularEntryBehavior;
 
 #[async_trait]
 impl SystemEntryBehavior for RegularEntryBehavior {
-    async fn prepare_write(&self, _entry: &Entry, _labels: &Labels) -> Result<(), ReductError> {
-        Ok(())
+    async fn prepare_write(
+        &self,
+        _entry: &Entry,
+        _labels: &Labels,
+    ) -> Result<WritePreparation, ReductError> {
+        Ok(WritePreparation {
+            superseded_record_timestamps: vec![],
+        })
     }
 
     fn apply_default_query_filters(&self, _query: &mut QueryEntry) {}
@@ -86,7 +100,11 @@ pub(crate) struct MetaEntryBehavior;
 
 #[async_trait]
 impl SystemEntryBehavior for MetaEntryBehavior {
-    async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError> {
+    async fn prepare_write(
+        &self,
+        entry: &Entry,
+        labels: &Labels,
+    ) -> Result<WritePreparation, ReductError> {
         let Some(key) = labels.get("key") else {
             return Err(unprocessable_entity!(
                 "System entry '{}' records must contain label 'key'",
@@ -108,9 +126,11 @@ impl SystemEntryBehavior for MetaEntryBehavior {
             key.to_string()
         };
 
-        // remove previous version with the same key (upsert-by-key behavior)
-        let _ = entry
-            .query_remove_records(QueryEntry {
+        // Find the previous version now, but retain it until the replacement is
+        // written successfully. Removing it here could make a failed write lose
+        // the last readable attachment.
+        let superseded_record_timestamps = entry
+            .query_record_timestamps(QueryEntry {
                 start: Some(0),
                 stop: Some(u64::MAX),
                 when: Some(json!({
@@ -120,7 +140,9 @@ impl SystemEntryBehavior for MetaEntryBehavior {
                 ..Default::default()
             })
             .await?;
-        Ok(())
+        Ok(WritePreparation {
+            superseded_record_timestamps,
+        })
     }
 
     fn apply_default_query_filters(&self, query: &mut QueryEntry) {
@@ -314,7 +336,7 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn meta_prepare_write_removes_existing_records_with_same_key() {
+    async fn meta_prepare_write_collects_existing_records_with_same_key() {
         let entry = build_entry("entry/$meta").await;
         write_record(
             &entry,
@@ -324,7 +346,7 @@ mod tests {
         .await;
         assert!(entry.begin_read(1).await.is_ok());
 
-        MetaEntryBehavior
+        let preparation = MetaEntryBehavior
             .prepare_write(
                 &entry,
                 &Labels::from_iter([("key".to_string(), "schema".to_string())]),
@@ -332,6 +354,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert!(entry.begin_read(1).await.is_err());
+        assert_eq!(preparation.superseded_record_timestamps, vec![1]);
+        assert!(entry.begin_read(1).await.is_ok());
     }
 }

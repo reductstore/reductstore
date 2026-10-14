@@ -14,7 +14,7 @@ use prost::Message;
 
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole::Replica;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::block_index::BlockIndex;
 use crate::storage::block_manager::compress::CompressionAlgorithm;
@@ -24,7 +24,7 @@ use crate::storage::block_manager::{
     DATA_FILE_EXT, DESCRIPTOR_FILE_EXT,
 };
 use crate::storage::entry::strategy_for_entry;
-use crate::storage::entry::{Entry, EntrySettings};
+use crate::storage::entry::{publication, Entry, EntrySettings};
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::proto::{ts_to_us, Block, MinimalBlock};
 use crate::storage::usage::UsageCounters;
@@ -42,6 +42,7 @@ impl EntryLoader {
         options: EntrySettings,
         cfg: Arc<Cfg>,
         usage_counters: Arc<UsageCounters>,
+        file_cache: Arc<FileCache>,
     ) -> Result<Option<Entry>, ReductError> {
         let io_limiter = InFlightIoLimiter::from_cfg(cfg.as_ref());
         let entry_name = path.file_name().unwrap().to_str().unwrap().to_string();
@@ -61,6 +62,7 @@ impl EntryLoader {
             cfg,
             io_limiter,
             usage_counters,
+            file_cache,
         )
         .await
     }
@@ -73,8 +75,21 @@ impl EntryLoader {
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
         usage_counters: Arc<UsageCounters>,
+        file_cache: Arc<FileCache>,
     ) -> Result<Option<Entry>, ReductError> {
         let start_time = Instant::now();
+        let publication_before = if cfg.role == Replica {
+            match Self::load_replica_publication(&path, &file_cache).await {
+                Ok(publication) => publication,
+                Err(err) if err.status() == reduct_base::error::ErrorCode::TooEarly => {
+                    debug!("Skipping replica entry {:?}: {}", path, err);
+                    return Ok(None);
+                }
+                Err(err) => return Err(err),
+            }
+        } else {
+            None
+        };
 
         let mut entry = match Self::try_restore_entry_from_index(
             path.clone(),
@@ -84,6 +99,7 @@ impl EntryLoader {
             cfg.clone(),
             io_limiter.clone(),
             Arc::clone(&usage_counters),
+            Arc::clone(&file_cache),
         )
         .await
         {
@@ -110,25 +126,26 @@ impl EntryLoader {
                     cfg.clone(),
                     io_limiter.clone(),
                     Arc::clone(&usage_counters),
+                    Arc::clone(&file_cache),
                 )
                 .await?
             }
         };
 
         if cfg.role != Replica {
-            Self::restore_uncommitted_changes(path.clone(), &mut entry).await?;
+            Self::restore_uncommitted_changes(path.clone(), &mut entry, &file_cache).await?;
         }
 
         if cfg.role != Replica && cfg.engine_config.enable_integrity_checks {
             let needs_rebuild = {
-                let file_list = FILE_CACHE
+                let file_list = file_cache
                     .read_dir(&path)
                     .await?
                     .into_iter()
                     .collect::<HashSet<PathBuf>>();
 
                 let bm = entry.block_manager.read().await?;
-                Self::check_if_block_files_exist(&path, &file_list, &bm.index())
+                Self::check_if_block_files_exist(&path, &file_list, &bm.index(), &file_cache)
                     .await
                     .is_err()
                     || Self::check_descriptor_count(&path, &file_list, &bm.index()).is_err()
@@ -144,9 +161,29 @@ impl EntryLoader {
                     cfg.clone(),
                     io_limiter.clone(),
                     Arc::clone(&usage_counters),
+                    Arc::clone(&file_cache),
                 )
                 .await?;
             }
+        }
+
+        if cfg.role == Replica {
+            let publication_after = publication::load_fresh(&path, &file_cache).await?;
+            let accepted_publication =
+                match publication::validate_window(publication_before, publication_after) {
+                    Ok(publication) => publication,
+                    Err(err) if err.status() == reduct_base::error::ErrorCode::TooEarly => {
+                        debug!("Skipping replica entry {:?}: {}", path, err);
+                        return Ok(None);
+                    }
+                    Err(err) => return Err(err),
+                };
+            entry
+                .block_manager
+                .write()
+                .await?
+                .initialize_replica_publication(accepted_publication)
+                .await?;
         }
 
         {
@@ -172,6 +209,7 @@ impl EntryLoader {
         }
 
         entry.cfg = cfg;
+        entry.file_cache = file_cache;
         Ok(Some(entry))
     }
 
@@ -184,10 +222,14 @@ impl EntryLoader {
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
         usage_counters: Arc<UsageCounters>,
+        file_cache: Arc<FileCache>,
     ) -> Result<Entry, ReductError> {
-        async fn remove_block_files(path: &PathBuf) -> Result<(), ReductError> {
+        async fn remove_block_files(
+            path: &PathBuf,
+            file_cache: &Arc<FileCache>,
+        ) -> Result<(), ReductError> {
             warn!("Removing meta block {:?}", path);
-            FILE_CACHE.remove(path).await?;
+            file_cache.remove(path).await?;
 
             let name = path.file_name().unwrap().to_str().unwrap();
             let data_file =
@@ -200,12 +242,12 @@ impl EntryLoader {
                 };
             let data_path = path.parent().unwrap().join(data_file);
             warn!("Removing data block {:?}", data_path);
-            FILE_CACHE.remove(&data_path).await?;
+            file_cache.remove(&data_path).await?;
             Ok(())
         }
 
-        let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE));
-        for path in FILE_CACHE.read_dir(&path).await? {
+        let mut block_index = BlockIndex::new(path.join(BLOCK_INDEX_FILE), Arc::clone(&file_cache));
+        for path in file_cache.read_dir(&path).await? {
             if path.is_dir() {
                 continue;
             }
@@ -217,7 +259,7 @@ impl EntryLoader {
             }
 
             let buf = {
-                let mut file = FILE_CACHE.read(&path, SeekFrom::Start(0)).await?;
+                let mut file = file_cache.read(&path, SeekFrom::Start(0)).await?;
                 let mut buf = vec![];
                 file.read_to_end(&mut buf)?;
                 if compressed {
@@ -241,7 +283,7 @@ impl EntryLoader {
                 Ok(block) => block,
                 Err(err) => {
                     error!("Failed to decode block {:?}: {}", path, err);
-                    remove_block_files(&path).await?;
+                    remove_block_files(&path, &file_cache).await?;
                     continue;
                 }
             };
@@ -252,7 +294,7 @@ impl EntryLoader {
                     Ok(block) => block,
                     Err(err) => {
                         error!("Failed to decode block {:?}: {}", path, err);
-                        remove_block_files(&path).await?;
+                        remove_block_files(&path, &file_cache).await?;
                         continue;
                     }
                 };
@@ -263,7 +305,7 @@ impl EntryLoader {
                 block.record_count = full_block.record_count;
                 block.metadata_size = full_block.metadata_size;
 
-                let mut file = FILE_CACHE
+                let mut file = file_cache
                     .write_or_create(&path, SeekFrom::Start(0))
                     .await?;
                 file.set_len(0)?;
@@ -278,7 +320,7 @@ impl EntryLoader {
                 ts_to_us(begin_time)
             } else {
                 warn!("Block {:?} has no begin time", path);
-                remove_block_files(&path).await?;
+                remove_block_files(&path, &file_cache).await?;
                 continue;
             };
 
@@ -288,22 +330,22 @@ impl EntryLoader {
                     .parent()
                     .unwrap()
                     .join(format!("{}{}", block_id, COMPRESSED_DATA_FILE_EXT));
-                if !FILE_CACHE.try_exists(&compressed_data_path).await? {
+                if !file_cache.try_exists(&compressed_data_path).await? {
                     warn!(
                         "Data block {:?} not found. Removing its descriptor",
                         compressed_data_path
                     );
                     block_index.remove_block(block_id);
-                    remove_block_files(&path).await?;
+                    remove_block_files(&path, &file_cache).await?;
                     continue;
                 }
 
-                let data_size = FILE_CACHE
+                let data_size = file_cache
                     .read(&compressed_data_path, SeekFrom::Start(0))
                     .await?
                     .metadata()?
                     .len();
-                let metadata_size = FILE_CACHE
+                let metadata_size = file_cache
                     .read(&path, SeekFrom::Start(0))
                     .await?
                     .metadata()?
@@ -328,6 +370,7 @@ impl EntryLoader {
                     entry_name.clone(),
                     cfg.clone(),
                     usage_counters,
+                    Arc::clone(&file_cache),
                 )
                 .await?,
             )),
@@ -337,6 +380,12 @@ impl EntryLoader {
             path,
             cfg,
             io_limiter,
+            publication: Arc::new(
+                super::publication_coordinator::PublicationCoordinator::new_with_cache(Arc::clone(
+                    &file_cache,
+                )),
+            ),
+            file_cache,
         })
     }
 
@@ -349,8 +398,15 @@ impl EntryLoader {
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
         usage_counters: Arc<UsageCounters>,
+        file_cache: Arc<FileCache>,
     ) -> Result<Entry, ReductError> {
-        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE)).await?;
+        if cfg.role == Replica {
+            file_cache
+                .invalidate_local_cache_file(&path.join(BLOCK_INDEX_FILE))
+                .await?;
+        }
+        let block_index =
+            BlockIndex::try_load(path.join(BLOCK_INDEX_FILE), Arc::clone(&file_cache)).await?;
 
         Ok(Entry {
             name: entry_name.clone(),
@@ -364,6 +420,7 @@ impl EntryLoader {
                     entry_name.clone(),
                     cfg.clone(),
                     usage_counters,
+                    Arc::clone(&file_cache),
                 )
                 .await?,
             )),
@@ -373,7 +430,45 @@ impl EntryLoader {
             path,
             cfg,
             io_limiter,
+            publication: Arc::new(
+                super::publication_coordinator::PublicationCoordinator::new_with_cache(Arc::clone(
+                    &file_cache,
+                )),
+            ),
+            file_cache,
         })
+    }
+
+    async fn load_replica_publication(
+        path: &PathBuf,
+        file_cache: &Arc<FileCache>,
+    ) -> Result<Option<publication::Publication>, ReductError> {
+        const PUBLICATION_ATTEMPTS: usize = 3;
+
+        for attempt in 1..=PUBLICATION_ATTEMPTS {
+            let publication = publication::load_fresh(path, file_cache).await?;
+            if !matches!(
+                publication,
+                Some(publication::Publication {
+                    state: publication::PublicationState::Updating,
+                    ..
+                })
+            ) {
+                return Ok(publication);
+            }
+
+            if attempt < PUBLICATION_ATTEMPTS {
+                debug!(
+                    "Retrying replica entry {:?} while publication is updating (attempt {}/{})",
+                    path, attempt, PUBLICATION_ATTEMPTS
+                );
+                tokio::task::yield_now().await;
+            }
+        }
+
+        Err(reduct_base::too_early!(
+            "Entry publication remained updating while restoring replica entry"
+        ))
     }
 
     fn check_descriptor_count(
@@ -410,6 +505,7 @@ impl EntryLoader {
         path: &PathBuf,
         file_list: &HashSet<PathBuf>,
         block_index: &BlockIndex,
+        file_cache: &Arc<FileCache>,
     ) -> Result<(), ReductError> {
         let mut inconsistent_data = false;
         for block_id in block_index.tree().iter() {
@@ -436,7 +532,7 @@ impl EntryLoader {
                         "Data block {:?} not found. Removing its descriptor",
                         data_path
                     );
-                    FILE_CACHE.remove(&desc_path).await?;
+                    file_cache.remove(&desc_path).await?;
                     inconsistent_data = true;
                 }
             } else {
@@ -455,8 +551,9 @@ impl EntryLoader {
     async fn restore_uncommitted_changes(
         entry_path: PathBuf,
         entry: &mut Entry,
+        file_cache: &Arc<FileCache>,
     ) -> Result<(), ReductError> {
-        let mut wal = create_wal(entry_path.clone()).await?;
+        let mut wal = create_wal(entry_path.clone(), Arc::clone(&file_cache)).await?;
         let wal_blocks = wal.list().await?;
         if !wal_blocks.is_empty() {
             warn!(
@@ -555,21 +652,28 @@ impl EntryLoader {
 #[cfg(test)]
 mod tests {
     use crate::storage::block_manager::wal::{create_wal, WalEntry};
-    use crate::storage::entry::tests::{entry, entry_settings, path, write_stub_record};
+    use crate::storage::entry::tests::{
+        entry, entry_settings, file_cache, path, write_stub_record,
+    };
     use crate::storage::proto::{record, us_to_ts, Block, BlockIndex as BlockIndexProto, Record};
     use std::fs;
     use std::io::SeekFrom;
 
     use super::*;
 
-    use crate::core::file_cache::FILE_CACHE;
+    use crate::core::file_cache::FileCache;
     use reduct_base::io::ReadRecord;
     use rstest::{fixture, rstest};
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+    async fn test_restore(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
 
@@ -609,12 +713,14 @@ mod tests {
             }
         );
 
-        bm.save_cache_on_disk().await.unwrap();
+        drop(bm);
+        entry.sync_fs().await.unwrap();
         let entry = EntryLoader::restore_entry(
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -647,20 +753,19 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_restore_replica_skips_wal_recovery(entry_settings: EntrySettings, path: PathBuf) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+    async fn test_restore_replica_skips_wal_recovery(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
-        entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await
-            .unwrap();
+        entry.sync_fs().await.unwrap();
 
         let entry_path = path.join(entry.name());
-        let mut wal = create_wal(entry_path.clone()).await.unwrap();
+        let mut wal = create_wal(entry_path.clone(), file_cache.clone())
+            .await
+            .unwrap();
         wal.append(
             1,
             WalEntry::WriteRecord(Record {
@@ -687,6 +792,7 @@ mod tests {
             entry_settings,
             Arc::new(cfg),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -696,7 +802,7 @@ mod tests {
         assert_eq!(info.record_count, 1);
         assert!(entry.begin_read(2).await.is_err());
 
-        let wal = create_wal(entry_path).await.unwrap();
+        let wal = create_wal(entry_path, file_cache.clone()).await.unwrap();
         assert_eq!(wal.list().await.unwrap(), vec![1]);
     }
 
@@ -705,21 +811,15 @@ mod tests {
     async fn test_restore_replica_ignores_entry_when_index_fails(
         entry_settings: EntrySettings,
         path: PathBuf,
+        file_cache: Arc<FileCache>,
     ) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
-        entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await
-            .unwrap();
+        entry.sync_fs().await.unwrap();
 
         let entry_path = path.join(entry.name());
         {
-            let mut block_file_index = FILE_CACHE
+            let mut block_file_index = file_cache
                 .write_or_create(&entry_path.join(BLOCK_INDEX_FILE), SeekFrom::Start(0))
                 .await
                 .unwrap();
@@ -739,6 +839,7 @@ mod tests {
             entry_settings,
             Arc::new(cfg),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
@@ -748,7 +849,11 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_restore_bad_block(entry_settings: EntrySettings, path: PathBuf) {
+    async fn test_restore_bad_block(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
         fs::create_dir_all(path.join("entry")).unwrap();
 
         let meta_path = path.join("entry/1.meta");
@@ -761,6 +866,7 @@ mod tests {
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -774,17 +880,22 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_migration_v18_v19(entry_settings: EntrySettings, path: PathBuf) {
+    async fn test_migration_v18_v19(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
         let path = path.join("entry");
-        FILE_CACHE.create_dir_all(&path).await.unwrap();
+        file_cache.create_dir_all(&path).await.unwrap();
 
         let mut block_manager = BlockManager::build(
             path.clone(),
-            BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE)),
+            BlockIndex::new(path.clone().join(BLOCK_INDEX_FILE), file_cache.clone()),
             "bucket".to_string(),
             "entry".to_string(),
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
@@ -821,7 +932,7 @@ mod tests {
         block_proto.record_count = 0;
 
         {
-            let mut lock = FILE_CACHE
+            let mut lock = file_cache
                 .write_or_create(&path.join("1.meta"), SeekFrom::Start(0))
                 .await
                 .unwrap();
@@ -836,6 +947,7 @@ mod tests {
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -848,7 +960,7 @@ mod tests {
         assert_eq!(info.oldest_record, 1);
         assert_eq!(info.latest_record, 2000010);
 
-        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE))
+        let block_index = BlockIndex::try_load(path.join(BLOCK_INDEX_FILE), file_cache.clone())
             .await
             .unwrap();
         let mut block_manager = BlockManager::build(
@@ -858,6 +970,7 @@ mod tests {
             "entry".to_string(),
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
@@ -876,15 +989,19 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_empty_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+    async fn test_empty_block_index(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
-        entry.compact().await.unwrap(); // sync WALs
+        entry.sync_fs().await.unwrap(); // sync WALs
 
         {
             let block_file_index = path.join(&entry.name).join(BLOCK_INDEX_FILE);
-            let mut file = FILE_CACHE
+            let mut file = file_cache
                 .write_or_create(&block_file_index, SeekFrom::Current(0))
                 .await
                 .unwrap();
@@ -897,6 +1014,7 @@ mod tests {
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -907,24 +1025,22 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_create_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+    async fn test_create_block_index(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
-        entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await
-            .unwrap();
+        entry.sync_fs().await.unwrap();
 
         EntryLoader::restore_entry(
             path.join(entry.name()),
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -947,9 +1063,11 @@ mod tests {
     async fn test_restore_carries_descriptor_version_and_corrupted_flag(
         path: PathBuf,
         entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
     ) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
         entry
             .block_manager
             .write()
@@ -960,7 +1078,7 @@ mod tests {
             .unwrap();
 
         let entry_path = path.join(entry.name());
-        FILE_CACHE
+        file_cache
             .remove(&entry_path.join(BLOCK_INDEX_FILE))
             .await
             .unwrap();
@@ -976,6 +1094,7 @@ mod tests {
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -994,26 +1113,31 @@ mod tests {
     async fn test_create_block_index_with_compressed_block(
         path: PathBuf,
         entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
     ) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
-            bm.save_cache_on_disk().await.unwrap();
             bm.compress_block(1, CompressionAlgorithm::Zstd)
                 .await
                 .unwrap();
         }
+        entry.sync_fs().await.unwrap();
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
-        FILE_CACHE.remove(&block_index_path).await.unwrap();
+        let entry_path = path.join(entry.name());
+        file_cache.remove(&block_index_path).await.unwrap();
+        drop(entry);
 
         let entry = EntryLoader::restore_entry(
-            path.join(entry.name()),
+            entry_path,
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -1042,30 +1166,32 @@ mod tests {
     async fn test_restore_compressed_block_missing_data(
         path: PathBuf,
         entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
     ) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
-            bm.save_cache_on_disk().await.unwrap();
             bm.compress_block(1, CompressionAlgorithm::Zstd)
                 .await
                 .unwrap();
         }
 
         let block_index_path = path.join("entry").join(BLOCK_INDEX_FILE);
-        FILE_CACHE.remove(&block_index_path).await.unwrap();
-        fs::remove_file(
-            path.join("entry")
-                .join(format!("1{}", COMPRESSED_DATA_FILE_EXT)),
-        )
-        .unwrap();
+        file_cache.remove(&block_index_path).await.unwrap();
+        let compressed_data_path = path
+            .join("entry")
+            .join(format!("1{}", COMPRESSED_DATA_FILE_EXT));
+        file_cache.remove(&compressed_data_path).await.unwrap();
+        drop(entry);
 
         let err = match EntryLoader::restore_entry(
             path.join("entry"),
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         {
@@ -1084,28 +1210,30 @@ mod tests {
     async fn test_integrity_check_compressed_block_missing_data(
         path: PathBuf,
         entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
     ) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
-            bm.save_cache_on_disk().await.unwrap();
             bm.compress_block(1, CompressionAlgorithm::Zstd)
                 .await
                 .unwrap();
         }
 
-        fs::remove_file(
-            path.join("entry")
-                .join(format!("1{}", COMPRESSED_DATA_FILE_EXT)),
-        )
-        .unwrap();
+        let compressed_data_path = path
+            .join("entry")
+            .join(format!("1{}", COMPRESSED_DATA_FILE_EXT));
+        file_cache.remove(&compressed_data_path).await.unwrap();
+        drop(entry);
 
         let entry = EntryLoader::restore_entry(
             path.join("entry"),
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -1119,9 +1247,11 @@ mod tests {
     async fn test_restore_compressed_block_with_corrupted_descriptor(
         path: PathBuf,
         entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
     ) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
         {
             let mut bm = entry.block_manager.write().await.unwrap();
             bm.save_cache_on_disk().await.unwrap();
@@ -1130,7 +1260,7 @@ mod tests {
                 .unwrap();
         }
 
-        FILE_CACHE
+        file_cache
             .remove(&path.join("entry").join(BLOCK_INDEX_FILE))
             .await
             .unwrap();
@@ -1146,6 +1276,7 @@ mod tests {
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         {
@@ -1161,9 +1292,13 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_restore_block_without_begin_time(path: PathBuf, entry_settings: EntrySettings) {
+    async fn test_restore_block_without_begin_time(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
+    ) {
         let entry_path = path.join("entry");
-        FILE_CACHE.create_dir_all(&entry_path).await.unwrap();
+        file_cache.create_dir_all(&entry_path).await.unwrap();
         let block = MinimalBlock {
             begin_time: None,
             latest_record_time: None,
@@ -1181,6 +1316,7 @@ mod tests {
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -1193,23 +1329,22 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_check_integrity_block_index(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+    async fn test_rebuilt_block_index_survives_restart(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
         write_stub_record(&entry, 2000010).await;
-        let _ = entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await;
+        entry.sync_fs().await.unwrap();
 
         EntryLoader::restore_entry(
             path.join(entry.name.clone()),
             entry_settings.clone(),
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -1228,41 +1363,65 @@ mod tests {
         file.write_all(&block_index.encode_to_vec()).unwrap();
         file.sync_all().unwrap();
 
-        EntryLoader::restore_entry(
+        let restored_entry = EntryLoader::restore_entry(
             path.join(entry.name()),
-            entry_settings,
+            entry_settings.clone(),
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
+        .unwrap()
         .unwrap();
 
-        let buf = fs::read(block_index_path).unwrap();
-        let block_index = BlockIndexProto::decode(Bytes::from(buf)).unwrap();
+        let rebuilt_index = fs::read(&block_index_path).unwrap();
+        let block_index = BlockIndexProto::decode(Bytes::from(rebuilt_index.clone())).unwrap();
         assert_eq!(
             block_index.blocks[0].size, 20,
             "should restore the block index from the blocks"
         );
+
+        let info = restored_entry.info().await.unwrap();
+        assert_eq!(info.record_count, 2);
+        drop(restored_entry);
+
+        // A clean restart must be able to restore the entry from the persisted
+        // rebuilt index without changing it or losing access to its records.
+        let restarted_entry = EntryLoader::restore_entry(
+            path.join(entry.name()),
+            entry_settings,
+            Cfg::default().into(),
+            Default::default(),
+            file_cache.clone(),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+
+        assert_eq!(fs::read(&block_index_path).unwrap(), rebuilt_index);
+        let info = restarted_entry.info().await.unwrap();
+        assert_eq!(info.record_count, 2);
+        assert!(restarted_entry.begin_read(1).await.is_ok());
+        assert!(restarted_entry.begin_read(2000010).await.is_ok());
     }
 
     #[rstest]
     #[tokio::test]
-    async fn test_missed_descriptor(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+    async fn test_missed_descriptor(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
-        let _ = entry
-            .block_manager
-            .write()
-            .await
-            .unwrap()
-            .save_cache_on_disk()
-            .await;
+        entry.sync_fs().await.unwrap();
 
         let entry = EntryLoader::restore_entry(
             path.join(entry.name.clone()),
             entry_settings.clone(),
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -1287,6 +1446,7 @@ mod tests {
             entry_settings,
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap();
@@ -1302,10 +1462,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_recovery_with_orphan_block(path: PathBuf, entry_settings: EntrySettings) {
-        let entry = entry(entry_settings.clone(), path.clone()).await;
+    async fn test_recovery_with_orphan_block(
+        path: PathBuf,
+        entry_settings: EntrySettings,
+        file_cache: Arc<FileCache>,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
         write_stub_record(&entry, 1).await;
-        entry.compact().await.unwrap();
+        entry.sync_fs().await.unwrap();
 
         // Create a new block but don't add it to the index
         let mut bm = entry.block_manager.write().await.unwrap();
@@ -1320,6 +1484,7 @@ mod tests {
             entry.settings().await.unwrap(),
             Cfg::default().into(),
             Default::default(),
+            file_cache.clone(),
         )
         .await
         .unwrap()
@@ -1348,9 +1513,13 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_new_block(#[future] entry_fix: (Arc<Entry>, PathBuf), record2: Record) {
+        async fn test_new_block(
+            #[future] entry_fix: (Arc<Entry>, PathBuf),
+            record2: Record,
+            file_cache: Arc<FileCache>,
+        ) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone()).await.unwrap();
+            let mut wal = create_wal(path.clone(), file_cache.clone()).await.unwrap();
             // Block #3 was created
             wal.append(3, WalEntry::WriteRecord(record2.clone()))
                 .await
@@ -1367,6 +1536,7 @@ mod tests {
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
                 Default::default(),
+                file_cache.clone(),
             )
             .await
             .unwrap()
@@ -1398,9 +1568,10 @@ mod tests {
         async fn test_update_block(
             #[future] entry_fix: (Arc<Entry>, PathBuf),
             mut record2: Record,
+            file_cache: Arc<FileCache>,
         ) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone()).await.unwrap();
+            let mut wal = create_wal(path.clone(), file_cache.clone()).await.unwrap();
 
             // Block #1 was updated
             wal.append(1, WalEntry::WriteRecord(record2.clone()))
@@ -1416,6 +1587,7 @@ mod tests {
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
                 Default::default(),
+                file_cache.clone(),
             )
             .await
             .unwrap()
@@ -1443,9 +1615,12 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_record(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
+        async fn test_remove_record(
+            #[future] entry_fix: (Arc<Entry>, PathBuf),
+            file_cache: Arc<FileCache>,
+        ) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone()).await.unwrap();
+            let mut wal = create_wal(path.clone(), file_cache.clone()).await.unwrap();
 
             // Record #1 was removed
             wal.append(1, WalEntry::RemoveRecord(0)).await.unwrap();
@@ -1455,6 +1630,7 @@ mod tests {
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
                 Default::default(),
+                file_cache.clone(),
             )
             .await
             .unwrap()
@@ -1476,9 +1652,12 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_remove_block(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
+        async fn test_remove_block(
+            #[future] entry_fix: (Arc<Entry>, PathBuf),
+            file_cache: Arc<FileCache>,
+        ) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone()).await.unwrap();
+            let mut wal = create_wal(path.clone(), file_cache.clone()).await.unwrap();
 
             // Block #1 was removed
             wal.append(1, WalEntry::RemoveBlock).await.unwrap();
@@ -1487,6 +1666,7 @@ mod tests {
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
                 Default::default(),
+                file_cache.clone(),
             )
             .await
             .unwrap()
@@ -1505,7 +1685,10 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_corrupted_wal(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
+        async fn test_corrupted_wal(
+            #[future] entry_fix: (Arc<Entry>, PathBuf),
+            file_cache: Arc<FileCache>,
+        ) {
             let (entry, path) = entry_fix.await;
 
             fs::write(path.join(".wal/1.wal"), b"bad data").unwrap();
@@ -1514,6 +1697,7 @@ mod tests {
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
                 Default::default(),
+                file_cache.clone(),
             )
             .await;
             assert!(entry.is_ok());
@@ -1525,9 +1709,12 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_recovery_without_index(#[future] entry_fix: (Arc<Entry>, PathBuf)) {
+        async fn test_recovery_without_index(
+            #[future] entry_fix: (Arc<Entry>, PathBuf),
+            file_cache: Arc<FileCache>,
+        ) {
             let (entry, path) = entry_fix.await;
-            let mut wal = create_wal(path.clone()).await.unwrap();
+            let mut wal = create_wal(path.clone(), file_cache.clone()).await.unwrap();
 
             // Block #1 was appended to the WAL
             wal.append(
@@ -1556,6 +1743,7 @@ mod tests {
                 entry.settings().await.unwrap(),
                 Cfg::default().into(),
                 Default::default(),
+                file_cache.clone(),
             )
             .await
             .unwrap()
@@ -1586,8 +1774,12 @@ mod tests {
         }
 
         #[fixture]
-        async fn entry_fix(path: PathBuf, entry_settings: EntrySettings) -> (Arc<Entry>, PathBuf) {
-            let entry = entry(entry_settings.clone(), path.clone()).await;
+        async fn entry_fix(
+            path: PathBuf,
+            entry_settings: EntrySettings,
+            file_cache: Arc<FileCache>,
+        ) -> (Arc<Entry>, PathBuf) {
+            let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
             let name = entry.name().to_string();
             {
                 let mut block_manager = entry.block_manager.write().await.unwrap();

@@ -14,7 +14,7 @@ pub(super) mod settings;
 pub(crate) mod update_records;
 
 use crate::cfg::{Cfg, InstanceRole};
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 pub use crate::storage::block_manager::RecordRx;
@@ -32,7 +32,7 @@ use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
 use reduct_base::msg::bucket_api::{BucketInfo, BucketSettings, FullBucketInfo};
 use reduct_base::msg::status::ResourceStatus;
-use reduct_base::{conflict, forbidden, Labels};
+use reduct_base::{conflict, forbidden, not_found, Labels};
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -83,6 +83,7 @@ pub(crate) struct Bucket {
     io_limiter: InFlightIoLimiter,
     usage_counters: Arc<UsageCounters>,
     free_space_fn: FreeSpaceFn,
+    file_cache: Arc<FileCache>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -123,12 +124,9 @@ impl Bucket {
     pub async fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
         self.reload().await?;
         let entries = self.entries.read().await?;
-        let entry = entries.get(name).ok_or_else(|| {
-            ReductError::not_found(&format!(
-                "Entry '{}' not found in bucket '{}'",
-                name, self.name
-            ))
-        })?;
+        let entry = entries
+            .get(name)
+            .ok_or_else(|| not_found!("Entry '{}' not found in bucket '{}'", name, self.name))?;
         entry.ensure_not_deleting().await?;
         Ok(entry.clone().into())
     }
@@ -323,7 +321,7 @@ impl Bucket {
                 continue;
             }
 
-            if !FILE_CACHE.try_exists(entry.path()).await? {
+            if !self.file_cache.try_exists(entry.path()).await? {
                 debug!(
                     "Remove stale entry '{}' from bucket '{}' because its folder is missing",
                     entry.name(),
@@ -432,6 +430,7 @@ impl Bucket {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use crate::core::file_cache::build_test_file_cache;
     use bytes::Bytes;
     use reduct_base::io::ReadRecord;
     use reduct_base::msg::bucket_api::QuotaType;
@@ -861,7 +860,8 @@ pub(crate) mod tests {
 
     #[fixture]
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
-        FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
+        let file_cache = build_test_file_cache();
+        file_cache.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
             Bucket::builder()
                 .name("test")
@@ -869,6 +869,7 @@ pub(crate) mod tests {
                 .settings(settings)
                 .cfg(Cfg::default())
                 .usage_counters(Default::default())
+                .file_cache(file_cache)
                 .build()
                 .await
                 .unwrap(),
@@ -877,13 +878,15 @@ pub(crate) mod tests {
 
     #[fixture]
     pub async fn provisioned_bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
-        FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
+        let file_cache = build_test_file_cache();
+        file_cache.create_dir_all(&path.join("test")).await.unwrap();
         let bucket = Bucket::builder()
             .name("test")
             .data_path(path)
             .settings(settings)
             .cfg(Cfg::default())
             .usage_counters(Default::default())
+            .file_cache(file_cache)
             .build()
             .await
             .unwrap();

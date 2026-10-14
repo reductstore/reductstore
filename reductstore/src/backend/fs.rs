@@ -87,6 +87,10 @@ impl StorageBackend for FileSystemBackend {
         vec![]
     }
 
+    async fn remove_from_local_cache_if_unused(&self, _path: &Path) -> std::io::Result<bool> {
+        Ok(false)
+    }
+
     async fn remove_from_local_cache(&self, _path: &Path) -> std::io::Result<()> {
         // do nothing because filesystem backend does not have a cache
         Ok(())
@@ -224,6 +228,15 @@ mod tests {
             assert!(entry_names.contains(&"file2.txt".to_string()));
             assert!(entry_names.contains(&"child".to_string()));
         }
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "current_thread")]
+    async fn does_not_remove_files_from_a_nonexistent_local_cache(fs_backend: FileSystemBackend) {
+        assert!(!fs_backend
+            .remove_from_local_cache_if_unused(Path::new("unused"))
+            .await
+            .unwrap());
     }
 
     #[fixture]

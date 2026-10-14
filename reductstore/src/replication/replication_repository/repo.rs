@@ -2,7 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::cfg::{Cfg, DEFAULT_PORT};
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::replication::proto::replication_repo::Item;
 use crate::replication::proto::{
@@ -10,7 +10,9 @@ use crate::replication::proto::{
     ReplicationRepo as ProtoReplicationRepo, ReplicationSettings as ProtoReplicationSettings,
 };
 use crate::replication::replication_task::ReplicationTask;
-use crate::replication::{prepend_when_conditions, ManageReplications, TransactionNotification};
+use crate::replication::{
+    prepend_when_conditions, ManageReplications, ReplicationSourceIdentity, TransactionNotification,
+};
 use crate::storage::engine::StorageEngine;
 use crate::storage::query::condition::Parser;
 use crate::storage::query::filters::WhenFilter;
@@ -24,7 +26,7 @@ use reduct_base::msg::replication_api::{
     FullReplicationInfo, ReplicationCompression, ReplicationInfo, ReplicationMode,
     ReplicationSettings,
 };
-use reduct_base::{not_found, unprocessable_entity};
+use reduct_base::{conflict, not_found, unprocessable_entity};
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::io::SeekFrom::Start;
@@ -255,9 +257,11 @@ pub(crate) struct ReplicationRepository {
     repo_path: PathBuf,
     config: Cfg,
     system_event_sink: Option<SystemEventSink>,
+    source_identity: ReplicationSourceIdentity,
     started: bool,
     notification_tx: UnboundedSender<NotificationCommand>,
     notification_worker: Option<JoinHandle<()>>,
+    file_cache: Arc<FileCache>,
 }
 
 #[async_trait]
@@ -269,10 +273,7 @@ impl ManageReplications for ReplicationRepository {
     ) -> Result<(), ReductError> {
         // check if replication already exists
         if self.replications.read().await?.contains_key(name) {
-            return Err(ReductError::conflict(&format!(
-                "Replication '{}' already exists",
-                name
-            )));
+            return Err(conflict!("Replication '{}' already exists", name));
         }
 
         self.create_or_update_replication_task(name, settings).await
@@ -287,18 +288,12 @@ impl ManageReplications for ReplicationRepository {
         match self.replications.read().await?.get(name) {
             Some(replication) => {
                 if replication.is_provisioned() {
-                    Err(ReductError::conflict(&format!(
-                        "Can't update provisioned replication '{}'",
-                        name
-                    )))
+                    Err(conflict!("Can't update provisioned replication '{}'", name))
                 } else {
                     Ok(())
                 }
             }
-            None => Err(ReductError::not_found(&format!(
-                "Replication '{}' does not exist",
-                name
-            ))),
+            None => Err(not_found!("Replication '{}' does not exist", name)),
         }?;
 
         self.create_or_update_replication_task(name, settings).await
@@ -315,9 +310,9 @@ impl ManageReplications for ReplicationRepository {
 
     async fn get_info(&self, name: &str) -> Result<FullReplicationInfo, ReductError> {
         let guard = self.replications.read().await?;
-        let replication = guard.get(name).ok_or_else(|| {
-            ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })?;
+        let replication = guard
+            .get(name)
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))?;
         let info = FullReplicationInfo {
             info: replication.info().await?,
             settings: replication.masked_settings().clone(),
@@ -334,9 +329,7 @@ impl ManageReplications for ReplicationRepository {
         guard
             .get(name)
             .map(|replication| replication.settings().clone())
-            .ok_or_else(|| {
-                ReductError::not_found(&format!("Replication '{}' does not exist", name))
-            })
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))
     }
 
     async fn is_replication_running(&self, name: &str) -> Result<bool, ReductError> {
@@ -344,9 +337,7 @@ impl ManageReplications for ReplicationRepository {
         guard
             .get(name)
             .map(|replication| replication.is_running())
-            .ok_or_else(|| {
-                ReductError::not_found(&format!("Replication '{}' does not exist", name))
-            })
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))
     }
 
     async fn set_replication_provisioned(
@@ -355,23 +346,20 @@ impl ManageReplications for ReplicationRepository {
         provisioned: bool,
     ) -> Result<(), ReductError> {
         let mut guard = self.replications.write().await?;
-        let replication = guard.get_mut(name).ok_or_else(|| {
-            ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })?;
+        let replication = guard
+            .get_mut(name)
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))?;
         replication.set_provisioned(provisioned);
         Ok(())
     }
 
     async fn remove_replication(&self, name: &str) -> Result<(), ReductError> {
         let mut guard = self.replications.write().await?;
-        let repl = guard.get(name).ok_or_else(|| {
-            ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })?;
+        let repl = guard
+            .get(name)
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))?;
         if repl.is_provisioned() {
-            return Err(ReductError::conflict(&format!(
-                "Can't remove provisioned replication '{}'",
-                name
-            )));
+            return Err(conflict!("Can't remove provisioned replication '{}'", name));
         }
         let removed = guard.remove(name);
         drop(guard);
@@ -384,9 +372,9 @@ impl ManageReplications for ReplicationRepository {
 
     async fn set_mode(&self, name: &str, mode: ReplicationMode) -> Result<(), ReductError> {
         let mut guard = self.replications.write().await?;
-        let replication = guard.get_mut(name).ok_or_else(|| {
-            ReductError::not_found(&format!("Replication '{}' does not exist", name))
-        })?;
+        let replication = guard
+            .get_mut(name)
+            .ok_or_else(|| not_found!("Replication '{}' does not exist", name))?;
         replication.set_mode(mode);
         drop(guard);
         self.save_repo().await
@@ -433,6 +421,8 @@ impl ReplicationRepository {
         storage: Arc<StorageEngine>,
         config: Cfg,
         system_event_sink: Option<SystemEventSink>,
+        source_identity: ReplicationSourceIdentity,
+        file_cache: Arc<FileCache>,
     ) -> Self {
         let repo_path = storage.data_path().join(REPLICATION_REPO_FILE_NAME);
         let replications = Arc::new(AsyncRwLock::new(HashMap::<String, ReplicationTask>::new()));
@@ -465,19 +455,22 @@ impl ReplicationRepository {
             }
         });
 
-        let mut repo = Self {
+        let repo = Self {
             replications,
             storage,
             repo_path,
             config,
             system_event_sink,
+            source_identity,
             started: false,
             notification_tx,
             notification_worker: Some(notification_worker),
+            file_cache,
         };
 
         let read_conf_file = async || {
-            let mut lock = FILE_CACHE
+            let mut lock = repo
+                .file_cache
                 .write_or_create(&repo.repo_path, Start(0))
                 .await?;
 
@@ -529,7 +522,8 @@ impl ReplicationRepository {
             .encode(&mut buf)
             .expect("Error encoding replication repository");
 
-        let mut file = FILE_CACHE
+        let mut file = self
+            .file_cache
             .write_or_create(&self.repo_path, Start(0))
             .await?;
         file.set_len(0)?;
@@ -621,6 +615,7 @@ impl ReplicationRepository {
             conf,
             Arc::clone(&self.storage),
             self.system_event_sink.clone(),
+            self.source_identity.clone(),
         )?;
         let mut replication = replication;
         if self.started {
@@ -688,7 +683,7 @@ impl ReplicationRepository {
                     continue;
                 }
 
-                match FILE_CACHE.remove(&path).await {
+                match self.file_cache.remove(&path).await {
                     Ok(()) => {}
                     Err(err) if err.status() == ErrorCode::NotFound => {}
                     Err(err) => return Err(err),
@@ -719,7 +714,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -740,7 +735,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -758,7 +753,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let mut settings = settings;
             settings.dst_host = "invalid_url".to_string();
 
@@ -777,7 +772,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let mut settings = settings;
             settings.dst_host = format!("http://localhost:{}", DEFAULT_PORT);
             settings.dst_bucket = "bucket-1".to_string();
@@ -797,7 +792,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             mut settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             settings.src_bucket = "bucket-2".to_string();
             assert_eq!(
                 repo.create_replication("test", settings).await,
@@ -814,7 +809,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let mut settings = settings;
             settings.when = Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y"]}));
             assert_eq!(
@@ -834,16 +829,27 @@ mod tests {
         ) {
             settings.dst_prefix = "robot-1".to_string();
             let storage = storage.await;
-            let mut repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
-                    .await;
+            let file_cache = Arc::clone(storage.file_cache());
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+                file_cache,
+            )
+            .await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
 
-            let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
-                    .await;
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+                Arc::clone(storage.file_cache()),
+            )
+            .await;
             assert_eq!(repo.replications().await.unwrap().len(), 1);
             assert_eq!(
                 repo.get_replication_settings("test").await.unwrap(),
@@ -861,7 +867,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -882,7 +888,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -901,7 +907,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_update_non_existing_replication(#[future] mut repo: ReplicationRepository) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             assert_eq!(
                 repo.update_replication("test-2", ReplicationSettings::default())
                     .await,
@@ -916,7 +922,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -939,7 +945,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -963,7 +969,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -986,7 +992,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             mut settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1014,7 +1020,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let storage = Arc::clone(&repo.storage);
             repo.create_replication("test", settings.clone())
                 .await
@@ -1065,7 +1071,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let storage = Arc::clone(&repo.storage);
             repo.create_replication("test", settings.clone())
                 .await
@@ -1098,9 +1104,14 @@ mod tests {
             assert!(!log_path.exists(), "Should remove transaction log");
 
             // check if replication is removed from file
-            let repo =
-                ReplicationRepository::load_or_create(Arc::clone(&storage), Cfg::default(), None)
-                    .await;
+            let repo = ReplicationRepository::load_or_create(
+                Arc::clone(&storage),
+                Cfg::default(),
+                None,
+                ReplicationSourceIdentity::default(),
+                Arc::clone(storage.file_cache()),
+            )
+            .await;
             assert_eq!(
                 repo.replications().await.unwrap().len(),
                 0,
@@ -1238,7 +1249,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1265,7 +1276,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1310,7 +1321,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_get_mut_non_existing_replication(#[future] mut repo: ReplicationRepository) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             assert_eq!(
                 repo.set_replication_provisioned("test-2", true).await.err(),
                 Some(not_found!("Replication 'test-2' does not exist")),
@@ -1330,7 +1341,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1353,7 +1364,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1405,7 +1416,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let mut settings_1 = settings.clone();
             settings_1.src_bucket = "bucket-1".to_string();
             repo.create_replication("test-1", settings_1).await.unwrap();
@@ -1453,7 +1464,7 @@ mod tests {
             }
             let _reset = ResetGuard;
 
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings).await.unwrap();
 
             set_rwlock_timeout(Duration::from_millis(20));
@@ -1582,7 +1593,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test-1", settings.clone())
                 .await
                 .unwrap();
@@ -1599,7 +1610,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_set_mode_non_existing(#[future] mut repo: ReplicationRepository) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             assert_eq!(
                 repo.set_mode("test-1", ReplicationMode::Paused).await,
                 Err(not_found!("Replication 'test-1' does not exist"))
@@ -2066,7 +2077,15 @@ mod tests {
     #[fixture]
     async fn repo(#[future] storage: Arc<StorageEngine>) -> ReplicationRepository {
         let storage = storage.await;
-        ReplicationRepository::load_or_create(storage, Cfg::default(), None).await
+        let file_cache = Arc::clone(storage.file_cache());
+        ReplicationRepository::load_or_create(
+            storage,
+            Cfg::default(),
+            None,
+            ReplicationSourceIdentity::default(),
+            file_cache,
+        )
+        .await
     }
 
     mod each_s_migration {

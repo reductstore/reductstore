@@ -3,7 +3,7 @@
 mod read_only;
 use crate::cfg::Cfg;
 use crate::cfg::InstanceRole;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::bucket::Bucket;
@@ -31,6 +31,7 @@ pub struct StorageEngineBuilder {
     license: Option<License>,
     data_path: Option<PathBuf>,
     usage_counters: Option<Arc<UsageCounters>>,
+    file_cache: Option<Arc<FileCache>>,
 }
 
 impl StorageEngineBuilder {
@@ -57,6 +58,11 @@ impl StorageEngineBuilder {
         self
     }
 
+    pub(crate) fn with_file_cache(mut self, file_cache: Arc<FileCache>) -> Self {
+        self.file_cache = Some(file_cache);
+        self
+    }
+
     pub async fn build(self) -> StorageEngine {
         let cfg = self.cfg.expect("Config must be set");
         let data_path = self.data_path.expect("Data path must be set");
@@ -65,9 +71,16 @@ impl StorageEngineBuilder {
             .usage_counters
             .unwrap_or_else(|| Arc::new(UsageCounters::default()));
 
-        if !FILE_CACHE.try_exists(&data_path).await.unwrap_or(false) {
+        let file_cache = match self.file_cache {
+            Some(file_cache) => file_cache,
+            None => FileCache::with_local_backend(data_path.clone())
+                .await
+                .expect("Failed to initialize default storage backend"),
+        };
+
+        if !file_cache.try_exists(&data_path).await.unwrap_or(false) {
             info!("Folder {:?} doesn't exist. Create it.", data_path);
-            FILE_CACHE.create_dir_all(&data_path).await.unwrap();
+            file_cache.create_dir_all(&data_path).await.unwrap();
         }
 
         let data_path = data_path.canonicalize().unwrap();
@@ -75,8 +88,13 @@ impl StorageEngineBuilder {
         // restore buckets
         let time = Instant::now();
         let mut buckets = BTreeMap::new();
-        let folder_keeper =
-            FolderKeeper::new_with_depth(data_path.clone(), &cfg, DiscoveryDepth::FirstLevel).await;
+        let folder_keeper = FolderKeeper::new_with_depth(
+            data_path.clone(),
+            &cfg,
+            DiscoveryDepth::FirstLevel,
+            Arc::clone(&file_cache),
+        )
+        .await;
         for path in folder_keeper
             .list_folders()
             .await
@@ -87,6 +105,7 @@ impl StorageEngineBuilder {
                 .cfg(cfg.clone())
                 .io_limiter(io_limiter.clone())
                 .usage_counters(Arc::clone(&usage_counters))
+                .file_cache(Arc::clone(&file_cache))
                 .restore()
                 .await
             {
@@ -106,11 +125,12 @@ impl StorageEngineBuilder {
             data_path,
             start_time: Instant::now(),
             buckets: Arc::new(AsyncRwLock::new(buckets)),
-            license: self.license,
+            license: Arc::new(AsyncRwLock::new(self.license)),
             cfg,
             folder_keeper: Arc::new(folder_keeper),
             io_limiter,
             usage_counters,
+            file_cache,
         }
     }
 }
@@ -120,13 +140,14 @@ pub struct StorageEngine {
     data_path: PathBuf,
     start_time: Instant,
     buckets: Arc<AsyncRwLock<BTreeMap<String, Arc<Bucket>>>>,
-    license: Option<License>,
+    license: Arc<AsyncRwLock<Option<License>>>,
     cfg: Cfg,
     folder_keeper: Arc<FolderKeeper>,
     io_limiter: InFlightIoLimiter,
     /// Usage traffic counters owned by the engine and shared with the usage
     /// statistics logger, which drains them periodically.
     usage_counters: Arc<UsageCounters>,
+    pub(crate) file_cache: Arc<FileCache>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -142,12 +163,17 @@ impl StorageEngine {
             license: None,
             data_path: None,
             usage_counters: None,
+            file_cache: None,
         }
     }
 
     #[cfg(test)]
     pub(crate) fn cfg(&self) -> &Cfg {
         &self.cfg
+    }
+
+    pub(crate) fn file_cache(&self) -> &Arc<FileCache> {
+        &self.file_cache
     }
 
     #[cfg(test)]
@@ -157,6 +183,12 @@ impl StorageEngine {
 
     async fn reload(&self) -> Result<(), ReductError> {
         // Replica reloading is driven by the launcher background task.
+        Ok(())
+    }
+
+    /// Update license information reported by the server at runtime.
+    pub async fn set_runtime_license(&self, license: License) -> Result<(), ReductError> {
+        *self.license.write().await? = Some(license);
         Ok(())
     }
 
@@ -212,7 +244,7 @@ impl StorageEngine {
             defaults: Defaults {
                 bucket: self.cfg.bucket_defaults.clone(),
             },
-            license: self.license.clone(),
+            license: self.license.read().await?.clone(),
         })
     }
 
@@ -356,6 +388,7 @@ impl StorageEngine {
                 .cfg(self.cfg.clone())
                 .io_limiter(self.io_limiter.clone())
                 .usage_counters(Arc::clone(&self.usage_counters))
+                .file_cache(Arc::clone(&self.file_cache))
                 .build()
                 .await?,
         );
@@ -381,9 +414,7 @@ impl StorageEngine {
                 bucket.ensure_not_deleting().await?;
                 Ok(Arc::clone(bucket).into())
             }
-            None => Err(ReductError::not_found(
-                format!("Bucket '{}' is not found", name).as_str(),
-            )),
+            None => Err(not_found!("Bucket '{}' is not found", name)),
         }
     }
 
@@ -482,6 +513,7 @@ impl StorageEngine {
             .cfg(cfg)
             .io_limiter(self.io_limiter.clone())
             .usage_counters(Arc::clone(&self.usage_counters))
+            .file_cache(Arc::clone(&self.file_cache))
             .restore()
             .await?;
         buckets.insert(new_name.to_string(), Arc::new(bucket));
@@ -518,7 +550,7 @@ impl StorageEngine {
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
         self.run_bucket_maintenance(BucketMaintenanceMode::SyncFs)
             .await?;
-        FILE_CACHE.force_sync_all().await?;
+        self.file_cache.force_sync_all().await?;
         Ok(())
     }
 
@@ -835,6 +867,24 @@ mod tests {
                 .await,
         );
         assert_eq!(storage.info().await.unwrap().license, Some(license));
+
+        let subscription_license = License {
+            licensee: "Subscription".to_string(),
+            invoice: "lic-123".to_string(),
+            expiry_date: chrono::Utc::now(),
+            plan: "Unlimited".to_string(),
+            device_number: 0,
+            disk_quota: 0,
+            fingerprint: String::new(),
+        };
+        storage
+            .set_runtime_license(subscription_license.clone())
+            .await
+            .unwrap();
+        assert_eq!(
+            storage.info().await.unwrap().license,
+            Some(subscription_license)
+        );
     }
 
     #[rstest]
@@ -1111,7 +1161,7 @@ mod tests {
 
             let path = storage.data_path.join("test");
             let settings_path = path.join(SETTINGS_NAME);
-            FILE_CACHE.remove(&settings_path).await.unwrap();
+            storage.file_cache().remove(&settings_path).await.unwrap();
             let cfg = Cfg {
                 data_path: storage.data_path.clone(),
                 ..Cfg::default()

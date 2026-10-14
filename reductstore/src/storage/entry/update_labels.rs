@@ -38,6 +38,11 @@ impl Entry {
         updates: Vec<UpdateLabels>,
     ) -> Result<UpdateResult, ReductError> {
         self.ensure_not_deleting().await?;
+        let publication = self.publication.begin_mutation(&self.path).await?;
+        self.block_manager
+            .write()
+            .await?
+            .set_mutation_batch(publication.token.clone());
         let mut result = UpdateResult::new();
         let mut records_per_block = BTreeMap::new();
         for UpdateLabels {
@@ -49,7 +54,7 @@ impl Entry {
             // Find the block/record first, then apply a label update.
             let located = {
                 let mut bm = self.block_manager.write().await?;
-                match bm.find_block(time).await {
+                match bm.find_block_with_record(time).await {
                     Ok(block_ref) => {
                         let block = block_ref.read().await?;
                         block
@@ -110,6 +115,9 @@ impl Entry {
             handler.await.unwrap()?;
         }
 
+        drop(publication);
+        self.publication
+            .schedule_publish(self.path.clone(), Arc::clone(&self.block_manager));
         Ok(result)
     }
 

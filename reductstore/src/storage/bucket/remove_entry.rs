@@ -3,7 +3,7 @@
 
 use super::Bucket;
 use crate::cfg::Cfg;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::entry::is_system_meta_entry;
 use crate::storage::entry::Entry;
@@ -87,12 +87,13 @@ impl Bucket {
         let cfg = self.cfg.clone();
         let io_limiter = self.io_limiter.clone();
         let usage_counters = self.usage_counters.clone();
+        let file_cache = Arc::clone(&self.file_cache);
 
         tokio::spawn(async move {
             for (entry_name, entry) in entries_to_remove {
                 let path = entry.path().to_path_buf();
 
-                match FILE_CACHE.try_exists(&path).await {
+                match file_cache.try_exists(&path).await {
                     Ok(true) => {
                         if let Err(err) = entry.remove_all_blocks().await {
                             warn!(
@@ -117,6 +118,13 @@ impl Bucket {
                     }
                 }
 
+                if let Err(err) = entry.sync_fs().await {
+                    warn!(
+                        "Failed to publish entry '{}' in bucket '{}' before removal: {}",
+                        entry_name, bucket_name, err
+                    );
+                }
+
                 let folder_removed = match folder_keeper.remove_folder(&entry_name).await {
                     Ok(()) => true,
                     Err(err) if err.status() == ErrorCode::NotFound => true,
@@ -139,6 +147,7 @@ impl Bucket {
                         cfg.clone(),
                         io_limiter.clone(),
                         Arc::clone(&usage_counters),
+                        Arc::clone(&file_cache),
                     )
                     .await;
                     continue;
@@ -190,10 +199,8 @@ impl Bucket {
             }
 
             entry.remove_all_blocks().await?;
-            if crate::core::file_cache::FILE_CACHE
-                .try_exists(&self.path.join(name))
-                .await?
-            {
+            entry.sync_fs().await?;
+            if self.file_cache.try_exists(&self.path.join(name)).await? {
                 self.folder_keeper.remove_folder(name).await?;
             }
         }
@@ -283,6 +290,7 @@ impl Bucket {
         cfg: Arc<Cfg>,
         io_limiter: InFlightIoLimiter,
         usage_counters: Arc<UsageCounters>,
+        file_cache: Arc<FileCache>,
     ) {
         let recovered_entry = match entry.settings().await {
             Ok(settings) => {
@@ -294,6 +302,7 @@ impl Bucket {
                     .cfg(cfg)
                     .io_limiter(io_limiter)
                     .usage_counters(usage_counters)
+                    .file_cache(file_cache)
                     .restore()
                     .await
             }
@@ -336,7 +345,7 @@ impl Bucket {
 mod tests {
     use super::Bucket;
     use crate::cfg::{Cfg, InstanceRole};
-    use crate::core::file_cache::FILE_CACHE;
+    use crate::core::file_cache::build_test_file_cache;
     use crate::core::sync::{reset_rwlock_config, set_rwlock_timeout};
     use prost::bytes::Bytes;
     use reduct_base::conflict;
@@ -463,8 +472,9 @@ mod tests {
         let bucket = bucket.await;
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        entry.sync_fs().await.unwrap();
 
-        FILE_CACHE.remove_dir(entry.path()).await.unwrap();
+        bucket.file_cache.remove_dir(entry.path()).await.unwrap();
         bucket.remove_entry("test-1").await.unwrap();
 
         for _ in 0..50 {
@@ -483,8 +493,9 @@ mod tests {
         let bucket = bucket.await;
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        entry.sync_fs().await.unwrap();
 
-        FILE_CACHE.remove_dir(entry.path()).await.unwrap();
+        bucket.file_cache.remove_dir(entry.path()).await.unwrap();
         bucket.compact().await.unwrap();
 
         assert_eq!(
@@ -501,8 +512,9 @@ mod tests {
         let bucket = bucket.await;
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
+        entry.sync_fs().await.unwrap();
 
-        FILE_CACHE.remove_dir(entry.path()).await.unwrap();
+        bucket.file_cache.remove_dir(entry.path()).await.unwrap();
         bucket.sync_fs().await.unwrap();
 
         assert_eq!(
@@ -532,6 +544,7 @@ mod tests {
             Arc::clone(&bucket.cfg),
             bucket.io_limiter.clone(),
             Arc::clone(&bucket.usage_counters),
+            Arc::clone(&bucket.file_cache),
         )
         .await;
 
@@ -553,7 +566,8 @@ mod tests {
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
         entry.mark_deleting().await.unwrap();
-        FILE_CACHE.remove_dir(entry.path()).await.unwrap();
+        entry.sync_fs().await.unwrap();
+        bucket.file_cache.remove_dir(entry.path()).await.unwrap();
 
         let cfg = Arc::new(Cfg {
             role: InstanceRole::Replica,
@@ -569,6 +583,7 @@ mod tests {
             cfg,
             bucket.io_limiter.clone(),
             Arc::clone(&bucket.usage_counters),
+            Arc::clone(&bucket.file_cache),
         )
         .await;
 
@@ -596,7 +611,8 @@ mod tests {
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         let entry = bucket.get_entry("test-1").await.unwrap().upgrade().unwrap();
         entry.mark_deleting().await.unwrap();
-        FILE_CACHE.remove_dir(entry.path()).await.unwrap();
+        entry.sync_fs().await.unwrap();
+        bucket.file_cache.remove_dir(entry.path()).await.unwrap();
 
         Bucket::recover_entry_after_failed_removal(
             &bucket.entries,
@@ -607,6 +623,7 @@ mod tests {
             Arc::clone(&bucket.cfg),
             bucket.io_limiter.clone(),
             Arc::clone(&bucket.usage_counters),
+            Arc::clone(&bucket.file_cache),
         )
         .await;
 
@@ -696,11 +713,13 @@ mod tests {
         write(&bucket, "test-1", 1, b"test").await.unwrap();
         write(&bucket, "test-2", 2, b"test").await.unwrap();
 
-        assert!(FILE_CACHE
+        assert!(bucket
+            .file_cache
             .try_exists(&bucket.path.join("test-1"))
             .await
             .unwrap());
-        assert!(FILE_CACHE
+        assert!(bucket
+            .file_cache
             .try_exists(&bucket.path.join("test-2"))
             .await
             .unwrap());
@@ -710,11 +729,13 @@ mod tests {
         let bucket_path = bucket.path.clone();
         let info = bucket.clone().info().await.unwrap();
         assert!(info.entries.is_empty());
-        assert!(!FILE_CACHE
+        assert!(!bucket
+            .file_cache
             .try_exists(&bucket_path.join("test-1"))
             .await
             .unwrap());
-        assert!(!FILE_CACHE
+        assert!(!bucket
+            .file_cache
             .try_exists(&bucket_path.join("test-2"))
             .await
             .unwrap());
@@ -733,11 +754,13 @@ mod tests {
 
         let info = bucket.clone().info().await.unwrap();
         assert!(info.entries.is_empty());
-        assert!(!FILE_CACHE
+        assert!(!bucket
+            .file_cache
             .try_exists(&bucket.path.join("test-1"))
             .await
             .unwrap());
-        assert!(!FILE_CACHE
+        assert!(!bucket
+            .file_cache
             .try_exists(&bucket.path.join("test-1/$meta"))
             .await
             .unwrap());
@@ -772,14 +795,16 @@ mod tests {
         let bucket = bucket.await;
         bucket.get_or_create_entry("empty").await.unwrap();
 
-        assert!(FILE_CACHE
+        assert!(bucket
+            .file_cache
             .try_exists(&bucket.path.join("empty"))
             .await
             .unwrap());
 
         bucket.remove_entries_for_bucket_removal().await.unwrap();
 
-        assert!(!FILE_CACHE
+        assert!(!bucket
+            .file_cache
             .try_exists(&bucket.path.join("empty"))
             .await
             .unwrap());
@@ -854,7 +879,8 @@ mod tests {
 
     #[fixture]
     pub async fn bucket(settings: BucketSettings, path: PathBuf) -> Arc<Bucket> {
-        FILE_CACHE.create_dir_all(&path.join("test")).await.unwrap();
+        let file_cache = build_test_file_cache();
+        file_cache.create_dir_all(&path.join("test")).await.unwrap();
         Arc::new(
             Bucket::builder()
                 .name("test")
@@ -862,6 +888,7 @@ mod tests {
                 .settings(settings)
                 .cfg(Cfg::default())
                 .usage_counters(Default::default())
+                .file_cache(file_cache)
                 .build()
                 .await
                 .unwrap(),

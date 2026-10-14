@@ -3,6 +3,7 @@
 
 pub mod components;
 pub mod http;
+pub(crate) mod license_device_guard;
 pub mod limits;
 #[cfg(feature = "zenoh-api")]
 pub mod zenoh;

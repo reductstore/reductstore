@@ -24,6 +24,7 @@ pub struct File {
     is_synced: bool,
     mode: AccessMode,
     ignore_write: bool, // read-only mode, write operations are ignored
+    batch_id: Option<u64>,
 }
 
 pub struct OpenOptions {
@@ -110,6 +111,7 @@ impl OpenOptions {
             is_synced: true,
             mode: self.mode.clone(),
             ignore_write: self.ignore_write,
+            batch_id: None,
         })
     }
 }
@@ -125,8 +127,23 @@ impl File {
     }
 
     pub async fn sync_all(&mut self) -> std::io::Result<()> {
+        self.sync_all_authorized(None).await
+    }
+
+    pub(crate) async fn sync_all_in_batch(&mut self, batch_id: u64) -> std::io::Result<()> {
+        self.sync_all_authorized(Some(batch_id)).await
+    }
+
+    async fn sync_all_authorized(&mut self, batch_id: Option<u64>) -> std::io::Result<()> {
         if self.ignore_write {
             return Ok(());
+        }
+
+        if self.batch_id.is_some() && self.batch_id != batch_id {
+            return Err(std::io::Error::new(
+                std::io::ErrorKind::PermissionDenied,
+                "Cannot sync a file owned by an active batch",
+            ));
         }
 
         if self.is_synced() {
@@ -140,6 +157,10 @@ impl File {
         self.last_synced = Instant::now();
         self.is_synced = true;
         Ok(())
+    }
+
+    pub(crate) fn set_batch_owner(&mut self, batch_id: Option<u64>) {
+        self.batch_id = batch_id;
     }
 
     /// Flush data to local filesystem without triggering remote upload.
@@ -531,6 +552,7 @@ mod tests {
             async fn download(&self, path: &Path) -> std::io::Result<()>;
             async fn update_local_cache(&self, path: &Path, mode: &AccessMode) -> std::io::Result<()>;
             async fn invalidate_locally_cached_files(&self) -> Vec<PathBuf>;
+            async fn remove_from_local_cache_if_unused(&self, path: &Path) -> std::io::Result<bool>;
             async fn get_stats(&self, path: &Path) -> std::io::Result<Option<ObjectMetadata>>;
             async fn remove_from_local_cache(&self, path: &Path) -> std::io::Result<()>;
         }

@@ -98,6 +98,7 @@ mod tests {
             verify_ssl: true,
             ca_path: None,
             compression: Default::default(),
+            source_identity: Default::default(),
         })
         .unwrap();
         assert_eq!(state.last_result(), &Ok(ErrorRecordMap::new()));

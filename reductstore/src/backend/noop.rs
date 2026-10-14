@@ -54,6 +54,10 @@ impl StorageBackend for NoopBackend {
         vec![]
     }
 
+    async fn remove_from_local_cache_if_unused(&self, _path: &Path) -> std::io::Result<bool> {
+        Ok(false)
+    }
+
     async fn get_stats(&self, _path: &Path) -> std::io::Result<Option<ObjectMetadata>> {
         Ok(None)
     }
@@ -98,6 +102,10 @@ mod tests {
             .await
             .is_ok());
         assert!(backend.invalidate_locally_cached_files().await.is_empty());
+        assert!(!backend
+            .remove_from_local_cache_if_unused(Path::new("some/path"))
+            .await
+            .unwrap());
         assert!(backend
             .get_stats(Path::new("some/path"))
             .await

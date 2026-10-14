@@ -6,6 +6,8 @@ mod compress;
 mod entry_loader;
 pub(crate) mod io;
 mod pattern;
+pub(crate) mod publication;
+mod publication_coordinator;
 mod read_record;
 mod remove_records;
 mod system;
@@ -14,7 +16,7 @@ mod write_record;
 
 use crate::cfg::io::IoConfig;
 use crate::cfg::Cfg;
-use crate::core::file_cache::FILE_CACHE;
+use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::block_manager::BlockManager;
@@ -69,6 +71,8 @@ pub(crate) struct Entry {
     path: PathBuf,
     cfg: Arc<Cfg>,
     io_limiter: InFlightIoLimiter,
+    publication: Arc<publication_coordinator::PublicationCoordinator>,
+    pub(super) file_cache: Arc<FileCache>,
 }
 
 #[derive(PartialEq)]
@@ -109,34 +113,83 @@ impl Entry {
     }
 
     pub(crate) async fn reload_index_on_replica(&self) -> Result<(), ReductError> {
-        let reload = {
-            let Some(block_manager) = self.block_manager.try_read() else {
-                debug!(
-                    "Skipping replica index reload for {}/{} because block manager is busy",
-                    self.bucket_name, self.name
-                );
+        const RELOAD_ATTEMPTS: usize = 3;
+
+        for attempt in 1..=RELOAD_ATTEMPTS {
+            let reload = {
+                let Some(block_manager) = self.block_manager.try_read() else {
+                    if attempt == RELOAD_ATTEMPTS {
+                        debug!(
+                            "Skipping replica index reload for {}/{} because block manager remained busy",
+                            self.bucket_name, self.name
+                        );
+                        return Ok(());
+                    }
+                    tokio::task::yield_now().await;
+                    continue;
+                };
+
+                block_manager.prepare_replica_index_reload()
+            };
+
+            let Some(reload) = reload else {
                 return Ok(());
             };
 
-            block_manager.prepare_replica_index_reload()
-        };
+            let result = async {
+                let before = publication::load_fresh(&self.path, &self.file_cache).await?;
+                if matches!(
+                    before,
+                    Some(publication::Publication {
+                        state: publication::PublicationState::Updating,
+                        ..
+                    })
+                ) {
+                    return Err(reduct_base::too_early!("Entry publication is updating"));
+                }
 
-        let Some(reload) = reload else {
-            return Ok(());
-        };
+                if before.as_ref().and_then(publication::Publication::id)
+                    == reload.accepted_publication().id().cloned()
+                {
+                    return Ok(());
+                }
 
-        let updated_index = reload.load_updated_index().await?;
+                let updated_index = reload.load_candidate(&self.file_cache).await?;
+                let after = publication::load_fresh(&self.path, &self.file_cache).await?;
+                let publication = publication::validate_window(before, after)?;
+                reload.validate_successor(&publication)?;
 
-        let Some(mut block_manager) = self.block_manager.try_write() else {
-            debug!(
-                "Skipping replica index swap for {}/{} because block manager is busy",
-                self.bucket_name, self.name
-            );
-            return Ok(());
-        };
+                let Some(mut block_manager) = self.block_manager.try_write() else {
+                    return Err(reduct_base::too_early!(
+                        "Block manager is busy while installing replica index"
+                    ));
+                };
 
-        block_manager.apply_replica_index_reload(updated_index);
-        Ok(())
+                block_manager
+                    .apply_replica_index_reload(reload, updated_index, publication)
+                    .await
+            }
+            .await;
+
+            match result {
+                Ok(()) => return Ok(()),
+                Err(err)
+                    if err.status() == reduct_base::error::ErrorCode::TooEarly
+                        && attempt < RELOAD_ATTEMPTS =>
+                {
+                    debug!(
+                        "Retrying replica index reload for {}/{} after transient publication state (attempt {}/{})",
+                        self.bucket_name, self.name, attempt, RELOAD_ATTEMPTS
+                    );
+                    tokio::task::yield_now().await;
+                }
+                Err(err) => return Err(err),
+            }
+        }
+
+        Err(reduct_base::too_early!(
+            "Replica index reload did not observe a stable publication"
+        ))
     }
 
     /// Query records for a time range.
@@ -274,10 +327,11 @@ impl Entry {
     }
 
     pub(super) async fn remove_all_blocks(&self) -> Result<(), ReductError> {
-        if !FILE_CACHE.try_exists(&self.path).await? {
+        if !self.file_cache.try_exists(&self.path).await? {
             return Ok(());
         }
 
+        let publication = self.publication.begin_mutation(&self.path).await?;
         let block_ids = {
             let block_manager = self.block_manager.read().await?;
             Ok::<BTreeSet<u64>, ReductError>(block_manager.index().tree().clone())
@@ -285,8 +339,9 @@ impl Entry {
 
         for block_id in block_ids? {
             let mut block_manager = self.block_manager.write().await?;
+            block_manager.set_mutation_batch(publication.token.clone());
             if let Err(err) = block_manager.remove_block(block_id).await {
-                if !FILE_CACHE.try_exists(&self.path).await? {
+                if !self.file_cache.try_exists(&self.path).await? {
                     return Ok(());
                 }
 
@@ -307,6 +362,7 @@ impl Entry {
     ///
     /// HTTTPError - The error if any.
     pub async fn try_remove_oldest_block(&self) -> Result<(), ReductError> {
+        let publication = self.publication.begin_mutation(&self.path).await?;
         let bm = self.block_manager.read().await?;
         let index_tree = bm.index().tree();
         if index_tree.is_empty() {
@@ -327,6 +383,7 @@ impl Entry {
             }
         };
 
+        bm.set_mutation_batch(publication.token.clone());
         bm.remove_block(oldest_block_id).await?;
         debug!(
             "Removing the oldest block {}.blk",
@@ -338,7 +395,7 @@ impl Entry {
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
     pub async fn compact(&self) -> Result<(), ReductError> {
-        if !FILE_CACHE.try_exists(&self.path).await? {
+        if !self.file_cache.try_exists(&self.path).await? {
             debug!(
                 "Skipping compact for {}/{} because entry folder is missing",
                 self.bucket_name, self.name
@@ -346,9 +403,17 @@ impl Entry {
             return Ok(());
         }
 
+        let publication = self.publication.begin_mutation(&self.path).await?;
         if let Some(mut bm) = self.block_manager.try_write() {
-            bm.save_cache_metadata_on_disk().await
+            bm.set_mutation_batch(publication.token.clone());
+            bm.save_cache_metadata_on_disk().await?;
+            drop(publication);
+            if self.publication.try_publish(&self.path).await? {
+                bm.clear_mutation_batch();
+            }
+            Ok(())
         } else {
+            drop(publication);
             // Avoid blocking writers; we'll try again on the next sync tick
             debug!(
                 "Skipping compact for {}/{} because block manager is busy",
@@ -363,7 +428,7 @@ impl Entry {
     /// Unlike [`Self::compact`], this method waits for the block manager lock and
     /// must be used for strict sync points (e.g. graceful shutdown).
     pub async fn sync_fs(&self) -> Result<(), ReductError> {
-        if !FILE_CACHE.try_exists(&self.path).await? {
+        if !self.file_cache.try_exists(&self.path).await? {
             debug!(
                 "Skipping sync for {}/{} because entry folder is missing",
                 self.bucket_name, self.name
@@ -371,8 +436,15 @@ impl Entry {
             return Ok(());
         }
 
-        let mut bm = self.block_manager.write().await?;
-        bm.save_cache_on_disk().await
+        {
+            let publication = self.publication.begin_mutation(&self.path).await?;
+            let mut bm = self.block_manager.write().await?;
+            bm.set_mutation_batch(publication.token.clone());
+            bm.save_cache_on_disk().await?;
+        }
+        self.publication.publish(&self.path).await?;
+        self.block_manager.write().await?.clear_mutation_batch();
+        Ok(())
     }
 
     pub fn name(&self) -> &str {
@@ -457,12 +529,18 @@ impl Entry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::file_cache::{build_test_file_cache, FileCache};
     use bytes::Bytes;
     use reduct_base::{conflict, Labels};
     use rstest::{fixture, rstest};
     use std::sync::Arc;
     use std::time::Duration;
     use tempfile;
+
+    #[fixture]
+    pub(super) fn file_cache() -> Arc<FileCache> {
+        build_test_file_cache()
+    }
 
     mod deleting {
         use super::*;
@@ -566,8 +644,12 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn test_restore(entry_settings: EntrySettings, path: PathBuf) {
-            let entry = entry(entry_settings.clone(), path.clone()).await;
+        async fn test_restore(
+            entry_settings: EntrySettings,
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
             write_stub_record(&entry, 1).await;
             write_stub_record(&entry, 2000010).await;
 
@@ -614,6 +696,7 @@ mod tests {
                 .settings(entry_settings)
                 .cfg(Cfg::default().into())
                 .usage_counters(Default::default())
+                .file_cache(file_cache)
                 .restore()
                 .await
                 .unwrap()
@@ -628,6 +711,192 @@ mod tests {
     mod compact {
         use super::*;
 
+        async fn wait_for_publication(entry: &Entry, file_cache: &Arc<FileCache>, generation: u64) {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let published = publication::load(&entry.path, file_cache).await.unwrap();
+                    if published.as_ref().map(|marker| marker.generation) == Some(generation)
+                        && !entry
+                            .block_manager
+                            .read()
+                            .await
+                            .unwrap()
+                            .has_mutation_batch()
+                    {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("entry mutation burst was not published");
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compact_publishes_and_clears_mutation_batch(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+
+            entry.compact().await.unwrap();
+
+            let publication = publication::load(&entry.path, &file_cache)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(publication.state, publication::PublicationState::Ready);
+            assert_eq!(publication.generation, 2);
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compact_batches_completed_writes(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+            write_stub_record(&entry, 2).await;
+
+            assert!(entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+            assert_eq!(
+                publication::load(&entry.path, &file_cache).await.unwrap(),
+                None
+            );
+
+            entry.compact().await.unwrap();
+            wait_for_publication(&entry, &file_cache, 2).await;
+
+            let publication = publication::load(&entry.path, &file_cache)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(publication.state, publication::PublicationState::Ready);
+            assert_eq!(publication.generation, 2);
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_idle_publisher_batches_completed_writes(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+            write_stub_record(&entry, 2).await;
+
+            assert_eq!(
+                publication::load(&entry.path, &file_cache).await.unwrap(),
+                None
+            );
+            wait_for_publication(&entry, &file_cache, 2).await;
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_idle_publisher_publishes_while_block_manager_is_busy(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+
+            let block_manager = entry.block_manager.write().await.unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let published = publication::load(&entry.path, &file_cache).await.unwrap();
+                    if published.as_ref().map(|marker| marker.generation) == Some(2) {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+            })
+            .await
+            .expect("idle publisher was blocked by block manager");
+            drop(block_manager);
+
+            wait_for_publication(&entry, &file_cache, 2).await;
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_idle_publisher_batches_label_updates(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+            entry.sync_fs().await.unwrap();
+
+            entry
+                .clone()
+                .update_labels(vec![update_labels::UpdateLabels {
+                    time: 1,
+                    update: Labels::from_iter([("first".to_string(), "1".to_string())]),
+                    remove: Default::default(),
+                }])
+                .await
+                .unwrap();
+            entry
+                .clone()
+                .update_labels(vec![update_labels::UpdateLabels {
+                    time: 1,
+                    update: Labels::from_iter([("second".to_string(), "2".to_string())]),
+                    remove: Default::default(),
+                }])
+                .await
+                .unwrap();
+
+            wait_for_publication(&entry, &file_cache, 4).await;
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compact_publishes_after_errored_write(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+            let mut writer = entry
+                .begin_write(1, 10, "text/plain".to_string(), Labels::new())
+                .await
+                .unwrap();
+
+            writer
+                .send(Err(ReductError::internal_server_error("write failed")))
+                .await
+                .unwrap();
+
+            entry.compact().await.unwrap();
+            wait_for_publication(&entry, &file_cache, 2).await;
+
+            let publication = publication::load(&entry.path, &file_cache)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(publication.state, publication::PublicationState::Ready);
+            assert_eq!(publication.generation, 2);
+        }
+
         #[rstest]
         #[tokio::test]
         async fn test_compact_skips_when_block_manager_busy(#[future] entry: Arc<Entry>) {
@@ -638,6 +907,33 @@ mod tests {
                 .await
                 .expect("compact should not block while block manager is busy")
                 .unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compact_keeps_mutation_batch_when_another_mutation_is_active(
+            #[future] entry: Arc<Entry>,
+        ) {
+            let entry = entry.await;
+            let admission = entry.publication.begin_mutation(&entry.path).await.unwrap();
+
+            entry.compact().await.unwrap();
+
+            assert!(entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+
+            drop(admission);
+            entry.sync_fs().await.unwrap();
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
         }
 
         #[rstest]
@@ -658,6 +954,48 @@ mod tests {
 
             drop(guard);
             sync_task.await.unwrap().unwrap();
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_compact_and_sync_fs_skip_missing_entry_directory(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+            std::fs::remove_dir_all(&entry.path).unwrap();
+
+            entry.compact().await.unwrap();
+            entry.sync_fs().await.unwrap();
+            assert_eq!(
+                publication::load(&entry.path, &file_cache).await.unwrap(),
+                None
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_sync_fs_publishes_and_clears_mutation_batch(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+
+            entry.sync_fs().await.unwrap();
+
+            let publication = publication::load(&entry.path, &file_cache)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(publication.state, publication::PublicationState::Ready);
+            assert_eq!(publication.generation, 2);
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
         }
     }
 
@@ -719,6 +1057,58 @@ mod tests {
                     "Query {} not found and it might have expired. Check TTL in your query request.",
                     id
                 ))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn reads_and_queries_records_after_belated_write_starts_overlapping_block(
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry(
+                EntrySettings {
+                    max_block_size: 10000,
+                    max_block_records: 2,
+                },
+                path,
+                file_cache,
+            )
+            .await;
+
+            // The belated write must start a block between the first and second blocks.
+            for timestamp in [1000, 2000, 3000, 1500] {
+                write_stub_record(&entry, timestamp).await;
+            }
+
+            for timestamp in [1000, 1500, 2000, 3000] {
+                assert!(
+                    entry.begin_read(timestamp).await.is_ok(),
+                    "record {timestamp} must be readable by timestamp"
+                );
+            }
+
+            let id = entry
+                .query(QueryEntry {
+                    start: Some(0),
+                    stop: Some(10000),
+                    ..Default::default()
+                })
+                .await
+                .unwrap();
+            let (rx, _) = entry.get_query_receiver(id).await.unwrap();
+            let rx = rx.upgrade_and_unwrap();
+            let mut rx = rx.write().await.unwrap();
+
+            for timestamp in [1000, 1500, 2000, 3000] {
+                assert_eq!(
+                    rx.recv().await.unwrap().unwrap().meta().timestamp(),
+                    timestamp
+                );
+            }
+            assert_eq!(
+                rx.recv().await.unwrap().err(),
+                Some(no_content!("No content"))
             );
         }
 
@@ -857,13 +1247,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_info(path: PathBuf) {
+    async fn test_info(path: PathBuf, file_cache: Arc<FileCache>) {
         let entry = entry(
             EntrySettings {
                 max_block_size: 10000,
                 max_block_records: 10000,
             },
             path,
+            file_cache,
         )
         .await;
 
@@ -1028,6 +1419,111 @@ mod tests {
             assert_eq!(entry.info().await.unwrap().record_count, 0);
             assert_eq!(entry.info().await.unwrap().size, 0);
         }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_removal_is_published_by_sync_fs(
+            #[future] entry: Arc<Entry>,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1).await;
+
+            entry.try_remove_oldest_block().await.unwrap();
+            assert!(entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+
+            entry.sync_fs().await.unwrap();
+
+            assert_eq!(entry.info().await.unwrap().block_count, 0);
+            assert_eq!(
+                publication::load(&entry.path, &file_cache)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .generation,
+                2
+            );
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+        }
+    }
+
+    mod remove_all_blocks {
+        use super::*;
+
+        #[rstest]
+        #[tokio::test]
+        async fn removes_every_block_in_one_mutation_batch(
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) {
+            let entry = Arc::new(
+                Entry::builder()
+                    .name("entry")
+                    .bucket_path(path)
+                    .settings(EntrySettings {
+                        max_block_size: 10000,
+                        max_block_records: 1,
+                    })
+                    .cfg(Cfg::default().into())
+                    .usage_counters(Default::default())
+                    .file_cache(file_cache.clone())
+                    .build()
+                    .await
+                    .unwrap(),
+            );
+            write_stub_record(&entry, 1).await;
+            write_stub_record(&entry, 2).await;
+
+            entry.remove_all_blocks().await.unwrap();
+            assert_eq!(entry.info().await.unwrap().block_count, 0);
+            assert!(entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+
+            entry.sync_fs().await.unwrap();
+            assert_eq!(
+                publication::load(&entry.path, &file_cache)
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .generation,
+                2
+            );
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn skips_missing_entry_directory(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            std::fs::remove_dir_all(&entry.path).unwrap();
+
+            entry.remove_all_blocks().await.unwrap();
+            assert!(!entry
+                .block_manager
+                .read()
+                .await
+                .unwrap()
+                .has_mutation_batch());
+        }
     }
 
     #[fixture]
@@ -1039,7 +1535,11 @@ mod tests {
     }
 
     #[fixture]
-    pub(super) async fn entry(entry_settings: EntrySettings, path: PathBuf) -> Arc<Entry> {
+    pub(super) async fn entry(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) -> Arc<Entry> {
         Arc::new(
             Entry::builder()
                 .name("entry")
@@ -1047,6 +1547,7 @@ mod tests {
                 .settings(entry_settings)
                 .cfg(Cfg::default().into())
                 .usage_counters(Default::default())
+                .file_cache(file_cache)
                 .build()
                 .await
                 .unwrap(),

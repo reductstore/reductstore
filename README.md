@@ -13,23 +13,6 @@
   <a href="https://community.reduct.store/signup"><img alt="Community" src="https://img.shields.io/discourse/status?server=https%3A%2F%2Fcommunity.reduct.store" /></a>
 </p>
 
-## Make robotics and industrial data queryable
-
-ReductStore is high-performance, time-indexed object storage for robotics and industrial IoT.
-
-Store terabytes of images, video, sensor readings, logs, files, and ROS bags in their native binary formats. Every record is organized by timestamp and can be enriched with labels, so you can retrieve exactly the data you need by time range and operational context.
-
-Instead of combining a time-series database, generic object storage, metadata indexes, and custom retention jobs, ReductStore provides one system for ingesting, organizing, retaining, and querying multimodal time-series data.
-
-## Why Teams Pick ReductStore
-
-- Make binary-first robotics and industrial data queryable by time range and labels
-- Built for workloads such as camera frames, sensor payloads, logs, files, and ROS bags
-- Replicate only selected records to the cloud to reduce bandwidth and storage cost
-- Apply quotas and lifecycle policies in the same system that stores the data
-
-## Proof Points
-
 <p align="center">
   <strong>🚀 60k+</strong> downloads
   &nbsp;&nbsp;•&nbsp;&nbsp;
@@ -43,6 +26,31 @@ Instead of combining a time-series database, generic object storage, metadata in
   &nbsp;&nbsp;•&nbsp;&nbsp;
   <strong>🛠️ 4+</strong> years of active development
 </p>
+
+## Make robotics and industrial data queryable
+
+ReductStore is high-performance, time-indexed object storage for robotics and industrial IoT.
+
+Store terabytes of images, video, sensor readings, logs, files, and ROS bags in their native binary formats. Every record is organized by timestamp and can be enriched with labels, so you can retrieve exactly the data you need by time range and operational context.
+
+Instead of combining a time-series database, generic object storage, metadata indexes, and custom retention jobs, ReductStore provides one system for ingesting, organizing, retaining, and querying multimodal time-series data.
+
+## Why ReductStore
+
+We built ReductStore for robotics and industrial systems that continuously produce images, video, sensor readings, logs, files, and ROS bags. These workloads need the time index of a time series database and the payload flexibility of object storage without maintaining both systems.
+
+| Native support for continuous multimodal data | ReductStore | [MinIO AIStor](https://www.reduct.store/blog/comparisons/computer-vision/iot/performance-comparison-reductstore-vs-minio) | [TimescaleDB](https://www.reduct.store/blog/comparisons/iot/reductstore-vs-timescaledb) | [MongoDB](https://www.reduct.store/blog/comparisons/iot/reductstore-vs-mongodb) |
+| --- | --- | --- | --- | --- |
+| Store arbitrary binary payloads | ✅ Native records | ✅ Native objects | 🟡 `BYTEA` rows | 🟡 `BinData` or GridFS |
+| Index binary data by timestamp | ✅ Built in | ❌ Object key index | ✅ Hypertable time index | 🟡 Schema and index required |
+| Query by time range and metadata | ✅ Time and label query | ❌ No online time/metadata query<br>Listing or batch inventory | 🟡 Requires schema + indexes | 🟡 Indexed timestamp/metadata<br>GridFS for >16 MiB |
+| Manage a fixed disk as a ring buffer | ✅ Capacity based FIFO quota | ❌ Age based expiration | ❌ Time based retention | 🟡 Capped collections |
+| Replicate selected data upstream | ✅ Entry and label conditions | 🟡 Prefix and object tag rules | ❌ No native selective replication<br>Streaming replication is full copy | ❌ Application pipeline required |
+| Compress and delete historical data | ✅ Lifecycle policies | 🟡 Expiration/tiering<br>Compression on PUT | ✅ Columnstore and retention policies | 🟡 TTL expiration |
+
+ReductStore keeps the timestamp, labels, and binary payload in one record. The same labels drive queries, deletion policies, and replication, so edge devices can retain a bounded local history and send only relevant data upstream.
+
+This comparison covers native capabilities for continuously recorded multimodal data. A partial result means the capability requires a custom schema, restricted rule model, batch workflow, or additional setup rather than being a first class feature of the storage model.
 
 ## When You Should Use It
 
@@ -160,17 +168,20 @@ Thanks to everyone who has contributed to ReductStore.
   <a href="https://github.com/DibbayajyotiRoy"><img src="https://avatars.githubusercontent.com/u/125145390?v=4" width="48" height="48" alt="@DibbayajyotiRoy" /></a>
   <a href="https://github.com/rohankumardubey"><img src="https://avatars.githubusercontent.com/u/82864904?v=4" width="48" height="48" alt="@rohankumardubey" /></a>
   <a href="https://github.com/rtadepalli"><img src="https://avatars.githubusercontent.com/u/105760760?v=4" width="48" height="48" alt="@rtadepalli" /></a>
-  <a href="https://github.com/FirasCh3"><img src="https://avatars.githubusercontent.com/u/29213889?v=4" width="48" height="48" alt="@FirasCh3" /></a>
   <a href="https://github.com/vbmade2000"><img src="https://avatars.githubusercontent.com/u/1904995?v=4" width="48" height="48" alt="@vbmade2000" /></a>
   <a href="https://github.com/LordAizen1"><img src="https://avatars.githubusercontent.com/u/119096690?v=4" width="48" height="48" alt="@LordAizen1" /></a>
+  <a href="https://github.com/ragen1337"><img src="https://avatars.githubusercontent.com/u/53276547?v=4" width="48" height="48" alt="@ragen1337" /></a>
   <a href="https://github.com/tuanhungngyn"><img src="https://avatars.githubusercontent.com/u/165829382?v=4" width="48" height="48" alt="@tuanhungngyn" /></a>
   <a href="https://github.com/upuddu"><img src="https://avatars.githubusercontent.com/u/125773480?v=4" width="48" height="48" alt="@upuddu" /></a>
+  <a href="https://github.com/Harshal875"><img src="https://avatars.githubusercontent.com/u/153023634?v=4" width="48" height="48" alt="@Harshal875" /></a>
   <a href="https://github.com/gitcommit90"><img src="https://avatars.githubusercontent.com/u/294273268?v=4" width="48" height="48" alt="@gitcommit90" /></a>
   <a href="https://github.com/lntutor"><img src="https://avatars.githubusercontent.com/u/1948922?v=4" width="48" height="48" alt="@lntutor" /></a>
   <a href="https://github.com/mambaz"><img src="https://avatars.githubusercontent.com/u/3928782?v=4" width="48" height="48" alt="@mambaz" /></a>
   <a href="https://github.com/victor1234"><img src="https://avatars.githubusercontent.com/u/1102205?v=4" width="48" height="48" alt="@victor1234" /></a>
+  <a href="https://github.com/vjymisal0"><img src="https://avatars.githubusercontent.com/u/97379957?v=4" width="48" height="48" alt="@vjymisal0" /></a>
   <a href="https://github.com/aschenbecherwespe"><img src="https://avatars.githubusercontent.com/u/94011659?v=4" width="48" height="48" alt="@aschenbecherwespe" /></a>
   <a href="https://github.com/renghen"><img src="https://avatars.githubusercontent.com/u/271285?v=4" width="48" height="48" alt="@renghen" /></a>
+  <a href="https://github.com/vintcessun"><img src="https://avatars.githubusercontent.com/u/111984858?v=4" width="48" height="48" alt="@vintcessun" /></a>
 </p>
 
 Your support fuels our passion and drives us to keep improving.
