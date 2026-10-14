@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use super::{settings_for_entry, Bucket};
+use crate::storage::engine::check_entry_name_convention;
 use crate::storage::entry::Entry;
 use log::{debug, error};
 use reduct_base::error::{ErrorCode, ReductError};
@@ -106,6 +107,42 @@ impl Bucket {
 
         Ok(())
     }
+
+    /// Restore an entry by its exact remote path when a replica folder-map
+    /// refresh did not advertise it. This keeps hidden `/$meta` entries
+    /// readable without treating an incomplete `.folder` snapshot as proof of
+    /// deletion.
+    pub(super) async fn restore_replica_entry(
+        &self,
+        entry_name: &str,
+    ) -> Result<Option<Arc<Entry>>, ReductError> {
+        check_entry_name_convention(entry_name)?;
+        let settings = self.settings.read().await?.clone();
+        let Some(entry) = Entry::builder()
+            .path(self.path().join(entry_name))
+            .name(entry_name)
+            .bucket_name(self.name().to_string())
+            .settings(settings_for_entry(entry_name, &settings))
+            .cfg(self.cfg.clone())
+            .io_limiter(self.io_limiter.clone())
+            .usage_counters(Arc::clone(&self.usage_counters))
+            .file_cache(Arc::clone(&self.file_cache))
+            .restore()
+            .await?
+        else {
+            return Ok(None);
+        };
+
+        let entry = Arc::new(entry);
+        let entry = self
+            .entries
+            .write()
+            .await?
+            .entry(entry_name.to_string())
+            .or_insert_with(|| Arc::clone(&entry))
+            .clone();
+        Ok(Some(entry))
+    }
 }
 
 #[cfg(test)]
@@ -118,7 +155,11 @@ mod tests {
     use crate::core::file_cache::build_test_file_cache;
     use crate::storage::block_manager::block_index::BlockIndex;
     use crate::storage::block_manager::BLOCK_INDEX_FILE;
-    use crate::storage::bucket::tests::write;
+    use crate::storage::bucket::tests::{write, write_meta};
+    use crate::storage::proto::folder_map::Item;
+    use crate::storage::proto::FolderMap;
+    use prost::Message;
+    use reduct_base::io::ReadRecord;
     use reduct_base::msg::bucket_api::BucketSettings;
     use rstest::{fixture, rstest};
     use tempfile::tempdir;
@@ -225,6 +266,71 @@ mod tests {
             let entries = read_only_bucket.entries.read().await.unwrap();
             assert_eq!(entries.len(), 0);
         }
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_get_entry_restores_meta_omitted_from_folder_map(
+        #[future] primary_bucket: Arc<Bucket>,
+    ) {
+        let primary_bucket = primary_bucket.await;
+        write_meta(&primary_bucket, "test-1/$meta", 2, b"schema")
+            .await
+            .unwrap();
+        primary_bucket.sync_fs().await.unwrap();
+
+        let mut cfg = primary_bucket.cfg().clone();
+        cfg.role = InstanceRole::Replica;
+        let read_only_bucket = Arc::new(
+            Bucket::builder()
+                .path(primary_bucket.path().clone())
+                .cfg(cfg)
+                .usage_counters(Default::default())
+                .restore()
+                .await
+                .unwrap(),
+        );
+        assert!(read_only_bucket
+            .entries
+            .read()
+            .await
+            .unwrap()
+            .contains_key("test-1/$meta"));
+
+        let folder_map = FolderMap {
+            items: vec![Item {
+                name: "test-1".to_string(),
+                folder_name: "test-1".to_string(),
+            }],
+        };
+        std::fs::write(
+            primary_bucket.path().join(".folder"),
+            folder_map.encode_to_vec(),
+        )
+        .unwrap();
+
+        read_only_bucket.reload_entries().await.unwrap();
+        assert!(!read_only_bucket
+            .entries
+            .read()
+            .await
+            .unwrap()
+            .contains_key("test-1/$meta"));
+
+        let mut reader = read_only_bucket
+            .begin_read("test-1/$meta", 2)
+            .await
+            .unwrap();
+        assert_eq!(
+            reader.read_chunk().unwrap().unwrap(),
+            bytes::Bytes::from("schema")
+        );
+        assert!(read_only_bucket
+            .entries
+            .read()
+            .await
+            .unwrap()
+            .contains_key("test-1/$meta"));
     }
 
     #[rstest]

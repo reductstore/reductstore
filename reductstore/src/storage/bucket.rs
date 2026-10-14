@@ -123,12 +123,24 @@ impl Bucket {
     /// * `&Entry` - The entry or an HTTPError
     pub async fn get_entry(&self, name: &str) -> Result<Weak<Entry>, ReductError> {
         self.reload().await?;
-        let entries = self.entries.read().await?;
-        let entry = entries
-            .get(name)
-            .ok_or_else(|| not_found!("Entry '{}' not found in bucket '{}'", name, self.name))?;
+        let entry = self.entries.read().await?.get(name).cloned();
+        let entry = match entry {
+            Some(entry) => entry,
+            None if self.cfg.role == InstanceRole::Replica => {
+                self.restore_replica_entry(name).await?.ok_or_else(|| {
+                    not_found!("Entry '{}' not found in bucket '{}'", name, self.name)
+                })?
+            }
+            None => {
+                return Err(not_found!(
+                    "Entry '{}' not found in bucket '{}'",
+                    name,
+                    self.name
+                ));
+            }
+        };
         entry.ensure_not_deleting().await?;
-        Ok(entry.clone().into())
+        Ok(entry.into())
     }
 
     /// Return bucket stats
