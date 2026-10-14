@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 /// Matches a name against a pattern list where a leading `!` marks an exclusion.
+#[cfg(any(feature = "zenoh-api", test))]
 pub(crate) fn matches_patterns(name: &str, patterns: &[String]) -> bool {
     let mut includes = patterns
         .iter()
@@ -17,6 +18,7 @@ pub(crate) fn matches_patterns(name: &str, patterns: &[String]) -> bool {
             .any(|pattern| entry_matches_pattern(name, &pattern[1..]))
 }
 
+#[cfg(any(feature = "zenoh-api", test))]
 fn is_exclusion(pattern: &str) -> bool {
     pattern.starts_with('!') && pattern.len() > 1
 }

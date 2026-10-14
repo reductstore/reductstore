@@ -10,6 +10,8 @@ pub(crate) mod routing;
 mod session;
 pub(crate) mod subscriber;
 
+pub(crate) use session::validate_config;
+
 pub struct ZenohRuntimeHandle {
     task: JoinHandle<()>,
     shutdown_tx: watch::Sender<bool>,

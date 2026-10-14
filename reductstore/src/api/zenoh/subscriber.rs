@@ -22,10 +22,6 @@ use tokio::sync::Mutex;
 
 const DROP_REPORT_INTERVAL_MS: u64 = 10_000;
 
-/// How far a record timestamp may be advanced past the publisher's stamp to clear
-/// microsecond collisions before the sample is rejected.
-const MAX_TIMESTAMP_SHIFT_US: u64 = 1_000;
-
 /// Subscriber pipeline for ingesting Zenoh samples of one configured block into ReductStore.
 pub(crate) struct SubscriberPipeline {
     components: Arc<Components>,
@@ -87,7 +83,7 @@ impl SubscriberPipeline {
             labels.insert(key, value);
         }
 
-        let mut ts = timestamp.unwrap_or_else(current_time_us);
+        let ts = timestamp.unwrap_or_else(current_time_us);
 
         self.ensure_bucket(bucket, route.may_create).await?;
 
@@ -112,17 +108,8 @@ impl SubscriberPipeline {
                 .await
             {
                 Ok(writer) => break writer,
-                // Publishers stamping faster than the microsecond resolution of a
-                // record timestamp land on an occupied slot; the next free one keeps
-                // the sample and its arrival order.
-                Err(err)
-                    if err.status() == ErrorCode::Conflict
-                        && ts.wrapping_sub(timestamp.unwrap_or(ts)) < MAX_TIMESTAMP_SHIFT_US =>
-                {
-                    ts += 1;
-                }
                 // The bucket was removed out of band after it was memoized as ready;
-                // recreate it and keep the sample.
+                // recreate it once and keep the sample.
                 Err(err) if err.status() == ErrorCode::NotFound && !recreated => {
                     recreated = true;
                     self.forget_bucket(bucket).await;
@@ -160,31 +147,36 @@ impl SubscriberPipeline {
             return Ok(());
         }
 
-        if self.components.storage.get_bucket(bucket).await.is_err() {
-            if !may_create {
-                let err = RoutingError::BucketMissing {
-                    bucket: bucket.to_string(),
-                };
-                // not memoized: the bucket may be created out of band later
-                self.report_drop(bucket, &err);
-                return Err(IngestError::Routing(err));
-            }
+        match self.components.storage.get_bucket(bucket).await {
+            Ok(_) => {}
+            // only a confirmed missing bucket may be created; internal or lock errors propagate
+            Err(err) if err.status() == ErrorCode::NotFound => {
+                if !may_create {
+                    let err = RoutingError::BucketMissing {
+                        bucket: bucket.to_string(),
+                    };
+                    // not memoized: the bucket may be created out of band later
+                    self.report_drop(bucket, &err);
+                    return Err(IngestError::Routing(err));
+                }
 
-            match self
-                .components
-                .storage
-                .create_bucket(bucket, BucketSettings::default())
-                .await
-            {
-                Ok(_) => info!(
-                    "Zenoh subscriber block '{}' created bucket '{}'",
-                    self.router.block_id(),
-                    bucket
-                ),
-                // lost a create race with another writer
-                Err(_) if self.components.storage.get_bucket(bucket).await.is_ok() => {}
-                Err(err) => return Err(IngestError::Storage(err)),
+                match self
+                    .components
+                    .storage
+                    .create_bucket(bucket, BucketSettings::default())
+                    .await
+                {
+                    Ok(_) => info!(
+                        "Zenoh subscriber block '{}' created bucket '{}'",
+                        self.router.block_id(),
+                        bucket
+                    ),
+                    // lost a create race with another writer
+                    Err(_) if self.components.storage.get_bucket(bucket).await.is_ok() => {}
+                    Err(err) => return Err(IngestError::Storage(err)),
+                }
             }
+            Err(err) => return Err(IngestError::Storage(err)),
         }
 
         self.ready_buckets.lock().await.insert(bucket.to_string());
@@ -405,13 +397,14 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn shifts_timestamp_when_slot_is_taken(#[future] keeper: Arc<StateKeeper>) {
+    async fn rejects_duplicate_timestamp_on_same_entry(#[future] keeper: Arc<StateKeeper>) {
         let components = keeper.await.get_anonymous().await.unwrap();
         let pipeline = SubscriberPipeline::new(static_router(), Arc::clone(&components));
 
-        for _ in 0..3 {
-            write(&pipeline, "motion/welder", 500).await.unwrap();
-        }
+        write(&pipeline, "motion/welder", 500).await.unwrap();
+
+        let err = expect_storage_error(write(&pipeline, "motion/welder", 500).await.unwrap_err());
+        assert_eq!(err.status(), ErrorCode::Conflict);
 
         let entry = components
             .storage
@@ -425,26 +418,7 @@ mod tests {
             .unwrap()
             .upgrade()
             .unwrap();
-        assert_eq!(entry.info().await.unwrap().record_count, 3);
-        for ts in [500, 501, 502] {
-            assert!(entry.begin_read(ts).await.is_ok(), "record {} missing", ts);
-        }
-    }
-
-    #[rstest]
-    #[tokio::test]
-    async fn rejects_timestamp_shifted_beyond_the_limit(#[future] keeper: Arc<StateKeeper>) {
-        let components = keeper.await.get_anonymous().await.unwrap();
-        let pipeline = SubscriberPipeline::new(static_router(), Arc::clone(&components));
-
-        for offset in 0..=MAX_TIMESTAMP_SHIFT_US {
-            write(&pipeline, "motion/welder", 1_000 + offset)
-                .await
-                .unwrap();
-        }
-
-        let err = expect_storage_error(write(&pipeline, "motion/welder", 1_000).await.unwrap_err());
-        assert_eq!(err.status(), ErrorCode::Conflict);
+        assert_eq!(entry.info().await.unwrap().record_count, 1);
     }
 
     #[rstest]

@@ -5,8 +5,6 @@ use crate::cfg::zenoh::{ZenohBlock, ZenohBucketRouting};
 use crate::storage::entry::matches_patterns;
 use std::fmt::{Display, Formatter};
 
-const MAX_BUCKET_NAME_LEN: usize = 64;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum RoutingMode {
     Static {
@@ -219,13 +217,8 @@ fn validate_bucket_name(name: &str) -> Result<(), RoutingError> {
     if name.is_empty() {
         return reject("is empty");
     }
-    if name.len() > MAX_BUCKET_NAME_LEN {
-        return reject(&format!(
-            "is longer than {} characters",
-            MAX_BUCKET_NAME_LEN
-        ));
-    }
-    // rejecting '$' keeps a key expression from reaching a system bucket
+    // charset mirrors storage::engine::check_name_convention; rejecting '$' also keeps a key
+    // expression from reaching a system bucket. No length cap, to match storage.
     if !name
         .chars()
         .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
@@ -338,15 +331,8 @@ mod tests {
     }
 
     #[rstest]
-    fn rejects_over_long_derived_bucket_name() {
-        let key = format!("{}/entry", "a".repeat(MAX_BUCKET_NAME_LEN + 1));
-        let err = key_prefix(None, &["*"], true).resolve(&key).unwrap_err();
-        assert!(matches!(err, RoutingError::InvalidBucketName { .. }));
-    }
-
-    #[rstest]
-    fn accepts_bucket_name_at_the_length_limit() {
-        let name = "a".repeat(MAX_BUCKET_NAME_LEN);
+    fn accepts_a_long_derived_bucket_name() {
+        let name = "a".repeat(200);
         let key = format!("{}/entry", name);
         let router = key_prefix(None, &["*"], true);
         let route = router.resolve(&key).unwrap();

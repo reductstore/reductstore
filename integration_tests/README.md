@@ -29,7 +29,8 @@ rm -rf ~/data-test
 `RS_ZENOH_SUB_KEYEXPRS` / `RS_ZENOH_QUERY_KEYEXPRS` above configure a single static block writing
 everything to `RS_ZENOH_BUCKET` (default `zenoh`). The same paths can also be configured as
 `RS_ZENOH_SUB_<ID>_*` / `RS_ZENOH_QUERY_<ID>_*` blocks, each with its own bucket and routing.
-Setting any indexed variable makes the unindexed ones inactive.
+Use one style or the other: setting both indexed and unindexed variables, or an indexed variable
+without a matching `_KEYEXPRS`, aborts startup instead of running a partial configuration.
 
 `routing_test.py` exercises this and is skipped unless `RS_ZENOH_ROUTING_TESTS` is set.
 

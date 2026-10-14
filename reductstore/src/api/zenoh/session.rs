@@ -48,6 +48,8 @@ pub(crate) async fn run_session(
 ) -> Result<(), SessionError> {
     info!("Starting Zenoh API runtime: {}", config);
 
+    validate_config(&config)?;
+
     let subscriber_routers = build_routers(&config.subscribers, "subscriber")?;
     let queryable_routers = build_routers(
         &config
@@ -57,9 +59,6 @@ pub(crate) async fn run_session(
             .collect::<Vec<_>>(),
         "queryable",
     )?;
-
-    validate_keyexprs(&config)?;
-    warn_on_overlapping_keyexprs(&config);
 
     let components = {
         let mut logged_wait = false;
@@ -108,41 +107,42 @@ pub(crate) async fn run_session(
     info!("Zenoh session opened successfully");
 
     let mut handles = Vec::new();
-    let mut declared = 0;
 
-    for (block, router) in config.subscribers.iter().zip(subscriber_routers) {
-        let pipeline = Arc::new(SubscriberPipeline::new(router, Arc::clone(&components)));
-        info!(
-            "Zenoh subscriber block '{}': keyexprs=[{}] {}",
-            block.id,
-            block.keyexprs.join(","),
-            pipeline.describe()
-        );
-        declared += spawn_subscriber_block(&session, block, pipeline, &mut handles).await;
-    }
+    let spawn_all = async {
+        for (block, router) in config.subscribers.iter().zip(subscriber_routers) {
+            let pipeline = Arc::new(SubscriberPipeline::new(router, Arc::clone(&components)));
+            info!(
+                "Zenoh subscriber block '{}': keyexprs=[{}] {}",
+                block.id,
+                block.keyexprs.join(","),
+                pipeline.describe()
+            );
+            spawn_subscriber_block(&session, block, pipeline, &mut handles).await?;
+        }
 
-    for (block, router) in config.queryables.iter().zip(queryable_routers) {
-        let pipeline = Arc::new(QueryablePipeline::new(router, Arc::clone(&components)));
-        info!(
-            "Zenoh queryable block '{}': keyexprs=[{}] locality={} {}",
-            block.route.id,
-            block.route.keyexprs.join(","),
-            block.locality,
-            pipeline.describe()
-        );
-        declared += spawn_queryable_block(&session, block, pipeline, &mut handles).await;
+        for (block, router) in config.queryables.iter().zip(queryable_routers) {
+            let pipeline = Arc::new(QueryablePipeline::new(router, Arc::clone(&components)));
+            info!(
+                "Zenoh queryable block '{}': keyexprs=[{}] locality={} {}",
+                block.route.id,
+                block.route.keyexprs.join(","),
+                block.locality,
+                pipeline.describe()
+            );
+            spawn_queryable_block(&session, block, pipeline, &mut handles).await?;
+        }
+
+        Ok::<(), SessionError>(())
+    };
+
+    // all declarations must succeed; a partial set would silently drop part of the key space
+    if let Err(err) = spawn_all.await {
+        shutdown(session, handles).await.ok();
+        return Err(err);
     }
 
     let configured = config.subscribers.len() + config.queryables.len();
-    if declared == 0 && configured > 0 {
-        shutdown(session, handles).await.ok();
-        return Err(SessionError::NoBlocksStarted(format!(
-            "all {} configured block(s) failed to declare",
-            configured
-        )));
-    }
-
-    info!("Zenoh API runtime started: {} declaration(s)", declared);
+    info!("Zenoh API runtime started: {} block(s)", configured);
 
     loop {
         tokio::select! {
@@ -194,6 +194,24 @@ fn build_routers(
         .collect()
 }
 
+/// Structural validation run before the HTTP listener starts so an invalid Zenoh configuration
+/// aborts startup instead of silently running a partial setup.
+pub(crate) fn validate_config(config: &ZenohApiConfig) -> Result<(), SessionError> {
+    if !config.config_errors.is_empty() {
+        return Err(SessionError::InvalidConfig(config.config_errors.join("; ")));
+    }
+
+    for (kind, block) in blocks_with_kind(config) {
+        BucketRouter::from_block(block).validate().map_err(|err| {
+            SessionError::InvalidConfig(format!("{} block '{}': {}", kind, block.id, err))
+        })?;
+    }
+
+    validate_keyexprs(config)?;
+    check_block_overlaps(config)?;
+    Ok(())
+}
+
 fn validate_keyexprs(config: &ZenohApiConfig) -> Result<(), SessionError> {
     for (kind, block) in blocks_with_kind(config) {
         for key_expr in &block.keyexprs {
@@ -208,31 +226,24 @@ fn validate_keyexprs(config: &ZenohApiConfig) -> Result<(), SessionError> {
     Ok(())
 }
 
-// zenoh delivers a sample to every matching subscriber, so overlapping keyexprs store it twice
-fn warn_on_overlapping_keyexprs(config: &ZenohApiConfig) {
-    for (block_a, key_a, block_b, key_b) in keyexpr_pairs(&config.subscribers) {
-        if keyexprs_intersect(key_a, key_b) {
-            warn!(
-                "Zenoh subscriber key expressions '{}' (block '{}') and '{}' (block '{}') \
-                 intersect, so matching samples are written more than once",
-                key_a, block_a, key_b, block_b
-            );
+// Zenoh delivers a sample to every matching key expression, so two expressions in the same block
+// that intersect would store (or answer) the same sample twice. Overlap across blocks is allowed:
+// it intentionally tees one key space into several buckets.
+fn check_block_overlaps(config: &ZenohApiConfig) -> Result<(), SessionError> {
+    for (kind, block) in blocks_with_kind(config) {
+        for (index, key_a) in block.keyexprs.iter().enumerate() {
+            for key_b in block.keyexprs.iter().skip(index + 1) {
+                if keyexprs_intersect(key_a, key_b) {
+                    return Err(SessionError::InvalidConfig(format!(
+                        "{} block '{}': key expressions '{}' and '{}' intersect; \
+                         a matching sample would be handled twice",
+                        kind, block.id, key_a, key_b
+                    )));
+                }
+            }
         }
     }
-
-    let queryable_routes: Vec<ZenohBlock> = config
-        .queryables
-        .iter()
-        .map(|block| block.route.clone())
-        .collect();
-    for (block_a, key_a, block_b, key_b) in keyexpr_pairs(&queryable_routes) {
-        if keyexprs_intersect(key_a, key_b) {
-            debug!(
-                "Zenoh queryable key expressions '{}' (block '{}') and '{}' (block '{}') intersect",
-                key_a, block_a, key_b, block_b
-            );
-        }
-    }
+    Ok(())
 }
 
 fn keyexprs_intersect(a: &str, b: &str) -> bool {
@@ -240,26 +251,6 @@ fn keyexprs_intersect(a: &str, b: &str) -> bool {
         (Ok(a), Ok(b)) => a.intersects(&b),
         _ => false,
     }
-}
-
-fn keyexpr_pairs(blocks: &[ZenohBlock]) -> Vec<(&str, &str, &str, &str)> {
-    let flat: Vec<(&str, &str)> = blocks
-        .iter()
-        .flat_map(|block| {
-            block
-                .keyexprs
-                .iter()
-                .map(move |key| (block.id.as_str(), key.as_str()))
-        })
-        .collect();
-
-    let mut pairs = Vec::new();
-    for (index, (block_a, key_a)) in flat.iter().enumerate() {
-        for (block_b, key_b) in flat.iter().skip(index + 1) {
-            pairs.push((*block_a, *key_a, *block_b, *key_b));
-        }
-    }
-    pairs
 }
 
 fn blocks_with_kind(config: &ZenohApiConfig) -> Vec<(&'static str, &ZenohBlock)> {
@@ -511,22 +502,19 @@ async fn spawn_subscriber_block(
     block: &ZenohBlock,
     pipeline: Arc<SubscriberPipeline>,
     handles: &mut Vec<JoinHandle<()>>,
-) -> usize {
-    let mut declared = 0;
-
+) -> Result<(), SessionError> {
     for key_expr in &block.keyexprs {
         info!("Declaring Zenoh subscriber on key expression: {}", key_expr);
 
-        let subscriber = match session.declare_subscriber(key_expr.as_str()).await {
-            Ok(subscriber) => subscriber,
-            Err(err) => {
-                error!(
-                    "Zenoh subscriber block '{}' failed to declare '{}': {}",
+        let subscriber = session
+            .declare_subscriber(key_expr.as_str())
+            .await
+            .map_err(|err| {
+                SessionError::Declaration(format!(
+                    "subscriber block '{}' failed to declare '{}': {}",
                     block.id, key_expr, err
-                );
-                continue;
-            }
-        };
+                ))
+            })?;
 
         let pipeline = Arc::clone(&pipeline);
         let key_expr = key_expr.clone();
@@ -549,11 +537,9 @@ async fn spawn_subscriber_block(
                 }
             }
         }));
-
-        declared += 1;
     }
 
-    declared
+    Ok(())
 }
 
 enum IngestFailure {
@@ -616,8 +602,7 @@ async fn spawn_queryable_block(
     block: &ZenohQueryableBlock,
     pipeline: Arc<QueryablePipeline>,
     handles: &mut Vec<JoinHandle<()>>,
-) -> usize {
-    let mut declared = 0;
+) -> Result<(), SessionError> {
     let allowed_origin = to_zenoh_locality(block.locality);
 
     for key_expr in &block.route.keyexprs {
@@ -626,20 +611,16 @@ async fn spawn_queryable_block(
             key_expr, block.locality
         );
 
-        let queryable = match session
+        let queryable = session
             .declare_queryable(key_expr.as_str())
             .allowed_origin(allowed_origin)
             .await
-        {
-            Ok(queryable) => queryable,
-            Err(err) => {
-                error!(
-                    "Zenoh queryable block '{}' failed to declare '{}': {}",
+            .map_err(|err| {
+                SessionError::Declaration(format!(
+                    "queryable block '{}' failed to declare '{}': {}",
                     block.route.id, key_expr, err
-                );
-                continue;
-            }
-        };
+                ))
+            })?;
 
         let pipeline = Arc::clone(&pipeline);
         handles.push(tokio::spawn(async move {
@@ -705,11 +686,9 @@ async fn spawn_queryable_block(
                 }
             }
         }));
-
-        declared += 1;
     }
 
-    declared
+    Ok(())
 }
 
 fn to_zenoh_locality(locality: ZenohQueryableLocality) -> zenoh::sample::Locality {
@@ -940,7 +919,7 @@ pub(crate) enum SessionError {
     ZenohOpen(String),
     ZenohClose(String),
     InvalidConfig(String),
-    NoBlocksStarted(String),
+    Declaration(String),
 }
 
 impl Display for SessionError {
@@ -950,8 +929,8 @@ impl Display for SessionError {
             SessionError::ZenohOpen(err) => write!(f, "Failed to open Zenoh session: {}", err),
             SessionError::ZenohClose(err) => write!(f, "Failed to close Zenoh session: {}", err),
             SessionError::InvalidConfig(err) => write!(f, "Invalid Zenoh configuration: {}", err),
-            SessionError::NoBlocksStarted(err) => {
-                write!(f, "No Zenoh blocks could be started: {}", err)
+            SessionError::Declaration(err) => {
+                write!(f, "Failed to declare Zenoh block: {}", err)
             }
         }
     }
@@ -1053,17 +1032,62 @@ mod tests {
     }
 
     #[rstest]
-    fn keyexpr_pairs_covers_within_and_across_blocks() {
-        let blocks = vec![
-            subscriber_block("0", &["a/**", "b/**"], Some("bucket_a")),
-            subscriber_block("1", &["c/**"], Some("bucket_b")),
-        ];
+    fn check_block_overlaps_rejects_intersecting_exprs_in_one_block() {
+        let config = config_with(
+            vec![subscriber_block(
+                "0",
+                &["sensors/**", "sensors/camera/**"],
+                Some("zenoh"),
+            )],
+            vec![],
+        );
+        let err = check_block_overlaps(&config).unwrap_err();
+        assert!(err.to_string().contains("intersect"));
+    }
 
-        let pairs = keyexpr_pairs(&blocks);
-        assert_eq!(pairs.len(), 3);
-        assert!(pairs.contains(&("0", "a/**", "0", "b/**")));
-        assert!(pairs.contains(&("0", "a/**", "1", "c/**")));
-        assert!(pairs.contains(&("0", "b/**", "1", "c/**")));
+    #[rstest]
+    fn check_block_overlaps_allows_intersection_across_blocks() {
+        let config = config_with(
+            vec![
+                subscriber_block("raw", &["sensors/**"], Some("raw")),
+                subscriber_block("archive", &["sensors/camera/**"], Some("archive")),
+            ],
+            vec![],
+        );
+        assert!(check_block_overlaps(&config).is_ok());
+    }
+
+    #[rstest]
+    fn validate_config_surfaces_parse_errors() {
+        let mut config = config_with(
+            vec![subscriber_block("0", &["raw/**"], Some("raw"))],
+            vec![],
+        );
+        config.config_errors = vec!["subscriber[0]: boom".to_string()];
+        let err = validate_config(&config).unwrap_err();
+        assert!(err.to_string().contains("boom"));
+    }
+
+    #[rstest]
+    fn validate_config_rejects_within_block_overlap() {
+        let config = config_with(
+            vec![subscriber_block(
+                "0",
+                &["sensors/**", "sensors/camera/**"],
+                Some("zenoh"),
+            )],
+            vec![],
+        );
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[rstest]
+    fn validate_config_accepts_a_valid_config() {
+        let config = config_with(
+            vec![subscriber_block("0", &["raw/**"], Some("raw"))],
+            vec![subscriber_block("0", &["derived/**"], Some("derived"))],
+        );
+        assert!(validate_config(&config).is_ok());
     }
 
     fn build_labels_with_timestamp() -> Labels {

@@ -47,6 +47,24 @@ async def test_static_block_writes_to_its_bucket(client, zenoh_bucket, zenoh_ses
     assert await read_first_payload(bucket, entry_name) == payload
 
 
+async def test_static_block_covers_all_its_keyexprs(
+    client, zenoh_bucket, zenoh_session, run_id
+):
+    """Both comma-separated key expressions of one block feed the same bucket."""
+    entry_key = f"entry_{run_id}"
+    factory_key = f"factory/{run_id}/status"
+    entry_payload = b"from entry keyexpr"
+    factory_payload = b"from factory keyexpr"
+
+    zenoh_session.put(entry_key, entry_payload)
+    zenoh_session.put(factory_key, factory_payload)
+    await asyncio.sleep(0.5)
+
+    bucket = await client.get_bucket(zenoh_bucket)
+    assert await read_first_payload(bucket, entry_key) == entry_payload
+    assert await read_first_payload(bucket, factory_key) == factory_payload
+
+
 async def test_key_prefix_creates_allowed_bucket(client, zenoh_session, run_id):
     """The first key chunk selects the bucket, which is created on demand."""
     bucket_name = f"rt_site_{run_id}"
