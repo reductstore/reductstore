@@ -497,6 +497,15 @@ mod tests {
 
         #[rstest]
         #[tokio::test]
+        async fn test_debug_includes_crc64(file_cache: Arc<FileCache>) {
+            let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
+            let block_index = BlockIndex::new(path, file_cache);
+
+            assert!(format!("{block_index:?}").contains("crc64: 0"));
+        }
+
+        #[rstest]
+        #[tokio::test]
         async fn test_ok(file_cache: Arc<FileCache>) {
             let path = tempdir().unwrap().keep().join(BLOCK_INDEX_FILE);
 

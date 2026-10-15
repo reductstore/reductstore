@@ -287,10 +287,13 @@ mod tests {
     }
 
     #[rstest]
+    #[case(true)]
+    #[case(false)]
     #[tokio::test]
     async fn test_replica_index_reload_accepts_published_transition(
         #[future] path: PathBuf,
         file_cache: Arc<FileCache>,
+        #[case] with_index_crc: bool,
     ) {
         let path = path.await;
         let cfg = Cfg {
@@ -324,7 +327,7 @@ mod tests {
             ReplicaPublication::Published(crate::storage::entry::publication::PublicationId {
                 incarnation: "test-incarnation".to_string(),
                 generation: 2,
-                block_index_crc64: Some(block_index_crc64),
+                block_index_crc64: with_index_crc.then_some(block_index_crc64),
             });
         block_manager
             .apply_replica_index_reload(reload, updated_index, publication.clone())
