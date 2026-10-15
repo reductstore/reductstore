@@ -95,6 +95,15 @@ impl BlockManager {
         }
 
         reload.validate_successor(&publication)?;
+        if let ReplicaPublication::Published(publication) = &publication {
+            if let Some(expected_crc64) = publication.block_index_crc64 {
+                if updated_index.crc64() != expected_crc64 {
+                    return Err(too_early!(
+                        "Replica block index does not match entry publication"
+                    ));
+                }
+            }
+        }
         let invalidate_all = match (&reload.base_publication, &publication) {
             (ReplicaPublication::Legacy, ReplicaPublication::Published(_)) => true,
             (ReplicaPublication::Published(previous), ReplicaPublication::Published(next)) => {
@@ -278,10 +287,13 @@ mod tests {
     }
 
     #[rstest]
+    #[case(true)]
+    #[case(false)]
     #[tokio::test]
     async fn test_replica_index_reload_accepts_published_transition(
         #[future] path: PathBuf,
         file_cache: Arc<FileCache>,
+        #[case] with_index_crc: bool,
     ) {
         let path = path.await;
         let cfg = Cfg {
@@ -310,10 +322,12 @@ mod tests {
 
         let reload = block_manager.prepare_replica_index_reload().unwrap();
         let updated_index = reload.load_candidate(&file_cache).await.unwrap();
+        let block_index_crc64 = updated_index.crc64();
         let publication =
             ReplicaPublication::Published(crate::storage::entry::publication::PublicationId {
                 incarnation: "test-incarnation".to_string(),
                 generation: 2,
+                block_index_crc64: with_index_crc.then_some(block_index_crc64),
             });
         block_manager
             .apply_replica_index_reload(reload, updated_index, publication.clone())
@@ -322,6 +336,63 @@ mod tests {
 
         assert_eq!(block_manager.accepted_publication, publication);
         assert!(block_manager.block_index.info().contains_key(&1));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_replica_index_reload_rejects_stale_index_for_publication(
+        #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
+        let path = path.await;
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            data_path: path.clone(),
+            ..Default::default()
+        };
+        let index_path = path.join(BLOCK_INDEX_FILE);
+        let stale_index = BlockIndex::new(index_path.clone(), file_cache.clone());
+        stale_index.save().await.unwrap();
+        let stale_crc64 = stale_index.crc64();
+        let stale_candidate = BlockIndex::new(index_path.clone(), file_cache.clone());
+        let mut block_manager = BlockManager::build(
+            path,
+            stale_index,
+            "bucket".to_string(),
+            "entry".to_string(),
+            Arc::new(cfg),
+            Default::default(),
+            file_cache.clone(),
+        )
+        .await
+        .unwrap();
+
+        let mut current_index = BlockIndex::new(index_path, file_cache.clone());
+        current_index.insert_or_update(Block::new(1));
+        current_index.save().await.unwrap();
+        let current_crc64 = current_index.crc64();
+        assert_ne!(stale_crc64, current_crc64);
+
+        let reload = block_manager.prepare_replica_index_reload().unwrap();
+        let err = block_manager
+            .apply_replica_index_reload(
+                reload,
+                stale_candidate,
+                ReplicaPublication::Published(crate::storage::entry::publication::PublicationId {
+                    incarnation: "test-incarnation".to_string(),
+                    generation: 2,
+                    block_index_crc64: Some(current_crc64),
+                }),
+            )
+            .await
+            .unwrap_err();
+
+        assert_eq!(err.status(), ErrorCode::TooEarly);
+        assert!(block_manager.block_index.info().is_empty());
+        assert_eq!(
+            block_manager.accepted_publication,
+            ReplicaPublication::Legacy
+        );
     }
 
     #[rstest]

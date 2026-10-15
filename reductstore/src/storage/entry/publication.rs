@@ -24,12 +24,14 @@ pub(crate) struct Publication {
     pub(super) incarnation: String,
     pub(super) generation: u64,
     pub(super) state: PublicationState,
+    pub(super) block_index_crc64: Option<u64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PublicationId {
     pub(crate) incarnation: String,
     pub(crate) generation: u64,
+    pub(crate) block_index_crc64: Option<u64>,
 }
 
 impl Publication {
@@ -38,6 +40,7 @@ impl Publication {
             incarnation: uuid::Uuid::new_v4().to_string(),
             generation: 0,
             state: PublicationState::Ready,
+            block_index_crc64: None,
         }
     }
 
@@ -49,10 +52,11 @@ impl Publication {
                 .checked_add(1)
                 .ok_or_else(|| internal_server_error!("Entry publication generation overflow"))?,
             state: PublicationState::Updating,
+            block_index_crc64: None,
         })
     }
 
-    pub(super) fn ready(&self) -> Result<Self, ReductError> {
+    pub(super) fn ready(&self, block_index_crc64: u64) -> Result<Self, ReductError> {
         Ok(Self {
             incarnation: self.incarnation.clone(),
             generation: self
@@ -60,6 +64,7 @@ impl Publication {
                 .checked_add(1)
                 .ok_or_else(|| internal_server_error!("Entry publication generation overflow"))?,
             state: PublicationState::Ready,
+            block_index_crc64: Some(block_index_crc64),
         })
     }
 
@@ -71,6 +76,7 @@ impl Publication {
                 PublicationState::Updating => entry_publication::State::Updating as i32,
                 PublicationState::Ready => entry_publication::State::Ready as i32,
             },
+            block_index_crc64: self.block_index_crc64,
         }
         .encode_to_vec()
     }
@@ -79,6 +85,7 @@ impl Publication {
         (self.state == PublicationState::Ready).then(|| PublicationId {
             incarnation: self.incarnation.clone(),
             generation: self.generation,
+            block_index_crc64: self.block_index_crc64,
         })
     }
 
@@ -119,6 +126,7 @@ impl Publication {
             incarnation: marker.incarnation,
             generation: marker.generation,
             state,
+            block_index_crc64: marker.block_index_crc64,
         })
     }
 }
@@ -221,6 +229,7 @@ mod tests {
             incarnation: "test-incarnation".to_owned(),
             generation,
             state,
+            block_index_crc64: None,
         }
     }
 
@@ -238,13 +247,20 @@ mod tests {
         assert_eq!(updating, publication(1, PublicationState::Updating));
         assert_eq!(updating.id(), None);
 
-        let ready = updating.ready().unwrap();
-        assert_eq!(ready, publication(2, PublicationState::Ready));
+        let ready = updating.ready(42).unwrap();
+        assert_eq!(
+            ready,
+            Publication {
+                block_index_crc64: Some(42),
+                ..publication(2, PublicationState::Ready)
+            }
+        );
         assert_eq!(
             ready.id(),
             Some(PublicationId {
                 incarnation: "test-incarnation".to_owned(),
                 generation: 2,
+                block_index_crc64: Some(42),
             })
         );
     }
@@ -255,7 +271,7 @@ mod tests {
             .updating()
             .is_err());
         assert!(publication(u64::MAX, PublicationState::Updating)
-            .ready()
+            .ready(0)
             .is_err());
     }
 
@@ -269,6 +285,7 @@ mod tests {
                     incarnation: String::new(),
                     generation: 0,
                     state: entry_publication::State::Ready as i32,
+                    block_index_crc64: None,
                 }
                 .encode_to_vec(),
                 "has no incarnation",
@@ -278,6 +295,7 @@ mod tests {
                     incarnation: "incarnation".to_owned(),
                     generation: 0,
                     state: 99,
+                    block_index_crc64: None,
                 }
                 .encode_to_vec(),
                 "has an invalid state",
@@ -287,6 +305,7 @@ mod tests {
                     incarnation: "incarnation".to_owned(),
                     generation: 1,
                     state: entry_publication::State::Ready as i32,
+                    block_index_crc64: None,
                 }
                 .encode_to_vec(),
                 "has invalid generation parity",
@@ -296,6 +315,7 @@ mod tests {
                     incarnation: "incarnation".to_owned(),
                     generation: 0,
                     state: entry_publication::State::Updating as i32,
+                    block_index_crc64: None,
                 }
                 .encode_to_vec(),
                 "has invalid generation parity",

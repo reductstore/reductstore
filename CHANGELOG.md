@@ -13,7 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- Update `rustls` to 0.23.46 to clear the advisories (RUSTSEC-2026-0348/0349) flagged by the dependency audit, [PR-1667](https://github.com/reductstore/reductstore/pull/1667)
+- Bind each ready entry publication marker to its exact block index so read-only replicas reject stale cached indexes, [PR-1671](https://github.com/reductstore/reductstore/pull/1671)
 - Avoid blocking update mutations while a scheduled publication synchronizes its current batch, [PR-1666](https://github.com/reductstore/reductstore/pull/1666)
 - Prevent remote cache eviction from unlinking files while they are being accessed, [PR-1665](https://github.com/reductstore/reductstore/pull/1665)
 - Preserve the last committed attachment when its replacement write fails, [#1664](https://github.com/reductstore/reductstore/pull/1664)
