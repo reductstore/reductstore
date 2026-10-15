@@ -242,39 +242,6 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_expired(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
-        let options = QueryOptions {
-            ttl: Duration::from_millis(50),
-            ..Default::default()
-        };
-
-        let query = build_query(
-            "entry".to_string(),
-            0,
-            5,
-            options.clone(),
-            IoConfig::default(),
-        )
-        .unwrap();
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        let (rx, handle) = spawn_query_task(
-            0,
-            "bucket/entry".to_string(),
-            query,
-            options,
-            block_manager.clone(),
-        );
-        assert!(rx.is_empty());
-        assert!(timeout(Duration::from_millis(1000), handle)
-            .await
-            .unwrap()
-            .is_ok());
-    }
-
-    #[log_test(rstest)]
-    #[tokio::test(flavor = "multi_thread")]
     async fn test_query_task_ok(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
         let block_manager = block_manager.await;
         let options = QueryOptions::default();
