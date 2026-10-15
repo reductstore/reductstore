@@ -9,6 +9,7 @@ use reduct_base::internal_server_error;
 use std::collections::{BTreeSet, HashMap};
 use std::io::{Read, SeekFrom, Write};
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU64, Ordering};
 
 use crate::core::file_cache::{BatchToken, FileCache};
 use crate::storage::block_manager::block::Block;
@@ -25,6 +26,7 @@ pub(in crate::storage) struct BlockIndex {
     index: BTreeSet<u64>,
     batch_token: Option<BatchToken>,
     file_cache: Arc<FileCache>,
+    crc64: AtomicU64,
 }
 
 impl std::fmt::Debug for BlockIndex {
@@ -34,6 +36,7 @@ impl std::fmt::Debug for BlockIndex {
             .field("index_info", &self.index_info)
             .field("index", &self.index)
             .field("batch_token", &self.batch_token)
+            .field("crc64", &self.crc64.load(Ordering::Acquire))
             .finish()
     }
 }
@@ -94,6 +97,7 @@ impl BlockIndex {
             index: BTreeSet::new(),
             batch_token: None,
             file_cache,
+            crc64: AtomicU64::new(0),
         };
 
         index
@@ -230,12 +234,14 @@ impl BlockIndex {
         value: BlockIndexProto,
         file_cache: Arc<FileCache>,
     ) -> Result<Self, ReductError> {
+        let expected_crc64 = value.crc64;
         let mut block_index = BlockIndex {
             path_buf: path.clone(),
             index_info: HashMap::new(),
             index: BTreeSet::new(),
             batch_token: None,
             file_cache,
+            crc64: AtomicU64::new(expected_crc64),
         };
 
         let mut crc = Digest::new();
@@ -264,7 +270,7 @@ impl BlockIndex {
             block_index.index_info.insert(block.block_id, block);
         });
 
-        if crc.sum64() != value.crc64 {
+        if crc.sum64() != expected_crc64 {
             return Err(internal_server_error!(
                 "Block index {:?} is corrupted",
                 path
@@ -340,6 +346,7 @@ impl BlockIndex {
         })?;
 
         lock.flush_local().await?;
+        self.crc64.store(block_index_proto.crc64, Ordering::Release);
 
         Ok(())
     }
@@ -362,6 +369,10 @@ impl BlockIndex {
 
     pub fn info(&self) -> &HashMap<u64, BlockEntry> {
         &self.index_info
+    }
+
+    pub(in crate::storage) fn crc64(&self) -> u64 {
+        self.crc64.load(Ordering::Acquire)
     }
 
     fn insert(&mut self, block: BlockEntry) {

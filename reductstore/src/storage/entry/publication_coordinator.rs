@@ -4,7 +4,7 @@
 use super::publication::{self, Publication};
 use crate::core::file_cache::{BatchToken, FileBatch, FileCache};
 use crate::core::sync::AsyncRwLock;
-use crate::storage::block_manager::BlockManager;
+use crate::storage::block_manager::{block_index::BlockIndex, BlockManager, BLOCK_INDEX_FILE};
 use log::error;
 use reduct_base::error::ReductError;
 use std::path::{Path, PathBuf};
@@ -247,7 +247,9 @@ impl PublicationCoordinator {
             .await
             .clone()
             .expect("updating publication marker disappeared");
-        let ready = updating.ready()?;
+        let index =
+            BlockIndex::try_load(path.join(BLOCK_INDEX_FILE), Arc::clone(&self.file_cache)).await?;
+        let ready = updating.ready(index.crc64())?;
         let marker_path =
             publication::write_local_in_batch(&token, path, &ready, &self.file_cache).await?;
         self.sync_pending_file(&marker_path).await?;
@@ -323,6 +325,7 @@ mod tests {
     fn entry_path() -> std::path::PathBuf {
         let path = tempfile::tempdir().unwrap().keep().join("entry");
         std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join(BLOCK_INDEX_FILE), []).unwrap();
         path
     }
 
@@ -347,6 +350,7 @@ mod tests {
         let marker = load(&path, &file_cache).await.unwrap().unwrap();
         assert_eq!(marker.generation, 2);
         assert_eq!(marker.state, PublicationState::Ready);
+        assert_eq!(marker.block_index_crc64, Some(0));
         assert!(!marker.incarnation.is_empty());
     }
 
@@ -367,6 +371,7 @@ mod tests {
             incarnation: "test-incarnation".to_owned(),
             generation: 1,
             state: PublicationState::Updating,
+            block_index_crc64: None,
         };
         let file_cache = build_test_file_cache();
         let mut batch = file_cache.begin_batch().await.unwrap();
@@ -387,6 +392,7 @@ mod tests {
                 incarnation: "test-incarnation".to_owned(),
                 generation: 2,
                 state: PublicationState::Ready,
+                block_index_crc64: Some(0),
             }
         );
     }
