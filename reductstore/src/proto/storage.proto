@@ -117,4 +117,5 @@ message EntryPublication {
   string incarnation = 1;
   uint64 generation = 2;
   State state = 3;
+  optional uint64 block_index_crc64 = 4; // binds a ready marker to its exact blocks.idx contents
 }
