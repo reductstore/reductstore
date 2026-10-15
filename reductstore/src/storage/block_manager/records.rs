@@ -2,6 +2,7 @@
 // Licensed under the Apache License, Version 2.0
 
 use super::*;
+use reduct_base::not_found;
 use std::io::ErrorKind::UnexpectedEof;
 
 impl BlockManager {
@@ -293,14 +294,25 @@ impl BlockManager {
     ///
     /// # Errors
     ///
-    /// * `ReductError` - If file system operation failed.
+    /// * `ReductError` - If file system operation failed or the record was removed.
     pub(crate) async fn begin_read_record(
         &self,
         block: &Block,
         record_timestamp: u64,
     ) -> Result<(PathBuf, u64), ReductError> {
         let path = self.resolve_data_path(block.block_id()).await?;
-        let offset = block.get_record(record_timestamp).unwrap().begin;
+        let offset = block
+            .get_record(record_timestamp)
+            .ok_or_else(|| {
+                not_found!(
+                    "Record {} not found in block {}/{}/{}",
+                    record_timestamp,
+                    self.bucket_name(),
+                    self.entry_name(),
+                    block.block_id()
+                )
+            })?
+            .begin;
         Ok((path, offset))
     }
 }
@@ -627,6 +639,33 @@ mod tests {
                 .is_err(),
             "wal must be removed after successful update"
         );
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_read_record_removed_after_lookup_is_not_found(
+        #[future] block_manager: BlockManager,
+        #[future] block: BlockRef,
+    ) {
+        let block_manager = Arc::new(AsyncRwLock::new(block_manager.await));
+        let block_ref = block.await;
+        let (record, _) = write_record(1, 10, &block_manager, block_ref.clone()).await;
+        let record_time = ts_to_us(&record.timestamp.unwrap());
+
+        // removed after the reader found it
+        block_ref.write().await.unwrap().remove_record(record_time);
+
+        let err = RecordReader::try_new(
+            Arc::clone(&block_manager),
+            block_ref,
+            record_time,
+            None,
+            None,
+        )
+        .await
+        .err()
+        .expect("an error, not a panic");
+        assert_eq!(err.status, ErrorCode::NotFound);
     }
 
     #[rstest]

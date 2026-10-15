@@ -55,7 +55,13 @@ impl RecordReader {
 
         let (file_path, offset) = bm.begin_read_record(&block, record_timestamp).await?;
 
-        let record = block.get_record(record_timestamp).unwrap();
+        let record = block.get_record(record_timestamp).ok_or_else(|| {
+            not_found!(
+                "Record {} not found in block {}",
+                record_timestamp,
+                block.block_id()
+            )
+        })?;
         let content_size = record.end - record.begin;
 
         let meta: RecordMeta = {
