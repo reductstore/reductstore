@@ -299,12 +299,24 @@ impl Entry {
         Ok(bm.index().size())
     }
 
+    pub(super) async fn oldest_block(&self) -> Result<Option<(u64, u64)>, ReductError> {
+        let bm = self.block_manager.read().await?;
+        let Some(block_id) = bm.index().tree().first() else {
+            return Ok(None);
+        };
+        let block = bm
+            .index()
+            .get_block(*block_id)
+            .ok_or_else(|| not_found!("Block {} not found", block_id))?;
+        Ok(Some((*block_id, block.size + block.metadata_size)))
+    }
+
     /// Try to remove the oldest block.
     ///
     /// # Returns
     ///
     /// HTTTPError - The error if any.
-    pub async fn try_remove_oldest_block(&self) -> Result<(), ReductError> {
+    pub async fn try_remove_oldest_block(&self) -> Result<u64, ReductError> {
         let bm = self.block_manager.read().await?;
         let index_tree = bm.index().tree();
         if index_tree.is_empty() {
@@ -312,6 +324,11 @@ impl Entry {
         }
 
         let oldest_block_id = *index_tree.first().unwrap();
+        let removed_size = bm
+            .index()
+            .get_block(oldest_block_id)
+            .expect("Block index tree and metadata must be consistent");
+        let removed_size = removed_size.size + removed_size.metadata_size;
         let block_manager = Arc::clone(&self.block_manager);
         drop(bm); // release read lock before acquiring write lock
 
@@ -331,7 +348,7 @@ impl Entry {
             bm.path().join(oldest_block_id.to_string()).display()
         );
 
-        Ok(())
+        Ok(removed_size)
     }
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
