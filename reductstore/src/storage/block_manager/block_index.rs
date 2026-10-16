@@ -25,6 +25,15 @@ pub(in crate::storage) struct BlockIndex {
     index: BTreeSet<u64>,
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub(in crate::storage) struct BlockIndexSummary {
+    pub size: u64,
+    pub record_count: u64,
+    pub block_count: u64,
+    pub oldest_record: u64,
+    pub latest_record: u64,
+}
+
 impl Into<BlockEntry> for MinimalBlock {
     fn into(self) -> BlockEntry {
         BlockEntry {
@@ -318,6 +327,44 @@ impl BlockIndex {
             .fold(0, |acc, (_, block)| acc + block.record_count)
     }
 
+    pub fn aggregate_stats(&self) -> BlockIndexSummary {
+        let (size, record_count) =
+            self.index_info
+                .values()
+                .fold((0, 0), |(size, record_count), block| {
+                    (
+                        size + block.size + block.metadata_size,
+                        record_count + block.record_count,
+                    )
+                });
+        let oldest_record = self
+            .index
+            .iter()
+            .find_map(|block_id| {
+                let block = self.get_block(*block_id)?;
+                (!self.is_corrupted(*block_id) && block.record_count > 0).then_some(*block_id)
+            })
+            .unwrap_or(0);
+        let latest_record = self
+            .index
+            .iter()
+            .rev()
+            .find_map(|block_id| {
+                let block = self.get_block(*block_id)?;
+                (!self.is_corrupted(*block_id) && block.record_count > 0)
+                    .then(|| ts_to_us(block.latest_record_time.as_ref().unwrap()))
+            })
+            .unwrap_or(0);
+
+        BlockIndexSummary {
+            size,
+            record_count,
+            block_count: self.index.len() as u64,
+            oldest_record,
+            latest_record,
+        }
+    }
+
     pub fn tree(&self) -> &BTreeSet<u64> {
         &self.index
     }
@@ -491,6 +538,69 @@ mod tests {
             assert!(block_index.is_corrupted(1));
             assert_eq!(block_index.corrupted_block_count(), 1);
             assert_eq!(block_index.corrupted_block_ids(), vec![1]);
+        }
+    }
+
+    mod aggregate_stats {
+        use super::*;
+
+        fn block(
+            block_id: u64,
+            size: u64,
+            metadata_size: u64,
+            record_count: u64,
+            latest_record_time: u64,
+            corrupted: Option<bool>,
+        ) -> BlockEntry {
+            BlockEntry {
+                block_id,
+                size,
+                record_count,
+                metadata_size,
+                latest_record_time: Some(us_to_ts(&latest_record_time)),
+                crc64: None,
+                compression: None,
+                corrupted,
+                version: None,
+            }
+        }
+
+        #[test]
+        fn returns_default_for_empty_index() {
+            assert_eq!(
+                BlockIndex::new(PathBuf::from("index")).aggregate_stats(),
+                BlockIndexSummary::default()
+            );
+        }
+
+        #[test]
+        fn includes_corrupted_blocks_in_totals_but_not_record_bounds() {
+            let mut index = BlockIndex::new(PathBuf::from("index"));
+            index.insert_or_update(block(1, 10, 1, 2, 10, Some(true)));
+            index.insert_or_update(block(2, 20, 2, 0, 20, None));
+            index.insert_or_update(block(3, 30, 3, 1, 30, None));
+
+            assert_eq!(
+                index.aggregate_stats(),
+                BlockIndexSummary {
+                    size: 66,
+                    record_count: 3,
+                    block_count: 3,
+                    oldest_record: 3,
+                    latest_record: 30,
+                }
+            );
+        }
+
+        #[test]
+        fn returns_bounds_from_multiple_active_nonempty_blocks() {
+            let mut index = BlockIndex::new(PathBuf::from("index"));
+            index.insert_or_update(block(10, 1, 0, 1, 15, None));
+            index.insert_or_update(block(20, 1, 0, 1, 25, None));
+
+            let summary = index.aggregate_stats();
+            assert_eq!(summary.oldest_record, 10);
+            assert_eq!(summary.latest_record, 25);
         }
     }
 }

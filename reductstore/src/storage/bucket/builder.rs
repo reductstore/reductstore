@@ -27,7 +27,6 @@ use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
 use tokio::sync::Mutex;
-use tokio::sync::Mutex;
 
 #[derive(Default)]
 pub(crate) struct BucketBuilder {
