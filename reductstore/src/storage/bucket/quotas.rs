@@ -25,7 +25,12 @@ impl Bucket {
 
         match quota_type {
             QuotaType::NONE => Ok(()),
-            QuotaType::FIFO => self.remove_oldest_block(content_size, quota_size).await,
+            QuotaType::FIFO => {
+                // Remote block deletion can take substantial time. Serialize cleanup so
+                // concurrent writes do not queue stale removals for the same block.
+                let _cleanup = self.quota_cleanup.lock().await;
+                self.remove_oldest_block(content_size, quota_size).await
+            }
             QuotaType::HARD => {
                 let entries = self.entries.read().await?;
                 let mut total_size = 0u64;
