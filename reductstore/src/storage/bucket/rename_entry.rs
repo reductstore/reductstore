@@ -173,7 +173,7 @@ mod tests {
     use std::path::PathBuf;
     use std::time::Duration;
     use tempfile::tempdir;
-    use tokio::time::sleep;
+    use tokio::time::{sleep, timeout};
 
     #[rstest]
     #[tokio::test]
@@ -282,10 +282,18 @@ mod tests {
 
         let entries_guard = bucket.entries.read().await.unwrap();
         let bucket_for_rename = bucket.clone();
+        let target_path = bucket.path.join("test-2");
         let handle =
             tokio::spawn(async move { bucket_for_rename.rename_entry("test-1", "test-2").await });
 
-        sleep(rwlock_timeout() + Duration::from_millis(1000)).await;
+        timeout(Duration::from_secs(5), async {
+            while !target_path.exists() {
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+        sleep(rwlock_timeout() + Duration::from_millis(100)).await;
         drop(entries_guard);
 
         let err = handle.await.unwrap().err().unwrap();

@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Route Zenoh data with per-block `RS_ZENOH_SUB_<ID>_*` / `RS_ZENOH_QUERY_<ID>_*` configuration supporting comma-separated key expressions and optional key-prefix bucket routing, [PR-1667](https://github.com/reductstore/reductstore/pull/1667) by @oh-yes-0-fps
+- Support per-block Zenoh routes and retain failed file batches for retry, [PR-1667](https://github.com/reductstore/reductstore/pull/1667) by @oh-yes-0-fps
 
 ### Fixed
 
