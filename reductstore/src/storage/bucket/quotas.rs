@@ -2,11 +2,12 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::Entry;
 use log::debug;
 use reduct_base::error::ReductError;
 use reduct_base::msg::bucket_api::QuotaType;
 use reduct_base::{bad_request, internal_server_error};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
 impl Bucket {
@@ -14,9 +15,15 @@ impl Bucket {
         self: &Arc<Self>,
         content_size: u64,
     ) -> Result<(), ReductError> {
-        let settings = self.settings.read().await?;
-        let quota_size = settings.quota_size.unwrap_or(0);
-        match settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
+        let (quota_size, quota_type) = {
+            let settings = self.settings.read().await?;
+            (
+                settings.quota_size.unwrap_or(0),
+                settings.quota_type.clone().unwrap_or(QuotaType::NONE),
+            )
+        };
+
+        match quota_type {
             QuotaType::NONE => Ok(()),
             QuotaType::FIFO => self.remove_oldest_block(content_size, quota_size).await,
             QuotaType::HARD => {
@@ -39,64 +46,58 @@ impl Bucket {
         content_size: u64,
         quota_size: u64,
     ) -> Result<(), ReductError> {
-        let get_bucket_size = async || {
+        let entries = {
             let entries = self.entries.read().await?;
-
-            let mut total_size = 0u64;
-            for entry in entries.values() {
-                total_size += entry.size().await?;
-            }
-            Ok::<u64, ReductError>(total_size)
+            entries
+                .iter()
+                .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
+                .collect::<HashMap<_, _>>()
         };
 
-        let mut size = get_bucket_size().await? + content_size as u64;
-        while size > quota_size {
-            let mut success = false;
-
-            {
-                debug!(
-                    "Need more space. Remove an oldest block from bucket '{}'",
-                    self.name()
-                );
-
-                let mut candidates: Vec<(u64, &Entry)> = vec![];
-                let entries = self.entries.read().await?;
-                for (_, entry) in entries.iter() {
-                    if !entry.is_eligible_for_fifo_eviction() {
-                        continue;
-                    }
-                    let info = entry.info().await?;
-                    candidates.push((info.oldest_record, entry));
-                }
-                candidates.sort_by_key(|entry| entry.0);
-
-                let candidates = candidates
-                    .iter()
-                    .map(|(_, entry)| entry.name().to_string())
-                    .collect::<Vec<String>>();
-
-                for name in candidates {
-                    debug!("Remove an oldest block from entry '{}'", name);
-                    match entries.get(&name).unwrap().try_remove_oldest_block().await {
-                        Ok(_) => {
-                            success = true;
-                            break;
-                        }
-                        Err(e) => {
-                            debug!("Failed to remove oldest block from entry '{}': {}", name, e);
-                        }
-                    }
+        let mut candidates = BinaryHeap::new();
+        let mut size = content_size;
+        for (name, entry) in &entries {
+            size += entry.size().await?;
+            if entry.is_eligible_for_fifo_eviction() {
+                if let Some((block_id, _)) = entry.oldest_block().await? {
+                    candidates.push(Reverse((block_id, name.clone())));
                 }
             }
+        }
 
-            if !success {
+        while size > quota_size {
+            let Some(Reverse((_, name))) = candidates.pop() else {
                 return Err(internal_server_error!(
                     "Failed to keep quota of '{}'",
                     self.name()
                 ));
-            }
+            };
 
-            size = get_bucket_size().await? + content_size;
+            let entry = entries
+                .get(&name)
+                .expect("FIFO eviction candidate must reference a bucket entry");
+            debug!(
+                "Need more space. Remove an oldest block from entry '{}'",
+                name
+            );
+
+            match entry.try_remove_oldest_block().await {
+                Ok(removed_size) => {
+                    size = size.checked_sub(removed_size).ok_or_else(|| {
+                        internal_server_error!(
+                            "FIFO eviction size underflow in bucket '{}'",
+                            self.name()
+                        )
+                    })?;
+
+                    if let Some((block_id, _)) = entry.oldest_block().await? {
+                        candidates.push(Reverse((block_id, name)));
+                    }
+                }
+                Err(e) => {
+                    debug!("Failed to remove oldest block from entry '{}': {}", name, e);
+                }
+            }
         }
 
         Ok(())
@@ -177,6 +178,37 @@ mod tests {
                 .is_ok()
         );
         assert!(crate::storage::bucket::tests::read(&bucket, "data-2", 2)
+            .await
+            .is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_fifo_quota_refreshes_only_evicted_entry_candidate(path: PathBuf) {
+        let bucket = bucket(
+            BucketSettings {
+                quota_type: Some(QuotaType::NONE),
+                max_block_records: Some(1),
+                ..BucketSettings::default()
+            },
+            path,
+        )
+        .await;
+        let blob: &[u8] = &[0; 40];
+
+        write(&bucket, "first", 1, blob).await.unwrap();
+        write(&bucket, "second", 2, blob).await.unwrap();
+        write(&bucket, "first", 3, blob).await.unwrap();
+
+        bucket.remove_oldest_block(0, 60).await.unwrap();
+
+        assert!(crate::storage::bucket::tests::read(&bucket, "first", 1)
+            .await
+            .is_err());
+        assert!(crate::storage::bucket::tests::read(&bucket, "second", 2)
+            .await
+            .is_err());
+        assert!(crate::storage::bucket::tests::read(&bucket, "first", 3)
             .await
             .is_ok());
     }
