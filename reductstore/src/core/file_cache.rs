@@ -368,6 +368,7 @@ impl FileCache {
     }
 
     /// Starts a batch. Paths are claimed explicitly by batch-aware mutations.
+    #[cfg(test)]
     pub async fn begin_batch(&self) -> Result<FileBatch, ReductError> {
         self.begin_batch_with_scope(None).await
     }
@@ -950,7 +951,7 @@ impl FileBatch {
     }
 
     /// Releases owned paths after all pending remote mutations are published.
-    pub async fn commit(self) -> Result<(), ReductError> {
+    pub async fn commit(&mut self) -> Result<(), ReductError> {
         let paths = {
             let mut batches = self.batches.write().await?;
             let batch = batches
@@ -1338,7 +1339,7 @@ mod tests {
             expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
         });
         let cache = build_cache(backend);
-        let batch = cache.begin_batch().await.unwrap();
+        let mut batch = cache.begin_batch().await.unwrap();
         let token = batch.token();
 
         drop(
@@ -1352,6 +1353,8 @@ mod tests {
             batch.commit().await.unwrap_err(),
             internal_server_error!("Cannot commit file batch with pending remote mutations")
         );
+        batch.sync_all().await.unwrap();
+        batch.commit().await.unwrap();
     }
 
     #[rstest]
@@ -1425,7 +1428,7 @@ mod tests {
     async fn batch_rejects_stale_token(tmp_dir: PathBuf) {
         let file_path = tmp_dir.join("blocks.idx");
         let cache = build_cache(build_backend(|_mock| {}));
-        let batch = cache.begin_batch().await.unwrap();
+        let mut batch = cache.begin_batch().await.unwrap();
         let stale_token = batch.token();
         batch.commit().await.unwrap();
 
@@ -1714,7 +1717,7 @@ mod tests {
         });
         let cache = build_cache(backend);
 
-        let batch = cache.begin_batch().await.unwrap();
+        let mut batch = cache.begin_batch().await.unwrap();
         let mut stale_batch = FileBatch {
             token: batch.token(),
             cache: Arc::clone(&cache.cache),
@@ -2429,7 +2432,7 @@ mod tests {
             let cache = build_cache(backend);
             fs::create_dir_all(&entry_path).unwrap();
             fs::write(&file_path, b"index").unwrap();
-            let batch = cache.begin_batch_for_scope(&entry_path).await.unwrap();
+            let mut batch = cache.begin_batch_for_scope(&entry_path).await.unwrap();
 
             cache.force_sync_all().await.unwrap();
 
