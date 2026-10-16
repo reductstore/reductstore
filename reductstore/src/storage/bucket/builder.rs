@@ -23,6 +23,7 @@ use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Default)]
 pub(crate) struct BucketBuilder {
@@ -97,6 +98,7 @@ impl BucketBuilder {
             queries: AsyncRwLock::new(HashMap::<u64, MultiEntryQuery>::new()),
             io_limiter,
             usage_counters,
+            quota_cleanup: Mutex::new(()),
         };
 
         bucket.save_settings().await?;
@@ -178,6 +180,7 @@ impl BucketBuilder {
             queries: AsyncRwLock::new(HashMap::<u64, MultiEntryQuery>::new()),
             io_limiter,
             usage_counters,
+            quota_cleanup: Mutex::new(()),
         })
     }
 }
