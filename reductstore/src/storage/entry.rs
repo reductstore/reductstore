@@ -317,30 +317,17 @@ impl Entry {
     ///
     /// HTTTPError - The error if any.
     pub async fn try_remove_oldest_block(&self) -> Result<u64, ReductError> {
-        let bm = self.block_manager.read().await?;
-        let index_tree = bm.index().tree();
-        if index_tree.is_empty() {
-            return Err(internal_server_error!("No block to remove")).into();
-        }
-
-        let oldest_block_id = *index_tree.first().unwrap();
+        let mut bm = self.block_manager.write().await?;
+        let oldest_block_id = *bm
+            .index()
+            .tree()
+            .first()
+            .ok_or_else(|| internal_server_error!("No block to remove"))?;
         let removed_size = bm
             .index()
             .get_block(oldest_block_id)
             .expect("Block index tree and metadata must be consistent");
         let removed_size = removed_size.size + removed_size.metadata_size;
-        let block_manager = Arc::clone(&self.block_manager);
-        drop(bm); // release read lock before acquiring write lock
-
-        let mut bm = match block_manager.write().await {
-            Ok(bm) => bm,
-            Err(_) => {
-                return Err(internal_server_error!(
-                    "Cannot remove block {} because it is in use",
-                    oldest_block_id
-                ));
-            }
-        };
 
         bm.remove_block(oldest_block_id).await?;
         debug!(
@@ -983,6 +970,33 @@ mod tests {
                 entry.try_remove_oldest_block().await,
                 Err(internal_server_error!("No block to remove"))
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_concurrent_removal_does_not_remove_stale_block(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1_000_000).await;
+
+            let first_entry = Arc::clone(&entry);
+            let second_entry = Arc::clone(&entry);
+            let (first, second) = tokio::join!(
+                async move { first_entry.try_remove_oldest_block().await },
+                async move { second_entry.try_remove_oldest_block().await },
+            );
+
+            assert_eq!(
+                [first.is_ok(), second.is_ok()]
+                    .into_iter()
+                    .filter(|ok| *ok)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                first.err().or_else(|| second.err()),
+                Some(internal_server_error!("No block to remove"))
+            );
+            assert_eq!(entry.info().await.unwrap().block_count, 0);
         }
 
         #[rstest]

@@ -38,6 +38,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::Mutex;
+use tokio::sync::Mutex;
 
 pub(crate) use builder::BucketBuilder;
 
@@ -83,6 +85,7 @@ pub(crate) struct Bucket {
     io_limiter: InFlightIoLimiter,
     usage_counters: Arc<UsageCounters>,
     free_space_fn: FreeSpaceFn,
+    quota_cleanup: Mutex<()>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
