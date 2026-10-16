@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Prevent FIFO quota cleanup from blocking storage info requests during slow block deletion, [PR-1673](https://github.com/reductstore/reductstore/pull/1673)
+
 ## 1.20.11 - 2026-08-05
 
 ### Security
