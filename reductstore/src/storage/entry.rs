@@ -19,9 +19,9 @@ use crate::cfg::Cfg;
 use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
+use crate::storage::block_manager::block_index::BlockIndexSummary;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::in_flight::InFlightIoLimiter;
-use crate::storage::proto::ts_to_us;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
 pub(crate) use io::record_reader::RecordReader;
@@ -66,6 +66,7 @@ pub(crate) struct Entry {
     system_behavior: Box<dyn SystemEntryBehavior + Send + Sync>,
     queries: QueryHandleMapRef,
     status: AsyncRwLock<ResourceStatus>,
+    info_cache: AsyncRwLock<Option<Arc<BlockIndexSummary>>>,
     path: PathBuf,
     cfg: Arc<Cfg>,
     io_limiter: InFlightIoLimiter,
@@ -165,7 +166,9 @@ impl Entry {
 
                 block_manager
                     .apply_replica_index_reload(reload, updated_index, publication)
-                    .await
+                    .await?;
+                self.update_info_cache(Arc::new(block_manager.index().aggregate_stats()));
+                Ok(())
             }
             .await;
 
@@ -266,40 +269,40 @@ impl Entry {
 
     /// Returns stats about the entry.
     pub async fn info(&self) -> Result<EntryInfo, ReductError> {
-        let name = self.name.clone();
-        let status_result = self.status();
+        let summary = if let Some(block_manager) = self.block_manager.try_read() {
+            let summary = Arc::new(block_manager.index().aggregate_stats());
+            drop(block_manager);
+            self.update_info_cache(Arc::clone(&summary));
+            summary
+        } else if let Some(summary) = self.info_cache.read().await?.clone() {
+            summary
+        } else {
+            let block_manager = self.block_manager.read().await?;
+            let summary = Arc::new(block_manager.index().aggregate_stats());
+            drop(block_manager);
+            self.update_info_cache(Arc::clone(&summary));
+            summary
+        };
 
-        let bm = self.block_manager.read().await?;
-        let index = bm.index();
-        let active_tree = index.active_tree();
-        let oldest_record = active_tree
-            .iter()
-            .find_map(|block_id| {
-                let block = index.get_block(*block_id)?;
-                (block.record_count > 0).then_some(*block_id)
-            })
-            .unwrap_or(0);
-        let latest_record = active_tree
-            .iter()
-            .rev()
-            .find_map(|block_id| {
-                let block = index.get_block(*block_id)?;
-                (block.record_count > 0)
-                    .then(|| ts_to_us(block.latest_record_time.as_ref().unwrap()))
-            })
-            .unwrap_or(0);
+        Ok(self.entry_info(&summary, self.status().await?))
+    }
 
-        let status = status_result.await?;
+    fn update_info_cache(&self, summary: Arc<BlockIndexSummary>) {
+        if let Some(mut cache) = self.info_cache.try_write() {
+            *cache = Some(summary);
+        }
+    }
 
-        Ok(EntryInfo {
-            name,
-            size: index.size(),
-            record_count: index.record_count(),
-            block_count: index.tree().len() as u64,
-            oldest_record,
-            latest_record,
+    fn entry_info(&self, summary: &BlockIndexSummary, status: ResourceStatus) -> EntryInfo {
+        EntryInfo {
+            name: self.name.clone(),
+            size: summary.size,
+            record_count: summary.record_count,
+            block_count: summary.block_count,
+            oldest_record: summary.oldest_record,
+            latest_record: summary.latest_record,
             status,
-        })
+        }
     }
 
     pub(crate) async fn status(&self) -> Result<ResourceStatus, ReductError> {
@@ -354,41 +357,46 @@ impl Entry {
         Ok(bm.index().size())
     }
 
+    pub(super) async fn oldest_block(&self) -> Result<Option<(u64, u64)>, ReductError> {
+        let bm = self.block_manager.read().await?;
+        let Some(block_id) = bm.index().tree().first() else {
+            return Ok(None);
+        };
+        let block = bm
+            .index()
+            .get_block(*block_id)
+            .ok_or_else(|| not_found!("Block {} not found", block_id))?;
+        Ok(Some((*block_id, block.size + block.metadata_size)))
+    }
+
     /// Try to remove the oldest block.
     ///
     /// # Returns
     ///
     /// HTTTPError - The error if any.
-    pub async fn try_remove_oldest_block(&self) -> Result<(), ReductError> {
+    pub async fn try_remove_oldest_block(&self) -> Result<u64, ReductError> {
         let publication = self.publication.begin_mutation(&self.path).await?;
-        let bm = self.block_manager.read().await?;
-        let index_tree = bm.index().tree();
-        if index_tree.is_empty() {
-            return Err(internal_server_error!("No block to remove")).into();
-        }
-
-        let oldest_block_id = *index_tree.first().unwrap();
-        let block_manager = Arc::clone(&self.block_manager);
-        drop(bm); // release read lock before acquiring write lock
-
-        let mut bm = match block_manager.write().await {
-            Ok(bm) => bm,
-            Err(_) => {
-                return Err(internal_server_error!(
-                    "Cannot remove block {} because it is in use",
-                    oldest_block_id
-                ));
-            }
-        };
+        let mut bm = self.block_manager.write().await?;
+        let oldest_block_id = *bm
+            .index()
+            .tree()
+            .first()
+            .ok_or_else(|| internal_server_error!("No block to remove"))?;
+        let removed_size = bm
+            .index()
+            .get_block(oldest_block_id)
+            .expect("Block index tree and metadata must be consistent");
+        let removed_size = removed_size.size + removed_size.metadata_size;
 
         bm.set_mutation_batch(publication.token.clone());
         bm.remove_block(oldest_block_id).await?;
+        self.update_info_cache(Arc::new(bm.index().aggregate_stats()));
         debug!(
             "Removing the oldest block {}.blk",
             bm.path().join(oldest_block_id.to_string()).display()
         );
 
-        Ok(())
+        Ok(removed_size)
     }
 
     // Compacts the entry by saving the block manager cache on disk and update index from WALs
@@ -1271,6 +1279,41 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn test_info_uses_cached_stats_while_block_manager_is_write_locked(
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
+        let entry = entry(
+            EntrySettings {
+                max_block_size: 10000,
+                max_block_records: 10000,
+            },
+            path,
+            file_cache,
+        )
+        .await;
+        write_stub_record(&entry, 1000000).await;
+
+        let cached_info = entry.info().await.unwrap();
+        let mut block_manager = entry.block_manager.write().await.unwrap();
+        let block_id = *block_manager.index().tree().first().unwrap();
+        block_manager.remove_block(block_id).await.unwrap();
+
+        let stale_info = tokio::time::timeout(Duration::from_millis(100), entry.info())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(stale_info, cached_info);
+
+        drop(block_manager);
+        let fresh_info = entry.info().await.unwrap();
+        assert_eq!(fresh_info.block_count, 0);
+        assert_eq!(fresh_info.record_count, 0);
+        assert_eq!(fresh_info.size, 0);
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn test_nested_entry_name_in_record_metadata(path: PathBuf) {
         use reduct_base::io::ReadRecord;
 
@@ -1307,6 +1350,33 @@ mod tests {
                 entry.try_remove_oldest_block().await,
                 Err(internal_server_error!("No block to remove"))
             );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn test_concurrent_removal_does_not_remove_stale_block(#[future] entry: Arc<Entry>) {
+            let entry = entry.await;
+            write_stub_record(&entry, 1_000_000).await;
+
+            let first_entry = Arc::clone(&entry);
+            let second_entry = Arc::clone(&entry);
+            let (first, second) = tokio::join!(
+                async move { first_entry.try_remove_oldest_block().await },
+                async move { second_entry.try_remove_oldest_block().await },
+            );
+
+            assert_eq!(
+                [first.is_ok(), second.is_ok()]
+                    .into_iter()
+                    .filter(|ok| *ok)
+                    .count(),
+                1
+            );
+            assert_eq!(
+                first.err().or_else(|| second.err()),
+                Some(internal_server_error!("No block to remove"))
+            );
+            assert_eq!(entry.info().await.unwrap().block_count, 0);
         }
 
         #[rstest]

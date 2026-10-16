@@ -27,6 +27,7 @@ use crate::storage::entry::{
 use crate::storage::folder_keeper::FolderKeeper;
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::usage::UsageCounters;
+use futures_util::future::try_join_all;
 use log::{debug, error};
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
@@ -38,6 +39,7 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
+use tokio::sync::Mutex;
 
 pub(crate) use builder::BucketBuilder;
 
@@ -84,6 +86,7 @@ pub(crate) struct Bucket {
     usage_counters: Arc<UsageCounters>,
     free_space_fn: FreeSpaceFn,
     file_cache: Arc<FileCache>,
+    quota_cleanup: Mutex<()>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -141,14 +144,21 @@ impl Bucket {
         let mut entry_infos = Vec::new();
 
         let entries_guard = self.entries.read().await?;
-        let entries = entries_guard.values().cloned().collect::<Vec<_>>();
+        let entries = entries_guard
+            .values()
+            .map(|entry| (Arc::clone(entry), entry.is_visible_in_bucket_info()))
+            .collect::<Vec<_>>();
         drop(entries_guard);
 
-        for entry in entries {
-            let info = entry.info().await?;
+        let infos = try_join_all(entries.into_iter().map(|(entry, visible)| async move {
+            Ok::<_, ReductError>((visible, entry.info().await?))
+        }))
+        .await?;
+
+        for (visible, info) in infos {
             size += info.size;
 
-            if entry.is_visible_in_bucket_info() {
+            if visible {
                 if info.record_count > 0 {
                     oldest_record = oldest_record.min(info.oldest_record);
                     latest_record = latest_record.max(info.latest_record);

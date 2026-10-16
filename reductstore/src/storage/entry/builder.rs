@@ -104,6 +104,7 @@ impl EntryBuilder {
             file_cache.create_dir_all(&path).await?;
             block_index.save().await?;
         }
+        let info_cache = Arc::new(block_index.aggregate_stats());
 
         Ok(Entry {
             name: name.clone(),
@@ -124,6 +125,7 @@ impl EntryBuilder {
             system_behavior: strategy_for_entry(&name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
+            info_cache: AsyncRwLock::new(Some(info_cache)),
             path,
             cfg,
             io_limiter,

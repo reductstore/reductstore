@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Publish entry mutations atomically for read-only replicas, [PR-1637](https://github.com/reductstore/reductstore/pull/1637) by @atimin
 - Replace formatted `ReductError` constructors with error macros, [PR-1631](https://github.com/reductstore/reductstore/pull/1631) by @vintcessun
 
+## 1.21.3 - 2026-10-16
+
+### Fixed
+
+- Prevent FIFO quota cleanup from blocking storage info requests during slow block deletion, [PR-1673](https://github.com/reductstore/reductstore/pull/1673)
+
 ## 1.21.2 - 2026-10-08
 
 ### Fixed
