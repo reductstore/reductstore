@@ -26,6 +26,7 @@ use std::io::{Read, SeekFrom};
 use std::path::PathBuf;
 use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use tokio::sync::Mutex;
 
 #[derive(Default)]
 pub(crate) struct BucketBuilder {
@@ -113,6 +114,7 @@ impl BucketBuilder {
             io_limiter,
             usage_counters,
             free_space_fn: self.free_space_fn.unwrap_or_else(default_free_space_fn),
+            quota_cleanup: Mutex::new(()),
         };
 
         bucket.save_settings().await?;
@@ -195,6 +197,7 @@ impl BucketBuilder {
             io_limiter,
             usage_counters,
             free_space_fn: self.free_space_fn.unwrap_or_else(default_free_space_fn),
+            quota_cleanup: Mutex::new(()),
         })
     }
 }

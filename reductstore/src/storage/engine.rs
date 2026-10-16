@@ -10,6 +10,7 @@ use crate::storage::bucket::Bucket;
 use crate::storage::folder_keeper::{DiscoveryDepth, FolderKeeper};
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::usage::{BucketSnapshot, UsageCounters, UsageSnapshot};
+use futures_util::future::try_join_all;
 use log::{debug, error, info};
 use reduct_base::error::ReductError;
 use reduct_base::io::WriteRecord;
@@ -189,14 +190,14 @@ impl StorageEngine {
         let mut oldest_record = u64::MAX;
         let mut latest_record = 0u64;
 
-        let buckets = self.buckets.read().await?;
-        let infos = buckets
-            .values()
-            .map(|bucket| bucket.clone().info())
-            .collect::<Vec<_>>();
+        let buckets_guard = self.buckets.read().await?;
+        let buckets = buckets_guard.values().cloned().collect::<Vec<_>>();
+        drop(buckets_guard);
+        let bucket_count = buckets.len() as u64;
+        let infos = try_join_all(buckets.into_iter().map(|bucket| bucket.info())).await?;
 
-        for task in infos {
-            let bucket = task.await?.info;
+        for info in infos {
+            let bucket = info.info;
             usage += bucket.size;
             if bucket.oldest_record != u64::MAX {
                 oldest_record = oldest_record.min(bucket.oldest_record);
@@ -210,7 +211,7 @@ impl StorageEngine {
                 .to_string(),
             instance_name: self.cfg.instance_name.clone(),
             instance_role: self.cfg.role.as_str().to_string(),
-            bucket_count: buckets.len() as u64,
+            bucket_count,
             usage,
             uptime: self.start_time.elapsed().as_secs(),
             oldest_record,
