@@ -261,12 +261,19 @@ impl PublicationCoordinator {
             .await
             .take()
             .expect("pending publication disappeared");
-        pending
+        match pending
             .file_batch
-            .take()
+            .as_mut()
             .expect("file batch is already being synchronized")
             .commit()
             .await
+        {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.batch.lock().await.replace(pending);
+                Err(err)
+            }
+        }
     }
 
     async fn sync_pending_file(&self, path: &Path) -> Result<(), ReductError> {
@@ -319,6 +326,7 @@ mod tests {
     use super::*;
     use crate::core::file_cache::build_test_file_cache;
     use crate::storage::entry::publication::{load, PublicationState};
+    use reduct_base::internal_server_error;
     use std::io::{SeekFrom, Write};
     use std::sync::Arc;
 
@@ -395,6 +403,40 @@ mod tests {
                 block_index_crc64: Some(0),
             }
         );
+    }
+    #[tokio::test]
+    async fn restores_pending_batch_when_commit_fails() {
+        let path = entry_path();
+        let pending_path = path.join("pending.blk");
+        let file_cache = build_test_file_cache();
+        let coordinator = PublicationCoordinator::new_with_cache(file_cache.clone());
+        drop(coordinator.begin_mutation(&path).await.unwrap());
+        coordinator.begin_publication(&path).await.unwrap();
+
+        let token = coordinator
+            .batch
+            .lock()
+            .await
+            .as_ref()
+            .unwrap()
+            .token
+            .clone();
+        let mut pending = file_cache
+            .write_or_create_in_batch(&token, &pending_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        pending.write_all(b"pending").unwrap();
+        drop(pending);
+
+        assert_eq!(
+            coordinator.finish_publication(&path).await.unwrap_err(),
+            internal_server_error!("Cannot commit file batch with pending remote mutations")
+        );
+        assert!(coordinator.batch.lock().await.is_some());
+
+        coordinator.sync_pending_batch().await.unwrap();
+        coordinator.finish_publication(&path).await.unwrap();
+        assert!(coordinator.batch.lock().await.is_none());
     }
 
     #[tokio::test]

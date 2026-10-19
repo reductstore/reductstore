@@ -193,6 +193,14 @@ where
 
     let parser =
         CfgParser::from_env_with_ext(StdEnvGetter::default(), &ext_cfg_parser, version).await;
+
+    #[cfg(feature = "zenoh-api")]
+    if parser.cfg.zenoh_api.enabled {
+        if let Err(err) = zenoh::validate_config(&parser.cfg.zenoh_api) {
+            return Err(reduct_base::unprocessable_entity!("{}", err));
+        }
+    }
+
     let lock_file = Arc::new(parser.build_lock_file()?);
     let runtime = start_listener(parser.cfg.clone(), Arc::clone(&lock_file));
 
