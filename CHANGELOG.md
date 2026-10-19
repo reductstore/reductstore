@@ -9,7 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- Support per-block Zenoh routes and retain failed file batches for retry, [PR-1667](https://github.com/reductstore/reductstore/pull/1667) by @oh-yes-0-fps
+- Support per-block Zenoh routes, retain failed file batches for retry, and upgrade zip to resolve extraction advisories, [PR-1667](https://github.com/reductstore/reductstore/pull/1667) by @oh-yes-0-fps
 
 ### Fixed
 
