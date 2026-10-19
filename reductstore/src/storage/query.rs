@@ -253,6 +253,7 @@ mod tests {
         let query: Box<dyn Query + Send + Sync> = Box::new(RepeatingQuery {
             io: IoConfig::default(),
         });
+        let _ = query.io_settings();
         let (mut rx, handle) = spawn_query_task(
             0,
             "bucket/entry".to_string(),
