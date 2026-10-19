@@ -54,7 +54,9 @@ runs:
       shell: bash
       env:
         RS_API_TOKEN: ${{ inputs.rs_api_token }}
-      run: python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 current.csv
+      run: >-
+        python3 ./integration_tests/benchmarks/python-benchmark.py
+        http://localhost:8383 current.csv --restart-container reductstore
 
     - name: Stop and remove current container
       shell: bash
@@ -84,7 +86,9 @@ runs:
       shell: bash
       env:
         RS_API_TOKEN: ${{ inputs.rs_api_token }}
-      run: python3 ./integration_tests/benchmarks/python-benchmark.py http://localhost:8383 ${{ inputs.branch }}.csv
+      run: >-
+        python3 ./integration_tests/benchmarks/python-benchmark.py
+        http://localhost:8383 ${{ inputs.branch }}.csv --restart-container reductstore
 
     - name: Check result
       shell: bash
