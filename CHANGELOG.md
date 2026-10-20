@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Avoid a read/remove lock inversion and return HTTP 404 instead of panicking when a concurrent removal wins the race, [PR-1670](https://github.com/reductstore/reductstore/pull/1670) by @mjcarroll
+
 ## 1.21.3 - 2026-10-16
 
 ### Fixed
