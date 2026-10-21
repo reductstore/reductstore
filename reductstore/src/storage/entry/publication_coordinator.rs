@@ -405,6 +405,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retains_failed_publication_batch_for_retry() {
+        let path = entry_path();
+        let data_path = path.join("data.blk");
+        let file_cache = build_test_file_cache();
+        let coordinator = PublicationCoordinator::new_with_cache(Arc::clone(&file_cache));
+        let admission = coordinator.begin_mutation(&path).await.unwrap();
+        let token = admission.token.clone();
+        drop(admission);
+
+        coordinator.begin_publication(&path).await.unwrap();
+        coordinator.sync_pending_batch().await.unwrap();
+
+        let mut data = file_cache
+            .write_or_create_in_batch(&token, &data_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        data.write_all(b"pending").unwrap();
+        drop(data);
+
+        assert_eq!(
+            coordinator.finish_publication(&path).await.unwrap_err(),
+            reduct_base::internal_server_error!(
+                "Cannot commit file batch with pending remote mutations"
+            )
+        );
+        let retry = coordinator.begin_mutation(&path).await.unwrap();
+        assert_eq!(retry.token, token);
+        drop(retry);
+
+        coordinator.publish(&path).await.unwrap();
+        assert_ne!(
+            coordinator.begin_mutation(&path).await.unwrap().token,
+            token
+        );
+    }
+
+    #[tokio::test]
     async fn scheduled_publication_admits_mutations_while_syncing() {
         let path = entry_path();
         let first_path = path.join("first.blk");
