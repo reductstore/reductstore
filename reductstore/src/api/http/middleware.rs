@@ -504,9 +504,9 @@ mod tests {
         let mut reader = bucket
             .begin_read(&entry.name, entry.oldest_record)
             .await
-            .unwrap();
-        let record = reader.read_chunk().unwrap().unwrap();
-        Some(serde_json::from_slice(&record).unwrap())
+            .ok()?;
+        let record = reader.read_chunk()?.ok()?;
+        serde_json::from_slice(&record).ok()
     }
 
     async fn wait_for_audit_event(
