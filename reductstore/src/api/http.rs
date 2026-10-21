@@ -889,6 +889,7 @@ pub(crate) mod tests {
             .unwrap();
         sender.send(Ok(Some(Bytes::from("Hey!!!")))).await.unwrap();
         sender.send(Ok(None)).await.unwrap();
+        storage.sync_fs().await.unwrap();
 
         let permissions = Permissions {
             read: vec!["bucket-1".to_string(), "bucket-2".to_string()],

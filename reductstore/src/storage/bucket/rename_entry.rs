@@ -434,6 +434,7 @@ mod tests {
             .send(Ok(None))
             .await
             .map_err(|e| internal_server_error!("Failed to sync channel: {}", e))?;
+        bucket.sync_fs().await?;
         Ok(())
     }
 
@@ -460,6 +461,7 @@ mod tests {
             .send(Ok(None))
             .await
             .map_err(|e| internal_server_error!("Failed to sync channel: {}", e))?;
+        bucket.sync_fs().await?;
         Ok(())
     }
 
