@@ -29,10 +29,9 @@ impl Entry {
             let bm = self.block_manager.read().await?;
             bm.find_cached_block(time)
         } {
-            let block = block_ref.read().await?;
-            if let Some(record) = block.get_record(time) {
-                let record = record.clone();
-                drop(block);
+            // release the block first: the fallback takes the block manager lock
+            let cached = block_ref.read().await?.get_record(time).cloned();
+            if let Some(record) = cached {
                 (block_ref, record)
             } else {
                 self.find_record_for_read(time).await?

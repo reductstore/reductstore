@@ -29,6 +29,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Publish entry mutations atomically for read-only replicas, [PR-1637](https://github.com/reductstore/reductstore/pull/1637) by @atimin
 - Replace formatted `ReductError` constructors with error macros, [PR-1631](https://github.com/reductstore/reductstore/pull/1631) by @vintcessun
 
+## 1.21.4 - 2026-10-21
+
+### Fixed
+
+- Return HTTP 404 instead of panicking when a record is removed between lookup and read, [PR-1684](https://github.com/reductstore/reductstore/pull/1684) by @mjcarroll
+
 ## 1.21.3 - 2026-10-16
 
 ### Fixed
