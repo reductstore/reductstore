@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Return HTTP 404 instead of panicking when a record is removed between lookup and read, [PR-1684](https://github.com/reductstore/reductstore/pull/1684)
+
 ## 1.21.3 - 2026-10-16
 
 ### Fixed
