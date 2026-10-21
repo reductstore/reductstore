@@ -725,7 +725,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -746,7 +746,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -764,7 +764,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let mut settings = settings;
             settings.dst_host = "invalid_url".to_string();
 
@@ -783,7 +783,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let mut settings = settings;
             settings.dst_host = format!("http://localhost:{}", DEFAULT_PORT);
             settings.dst_bucket = "bucket-1".to_string();
@@ -803,7 +803,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             mut settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             settings.src_bucket = "bucket-2".to_string();
             assert_eq!(
                 repo.create_replication("test", settings).await,
@@ -820,7 +820,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let mut settings = settings;
             settings.when = Some(serde_json::json!({"$UNKNOWN_OP": ["&x", "y"]}));
             assert_eq!(
@@ -840,7 +840,7 @@ mod tests {
         ) {
             settings.dst_prefix = "robot-1".to_string();
             let storage = storage.await;
-            let mut repo = ReplicationRepository::load_or_create(
+            let repo = ReplicationRepository::load_or_create(
                 Arc::clone(&storage),
                 Cfg::default(),
                 None,
@@ -875,7 +875,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -896,7 +896,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -915,7 +915,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_update_non_existing_replication(#[future] mut repo: ReplicationRepository) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             assert_eq!(
                 repo.update_replication("test-2", ReplicationSettings::default())
                     .await,
@@ -930,7 +930,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -953,7 +953,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -977,7 +977,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1000,7 +1000,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             mut settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1028,7 +1028,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let storage = Arc::clone(&repo.storage);
             repo.create_replication("test", settings.clone())
                 .await
@@ -1079,7 +1079,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let storage = Arc::clone(&repo.storage);
             repo.create_replication("test", settings.clone())
                 .await
@@ -1256,7 +1256,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1283,7 +1283,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1328,7 +1328,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_get_mut_non_existing_replication(#[future] mut repo: ReplicationRepository) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             assert_eq!(
                 repo.set_replication_provisioned("test-2", true).await.err(),
                 Some(not_found!("Replication 'test-2' does not exist")),
@@ -1348,7 +1348,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1371,7 +1371,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings.clone())
                 .await
                 .unwrap();
@@ -1423,7 +1423,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             let mut settings_1 = settings.clone();
             settings_1.src_bucket = "bucket-1".to_string();
             repo.create_replication("test-1", settings_1).await.unwrap();
@@ -1471,7 +1471,7 @@ mod tests {
             }
             let _reset = ResetGuard;
 
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test", settings).await.unwrap();
 
             set_rwlock_timeout(Duration::from_millis(20));
@@ -1600,7 +1600,7 @@ mod tests {
             #[future] mut repo: ReplicationRepository,
             settings: ReplicationSettings,
         ) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             repo.create_replication("test-1", settings.clone())
                 .await
                 .unwrap();
@@ -1617,7 +1617,7 @@ mod tests {
         #[rstest]
         #[tokio::test]
         async fn test_set_mode_non_existing(#[future] mut repo: ReplicationRepository) {
-            let mut repo = repo.await;
+            let repo = repo.await;
             assert_eq!(
                 repo.set_mode("test-1", ReplicationMode::Paused).await,
                 Err(not_found!("Replication 'test-1' does not exist"))
