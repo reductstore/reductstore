@@ -261,12 +261,19 @@ impl PublicationCoordinator {
             .await
             .take()
             .expect("pending publication disappeared");
-        pending
+        match pending
             .file_batch
-            .take()
+            .as_mut()
             .expect("file batch is already being synchronized")
             .commit()
             .await
+        {
+            Ok(()) => Ok(()),
+            Err(err) => {
+                self.batch.lock().await.replace(pending);
+                Err(err)
+            }
+        }
     }
 
     async fn sync_pending_file(&self, path: &Path) -> Result<(), ReductError> {
