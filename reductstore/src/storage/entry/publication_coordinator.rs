@@ -180,13 +180,16 @@ impl PublicationCoordinator {
 
             // Mutations may join this batch while its current dirty-file snapshot is synced.
             // A revision change below forces another pass before Ready is published.
-            self.sync_pending_batch().await?;
+            self.sync_pending_files().await?;
 
             guard = Arc::clone(&self.admission).write_owned().await;
             if self.publication_revision.load(Ordering::Acquire) != observed_revision {
                 continue;
             }
 
+            // A remote delete may also unlink its local cache path. Run deferred deletes only
+            // while mutations are excluded so a stale delete cannot remove a recreated WAL.
+            self.sync_pending_deletes().await?;
             self.finish_publication(path).await?;
             return Ok(Some(token));
         }
@@ -284,13 +287,27 @@ impl PublicationCoordinator {
     }
 
     async fn sync_pending_batch(&self) -> Result<(), ReductError> {
+        let mut file_batch = self.take_file_batch().await?;
+        let result = file_batch.sync_all().await;
+        self.restore_file_batch(file_batch).await?;
+        result
+    }
+
+    async fn sync_pending_files(&self) -> Result<(), ReductError> {
+        let mut file_batch = self.take_file_batch().await?;
+        let result = file_batch.sync_files().await;
         #[cfg(test)]
         if let Some(pause) = self.sync_pause.lock().await.take() {
             pause.started.notify_one();
             pause.release.notified().await;
         }
+        self.restore_file_batch(file_batch).await?;
+        result
+    }
+
+    async fn sync_pending_deletes(&self) -> Result<(), ReductError> {
         let mut file_batch = self.take_file_batch().await?;
-        let result = file_batch.sync_all().await;
+        let result = file_batch.sync_deletes().await;
         self.restore_file_batch(file_batch).await?;
         result
     }
@@ -496,5 +513,58 @@ mod tests {
         let marker = load(&path, &file_cache).await.unwrap().unwrap();
         assert_eq!(marker.state, PublicationState::Ready);
         assert_eq!(marker.generation, 2);
+    }
+
+    #[tokio::test]
+    async fn scheduled_publication_does_not_delete_recreated_wal() {
+        let path = entry_path();
+        let wal_path = path.join(".wal").join("1.wal");
+        let file_cache = build_test_file_cache();
+        let coordinator = Arc::new(PublicationCoordinator::new_with_cache(Arc::clone(
+            &file_cache,
+        )));
+        let pause = Arc::new(SyncPause {
+            started: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        *coordinator.sync_pause.lock().await = Some(Arc::clone(&pause));
+
+        let admission = coordinator.begin_mutation(&path).await.unwrap();
+        let token = admission.token.clone();
+        let mut wal = file_cache
+            .write_or_create_in_batch(&token, &wal_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        wal.write_all(b"old").unwrap();
+        drop(wal);
+        file_cache.remove_in_batch(&token, &wal_path).await.unwrap();
+        drop(admission);
+
+        let publisher = tokio::spawn({
+            let coordinator = Arc::clone(&coordinator);
+            let path = path.clone();
+            async move { coordinator.publish_scheduled(&path).await }
+        });
+        tokio::time::timeout(Duration::from_secs(2), pause.started.notified())
+            .await
+            .expect("publication did not finish synchronizing files");
+
+        let admission = coordinator.begin_mutation(&path).await.unwrap();
+        assert_eq!(admission.token, token);
+        let mut wal = file_cache
+            .write_or_create_in_batch(&token, &wal_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        wal.write_all(b"replacement").unwrap();
+        drop(wal);
+        drop(admission);
+
+        pause.release.notify_one();
+        assert_eq!(publisher.await.unwrap().unwrap(), Some(token));
+        assert_eq!(std::fs::read(&wal_path).unwrap(), b"replacement");
+        assert_eq!(
+            load(&path, &file_cache).await.unwrap().unwrap().state,
+            PublicationState::Ready
+        );
     }
 }
