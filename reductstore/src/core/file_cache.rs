@@ -1029,7 +1029,8 @@ impl FileBatch {
     }
 
     async fn sync_path(&mut self, path: &Path, version: Option<u64>) -> Result<(), ReductError> {
-        if let Some(file) = self.cache.read().await?.get(&path.to_path_buf()).cloned() {
+        let cached_file = self.cache.read().await?.get(&path.to_path_buf()).cloned();
+        if let Some(file) = cached_file {
             file.write().await?.sync_all_in_batch(self.token.id).await?;
         } else {
             let mut options = self.backend.read().await?.open_options();
@@ -1494,6 +1495,45 @@ mod tests {
         cache.cache.write().await.unwrap().remove(&file_path);
 
         batch.sync_file(&file_path).await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_sync_releases_cache_lock_while_waiting_for_file(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            expect_upload(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        let mut file = cache
+            .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        file.write_all(b"index").unwrap();
+
+        let sync = tokio::spawn({
+            let file_path = file_path.clone();
+            async move {
+                batch.sync_file(&file_path).await.unwrap();
+                batch
+            }
+        });
+        tokio::task::yield_now().await;
+
+        let cache_guard = tokio::time::timeout(Duration::from_millis(100), cache.cache.write())
+            .await
+            .expect("file synchronization retained the cache read lock")
+            .unwrap();
+        drop(cache_guard);
+
+        drop(file);
+        let mut batch = sync.await.unwrap();
         batch.commit().await.unwrap();
     }
 
