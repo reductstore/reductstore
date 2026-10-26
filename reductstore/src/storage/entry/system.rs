@@ -21,8 +21,8 @@ pub(crate) struct WritePreparation {
 /// - `$meta` entries are excluded from user-facing entry counts/lists.
 /// - FIFO quota eviction must ignore `$meta` entries as removal candidates.
 /// - Every `$meta` record must include label `key`.
-/// - `$meta` behaves as upsert-by-key: writing a record with `key=K` removes existing `$meta`
-///   records with the same key before adding the new one.
+/// - `$meta` keeps the two newest records per key: writing a record with `key=K` retains the
+///   previous version and removes only older `$meta` records with the same key.
 /// - Updating a `$meta` record with label `remove=true` creates a tombstone (label-only update)
 ///   and does not physically delete the record.
 pub(crate) const META_ENTRY_SEGMENT: &str = "$meta";
@@ -129,7 +129,7 @@ impl SystemEntryBehavior for MetaEntryBehavior {
         // Find the previous version now, but retain it until the replacement is
         // written successfully. Removing it here could make a failed write lose
         // the last readable attachment.
-        let superseded_record_timestamps = entry
+        let mut superseded_record_timestamps = entry
             .query_record_timestamps(QueryEntry {
                 start: Some(0),
                 stop: Some(u64::MAX),
@@ -140,6 +140,10 @@ impl SystemEntryBehavior for MetaEntryBehavior {
                 ..Default::default()
             })
             .await?;
+
+        // Keep the newest existing version as a fallback and remove only older
+        // generations after the replacement has been written successfully.
+        superseded_record_timestamps.pop();
         Ok(WritePreparation {
             superseded_record_timestamps,
         })
@@ -336,7 +340,7 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn meta_prepare_write_collects_existing_records_with_same_key() {
+    async fn meta_prepare_write_keeps_latest_record_with_same_key() {
         let entry = build_entry("entry/$meta").await;
         write_record(
             &entry,
@@ -344,7 +348,20 @@ mod tests {
             Labels::from_iter([("key".to_string(), "schema".to_string())]),
         )
         .await;
+        write_record(
+            &entry,
+            2,
+            Labels::from_iter([("key".to_string(), "schema".to_string())]),
+        )
+        .await;
+        write_record(
+            &entry,
+            3,
+            Labels::from_iter([("key".to_string(), "other".to_string())]),
+        )
+        .await;
         assert!(entry.begin_read(1).await.is_ok());
+        assert!(entry.begin_read(2).await.is_ok());
 
         let preparation = MetaEntryBehavior
             .prepare_write(
@@ -356,5 +373,6 @@ mod tests {
 
         assert_eq!(preparation.superseded_record_timestamps, vec![1]);
         assert!(entry.begin_read(1).await.is_ok());
+        assert!(entry.begin_read(2).await.is_ok());
     }
 }
