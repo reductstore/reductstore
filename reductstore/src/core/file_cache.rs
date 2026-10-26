@@ -897,40 +897,71 @@ impl FileBatch {
     /// Synchronizes one file and waits until its remote upload completes.
     pub async fn sync_file(&mut self, path: &Path) -> Result<(), ReductError> {
         self.validate_path_owner(path).await?;
-        let result = self.sync_path(path).await;
+        let version = {
+            let batches = self.batches.read().await?;
+            self.active_batch(&batches)?.dirty_files.get(path).copied()
+        };
+        let result = self.sync_path(path, version).await;
         if result.is_err() {
             self.set_state(BatchState::Failed).await?;
+        }
+        result
+    }
+
+    /// Synchronizes every pending upload in this batch.
+    pub async fn sync_files(&mut self) -> Result<(), ReductError> {
+        let result = self.sync_files_inner().await;
+        if result.is_err() {
+            self.set_state(BatchState::Failed).await?;
+        } else {
+            self.set_state(BatchState::Active).await?;
+        }
+        result
+    }
+
+    /// Synchronizes every deferred delete in this batch.
+    pub async fn sync_deletes(&mut self) -> Result<(), ReductError> {
+        let result = self.sync_deletes_inner().await;
+        if result.is_err() {
+            self.set_state(BatchState::Failed).await?;
+        } else {
+            self.set_state(BatchState::Active).await?;
         }
         result
     }
 
     /// Synchronizes every pending upload and deferred delete in this batch.
     pub async fn sync_all(&mut self) -> Result<(), ReductError> {
-        let result = self.sync_all_inner().await;
-        if result.is_err() {
-            self.set_state(BatchState::Failed).await?;
-        }
-        result
+        self.sync_files().await?;
+        self.sync_deletes().await
     }
 
-    async fn sync_all_inner(&mut self) -> Result<(), ReductError> {
-        let (files, deletes) = {
+    async fn sync_files_inner(&mut self) -> Result<(), ReductError> {
+        let files = {
             let batches = self.batches.read().await?;
             let batch = self.active_batch(&batches)?;
-            (
-                batch
-                    .dirty_files
-                    .iter()
-                    .map(|(path, version)| (path.clone(), *version))
-                    .collect::<Vec<_>>(),
-                batch.pending_deletes.iter().cloned().collect::<Vec<_>>(),
-            )
+            batch
+                .dirty_files
+                .iter()
+                .map(|(path, version)| (path.clone(), *version))
+                .collect::<Vec<_>>()
         };
 
-        for (path, _) in &files {
-            self.sync_path(path).await?;
+        for (path, version) in files {
+            self.sync_path(&path, Some(version)).await?;
         }
+        Ok(())
+    }
 
+    async fn sync_deletes_inner(&mut self) -> Result<(), ReductError> {
+        let deletes = {
+            let batches = self.batches.read().await?;
+            self.active_batch(&batches)?
+                .pending_deletes
+                .iter()
+                .cloned()
+                .collect::<Vec<_>>()
+        };
         let backend = self.backend.read().await?.clone();
         for path in &deletes {
             if let Err(err) = backend.remove(path).await {
@@ -943,9 +974,6 @@ impl FileBatch {
                 .pending_deletes
                 .remove(path);
         }
-
-        let mut batches = self.batches.write().await?;
-        self.active_batch_mut(&mut batches)?.state = BatchState::Active;
         Ok(())
     }
 
@@ -1000,24 +1028,27 @@ impl FileBatch {
         Ok(())
     }
 
-    async fn sync_path(&mut self, path: &Path) -> Result<(), ReductError> {
-        let version = {
-            let batches = self.batches.read().await?;
-            self.active_batch(&batches)?.dirty_files.get(path).copied()
-        };
-        let file = self.cache.read().await?.get(&path.to_path_buf()).cloned();
-        if let Some(file) = file {
+    async fn sync_path(&mut self, path: &Path, version: Option<u64>) -> Result<(), ReductError> {
+        let cached_file = self.cache.read().await?.get(&path.to_path_buf()).cloned();
+        if let Some(file) = cached_file {
             file.write().await?.sync_all_in_batch(self.token.id).await?;
         } else {
-            let mut file = self
-                .backend
-                .read()
-                .await?
-                .open_options()
-                .write(true)
-                .read(true)
-                .open(path)
-                .await?;
+            let mut options = self.backend.read().await?.open_options();
+            let open_result = options.write(true).read(true).open(path).await;
+            let mut file = match open_result {
+                Ok(file) => file,
+                Err(err) if err.kind() == ErrorKind::NotFound => {
+                    let current_version = {
+                        let batches = self.batches.read().await?;
+                        self.active_batch(&batches)?.dirty_files.get(path).copied()
+                    };
+                    if version.is_some() && current_version != version {
+                        return Ok(());
+                    }
+                    return Err(err.into());
+                }
+                Err(err) => return Err(err.into()),
+            };
             file.flush_local().await?;
             file.sync_all_in_batch(self.token.id).await?;
         }
@@ -1464,6 +1495,84 @@ mod tests {
         cache.cache.write().await.unwrap().remove(&file_path);
 
         batch.sync_file(&file_path).await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_sync_releases_cache_lock_while_waiting_for_file(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("blocks.idx");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 1);
+            expect_try_exists(mock, &file_path, false, 1);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            expect_upload(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        let mut file = cache
+            .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        file.write_all(b"index").unwrap();
+
+        let sync = tokio::spawn({
+            let file_path = file_path.clone();
+            async move {
+                batch.sync_file(&file_path).await.unwrap();
+                batch
+            }
+        });
+        tokio::task::yield_now().await;
+
+        let cache_guard = tokio::time::timeout(Duration::from_millis(100), cache.cache.write())
+            .await
+            .expect("file synchronization retained the cache read lock")
+            .unwrap();
+        drop(cache_guard);
+
+        drop(file);
+        let mut batch = sync.await.unwrap();
+        batch.commit().await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn batch_ignores_missing_file_from_stale_upload_snapshot(tmp_dir: PathBuf) {
+        let file_path = tmp_dir.join("stale.wal");
+        let backend = build_backend(|mock| {
+            expect_path(mock, &tmp_dir, 2);
+            expect_try_exists(mock, &file_path, false, 2);
+            expect_update_local_cache(mock, &file_path, AccessMode::ReadWrite, 1);
+            expect_remove(mock, &file_path, 1);
+        });
+        let cache = build_cache(backend);
+        let mut batch = cache.begin_batch().await.unwrap();
+        let token = batch.token();
+        drop(
+            cache
+                .write_or_create_in_batch(&token, &file_path, SeekFrom::Start(0))
+                .await
+                .unwrap(),
+        );
+        let stale_version = cache
+            .batches
+            .read()
+            .await
+            .unwrap()
+            .active
+            .get(&token.id)
+            .unwrap()
+            .dirty_files[&file_path];
+
+        cache.remove_in_batch(&token, &file_path).await.unwrap();
+
+        batch
+            .sync_path(&file_path, Some(stale_version))
+            .await
+            .unwrap();
+        batch.sync_deletes().await.unwrap();
         batch.commit().await.unwrap();
     }
 
