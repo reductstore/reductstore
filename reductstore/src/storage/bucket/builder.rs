@@ -124,6 +124,15 @@ impl BucketBuilder {
             usage_counters,
             free_space_fn: self.free_space_fn.unwrap_or_else(default_free_space_fn),
             file_cache,
+            quota_cleanup: AsyncRwLock::new(()),
+            maintenance_admission: Arc::new(AsyncRwLock::new(())),
+            deletion_task: AsyncRwLock::new(None),
+            #[cfg(test)]
+            deletion_attempt_hook: AsyncRwLock::new(None),
+            #[cfg(test)]
+            fifo_pause: AsyncRwLock::new(None),
+            #[cfg(test)]
+            quota_wait_notify: AsyncRwLock::new(None),
         };
 
         bucket.save_settings().await?;
@@ -213,6 +222,15 @@ impl BucketBuilder {
             usage_counters,
             free_space_fn: self.free_space_fn.unwrap_or_else(default_free_space_fn),
             file_cache,
+            quota_cleanup: AsyncRwLock::new(()),
+            maintenance_admission: Arc::new(AsyncRwLock::new(())),
+            deletion_task: AsyncRwLock::new(None),
+            #[cfg(test)]
+            deletion_attempt_hook: AsyncRwLock::new(None),
+            #[cfg(test)]
+            fifo_pause: AsyncRwLock::new(None),
+            #[cfg(test)]
+            quota_wait_notify: AsyncRwLock::new(None),
         })
     }
 }

@@ -208,6 +208,11 @@ impl EntryLoader {
             );
         }
 
+        let summary = {
+            let block_manager = entry.block_manager.read().await?;
+            Arc::new(block_manager.index().aggregate_stats())
+        };
+        entry.update_info_cache(summary);
         entry.cfg = cfg;
         entry.file_cache = file_cache;
         Ok(Some(entry))
@@ -358,6 +363,7 @@ impl EntryLoader {
         }
 
         block_index.save().await?;
+        let info_cache = Arc::new(block_index.aggregate_stats());
         Ok(Entry {
             name: entry_name.clone(),
             bucket_name: bucket_name.clone(),
@@ -377,6 +383,7 @@ impl EntryLoader {
             system_behavior: strategy_for_entry(&entry_name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
+            info_cache: AsyncRwLock::new(Some(info_cache)),
             path,
             cfg,
             io_limiter,
@@ -407,6 +414,7 @@ impl EntryLoader {
         }
         let block_index =
             BlockIndex::try_load(path.join(BLOCK_INDEX_FILE), Arc::clone(&file_cache)).await?;
+        let info_cache = Arc::new(block_index.aggregate_stats());
 
         Ok(Entry {
             name: entry_name.clone(),
@@ -427,6 +435,7 @@ impl EntryLoader {
             system_behavior: strategy_for_entry(&entry_name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
+            info_cache: AsyncRwLock::new(Some(info_cache)),
             path,
             cfg,
             io_limiter,

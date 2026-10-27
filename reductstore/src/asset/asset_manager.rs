@@ -63,14 +63,17 @@ impl ZipAssetManager {
 
         for i in 0..archive.len() {
             let mut file = archive.by_index(i).unwrap();
+            let enclosed_name = file
+                .enclosed_name()
+                .expect("Zip archive contains an unsafe path");
             if file.is_dir() {
-                let path = temp_dir.path().join(file.name().unwrap().as_ref());
+                let path = temp_dir.path().join(&enclosed_name);
                 std::fs::create_dir_all(path).unwrap();
             }
 
             if file.is_file() {
                 // extract file to temporary directory without root directory
-                let path = temp_dir.path().join(file.name().unwrap().as_ref());
+                let path = temp_dir.path().join(enclosed_name);
                 debug!("Extracting file to {:?}", path);
                 let mut out = File::create(path).unwrap();
                 std::io::copy(&mut file, &mut out).unwrap();

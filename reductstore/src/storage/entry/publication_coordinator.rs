@@ -64,8 +64,12 @@ impl PublicationCoordinator {
         &self,
         path: &Path,
     ) -> Result<MutationAdmission, ReductError> {
-        self.publication_revision.fetch_add(1, Ordering::AcqRel);
         let guard = Arc::clone(&self.admission).read_owned().await;
+        // Advance the revision only after this mutation is admitted. Otherwise a
+        // publisher holding exclusive admission can observe the new revision,
+        // start another sync pass, and then admit this mutation after that pass
+        // has already snapshotted the dirty files.
+        self.publication_revision.fetch_add(1, Ordering::AcqRel);
         let mut batch = self.batch.lock().await;
         if batch.is_none() {
             let file_batch = self.file_cache.begin_batch_for_scope(path).await?;
@@ -180,13 +184,16 @@ impl PublicationCoordinator {
 
             // Mutations may join this batch while its current dirty-file snapshot is synced.
             // A revision change below forces another pass before Ready is published.
-            self.sync_pending_batch().await?;
+            self.sync_pending_files().await?;
 
             guard = Arc::clone(&self.admission).write_owned().await;
             if self.publication_revision.load(Ordering::Acquire) != observed_revision {
                 continue;
             }
 
+            // A remote delete may also unlink its local cache path. Run deferred deletes only
+            // while mutations are excluded so a stale delete cannot remove a recreated WAL.
+            self.sync_pending_deletes().await?;
             self.finish_publication(path).await?;
             return Ok(Some(token));
         }
@@ -284,13 +291,27 @@ impl PublicationCoordinator {
     }
 
     async fn sync_pending_batch(&self) -> Result<(), ReductError> {
+        let mut file_batch = self.take_file_batch().await?;
+        let result = file_batch.sync_all().await;
+        self.restore_file_batch(file_batch).await?;
+        result
+    }
+
+    async fn sync_pending_files(&self) -> Result<(), ReductError> {
+        let mut file_batch = self.take_file_batch().await?;
+        let result = file_batch.sync_files().await;
         #[cfg(test)]
         if let Some(pause) = self.sync_pause.lock().await.take() {
             pause.started.notify_one();
             pause.release.notified().await;
         }
+        self.restore_file_batch(file_batch).await?;
+        result
+    }
+
+    async fn sync_pending_deletes(&self) -> Result<(), ReductError> {
         let mut file_batch = self.take_file_batch().await?;
-        let result = file_batch.sync_all().await;
+        let result = file_batch.sync_deletes().await;
         self.restore_file_batch(file_batch).await?;
         result
     }
@@ -335,6 +356,32 @@ mod tests {
         std::fs::create_dir_all(&path).unwrap();
         std::fs::write(path.join(BLOCK_INDEX_FILE), []).unwrap();
         path
+    }
+
+    #[tokio::test]
+    async fn blocked_mutation_does_not_advance_publication_revision() {
+        let file_cache = build_test_file_cache();
+        let coordinator = Arc::new(PublicationCoordinator::new_with_cache(file_cache));
+        let path = entry_path();
+        let publisher = Arc::clone(&coordinator.admission).write_owned().await;
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+
+        let mutation = tokio::spawn({
+            let coordinator = Arc::clone(&coordinator);
+            async move {
+                started_tx.send(()).unwrap();
+                coordinator.begin_mutation(&path).await
+            }
+        });
+        started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+
+        assert_eq!(coordinator.publication_revision.load(Ordering::Acquire), 0);
+
+        drop(publisher);
+        let admission = mutation.await.unwrap().unwrap();
+        assert_eq!(coordinator.publication_revision.load(Ordering::Acquire), 1);
+        drop(admission);
     }
 
     #[tokio::test]
@@ -440,6 +487,43 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn retains_failed_publication_batch_for_retry() {
+        let path = entry_path();
+        let data_path = path.join("data.blk");
+        let file_cache = build_test_file_cache();
+        let coordinator = PublicationCoordinator::new_with_cache(Arc::clone(&file_cache));
+        let admission = coordinator.begin_mutation(&path).await.unwrap();
+        let token = admission.token.clone();
+        drop(admission);
+
+        coordinator.begin_publication(&path).await.unwrap();
+        coordinator.sync_pending_batch().await.unwrap();
+
+        let mut data = file_cache
+            .write_or_create_in_batch(&token, &data_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        data.write_all(b"pending").unwrap();
+        drop(data);
+
+        assert_eq!(
+            coordinator.finish_publication(&path).await.unwrap_err(),
+            reduct_base::internal_server_error!(
+                "Cannot commit file batch with pending remote mutations"
+            )
+        );
+        let retry = coordinator.begin_mutation(&path).await.unwrap();
+        assert_eq!(retry.token, token);
+        drop(retry);
+
+        coordinator.publish(&path).await.unwrap();
+        assert_ne!(
+            coordinator.begin_mutation(&path).await.unwrap().token,
+            token
+        );
+    }
+
+    #[tokio::test]
     async fn scheduled_publication_admits_mutations_while_syncing() {
         let path = entry_path();
         let first_path = path.join("first.blk");
@@ -494,5 +578,58 @@ mod tests {
         let marker = load(&path, &file_cache).await.unwrap().unwrap();
         assert_eq!(marker.state, PublicationState::Ready);
         assert_eq!(marker.generation, 2);
+    }
+
+    #[tokio::test]
+    async fn scheduled_publication_does_not_delete_recreated_wal() {
+        let path = entry_path();
+        let wal_path = path.join(".wal").join("1.wal");
+        let file_cache = build_test_file_cache();
+        let coordinator = Arc::new(PublicationCoordinator::new_with_cache(Arc::clone(
+            &file_cache,
+        )));
+        let pause = Arc::new(SyncPause {
+            started: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        *coordinator.sync_pause.lock().await = Some(Arc::clone(&pause));
+
+        let admission = coordinator.begin_mutation(&path).await.unwrap();
+        let token = admission.token.clone();
+        let mut wal = file_cache
+            .write_or_create_in_batch(&token, &wal_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        wal.write_all(b"old").unwrap();
+        drop(wal);
+        file_cache.remove_in_batch(&token, &wal_path).await.unwrap();
+        drop(admission);
+
+        let publisher = tokio::spawn({
+            let coordinator = Arc::clone(&coordinator);
+            let path = path.clone();
+            async move { coordinator.publish_scheduled(&path).await }
+        });
+        tokio::time::timeout(Duration::from_secs(2), pause.started.notified())
+            .await
+            .expect("publication did not finish synchronizing files");
+
+        let admission = coordinator.begin_mutation(&path).await.unwrap();
+        assert_eq!(admission.token, token);
+        let mut wal = file_cache
+            .write_or_create_in_batch(&token, &wal_path, SeekFrom::Start(0))
+            .await
+            .unwrap();
+        wal.write_all(b"replacement").unwrap();
+        drop(wal);
+        drop(admission);
+
+        pause.release.notify_one();
+        assert_eq!(publisher.await.unwrap().unwrap(), Some(token));
+        assert_eq!(std::fs::read(&wal_path).unwrap(), b"replacement");
+        assert_eq!(
+            load(&path, &file_cache).await.unwrap().unwrap().state,
+            PublicationState::Ready
+        );
     }
 }

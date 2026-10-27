@@ -13,6 +13,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Prevent admitted mutations from escaping the publication sync snapshot and leaving pending remote mutations, [#1695](https://github.com/reductstore/reductstore/pull/1695)
 - Bind each ready entry publication marker to its exact block index so read-only replicas reject stale cached indexes, [PR-1671](https://github.com/reductstore/reductstore/pull/1671)
 - Avoid blocking update mutations while a scheduled publication synchronizes its current batch, [PR-1666](https://github.com/reductstore/reductstore/pull/1666)
 - Prevent remote cache eviction from unlinking files while they are being accessed, [PR-1665](https://github.com/reductstore/reductstore/pull/1665)
@@ -32,6 +33,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use the shared ReductStore Debian base image for runtime containers, [PR-1639](https://github.com/reductstore/reductstore/pull/1639)
 - Publish entry mutations atomically for read-only replicas, [PR-1637](https://github.com/reductstore/reductstore/pull/1637) by @atimin
 - Replace formatted `ReductError` constructors with error macros, [PR-1631](https://github.com/reductstore/reductstore/pull/1631) by @vintcessun
+
+## 1.21.4 - 2026-10-21
+
+### Fixed
+
+- Return HTTP 404 instead of panicking when a record is removed between lookup and read, [PR-1684](https://github.com/reductstore/reductstore/pull/1684) by @mjcarroll
+
+## 1.21.3 - 2026-10-16
+
+### Fixed
+
+- Prevent FIFO quota cleanup from blocking storage info requests during slow block deletion, [PR-1673](https://github.com/reductstore/reductstore/pull/1673)
 
 ## 1.21.2 - 2026-10-08
 

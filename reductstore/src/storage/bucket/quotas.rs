@@ -2,11 +2,12 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::storage::bucket::Bucket;
-use crate::storage::entry::Entry;
 use log::debug;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::QuotaType;
 use reduct_base::{bad_request, internal_server_error};
+use std::cmp::Reverse;
+use std::collections::{BinaryHeap, HashMap};
 use std::sync::Arc;
 
 impl Bucket {
@@ -45,92 +46,145 @@ impl Bucket {
         self: &Arc<Self>,
         content_size: u64,
     ) -> Result<(), ReductError> {
-        let settings = self.settings.read().await?;
-        let quota_size = settings.quota_size.unwrap_or(0);
-        match settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
+        let (quota_size, quota_type) = {
+            let settings = self.settings.read().await?;
+            (
+                settings.quota_size.unwrap_or(0),
+                settings.quota_type.clone().unwrap_or(QuotaType::NONE),
+            )
+        };
+
+        match quota_type {
             QuotaType::NONE => Ok(()),
-            QuotaType::FIFO => self.remove_oldest_block(content_size, quota_size).await,
-            QuotaType::HARD => {
-                let entries = self.entries.read().await?;
-                let mut total_size = 0u64;
-                for entry in entries.values() {
-                    total_size += entry.size().await?;
+            QuotaType::FIFO => {
+                #[cfg(test)]
+                if let Some(notify) = self.quota_wait_notify.write().await?.take() {
+                    notify.notify_one();
                 }
-                if total_size + content_size as u64 > quota_size {
-                    Err(bad_request!("Quota of '{}' exceeded", self.name()))
-                } else {
-                    Ok(())
+
+                // Remote block deletion can take substantial time. Serialize cleanup so
+                // concurrent writes do not queue stale removals for the same block.
+                let _cleanup = self.quota_cleanup.write().await?;
+
+                let settings = self.settings.read().await?;
+                match settings.quota_type.clone().unwrap_or(QuotaType::NONE) {
+                    QuotaType::NONE => Ok(()),
+                    QuotaType::FIFO => self.remove_oldest_block(content_size).await,
+                    QuotaType::HARD => {
+                        let quota_size = settings.quota_size.unwrap_or(0);
+                        self.ensure_hard_quota(content_size, quota_size).await
+                    }
                 }
             }
+            QuotaType::HARD => self.ensure_hard_quota(content_size, quota_size).await,
         }
     }
 
-    async fn remove_oldest_block(
+    async fn ensure_hard_quota(
         &self,
         content_size: u64,
         quota_size: u64,
     ) -> Result<(), ReductError> {
-        let get_bucket_size = async || {
-            let entries = self.entries.read().await?;
+        let entries = self.entries.read().await?;
+        let mut total_size = 0u64;
+        for entry in entries.values() {
+            total_size += entry.size().await?;
+        }
+        if total_size + content_size > quota_size {
+            Err(bad_request!("Quota of '{}' exceeded", self.name()))
+        } else {
+            Ok(())
+        }
+    }
 
-            let mut total_size = 0u64;
-            for entry in entries.values() {
-                total_size += entry.size().await?;
-            }
-            Ok::<u64, ReductError>(total_size)
+    async fn remove_oldest_block(&self, content_size: u64) -> Result<(), ReductError> {
+        let entries = {
+            let entries = self.entries.read().await?;
+            entries
+                .iter()
+                .map(|(name, entry)| (name.clone(), Arc::clone(entry)))
+                .collect::<HashMap<_, _>>()
         };
 
-        let mut size = get_bucket_size().await? + content_size as u64;
-        while size > quota_size {
-            let mut success = false;
+        let mut candidates = BinaryHeap::new();
+        let mut candidates_ready = false;
+        let mut size = content_size;
 
-            {
-                debug!(
-                    "Need more space. Remove an oldest block from bucket '{}'",
-                    self.name()
-                );
+        loop {
+            let _admission = Arc::clone(&self.maintenance_admission).read_owned().await?;
 
-                let mut candidates: Vec<(u64, &Entry)> = vec![];
-                let entries = self.entries.read().await?;
-                for (_, entry) in entries.iter() {
-                    if !entry.is_eligible_for_fifo_eviction() {
-                        continue;
-                    }
-                    let info = entry.info().await?;
-                    candidates.push((info.oldest_record, entry));
-                }
-                candidates.sort_by_key(|entry| entry.0);
+            self.ensure_not_deleting().await?;
+            let settings = self.settings.read().await?;
+            let quota_type = settings.quota_type.clone().unwrap_or(QuotaType::NONE);
+            let quota_size = settings.quota_size.unwrap_or(0);
 
-                let candidates = candidates
-                    .iter()
-                    .map(|(_, entry)| entry.name().to_string())
-                    .collect::<Vec<String>>();
-
-                for name in candidates {
-                    debug!("Remove an oldest block from entry '{}'", name);
-                    match entries.get(&name).unwrap().try_remove_oldest_block().await {
-                        Ok(_) => {
-                            success = true;
-                            break;
-                        }
-                        Err(e) => {
-                            debug!("Failed to remove oldest block from entry '{}': {}", name, e);
+            if !candidates_ready {
+                for (name, entry) in &entries {
+                    size += entry.size().await?;
+                    if entry.is_eligible_for_fifo_eviction() {
+                        if let Some((block_id, _)) = entry.oldest_block().await? {
+                            candidates.push(Reverse((block_id, name.clone())));
                         }
                     }
                 }
+                candidates_ready = true;
             }
 
-            if !success {
+            match quota_type {
+                QuotaType::NONE => return Ok(()),
+                QuotaType::HARD => {
+                    return if size > quota_size {
+                        Err(bad_request!("Quota of '{}' exceeded", self.name()))
+                    } else {
+                        Ok(())
+                    };
+                }
+                QuotaType::FIFO => {}
+            }
+
+            if size <= quota_size {
+                return Ok(());
+            }
+
+            let Some(Reverse((_, name))) = candidates.pop() else {
                 return Err(internal_server_error!(
                     "Failed to keep quota of '{}'",
                     self.name()
                 ));
+            };
+
+            let entry = entries
+                .get(&name)
+                .expect("FIFO eviction candidate must reference a bucket entry");
+            debug!(
+                "Need more space. Remove an oldest block from entry '{}'",
+                name
+            );
+
+            match entry.try_remove_oldest_block().await {
+                Ok(removed_size) => {
+                    size = size.checked_sub(removed_size).ok_or_else(|| {
+                        internal_server_error!(
+                            "FIFO eviction size underflow in bucket '{}'",
+                            self.name()
+                        )
+                    })?;
+
+                    if let Some((block_id, _)) = entry.oldest_block().await? {
+                        candidates.push(Reverse((block_id, name)));
+                    }
+                }
+                Err(e) => {
+                    debug!("Failed to remove oldest block from entry '{}': {}", name, e);
+                }
             }
 
-            size = get_bucket_size().await? + content_size;
+            #[cfg(test)]
+            if let Some(pause) = self.fifo_pause.write().await?.take() {
+                pause.started.notify_one();
+                pause.release.notified().await;
+            }
         }
-
-        Ok(())
     }
 }
 
@@ -139,12 +193,48 @@ mod tests {
     use crate::cfg::Cfg;
     use crate::core::file_cache::build_test_file_cache;
     use crate::storage::bucket::tests::{bucket, path, read, write, write_meta};
-    use crate::storage::bucket::{Bucket, FreeSpaceFn};
+    use crate::storage::bucket::{Bucket, FifoPause, FreeSpaceFn};
+    use reduct_base::conflict;
     use reduct_base::error::{ErrorCode, ReductError};
     use reduct_base::msg::bucket_api::{BucketSettings, QuotaType};
     use rstest::rstest;
     use std::path::PathBuf;
     use std::sync::Arc;
+    use std::time::Duration;
+    use tokio::sync::Notify;
+    use tokio::time::timeout;
+
+    async fn bucket_with_two_blocks(path: PathBuf, quota_size: u64) -> Arc<Bucket> {
+        let bucket = bucket(
+            BucketSettings {
+                max_block_size: Some(100),
+                quota_type: Some(QuotaType::NONE),
+                max_block_records: Some(1),
+                ..BucketSettings::default()
+            },
+            path,
+        )
+        .await;
+        write(&bucket, "entry", 1, b"aaaa").await.unwrap();
+        write(&bucket, "entry", 2, b"bbbb").await.unwrap();
+        bucket.sync_fs().await.unwrap();
+        *bucket.settings.write().await.unwrap() = BucketSettings {
+            max_block_size: Some(100),
+            quota_type: Some(QuotaType::FIFO),
+            quota_size: Some(quota_size),
+            max_block_records: Some(1),
+        };
+        bucket
+    }
+
+    async fn entry_block_count(bucket: &Arc<Bucket>, entry_name: &str) -> u64 {
+        let entry = {
+            let entries = bucket.entries.read().await.unwrap();
+            entries.get(entry_name).cloned().unwrap()
+        };
+        entry.info().await.unwrap().block_count
+    }
+
     /// Build a bucket whose free-space provider reports a fixed number of
     /// available bytes, so the disk-space gate can be exercised deterministically.
     async fn bucket_with_free_space(
@@ -232,6 +322,43 @@ mod tests {
                 .is_ok()
         );
         assert!(crate::storage::bucket::tests::read(&bucket, "data-2", 2)
+            .await
+            .is_ok());
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn test_fifo_quota_refreshes_only_evicted_entry_candidate(path: PathBuf) {
+        let bucket = bucket(
+            BucketSettings {
+                quota_type: Some(QuotaType::NONE),
+                max_block_records: Some(1),
+                ..BucketSettings::default()
+            },
+            path,
+        )
+        .await;
+        let blob: &[u8] = &[0; 40];
+
+        write(&bucket, "first", 1, blob).await.unwrap();
+        write(&bucket, "second", 2, blob).await.unwrap();
+        write(&bucket, "first", 3, blob).await.unwrap();
+
+        *bucket.settings.write().await.unwrap() = BucketSettings {
+            quota_type: Some(QuotaType::FIFO),
+            quota_size: Some(60),
+            max_block_records: Some(1),
+            ..BucketSettings::default()
+        };
+        bucket.remove_oldest_block(0).await.unwrap();
+
+        assert!(crate::storage::bucket::tests::read(&bucket, "first", 1)
+            .await
+            .is_err());
+        assert!(crate::storage::bucket::tests::read(&bucket, "second", 2)
+            .await
+            .is_err());
+        assert!(crate::storage::bucket::tests::read(&bucket, "first", 3)
             .await
             .is_ok());
     }
@@ -407,5 +534,125 @@ mod tests {
         assert!(!compressed_data_path.exists());
         assert!(!compressed_desc_path.exists());
         assert!(bucket.clone().info().await.unwrap().info.size <= size + blob.len() as u64 - 1);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fifo_cleanup_queued_behind_cleanup_lock_observes_deletion(path: PathBuf) {
+        let bucket = bucket_with_two_blocks(path, 0).await;
+        let wait = Arc::new(Notify::new());
+        bucket.set_quota_wait_notify(Some(wait.clone())).await;
+
+        let cleanup_guard = bucket.quota_cleanup.write().await.unwrap();
+        let cleanup = tokio::spawn({
+            let bucket = Arc::clone(&bucket);
+            async move { bucket.keep_quota_for(0).await }
+        });
+        timeout(Duration::from_secs(2), wait.notified())
+            .await
+            .expect("cleanup did not reach the quota cleanup lock");
+
+        bucket.mark_deleting().await.unwrap();
+        drop(cleanup_guard);
+
+        let err = cleanup.await.unwrap().unwrap_err();
+        assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        assert_eq!(entry_block_count(&bucket, "entry").await, 2);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fifo_cleanup_yields_to_queued_deletion_at_block_boundary(path: PathBuf) {
+        let bucket = bucket_with_two_blocks(path, 0).await;
+        let pause = Arc::new(FifoPause {
+            started: Notify::new(),
+            release: Notify::new(),
+        });
+        bucket.set_fifo_pause(Some(pause.clone())).await;
+
+        let cleanup = tokio::spawn({
+            let bucket = Arc::clone(&bucket);
+            async move { bucket.keep_quota_for(0).await }
+        });
+        timeout(Duration::from_secs(2), pause.started.notified())
+            .await
+            .expect("cleanup did not pause after the first block");
+        assert_eq!(entry_block_count(&bucket, "entry").await, 1);
+
+        let deletion_waiter = tokio::spawn({
+            let admission = Arc::clone(&bucket.maintenance_admission);
+            async move { admission.write_owned().await.unwrap() }
+        });
+        tokio::task::yield_now().await;
+
+        pause.release.notify_one();
+        let admission = timeout(Duration::from_secs(2), deletion_waiter)
+            .await
+            .expect("deletion did not acquire maintenance admission")
+            .unwrap();
+
+        bucket.mark_deleting().await.unwrap();
+        assert_eq!(entry_block_count(&bucket, "entry").await, 1);
+        drop(admission);
+
+        let err = cleanup.await.unwrap().unwrap_err();
+        assert_eq!(err, conflict!("Bucket 'test' is being deleted"));
+        assert_eq!(entry_block_count(&bucket, "entry").await, 1);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fifo_cleanup_uses_quota_size_changed_while_waiting(path: PathBuf) {
+        let bucket = bucket_with_two_blocks(path, 1_000_000).await;
+        let wait = Arc::new(Notify::new());
+        bucket.set_quota_wait_notify(Some(wait.clone())).await;
+
+        let cleanup_guard = bucket.quota_cleanup.write().await.unwrap();
+        let cleanup = tokio::spawn({
+            let bucket = Arc::clone(&bucket);
+            async move { bucket.keep_quota_for(0).await }
+        });
+        timeout(Duration::from_secs(2), wait.notified())
+            .await
+            .expect("cleanup did not reach the quota cleanup lock");
+
+        *bucket.settings.write().await.unwrap() = BucketSettings {
+            max_block_size: Some(100),
+            quota_type: Some(QuotaType::FIFO),
+            quota_size: Some(0),
+            max_block_records: Some(1),
+        };
+        drop(cleanup_guard);
+
+        cleanup.await.unwrap().unwrap();
+        assert_eq!(entry_block_count(&bucket, "entry").await, 0);
+    }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn fifo_cleanup_uses_quota_type_changed_while_waiting(path: PathBuf) {
+        let bucket = bucket_with_two_blocks(path, 0).await;
+        let wait = Arc::new(Notify::new());
+        bucket.set_quota_wait_notify(Some(wait.clone())).await;
+
+        let cleanup_guard = bucket.quota_cleanup.write().await.unwrap();
+        let cleanup = tokio::spawn({
+            let bucket = Arc::clone(&bucket);
+            async move { bucket.keep_quota_for(0).await }
+        });
+        timeout(Duration::from_secs(2), wait.notified())
+            .await
+            .expect("cleanup did not reach the quota cleanup lock");
+
+        *bucket.settings.write().await.unwrap() = BucketSettings {
+            max_block_size: Some(100),
+            quota_type: Some(QuotaType::HARD),
+            quota_size: Some(1_000_000),
+            max_block_records: Some(1),
+        };
+        drop(cleanup_guard);
+
+        cleanup.await.unwrap().unwrap();
+        assert_eq!(entry_block_count(&bucket, "entry").await, 2);
     }
 }
