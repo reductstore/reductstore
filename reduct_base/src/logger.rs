@@ -143,15 +143,14 @@ impl Log for Logger {
 }
 
 impl Logger {
-    /// Initialize the logger with no capture sink (clearing any previously
-    /// installed one).
+    /// Initialize or reconfigure the logger while preserving any installed
+    /// capture sink.
     ///
     /// # Arguments
     ///
     /// * `level` - The log level to use. Can be one of TRACE, DEBUG, INFO, WARN, ERROR.
     pub fn init(levels: &str) {
         Self::setup(levels);
-        *LOGGER.sink.write().unwrap() = None;
     }
 
     /// Initialize the logger and install a capture [`LogSink`]. The sink is
@@ -159,6 +158,12 @@ impl Logger {
     pub fn init_with_sink(levels: &str, sink: LogSink) {
         Self::setup(levels);
         *LOGGER.sink.write().unwrap() = Some(sink);
+    }
+
+    /// Remove the currently installed capture sink without changing the log
+    /// level configuration.
+    pub fn clear_sink() {
+        *LOGGER.sink.write().unwrap() = None;
     }
 
     fn setup(levels: &str) {
@@ -227,6 +232,13 @@ mod test_support {
 mod tests {
     use super::*;
     use serial_test::serial;
+    use std::sync::Mutex;
+
+    fn capture_messages(captured: Arc<Mutex<Vec<String>>>) -> LogSink {
+        Arc::new(move |snapshot| {
+            captured.lock().unwrap().push(snapshot.message);
+        })
+    }
 
     #[test]
     #[serial]
@@ -261,12 +273,46 @@ mod tests {
         );
 
         log::warn!("hello sink");
-        Logger::init("INFO"); // clears the sink
+        Logger::clear_sink();
 
         let snapshots = captured.lock().unwrap();
         assert!(snapshots
             .iter()
             .any(|snap| snap.message == "hello sink" && snap.level == Level::Warn));
+    }
+
+    #[test]
+    #[serial]
+    fn init_preserves_installed_sink() {
+        let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        Logger::init_with_sink("TRACE", capture_messages(Arc::clone(&captured)));
+
+        Logger::init("WARN");
+        Logger::init("INFO");
+        log::warn!("sink survives reinitialization");
+        Logger::clear_sink();
+
+        assert!(captured
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|message| message == "sink survives reinitialization"));
+    }
+
+    #[test]
+    #[serial]
+    fn clear_sink_stops_capture() {
+        let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
+        Logger::init_with_sink("TRACE", capture_messages(Arc::clone(&captured)));
+
+        Logger::clear_sink();
+        log::warn!("not captured");
+
+        assert!(captured
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|message| message != "not captured"));
     }
 
     /// Constraint B: a log emitted *during* the capture hook still reaches the
@@ -293,7 +339,7 @@ mod tests {
 
         log::warn!("outer-message");
         let console = test_support::captured_console();
-        Logger::init("INFO"); // clears the sink
+        Logger::clear_sink();
 
         assert!(
             console.iter().any(|line| line.contains("outer-message")),
