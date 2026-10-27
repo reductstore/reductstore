@@ -64,8 +64,12 @@ impl PublicationCoordinator {
         &self,
         path: &Path,
     ) -> Result<MutationAdmission, ReductError> {
-        self.publication_revision.fetch_add(1, Ordering::AcqRel);
         let guard = Arc::clone(&self.admission).read_owned().await;
+        // Advance the revision only after this mutation is admitted. Otherwise a
+        // publisher holding exclusive admission can observe the new revision,
+        // start another sync pass, and then admit this mutation after that pass
+        // has already snapshotted the dirty files.
+        self.publication_revision.fetch_add(1, Ordering::AcqRel);
         let mut batch = self.batch.lock().await;
         if batch.is_none() {
             let file_batch = self.file_cache.begin_batch_for_scope(path).await?;
@@ -351,6 +355,32 @@ mod tests {
         std::fs::create_dir_all(&path).unwrap();
         std::fs::write(path.join(BLOCK_INDEX_FILE), []).unwrap();
         path
+    }
+
+    #[tokio::test]
+    async fn blocked_mutation_does_not_advance_publication_revision() {
+        let file_cache = build_test_file_cache();
+        let coordinator = Arc::new(PublicationCoordinator::new_with_cache(file_cache));
+        let path = entry_path();
+        let publisher = Arc::clone(&coordinator.admission).write_owned().await;
+        let (started_tx, started_rx) = tokio::sync::oneshot::channel();
+
+        let mutation = tokio::spawn({
+            let coordinator = Arc::clone(&coordinator);
+            async move {
+                started_tx.send(()).unwrap();
+                coordinator.begin_mutation(&path).await
+            }
+        });
+        started_rx.await.unwrap();
+        tokio::task::yield_now().await;
+
+        assert_eq!(coordinator.publication_revision.load(Ordering::Acquire), 0);
+
+        drop(publisher);
+        let admission = mutation.await.unwrap().unwrap();
+        assert_eq!(coordinator.publication_revision.load(Ordering::Acquire), 1);
+        drop(admission);
     }
 
     #[tokio::test]
