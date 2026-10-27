@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Persist system events when instance or event names contain characters unsupported by storage entry paths, [PR-1699](https://github.com/reductstore/reductstore/pull/1699)
+
 ## 1.21.4 - 2026-10-21
 
 ### Fixed

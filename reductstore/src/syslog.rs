@@ -26,6 +26,7 @@ use tokio::sync::Mutex;
 
 pub(crate) use aggregate::usage::UsageEventAggregator;
 pub(crate) use event::{SystemEvent, SystemEventKind};
+pub(crate) use path::sanitize_path_segment;
 pub(crate) use sink::{BoxedSystemLogger, LogSystemEvent, ReplicationNotifier, SystemEventSink};
 use system_event_logger::SystemEventLoggerBuilder;
 
