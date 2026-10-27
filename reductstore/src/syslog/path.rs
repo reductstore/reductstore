@@ -13,20 +13,35 @@ use reduct_base::Labels;
 
 /// Resolve the `$system` entry path `<kind-prefix>/<instance>/<entry>`.
 ///
-/// An empty instance falls back to `unknown`, matching both writers' prior
-/// behavior.
+/// Dynamic segments are reduced to the storage-safe character set without
+/// changing the event itself, so the JSON payload preserves producer values.
 pub(crate) fn entry_path(event: &SystemEvent) -> String {
-    let instance = if event.instance.is_empty() {
-        "unknown"
-    } else {
-        event.instance.as_str()
-    };
     format!(
         "{}/{}/{}",
         event.kind.entry_prefix(),
-        instance,
-        event.entry_name
+        sanitize_path_segment(&event.instance),
+        sanitize_path_segment(&event.entry_name)
     )
+}
+
+/// Convert a dynamically produced path segment to an entry-name-safe segment.
+pub(crate) fn sanitize_path_segment(value: &str) -> String {
+    let sanitized: String = value
+        .chars()
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_') {
+                ch
+            } else {
+                '_'
+            }
+        })
+        .collect();
+
+    if sanitized.is_empty() {
+        "unknown".to_string()
+    } else {
+        sanitized
+    }
 }
 
 /// Build the record labels for an event, matching the local writer's prior
@@ -73,6 +88,27 @@ mod tests {
     fn entry_path_empty_instance_falls_back_to_unknown() {
         let e = event(SystemEventKind::Audit, "", serde_json::json!({}));
         assert_eq!(entry_path(&e), "audit/unknown/entry");
+    }
+
+    #[rstest::rstest]
+    #[case("plant.example.com", "SP.9322", "plant_example_com", "SP_9322")]
+    #[case("plant:west", "SP 9322", "plant_west", "SP_9322")]
+    #[case("plant/node", "$meta", "plant_node", "_meta")]
+    fn entry_path_sanitizes_dynamic_segments(
+        #[case] instance: &str,
+        #[case] entry_name: &str,
+        #[case] expected_instance: &str,
+        #[case] expected_entry_name: &str,
+    ) {
+        let mut e = event(SystemEventKind::Lifecycle, instance, serde_json::json!({}));
+        e.entry_name = entry_name.to_string();
+
+        assert_eq!(
+            entry_path(&e),
+            format!("lifecycle/{expected_instance}/{expected_entry_name}")
+        );
+        assert_eq!(e.instance, instance);
+        assert_eq!(e.entry_name, entry_name);
     }
 
     #[test]
