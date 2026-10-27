@@ -39,9 +39,25 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::Mutex;
+#[cfg(test)]
+use tokio::sync::Notify;
+use tokio::sync::OwnedRwLockWriteGuard;
+use tokio::task::JoinHandle;
 
 pub(crate) use builder::BucketBuilder;
+
+#[cfg(test)]
+pub(crate) type DeletionAttemptHook = Arc<
+    dyn Fn(usize) -> futures_util::future::BoxFuture<'static, Result<(), ReductError>>
+        + Send
+        + Sync,
+>;
+
+#[cfg(test)]
+pub(crate) struct FifoPause {
+    pub(crate) started: Notify,
+    pub(crate) release: Notify,
+}
 
 fn normalize_entry_name(path: &std::path::Path) -> String {
     path.to_string_lossy().replace('\\', "/")
@@ -86,7 +102,15 @@ pub(crate) struct Bucket {
     usage_counters: Arc<UsageCounters>,
     free_space_fn: FreeSpaceFn,
     file_cache: Arc<FileCache>,
-    quota_cleanup: Mutex<()>,
+    quota_cleanup: AsyncRwLock<()>,
+    maintenance_admission: Arc<AsyncRwLock<()>>,
+    deletion_task: AsyncRwLock<Option<JoinHandle<Result<(), ReductError>>>>,
+    #[cfg(test)]
+    pub(in crate::storage) deletion_attempt_hook: AsyncRwLock<Option<DeletionAttemptHook>>,
+    #[cfg(test)]
+    fifo_pause: AsyncRwLock<Option<Arc<FifoPause>>>,
+    #[cfg(test)]
+    quota_wait_notify: AsyncRwLock<Option<Arc<Notify>>>,
 }
 
 #[derive(Copy, Clone, Eq, PartialEq)]
@@ -400,12 +424,100 @@ impl Bucket {
     }
 
     pub(super) async fn mark_deleting(&self) -> Result<(), ReductError> {
-        self.ensure_not_deleting().await?;
-        *self.status.write().await? = ResourceStatus::Deleting;
-        for entry in self.entries.read().await?.values() {
-            entry.mark_deleting().await?;
-        }
+        let mut status = self.status.write().await?;
+        *status = ResourceStatus::Deleting;
         Ok(())
+    }
+
+    pub(in crate::storage) async fn admit_deletion<F>(
+        self: &Arc<Self>,
+        buckets: &Arc<AsyncRwLock<BTreeMap<String, Arc<Bucket>>>>,
+        name: &str,
+        spawn_worker: F,
+    ) -> Result<(), ReductError>
+    where
+        F: FnOnce(Arc<Self>, OwnedRwLockWriteGuard<()>) -> JoinHandle<Result<(), ReductError>>,
+    {
+        let mut deletion_task = self.deletion_task.write().await?;
+
+        if let Some(handle) = deletion_task.as_ref() {
+            if !handle.is_finished() {
+                return Ok(());
+            }
+
+            let handle = deletion_task
+                .take()
+                .expect("finished deletion handle must be present");
+            match handle.await {
+                Ok(Ok(())) => {
+                    debug!(
+                        "Previous deletion worker for bucket '{}' finished",
+                        self.name
+                    )
+                }
+                Ok(Err(err)) => {
+                    error!(
+                        "Previous deletion worker for bucket '{}' failed; a repeated DELETE can resume cleanup: {}",
+                        self.name, err
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        "Previous deletion worker for bucket '{}' did not join cleanly; a repeated DELETE can resume cleanup: {}",
+                        self.name, err
+                    );
+                }
+            }
+        }
+
+        let admission = Arc::clone(&self.maintenance_admission)
+            .write_owned()
+            .await?;
+
+        let is_same_bucket = {
+            let buckets = buckets.read().await?;
+            buckets
+                .get(name)
+                .is_some_and(|current| Arc::ptr_eq(current, self))
+        };
+        if !is_same_bucket {
+            debug!(
+                "Skip resuming deletion for bucket '{}' because it was replaced or removed",
+                name
+            );
+            return Ok(());
+        }
+
+        self.mark_deleting().await?;
+
+        let handle = spawn_worker(Arc::clone(self), admission);
+        *deletion_task = Some(handle);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn set_deletion_attempt_hook(&self, hook: Option<DeletionAttemptHook>) {
+        *self.deletion_attempt_hook.write().await.unwrap() = hook;
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn has_finished_deletion_task(&self) -> bool {
+        self.deletion_task
+            .read()
+            .await
+            .unwrap()
+            .as_ref()
+            .map_or(true, JoinHandle::is_finished)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn set_fifo_pause(&self, pause: Option<Arc<FifoPause>>) {
+        *self.fifo_pause.write().await.unwrap() = pause;
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn set_quota_wait_notify(&self, notify: Option<Arc<Notify>>) {
+        *self.quota_wait_notify.write().await.unwrap() = notify;
     }
 
     pub(super) async fn ensure_not_deleting(&self) -> Result<(), ReductError> {
@@ -646,15 +758,13 @@ pub(crate) mod tests {
 
         #[rstest]
         #[tokio::test]
-        async fn bucket_mark_deleting_returns_conflict_when_already_deleting(
+        async fn bucket_mark_deleting_is_idempotent_when_already_deleting(
             #[future] bucket: Arc<Bucket>,
         ) {
             let bucket = bucket.await;
             bucket.mark_deleting().await.unwrap();
-            assert_eq!(
-                bucket.mark_deleting().await,
-                Err(conflict!("Bucket 'test' is being deleted"))
-            );
+            bucket.mark_deleting().await.unwrap();
+            assert_eq!(bucket.status().await.unwrap(), ResourceStatus::Deleting);
         }
 
         #[rstest]
