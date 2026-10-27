@@ -32,55 +32,8 @@ everything to `RS_ZENOH_BUCKET` (default `zenoh`). The same paths can also be co
 Use one style or the other: setting both indexed and unindexed variables, or an indexed variable
 without a matching `_KEYEXPRS`, aborts startup instead of running a partial configuration.
 
-The indexed suite is split into one behavior per file. It exercises static routing, multiple
-expressions, dynamic and pre-existing key-prefix buckets, fallback routing, denied routes, and
-multi-bucket queries.
-
-| Test file | Observable behavior |
-| --- | --- |
-| `routing/static_bucket_test.py` | Static routing writes to its configured bucket. |
-| `routing/static_keyexprs_test.py` | Each expression in a static block reaches that bucket. |
-| `routing/static_queryable_test.py` | A static queryable reads its configured bucket. |
-| `routing/key_prefix_create_test.py` | An allowed key prefix creates and writes to a bucket. |
-| `routing/key_prefix_existing_test.py` | A pre-existing key-prefix bucket accepts writes when creation is disabled. |
-| `routing/key_prefix_no_create_test.py` | A missing key-prefix bucket is not created when creation is disabled. |
-| `routing/queryable_no_create_test.py` | A key-prefix queryable does not create a missing bucket. |
-| `routing/key_prefix_fallback_test.py` | A one-chunk key uses the configured fallback bucket and queryable. |
-| `routing/key_prefix_no_fallback_test.py` | A one-chunk key without a fallback is rejected. |
-| `routing/key_prefix_allowlist_test.py` | A bucket outside the allowlist is rejected. |
-| `routing/queryable_multibucket_test.py` | One queryable serves independent data from multiple routed buckets. |
-
-1) Source the committed indexed-routing configuration and start ReductStore:
-```bash
-source integration_tests/zenoh/routing.env.sh
-RS_DATA_PATH=~/data-test RS_DISABLE_AUTH=true RS_ZENOH_ENABLED=1 \
-  RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tcp/127.0.0.1:7447]" \
-  cargo run -p reductstore --features "fs-backend web-console zenoh-api"
-```
-
-2) In another terminal, create an isolated test environment and install the exact dependencies:
-```bash
-python3 -m venv /tmp/reductstore-zenoh-venv
-/tmp/reductstore-zenoh-venv/bin/pip install -r integration_tests/zenoh/requirements.txt
-```
-
-3) Run one behavior at a time:
-```bash
-STORAGE_URL=http://127.0.0.1:8383 ZENOH_CONNECT=tcp/127.0.0.1:7447 \
-  RS_ZENOH_ROUTING_TESTS=1 \
-  /tmp/reductstore-zenoh-venv/bin/python -m pytest -v \
-  integration_tests/zenoh/routing/key_prefix_fallback_test.py
-```
-
-Run every indexed-routing behavior:
-```bash
-STORAGE_URL=http://127.0.0.1:8383 ZENOH_CONNECT=tcp/127.0.0.1:7447 \
-  RS_ZENOH_ROUTING_TESTS=1 \
-  /tmp/reductstore-zenoh-venv/bin/python -m pytest -v integration_tests/zenoh/routing
-```
-
-`_KEYEXPRS` takes Zenoh key expressions (`$*` matches within a chunk). `_BUCKET_ALLOWLIST`
-takes plain globs matched against bucket names.
+For the full indexed routing test suite - setup, environment variable explanations, and one
+command per behavior - see **[zenoh/routing/README.md](zenoh/routing/README.md)**.
 
 ## Zenoh Inline Credentials (TLS/Auth)
 
