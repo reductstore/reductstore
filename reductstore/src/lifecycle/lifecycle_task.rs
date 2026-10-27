@@ -270,7 +270,7 @@ impl LifecycleTask {
                 .unwrap_or_default()
                 .as_micros() as u64,
             instance: sink.instance_name.clone(),
-            entry_name: Self::sanitize_task_name(name),
+            entry_name: name.to_string(),
             status,
             message,
             payload,
@@ -302,18 +302,6 @@ impl LifecycleTask {
                 name, err
             ),
         }
-    }
-
-    fn sanitize_task_name(name: &str) -> String {
-        name.chars()
-            .map(|ch| {
-                if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                    ch
-                } else {
-                    '_'
-                }
-            })
-            .collect()
     }
 }
 
