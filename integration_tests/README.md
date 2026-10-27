@@ -50,64 +50,33 @@ multi-bucket queries.
 | `routing/key_prefix_allowlist_test.py` | A bucket outside the allowlist is rejected. |
 | `routing/queryable_multibucket_test.py` | One queryable serves independent data from multiple routed buckets. |
 
-1) Start ReductStore with the full indexed matrix:
+1) Source the committed indexed-routing configuration and start ReductStore:
 ```bash
-cat > /tmp/reductstore-zenoh-routing.sh <<'EOF'
-export RS_ZENOH_SUB_0_KEYEXPRS='entry_$*,factory/**'
-export RS_ZENOH_SUB_0_BUCKET=zenoh
-export RS_ZENOH_SUB_1_KEYEXPRS='rt_$*/**'
-export RS_ZENOH_SUB_1_ROUTING=key-prefix
-export RS_ZENOH_SUB_1_BUCKET_ALLOWLIST='rt_site_*'
-export RS_ZENOH_SUB_1_ALLOW_BUCKET_CREATION=true
-export RS_ZENOH_SUB_2_KEYEXPRS='existing_$*/**'
-export RS_ZENOH_SUB_2_ROUTING=key-prefix
-export RS_ZENOH_SUB_2_BUCKET_ALLOWLIST='existing_site_*'
-export RS_ZENOH_SUB_3_KEYEXPRS='fallback_$*'
-export RS_ZENOH_SUB_3_ROUTING=key-prefix
-export RS_ZENOH_SUB_3_BUCKET=zenoh_fallback
-export RS_ZENOH_SUB_3_BUCKET_ALLOWLIST=zenoh_fallback
-export RS_ZENOH_SUB_4_KEYEXPRS='orphan_$*'
-export RS_ZENOH_SUB_4_ROUTING=key-prefix
-export RS_ZENOH_SUB_4_BUCKET_ALLOWLIST='orphan_*'
-export RS_ZENOH_QUERY_0_KEYEXPRS='entry_$*,factory/**'
-export RS_ZENOH_QUERY_0_BUCKET=zenoh
-export RS_ZENOH_QUERY_1_KEYEXPRS='rt_$*/**'
-export RS_ZENOH_QUERY_1_ROUTING=key-prefix
-export RS_ZENOH_QUERY_1_BUCKET_ALLOWLIST='rt_site_*'
-export RS_ZENOH_QUERY_2_KEYEXPRS='existing_$*/**'
-export RS_ZENOH_QUERY_2_ROUTING=key-prefix
-export RS_ZENOH_QUERY_2_BUCKET_ALLOWLIST='existing_site_*'
-export RS_ZENOH_QUERY_3_KEYEXPRS='fallback_$*'
-export RS_ZENOH_QUERY_3_ROUTING=key-prefix
-export RS_ZENOH_QUERY_3_BUCKET=zenoh_fallback
-export RS_ZENOH_QUERY_3_BUCKET_ALLOWLIST=zenoh_fallback
-export RS_ZENOH_QUERY_4_KEYEXPRS='orphan_$*'
-export RS_ZENOH_QUERY_4_ROUTING=key-prefix
-export RS_ZENOH_QUERY_4_BUCKET_ALLOWLIST='orphan_*'
-EOF
-
-source /tmp/reductstore-zenoh-routing.sh
+source integration_tests/zenoh/routing.env.sh
 RS_DATA_PATH=~/data-test RS_DISABLE_AUTH=true RS_ZENOH_ENABLED=1 \
   RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tcp/127.0.0.1:7447]" \
   cargo run -p reductstore --features "fs-backend web-console zenoh-api"
 ```
 
-2) In another terminal, create an isolated test environment, install the exact dependencies, and
-run the matrix:
+2) In another terminal, create an isolated test environment and install the exact dependencies:
 ```bash
 python3 -m venv /tmp/reductstore-zenoh-venv
 /tmp/reductstore-zenoh-venv/bin/pip install -r integration_tests/zenoh/requirements.txt
-STORAGE_URL=http://127.0.0.1:8383 ZENOH_CONNECT=tcp/127.0.0.1:7447 \
-  RS_ZENOH_ROUTING_TESTS=1 \
-  /tmp/reductstore-zenoh-venv/bin/python -m pytest -v integration_tests/zenoh/routing
 ```
 
-Run one behavior while inspecting the server logs:
+3) Run one behavior at a time:
 ```bash
 STORAGE_URL=http://127.0.0.1:8383 ZENOH_CONNECT=tcp/127.0.0.1:7447 \
   RS_ZENOH_ROUTING_TESTS=1 \
   /tmp/reductstore-zenoh-venv/bin/python -m pytest -v \
   integration_tests/zenoh/routing/key_prefix_fallback_test.py
+```
+
+Run every indexed-routing behavior:
+```bash
+STORAGE_URL=http://127.0.0.1:8383 ZENOH_CONNECT=tcp/127.0.0.1:7447 \
+  RS_ZENOH_ROUTING_TESTS=1 \
+  /tmp/reductstore-zenoh-venv/bin/python -m pytest -v integration_tests/zenoh/routing
 ```
 
 `_KEYEXPRS` takes Zenoh key expressions (`$*` matches within a chunk). `_BUCKET_ALLOWLIST`

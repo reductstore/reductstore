@@ -73,41 +73,12 @@ runs:
       env:
         ROUTING_MODE: ${{ inputs.routing_mode }}
       run: |
-        # written to a file so the '*' and '$*' wildcards survive shell expansion
         if [ "$ROUTING_MODE" = "indexed" ]; then
-          cat > /tmp/zenoh-routing.env <<'EOF'
-        RS_ZENOH_SUB_0_KEYEXPRS=entry_$*,factory/**
-        RS_ZENOH_SUB_0_BUCKET=zenoh
-        RS_ZENOH_SUB_1_KEYEXPRS=rt_$*/**
-        RS_ZENOH_SUB_1_ROUTING=key-prefix
-        RS_ZENOH_SUB_1_BUCKET_ALLOWLIST=rt_site_*
-        RS_ZENOH_SUB_1_ALLOW_BUCKET_CREATION=true
-        RS_ZENOH_SUB_2_KEYEXPRS=existing_$*/**
-        RS_ZENOH_SUB_2_ROUTING=key-prefix
-        RS_ZENOH_SUB_2_BUCKET_ALLOWLIST=existing_site_*
-        RS_ZENOH_SUB_3_KEYEXPRS=fallback_$*
-        RS_ZENOH_SUB_3_ROUTING=key-prefix
-        RS_ZENOH_SUB_3_BUCKET=zenoh_fallback
-        RS_ZENOH_SUB_3_BUCKET_ALLOWLIST=zenoh_fallback
-        RS_ZENOH_SUB_4_KEYEXPRS=orphan_$*
-        RS_ZENOH_SUB_4_ROUTING=key-prefix
-        RS_ZENOH_SUB_4_BUCKET_ALLOWLIST=orphan_*
-        RS_ZENOH_QUERY_0_KEYEXPRS=entry_$*,factory/**
-        RS_ZENOH_QUERY_0_BUCKET=zenoh
-        RS_ZENOH_QUERY_1_KEYEXPRS=rt_$*/**
-        RS_ZENOH_QUERY_1_ROUTING=key-prefix
-        RS_ZENOH_QUERY_1_BUCKET_ALLOWLIST=rt_site_*
-        RS_ZENOH_QUERY_2_KEYEXPRS=existing_$*/**
-        RS_ZENOH_QUERY_2_ROUTING=key-prefix
-        RS_ZENOH_QUERY_2_BUCKET_ALLOWLIST=existing_site_*
-        RS_ZENOH_QUERY_3_KEYEXPRS=fallback_$*
-        RS_ZENOH_QUERY_3_ROUTING=key-prefix
-        RS_ZENOH_QUERY_3_BUCKET=zenoh_fallback
-        RS_ZENOH_QUERY_3_BUCKET_ALLOWLIST=zenoh_fallback
-        RS_ZENOH_QUERY_4_KEYEXPRS=orphan_$*
-        RS_ZENOH_QUERY_4_ROUTING=key-prefix
-        RS_ZENOH_QUERY_4_BUCKET_ALLOWLIST=orphan_*
-        EOF
+          source integration_tests/zenoh/routing.env.sh
+          : > /tmp/zenoh-routing.env
+          for variable in "${ZENOH_ROUTING_ENV_VARS[@]}"; do
+            printf '%s=%s\n' "$variable" "${!variable}" >> /tmp/zenoh-routing.env
+          done
           echo "routing_tests=1" >> $GITHUB_OUTPUT
         else
           cat > /tmp/zenoh-routing.env <<'EOF'
