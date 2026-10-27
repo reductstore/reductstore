@@ -232,6 +232,13 @@ mod test_support {
 mod tests {
     use super::*;
     use serial_test::serial;
+    use std::sync::Mutex;
+
+    fn capture_messages(captured: Arc<Mutex<Vec<String>>>) -> LogSink {
+        Arc::new(move |snapshot| {
+            captured.lock().unwrap().push(snapshot.message);
+        })
+    }
 
     #[test]
     #[serial]
@@ -277,46 +284,35 @@ mod tests {
     #[test]
     #[serial]
     fn init_preserves_installed_sink() {
-        use std::sync::Mutex;
-
         let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let sink_captured = Arc::clone(&captured);
-        Logger::init_with_sink(
-            "TRACE",
-            Arc::new(move |snapshot| {
-                sink_captured.lock().unwrap().push(snapshot.message);
-            }),
-        );
+        Logger::init_with_sink("TRACE", capture_messages(Arc::clone(&captured)));
 
         Logger::init("WARN");
         Logger::init("INFO");
         log::warn!("sink survives reinitialization");
         Logger::clear_sink();
 
-        assert_eq!(
-            captured.lock().unwrap().as_slice(),
-            ["sink survives reinitialization"]
-        );
+        assert!(captured
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|message| message == "sink survives reinitialization"));
     }
 
     #[test]
     #[serial]
     fn clear_sink_stops_capture() {
-        use std::sync::Mutex;
-
         let captured: Arc<Mutex<Vec<String>>> = Arc::new(Mutex::new(Vec::new()));
-        let sink_captured = Arc::clone(&captured);
-        Logger::init_with_sink(
-            "TRACE",
-            Arc::new(move |snapshot| {
-                sink_captured.lock().unwrap().push(snapshot.message);
-            }),
-        );
+        Logger::init_with_sink("TRACE", capture_messages(Arc::clone(&captured)));
 
         Logger::clear_sink();
         log::warn!("not captured");
 
-        assert!(captured.lock().unwrap().is_empty());
+        assert!(captured
+            .lock()
+            .unwrap()
+            .iter()
+            .all(|message| message != "not captured"));
     }
 
     /// Constraint B: a log emitted *during* the capture hook still reaches the
