@@ -74,7 +74,7 @@ runs:
         ROUTING_MODE: ${{ inputs.routing_mode }}
       run: |
         if [ "$ROUTING_MODE" = "indexed" ]; then
-          source integration_tests/zenoh/routing.env.sh
+          source integration_tests/zenoh/routing/env.sh
           : > /tmp/zenoh-routing.env
           for variable in "${ZENOH_ROUTING_ENV_VARS[@]}"; do
             printf '%s=%s\n' "$variable" "${!variable}" >> /tmp/zenoh-routing.env

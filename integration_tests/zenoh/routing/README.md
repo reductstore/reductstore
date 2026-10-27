@@ -17,7 +17,7 @@ docker run --init -d --name zenoh-router -p 7447:7447/tcp eclipse/zenoh
 In a dedicated terminal - keep it open while you run tests:
 
 ```bash
-source integration_tests/zenoh/routing.env.sh
+source integration_tests/zenoh/routing/env.sh
 
 RS_DATA_PATH=~/data-test RS_DISABLE_AUTH=true RS_ZENOH_ENABLED=1 \
   RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tcp/127.0.0.1:7447]" \
