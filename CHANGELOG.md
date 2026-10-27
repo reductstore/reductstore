@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Preserve the system log capture sink when logger initialization is repeated, [PR-1697](https://github.com/reductstore/reductstore/pull/1697)
 - Prevent admitted mutations from escaping the publication sync snapshot and leaving pending remote mutations, [#1695](https://github.com/reductstore/reductstore/pull/1695)
 - Bind each ready entry publication marker to its exact block index so read-only replicas reject stale cached indexes, [PR-1671](https://github.com/reductstore/reductstore/pull/1671)
 - Avoid blocking update mutations while a scheduled publication synchronizes its current batch, [PR-1666](https://github.com/reductstore/reductstore/pull/1666)
