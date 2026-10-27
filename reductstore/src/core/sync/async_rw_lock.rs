@@ -58,6 +58,23 @@ impl<T> AsyncRwLock<T> {
         self.inner.try_read().ok()
     }
 
+    #[track_caller]
+    pub fn read_owned(
+        &self,
+    ) -> impl Future<Output = Result<tokio::sync::OwnedRwLockReadGuard<T>, ReductError>> + '_ {
+        let location = Location::caller();
+        async move {
+            timeout(rwlock_timeout(), Arc::clone(&self.inner).read_owned())
+                .await
+                .map_err(|_| {
+                    lock_timeout_error_at(
+                        "Failed to acquire async owned read lock within timeout",
+                        location,
+                    )
+                })
+        }
+    }
+
     pub fn try_write(&self) -> Option<tokio::sync::RwLockWriteGuard<'_, T>> {
         self.inner.try_write().ok()
     }
@@ -97,6 +114,13 @@ mod tests {
     async fn test_async_rwlock_read() {
         let lock = AsyncRwLock::new(5);
         let read_guard = lock.read().await.unwrap();
+        assert_eq!(*read_guard, 5);
+    }
+
+    #[tokio::test]
+    async fn test_async_rwlock_read_owned() {
+        let lock = Arc::new(AsyncRwLock::new(5));
+        let read_guard = lock.read_owned().await.unwrap();
         assert_eq!(*read_guard, 5);
     }
 
