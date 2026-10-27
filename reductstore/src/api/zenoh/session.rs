@@ -78,14 +78,7 @@ pub(crate) async fn run_session(
         }
     };
 
-    let mut declared_buckets = HashSet::new();
-    for router in subscriber_routers.iter().chain(queryable_routers.iter()) {
-        if let Some(bucket) = router.declared_bucket() {
-            if declared_buckets.insert(bucket.to_string()) {
-                ensure_bucket_exists(&components, bucket).await?;
-            }
-        }
-    }
+    provision_declared_buckets(&components, &subscriber_routers).await?;
 
     let server_info = components
         .storage
@@ -278,6 +271,21 @@ fn blocks_with_kind(config: &ZenohApiConfig) -> Vec<(&'static str, &ZenohBlock)>
                 .map(|block| ("queryable", &block.route)),
         )
         .collect()
+}
+
+async fn provision_declared_buckets(
+    components: &Arc<crate::api::Components>,
+    routers: &[Arc<BucketRouter>],
+) -> Result<(), SessionError> {
+    let mut declared_buckets = HashSet::new();
+    for router in routers {
+        if let Some(bucket) = router.declared_bucket() {
+            if declared_buckets.insert(bucket.to_string()) {
+                ensure_bucket_exists(components, bucket).await?;
+            }
+        }
+    }
+    Ok(())
 }
 
 async fn ensure_bucket_exists(
@@ -960,6 +968,8 @@ impl Display for SessionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::components::StateKeeper;
+    use crate::api::http::tests::keeper;
     use crate::cfg::zenoh::ZenohBucketRouting;
     use rstest::rstest;
     use std::fs;
@@ -988,6 +998,26 @@ mod tests {
                 .collect(),
             ..Default::default()
         }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn startup_provisions_subscriber_buckets_not_queryable_buckets(
+        #[future] keeper: Arc<StateKeeper>,
+    ) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let config = config_with(
+            vec![subscriber_block("0", &["raw/**"], Some("sub_only"))],
+            vec![subscriber_block("0", &["derived/**"], Some("query_only"))],
+        );
+
+        let subscriber_routers = build_routers(&config.subscribers, "subscriber").unwrap();
+        provision_declared_buckets(&components, &subscriber_routers)
+            .await
+            .unwrap();
+
+        assert!(components.storage.get_bucket("sub_only").await.is_ok());
+        assert!(components.storage.get_bucket("query_only").await.is_err());
     }
 
     #[rstest]
