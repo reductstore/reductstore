@@ -10,7 +10,7 @@ use crate::api::zenoh::{
 use crate::cfg::zenoh::{ZenohApiConfig, ZenohBlock, ZenohQueryableBlock, ZenohQueryableLocality};
 use bytes::Bytes;
 use log::{debug, error, info, warn};
-use reduct_base::error::ErrorCode;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::Labels;
@@ -226,9 +226,6 @@ fn validate_keyexprs(config: &ZenohApiConfig) -> Result<(), SessionError> {
     Ok(())
 }
 
-// Zenoh delivers a sample to every matching key expression, so two expressions in the same block
-// that intersect would store (or answer) the same sample twice. Overlap across blocks is allowed:
-// it intentionally tees one key space into several buckets.
 fn check_block_overlaps(config: &ZenohApiConfig) -> Result<(), SessionError> {
     for (kind, block) in blocks_with_kind(config) {
         for (index, key_a) in block.keyexprs.iter().enumerate() {
@@ -243,6 +240,22 @@ fn check_block_overlaps(config: &ZenohApiConfig) -> Result<(), SessionError> {
             }
         }
     }
+    for (index, left) in config.queryables.iter().enumerate() {
+        for right in config.queryables.iter().skip(index + 1) {
+            for key_a in &left.route.keyexprs {
+                for key_b in &right.route.keyexprs {
+                    if keyexprs_intersect(key_a, key_b) {
+                        return Err(SessionError::InvalidConfig(format!(
+                            "queryable blocks '{}' and '{}': key expressions '{}' and '{}' \
+                             intersect; a query would receive multiple replies",
+                            left.route.id, right.route.id, key_a, key_b
+                        )));
+                    }
+                }
+            }
+        }
+    }
+
     Ok(())
 }
 
@@ -276,7 +289,7 @@ async fn ensure_bucket_exists(
             info!("Zenoh target bucket '{}' exists", bucket_name);
             Ok(())
         }
-        Err(_) => {
+        Err(error) if is_missing_bucket_error(&error) => {
             info!(
                 "Zenoh target bucket '{}' does not exist, creating...",
                 bucket_name
@@ -285,16 +298,24 @@ async fn ensure_bucket_exists(
                 .storage
                 .create_bucket(bucket_name, BucketSettings::default())
                 .await
-                .map_err(|e| {
+                .map_err(|error| {
                     SessionError::InvalidConfig(format!(
                         "Failed to create bucket '{}': {}",
-                        bucket_name, e
+                        bucket_name, error
                     ))
                 })?;
             info!("Zenoh target bucket '{}' created successfully", bucket_name);
             Ok(())
         }
+        Err(error) => Err(SessionError::InvalidConfig(format!(
+            "Failed to look up bucket '{}': {}",
+            bucket_name, error
+        ))),
     }
+}
+
+fn is_missing_bucket_error(error: &ReductError) -> bool {
+    error.status() == ErrorCode::NotFound
 }
 
 fn build_zenoh_config(config: &ZenohApiConfig) -> Result<(Config, CredentialFiles), SessionError> {
@@ -1055,6 +1076,27 @@ mod tests {
             vec![],
         );
         assert!(check_block_overlaps(&config).is_ok());
+    }
+    #[rstest]
+    fn check_block_overlaps_rejects_intersection_across_queryable_blocks() {
+        let config = config_with(
+            vec![],
+            vec![
+                subscriber_block("raw", &["sensors/**"], Some("raw")),
+                subscriber_block("derived", &["sensors/camera/**"], Some("derived")),
+            ],
+        );
+        let err = check_block_overlaps(&config).unwrap_err();
+        assert!(err.to_string().contains("queryable blocks"));
+    }
+
+    #[rstest]
+    #[case(ErrorCode::NotFound, true)]
+    #[case(ErrorCode::InternalServerError, false)]
+    #[case(ErrorCode::ServiceUnavailable, false)]
+    fn identifies_missing_bucket_errors(#[case] status: ErrorCode, #[case] expected: bool) {
+        let error = reduct_base::error::ReductError::new(status, "bucket lookup");
+        assert_eq!(is_missing_bucket_error(&error), expected);
     }
 
     #[rstest]

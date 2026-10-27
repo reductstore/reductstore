@@ -319,7 +319,18 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 fn parse_queryables<EnvGetter: GetEnv>(
     env: &mut Env<EnvGetter>,
 ) -> (Vec<ZenohQueryableBlock>, Vec<String>) {
-    let (routes, errors) = parse_blocks(env, QUERY_PREFIX, "queryable");
+    let (mut routes, mut errors) = parse_blocks(env, QUERY_PREFIX, "queryable");
+    for route in &mut routes {
+        let variable = format!("{}{}_ALLOW_BUCKET_CREATION", QUERY_PREFIX, route.id);
+        if env.get_optional::<String>(&variable).is_some() {
+            errors.push(format!(
+                "queryable block '{}': {} is not supported; queryables never create buckets",
+                route.id, variable
+            ));
+        }
+        route.allow_bucket_creation = false;
+    }
+
     let queryables = routes
         .into_iter()
         .map(|route| {
@@ -748,6 +759,21 @@ mod tests {
         assert_eq!(cfg.queryables[0].locality, ZenohQueryableLocality::Remote);
         assert_eq!(cfg.queryables[1].locality, ZenohQueryableLocality::Any);
         assert!(cfg.subscribers.is_empty());
+    }
+    #[rstest]
+    fn rejects_queryable_bucket_creation_setting() {
+        let cfg = parse(&[
+            ("RS_ZENOH_QUERY_0_KEYEXPRS", "site_$*/**"),
+            ("RS_ZENOH_QUERY_0_ROUTING", "key-prefix"),
+            ("RS_ZENOH_QUERY_0_BUCKET_ALLOWLIST", "site_*"),
+            ("RS_ZENOH_QUERY_0_ALLOW_BUCKET_CREATION", "true"),
+        ]);
+
+        assert!(!cfg.queryables[0].route.allow_bucket_creation);
+        assert!(cfg
+            .config_errors
+            .iter()
+            .any(|error| error.contains("ALLOW_BUCKET_CREATION")));
     }
 
     #[rstest]

@@ -4,19 +4,12 @@ All data is written to the bucket the server's static Zenoh block targets, which
 RS_ZENOH_BUCKET in the unindexed configuration.
 """
 
-import asyncio
+from conftest import wait_for_payload, wait_for_records
 
 import pytest
 import zenoh
 
-
 pytestmark = pytest.mark.asyncio
-
-
-async def read_first_payload(bucket, entry_name):
-    async for record in bucket.query(entry_name):
-        return await record.read_all()
-    return None
 
 
 async def test_publish_simple_data(bucket, entry_name, zenoh_session):
@@ -25,10 +18,8 @@ async def test_publish_simple_data(bucket, entry_name, zenoh_session):
     payload = b"hello from zenoh"
 
     zenoh_session.put(key_expr, payload)
-    await asyncio.sleep(0.5)
 
-    data = await read_first_payload(bucket, entry_name)
-    assert data is not None, "Expected at least one stored record"
+    data = await wait_for_payload(bucket, entry_name, payload)
     assert data == payload
 
 
@@ -39,10 +30,8 @@ async def test_publish_with_labels(bucket, entry_name, zenoh_session, serialize_
     labels = {"sensor": "imu", "unit": "m/s^2"}
 
     zenoh_session.put(key_expr, payload, attachment=serialize_labels(labels))
-    await asyncio.sleep(0.5)
 
-    records = [record async for record in bucket.query(entry_name)]
-    assert records
+    records = await wait_for_records(bucket, entry_name)
     assert records[0].labels.get("sensor") == "imu"
     assert records[0].labels.get("unit") == "m/s^2"
 
@@ -53,15 +42,8 @@ async def test_publish_multiple_records(bucket, entry_name, zenoh_session):
 
     for i in range(5):
         zenoh_session.put(key_expr, f"record_{i}".encode())
-        await asyncio.sleep(0.01)
 
-    records = []
-    for _ in range(10):
-        records = [record async for record in bucket.query(entry_name)]
-        if len(records) == 5:
-            break
-        await asyncio.sleep(0.2)
-
+    records = await wait_for_records(bucket, entry_name, count=5)
     assert len(records) == 5
 
 
@@ -71,10 +53,8 @@ async def test_publish_large_payload(bucket, entry_name, zenoh_session):
     payload = b"x" * (1024 * 1024)
 
     zenoh_session.put(key_expr, payload)
-    await asyncio.sleep(1.0)
 
-    data = await read_first_payload(bucket, entry_name)
-    assert data is not None
+    data = await wait_for_payload(bucket, entry_name, payload)
     assert len(data) == len(payload)
 
 
@@ -83,10 +63,8 @@ async def test_publish_empty_payload(bucket, entry_name, zenoh_session):
     key_expr = entry_name
 
     zenoh_session.put(key_expr, b"")
-    await asyncio.sleep(0.5)
 
-    data = await read_first_payload(bucket, entry_name)
-    assert data is not None
+    data = await wait_for_payload(bucket, entry_name, b"")
     assert data == b""
 
 
@@ -99,7 +77,8 @@ async def test_publish_nested_key(bucket, zenoh_session):
     payload = b"temperature reading"
 
     zenoh_session.put(key_expr, payload)
-    await asyncio.sleep(0.5)
+
+    await wait_for_payload(bucket, key_expr, payload)
 
     selector = f"{key_expr}?limit=1"
     replies = [reply for reply in zenoh_session.get(selector, timeout=5.0) if reply.ok]
@@ -121,10 +100,7 @@ async def test_publisher_with_attachment(
     publisher.put(b"telemetry data", attachment=serialize_labels(labels))
     publisher.undeclare()
 
-    await asyncio.sleep(0.5)
-
-    records = [record async for record in bucket.query(entry_name)]
-    assert records
+    records = await wait_for_records(bucket, entry_name)
     assert records[0].labels.get("type") == "telemetry"
     assert records[0].labels.get("version") == "1.0"
 
@@ -135,10 +111,8 @@ async def test_publish_with_encoding_json(bucket, entry_name, zenoh_session):
     payload = b'{"temperature": 23.5, "humidity": 65}'
 
     zenoh_session.put(key_expr, payload, encoding=zenoh.Encoding.APPLICATION_JSON)
-    await asyncio.sleep(0.5)
 
-    records = [record async for record in bucket.query(entry_name)]
-    assert records, "Expected at least one stored record"
+    records = await wait_for_records(bucket, entry_name)
     assert records[0].content_type == "application/json"
 
 
@@ -148,10 +122,8 @@ async def test_publish_with_encoding_text_plain(bucket, entry_name, zenoh_sessio
     payload = b"Hello, World!"
 
     zenoh_session.put(key_expr, payload, encoding=zenoh.Encoding.TEXT_PLAIN)
-    await asyncio.sleep(0.5)
 
-    records = [record async for record in bucket.query(entry_name)]
-    assert records, "Expected at least one stored record"
+    records = await wait_for_records(bucket, entry_name)
     assert records[0].content_type == "text/plain"
 
 
@@ -162,10 +134,8 @@ async def test_publish_with_encoding_custom(bucket, entry_name, zenoh_session):
 
     custom_encoding = zenoh.Encoding("application/x-custom-binary")
     zenoh_session.put(key_expr, payload, encoding=custom_encoding)
-    await asyncio.sleep(0.5)
 
-    records = [record async for record in bucket.query(entry_name)]
-    assert records, "Expected at least one stored record"
+    records = await wait_for_records(bucket, entry_name)
     assert records[0].content_type == "application/x-custom-binary"
 
 
@@ -175,10 +145,8 @@ async def test_publish_default_encoding(bucket, entry_name, zenoh_session):
     payload = b"binary data"
 
     zenoh_session.put(key_expr, payload)
-    await asyncio.sleep(0.5)
 
-    records = [record async for record in bucket.query(entry_name)]
-    assert records, "Expected at least one stored record"
+    records = await wait_for_records(bucket, entry_name)
     assert records[0].content_type == "zenoh/bytes"
 
 
@@ -188,10 +156,8 @@ async def test_publish_stores_zenoh_source_metadata(bucket, entry_name, zenoh_se
     payload = b"sample with timestamp"
 
     zenoh_session.put(key_expr, payload)
-    await asyncio.sleep(0.5)
 
-    records = [record async for record in bucket.query(entry_name)]
-    assert records, "Expected at least one stored record"
+    records = await wait_for_records(bucket, entry_name)
 
     record = records[0]
     assert "zenoh_source_id" in record.labels, "Expected zenoh_source_id label"

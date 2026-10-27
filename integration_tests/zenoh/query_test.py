@@ -1,12 +1,11 @@
 """Integration tests for querying ReductStore data via Zenoh."""
 
-import asyncio
+from conftest import wait_for_payload
 import json
 import random
 
 import pytest
 import zenoh
-
 
 pytestmark = pytest.mark.asyncio
 
@@ -74,7 +73,8 @@ async def test_query_nested_key(bucket, zenoh_session):
     payload = b"nested entry data"
 
     zenoh_session.put(entry_name, payload)
-    await asyncio.sleep(0.5)
+
+    await wait_for_payload(bucket, entry_name, payload)
 
     selector = f"{entry_name}"
     replies = [
