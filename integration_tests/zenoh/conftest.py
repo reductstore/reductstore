@@ -1,22 +1,81 @@
 """Pytest fixtures for Zenoh integration tests."""
 
+import asyncio
 import json
 import os
 import random
+from collections.abc import Awaitable, Callable
+from typing import TypeVar
 
 import pytest
 import pytest_asyncio
 import zenoh
 from reduct import Client
-from _pytest.fixtures import FixtureDef
-
-# Compatibility for pytest-asyncio 0.23 with pytest 9.x.
-if not hasattr(FixtureDef, "unittest"):
-    FixtureDef.unittest = False
 
 
 def _rand_name(prefix: str) -> str:
     return f"{prefix}_{random.randint(0, 1_000_000_000)}"
+
+
+T = TypeVar("T")
+
+
+async def wait_until(
+    condition: Callable[[], Awaitable[T | None]],
+    description: str,
+    timeout_s: float = 10.0,
+    interval_s: float = 0.1,
+) -> T:
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while True:
+        result = await condition()
+        if result is not None:
+            return result
+        if asyncio.get_running_loop().time() >= deadline:
+            raise AssertionError(f"Timed out waiting for {description}")
+        await asyncio.sleep(interval_s)
+
+
+async def read_first_payload(bucket, entry_name: str) -> bytes | None:
+    async for record in bucket.query(entry_name):
+        return await record.read_all()
+    return None
+
+
+async def wait_for_payload(bucket, entry_name: str, payload: bytes) -> bytes:
+    async def payload_is_available() -> bytes | None:
+        actual = await read_first_payload(bucket, entry_name)
+        return actual if actual == payload else None
+
+    return await wait_until(
+        payload_is_available,
+        f"payload for entry '{entry_name}'",
+    )
+
+
+async def wait_for_records(bucket, entry_name: str, count: int = 1):
+    async def records_are_available():
+        records = [record async for record in bucket.query(entry_name)]
+        return records if len(records) >= count else None
+
+    return await wait_until(
+        records_are_available,
+        f"{count} record(s) for entry '{entry_name}'",
+    )
+
+
+async def wait_for_query_payload(session, key_expr: str, payload: bytes) -> bytes:
+    async def reply_is_available() -> bytes | None:
+        replies = [reply for reply in session.get(key_expr, timeout=1.0) if reply.ok]
+        for reply in replies:
+            if reply.ok.payload.to_bytes() == payload:
+                return payload
+        return None
+
+    return await wait_until(
+        reply_is_available,
+        f"query reply for '{key_expr}'",
+    )
 
 
 @pytest.fixture(scope="session")

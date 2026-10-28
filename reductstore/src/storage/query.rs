@@ -107,6 +107,7 @@ pub(super) fn spawn_query_task(
                 // to avoid flooding the channel but still be responsive
                 let timeout = watcher.full_channel();
                 sleep(timeout).await;
+                continue;
             }
 
             let next_result = query.next(block_manager.clone()).await;
@@ -242,35 +243,38 @@ mod tests {
 
     #[log_test(rstest)]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_task_expired(#[future] block_manager: Arc<AsyncRwLock<BlockManager>>) {
-        let block_manager = block_manager.await;
+    async fn test_query_task_expires_when_channel_is_full(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
         let options = QueryOptions {
             ttl: Duration::from_millis(50),
             ..Default::default()
         };
-
-        let query = build_query(
-            "entry".to_string(),
-            0,
-            5,
-            options.clone(),
-            IoConfig::default(),
-        )
-        .unwrap();
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        let (rx, handle) = spawn_query_task(
+        let query: Box<dyn Query + Send + Sync> = Box::new(RepeatingQuery {
+            io: IoConfig::default(),
+        });
+        let _ = query.io_settings();
+        let (mut rx, handle) = spawn_query_task(
             0,
             "bucket/entry".to_string(),
             query,
             options,
-            block_manager.clone(),
+            block_manager.await,
         );
-        assert!(rx.is_empty());
-        assert!(timeout(Duration::from_millis(1000), handle)
+
+        timeout(Duration::from_secs(1), async {
+            while rx.len() < QUERY_BUFFER_SIZE {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+
+        assert!(timeout(Duration::from_secs(1), handle)
             .await
             .unwrap()
             .is_ok());
+        while rx.recv().await.is_some() {}
     }
 
     #[log_test(rstest)]
@@ -389,6 +393,34 @@ mod tests {
             .await
             .unwrap()
             .is_ok());
+    }
+
+    struct RepeatingQuery {
+        io: IoConfig,
+    }
+
+    #[async_trait::async_trait]
+    impl Query for RepeatingQuery {
+        async fn next(
+            &mut self,
+            _block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) -> Result<RecordReader, ReductError> {
+            Ok(RecordReader::form_record(
+                "entry",
+                Record {
+                    timestamp: Some(Timestamp {
+                        seconds: 0,
+                        nanos: 0,
+                    }),
+                    state: 1,
+                    ..Default::default()
+                },
+            ))
+        }
+
+        fn io_settings(&self) -> &IoConfig {
+            &self.io
+        }
     }
 
     struct PanickingQuery {

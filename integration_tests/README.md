@@ -24,6 +24,22 @@ docker rm -f zenoh-router
 rm -rf ~/data-test
 ```
 
+## Zenoh Block Routing
+
+`RS_ZENOH_SUB_KEYEXPRS` / `RS_ZENOH_QUERY_KEYEXPRS` above configure a single static block writing
+everything to `RS_ZENOH_BUCKET` (default `zenoh`). The same paths can also be configured as
+`RS_ZENOH_SUB_<ID>_*` / `RS_ZENOH_QUERY_<ID>_*` blocks, each with its own bucket and routing.
+Use one style or the other: setting both indexed and unindexed variables, or an indexed variable
+without a matching `_KEYEXPRS`, aborts startup instead of running a partial configuration.
+
+Indexed queryable blocks may share key expressions. Each matching block resolves the request against
+its own configured bucket and can return a separate Zenoh reply. See the
+[routing documentation](zenoh/routing/README.md#overlapping-queryable-blocks) for querier settings
+required to receive every reply and the reply identity limitation.
+
+For the full indexed routing test suite - setup, environment variable explanations, and one
+command per behavior - see **[zenoh/routing/README.md](zenoh/routing/README.md)**.
+
 ## Zenoh Inline Credentials (TLS/Auth)
 
 For cloud or container environments where file mounts are impractical, credentials can be provided inline via environment variables:
@@ -50,7 +66,7 @@ RS_DATA_PATH=~/data-test RS_DISABLE_AUTH=true RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG
 
 2) Run tests:
 ```bash
-RS_ZENOH_AUTH_DICTIONARY="testuser:testpassword" pytest integration_tests/zenoh/credentials_test.py -v
+RS_ZENOH_AUTH_DICTIONARY="testuser:testpassword" pytest integration_tests/zenoh/credentials/credentials_test.py -v
 ```
 
 #### TLS Tests
@@ -80,5 +96,5 @@ Start ReductStore and run tests:
 ```bash
 RS_DATA_PATH=~/data-test RS_DISABLE_AUTH=true RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tls/127.0.0.1:7447]" RS_ZENOH_SUB_KEYEXPRS="**" RS_ZENOH_TLS_ROOT_CA="$(cat misc/ca.crt)" cargo run -p reductstore --features "fs-backend web-console zenoh-api"
 
-RS_ZENOH_TLS_ROOT_CA="$(cat misc/ca.crt)" pytest integration_tests/zenoh/credentials_test.py -v
+RS_ZENOH_TLS_ROOT_CA="$(cat misc/ca.crt)" pytest integration_tests/zenoh/credentials/credentials_test.py -v
 ```

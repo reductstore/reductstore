@@ -360,7 +360,7 @@ mod tests {
     use rstest::{fixture, rstest};
     use serde_json::Value;
     use tempfile::tempdir;
-    use tokio::time::{sleep, Duration};
+    use tokio::time::{sleep, timeout, Duration};
 
     #[fixture]
     async fn storage_and_cfg() -> (Arc<StorageEngine>, Cfg) {
@@ -400,6 +400,24 @@ mod tests {
             }),
         }
     }
+    async fn wait_for_audit_record(storage: &StorageEngine) -> crate::storage::entry::RecordReader {
+        timeout(Duration::from_secs(10), async {
+            loop {
+                if let Ok(bucket) = storage.get_bucket(SYSTEM_BUCKET_NAME).await {
+                    if let Ok(bucket) = bucket.upgrade() {
+                        if let Ok(reader) =
+                            bucket.begin_read("audit/test-instance/token-1", 1).await
+                        {
+                            return reader;
+                        }
+                    }
+                }
+                sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("audit record was not persisted")
+    }
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
@@ -408,19 +426,9 @@ mod tests {
     ) {
         let (storage, cfg) = storage_and_cfg.await;
         let mut repo = build_audit_logger(&cfg, Arc::clone(&storage)).await;
-
         repo.log_event(make_event()).await.unwrap();
-        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
 
-        let bucket = storage
-            .get_bucket(SYSTEM_BUCKET_NAME)
-            .await
-            .unwrap()
-            .upgrade_and_unwrap();
-        let mut reader = bucket
-            .begin_read("audit/test-instance/token-1", 1)
-            .await
-            .unwrap();
+        let mut reader = wait_for_audit_record(&storage).await;
         let record = reader.read_chunk().unwrap().unwrap();
         let event: Value = serde_json::from_slice(&record).unwrap();
         assert_eq!(event["token_name"], "token-1");
@@ -595,17 +603,7 @@ mod tests {
         let (storage, cfg) = storage_and_cfg.await;
         let mut repo = build_audit_logger(&cfg, Arc::clone(&storage)).await;
         repo.log_event(make_event()).await.unwrap();
-        sleep(Duration::from_secs(AGGREGATION_WINDOW_SECS * 2)).await;
-
-        let bucket = storage
-            .get_bucket(SYSTEM_BUCKET_NAME)
-            .await
-            .unwrap()
-            .upgrade_and_unwrap();
-        let mut reader = bucket
-            .begin_read("audit/test-instance/token-1", 1)
-            .await
-            .unwrap();
+        let mut reader = wait_for_audit_record(&storage).await;
 
         // The only label on an audit record is the HTTP status.
         let labels = reader.meta().labels().clone();

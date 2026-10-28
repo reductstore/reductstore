@@ -1,14 +1,10 @@
-"""Integration tests for querying ReductStore data via Zenoh."""
+"""Queryable (read path): data in ReductStore is served over Zenoh queries."""
 
-import asyncio
+from conftest import wait_for_payload
 import json
 import random
 
-import pytest
 import zenoh
-
-
-pytestmark = pytest.mark.asyncio
 
 # Allow multiple records to be returned in one query response
 CONSOLIDATION = zenoh.ConsolidationMode.NONE
@@ -74,7 +70,8 @@ async def test_query_nested_key(bucket, zenoh_session):
     payload = b"nested entry data"
 
     zenoh_session.put(entry_name, payload)
-    await asyncio.sleep(0.5)
+
+    await wait_for_payload(bucket, entry_name, payload)
 
     selector = f"{entry_name}"
     replies = [

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Support per-block Zenoh routes with configurable bucket routing, multiple key expressions, and multiple replies from overlapping queryables, [PR-1667](https://github.com/reductstore/reductstore/pull/1667)
+- Allow unindexed Zenoh blocks to use static and key-prefix routing, [PR-1667](https://github.com/reductstore/reductstore/pull/1667)
+
 ### Fixed
 
 - Validate restored replica block indexes against their publication marker so stale cached indexes cannot hide attachments, [PR-1701](https://github.com/reductstore/reductstore/pull/1701)

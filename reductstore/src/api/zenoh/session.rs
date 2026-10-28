@@ -2,18 +2,19 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::api::components::{ComponentError, StateKeeper};
+use crate::api::zenoh::routing::BucketRouter;
 use crate::api::zenoh::{
     attachments, attachments::QueryAttachments, queryable::QueryablePipeline,
-    subscriber::SubscriberPipeline,
+    subscriber::IngestError, subscriber::SubscriberPipeline,
 };
-use crate::cfg::zenoh::{ZenohApiConfig, ZenohQueryableLocality};
+use crate::cfg::zenoh::{ZenohApiConfig, ZenohBlock, ZenohQueryableBlock, ZenohQueryableLocality};
 use bytes::Bytes;
 use log::{debug, error, info, warn};
-use reduct_base::error::ErrorCode;
+use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::bucket_api::BucketSettings;
 use reduct_base::Labels;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::error::Error;
 use std::fmt::{Display, Formatter};
 use std::io::Write;
@@ -23,9 +24,11 @@ use std::sync::Arc;
 use std::time::Duration as StdDuration;
 use tempfile::NamedTempFile;
 use tokio::sync::watch;
+use tokio::task::JoinHandle;
 use tokio::time::{sleep, timeout, Duration, Instant};
 
 use zenoh::config::Config;
+use zenoh::key_expr::KeyExpr;
 use zenoh::sample::Sample;
 use zenoh::time::{Timestamp, TimestampId, NTP64};
 use zenoh::Session;
@@ -43,12 +46,19 @@ pub(crate) async fn run_session(
     state_keeper: Arc<StateKeeper>,
     mut shutdown_rx: watch::Receiver<bool>,
 ) -> Result<(), SessionError> {
-    info!(
-        "Starting Zenoh API runtime: bucket='{}', sub_keyexprs={}, query_keyexprs={}",
-        config.bucket,
-        config.sub_keyexprs.as_deref().unwrap_or("<disabled>"),
-        config.query_keyexprs.as_deref().unwrap_or("<disabled>")
-    );
+    info!("Starting Zenoh API runtime: {}", config);
+
+    validate_config(&config)?;
+
+    let subscriber_routers = build_routers(&config.subscribers, "subscriber")?;
+    let queryable_routers = build_routers(
+        &config
+            .queryables
+            .iter()
+            .map(|block| block.route.clone())
+            .collect::<Vec<_>>(),
+        "queryable",
+    )?;
 
     let components = {
         let mut logged_wait = false;
@@ -68,7 +78,17 @@ pub(crate) async fn run_session(
         }
     };
 
-    ensure_bucket_exists(&components, &config.bucket).await?;
+    provision_declared_buckets(&components, &subscriber_routers).await?;
+
+    let server_info = components
+        .storage
+        .info()
+        .await
+        .map_err(|err| SessionError::InvalidConfig(err.to_string()))?;
+    info!(
+        "Zenoh API runtime ready (storage version {})",
+        server_info.version
+    );
 
     let (zenoh_config, _credential_files) = build_zenoh_config(&config)?;
 
@@ -79,41 +99,42 @@ pub(crate) async fn run_session(
 
     info!("Zenoh session opened successfully");
 
-    let subscriber_pipeline = Arc::new(SubscriberPipeline::new(
-        config.clone(),
-        Arc::clone(&components),
-    ));
-    let queryable_pipeline = Arc::new(QueryablePipeline::new(
-        config.clone(),
-        Arc::clone(&components),
-    ));
+    let mut handles = Vec::new();
 
-    subscriber_pipeline
-        .bootstrap()
-        .await
-        .map_err(SessionError::Subscriber)?;
-    queryable_pipeline
-        .bootstrap()
-        .await
-        .map_err(SessionError::Queryable)?;
+    let spawn_all = async {
+        for (block, router) in config.subscribers.iter().zip(subscriber_routers) {
+            let pipeline = Arc::new(SubscriberPipeline::new(router, Arc::clone(&components)));
+            info!(
+                "Zenoh subscriber block '{}': keyexprs=[{}] {}",
+                block.name(),
+                block.keyexprs.join(","),
+                pipeline.describe()
+            );
+            spawn_subscriber_block(&session, block, pipeline, &mut handles).await?;
+        }
 
-    let subscriber_handles = if config.sub_keyexprs.is_some() {
-        spawn_subscribers(&session, &config, Arc::clone(&subscriber_pipeline)).await?
-    } else {
-        Vec::new()
+        for (block, router) in config.queryables.iter().zip(queryable_routers) {
+            let pipeline = Arc::new(QueryablePipeline::new(router, Arc::clone(&components)));
+            info!(
+                "Zenoh queryable block '{}': keyexprs=[{}] locality={} {}",
+                block.route.name(),
+                block.route.keyexprs.join(","),
+                block.locality,
+                pipeline.describe()
+            );
+            spawn_queryable_block(&session, block, pipeline, &mut handles).await?;
+        }
+
+        Ok::<(), SessionError>(())
     };
 
-    let queryable_handles = if config.query_keyexprs.is_some() {
-        spawn_queryables(&session, &config, queryable_pipeline).await?
-    } else {
-        Vec::new()
-    };
+    if let Err(err) = spawn_all.await {
+        shutdown(session, handles).await.ok();
+        return Err(err);
+    }
 
-    info!(
-        "Zenoh API runtime started: {} subscribers, {} queryables",
-        subscriber_handles.len(),
-        queryable_handles.len()
-    );
+    let configured = config.subscribers.len() + config.queryables.len();
+    info!("Zenoh API runtime started: {} block(s)", configured);
 
     loop {
         tokio::select! {
@@ -126,13 +147,134 @@ pub(crate) async fn run_session(
         }
     }
 
+    shutdown(session, handles).await?;
+
+    info!("Zenoh API runtime terminated gracefully");
+    Ok(())
+}
+
+async fn shutdown(session: Session, handles: Vec<JoinHandle<()>>) -> Result<(), SessionError> {
+    for handle in handles {
+        handle.abort();
+    }
+
     info!("Closing Zenoh session...");
     session
         .close()
         .await
-        .map_err(|e| SessionError::ZenohClose(e.to_string()))?;
+        .map_err(|e| SessionError::ZenohClose(e.to_string()))
+}
 
-    info!("Zenoh API runtime terminated gracefully");
+fn build_routers(
+    blocks: &[ZenohBlock],
+    kind: &str,
+) -> Result<Vec<Arc<BucketRouter>>, SessionError> {
+    blocks
+        .iter()
+        .map(|block| {
+            let router = BucketRouter::from_block(block);
+            router.validate().map_err(|err| {
+                SessionError::InvalidConfig(format!("{} block '{}': {}", kind, block.name(), err))
+            })?;
+
+            for warning in router.config_warnings() {
+                warn!("Zenoh {} block '{}': {}", kind, block.name(), warning);
+            }
+
+            Ok(Arc::new(router))
+        })
+        .collect()
+}
+
+/// Structural validation run before the HTTP listener starts so an invalid Zenoh configuration
+/// aborts startup instead of silently running a partial setup.
+pub(crate) fn validate_config(config: &ZenohApiConfig) -> Result<(), SessionError> {
+    if !config.config_errors.is_empty() {
+        return Err(SessionError::InvalidConfig(config.config_errors.join("; ")));
+    }
+
+    for (kind, block) in blocks_with_kind(config) {
+        BucketRouter::from_block(block).validate().map_err(|err| {
+            SessionError::InvalidConfig(format!("{} block '{}': {}", kind, block.name(), err))
+        })?;
+    }
+
+    validate_keyexprs(config)?;
+    check_block_overlaps(config)?;
+    Ok(())
+}
+
+fn validate_keyexprs(config: &ZenohApiConfig) -> Result<(), SessionError> {
+    for (kind, block) in blocks_with_kind(config) {
+        for key_expr in &block.keyexprs {
+            KeyExpr::try_from(key_expr.as_str()).map_err(|err| {
+                SessionError::InvalidConfig(format!(
+                    "{} block '{}': invalid key expression '{}': {}",
+                    kind,
+                    block.name(),
+                    key_expr,
+                    err
+                ))
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn check_block_overlaps(config: &ZenohApiConfig) -> Result<(), SessionError> {
+    for (kind, block) in blocks_with_kind(config) {
+        for (index, key_a) in block.keyexprs.iter().enumerate() {
+            for key_b in block.keyexprs.iter().skip(index + 1) {
+                if keyexprs_intersect(key_a, key_b) {
+                    return Err(SessionError::InvalidConfig(format!(
+                        "{} block '{}': key expressions '{}' and '{}' intersect; \
+                         a matching sample would be handled twice",
+                        kind,
+                        block.name(),
+                        key_a,
+                        key_b
+                    )));
+                }
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn keyexprs_intersect(a: &str, b: &str) -> bool {
+    match (KeyExpr::try_from(a), KeyExpr::try_from(b)) {
+        (Ok(a), Ok(b)) => a.intersects(&b),
+        _ => false,
+    }
+}
+
+fn blocks_with_kind(config: &ZenohApiConfig) -> Vec<(&'static str, &ZenohBlock)> {
+    config
+        .subscribers
+        .iter()
+        .map(|block| ("subscriber", block))
+        .chain(
+            config
+                .queryables
+                .iter()
+                .map(|block| ("queryable", &block.route)),
+        )
+        .collect()
+}
+
+async fn provision_declared_buckets(
+    components: &Arc<crate::api::Components>,
+    routers: &[Arc<BucketRouter>],
+) -> Result<(), SessionError> {
+    let mut declared_buckets = HashSet::new();
+    for router in routers {
+        if let Some(bucket) = router.declared_bucket() {
+            if declared_buckets.insert(bucket.to_string()) {
+                ensure_bucket_exists(components, bucket).await?;
+            }
+        }
+    }
     Ok(())
 }
 
@@ -145,7 +287,7 @@ async fn ensure_bucket_exists(
             info!("Zenoh target bucket '{}' exists", bucket_name);
             Ok(())
         }
-        Err(_) => {
+        Err(error) if is_missing_bucket_error(&error) => {
             info!(
                 "Zenoh target bucket '{}' does not exist, creating...",
                 bucket_name
@@ -154,16 +296,24 @@ async fn ensure_bucket_exists(
                 .storage
                 .create_bucket(bucket_name, BucketSettings::default())
                 .await
-                .map_err(|e| {
+                .map_err(|error| {
                     SessionError::InvalidConfig(format!(
                         "Failed to create bucket '{}': {}",
-                        bucket_name, e
+                        bucket_name, error
                     ))
                 })?;
             info!("Zenoh target bucket '{}' created successfully", bucket_name);
             Ok(())
         }
+        Err(error) => Err(SessionError::InvalidConfig(format!(
+            "Failed to look up bucket '{}': {}",
+            bucket_name, error
+        ))),
     }
+}
+
+fn is_missing_bucket_error(error: &ReductError) -> bool {
+    error.status() == ErrorCode::NotFound
 }
 
 fn build_zenoh_config(config: &ZenohApiConfig) -> Result<(Config, CredentialFiles), SessionError> {
@@ -195,7 +345,6 @@ fn inject_credentials(
         auth_dictionary: None,
     };
 
-    // TLS Root CA Certificate (for validating server cert)
     if let Some(ref cert_content) = config.tls_root_ca_cert {
         let temp_file = write_credential_file("zenoh_root_ca", ".pem", cert_content)?;
         let path = temp_file.path().to_string_lossy().to_string();
@@ -211,7 +360,6 @@ fn inject_credentials(
         cred_files.tls_root_ca = Some(temp_file);
     }
 
-    // TLS Connect Certificate (for mTLS client authentication)
     if let Some(ref cert_content) = config.tls_connect_cert {
         let temp_file = write_credential_file("zenoh_connect_cert", ".pem", cert_content)?;
         let path = temp_file.path().to_string_lossy().to_string();
@@ -227,7 +375,6 @@ fn inject_credentials(
         cred_files.tls_connect_cert = Some(temp_file);
     }
 
-    // TLS Connect Private Key (for mTLS client authentication)
     if let Some(ref key_content) = config.tls_connect_key {
         let temp_file = write_credential_file("zenoh_connect_key", ".pem", key_content)?;
         let path = temp_file.path().to_string_lossy().to_string();
@@ -243,7 +390,6 @@ fn inject_credentials(
         cred_files.tls_connect_key = Some(temp_file);
     }
 
-    // User/Password Dictionary (for routers/peers accepting connections)
     if let Some(ref dict_content) = config.auth_dictionary {
         let temp_file = write_credential_file("zenoh_auth_dict", ".txt", dict_content)?;
         let path = temp_file.path().to_string_lossy().to_string();
@@ -297,13 +443,11 @@ fn write_credential_file(
 fn parse_inline_config(inline: &str) -> Result<Config, SessionError> {
     let trimmed = inline.trim();
 
-    // If it looks like JSON5
     if trimmed.starts_with('{') {
         return Config::from_json5(trimmed)
             .map_err(|e| SessionError::InvalidConfig(format!("Invalid JSON5 config: {}", e)));
     }
 
-    // Otherwise, parse simple key=value;key=value format
     let mut zenoh_config = Config::default();
 
     for part in inline.split(';') {
@@ -323,7 +467,6 @@ fn parse_inline_config(inline: &str) -> Result<Config, SessionError> {
             {
                 value.to_string()
             } else if value.starts_with('[') && value.ends_with(']') {
-                // Array: quote each element as a string
                 let inner = &value[1..value.len() - 1];
                 let elements: Vec<String> = inner
                     .split(',')
@@ -366,54 +509,59 @@ fn load_config_file(path: &str) -> Result<Config, SessionError> {
     })
 }
 
-async fn spawn_subscribers(
+async fn spawn_subscriber_block(
     session: &Session,
-    config: &ZenohApiConfig,
+    block: &ZenohBlock,
     pipeline: Arc<SubscriberPipeline>,
-) -> Result<Vec<tokio::task::JoinHandle<()>>, SessionError> {
-    let mut handles = Vec::new();
-    let key_expr = config.sub_keyexprs.as_ref().unwrap();
+    handles: &mut Vec<JoinHandle<()>>,
+) -> Result<(), SessionError> {
+    for key_expr in &block.keyexprs {
+        info!("Declaring Zenoh subscriber on key expression: {}", key_expr);
 
-    info!("Declaring Zenoh subscriber on key expression: {}", key_expr);
+        let subscriber = session
+            .declare_subscriber(key_expr.as_str())
+            .await
+            .map_err(|err| {
+                SessionError::Declaration(format!(
+                    "subscriber block '{}' failed to declare '{}': {}",
+                    block.name(),
+                    key_expr,
+                    err
+                ))
+            })?;
 
-    let subscriber = session.declare_subscriber(key_expr).await.map_err(|e| {
-        SessionError::Subscriber(format!(
-            "Failed to declare subscriber on '{}': {}",
-            key_expr, e
-        ))
-    })?;
+        let pipeline = Arc::clone(&pipeline);
+        let key_expr = key_expr.clone();
 
-    let pipeline_clone = Arc::clone(&pipeline);
-    let key_expr_clone = key_expr.clone();
-
-    let handle = tokio::spawn(async move {
-        loop {
-            match subscriber.recv_async().await {
-                Ok(sample) => {
-                    if let Err(e) = handle_sample(&pipeline_clone, sample).await {
-                        warn!(
-                            "Failed to handle Zenoh sample on '{}': {}",
-                            key_expr_clone, e
-                        );
+        handles.push(tokio::spawn(async move {
+            loop {
+                match subscriber.recv_async().await {
+                    Ok(sample) => match handle_sample(&pipeline, sample).await {
+                        Ok(()) => {}
+                        // routing rejections are already reported by the pipeline, throttled
+                        Err(IngestFailure::Routing) => {}
+                        Err(IngestFailure::Other(err)) => {
+                            warn!("Failed to handle Zenoh sample on '{}': {}", key_expr, err)
+                        }
+                    },
+                    Err(err) => {
+                        error!("Subscriber '{}' recv error: {}", key_expr, err);
+                        break;
                     }
                 }
-                Err(e) => {
-                    error!("Subscriber '{}' recv error: {}", key_expr_clone, e);
-                    break;
-                }
             }
-        }
-    });
+        }));
+    }
 
-    handles.push(handle);
-
-    Ok(handles)
+    Ok(())
 }
 
-async fn handle_sample(
-    pipeline: &SubscriberPipeline,
-    sample: Sample,
-) -> Result<(), Box<dyn Error + Send + Sync>> {
+enum IngestFailure {
+    Routing,
+    Other(Box<dyn Error + Send + Sync>),
+}
+
+async fn handle_sample(pipeline: &SubscriberPipeline, sample: Sample) -> Result<(), IngestFailure> {
     let key_expr = sample.key_expr().as_str();
     let payload = Bytes::from(sample.payload().to_bytes().to_vec());
 
@@ -457,66 +605,88 @@ async fn handle_sample(
             source_labels,
         )
         .await
-        .map_err(|e| Box::new(e) as Box<dyn Error + Send + Sync>)
+        .map_err(|err| match err {
+            IngestError::Routing(_) => IngestFailure::Routing,
+            other => IngestFailure::Other(Box::new(other) as Box<dyn Error + Send + Sync>),
+        })
 }
 
-async fn spawn_queryables(
+async fn spawn_queryable_block(
     session: &Session,
-    config: &ZenohApiConfig,
+    block: &ZenohQueryableBlock,
     pipeline: Arc<QueryablePipeline>,
-) -> Result<Vec<tokio::task::JoinHandle<()>>, SessionError> {
-    let mut handles = Vec::new();
+    handles: &mut Vec<JoinHandle<()>>,
+) -> Result<(), SessionError> {
+    let allowed_origin = to_zenoh_locality(block.locality);
 
-    let key_expr = config.query_keyexprs.as_ref().unwrap();
-    let allowed_origin = to_zenoh_locality(config.query_locality);
+    for key_expr in &block.route.keyexprs {
+        info!(
+            "Declaring Zenoh queryable on key expression: {} (locality={})",
+            key_expr, block.locality
+        );
 
-    info!(
-        "Declaring Zenoh queryable on key expression: {} (locality={})",
-        key_expr, config.query_locality
-    );
+        let queryable = session
+            .declare_queryable(key_expr.as_str())
+            .allowed_origin(allowed_origin)
+            .await
+            .map_err(|err| {
+                SessionError::Declaration(format!(
+                    "queryable block '{}' failed to declare '{}': {}",
+                    block.route.name(),
+                    key_expr,
+                    err
+                ))
+            })?;
 
-    let queryable = session
-        .declare_queryable(key_expr.as_str())
-        .allowed_origin(allowed_origin)
-        .await
-        .map_err(|e| SessionError::Queryable(format!("Failed to declare queryable: {}", e)))?;
+        let pipeline = Arc::clone(&pipeline);
+        handles.push(tokio::spawn(async move {
+            loop {
+                match queryable.recv_async().await {
+                    Ok(query) => {
+                        let key_expr = query.key_expr().as_str().to_string();
+                        let params = expand_query_params(query.selector().parameters());
+                        let query_attachments = parse_query_attachments(query.attachment());
 
-    let handle = tokio::spawn(async move {
-        loop {
-            match queryable.recv_async().await {
-                Ok(query) => {
-                    let key_expr = query.key_expr().as_str().to_string();
-                    let params = expand_query_params(query.selector().parameters());
-                    let query_attachments = parse_query_attachments(query.attachment());
+                        debug!(
+                            "Received Zenoh query: key={}, params={:?}, has_when={}",
+                            key_expr,
+                            params,
+                            query_attachments.when.is_some(),
+                        );
 
-                    debug!(
-                        "Received Zenoh query: key={}, params={:?}, has_when={}",
-                        key_expr,
-                        params,
-                        query_attachments.when.is_some(),
-                    );
+                        if let Err(e) = pipeline.check_api_request().await {
+                            warn!("Query request limit exceeded for '{}': {}", key_expr, e);
+                            if let Err(reply_err) = query
+                                .reply_err(zenoh::bytes::ZBytes::from(e.to_string().into_bytes()))
+                                .await
+                            {
+                                warn!("Failed to send error reply: {}", reply_err);
+                            }
+                            continue;
+                        }
 
-                    if let Err(e) = pipeline.check_api_request().await {
-                        warn!("Query request limit exceeded for '{}': {}", key_expr, e);
-                        if let Err(reply_err) = query
-                            .reply_err(zenoh::bytes::ZBytes::from(e.to_string().into_bytes()))
+                        match pipeline
+                            .handle_query(&key_expr, &params, &query_attachments)
                             .await
                         {
-                            warn!("Failed to send error reply: {}", reply_err);
-                        }
-                        continue;
-                    }
-
-                    match pipeline
-                        .handle_query(&key_expr, &params, &query_attachments)
-                        .await
-                    {
-                        Ok(result) => {
-                            if let Err(e) = send_query_reply(&query, result, &pipeline).await {
-                                warn!("Failed to send query reply: {}", e);
+                            Ok(result) => {
+                                if let Err(e) = send_query_reply(&query, result, &pipeline).await {
+                                    warn!("Failed to send query reply: {}", e);
+                                    if let Err(reply_err) = query
+                                        .reply_err(zenoh::bytes::ZBytes::from(
+                                            e.to_string().into_bytes(),
+                                        ))
+                                        .await
+                                    {
+                                        warn!("Failed to send error reply: {}", reply_err);
+                                    }
+                                }
+                            }
+                            Err(e) => {
+                                warn!("Query handler error for '{}': {}", key_expr, e);
                                 if let Err(reply_err) = query
                                     .reply_err(zenoh::bytes::ZBytes::from(
-                                        e.to_string().into_bytes(),
+                                        e.public_message().into_bytes(),
                                     ))
                                     .await
                                 {
@@ -524,27 +694,17 @@ async fn spawn_queryables(
                                 }
                             }
                         }
-                        Err(e) => {
-                            warn!("Query handler error for '{}': {}", key_expr, e);
-                            if let Err(reply_err) = query
-                                .reply_err(zenoh::bytes::ZBytes::from(e.to_string().into_bytes()))
-                                .await
-                            {
-                                warn!("Failed to send error reply: {}", reply_err);
-                            }
-                        }
+                    }
+                    Err(e) => {
+                        error!("Queryable recv error: {}", e);
+                        break;
                     }
                 }
-                Err(e) => {
-                    error!("Queryable recv error: {}", e);
-                    break;
-                }
             }
-        }
-    });
+        }));
+    }
 
-    handles.push(handle);
-    Ok(handles)
+    Ok(())
 }
 
 fn to_zenoh_locality(locality: ZenohQueryableLocality) -> zenoh::sample::Locality {
@@ -772,22 +932,22 @@ fn timestamp_from_microseconds(labels: &Labels, record_timestamp_us: u64) -> Opt
 #[derive(Debug)]
 pub(crate) enum SessionError {
     Component(ComponentError),
-    Subscriber(String),
-    Queryable(String),
     ZenohOpen(String),
     ZenohClose(String),
     InvalidConfig(String),
+    Declaration(String),
 }
 
 impl Display for SessionError {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             SessionError::Component(err) => write!(f, "{}", err),
-            SessionError::Subscriber(err) => write!(f, "Subscriber pipeline error: {}", err),
-            SessionError::Queryable(err) => write!(f, "Queryable pipeline error: {}", err),
             SessionError::ZenohOpen(err) => write!(f, "Failed to open Zenoh session: {}", err),
             SessionError::ZenohClose(err) => write!(f, "Failed to close Zenoh session: {}", err),
             SessionError::InvalidConfig(err) => write!(f, "Invalid Zenoh configuration: {}", err),
+            SessionError::Declaration(err) => {
+                write!(f, "Failed to declare Zenoh block: {}", err)
+            }
         }
     }
 }
@@ -795,9 +955,212 @@ impl Display for SessionError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::api::components::StateKeeper;
+    use crate::api::http::tests::keeper;
+    use crate::cfg::zenoh::ZenohBucketRouting;
     use rstest::rstest;
     use std::fs;
     use std::time::Duration as StdDuration;
+
+    fn subscriber_block(id: &str, keyexprs: &[&str], bucket: Option<&str>) -> ZenohBlock {
+        ZenohBlock {
+            id: Some(id.to_string()),
+            keyexprs: keyexprs.iter().map(|k| k.to_string()).collect(),
+            routing: ZenohBucketRouting::Static,
+            bucket: bucket.map(|name| name.to_string()),
+            bucket_allowlist: Vec::new(),
+            allow_bucket_creation: false,
+        }
+    }
+
+    fn config_with(subscribers: Vec<ZenohBlock>, queryables: Vec<ZenohBlock>) -> ZenohApiConfig {
+        ZenohApiConfig {
+            subscribers,
+            queryables: queryables
+                .into_iter()
+                .map(|route| ZenohQueryableBlock {
+                    route,
+                    locality: ZenohQueryableLocality::default(),
+                })
+                .collect(),
+            ..Default::default()
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn startup_provisions_subscriber_buckets_not_queryable_buckets(
+        #[future] keeper: Arc<StateKeeper>,
+    ) {
+        let components = keeper.await.get_anonymous().await.unwrap();
+        let config = config_with(
+            vec![subscriber_block("0", &["raw/**"], Some("sub_only"))],
+            vec![subscriber_block("0", &["derived/**"], Some("query_only"))],
+        );
+
+        let subscriber_routers = build_routers(&config.subscribers, "subscriber").unwrap();
+        provision_declared_buckets(&components, &subscriber_routers)
+            .await
+            .unwrap();
+
+        assert!(components.storage.get_bucket("sub_only").await.is_ok());
+        assert!(components.storage.get_bucket("query_only").await.is_err());
+    }
+
+    #[rstest]
+    fn build_routers_rejects_a_bucket_outside_its_allowlist() {
+        let block = ZenohBlock {
+            bucket_allowlist: vec!["site_*".to_string()],
+            routing: ZenohBucketRouting::KeyPrefix,
+            ..subscriber_block("3", &["**"], Some("zenoh_misc"))
+        };
+
+        let err = build_routers(&[block], "subscriber").unwrap_err();
+        assert!(matches!(err, SessionError::InvalidConfig(_)));
+        assert!(err.to_string().contains("subscriber block '3'"));
+    }
+
+    #[rstest]
+    fn build_routers_rejects_a_system_bucket() {
+        let err = build_routers(
+            &[subscriber_block("0", &["**"], Some("$system"))],
+            "queryable",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("queryable block '0'"));
+    }
+
+    #[rstest]
+    fn build_routers_accepts_valid_blocks() {
+        let routers = build_routers(
+            &[subscriber_block("0", &["raw/**"], Some("raw_data"))],
+            "subscriber",
+        )
+        .unwrap();
+        assert_eq!(routers.len(), 1);
+        assert_eq!(routers[0].declared_bucket(), Some("raw_data"));
+    }
+
+    #[rstest]
+    fn validate_keyexprs_rejects_malformed_expressions() {
+        let config = config_with(
+            vec![subscriber_block("0", &["raw/***"], Some("raw"))],
+            vec![],
+        );
+        let err = validate_keyexprs(&config).unwrap_err();
+        assert!(err.to_string().contains("invalid key expression"));
+    }
+
+    #[rstest]
+    fn validate_keyexprs_accepts_wildcards() {
+        let config = config_with(
+            vec![subscriber_block("0", &["site_$*/**", "**"], Some("raw"))],
+            vec![subscriber_block("0", &["a/*/b"], Some("raw"))],
+        );
+        assert!(validate_keyexprs(&config).is_ok());
+    }
+
+    #[rstest]
+    #[case("**", "a/b", true)]
+    #[case("a/**", "a/b", true)]
+    #[case("a/**", "b/**", false)]
+    #[case("site_$*/**", "cell_$*/**", false)]
+    fn detects_intersecting_keyexprs(#[case] a: &str, #[case] b: &str, #[case] expected: bool) {
+        assert_eq!(keyexprs_intersect(a, b), expected);
+    }
+
+    #[rstest]
+    fn check_block_overlaps_rejects_intersecting_exprs_in_subscriber_block() {
+        let config = config_with(
+            vec![subscriber_block(
+                "0",
+                &["sensors/**", "sensors/camera/**"],
+                Some("zenoh"),
+            )],
+            vec![],
+        );
+        let err = check_block_overlaps(&config).unwrap_err();
+        assert!(err.to_string().contains("intersect"));
+    }
+
+    #[rstest]
+    fn check_block_overlaps_rejects_intersecting_exprs_in_queryable_block() {
+        let config = config_with(
+            vec![],
+            vec![subscriber_block(
+                "0",
+                &["sensors/**", "sensors/camera/**"],
+                Some("zenoh"),
+            )],
+        );
+        let err = check_block_overlaps(&config).unwrap_err();
+        assert!(err.to_string().contains("intersect"));
+    }
+
+    #[rstest]
+    fn check_block_overlaps_allows_intersection_across_subscriber_blocks() {
+        let config = config_with(
+            vec![
+                subscriber_block("raw", &["sensors/**"], Some("raw")),
+                subscriber_block("archive", &["sensors/camera/**"], Some("archive")),
+            ],
+            vec![],
+        );
+        assert!(check_block_overlaps(&config).is_ok());
+    }
+    #[rstest]
+    fn check_block_overlaps_allows_intersection_across_queryable_blocks() {
+        let config = config_with(
+            vec![],
+            vec![
+                subscriber_block("raw", &["sensors/**"], Some("raw")),
+                subscriber_block("derived", &["sensors/camera/**"], Some("derived")),
+            ],
+        );
+        assert!(check_block_overlaps(&config).is_ok());
+    }
+
+    #[rstest]
+    #[case(ErrorCode::NotFound, true)]
+    #[case(ErrorCode::InternalServerError, false)]
+    #[case(ErrorCode::ServiceUnavailable, false)]
+    fn identifies_missing_bucket_errors(#[case] status: ErrorCode, #[case] expected: bool) {
+        let error = reduct_base::error::ReductError::new(status, "bucket lookup");
+        assert_eq!(is_missing_bucket_error(&error), expected);
+    }
+
+    #[rstest]
+    fn validate_config_surfaces_parse_errors() {
+        let mut config = config_with(
+            vec![subscriber_block("0", &["raw/**"], Some("raw"))],
+            vec![],
+        );
+        config.config_errors = vec!["subscriber[0]: boom".to_string()];
+        let err = validate_config(&config).unwrap_err();
+        assert!(err.to_string().contains("boom"));
+    }
+
+    #[rstest]
+    fn validate_config_rejects_within_block_overlap() {
+        let config = config_with(
+            vec![subscriber_block(
+                "0",
+                &["sensors/**", "sensors/camera/**"],
+                Some("zenoh"),
+            )],
+            vec![],
+        );
+        assert!(validate_config(&config).is_err());
+    }
+
+    #[rstest]
+    fn validate_config_accepts_a_valid_config() {
+        let config = config_with(
+            vec![subscriber_block("0", &["raw/**"], Some("raw"))],
+            vec![subscriber_block("0", &["derived/**"], Some("derived"))],
+        );
+        assert!(validate_config(&config).is_ok());
+    }
 
     fn build_labels_with_timestamp() -> Labels {
         let mut labels = Labels::new();
@@ -887,7 +1250,6 @@ mod tests {
 
         let cred_files = inject_credentials(&mut zenoh_config, &api_config).unwrap();
 
-        // Credential file should exist
         assert!(cred_files.tls_root_ca.is_some());
         let temp_file = cred_files.tls_root_ca.as_ref().unwrap();
         let read_content = fs::read_to_string(temp_file.path()).unwrap();
