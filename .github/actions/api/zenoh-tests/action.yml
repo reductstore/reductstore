@@ -22,9 +22,9 @@ inputs:
     required: false
     default: ''
   routing_mode:
-    description: 'Zenoh routing configuration: "legacy" for the unindexed settings, "indexed" for RS_ZENOH_{SUB,QUERY}_<ID>_* blocks.'
+    description: 'Zenoh routing configuration: "unindexed" for no-ID settings, "indexed" for RS_ZENOH_{SUB,QUERY}_<ID>_* blocks.'
     required: false
-    default: 'legacy'
+    default: 'unindexed'
 runs:
   using: 'composite'
   steps:

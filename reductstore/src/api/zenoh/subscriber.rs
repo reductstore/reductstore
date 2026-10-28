@@ -314,7 +314,7 @@ mod tests {
         allow_bucket_creation: bool,
     ) -> Arc<BucketRouter> {
         Arc::new(BucketRouter::from_block(&ZenohBlock {
-            id: "0".to_string(),
+            id: Some("0".to_string()),
             keyexprs: vec!["**".to_string()],
             routing,
             bucket: bucket.map(|name| name.to_string()),

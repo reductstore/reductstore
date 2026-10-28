@@ -2,11 +2,11 @@
 
 ## Default
 
-Covers the unindexed Zenoh subscriber and queryable write and read paths. Start ReductStore with `RS_ZENOH_SUB_KEYEXPRS='**'` and `RS_ZENOH_QUERY_KEYEXPRS='**'`. Run `pytest integration_tests/zenoh/default`.
+Covers unindexed static Zenoh subscriber and queryable paths. Start ReductStore with `RS_ZENOH_SUB_KEYEXPRS='**'` and `RS_ZENOH_QUERY_KEYEXPRS='**'`. Run `pytest integration_tests/zenoh/default`.
 
 ## Routing
 
-Covers indexed Zenoh block routing for subscriber and queryable paths. Start ReductStore after sourcing `integration_tests/zenoh/routing/env.sh`. Run `pytest integration_tests/zenoh/routing`; see [routing/README.md](routing/README.md) for the full routing matrix.
+Covers indexed Zenoh block routing for subscriber and queryable paths. Unindexed blocks use the same routing settings without `<ID>_`; see [routing/README.md](routing/README.md). Start ReductStore after sourcing `integration_tests/zenoh/routing/env.sh`. Run `pytest integration_tests/zenoh/routing`.
 
 ## Credentials
 

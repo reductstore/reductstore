@@ -3,13 +3,13 @@
 
 use crate::cfg::{parse_bool, CfgParser, ExtCfgBounds};
 use crate::core::env::{Env, GetEnv};
-use log::{debug, info, warn};
+use log::{debug, warn};
 use std::fmt::{Display, Formatter};
 use std::str::FromStr;
 
 const DEFAULT_BUCKET: &str = "zenoh";
 
-const LEGACY_BLOCK_ID: &str = "legacy";
+const UNINDEXED_BLOCK_ID: &str = "default";
 
 const SUB_PREFIX: &str = "RS_ZENOH_SUB_";
 const QUERY_PREFIX: &str = "RS_ZENOH_QUERY_";
@@ -21,13 +21,6 @@ const BLOCK_SUFFIXES: [&str; 6] = [
     "BUCKET_ALLOWLIST",
     "ALLOW_BUCKET_CREATION",
     "LOCALITY",
-];
-
-const LEGACY_KEYS: [&str; 4] = [
-    "RS_ZENOH_BUCKET",
-    "RS_ZENOH_SUB_KEYEXPRS",
-    "RS_ZENOH_QUERY_KEYEXPRS",
-    "RS_ZENOH_QUERY_LOCALITY",
 ];
 
 /// Configuration for the Zenoh API integration.
@@ -54,33 +47,34 @@ const LEGACY_KEYS: [&str; 4] = [
 ///
 /// # Block Environment Variables
 ///
-/// The write path is configured as `RS_ZENOH_SUB_<ID>_*` blocks and the read path as
-/// `RS_ZENOH_QUERY_<ID>_*` blocks. `<ID>` is any token; numeric ids are listed first.
-/// A block declares one or more key expressions and the bucket policy applied to them.
+/// The write path is configured with `RS_ZENOH_SUB_*` blocks and the read path with
+/// `RS_ZENOH_QUERY_*` blocks. A block declares one or more key expressions and the bucket policy
+/// applied to them.
 ///
-/// - `RS_ZENOH_{SUB,QUERY}_<ID>_KEYEXPRS`: Zenoh key expressions, comma separated (required)
-/// - `RS_ZENOH_{SUB,QUERY}_<ID>_ROUTING`: `static` (default) or `key-prefix`
-/// - `RS_ZENOH_{SUB,QUERY}_<ID>_BUCKET`: in `static` routing, the target bucket (required);
-///   in `key-prefix` routing, an optional fallback for keys with a single chunk
-/// - `RS_ZENOH_{SUB,QUERY}_<ID>_BUCKET_ALLOWLIST`: comma-separated globs limiting which bucket
+/// A path may use a single unindexed block or one or more indexed blocks. Omit `<ID>_` for an
+/// unindexed block, for example `RS_ZENOH_SUB_KEYEXPRS`. Add `<ID>_` for an indexed block, for
+/// example `RS_ZENOH_SUB_0_KEYEXPRS`. Indexed and unindexed blocks cannot be mixed in the same
+/// path, but the subscriber and queryable paths may choose independently.
+///
+/// - `RS_ZENOH_{SUB,QUERY}[_<ID>]_KEYEXPRS`: Zenoh key expressions, comma separated (required)
+/// - `RS_ZENOH_{SUB,QUERY}[_<ID>]_ROUTING`: `static` (default) or `key-prefix`
+/// - `RS_ZENOH_{SUB,QUERY}[_<ID>]_BUCKET`: in `static` routing, the target bucket; in
+///   `key-prefix` routing, an optional fallback for keys with a single chunk
+/// - `RS_ZENOH_{SUB,QUERY}[_<ID>]_BUCKET_ALLOWLIST`: comma-separated globs limiting which bucket
 ///   names a key prefix may resolve to. Required in `key-prefix` routing, ignored in `static`
-/// - `RS_ZENOH_SUB_<ID>_ALLOW_BUCKET_CREATION`: whether `key-prefix` routing may create buckets
+/// - `RS_ZENOH_SUB[_<ID>]_ALLOW_BUCKET_CREATION`: whether `key-prefix` routing may create buckets
 ///   on demand (default: false). Ignored in `static` routing, where the named bucket is always
 ///   created at startup. Queryables never create buckets
-/// - `RS_ZENOH_QUERY_<ID>_LOCALITY`: allowed origin for query replies. One of `SessionLocal`,
+/// - `RS_ZENOH_QUERY[_<ID>]_LOCALITY`: allowed origin for query replies. One of `SessionLocal`,
 ///   `Remote`, or `Any` (default)
 ///
 /// In `key-prefix` routing the first chunk of the key selects the bucket and the rest becomes
 /// the entry name, e.g. `site_a/motion/welder` -> bucket `site_a`, entry `motion/welder`.
 /// `_BUCKET_ALLOWLIST` takes plain globs (`*`, leading `!` excludes), not Zenoh key expressions.
 ///
-/// # Legacy (unindexed) Configuration
-///
-/// `RS_ZENOH_BUCKET` (default: "zenoh"), `RS_ZENOH_SUB_KEYEXPRS`, `RS_ZENOH_QUERY_KEYEXPRS`
-/// and `RS_ZENOH_QUERY_LOCALITY` configure a single static block writing everything to one
-/// bucket. They apply only when no indexed variable is set. Setting both styles at once, or an
-/// indexed variable without a matching `_KEYEXPRS`, is a fatal configuration error that aborts
-/// startup rather than silently ignoring part of the configuration.
+/// For an unindexed static block, `RS_ZENOH_{SUB,QUERY}_BUCKET` takes precedence. When it is
+/// absent, `RS_ZENOH_BUCKET` remains the shared fallback and defaults to `"zenoh"`. Indexed
+/// static blocks must set their own `_BUCKET`.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct ZenohApiConfig {
     /// Enables the Zenoh API runtime.
@@ -114,8 +108,8 @@ pub struct ZenohApiConfig {
 /// A set of Zenoh key expressions and the bucket policy applied to keys matching them.
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct ZenohBlock {
-    /// The `<ID>` from the environment variable names.
-    pub id: String,
+    /// The optional `<ID>` from the environment variable names.
+    pub id: Option<String>,
     /// Zenoh key expressions.
     pub keyexprs: Vec<String>,
     /// How keys matching this block are mapped to buckets.
@@ -129,6 +123,10 @@ pub struct ZenohBlock {
 }
 
 impl ZenohBlock {
+    pub fn name(&self) -> &str {
+        self.id.as_deref().unwrap_or(UNINDEXED_BLOCK_ID)
+    }
+
     pub fn is_key_prefix(&self) -> bool {
         self.routing == ZenohBucketRouting::KeyPrefix
     }
@@ -208,7 +206,7 @@ impl Display for ZenohBlock {
         write!(
             f,
             "{}: keyexprs={}, routing={}, bucket={}",
-            self.id,
+            self.name(),
             self.keyexprs.join(","),
             self.routing,
             self.bucket.as_deref().unwrap_or("<none>")
@@ -255,41 +253,18 @@ impl Display for ZenohApiConfig {
 
 impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
     pub(super) fn parse_zenoh_api_config(env: &mut Env<EnvGetter>) -> ZenohApiConfig {
-        let zenoh_keys = env.keys_with_prefix("RS_ZENOH_");
-        let indexed_keys: Vec<&String> = zenoh_keys
-            .iter()
-            .filter(|key| is_indexed_block_key(key))
-            .collect();
-        let legacy_keys: Vec<&String> = zenoh_keys
-            .iter()
-            .filter(|key| LEGACY_KEYS.contains(&key.as_str()))
-            .collect();
-
-        let mut errors = Vec::new();
-
-        let (subscribers, queryables) = if indexed_keys.is_empty() {
-            parse_legacy_blocks(env)
-        } else {
-            if !legacy_keys.is_empty() {
-                errors.push(format!(
-                    "indexed settings ({}) and unindexed settings ({}) are both set; \
-                     use one style or the other",
-                    join_keys(&indexed_keys),
-                    join_keys(&legacy_keys)
-                ));
-            }
-            let (subscribers, mut sub_errors) = parse_blocks(env, SUB_PREFIX, "subscriber");
-            let (queryables, mut query_errors) = parse_queryables(env);
-            errors.append(&mut sub_errors);
-            errors.append(&mut query_errors);
-            (subscribers, queryables)
-        };
+        let default_bucket = parse_optional_string(env.get_optional::<String>("RS_ZENOH_BUCKET"))
+            .unwrap_or_else(|| DEFAULT_BUCKET.to_string());
+        let (subscribers, mut errors) =
+            parse_blocks(env, SUB_PREFIX, "subscriber", &default_bucket);
+        let (queryables, mut query_errors) = parse_queryables(env, &default_bucket);
+        errors.append(&mut query_errors);
 
         let enabled = parse_bool(env.get_optional::<String>("RS_ZENOH_ENABLED"), false);
         if enabled && subscribers.is_empty() && queryables.is_empty() && errors.is_empty() {
             warn!(
                 "Zenoh API is enabled but no subscriber or queryable block is configured. \
-                 Set RS_ZENOH_SUB_0_KEYEXPRS and/or RS_ZENOH_QUERY_0_KEYEXPRS"
+                 Set RS_ZENOH_SUB_KEYEXPRS and/or RS_ZENOH_QUERY_KEYEXPRS"
             );
         }
 
@@ -318,14 +293,16 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
 fn parse_queryables<EnvGetter: GetEnv>(
     env: &mut Env<EnvGetter>,
+    default_bucket: &str,
 ) -> (Vec<ZenohQueryableBlock>, Vec<String>) {
-    let (mut routes, mut errors) = parse_blocks(env, QUERY_PREFIX, "queryable");
+    let (mut routes, mut errors) = parse_blocks(env, QUERY_PREFIX, "queryable", default_bucket);
     for route in &mut routes {
-        let variable = format!("{}{}_ALLOW_BUCKET_CREATION", QUERY_PREFIX, route.id);
+        let variable = block_variable(QUERY_PREFIX, route.id.as_deref(), "ALLOW_BUCKET_CREATION");
         if env.get_optional::<String>(&variable).is_some() {
             errors.push(format!(
                 "queryable block '{}': {} is not supported; queryables never create buckets",
-                route.id, variable
+                route.name(),
+                variable
             ));
         }
         route.allow_bucket_creation = false;
@@ -334,9 +311,10 @@ fn parse_queryables<EnvGetter: GetEnv>(
     let queryables = routes
         .into_iter()
         .map(|route| {
+            let variable = block_variable(QUERY_PREFIX, route.id.as_deref(), "LOCALITY");
             let locality = parse_locality(
-                env.get_optional::<String>(&format!("{}{}_LOCALITY", QUERY_PREFIX, route.id)),
-                &format!("queryable[{}]", route.id),
+                env.get_optional::<String>(&variable),
+                &format!("queryable[{}]", route.name()),
             );
             ZenohQueryableBlock { route, locality }
         })
@@ -348,22 +326,57 @@ fn parse_blocks<EnvGetter: GetEnv>(
     env: &mut Env<EnvGetter>,
     prefix: &str,
     kind: &str,
+    default_bucket: &str,
 ) -> (Vec<ZenohBlock>, Vec<String>) {
-    let discovered = env.matches::<String>(&format!("^{}(.+)_KEYEXPRS$", prefix));
-    let discovered_ids: Vec<String> = discovered.keys().cloned().collect();
+    let path_keys = env.keys_with_prefix(prefix);
+    let indexed_keys: Vec<&String> = path_keys
+        .iter()
+        .filter(|key| block_var_id(key, prefix).is_some())
+        .collect();
+    let unindexed_keys: Vec<&String> = path_keys
+        .iter()
+        .filter(|key| matches!(block_var_parts(key, prefix), Some((None, _))))
+        .collect();
+    let indexed = env.matches::<String>(&format!("^{}(.+)_KEYEXPRS$", prefix));
+    let unindexed_keyexprs = env.get_optional::<String>(&block_variable(prefix, None, "KEYEXPRS"));
+    let has_unindexed_keyexprs = unindexed_keyexprs.is_some();
+
+    let mut errors = Vec::new();
+    let mixed = !indexed_keys.is_empty() && !unindexed_keys.is_empty();
+    if mixed {
+        errors.push(format!(
+            "{} configuration cannot use indexed settings ({}) and unindexed settings ({}) together",
+            kind,
+            join_keys(&indexed_keys),
+            join_keys(&unindexed_keys)
+        ));
+    }
+
+    let indexed_ids: Vec<String> = indexed.keys().cloned().collect();
+    let discovered = if indexed.is_empty() {
+        unindexed_keyexprs
+            .map(|keyexprs| vec![(None, keyexprs)])
+            .unwrap_or_default()
+    } else {
+        indexed
+            .into_iter()
+            .map(|(id, keyexprs)| (Some(id), keyexprs))
+            .collect()
+    };
 
     let mut blocks = Vec::with_capacity(discovered.len());
-    let mut errors = Vec::new();
     for (id, raw_keyexprs) in discovered {
-        let label = format!("{}[{}]", kind, id);
+        let label = block_label(kind, id.as_deref());
+        let keyexprs_variable = block_variable(prefix, id.as_deref(), "KEYEXPRS");
 
         let keyexprs = split_list(&raw_keyexprs);
         if keyexprs.is_empty() {
-            errors.push(format!("{}: {}{}_KEYEXPRS is empty", label, prefix, id));
+            errors.push(format!("{}: {} is empty", label, keyexprs_variable));
             continue;
         }
 
-        let routing = match env.get_optional::<String>(&format!("{}{}_ROUTING", prefix, id)) {
+        let routing_variable = block_variable(prefix, id.as_deref(), "ROUTING");
+        let routing = match env.get_optional::<String>(&routing_variable) {
             Some(raw) => match ZenohBucketRouting::from_str(&raw) {
                 Ok(routing) => routing,
                 Err(_) => {
@@ -377,8 +390,11 @@ fn parse_blocks<EnvGetter: GetEnv>(
             None => ZenohBucketRouting::Static,
         };
 
-        let bucket =
-            parse_optional_string(env.get_optional::<String>(&format!("{}{}_BUCKET", prefix, id)));
+        let bucket_variable = block_variable(prefix, id.as_deref(), "BUCKET");
+        let mut bucket = parse_optional_string(env.get_optional::<String>(&bucket_variable));
+        if routing == ZenohBucketRouting::Static && id.is_none() && bucket.is_none() {
+            bucket = Some(default_bucket.to_string());
+        }
         if let Some(name) = &bucket {
             if !is_valid_bucket_name(name) {
                 errors.push(format!(
@@ -389,46 +405,46 @@ fn parse_blocks<EnvGetter: GetEnv>(
             }
         }
 
+        let allowlist_variable = block_variable(prefix, id.as_deref(), "BUCKET_ALLOWLIST");
         let allowlist = env
-            .get_optional::<String>(&format!("{}{}_BUCKET_ALLOWLIST", prefix, id))
+            .get_optional::<String>(&allowlist_variable)
             .map(|raw| split_list(&raw))
             .unwrap_or_default();
         for pattern in &allowlist {
             if pattern.contains('/') || pattern.contains("$*") {
                 warn!(
                     "Zenoh {}: allowlist pattern '{}' looks like a Zenoh key expression. \
-                     {}{}_BUCKET_ALLOWLIST takes plain globs matched against bucket names.",
-                    label, pattern, prefix, id
+                     {} takes plain globs matched against bucket names.",
+                    label, pattern, allowlist_variable
                 );
             }
         }
 
-        let allow_bucket_creation = parse_bool(
-            env.get_optional::<String>(&format!("{}{}_ALLOW_BUCKET_CREATION", prefix, id)),
-            false,
-        );
+        let allow_creation_variable =
+            block_variable(prefix, id.as_deref(), "ALLOW_BUCKET_CREATION");
+        let allow_bucket_creation =
+            parse_bool(env.get_optional::<String>(&allow_creation_variable), false);
 
         let block = match routing {
             ZenohBucketRouting::Static => {
                 let Some(bucket) = bucket else {
                     errors.push(format!(
-                        "{}: static routing needs {}{}_BUCKET",
-                        label, prefix, id
+                        "{}: static routing needs {}",
+                        label, bucket_variable
                     ));
                     continue;
                 };
 
                 if !allowlist.is_empty() {
                     warn!(
-                        "Zenoh {}: {}{}_BUCKET_ALLOWLIST is ignored in static routing",
-                        label, prefix, id
+                        "Zenoh {}: {} is ignored in static routing",
+                        label, allowlist_variable
                     );
                 }
                 if allow_bucket_creation {
                     warn!(
-                        "Zenoh {}: {}{}_ALLOW_BUCKET_CREATION is ignored in static routing, \
-                         bucket '{}' is created at startup",
-                        label, prefix, id, bucket
+                        "Zenoh {}: {} is ignored in static routing, bucket '{}' is created at startup",
+                        label, allow_creation_variable, bucket
                     );
                 }
 
@@ -444,16 +460,15 @@ fn parse_blocks<EnvGetter: GetEnv>(
             ZenohBucketRouting::KeyPrefix => {
                 if allowlist.is_empty() {
                     errors.push(format!(
-                        "{}: key-prefix routing needs {}{}_BUCKET_ALLOWLIST to bound which \
-                         buckets a key prefix can reach",
-                        label, prefix, id
+                        "{}: key-prefix routing needs {} to bound which buckets a key prefix can reach",
+                        label, allowlist_variable
                     ));
                     continue;
                 }
                 if bucket.is_none() {
                     debug!(
-                        "Zenoh {}: no {}{}_BUCKET fallback, keys with a single chunk are rejected",
-                        label, prefix, id
+                        "Zenoh {}: no {} fallback, keys with a single chunk are rejected",
+                        label, bucket_variable
                     );
                 }
 
@@ -471,77 +486,46 @@ fn parse_blocks<EnvGetter: GetEnv>(
         blocks.push(block);
     }
 
-    errors.extend(orphan_block_errors(env, prefix, kind, &discovered_ids));
-    blocks.sort_by_key(|block| block_sort_key(&block.id));
+    errors.extend(orphan_block_errors(
+        env,
+        prefix,
+        kind,
+        &indexed_ids,
+        has_unindexed_keyexprs,
+        mixed,
+    ));
+    blocks.sort_by_key(|block| block_sort_key(block.name()));
     (blocks, errors)
-}
-
-fn parse_legacy_blocks<EnvGetter: GetEnv>(
-    env: &mut Env<EnvGetter>,
-) -> (Vec<ZenohBlock>, Vec<ZenohQueryableBlock>) {
-    let bucket = parse_optional_string(env.get_optional::<String>("RS_ZENOH_BUCKET"))
-        .unwrap_or_else(|| DEFAULT_BUCKET.to_string());
-
-    let legacy_block = |keyexprs: Vec<String>| ZenohBlock {
-        id: LEGACY_BLOCK_ID.to_string(),
-        keyexprs,
-        routing: ZenohBucketRouting::Static,
-        bucket: Some(bucket.clone()),
-        bucket_allowlist: Vec::new(),
-        allow_bucket_creation: false,
-    };
-
-    let subscribers = env
-        .get_optional::<String>("RS_ZENOH_SUB_KEYEXPRS")
-        .map(|raw| split_list(&raw))
-        .filter(|keyexprs| !keyexprs.is_empty())
-        .map(|keyexprs| vec![legacy_block(keyexprs)])
-        .unwrap_or_default();
-
-    let queryable_keyexprs = env
-        .get_optional::<String>("RS_ZENOH_QUERY_KEYEXPRS")
-        .map(|raw| split_list(&raw))
-        .filter(|keyexprs| !keyexprs.is_empty());
-    let queryables = match queryable_keyexprs {
-        Some(keyexprs) => {
-            let locality = parse_locality(
-                env.get_optional::<String>("RS_ZENOH_QUERY_LOCALITY"),
-                "queryable[legacy]",
-            );
-            vec![ZenohQueryableBlock {
-                route: legacy_block(keyexprs),
-                locality,
-            }]
-        }
-        None => Vec::new(),
-    };
-
-    if !subscribers.is_empty() || !queryables.is_empty() {
-        info!(
-            "Zenoh: using the unindexed configuration as a single static block on bucket '{}'. \
-             Consider migrating to RS_ZENOH_SUB_<ID>_* / RS_ZENOH_QUERY_<ID>_*",
-            bucket
-        );
-    }
-
-    (subscribers, queryables)
 }
 
 fn orphan_block_errors<EnvGetter: GetEnv>(
     env: &Env<EnvGetter>,
     prefix: &str,
     kind: &str,
-    discovered_ids: &[String],
+    indexed_ids: &[String],
+    has_unindexed_keyexprs: bool,
+    skip_unindexed: bool,
 ) -> Vec<String> {
     let mut errors = Vec::new();
     for key in env.keys_with_prefix(prefix) {
-        if let Some(id) = block_var_id(&key, prefix) {
-            if !discovered_ids.iter().any(|known| known == id) {
-                errors.push(format!(
-                    "'{}' has no matching {}{}_KEYEXPRS, so {} block '{}' is incomplete",
-                    key, prefix, id, kind, id
-                ));
-            }
+        let Some((id, _)) = block_var_parts(&key, prefix) else {
+            continue;
+        };
+        if id.is_none() && skip_unindexed {
+            continue;
+        }
+        let has_keyexprs = match id {
+            Some(id) => indexed_ids.iter().any(|known| known == id),
+            None => has_unindexed_keyexprs,
+        };
+        if !has_keyexprs {
+            errors.push(format!(
+                "'{}' has no matching {}, so {} block '{}' is incomplete",
+                key,
+                block_variable(prefix, id, "KEYEXPRS"),
+                kind,
+                id.unwrap_or(UNINDEXED_BLOCK_ID)
+            ));
         }
     }
     errors
@@ -582,16 +566,38 @@ fn is_valid_bucket_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-fn block_var_id<'a>(key: &'a str, prefix: &str) -> Option<&'a str> {
-    let rest = key.strip_prefix(prefix)?;
-    BLOCK_SUFFIXES.iter().find_map(|suffix| {
-        let id = rest.strip_suffix(suffix)?.strip_suffix('_')?;
-        (!id.is_empty()).then_some(id)
-    })
+fn block_label(kind: &str, id: Option<&str>) -> String {
+    format!("{}[{}]", kind, id.unwrap_or(UNINDEXED_BLOCK_ID))
 }
 
-fn is_indexed_block_key(key: &str) -> bool {
-    block_var_id(key, SUB_PREFIX).is_some() || block_var_id(key, QUERY_PREFIX).is_some()
+fn block_variable(prefix: &str, id: Option<&str>, suffix: &str) -> String {
+    match id {
+        Some(id) => format!("{}{}_{}", prefix, id, suffix),
+        None => format!("{}{}", prefix, suffix),
+    }
+}
+
+fn block_var_parts<'a>(key: &'a str, prefix: &str) -> Option<(Option<&'a str>, &'static str)> {
+    let rest = key.strip_prefix(prefix)?;
+    for suffix in BLOCK_SUFFIXES {
+        if rest == suffix {
+            return Some((None, suffix));
+        }
+        let Some(id) = rest
+            .strip_suffix(suffix)
+            .and_then(|value| value.strip_suffix('_'))
+        else {
+            continue;
+        };
+        if !id.is_empty() {
+            return Some((Some(id), suffix));
+        }
+    }
+    None
+}
+
+fn block_var_id<'a>(key: &'a str, prefix: &str) -> Option<&'a str> {
+    block_var_parts(key, prefix).and_then(|(id, _)| id)
 }
 
 fn block_sort_key(id: &str) -> (u8, u64, String) {
@@ -669,13 +675,132 @@ mod tests {
 
         assert_eq!(cfg.subscribers.len(), 1);
         let block = &cfg.subscribers[0];
-        assert_eq!(block.id, "0");
+        assert_eq!(block.id.as_deref(), Some("0"));
         assert_eq!(block.keyexprs, vec!["raw/**".to_string()]);
         assert_eq!(block.routing, ZenohBucketRouting::Static);
         assert_eq!(block.bucket, Some("raw_data".to_string()));
         assert!(block.bucket_allowlist.is_empty());
         assert!(!block.allow_bucket_creation);
         assert!(cfg.queryables.is_empty());
+    }
+
+    #[rstest]
+    fn parses_unindexed_static_blocks_with_path_buckets() {
+        let cfg = parse(&[
+            ("RS_ZENOH_SUB_KEYEXPRS", "raw/**"),
+            ("RS_ZENOH_SUB_BUCKET", "raw_data"),
+            ("RS_ZENOH_QUERY_KEYEXPRS", "raw/**"),
+            ("RS_ZENOH_QUERY_BUCKET", "read_data"),
+            ("RS_ZENOH_QUERY_LOCALITY", "Remote"),
+        ]);
+
+        assert!(cfg.config_errors.is_empty());
+        assert_eq!(cfg.subscribers[0].id, None);
+        assert_eq!(cfg.subscribers[0].bucket, Some("raw_data".to_string()));
+        assert_eq!(cfg.queryables[0].route.id, None);
+        assert_eq!(
+            cfg.queryables[0].route.bucket,
+            Some("read_data".to_string())
+        );
+        assert_eq!(cfg.queryables[0].locality, ZenohQueryableLocality::Remote);
+    }
+
+    #[rstest]
+    fn parses_unindexed_key_prefix_blocks() {
+        let cfg = parse(&[
+            ("RS_ZENOH_SUB_KEYEXPRS", "site_$*/**"),
+            ("RS_ZENOH_SUB_ROUTING", "key-prefix"),
+            ("RS_ZENOH_SUB_BUCKET_ALLOWLIST", "site_*"),
+            ("RS_ZENOH_SUB_ALLOW_BUCKET_CREATION", "true"),
+            ("RS_ZENOH_QUERY_KEYEXPRS", "cell_$*/**"),
+            ("RS_ZENOH_QUERY_ROUTING", "key-prefix"),
+            ("RS_ZENOH_QUERY_BUCKET", "query_fallback"),
+            ("RS_ZENOH_QUERY_BUCKET_ALLOWLIST", "cell_*"),
+        ]);
+
+        assert!(cfg.config_errors.is_empty());
+        assert_eq!(cfg.subscribers[0].routing, ZenohBucketRouting::KeyPrefix);
+        assert_eq!(
+            cfg.subscribers[0].bucket_allowlist,
+            vec!["site_*".to_string()]
+        );
+        assert!(cfg.subscribers[0].allow_bucket_creation);
+        assert_eq!(
+            cfg.queryables[0].route.routing,
+            ZenohBucketRouting::KeyPrefix
+        );
+        assert_eq!(
+            cfg.queryables[0].route.bucket,
+            Some("query_fallback".to_string())
+        );
+        assert_eq!(
+            cfg.queryables[0].route.bucket_allowlist,
+            vec!["cell_*".to_string()]
+        );
+    }
+
+    #[rstest]
+    fn allows_unindexed_subscriber_with_indexed_queryable() {
+        let cfg = parse(&[
+            ("RS_ZENOH_SUB_KEYEXPRS", "raw/**"),
+            ("RS_ZENOH_SUB_BUCKET", "raw_data"),
+            ("RS_ZENOH_QUERY_0_KEYEXPRS", "raw/**"),
+            ("RS_ZENOH_QUERY_0_BUCKET", "read_data"),
+        ]);
+
+        assert!(cfg.config_errors.is_empty());
+        assert_eq!(cfg.subscribers[0].bucket, Some("raw_data".to_string()));
+        assert_eq!(
+            cfg.queryables[0].route.bucket,
+            Some("read_data".to_string())
+        );
+    }
+
+    #[rstest]
+    fn allows_indexed_subscriber_with_unindexed_queryable() {
+        let cfg = parse(&[
+            ("RS_ZENOH_SUB_0_KEYEXPRS", "raw/**"),
+            ("RS_ZENOH_SUB_0_BUCKET", "raw_data"),
+            ("RS_ZENOH_QUERY_KEYEXPRS", "raw/**"),
+            ("RS_ZENOH_QUERY_BUCKET", "read_data"),
+        ]);
+
+        assert!(cfg.config_errors.is_empty());
+        assert_eq!(cfg.subscribers[0].bucket, Some("raw_data".to_string()));
+        assert_eq!(
+            cfg.queryables[0].route.bucket,
+            Some("read_data".to_string())
+        );
+    }
+
+    #[rstest]
+    fn rejects_indexed_and_unindexed_subscriber_blocks() {
+        let cfg = parse(&[
+            ("RS_ZENOH_SUB_KEYEXPRS", "raw/**"),
+            ("RS_ZENOH_SUB_BUCKET", "raw_data"),
+            ("RS_ZENOH_SUB_0_KEYEXPRS", "archive/**"),
+            ("RS_ZENOH_SUB_0_BUCKET", "archive_data"),
+        ]);
+
+        assert!(cfg
+            .config_errors
+            .iter()
+            .any(|error| { error.contains("subscriber configuration cannot use") }));
+    }
+
+    #[rstest]
+    fn rejects_indexed_and_unindexed_queryable_blocks() {
+        let cfg = parse(&[
+            ("RS_ZENOH_QUERY_KEYEXPRS", "raw/**"),
+            ("RS_ZENOH_QUERY_BUCKET", "raw_data"),
+            ("RS_ZENOH_QUERY_0_KEYEXPRS", "archive/**"),
+            ("RS_ZENOH_QUERY_0_BUCKET", "archive_data"),
+        ]);
+
+        assert!(cfg
+            .config_errors
+            .iter()
+            .any(|error| { error.contains("queryable configuration cannot use") }));
     }
 
     #[rstest]
@@ -691,7 +816,11 @@ mod tests {
             ("RS_ZENOH_SUB_10_BUCKET", "bucket_d"),
         ]);
 
-        let ids: Vec<&str> = cfg.subscribers.iter().map(|b| b.id.as_str()).collect();
+        let ids: Vec<&str> = cfg
+            .subscribers
+            .iter()
+            .map(|block| block.id.as_deref().unwrap())
+            .collect();
         assert_eq!(ids, vec!["0", "1", "2", "10"]);
         assert_eq!(cfg.subscribers[3].bucket, Some("bucket_d".to_string()));
     }
@@ -911,7 +1040,11 @@ mod tests {
             ("RS_ZENOH_SUB_2_BUCKET", "bucket_c"),
         ]);
 
-        let ids: Vec<&str> = cfg.subscribers.iter().map(|b| b.id.as_str()).collect();
+        let ids: Vec<&str> = cfg
+            .subscribers
+            .iter()
+            .map(|block| block.id.as_deref().unwrap())
+            .collect();
         assert_eq!(ids, vec!["0", "2"]);
         assert!(!cfg.config_errors.is_empty());
     }
@@ -955,7 +1088,7 @@ mod tests {
     }
 
     #[rstest]
-    fn synthesizes_legacy_block_from_unindexed_vars() {
+    fn parses_unindexed_blocks_from_unindexed_vars() {
         let cfg = parse(&[
             ("RS_ZENOH_BUCKET", "telemetry"),
             ("RS_ZENOH_SUB_KEYEXPRS", "**"),
@@ -965,7 +1098,7 @@ mod tests {
 
         assert_eq!(cfg.subscribers.len(), 1);
         let sub = &cfg.subscribers[0];
-        assert_eq!(sub.id, LEGACY_BLOCK_ID);
+        assert_eq!(sub.id, None);
         assert_eq!(sub.routing, ZenohBucketRouting::Static);
         assert_eq!(sub.bucket, Some("telemetry".to_string()));
         assert_eq!(sub.keyexprs, vec!["**".to_string()]);
@@ -979,69 +1112,73 @@ mod tests {
     }
 
     #[rstest]
-    fn legacy_defaults_to_zenoh_bucket() {
+    fn unindexed_static_block_defaults_to_zenoh_bucket() {
         let cfg = parse(&[("RS_ZENOH_SUB_KEYEXPRS", "**")]);
         assert_eq!(cfg.subscribers[0].bucket, Some(DEFAULT_BUCKET.to_string()));
     }
 
     #[rstest]
-    fn legacy_empty_bucket_falls_back_to_default() {
+    fn empty_global_bucket_falls_back_to_default() {
         let cfg = parse(&[("RS_ZENOH_BUCKET", "   "), ("RS_ZENOH_SUB_KEYEXPRS", "**")]);
         assert_eq!(cfg.subscribers[0].bucket, Some(DEFAULT_BUCKET.to_string()));
     }
 
     #[rstest]
-    fn legacy_sub_only_leaves_queryables_empty() {
+    fn unindexed_subscriber_leaves_queryables_empty() {
         let cfg = parse(&[("RS_ZENOH_SUB_KEYEXPRS", "**")]);
         assert_eq!(cfg.subscribers.len(), 1);
         assert!(cfg.queryables.is_empty());
     }
 
     #[rstest]
-    fn legacy_query_only_leaves_subscribers_empty() {
+    fn unindexed_queryable_leaves_subscribers_empty() {
         let cfg = parse(&[("RS_ZENOH_QUERY_KEYEXPRS", "**")]);
         assert!(cfg.subscribers.is_empty());
         assert_eq!(cfg.queryables.len(), 1);
     }
 
     #[rstest]
-    fn legacy_keyexprs_is_not_seen_as_indexed() {
+    fn unindexed_keyexprs_have_no_block_id() {
         let cfg = parse(&[
             ("RS_ZENOH_SUB_KEYEXPRS", "**"),
             ("RS_ZENOH_QUERY_KEYEXPRS", "**"),
             ("RS_ZENOH_QUERY_LOCALITY", "Any"),
         ]);
 
-        assert_eq!(cfg.subscribers[0].id, LEGACY_BLOCK_ID);
-        assert_eq!(cfg.queryables[0].route.id, LEGACY_BLOCK_ID);
+        assert_eq!(cfg.subscribers[0].id, None);
+        assert_eq!(cfg.queryables[0].route.id, None);
     }
 
     #[rstest]
-    fn mixing_indexed_and_legacy_vars_is_fatal() {
+    fn mixing_indexed_and_unindexed_subscriber_settings_is_fatal() {
         let cfg = parse(&[
-            ("RS_ZENOH_BUCKET", "legacy_bucket"),
+            ("RS_ZENOH_BUCKET", "fallback_bucket"),
             ("RS_ZENOH_SUB_KEYEXPRS", "**"),
             ("RS_ZENOH_SUB_0_KEYEXPRS", "raw/**"),
             ("RS_ZENOH_SUB_0_BUCKET", "raw_data"),
         ]);
 
         assert_eq!(cfg.subscribers.len(), 1);
-        assert_eq!(cfg.subscribers[0].id, "0");
-        assert!(cfg.config_errors.iter().any(|err| err.contains("both set")));
+        assert_eq!(cfg.subscribers[0].id.as_deref(), Some("0"));
+        assert!(cfg
+            .config_errors
+            .iter()
+            .any(|err| err.contains("subscriber configuration cannot use")));
     }
 
     #[rstest]
     fn orphan_indexed_var_is_fatal() {
         let cfg = parse(&[
             ("RS_ZENOH_SUB_0_BUCKET", "raw_data"),
-            ("RS_ZENOH_BUCKET", "legacy_bucket"),
-            ("RS_ZENOH_SUB_KEYEXPRS", "**"),
             ("RS_ZENOH_QUERY_KEYEXPRS", "**"),
         ]);
 
         assert!(cfg.subscribers.is_empty());
-        assert!(cfg.queryables.is_empty());
-        assert!(!cfg.config_errors.is_empty());
+        assert_eq!(cfg.queryables.len(), 1);
+        assert!(cfg
+            .config_errors
+            .iter()
+            .any(|error| error.contains("RS_ZENOH_SUB_0_KEYEXPRS")));
     }
 
     #[rstest]
@@ -1089,7 +1226,10 @@ mod tests {
     #[case("RS_ZENOH_SUB_KEYEXPRS", false)]
     #[case("RS_ZENOH_ENABLED", false)]
     fn detects_indexed_block_keys(#[case] key: &str, #[case] expected: bool) {
-        assert_eq!(is_indexed_block_key(key), expected);
+        assert_eq!(
+            block_var_id(key, SUB_PREFIX).is_some() || block_var_id(key, QUERY_PREFIX).is_some(),
+            expected
+        );
     }
 
     #[rstest]

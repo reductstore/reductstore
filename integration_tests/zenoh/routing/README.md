@@ -1,11 +1,17 @@
 # Zenoh Routing Integration Tests
 
-Two files cover the indexed routing matrix:
+The routing matrix uses indexed blocks:
 
 - `subscriber_test.py` - the write path (published samples are routed to buckets)
 - `queryable_test.py` - the read path (queries are served from routed buckets)
 
-Both run against a live server started with the block matrix in `env.sh`.
+Both run against a live server started with the indexed block matrix in `env.sh`.
+
+For one subscriber or queryable block, omit `<ID>_` from the variable names and use the same
+settings. For example, `RS_ZENOH_SUB_ROUTING=key-prefix`,
+`RS_ZENOH_SUB_BUCKET_ALLOWLIST='site_*'`, and
+`RS_ZENOH_SUB_ALLOW_BUCKET_CREATION=true` configure an unindexed key-prefix subscriber. Use
+`RS_ZENOH_QUERY_ROUTING` and `RS_ZENOH_QUERY_BUCKET_ALLOWLIST` for an unindexed queryable.
 
 ## Setup
 
@@ -53,8 +59,8 @@ pytest -v routing/subscriber_test.py -k fallback
 
 ## The routing blocks
 
-Each block below maps a key pattern to a bucket. `env.sh` sets these for both the
-subscriber (`RS_ZENOH_SUB_*`) and the matching queryable (`RS_ZENOH_QUERY_*`).
+Each block below maps a key pattern to a bucket. `env.sh` sets indexed variables for both the
+subscriber (`RS_ZENOH_SUB_*`) and matching queryable (`RS_ZENOH_QUERY_*`) paths.
 
 **Block 0 - static, bucket `zenoh`**
 ```

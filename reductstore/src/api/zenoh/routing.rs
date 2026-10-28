@@ -93,7 +93,7 @@ impl BucketRouter {
         };
 
         BucketRouter {
-            block_id: block.id.clone(),
+            block_id: block.name().to_string(),
             mode,
             allowlist: block.bucket_allowlist.clone(),
             allow_bucket_creation: block.allow_bucket_creation,
@@ -243,7 +243,7 @@ mod tests {
 
     fn block(routing: ZenohBucketRouting, bucket: Option<&str>, allowlist: &[&str]) -> ZenohBlock {
         ZenohBlock {
-            id: "0".to_string(),
+            id: Some("0".to_string()),
             keyexprs: vec!["**".to_string()],
             routing,
             bucket: bucket.map(|name| name.to_string()),

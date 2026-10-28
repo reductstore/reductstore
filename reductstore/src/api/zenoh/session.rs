@@ -106,7 +106,7 @@ pub(crate) async fn run_session(
             let pipeline = Arc::new(SubscriberPipeline::new(router, Arc::clone(&components)));
             info!(
                 "Zenoh subscriber block '{}': keyexprs=[{}] {}",
-                block.id,
+                block.name(),
                 block.keyexprs.join(","),
                 pipeline.describe()
             );
@@ -117,7 +117,7 @@ pub(crate) async fn run_session(
             let pipeline = Arc::new(QueryablePipeline::new(router, Arc::clone(&components)));
             info!(
                 "Zenoh queryable block '{}': keyexprs=[{}] locality={} {}",
-                block.route.id,
+                block.route.name(),
                 block.route.keyexprs.join(","),
                 block.locality,
                 pipeline.describe()
@@ -174,11 +174,11 @@ fn build_routers(
         .map(|block| {
             let router = BucketRouter::from_block(block);
             router.validate().map_err(|err| {
-                SessionError::InvalidConfig(format!("{} block '{}': {}", kind, block.id, err))
+                SessionError::InvalidConfig(format!("{} block '{}': {}", kind, block.name(), err))
             })?;
 
             for warning in router.config_warnings() {
-                warn!("Zenoh {} block '{}': {}", kind, block.id, warning);
+                warn!("Zenoh {} block '{}': {}", kind, block.name(), warning);
             }
 
             Ok(Arc::new(router))
@@ -195,7 +195,7 @@ pub(crate) fn validate_config(config: &ZenohApiConfig) -> Result<(), SessionErro
 
     for (kind, block) in blocks_with_kind(config) {
         BucketRouter::from_block(block).validate().map_err(|err| {
-            SessionError::InvalidConfig(format!("{} block '{}': {}", kind, block.id, err))
+            SessionError::InvalidConfig(format!("{} block '{}': {}", kind, block.name(), err))
         })?;
     }
 
@@ -210,7 +210,10 @@ fn validate_keyexprs(config: &ZenohApiConfig) -> Result<(), SessionError> {
             KeyExpr::try_from(key_expr.as_str()).map_err(|err| {
                 SessionError::InvalidConfig(format!(
                     "{} block '{}': invalid key expression '{}': {}",
-                    kind, block.id, key_expr, err
+                    kind,
+                    block.name(),
+                    key_expr,
+                    err
                 ))
             })?;
         }
@@ -226,7 +229,10 @@ fn check_block_overlaps(config: &ZenohApiConfig) -> Result<(), SessionError> {
                     return Err(SessionError::InvalidConfig(format!(
                         "{} block '{}': key expressions '{}' and '{}' intersect; \
                          a matching sample would be handled twice",
-                        kind, block.id, key_a, key_b
+                        kind,
+                        block.name(),
+                        key_a,
+                        key_b
                     )));
                 }
             }
@@ -518,7 +524,9 @@ async fn spawn_subscriber_block(
             .map_err(|err| {
                 SessionError::Declaration(format!(
                     "subscriber block '{}' failed to declare '{}': {}",
-                    block.id, key_expr, err
+                    block.name(),
+                    key_expr,
+                    err
                 ))
             })?;
 
@@ -624,7 +632,9 @@ async fn spawn_queryable_block(
             .map_err(|err| {
                 SessionError::Declaration(format!(
                     "queryable block '{}' failed to declare '{}': {}",
-                    block.route.id, key_expr, err
+                    block.route.name(),
+                    key_expr,
+                    err
                 ))
             })?;
 
@@ -954,7 +964,7 @@ mod tests {
 
     fn subscriber_block(id: &str, keyexprs: &[&str], bucket: Option<&str>) -> ZenohBlock {
         ZenohBlock {
-            id: id.to_string(),
+            id: Some(id.to_string()),
             keyexprs: keyexprs.iter().map(|k| k.to_string()).collect(),
             routing: ZenohBucketRouting::Static,
             bucket: bucket.map(|name| name.to_string()),
