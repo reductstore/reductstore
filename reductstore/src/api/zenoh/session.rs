@@ -444,8 +444,9 @@ fn parse_inline_config(inline: &str) -> Result<Config, SessionError> {
     let trimmed = inline.trim();
 
     if trimmed.starts_with('{') {
-        return Config::from_json5(trimmed)
-            .map_err(|e| SessionError::InvalidConfig(format!("Invalid JSON5 config: {}", e)));
+        return Config::from_json5(trimmed).map_err(|_| {
+            SessionError::InvalidConfig("Invalid JSON5 config (content redacted)".to_string())
+        });
     }
 
     let mut zenoh_config = Config::default();
@@ -477,14 +478,16 @@ fn parse_inline_config(inline: &str) -> Result<Config, SessionError> {
                 format!("\"{}\"", value)
             };
 
-            zenoh_config.insert_json5(key, &json_value).map_err(|e| {
-                SessionError::InvalidConfig(format!("Invalid config '{}={}': {}", key, value, e))
+            zenoh_config.insert_json5(key, &json_value).map_err(|_| {
+                SessionError::InvalidConfig(format!(
+                    "Invalid config value for key '{}' (value redacted)",
+                    key
+                ))
             })?;
         } else {
-            return Err(SessionError::InvalidConfig(format!(
-                "Invalid config part '{}', expected key=value",
-                part
-            )));
+            return Err(SessionError::InvalidConfig(
+                "Invalid config part, expected key=value (content redacted)".to_string(),
+            ));
         }
     }
 
@@ -1366,5 +1369,29 @@ mod tests {
         let result = parse_inline_config(config);
         assert!(result.is_err());
         assert!(result.unwrap_err().to_string().contains("Invalid JSON5"));
+    }
+
+    #[rstest]
+    fn missing_equals_error_redacts_content() {
+        let config = "s3cr3t-token-value";
+        let message = parse_inline_config(config).unwrap_err().to_string();
+        assert!(message.contains("expected key=value"));
+        assert!(!message.contains("s3cr3t-token-value"));
+    }
+
+    #[rstest]
+    fn invalid_value_error_redacts_value() {
+        let config = "scouting/multicast/enabled=s3cr3t-password";
+        let message = parse_inline_config(config).unwrap_err().to_string();
+        assert!(message.contains("scouting/multicast/enabled"));
+        assert!(!message.contains("s3cr3t-password"));
+    }
+
+    #[rstest]
+    fn invalid_json5_error_redacts_content() {
+        let config = r#"{ mode: "client" "transport/auth/usrpwd/user": "s3cr3t-user" "#;
+        let message = parse_inline_config(config).unwrap_err().to_string();
+        assert!(message.contains("Invalid JSON5"));
+        assert!(!message.contains("s3cr3t-user"));
     }
 }

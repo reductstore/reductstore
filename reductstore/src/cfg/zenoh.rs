@@ -281,10 +281,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
             subscribers,
             queryables,
             tls_root_ca_cert: parse_optional_string(
-                env.get_optional::<String>("RS_ZENOH_TLS_ROOT_CA"),
+                env.get_masked_optional::<String>("RS_ZENOH_TLS_ROOT_CA"),
             ),
             tls_connect_cert: parse_optional_string(
-                env.get_optional::<String>("RS_ZENOH_TLS_CONNECT_CERT"),
+                env.get_masked_optional::<String>("RS_ZENOH_TLS_CONNECT_CERT"),
             ),
             tls_connect_key: parse_optional_string(
                 env.get_masked_optional::<String>("RS_ZENOH_TLS_CONNECT_KEY"),

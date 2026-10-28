@@ -15,7 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Reject invalid Zenoh query locality values at startup instead of silently defaulting to `Any`, [PR-1667](https://github.com/reductstore/reductstore/pull/1667)
-- Redact inline Zenoh configuration and credentials from startup logs, [PR-1667](https://github.com/reductstore/reductstore/pull/1667)
+- Redact inline Zenoh configuration, certificates, and credentials from startup logs and configuration error messages, [PR-1667](https://github.com/reductstore/reductstore/pull/1667)
 - Prevent admitted mutations from escaping the publication sync snapshot and leaving pending remote mutations, [#1695](https://github.com/reductstore/reductstore/pull/1695)
 - Bind each ready entry publication marker to its exact block index so read-only replicas reject stale cached indexes, [PR-1671](https://github.com/reductstore/reductstore/pull/1671)
 - Avoid blocking update mutations while a scheduled publication synchronizes its current batch, [PR-1666](https://github.com/reductstore/reductstore/pull/1666)
