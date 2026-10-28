@@ -5,6 +5,7 @@ RS_ZENOH_ROUTING_TESTS set. See README.md.
 """
 
 import pytest
+import zenoh
 from reduct import ReductError
 
 from conftest import wait_for_query_payload
@@ -21,6 +22,33 @@ async def test_static_queryable_reads_the_configured_bucket(
     await bucket.write(entry_name, payload, timestamp=1_000_000)
 
     assert await wait_for_query_payload(zenoh_session, entry_name, payload) == payload
+
+
+async def test_overlapping_queryable_blocks_return_records_from_each_bucket(
+    client, zenoh_session, run_id
+):
+    """Blocks 5-6: matching queryables independently reply from their static buckets."""
+    entry_name = f"overlap_{run_id}"
+    payloads = [b"first queryable", b"second queryable"]
+
+    for bucket_name, payload in zip(
+        ["zenoh_queryable_overlap_a", "zenoh_queryable_overlap_b"], payloads
+    ):
+        bucket = await client.create_bucket(bucket_name)
+        await bucket.write(entry_name, payload, timestamp=1_000_000)
+
+    replies = [
+        reply.ok.payload.to_bytes()
+        for reply in zenoh_session.get(
+            entry_name,
+            target=zenoh.QueryTarget.ALL,
+            consolidation=zenoh.ConsolidationMode.NONE,
+            timeout=5.0,
+        )
+        if reply.ok
+    ]
+
+    assert sorted(replies) == sorted(payloads)
 
 
 async def test_key_prefix_queryable_reads_from_multiple_buckets(

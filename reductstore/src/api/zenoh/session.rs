@@ -232,21 +232,6 @@ fn check_block_overlaps(config: &ZenohApiConfig) -> Result<(), SessionError> {
             }
         }
     }
-    for (index, left) in config.queryables.iter().enumerate() {
-        for right in config.queryables.iter().skip(index + 1) {
-            for key_a in &left.route.keyexprs {
-                for key_b in &right.route.keyexprs {
-                    if keyexprs_intersect(key_a, key_b) {
-                        return Err(SessionError::InvalidConfig(format!(
-                            "queryable blocks '{}' and '{}': key expressions '{}' and '{}' \
-                             intersect; a query would receive multiple replies",
-                            left.route.id, right.route.id, key_a, key_b
-                        )));
-                    }
-                }
-            }
-        }
-    }
 
     Ok(())
 }
@@ -1075,7 +1060,7 @@ mod tests {
     }
 
     #[rstest]
-    fn check_block_overlaps_rejects_intersecting_exprs_in_one_block() {
+    fn check_block_overlaps_rejects_intersecting_exprs_in_subscriber_block() {
         let config = config_with(
             vec![subscriber_block(
                 "0",
@@ -1089,7 +1074,21 @@ mod tests {
     }
 
     #[rstest]
-    fn check_block_overlaps_allows_intersection_across_blocks() {
+    fn check_block_overlaps_rejects_intersecting_exprs_in_queryable_block() {
+        let config = config_with(
+            vec![],
+            vec![subscriber_block(
+                "0",
+                &["sensors/**", "sensors/camera/**"],
+                Some("zenoh"),
+            )],
+        );
+        let err = check_block_overlaps(&config).unwrap_err();
+        assert!(err.to_string().contains("intersect"));
+    }
+
+    #[rstest]
+    fn check_block_overlaps_allows_intersection_across_subscriber_blocks() {
         let config = config_with(
             vec![
                 subscriber_block("raw", &["sensors/**"], Some("raw")),
@@ -1100,7 +1099,7 @@ mod tests {
         assert!(check_block_overlaps(&config).is_ok());
     }
     #[rstest]
-    fn check_block_overlaps_rejects_intersection_across_queryable_blocks() {
+    fn check_block_overlaps_allows_intersection_across_queryable_blocks() {
         let config = config_with(
             vec![],
             vec![
@@ -1108,8 +1107,7 @@ mod tests {
                 subscriber_block("derived", &["sensors/camera/**"], Some("derived")),
             ],
         );
-        let err = check_block_overlaps(&config).unwrap_err();
-        assert!(err.to_string().contains("queryable blocks"));
+        assert!(check_block_overlaps(&config).is_ok());
     }
 
     #[rstest]

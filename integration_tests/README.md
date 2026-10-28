@@ -32,6 +32,11 @@ everything to `RS_ZENOH_BUCKET` (default `zenoh`). The same paths can also be co
 Use one style or the other: setting both indexed and unindexed variables, or an indexed variable
 without a matching `_KEYEXPRS`, aborts startup instead of running a partial configuration.
 
+Indexed queryable blocks may share key expressions. Each matching block resolves the request against
+its own configured bucket and can return a separate Zenoh reply. See the
+[routing documentation](zenoh/routing/README.md#overlapping-queryable-blocks) for querier settings
+required to receive every reply and the reply identity limitation.
+
 For the full indexed routing test suite - setup, environment variable explanations, and one
 command per behavior - see **[zenoh/routing/README.md](zenoh/routing/README.md)**.
 

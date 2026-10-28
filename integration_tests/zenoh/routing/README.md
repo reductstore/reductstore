@@ -94,6 +94,18 @@ ROUTING=key-prefix
 BUCKET_ALLOWLIST='orphan_*'      # no BUCKET → single-chunk keys are dropped
 ```
 
+## Overlapping queryable blocks
+
+Queryable blocks may use the same or intersecting key expressions. Every matching block independently
+resolves the requested key with its own bucket routing and sends a reply. For example, blocks 5 and 6
+in `env.sh` both match `overlap_$*` but read from `zenoh_queryable_overlap_a` and
+`zenoh_queryable_overlap_b`, respectively.
+
+To receive every reply, the Zenoh querier must use `QueryTarget::All` and
+`ConsolidationMode::None`. Default querier target and consolidation settings may select or consolidate
+the replies, so they may not return both. Replies currently use the requested key expression and do
+not identify their source bucket.
+
 ## Cleanup
 
 ```bash
