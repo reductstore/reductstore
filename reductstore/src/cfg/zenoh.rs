@@ -241,7 +241,11 @@ impl Display for ZenohApiConfig {
             f,
             "enabled={}, config={}, config_path={}, tls={}, auth={}, subscribers={}, queryables={}",
             self.enabled,
-            self.config_inline.as_deref().unwrap_or("<none>"),
+            if self.config_inline.is_some() {
+                "<redacted>"
+            } else {
+                "<none>"
+            },
             self.config_path.as_deref().unwrap_or("<none>"),
             self.tls_root_ca_cert.is_some() || self.tls_connect_cert.is_some(),
             self.auth_dictionary.is_some(),
@@ -270,7 +274,9 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
 
         ZenohApiConfig {
             enabled,
-            config_inline: parse_optional_string(env.get_optional::<String>("RS_ZENOH_CONFIG")),
+            config_inline: parse_optional_string(
+                env.get_masked_optional::<String>("RS_ZENOH_CONFIG"),
+            ),
             config_path: parse_optional_string(env.get_optional::<String>("RS_ZENOH_CONFIG_PATH")),
             subscribers,
             queryables,
@@ -281,10 +287,10 @@ impl<EnvGetter: GetEnv, ExtCfg: ExtCfgBounds> CfgParser<EnvGetter, ExtCfg> {
                 env.get_optional::<String>("RS_ZENOH_TLS_CONNECT_CERT"),
             ),
             tls_connect_key: parse_optional_string(
-                env.get_optional::<String>("RS_ZENOH_TLS_CONNECT_KEY"),
+                env.get_masked_optional::<String>("RS_ZENOH_TLS_CONNECT_KEY"),
             ),
             auth_dictionary: parse_optional_string(
-                env.get_optional::<String>("RS_ZENOH_AUTH_DICTIONARY"),
+                env.get_masked_optional::<String>("RS_ZENOH_AUTH_DICTIONARY"),
             ),
             config_errors: errors,
         }
@@ -312,10 +318,18 @@ fn parse_queryables<EnvGetter: GetEnv>(
         .into_iter()
         .map(|route| {
             let variable = block_variable(QUERY_PREFIX, route.id.as_deref(), "LOCALITY");
-            let locality = parse_locality(
-                env.get_optional::<String>(&variable),
-                &format!("queryable[{}]", route.name()),
-            );
+            let locality = match parse_locality(env.get_optional::<String>(&variable)) {
+                Ok(locality) => locality,
+                Err(value) => {
+                    errors.push(format!(
+                        "queryable[{}]: invalid {} '{}', expected one of SessionLocal, Remote, Any",
+                        route.name(),
+                        variable,
+                        value
+                    ));
+                    ZenohQueryableLocality::default()
+                }
+            };
             ZenohQueryableBlock { route, locality }
         })
         .collect();
@@ -535,18 +549,10 @@ fn parse_optional_string(raw: Option<String>) -> Option<String> {
     raw.map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
 }
 
-fn parse_locality(raw: Option<String>, label: &str) -> ZenohQueryableLocality {
+fn parse_locality(raw: Option<String>) -> Result<ZenohQueryableLocality, String> {
     match raw {
-        Some(value) => ZenohQueryableLocality::from_str(&value).unwrap_or_else(|_| {
-            warn!(
-                "Zenoh {}: invalid locality '{}', falling back to '{}'",
-                label,
-                value,
-                ZenohQueryableLocality::default()
-            );
-            ZenohQueryableLocality::default()
-        }),
-        None => ZenohQueryableLocality::default(),
+        Some(value) => ZenohQueryableLocality::from_str(&value).map_err(|_| value),
+        None => Ok(ZenohQueryableLocality::default()),
     }
 }
 
@@ -927,6 +933,21 @@ mod tests {
     }
 
     #[rstest]
+    fn display_redacts_inline_config() {
+        let cfg = parse(&[
+            ("RS_ZENOH_ENABLED", "true"),
+            (
+                "RS_ZENOH_CONFIG",
+                "mode=client;transport/auth/usrpwd/user=admin",
+            ),
+        ]);
+
+        let rendered = cfg.to_string();
+        assert!(rendered.contains("config=<redacted>"));
+        assert!(!rendered.contains("admin"));
+    }
+
+    #[rstest]
     fn parses_config_path() {
         let cfg = parse(&[
             ("RS_ZENOH_ENABLED", "true"),
@@ -1064,15 +1085,19 @@ mod tests {
     }
 
     #[rstest]
-    fn invalid_locality_falls_back_to_any() {
+    fn rejects_invalid_locality() {
         let cfg = parse(&[
             ("RS_ZENOH_QUERY_0_KEYEXPRS", "a/**"),
             ("RS_ZENOH_QUERY_0_BUCKET", "bucket_a"),
             ("RS_ZENOH_QUERY_0_LOCALITY", "nowhere"),
         ]);
 
-        assert_eq!(cfg.queryables.len(), 1);
-        assert_eq!(cfg.queryables[0].locality, ZenohQueryableLocality::Any);
+        assert!(cfg
+            .config_errors
+            .iter()
+            .any(|error| error.contains("invalid")
+                && error.contains("LOCALITY")
+                && error.contains("nowhere")));
     }
 
     #[rstest]
@@ -1283,7 +1308,7 @@ mod tests {
 
         let display = format!("{cfg}");
         assert!(display.contains("enabled=true"));
-        assert!(display.contains("config=mode=client"));
+        assert!(display.contains("config=<redacted>"));
         assert!(display.contains("config_path=/etc/zenoh.json5"));
         assert!(display.contains("tls=true"));
         assert!(display.contains("[0: keyexprs=raw/**, routing=static, bucket=raw_data]"));
