@@ -95,15 +95,7 @@ impl BlockManager {
         }
 
         reload.validate_successor(&publication)?;
-        if let ReplicaPublication::Published(publication) = &publication {
-            if let Some(expected_crc64) = publication.block_index_crc64 {
-                if updated_index.crc64() != expected_crc64 {
-                    return Err(too_early!(
-                        "Replica block index does not match entry publication"
-                    ));
-                }
-            }
-        }
+        validate_index_publication(&updated_index, &publication)?;
         let invalidate_all = match (&reload.base_publication, &publication) {
             (ReplicaPublication::Legacy, ReplicaPublication::Published(_)) => true,
             (ReplicaPublication::Published(previous), ReplicaPublication::Published(next)) => {
@@ -138,6 +130,7 @@ impl BlockManager {
         &mut self,
         publication: ReplicaPublication,
     ) -> Result<(), ReductError> {
+        validate_index_publication(&self.block_index, &publication)?;
         if matches!(publication, ReplicaPublication::Published(_)) {
             let ids = self.block_index.info().keys().copied().collect::<Vec<_>>();
             let mut first_err = None;
@@ -158,6 +151,22 @@ impl BlockManager {
         self.accepted_publication = publication;
         Ok(())
     }
+}
+
+fn validate_index_publication(
+    index: &BlockIndex,
+    publication: &ReplicaPublication,
+) -> Result<(), ReductError> {
+    if let ReplicaPublication::Published(publication) = publication {
+        if let Some(expected_crc64) = publication.block_index_crc64 {
+            if index.crc64() != expected_crc64 {
+                return Err(too_early!(
+                    "Replica block index does not match entry publication"
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn affected_block_ids(
