@@ -61,7 +61,7 @@ RS_DATA_PATH=~/data-test RS_DISABLE_AUTH=true RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG
 
 2) Run tests:
 ```bash
-RS_ZENOH_AUTH_DICTIONARY="testuser:testpassword" pytest integration_tests/zenoh/credentials_test.py -v
+RS_ZENOH_AUTH_DICTIONARY="testuser:testpassword" pytest integration_tests/zenoh/credentials/credentials_test.py -v
 ```
 
 #### TLS Tests
@@ -91,5 +91,5 @@ Start ReductStore and run tests:
 ```bash
 RS_DATA_PATH=~/data-test RS_DISABLE_AUTH=true RS_ZENOH_ENABLED=1 RS_ZENOH_CONFIG="mode=client;connect/endpoints=[tls/127.0.0.1:7447]" RS_ZENOH_SUB_KEYEXPRS="**" RS_ZENOH_TLS_ROOT_CA="$(cat misc/ca.crt)" cargo run -p reductstore --features "fs-backend web-console zenoh-api"
 
-RS_ZENOH_TLS_ROOT_CA="$(cat misc/ca.crt)" pytest integration_tests/zenoh/credentials_test.py -v
+RS_ZENOH_TLS_ROOT_CA="$(cat misc/ca.crt)" pytest integration_tests/zenoh/credentials/credentials_test.py -v
 ```

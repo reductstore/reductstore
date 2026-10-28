@@ -6,10 +6,7 @@ RS_ZENOH_BUCKET in the unindexed configuration.
 
 from conftest import wait_for_payload, wait_for_records
 
-import pytest
 import zenoh
-
-pytestmark = pytest.mark.asyncio
 
 
 async def test_publish_simple_data(bucket, entry_name, zenoh_session):

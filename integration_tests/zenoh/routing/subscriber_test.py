@@ -14,8 +14,6 @@ from conftest import (
     wait_until,
 )
 
-pytestmark = pytest.mark.asyncio
-
 
 async def test_static_block_writes_to_configured_bucket(
     client, zenoh_bucket, zenoh_session, run_id

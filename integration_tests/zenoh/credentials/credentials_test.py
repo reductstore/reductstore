@@ -31,7 +31,6 @@ def uses_inline_credentials() -> bool:
     )
 
 
-@pytest.mark.asyncio
 async def test_server_accepts_inline_credential_env_vars(client, zenoh_bucket):
     """Verify the server starts successfully with credential env vars.
 
@@ -43,7 +42,6 @@ async def test_server_accepts_inline_credential_env_vars(client, zenoh_bucket):
     assert info.name == zenoh_bucket
 
 
-@pytest.mark.asyncio
 async def test_ingestion_works_with_credential_config(
     bucket,
     entry_name,
@@ -60,7 +58,6 @@ async def test_ingestion_works_with_credential_config(
 @pytest.mark.skipif(
     not os.environ.get("RS_ZENOH_TLS_ROOT_CA"), reason="TLS root CA not configured"
 )
-@pytest.mark.asyncio
 async def test_tls_root_ca_is_used(bucket, entry_name, zenoh_session):
     """Test that TLS root CA certificate is properly applied.
 
@@ -78,7 +75,6 @@ async def test_tls_root_ca_is_used(bucket, entry_name, zenoh_session):
     not os.environ.get("RS_ZENOH_AUTH_DICTIONARY"),
     reason="Auth dictionary not configured",
 )
-@pytest.mark.asyncio
 async def test_auth_dictionary_is_used(bucket, entry_name, zenoh_session):
     """Test that auth dictionary is properly applied.
 

@@ -4,10 +4,7 @@ from conftest import wait_for_payload
 import json
 import random
 
-import pytest
 import zenoh
-
-pytestmark = pytest.mark.asyncio
 
 # Allow multiple records to be returned in one query response
 CONSOLIDATION = zenoh.ConsolidationMode.NONE

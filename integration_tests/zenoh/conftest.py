@@ -11,11 +11,6 @@ import pytest
 import pytest_asyncio
 import zenoh
 from reduct import Client
-from _pytest.fixtures import FixtureDef
-
-# Compatibility for pytest-asyncio 0.23 with pytest 9.x.
-if not hasattr(FixtureDef, "unittest"):
-    FixtureDef.unittest = False
 
 
 def _rand_name(prefix: str) -> str:

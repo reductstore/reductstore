@@ -9,8 +9,6 @@ from reduct import ReductError
 
 from conftest import wait_for_query_payload
 
-pytestmark = pytest.mark.asyncio
-
 
 async def test_static_queryable_reads_the_configured_bucket(
     client, zenoh_bucket, zenoh_session, run_id
