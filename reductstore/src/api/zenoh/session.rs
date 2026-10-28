@@ -128,7 +128,6 @@ pub(crate) async fn run_session(
         Ok::<(), SessionError>(())
     };
 
-    // all declarations must succeed; a partial set would silently drop part of the key space
     if let Err(err) = spawn_all.await {
         shutdown(session, handles).await.ok();
         return Err(err);
@@ -355,7 +354,6 @@ fn inject_credentials(
         auth_dictionary: None,
     };
 
-    // TLS Root CA Certificate (for validating server cert)
     if let Some(ref cert_content) = config.tls_root_ca_cert {
         let temp_file = write_credential_file("zenoh_root_ca", ".pem", cert_content)?;
         let path = temp_file.path().to_string_lossy().to_string();
@@ -371,7 +369,6 @@ fn inject_credentials(
         cred_files.tls_root_ca = Some(temp_file);
     }
 
-    // TLS Connect Certificate (for mTLS client authentication)
     if let Some(ref cert_content) = config.tls_connect_cert {
         let temp_file = write_credential_file("zenoh_connect_cert", ".pem", cert_content)?;
         let path = temp_file.path().to_string_lossy().to_string();
@@ -387,7 +384,6 @@ fn inject_credentials(
         cred_files.tls_connect_cert = Some(temp_file);
     }
 
-    // TLS Connect Private Key (for mTLS client authentication)
     if let Some(ref key_content) = config.tls_connect_key {
         let temp_file = write_credential_file("zenoh_connect_key", ".pem", key_content)?;
         let path = temp_file.path().to_string_lossy().to_string();
@@ -403,7 +399,6 @@ fn inject_credentials(
         cred_files.tls_connect_key = Some(temp_file);
     }
 
-    // User/Password Dictionary (for routers/peers accepting connections)
     if let Some(ref dict_content) = config.auth_dictionary {
         let temp_file = write_credential_file("zenoh_auth_dict", ".txt", dict_content)?;
         let path = temp_file.path().to_string_lossy().to_string();
@@ -457,13 +452,11 @@ fn write_credential_file(
 fn parse_inline_config(inline: &str) -> Result<Config, SessionError> {
     let trimmed = inline.trim();
 
-    // If it looks like JSON5
     if trimmed.starts_with('{') {
         return Config::from_json5(trimmed)
             .map_err(|e| SessionError::InvalidConfig(format!("Invalid JSON5 config: {}", e)));
     }
 
-    // Otherwise, parse simple key=value;key=value format
     let mut zenoh_config = Config::default();
 
     for part in inline.split(';') {
@@ -483,7 +476,6 @@ fn parse_inline_config(inline: &str) -> Result<Config, SessionError> {
             {
                 value.to_string()
             } else if value.starts_with('[') && value.ends_with(']') {
-                // Array: quote each element as a string
                 let inner = &value[1..value.len() - 1];
                 let elements: Vec<String> = inner
                     .split(',')
@@ -1250,7 +1242,6 @@ mod tests {
 
         let cred_files = inject_credentials(&mut zenoh_config, &api_config).unwrap();
 
-        // Credential file should exist
         assert!(cred_files.tls_root_ca.is_some());
         let temp_file = cred_files.tls_root_ca.as_ref().unwrap();
         let read_content = fs::read_to_string(temp_file.path()).unwrap();

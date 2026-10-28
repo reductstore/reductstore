@@ -85,7 +85,6 @@ impl BucketRouter {
     pub(crate) fn from_block(block: &ZenohBlock) -> Self {
         let mode = match block.routing {
             ZenohBucketRouting::Static => RoutingMode::Static {
-                // a static block without a bucket is dropped while parsing
                 bucket: block.bucket.clone().unwrap_or_default(),
             },
             ZenohBucketRouting::KeyPrefix => RoutingMode::KeyPrefix {

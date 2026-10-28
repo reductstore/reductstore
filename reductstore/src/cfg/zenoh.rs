@@ -582,7 +582,6 @@ fn is_valid_bucket_name(name: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
 }
 
-// matched from the end so `_BUCKET` does not shadow `_BUCKET_ALLOWLIST`
 fn block_var_id<'a>(key: &'a str, prefix: &str) -> Option<&'a str> {
     let rest = key.strip_prefix(prefix)?;
     BLOCK_SUFFIXES.iter().find_map(|suffix| {
@@ -1026,7 +1025,6 @@ mod tests {
             ("RS_ZENOH_SUB_0_BUCKET", "raw_data"),
         ]);
 
-        // the indexed block is still parsed, but the mix is recorded as a fatal error
         assert_eq!(cfg.subscribers.len(), 1);
         assert_eq!(cfg.subscribers[0].id, "0");
         assert!(cfg.config_errors.iter().any(|err| err.contains("both set")));
