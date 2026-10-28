@@ -1,6 +1,11 @@
 # Zenoh Routing Integration Tests
 
-Each file tests one observable routing behavior against a live server.
+Two files cover the indexed routing matrix:
+
+- `subscriber_test.py` - the write path (published samples are routed to buckets)
+- `queryable_test.py` - the read path (queries are served from routed buckets)
+
+Both run against a live server started with the block matrix in `env.sh`.
 
 ## Setup
 
@@ -35,107 +40,58 @@ cd integration_tests/zenoh
 
 ## Running the tests
 
-Run every file:
 ```bash
-pytest -v routing/
+# write path: static routing, key-prefix create/existing/no-create, fallback, allowlist
+pytest -v routing/subscriber_test.py
+
+# read path: static queryable, multi-bucket queryable, no-create queryable
+pytest -v routing/queryable_test.py
+
+# a single behavior
+pytest -v routing/subscriber_test.py -k fallback
 ```
 
-Or pick one at a time from the sections below.
+## The routing blocks
 
-## Block 0: static routing - bucket `zenoh`
+Each block below maps a key pattern to a bucket. `env.sh` sets these for both the
+subscriber (`RS_ZENOH_SUB_*`) and the matching queryable (`RS_ZENOH_QUERY_*`).
 
+**Block 0 - static, bucket `zenoh`**
 ```
-RS_ZENOH_SUB_0_KEYEXPRS='entry_$*,factory/**'  # matches entry_camera, factory/line1/temp, ...
-RS_ZENOH_SUB_0_BUCKET=zenoh                     # every matching key is stored here
-```
-
-The full Zenoh key becomes the entry name. The bucket is fixed and never derived from the key.
-
-```bash
-# key goes to the configured bucket, not to a bucket named after the key
-pytest -v routing/static_bucket_test.py
-
-# both comma-separated expressions in this block land in the same bucket
-pytest -v routing/static_keyexprs_test.py
-
-# queryable reads from the same bucket
-pytest -v routing/static_queryable_test.py
+KEYEXPRS='entry_$*,factory/**'   # matches entry_camera, factory/line1/temp, ...
+BUCKET=zenoh                      # the full key is the entry; the bucket is fixed
 ```
 
-## Block 1: key-prefix routing - `rt_site_*`, creation enabled
-
+**Block 1 - key-prefix `rt_site_*`, creation enabled**
 ```
-RS_ZENOH_SUB_1_KEYEXPRS='rt_$*/**'             # matches rt_london/sensors/temp, rt_berlin/cam, ...
-RS_ZENOH_SUB_1_ROUTING=key-prefix              # first chunk → bucket, rest → entry name
-RS_ZENOH_SUB_1_BUCKET_ALLOWLIST='rt_site_*'    # only bucket names matching this glob are accepted
-RS_ZENOH_SUB_1_ALLOW_BUCKET_CREATION=true      # bucket is created on first write if missing
+KEYEXPRS='rt_$*/**'              # first chunk → bucket, rest → entry name
+ROUTING=key-prefix
+BUCKET_ALLOWLIST='rt_site_*'     # only bucket names matching this glob are accepted
+ALLOW_BUCKET_CREATION=true       # bucket is created on first write if missing
 ```
+`rt_london/sensors/temp` → bucket `rt_london`, entry `sensors/temp`.
 
-Publishing `rt_london/sensors/temp` stores the payload in bucket `rt_london`, entry `sensors/temp`.
-
-```bash
-# rt_site_<id> does not exist yet; subscriber creates it on first write
-pytest -v routing/key_prefix_create_test.py
-
-# rt_blocked_<id> does not match rt_site_*; write is dropped, no bucket is created
-pytest -v routing/key_prefix_allowlist_test.py
-
-# queryable serves data from multiple rt_site_* buckets independently
-pytest -v routing/queryable_multibucket_test.py
+**Block 2 - key-prefix `existing_site_*`, creation disabled**
 ```
-
-## Block 2: key-prefix routing - `existing_site_*`, creation disabled
-
+KEYEXPRS='existing_$*/**'
+ROUTING=key-prefix
+BUCKET_ALLOWLIST='existing_site_*'  # ALLOW_BUCKET_CREATION unset → false
 ```
-RS_ZENOH_SUB_2_KEYEXPRS='existing_$*/**'          # matches existing_site_a/sensors/temp, ...
-RS_ZENOH_SUB_2_ROUTING=key-prefix                 # first chunk → bucket, rest → entry name
-RS_ZENOH_SUB_2_BUCKET_ALLOWLIST='existing_site_*' # only matching bucket names are accepted
-                                                   # ALLOW_BUCKET_CREATION not set → false
+The bucket must already exist; writes to missing buckets are dropped.
+
+**Block 3 - key-prefix with fallback bucket `zenoh_fallback`**
+```
+KEYEXPRS='fallback_$*'
+ROUTING=key-prefix
+BUCKET=zenoh_fallback            # single-chunk keys (no slash) fall back here
+BUCKET_ALLOWLIST=zenoh_fallback
 ```
 
-The target bucket must already exist. Writes to missing buckets are silently dropped.
-
-```bash
-# bucket created via the API before publishing; write succeeds
-pytest -v routing/key_prefix_existing_test.py
-
-# bucket does not exist; write is dropped, bucket is not created
-pytest -v routing/key_prefix_no_create_test.py
-
-# queryable never creates a bucket; get() to a missing bucket returns no replies
-pytest -v routing/queryable_no_create_test.py
+**Block 4 - key-prefix, no fallback**
 ```
-
-## Block 3: key-prefix routing - fallback bucket `zenoh_fallback`
-
-```
-RS_ZENOH_SUB_3_KEYEXPRS='fallback_$*'          # matches fallback_sensor, fallback_cam, ...
-RS_ZENOH_SUB_3_ROUTING=key-prefix
-RS_ZENOH_SUB_3_BUCKET=zenoh_fallback            # single-chunk keys fall back to this bucket
-RS_ZENOH_SUB_3_BUCKET_ALLOWLIST=zenoh_fallback
-```
-
-`fallback_a/temp` routes normally: bucket `fallback_a`, entry `temp`.
-`fallback_sensor` (no slash) falls back to `zenoh_fallback`, entry `fallback_sensor`.
-
-```bash
-# single-chunk key lands in zenoh_fallback; queryable reads it from there too
-pytest -v routing/key_prefix_fallback_test.py
-```
-
-## Block 4: key-prefix routing - no fallback
-
-```
-RS_ZENOH_SUB_4_KEYEXPRS='orphan_$*'            # matches orphan_sensor, orphan_cam, ...
-RS_ZENOH_SUB_4_ROUTING=key-prefix
-RS_ZENOH_SUB_4_BUCKET_ALLOWLIST='orphan_*'     # no RS_ZENOH_SUB_4_BUCKET → no fallback
-```
-
-Single-chunk keys are rejected. No data is stored, no bucket is created.
-
-```bash
-# single-chunk orphan key is dropped; no bucket appears
-pytest -v routing/key_prefix_no_fallback_test.py
+KEYEXPRS='orphan_$*'
+ROUTING=key-prefix
+BUCKET_ALLOWLIST='orphan_*'      # no BUCKET → single-chunk keys are dropped
 ```
 
 ## Cleanup

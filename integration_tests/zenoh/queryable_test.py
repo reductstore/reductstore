@@ -1,4 +1,4 @@
-"""Integration tests for querying ReductStore data via Zenoh."""
+"""Queryable (read path): data in ReductStore is served over Zenoh queries."""
 
 from conftest import wait_for_payload
 import json

@@ -1,4 +1,4 @@
-"""Integration tests for Zenoh data ingestion into ReductStore.
+"""Subscriber (write path): data published to Zenoh is ingested into ReductStore.
 
 All data is written to the bucket the server's static Zenoh block targets, which is
 RS_ZENOH_BUCKET in the unindexed configuration.

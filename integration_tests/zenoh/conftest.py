@@ -69,6 +69,20 @@ async def wait_for_records(bucket, entry_name: str, count: int = 1):
     )
 
 
+async def wait_for_query_payload(session, key_expr: str, payload: bytes) -> bytes:
+    async def reply_is_available() -> bytes | None:
+        replies = [reply for reply in session.get(key_expr, timeout=1.0) if reply.ok]
+        for reply in replies:
+            if reply.ok.payload.to_bytes() == payload:
+                return payload
+        return None
+
+    return await wait_until(
+        reply_is_available,
+        f"query reply for '{key_expr}'",
+    )
+
+
 @pytest.fixture(scope="session")
 def storage_url() -> str:
     return os.environ.get("STORAGE_URL", "http://127.0.0.1:8383")
