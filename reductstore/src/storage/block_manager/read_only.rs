@@ -2,7 +2,9 @@
 // Licensed under the Apache License, Version 2.0
 
 use crate::cfg::InstanceRole;
+use crate::core::file_cache::FileCache;
 use crate::storage::block_manager::block_index::BlockIndex;
+use crate::storage::block_manager::decompress_cache::DecompressCache;
 use crate::storage::block_manager::{
     all_block_file_paths, BlockManager, ReplicaPublication, BLOCK_INDEX_FILE,
 };
@@ -20,18 +22,23 @@ pub(in crate::storage) struct ReplicaIndexReload {
     index_path: PathBuf,
     previous_state: HashMap<u64, BlockEntry>,
     base_publication: ReplicaPublication,
+    file_cache: Arc<FileCache>,
+    decompress_cache: DecompressCache,
+}
+
+pub(in crate::storage) struct PreparedReplicaIndexReload {
+    reload: ReplicaIndexReload,
+    updated_index: BlockIndex,
+    publication: ReplicaPublication,
 }
 
 impl ReplicaIndexReload {
-    pub(in crate::storage) async fn load_candidate(
-        &self,
-        file_cache: &Arc<crate::core::file_cache::FileCache>,
-    ) -> Result<BlockIndex, ReductError> {
-        file_cache
+    pub(in crate::storage) async fn load_candidate(&self) -> Result<BlockIndex, ReductError> {
+        self.file_cache
             .invalidate_local_cache_file(&self.index_path)
             .await?;
 
-        BlockIndex::try_load(self.index_path.clone(), Arc::clone(file_cache)).await
+        BlockIndex::try_load(self.index_path.clone(), Arc::clone(&self.file_cache)).await
     }
 
     pub(in crate::storage) fn accepted_publication(&self) -> &ReplicaPublication {
@@ -54,6 +61,46 @@ impl ReplicaIndexReload {
             }
             _ => Ok(()),
         }
+    }
+
+    pub(in crate::storage) async fn prepare_candidate(
+        self,
+        updated_index: BlockIndex,
+        publication: ReplicaPublication,
+    ) -> Result<PreparedReplicaIndexReload, ReductError> {
+        self.validate_successor(&publication)?;
+        validate_index_publication(&updated_index, &publication)?;
+
+        let invalidate_all = match (&self.base_publication, &publication) {
+            (ReplicaPublication::Legacy, ReplicaPublication::Published(_)) => true,
+            (ReplicaPublication::Published(previous), ReplicaPublication::Published(next)) => {
+                previous.incarnation != next.incarnation
+            }
+            _ => false,
+        };
+        let ids = affected_block_ids(&self.previous_state, updated_index.info(), invalidate_all);
+        let mut first_err = None;
+        for block_id in ids {
+            for path in all_block_file_paths(&self.entry_path, block_id) {
+                if let Err(err) = self.file_cache.invalidate_local_cache_file(&path).await {
+                    if first_err.is_none() {
+                        first_err = Some(err);
+                    }
+                }
+            }
+            self.decompress_cache
+                .invalidate(&self.entry_path, block_id)
+                .await;
+        }
+        if let Some(err) = first_err {
+            return Err(err);
+        }
+
+        Ok(PreparedReplicaIndexReload {
+            reload: self,
+            updated_index,
+            publication,
+        })
     }
 }
 
@@ -79,15 +126,20 @@ impl BlockManager {
             index_path: self.path.join(BLOCK_INDEX_FILE),
             previous_state: self.block_index.info().clone(),
             base_publication: self.accepted_publication.clone(),
+            file_cache: Arc::clone(&self.file_cache),
+            decompress_cache: self.decompress_cache.clone(),
         })
     }
 
-    pub(in crate::storage) async fn apply_replica_index_reload(
+    pub(in crate::storage) fn apply_replica_index_reload(
         &mut self,
-        reload: ReplicaIndexReload,
-        updated_index: BlockIndex,
-        publication: ReplicaPublication,
+        prepared: PreparedReplicaIndexReload,
     ) -> Result<(), ReductError> {
+        let PreparedReplicaIndexReload {
+            reload,
+            updated_index,
+            publication,
+        } = prepared;
         if self.accepted_publication != reload.base_publication {
             return Err(too_early!(
                 "Replica index changed while candidate was loading"
@@ -96,29 +148,6 @@ impl BlockManager {
 
         reload.validate_successor(&publication)?;
         validate_index_publication(&updated_index, &publication)?;
-        let invalidate_all = match (&reload.base_publication, &publication) {
-            (ReplicaPublication::Legacy, ReplicaPublication::Published(_)) => true,
-            (ReplicaPublication::Published(previous), ReplicaPublication::Published(next)) => {
-                previous.incarnation != next.incarnation
-            }
-            _ => false,
-        };
-        let ids = affected_block_ids(&reload.previous_state, updated_index.info(), invalidate_all);
-        let mut first_err = None;
-        for block_id in ids {
-            for path in all_block_file_paths(&reload.entry_path, block_id) {
-                if let Err(err) = self.file_cache.invalidate_local_cache_file(&path).await {
-                    if first_err.is_none() {
-                        first_err = Some(err);
-                    }
-                }
-            }
-            self.decompress_cache.invalidate(&self.path, block_id).await;
-        }
-        if let Some(err) = first_err {
-            return Err(err);
-        }
-
         self.block_index = updated_index;
         self.accepted_publication = publication;
         self.block_cache.clear();
@@ -286,11 +315,12 @@ mod tests {
         new_index.save().await.unwrap();
 
         let reload = block_manager.prepare_replica_index_reload().unwrap();
-        let updated_index = reload.load_candidate(&file_cache).await.unwrap();
-        block_manager
-            .apply_replica_index_reload(reload, updated_index, ReplicaPublication::Legacy)
+        let updated_index = reload.load_candidate().await.unwrap();
+        let prepared = reload
+            .prepare_candidate(updated_index, ReplicaPublication::Legacy)
             .await
             .unwrap();
+        block_manager.apply_replica_index_reload(prepared).unwrap();
 
         assert!(block_manager.block_index.info().get(&1).is_some());
     }
@@ -330,7 +360,7 @@ mod tests {
         updated_index.save().await.unwrap();
 
         let reload = block_manager.prepare_replica_index_reload().unwrap();
-        let updated_index = reload.load_candidate(&file_cache).await.unwrap();
+        let updated_index = reload.load_candidate().await.unwrap();
         let block_index_crc64 = updated_index.crc64();
         let publication =
             ReplicaPublication::Published(crate::storage::entry::publication::PublicationId {
@@ -338,10 +368,11 @@ mod tests {
                 generation: 2,
                 block_index_crc64: with_index_crc.then_some(block_index_crc64),
             });
-        block_manager
-            .apply_replica_index_reload(reload, updated_index, publication.clone())
+        let prepared = reload
+            .prepare_candidate(updated_index, publication.clone())
             .await
             .unwrap();
+        block_manager.apply_replica_index_reload(prepared).unwrap();
 
         assert_eq!(block_manager.accepted_publication, publication);
         assert!(block_manager.block_index.info().contains_key(&1));
@@ -364,7 +395,7 @@ mod tests {
         stale_index.save().await.unwrap();
         let stale_crc64 = stale_index.crc64();
         let stale_candidate = BlockIndex::new(index_path.clone(), file_cache.clone());
-        let mut block_manager = BlockManager::build(
+        let block_manager = BlockManager::build(
             path,
             stale_index,
             "bucket".to_string(),
@@ -383,9 +414,8 @@ mod tests {
         assert_ne!(stale_crc64, current_crc64);
 
         let reload = block_manager.prepare_replica_index_reload().unwrap();
-        let err = block_manager
-            .apply_replica_index_reload(
-                reload,
+        let err = reload
+            .prepare_candidate(
                 stale_candidate,
                 ReplicaPublication::Published(crate::storage::entry::publication::PublicationId {
                     incarnation: "test-incarnation".to_string(),
@@ -394,7 +424,8 @@ mod tests {
                 }),
             )
             .await
-            .unwrap_err();
+            .err()
+            .unwrap();
 
         assert_eq!(err.status(), ErrorCode::TooEarly);
         assert!(block_manager.block_index.info().is_empty());
@@ -445,11 +476,12 @@ mod tests {
         updated_index.save().await.unwrap();
 
         let reload = block_manager.prepare_replica_index_reload().unwrap();
-        let updated_index = reload.load_candidate(&file_cache).await.unwrap();
-        block_manager
-            .apply_replica_index_reload(reload, updated_index, ReplicaPublication::Legacy)
+        let updated_index = reload.load_candidate().await.unwrap();
+        let prepared = reload
+            .prepare_candidate(updated_index, ReplicaPublication::Legacy)
             .await
             .unwrap();
+        block_manager.apply_replica_index_reload(prepared).unwrap();
 
         assert_eq!(
             block_manager.block_index.info().get(&1).unwrap().crc64,
@@ -513,11 +545,12 @@ mod tests {
         std::fs::write(entry_path.join("1.blk.zst"), b"new-data").unwrap();
 
         let reload = block_manager.prepare_replica_index_reload().unwrap();
-        let updated_index = reload.load_candidate(&file_cache).await.unwrap();
-        block_manager
-            .apply_replica_index_reload(reload, updated_index, ReplicaPublication::Legacy)
+        let updated_index = reload.load_candidate().await.unwrap();
+        let prepared = reload
+            .prepare_candidate(updated_index, ReplicaPublication::Legacy)
             .await
             .unwrap();
+        block_manager.apply_replica_index_reload(prepared).unwrap();
 
         let mut meta = file_cache
             .read(&entry_path.join("1.meta.zst"), std::io::SeekFrom::Start(0))
