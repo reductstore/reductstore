@@ -59,31 +59,32 @@ runs:
       if: steps.s3_cache.outputs.enabled == 'true'
       shell: bash
       run: |
-        export RUSTC_WRAPPER=sccache
-        export SCCACHE_BUCKET=reduct-cache
-        export SCCACHE_ENDPOINT=https://fsn1.your-objectstorage.com
-        export SCCACHE_REGION=fsn1
-        export SCCACHE_S3_KEY_PREFIX="sccache/${{ github.repository }}/${{ inputs.target }}/${{ inputs.profile }}/rust${RUST_MINOR}"
-        export SCCACHE_IDLE_TIMEOUT=0
-        export AWS_ACCESS_KEY_ID="${{ inputs.access-key-id }}"
-        export AWS_SECRET_ACCESS_KEY="${{ inputs.secret-access-key }}"
-        export AWS_REGION=fsn1
-        export AWS_DEFAULT_REGION=fsn1
-
-        {
-          echo "RUSTC_WRAPPER=${RUSTC_WRAPPER}"
-          echo "SCCACHE_BUCKET=${SCCACHE_BUCKET}"
-          echo "SCCACHE_ENDPOINT=${SCCACHE_ENDPOINT}"
-          echo "SCCACHE_REGION=${SCCACHE_REGION}"
-          echo "SCCACHE_S3_KEY_PREFIX=${SCCACHE_S3_KEY_PREFIX}"
-          echo "SCCACHE_IDLE_TIMEOUT=${SCCACHE_IDLE_TIMEOUT}"
-          echo "AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}"
-          echo "AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}"
-          echo "AWS_REGION=${AWS_REGION}"
-          echo "AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}"
-        } >> "$GITHUB_ENV"
-
-        sccache --start-server
+        if RUSTC_WRAPPER=sccache \
+          SCCACHE_BUCKET=reduct-cache \
+          SCCACHE_ENDPOINT=https://fsn1.your-objectstorage.com \
+          SCCACHE_REGION=fsn1 \
+          SCCACHE_S3_KEY_PREFIX="sccache/${{ github.repository }}/${{ inputs.target }}/${{ inputs.profile }}/rust${RUST_MINOR}" \
+          SCCACHE_IDLE_TIMEOUT=0 \
+          AWS_ACCESS_KEY_ID="${{ inputs.access-key-id }}" \
+          AWS_SECRET_ACCESS_KEY="${{ inputs.secret-access-key }}" \
+          AWS_REGION=fsn1 \
+          AWS_DEFAULT_REGION=fsn1 \
+          sccache --start-server; then
+          {
+            echo "RUSTC_WRAPPER=sccache"
+            echo "SCCACHE_BUCKET=reduct-cache"
+            echo "SCCACHE_ENDPOINT=https://fsn1.your-objectstorage.com"
+            echo "SCCACHE_REGION=fsn1"
+            echo "SCCACHE_S3_KEY_PREFIX=sccache/${{ github.repository }}/${{ inputs.target }}/${{ inputs.profile }}/rust${RUST_MINOR}"
+            echo "SCCACHE_IDLE_TIMEOUT=0"
+            echo "AWS_ACCESS_KEY_ID=${{ inputs.access-key-id }}"
+            echo "AWS_SECRET_ACCESS_KEY=${{ inputs.secret-access-key }}"
+            echo "AWS_REGION=fsn1"
+            echo "AWS_DEFAULT_REGION=fsn1"
+          } >> "$GITHUB_ENV"
+        else
+          echo "::warning::sccache server failed to start; continuing without sccache."
+        fi
 
     - name: Use cache for Cargo downloads
       if: steps.s3_cache.outputs.enabled == 'true'
