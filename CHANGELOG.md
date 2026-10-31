@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Retry replica queries after reloading indexes that disagree with cached block descriptors, [PR-1706](https://github.com/reductstore/reductstore/pull/1706)
 - Keep replica reads responsive while refreshed block indexes invalidate remote cache files, [PR-1703](https://github.com/reductstore/reductstore/pull/1703)
 - Validate restored replica block indexes against their publication marker so stale cached indexes cannot hide attachments, [PR-1701](https://github.com/reductstore/reductstore/pull/1701)
 - Preserve the system log capture sink when logger initialization is repeated, [PR-1697](https://github.com/reductstore/reductstore/pull/1697)
