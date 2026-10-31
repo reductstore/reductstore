@@ -166,6 +166,16 @@ impl BlockManager {
         }
     }
 
+    /// Returns `true` if any block in this entry has a pending WAL to flush.
+    ///
+    /// `save_cache_metadata_on_disk` only persists metadata for blocks that have
+    /// a WAL, so an empty WAL list means compaction has no metadata/index work to
+    /// publish. This lets [`crate::storage::entry::Entry::compact`] skip the
+    /// `Updating -> Ready` publication cycle for clean entries.
+    pub(in crate::storage) async fn has_pending_wal(&self) -> Result<bool, ReductError> {
+        Ok(!self.wal.list().await?.is_empty())
+    }
+
     pub(super) async fn write_or_create_mutation(
         &self,
         path: &PathBuf,
