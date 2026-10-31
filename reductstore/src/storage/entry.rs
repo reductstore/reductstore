@@ -15,7 +15,7 @@ pub(crate) mod update_labels;
 mod write_record;
 
 use crate::cfg::io::IoConfig;
-use crate::cfg::Cfg;
+use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
@@ -23,7 +23,9 @@ use crate::storage::block_manager::block_index::BlockIndexSummary;
 use crate::storage::block_manager::BlockManager;
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::query::base::QueryOptions;
-use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
+use crate::storage::query::{
+    build_query, next_query_id, spawn_query_task, QueryRx, ReplicaQueryRecovery,
+};
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 use log::debug;
@@ -66,7 +68,7 @@ pub(crate) struct Entry {
     system_behavior: Box<dyn SystemEntryBehavior + Send + Sync>,
     queries: QueryHandleMapRef,
     status: AsyncRwLock<ResourceStatus>,
-    info_cache: AsyncRwLock<Option<Arc<BlockIndexSummary>>>,
+    info_cache: Arc<AsyncRwLock<Option<Arc<BlockIndexSummary>>>>,
     path: PathBuf,
     cfg: Arc<Cfg>,
     io_limiter: InFlightIoLimiter,
@@ -74,55 +76,27 @@ pub(crate) struct Entry {
     pub(super) file_cache: Arc<FileCache>,
 }
 
-#[derive(PartialEq)]
-enum RecordType {
-    Latest,
-    Belated,
-    BelatedFirst,
+#[derive(Clone)]
+pub(in crate::storage) struct ReplicaReloadContext {
+    path: PathBuf,
+    bucket_name: String,
+    entry_name: String,
+    block_manager: Arc<AsyncRwLock<BlockManager>>,
+    file_cache: Arc<FileCache>,
+    info_cache: Arc<AsyncRwLock<Option<Arc<BlockIndexSummary>>>>,
 }
 
-/// EntryOptions is the options for creating a new entry.
-#[derive(PartialEq, Debug, Clone)]
-pub struct EntrySettings {
-    pub max_block_size: u64,
-    pub max_block_records: u64,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct CompressionStats {
-    pub(crate) blocks: u64,
-    pub(crate) records: u64,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct RecordQueryStats {
-    pub(crate) blocks: u64,
-    pub(crate) records: u64,
-}
-
-impl Entry {
-    pub(crate) fn builder() -> EntryBuilder {
-        EntryBuilder::default()
-    }
-
-    pub(crate) async fn acquire_writer_slot(
-        &self,
-    ) -> Result<Option<OwnedSemaphorePermit>, ReductError> {
-        self.io_limiter.acquire_writer_slot().await
-    }
-
-    pub(crate) async fn reload_index_on_replica(&self) -> Result<(), ReductError> {
+impl ReplicaReloadContext {
+    pub(in crate::storage) async fn reload_index(&self) -> Result<(), ReductError> {
         const RELOAD_ATTEMPTS: usize = 3;
 
         for attempt in 1..=RELOAD_ATTEMPTS {
             let reload = {
                 let Some(block_manager) = self.block_manager.try_read() else {
                     if attempt == RELOAD_ATTEMPTS {
-                        debug!(
-                            "Skipping replica index reload for {}/{} because block manager remained busy",
-                            self.bucket_name, self.name
-                        );
-                        return Ok(());
+                        return Err(reduct_base::too_early!(
+                            "Block manager remained busy while reloading replica index"
+                        ));
                     }
                     tokio::task::yield_now().await;
                     continue;
@@ -166,7 +140,9 @@ impl Entry {
                 };
 
                 block_manager.apply_replica_index_reload(prepared)?;
-                self.update_info_cache(Arc::new(block_manager.index().aggregate_stats()));
+                if let Some(mut cache) = self.info_cache.try_write() {
+                    *cache = Some(Arc::new(block_manager.index().aggregate_stats()));
+                }
                 Ok(())
             }
             .await;
@@ -179,7 +155,7 @@ impl Entry {
                 {
                     debug!(
                         "Retrying replica index reload for {}/{} after transient publication state (attempt {}/{})",
-                        self.bucket_name, self.name, attempt, RELOAD_ATTEMPTS
+                        self.bucket_name, self.entry_name, attempt, RELOAD_ATTEMPTS
                     );
                     tokio::task::yield_now().await;
                 }
@@ -190,6 +166,48 @@ impl Entry {
         Err(reduct_base::too_early!(
             "Replica index reload did not observe a stable publication"
         ))
+    }
+}
+
+#[derive(PartialEq)]
+enum RecordType {
+    Latest,
+    Belated,
+    BelatedFirst,
+}
+
+/// EntryOptions is the options for creating a new entry.
+#[derive(PartialEq, Debug, Clone)]
+pub struct EntrySettings {
+    pub max_block_size: u64,
+    pub max_block_records: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct CompressionStats {
+    pub(crate) blocks: u64,
+    pub(crate) records: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct RecordQueryStats {
+    pub(crate) blocks: u64,
+    pub(crate) records: u64,
+}
+
+impl Entry {
+    pub(crate) fn builder() -> EntryBuilder {
+        EntryBuilder::default()
+    }
+
+    pub(crate) async fn acquire_writer_slot(
+        &self,
+    ) -> Result<Option<OwnedSemaphorePermit>, ReductError> {
+        self.io_limiter.acquire_writer_slot().await
+    }
+
+    pub(crate) async fn reload_index_on_replica(&self) -> Result<(), ReductError> {
+        self.replica_reload_context().reload_index().await
     }
 
     /// Query records for a time range.
@@ -219,8 +237,31 @@ impl Entry {
         )?;
 
         let io_settings = query.as_ref().io_settings().clone();
-        let (rx, task_handle) =
-            spawn_query_task(id, self.task_group(), query, options.clone(), block_manager);
+        let recovery = (self.cfg.role == InstanceRole::Replica).then(|| ReplicaQueryRecovery {
+            reload: self.replica_reload_context(),
+            rebuild: Arc::new({
+                let entry_name = self.name.clone();
+                let options = options.clone();
+                let io_defaults = self.cfg.io_conf.clone();
+                move || {
+                    build_query(
+                        entry_name.clone(),
+                        start,
+                        stop,
+                        options.clone(),
+                        io_defaults.clone(),
+                    )
+                }
+            }),
+        });
+        let (rx, task_handle) = spawn_query_task(
+            id,
+            self.task_group(),
+            query,
+            options.clone(),
+            block_manager,
+            recovery,
+        );
 
         self.queries.write().await?.insert(
             id,
@@ -289,6 +330,17 @@ impl Entry {
     fn update_info_cache(&self, summary: Arc<BlockIndexSummary>) {
         if let Some(mut cache) = self.info_cache.try_write() {
             *cache = Some(summary);
+        }
+    }
+
+    fn replica_reload_context(&self) -> ReplicaReloadContext {
+        ReplicaReloadContext {
+            path: self.path.clone(),
+            bucket_name: self.bucket_name.clone(),
+            entry_name: self.name.clone(),
+            block_manager: Arc::clone(&self.block_manager),
+            file_cache: Arc::clone(&self.file_cache),
+            info_cache: Arc::clone(&self.info_cache),
         }
     }
 

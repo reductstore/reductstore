@@ -124,6 +124,23 @@ impl BlockManager {
                 if let Some(block_crc) = block.crc64 {
                     // we check crc if the crc is stored in the index for backward compatibility
                     if block_crc != crc.sum64() {
+                        if self.cfg.role == InstanceRole::Replica {
+                            warn!(
+                                "Replica descriptor/index CRC mismatch for {}/{}/{}: accepted_publication={:?}, expected_crc={}, actual_crc={}",
+                                self.bucket,
+                                self.entry,
+                                block_id,
+                                self.accepted_publication,
+                                block_crc,
+                                crc.sum64()
+                            );
+                            self.invalidate_replica_block_cache(block_id).await?;
+                            return Err(too_early!(
+                                "Block descriptor {:?} CRC mismatch on replica. Reload index and retry",
+                                path
+                            ));
+                        }
+
                         match BlockProto::decode(Bytes::from(buf.clone())) {
                             Ok(decoded) => {
                                 let desc_version = decoded.version.unwrap_or(0);
@@ -137,21 +154,7 @@ impl BlockManager {
 
                                     self.block_index
                                         .insert_or_update_with_crc(decoded.clone(), crc.sum64());
-                                    if self.cfg.role != InstanceRole::Replica {
-                                        self.block_index.save().await?;
-                                    }
-                                } else if self.cfg.role == InstanceRole::Replica {
-                                    debug!(
-                                        "Block descriptor {:?} CRC mismatch on replica: index CRC {} mismatch with calculated CRC {}. Treat as transient",
-                                        path,
-                                        block_crc,
-                                        crc.sum64()
-                                    );
-                                    self.invalidate_replica_block_cache(block_id).await?;
-                                    return Err(too_early!(
-                                        "Block descriptor {:?} CRC mismatch on replica. Reload index and retry",
-                                        path
-                                    ));
+                                    self.block_index.save().await?;
                                 } else {
                                     error!(
                                         "Block descriptor {:?} is corrupted: index CRC {} mismatch with calculated CRC {}, version {} <= {}",
@@ -300,7 +303,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
-    async fn test_load_block_newer_descriptor_on_replica_does_not_persist_index(
+    async fn test_load_block_newer_descriptor_on_replica_is_retryable(
         #[future] block_manager: BlockManager,
     ) {
         let mut block_manager = block_manager.await;
@@ -323,12 +326,15 @@ mod tests {
         let index_path = block_manager.path.join(super::super::BLOCK_INDEX_FILE);
         let persisted_index = std::fs::read(&index_path).unwrap();
 
-        let loaded = block_manager.load_block(block_id).await.unwrap();
+        let err = match block_manager.load_block(block_id).await {
+            Ok(_) => panic!("CRC mismatch should be retryable"),
+            Err(err) => err,
+        };
 
-        assert_eq!(loaded.read().await.unwrap().block_id(), block_id);
+        assert_eq!(err.status(), ErrorCode::TooEarly);
         assert_eq!(
             block_manager.index().get_block(block_id).unwrap().version,
-            Some(desc_version)
+            Some(desc_version - 1)
         );
         assert_eq!(std::fs::read(&index_path).unwrap(), persisted_index);
     }

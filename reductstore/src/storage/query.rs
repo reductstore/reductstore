@@ -10,10 +10,10 @@ mod historical;
 use crate::cfg::io::IoConfig;
 use crate::core::sync::AsyncRwLock;
 use crate::storage::block_manager::BlockManager;
-use crate::storage::entry::RecordReader;
+use crate::storage::entry::{RecordReader, ReplicaReloadContext};
 use crate::storage::query::base::{Query, QueryOptions};
 use log::{debug, trace};
-use reduct_base::error::ErrorCode::NoContent;
+use reduct_base::error::ErrorCode::{NoContent, TooEarly};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::cmp::{max, min};
@@ -25,6 +25,13 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
+type QueryFactory =
+    Arc<dyn Fn() -> Result<Box<dyn Query + Send + Sync>, ReductError> + Send + Sync>;
+
+pub(in crate::storage) struct ReplicaQueryRecovery {
+    pub(in crate::storage) reload: ReplicaReloadContext,
+    pub(in crate::storage) rebuild: QueryFactory,
+}
 
 const QUERY_BUFFER_SIZE: usize = 64;
 const MIN_FULL_CHANNEL_SLEEP: Duration = Duration::from_micros(10);
@@ -80,6 +87,7 @@ pub(super) fn spawn_query_task(
     mut query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
+    recovery: Option<ReplicaQueryRecovery>,
 ) -> (QueryRx, JoinHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
@@ -87,6 +95,8 @@ pub(super) fn spawn_query_task(
     let handle = tokio::spawn(async move {
         trace!("Query task for '{}' id={} running", task_group, id);
         let mut watcher = QueryWatcher::new();
+        let mut emitted_record = false;
+        let mut recovery_attempts = 0;
 
         loop {
             let group = task_group.clone();
@@ -110,7 +120,42 @@ pub(super) fn spawn_query_task(
             }
 
             let next_result = query.next(block_manager.clone()).await;
+            if next_result
+                .as_ref()
+                .is_err_and(|err| err.status == TooEarly)
+                && !emitted_record
+                && recovery_attempts < 3
+                && recovery.is_some()
+            {
+                recovery_attempts += 1;
+                let recovery = recovery.as_ref().unwrap();
+                match recovery.reload.reload_index().await {
+                    Ok(())
+                    | Err(ReductError {
+                        status: TooEarly, ..
+                    }) => {}
+                    Err(err) => {
+                        if tx.send(Err(err)).await.is_err() {
+                            debug!("Query '{}' id={} task channel closed", group, id);
+                        }
+                        break;
+                    }
+                }
+
+                match (recovery.rebuild)() {
+                    Ok(rebuilt) => query = rebuilt,
+                    Err(err) => {
+                        if tx.send(Err(err)).await.is_err() {
+                            debug!("Query '{}' id={} task channel closed", group, id);
+                        }
+                        break;
+                    }
+                }
+                tokio::task::yield_now().await;
+                continue;
+            }
             let query_err = next_result.as_ref().err().cloned();
+            let sent_record = next_result.is_ok();
 
             let send_result = tx.send(next_result).await;
 
@@ -121,6 +166,7 @@ pub(super) fn spawn_query_task(
 
             // notify the watcher that we sent a result
             watcher.send_success();
+            emitted_record |= sent_record;
 
             if let Some(err) = query_err {
                 if err.status == NoContent && options.continuous {
@@ -265,6 +311,7 @@ mod tests {
             query,
             options,
             block_manager.clone(),
+            None,
         );
         assert!(rx.is_empty());
         assert!(timeout(Duration::from_millis(1000), handle)
@@ -293,6 +340,7 @@ mod tests {
             query,
             options,
             block_manager.clone(),
+            None,
         );
         assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 0);
         assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 1);
@@ -328,6 +376,7 @@ mod tests {
             query,
             options,
             block_manager.clone(),
+            None,
         );
         assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 0);
         assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 1);
@@ -383,6 +432,7 @@ mod tests {
             query,
             options,
             block_manager.clone(),
+            None,
         );
         drop(rx); // drop the receiver to simulate a closed channel
         assert!(timeout(Duration::from_millis(1000), handle)
@@ -432,6 +482,7 @@ mod tests {
             query,
             options,
             block_manager,
+            None,
         );
 
         // spawn_blocking panic should close the channel without hanging the task
