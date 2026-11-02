@@ -17,6 +17,7 @@ mod records;
 pub(in crate::storage) mod wal;
 
 pub(in crate::storage) use paths::BlockFilePath;
+pub(in crate::storage) use read_only::ReplicaReloadOutcome;
 
 use crate::backend::BackendType;
 use crate::cfg::{Cfg, InstanceRole};
@@ -44,7 +45,7 @@ use std::fs::OpenOptions;
 use std::io::{Read, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 use tokio::sync::mpsc::{Receiver, Sender};
 
 pub(crate) type BlockRef = Arc<AsyncRwLock<Block>>;
@@ -65,7 +66,6 @@ pub(in crate::storage) struct BlockManager {
     wal: Box<dyn Wal + Sync + Send>,
     cfg: Arc<Cfg>,
     usage_counters: Arc<UsageCounters>,
-    last_replica_sync: Instant,
     accepted_publication: ReplicaPublication,
     mutation_batch: Option<BatchToken>,
     file_cache: Arc<FileCache>,
@@ -141,7 +141,6 @@ impl BlockManager {
             wal: create_wal(path.clone(), Arc::clone(&file_cache)).await?,
             cfg,
             usage_counters,
-            last_replica_sync: Instant::now(),
             accepted_publication: ReplicaPublication::Legacy,
             mutation_batch: None,
             file_cache,

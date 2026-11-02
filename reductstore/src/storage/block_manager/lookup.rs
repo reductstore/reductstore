@@ -125,9 +125,12 @@ impl BlockManager {
                     // we check crc if the crc is stored in the index for backward compatibility
                     if block_crc != crc.sum64() {
                         if self.cfg.role == InstanceRole::Replica {
-                            debug!(
-                                "Block descriptor {:?} CRC mismatch on replica: index CRC {} mismatch with calculated CRC {}. Treat as transient and reload index",
-                                path,
+                            warn!(
+                                "Replica descriptor/index CRC mismatch for {}/{}/{}: accepted_publication={:?}, expected_crc={}, actual_crc={}",
+                                self.bucket,
+                                self.entry,
+                                block_id,
+                                self.accepted_publication,
                                 block_crc,
                                 crc.sum64()
                             );
@@ -144,7 +147,7 @@ impl BlockManager {
                                 let index_version = block.version.unwrap_or(0);
 
                                 if desc_version > index_version {
-                                    warn!(
+                                    debug!(
                                         "Block descriptor {:?} is newer than index (v{} > v{}). Updating index",
                                         path, desc_version, index_version
                                     );
@@ -225,6 +228,7 @@ impl BlockManager {
 
 #[cfg(test)]
 mod tests {
+    use crate::cfg::InstanceRole;
     use crate::storage::block_manager::compress::CompressionAlgorithm;
     use crate::storage::block_manager::test_utils::{block_id, block_manager};
     use crate::storage::block_manager::BlockManager;
@@ -232,6 +236,7 @@ mod tests {
     use prost::Message;
     use reduct_base::error::ErrorCode;
     use rstest::rstest;
+    use std::sync::Arc;
 
     #[rstest]
     #[tokio::test]
@@ -294,6 +299,75 @@ mod tests {
         let index_block = block_manager.index().get_block(block_id).unwrap();
         assert_eq!(index_block.version, Some(desc_version));
         assert_ne!(index_block.crc64, Some(0));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_load_block_newer_descriptor_on_replica_is_retryable(
+        #[future] block_manager: BlockManager,
+    ) {
+        let mut block_manager = block_manager.await;
+        let block_id = 1;
+        block_manager.block_cache.remove(&block_id);
+        Arc::get_mut(&mut block_manager.cfg).unwrap().role = InstanceRole::Replica;
+
+        let desc_version = BlockProto::decode(
+            std::fs::read(block_manager.path_to_desc(block_id))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap()
+        .version
+        .unwrap();
+        let index_block = block_manager.index_mut().get_block_mut(block_id).unwrap();
+        index_block.version = Some(desc_version - 1);
+        index_block.crc64 = Some(0);
+        block_manager.index_mut().save().await.unwrap();
+        let index_path = block_manager.path.join(super::super::BLOCK_INDEX_FILE);
+        let persisted_index = std::fs::read(&index_path).unwrap();
+
+        let err = match block_manager.load_block(block_id).await {
+            Ok(_) => panic!("CRC mismatch should be retryable"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.status(), ErrorCode::TooEarly);
+        assert_eq!(
+            block_manager.index().get_block(block_id).unwrap().version,
+            Some(desc_version - 1)
+        );
+        assert_eq!(std::fs::read(&index_path).unwrap(), persisted_index);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn test_load_block_crc_mismatch_on_replica_is_retryable(
+        #[future] block_manager: BlockManager,
+    ) {
+        let mut block_manager = block_manager.await;
+        let block_id = 1;
+        block_manager.block_cache.remove(&block_id);
+        Arc::get_mut(&mut block_manager.cfg).unwrap().role = InstanceRole::Replica;
+
+        let desc_version = BlockProto::decode(
+            std::fs::read(block_manager.path_to_desc(block_id))
+                .unwrap()
+                .as_slice(),
+        )
+        .unwrap()
+        .version
+        .unwrap();
+        let index_block = block_manager.index_mut().get_block_mut(block_id).unwrap();
+        index_block.version = Some(desc_version);
+        index_block.crc64 = Some(0);
+        block_manager.index_mut().save().await.unwrap();
+
+        let err = match block_manager.load_block(block_id).await {
+            Ok(_) => panic!("CRC mismatch should be retryable"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.status(), ErrorCode::TooEarly);
     }
 
     #[rstest]

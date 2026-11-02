@@ -144,13 +144,7 @@ impl Query for HistoricalQuery {
                 let mut bm = block_manager.write().await?;
                 let first_block = match bm.find_block_candidate(start).await {
                     Ok(block) => block.read().await?.block_id(),
-                    Err(err) if err.status() == ErrorCode::TooEarly => {
-                        debug!(
-                            "Skip query start block lookup for '{}' due to transient replica state: {}",
-                            self.entry_name, err
-                        );
-                        0
-                    }
+                    Err(err) if err.status() == ErrorCode::TooEarly => return Err(err),
                     Err(_) => 0,
                 };
                 if first_block > self.stop_time {
@@ -187,13 +181,7 @@ impl Query for HistoricalQuery {
                 };
                 let block_ref = match block_result {
                     Ok(block_ref) => block_ref,
-                    Err(err) if err.status() == ErrorCode::TooEarly => {
-                        debug!(
-                            "Skip transient replica block {} for query '{}': {}",
-                            block_id, self.entry_name, err
-                        );
-                        continue;
-                    }
+                    Err(err) if err.status() == ErrorCode::TooEarly => return Err(err),
                     Err(err) if err.status() == ErrorCode::NotFound => {
                         debug!(
                             "Skip stale block {} for query '{}': {}",
@@ -459,7 +447,7 @@ mod tests {
 
     #[rstest]
     #[tokio::test(flavor = "multi_thread")]
-    async fn test_query_skips_missing_block_descriptor_on_replica(
+    async fn test_query_propagates_missing_block_descriptor_on_replica(
         #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) {
         let source_block_manager = block_manager.await;
@@ -499,11 +487,14 @@ mod tests {
         ));
 
         let mut query = build_query(0, 1001, QueryOptions::default()).unwrap();
-        let records = read_to_vector(&mut query, block_manager).await;
+        assert!(query.next(block_manager.clone()).await.is_ok());
+        assert!(query.next(block_manager.clone()).await.is_ok());
+        let err = match query.next(block_manager).await {
+            Ok(_) => panic!("missing replica descriptor should be retryable"),
+            Err(err) => err,
+        };
 
-        assert_eq!(records.len(), 2);
-        assert_eq!(records[0].0.meta().timestamp(), 0);
-        assert_eq!(records[1].0.meta().timestamp(), 5);
+        assert_eq!(err.status(), ErrorCode::TooEarly);
     }
 
     #[rstest]
@@ -631,7 +622,7 @@ mod tests {
         let mut query = build_query(1000, 1001, QueryOptions::default()).unwrap();
         let err = query.next(replica_block_manager).await.err().unwrap();
 
-        assert_eq!(err.status(), ErrorCode::NoContent);
+        assert_eq!(err.status(), ErrorCode::TooEarly);
     }
 
     #[rstest]
