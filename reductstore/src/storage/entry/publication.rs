@@ -89,6 +89,10 @@ impl Publication {
         })
     }
 
+    pub(in crate::storage) fn is_updating(&self) -> bool {
+        self.state == PublicationState::Updating
+    }
+
     fn decode(bytes: &[u8], path: &Path) -> Result<Self, ReductError> {
         let marker = EntryPublication::decode(bytes).map_err(|err| {
             internal_server_error!("Failed to decode entry publication {:?}: {}", path, err)
