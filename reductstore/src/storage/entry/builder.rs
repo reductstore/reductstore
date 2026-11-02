@@ -125,7 +125,7 @@ impl EntryBuilder {
             system_behavior: strategy_for_entry(&name),
             queries: Arc::new(AsyncRwLock::new(HashMap::new())),
             status: AsyncRwLock::new(ResourceStatus::Ready),
-            info_cache: Arc::new(AsyncRwLock::new(Some(info_cache))),
+            info_cache: AsyncRwLock::new(Some(info_cache)),
             path,
             cfg,
             io_limiter,

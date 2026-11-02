@@ -20,7 +20,7 @@ use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndexSummary;
-use crate::storage::block_manager::BlockManager;
+use crate::storage::block_manager::{BlockManager, ReplicaReloadOutcome};
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::query::base::QueryOptions;
 use crate::storage::query::{
@@ -68,105 +68,12 @@ pub(crate) struct Entry {
     system_behavior: Box<dyn SystemEntryBehavior + Send + Sync>,
     queries: QueryHandleMapRef,
     status: AsyncRwLock<ResourceStatus>,
-    info_cache: Arc<AsyncRwLock<Option<Arc<BlockIndexSummary>>>>,
+    info_cache: AsyncRwLock<Option<Arc<BlockIndexSummary>>>,
     path: PathBuf,
     cfg: Arc<Cfg>,
     io_limiter: InFlightIoLimiter,
     publication: Arc<publication_coordinator::PublicationCoordinator>,
     pub(super) file_cache: Arc<FileCache>,
-}
-
-#[derive(Clone)]
-pub(in crate::storage) struct ReplicaReloadContext {
-    path: PathBuf,
-    bucket_name: String,
-    entry_name: String,
-    block_manager: Arc<AsyncRwLock<BlockManager>>,
-    file_cache: Arc<FileCache>,
-    info_cache: Arc<AsyncRwLock<Option<Arc<BlockIndexSummary>>>>,
-}
-
-impl ReplicaReloadContext {
-    pub(in crate::storage) async fn reload_index(&self) -> Result<(), ReductError> {
-        const RELOAD_ATTEMPTS: usize = 3;
-
-        for attempt in 1..=RELOAD_ATTEMPTS {
-            let reload = {
-                let Some(block_manager) = self.block_manager.try_read() else {
-                    if attempt == RELOAD_ATTEMPTS {
-                        return Err(reduct_base::too_early!(
-                            "Block manager remained busy while reloading replica index"
-                        ));
-                    }
-                    tokio::task::yield_now().await;
-                    continue;
-                };
-
-                block_manager.prepare_replica_index_reload()
-            };
-
-            let Some(reload) = reload else {
-                return Ok(());
-            };
-
-            let result = async {
-                let before = publication::load_fresh(&self.path, &self.file_cache).await?;
-                if matches!(
-                    before,
-                    Some(publication::Publication {
-                        state: publication::PublicationState::Updating,
-                        ..
-                    })
-                ) {
-                    return Err(reduct_base::too_early!("Entry publication is updating"));
-                }
-
-                if before.as_ref().and_then(publication::Publication::id)
-                    == reload.accepted_publication().id().cloned()
-                {
-                    return Ok(());
-                }
-
-                let updated_index = reload.load_candidate().await?;
-                let after = publication::load_fresh(&self.path, &self.file_cache).await?;
-                let publication = publication::validate_window(before, after)?;
-                reload.validate_successor(&publication)?;
-                let prepared = reload.prepare_candidate(updated_index, publication).await?;
-
-                let Some(mut block_manager) = self.block_manager.try_write() else {
-                    return Err(reduct_base::too_early!(
-                        "Block manager is busy while installing replica index"
-                    ));
-                };
-
-                block_manager.apply_replica_index_reload(prepared)?;
-                if let Some(mut cache) = self.info_cache.try_write() {
-                    *cache = Some(Arc::new(block_manager.index().aggregate_stats()));
-                }
-                Ok(())
-            }
-            .await;
-
-            match result {
-                Ok(()) => return Ok(()),
-                Err(err)
-                    if err.status() == reduct_base::error::ErrorCode::TooEarly
-                        && attempt < RELOAD_ATTEMPTS =>
-                {
-                    debug!(
-                        "Retrying replica index reload for {}/{} after transient publication state (attempt {}/{})",
-                        self.bucket_name, self.entry_name, attempt, RELOAD_ATTEMPTS
-                    );
-                    tokio::task::yield_now().await;
-                }
-                Err(err) => return Err(err),
-            }
-        }
-
-        Err(reduct_base::too_early!(
-            "Replica index reload did not observe a stable publication"
-        ))
-    }
 }
 
 #[derive(PartialEq)]
@@ -207,7 +114,11 @@ impl Entry {
     }
 
     pub(crate) async fn reload_index_on_replica(&self) -> Result<(), ReductError> {
-        self.replica_reload_context().reload_index().await
+        match BlockManager::reload_replica_index(&self.block_manager).await? {
+            ReplicaReloadOutcome::Unchanged => {}
+            ReplicaReloadOutcome::Applied(summary) => self.update_info_cache(summary),
+        }
+        Ok(())
     }
 
     /// Query records for a time range.
@@ -238,7 +149,6 @@ impl Entry {
 
         let io_settings = query.as_ref().io_settings().clone();
         let recovery = (self.cfg.role == InstanceRole::Replica).then(|| ReplicaQueryRecovery {
-            reload: self.replica_reload_context(),
             rebuild: Arc::new({
                 let entry_name = self.name.clone();
                 let options = options.clone();
@@ -330,17 +240,6 @@ impl Entry {
     fn update_info_cache(&self, summary: Arc<BlockIndexSummary>) {
         if let Some(mut cache) = self.info_cache.try_write() {
             *cache = Some(summary);
-        }
-    }
-
-    fn replica_reload_context(&self) -> ReplicaReloadContext {
-        ReplicaReloadContext {
-            path: self.path.clone(),
-            bucket_name: self.bucket_name.clone(),
-            entry_name: self.name.clone(),
-            block_manager: Arc::clone(&self.block_manager),
-            file_cache: Arc::clone(&self.file_cache),
-            info_cache: Arc::clone(&self.info_cache),
         }
     }
 
