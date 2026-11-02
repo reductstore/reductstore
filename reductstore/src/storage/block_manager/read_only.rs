@@ -471,6 +471,86 @@ mod tests {
     }
 
     #[rstest]
+    #[tokio::test]
+    async fn service_returns_too_early_while_manager_is_busy(
+        #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
+        let path = path.await;
+        let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE), Arc::clone(&file_cache));
+        index.save().await.unwrap();
+        let block_manager = Arc::new(AsyncRwLock::new(
+            BlockManager::build(
+                path.clone(),
+                index,
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(Cfg {
+                    role: InstanceRole::Replica,
+                    data_path: path,
+                    ..Default::default()
+                }),
+                Default::default(),
+                file_cache,
+            )
+            .await
+            .unwrap(),
+        ));
+        let _guard = block_manager.write().await.unwrap();
+
+        let Err(err) = BlockManager::reload_replica_index(&block_manager).await else {
+            panic!("busy block manager must not reload");
+        };
+
+        assert_eq!(err.status(), ErrorCode::TooEarly);
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn service_retries_updating_publication(
+        #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
+        let path = path.await;
+        let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE), Arc::clone(&file_cache));
+        index.save().await.unwrap();
+        let block_manager = Arc::new(AsyncRwLock::new(
+            BlockManager::build(
+                path.clone(),
+                index,
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(Cfg {
+                    role: InstanceRole::Replica,
+                    data_path: path.clone(),
+                    ..Default::default()
+                }),
+                Default::default(),
+                Arc::clone(&file_cache),
+            )
+            .await
+            .unwrap(),
+        ));
+        std::fs::write(
+            publication::path(&path),
+            EntryPublication {
+                incarnation: "test-incarnation".to_string(),
+                generation: 1,
+                state: entry_publication::State::Updating as i32,
+                block_index_crc64: None,
+            }
+            .encode_to_vec(),
+        )
+        .unwrap();
+
+        let Err(err) = BlockManager::reload_replica_index(&block_manager).await else {
+            panic!("updating publication must not reload");
+        };
+
+        assert_eq!(err.status(), ErrorCode::TooEarly);
+    }
+
+    #[rstest]
     #[case(true)]
     #[case(false)]
     #[tokio::test]

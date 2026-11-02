@@ -542,6 +542,52 @@ mod tests {
 
     #[rstest]
     #[tokio::test]
+    async fn query_propagates_too_early_without_replica_recovery(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(TooEarlyQuery {
+                io: IoConfig::default(),
+            }),
+            QueryOptions::default(),
+            block_manager.await,
+            None,
+        );
+
+        assert_eq!(rx.recv().await.unwrap().err().unwrap().status, TooEarly);
+        handle.await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_propagates_rebuild_error_after_replica_recovery(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let recovery = ReplicaQueryRecovery {
+            rebuild: Arc::new(|| Err(ReductError::internal_server_error("rebuild failed"))),
+        };
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(TooEarlyQuery {
+                io: IoConfig::default(),
+            }),
+            QueryOptions::default(),
+            block_manager.await,
+            Some(recovery),
+        );
+
+        assert_eq!(
+            rx.recv().await.unwrap().err().unwrap().status,
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        handle.await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
     async fn query_stops_after_three_pre_output_recoveries(
         #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
     ) {
