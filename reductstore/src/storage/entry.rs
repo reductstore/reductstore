@@ -669,6 +669,77 @@ mod tests {
         use crate::cfg::InstanceRole;
         use std::io::SeekFrom;
 
+        async fn replica_with_pending_update(
+            entry_settings: EntrySettings,
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) -> Arc<Entry> {
+            let primary = entry(entry_settings.clone(), path, Arc::clone(&file_cache)).await;
+            write_stub_record(&primary, 1).await;
+            primary.sync_fs().await.unwrap();
+
+            let mut replica_cfg = Cfg::default();
+            replica_cfg.role = InstanceRole::Replica;
+            let replica = Arc::new(
+                Entry::builder()
+                    .path(primary.path().clone())
+                    .name("entry")
+                    .bucket_name("bucket")
+                    .settings(entry_settings)
+                    .cfg(replica_cfg.into())
+                    .usage_counters(Default::default())
+                    .file_cache(file_cache)
+                    .restore()
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+
+            write_stub_record(&primary, 2).await;
+            primary.sync_fs().await.unwrap();
+            replica
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn applied_reload_updates_info_cache(
+            entry_settings: EntrySettings,
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) {
+            let replica = replica_with_pending_update(entry_settings, path, file_cache).await;
+
+            replica.reload_index_on_replica().await.unwrap();
+
+            assert_eq!(
+                replica
+                    .info_cache
+                    .read()
+                    .await
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .record_count,
+                2
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn unchanged_reload_does_not_update_info_cache(
+            entry_settings: EntrySettings,
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) {
+            let replica = replica_with_pending_update(entry_settings, path, file_cache).await;
+            replica.reload_index_on_replica().await.unwrap();
+            *replica.info_cache.write().await.unwrap() = None;
+
+            replica.reload_index_on_replica().await.unwrap();
+
+            assert!(replica.info_cache.read().await.unwrap().is_none());
+        }
+
         #[rstest]
         #[tokio::test]
         async fn does_not_block_index_reads_while_invalidating_cache(

@@ -529,7 +529,7 @@ mod tests {
                 io: IoConfig::default(),
             }),
             QueryOptions::default(),
-            block_manager,
+            Arc::clone(&block_manager),
             Some(recovery),
         );
 
@@ -583,6 +583,102 @@ mod tests {
             rx.recv().await.unwrap().err().unwrap().status,
             reduct_base::error::ErrorCode::InternalServerError
         );
+        handle.await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_rebuilds_after_busy_replica_reload(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let _guard = block_manager.write().await.unwrap();
+        let rebuilds = Arc::new(AtomicUsize::new(0));
+        let recovery = ReplicaQueryRecovery {
+            rebuild: Arc::new({
+                let rebuilds = Arc::clone(&rebuilds);
+                move || {
+                    rebuilds.fetch_add(1, Ordering::SeqCst);
+                    Err(ReductError::internal_server_error("rebuild failed"))
+                }
+            }),
+        };
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(TooEarlyQuery {
+                io: IoConfig::default(),
+            }),
+            QueryOptions::default(),
+            Arc::clone(&block_manager),
+            Some(recovery),
+        );
+
+        assert_eq!(
+            rx.recv().await.unwrap().err().unwrap().status,
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        assert_eq!(rebuilds.load(Ordering::SeqCst), 1);
+        handle.await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_propagates_fatal_replica_reload_error() {
+        let path = tempfile::tempdir()
+            .unwrap()
+            .keep()
+            .join("bucket")
+            .join("entry");
+        let file_cache = build_test_file_cache();
+        let index = BlockIndex::new(path.join("index"), Arc::clone(&file_cache));
+        index.save().await.unwrap();
+        let block_manager = Arc::new(AsyncRwLock::new(
+            BlockManager::build(
+                path.clone(),
+                index,
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(Cfg {
+                    role: crate::cfg::InstanceRole::Replica,
+                    data_path: path.clone(),
+                    ..Default::default()
+                }),
+                Default::default(),
+                file_cache,
+            )
+            .await
+            .unwrap(),
+        ));
+        std::fs::write(crate::storage::entry::publication::path(&path), [0xff]).unwrap();
+        let rebuilds = Arc::new(AtomicUsize::new(0));
+        let recovery = ReplicaQueryRecovery {
+            rebuild: Arc::new({
+                let rebuilds = Arc::clone(&rebuilds);
+                move || {
+                    rebuilds.fetch_add(1, Ordering::SeqCst);
+                    Ok(Box::new(TooEarlyQuery {
+                        io: IoConfig::default(),
+                    }))
+                }
+            }),
+        };
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(TooEarlyQuery {
+                io: IoConfig::default(),
+            }),
+            QueryOptions::default(),
+            block_manager,
+            Some(recovery),
+        );
+
+        assert_eq!(
+            rx.recv().await.unwrap().err().unwrap().status,
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        assert_eq!(rebuilds.load(Ordering::SeqCst), 0);
         handle.await.unwrap();
     }
 

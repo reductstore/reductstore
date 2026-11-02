@@ -551,6 +551,75 @@ mod tests {
     }
 
     #[rstest]
+    #[tokio::test]
+    async fn service_skips_non_replica_manager(
+        #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
+        let path = path.await;
+        let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE), Arc::clone(&file_cache));
+        index.save().await.unwrap();
+        let block_manager = Arc::new(AsyncRwLock::new(
+            BlockManager::build(
+                path.clone(),
+                index,
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(Cfg {
+                    data_path: path,
+                    ..Default::default()
+                }),
+                Default::default(),
+                file_cache,
+            )
+            .await
+            .unwrap(),
+        ));
+
+        assert!(matches!(
+            BlockManager::reload_replica_index(&block_manager)
+                .await
+                .unwrap(),
+            ReplicaReloadOutcome::Unchanged
+        ));
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn service_skips_legacy_replica_without_publication_marker(
+        #[future] path: PathBuf,
+        file_cache: Arc<FileCache>,
+    ) {
+        let path = path.await;
+        let index = BlockIndex::new(path.join(BLOCK_INDEX_FILE), Arc::clone(&file_cache));
+        index.save().await.unwrap();
+        let block_manager = Arc::new(AsyncRwLock::new(
+            BlockManager::build(
+                path.clone(),
+                index,
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(Cfg {
+                    role: InstanceRole::Replica,
+                    data_path: path,
+                    ..Default::default()
+                }),
+                Default::default(),
+                file_cache,
+            )
+            .await
+            .unwrap(),
+        ));
+
+        assert!(matches!(
+            BlockManager::reload_replica_index(&block_manager)
+                .await
+                .unwrap(),
+            ReplicaReloadOutcome::Unchanged
+        ));
+    }
+
+    #[rstest]
     #[case(true)]
     #[case(false)]
     #[tokio::test]
