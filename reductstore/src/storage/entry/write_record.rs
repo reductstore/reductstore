@@ -767,7 +767,7 @@ mod tests {
     #[rstest]
     #[serial]
     #[tokio::test]
-    async fn test_meta_entry_replaces_previous_record_with_same_key(path: PathBuf) {
+    async fn test_meta_entry_keeps_previous_record_with_same_key(path: PathBuf) {
         let entry = Arc::new(
             Entry::builder()
                 .name("entry/$meta")
@@ -813,7 +813,7 @@ mod tests {
             .unwrap();
         sender.send(Ok(None)).await.unwrap();
 
-        assert!(entry.begin_read(1).await.is_err());
+        assert!(entry.begin_read(1).await.is_ok());
         assert!(entry.begin_read(2).await.is_ok());
     }
 
