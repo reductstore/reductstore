@@ -24,9 +24,6 @@ struct InFlightWriteRecord {
     entry_path: PathBuf,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
     completion: Option<oneshot::Receiver<bool>>,
-    superseded_record_timestamps: Vec<u64>,
-    bucket_name: String,
-    entry_name: String,
 }
 
 impl InFlightWriteRecord {
@@ -38,9 +35,6 @@ impl InFlightWriteRecord {
         entry_path: PathBuf,
         block_manager: Arc<AsyncRwLock<BlockManager>>,
         completion: oneshot::Receiver<bool>,
-        superseded_record_timestamps: Vec<u64>,
-        bucket_name: String,
-        entry_name: String,
     ) -> Self {
         Self {
             inner,
@@ -50,35 +44,15 @@ impl InFlightWriteRecord {
             entry_path,
             block_manager,
             completion: Some(completion),
-            superseded_record_timestamps,
-            bucket_name,
-            entry_name,
         }
     }
 
     async fn release_publication_after(&mut self, terminal: bool) {
         if terminal {
-            let write_succeeded = match self.completion.take() {
-                Some(completion) => completion.await.unwrap_or(false),
-                None => false,
+            let _ = match self.completion.take() {
+                Some(completion) => completion.await,
+                None => Ok(false),
             };
-            if write_succeeded && !self.superseded_record_timestamps.is_empty() {
-                if let Err(err) = Entry::remove_records_in_current_mutation(
-                    std::mem::take(&mut self.superseded_record_timestamps),
-                    Arc::clone(&self.block_manager),
-                    &self.bucket_name,
-                    &self.entry_name,
-                )
-                .await
-                {
-                    log::error!(
-                        "Failed to remove superseded records from {}/{}: {}",
-                        self.bucket_name,
-                        self.entry_name,
-                        err
-                    );
-                }
-            }
             self.publication.take();
             self.coordinator
                 .schedule_publish(self.entry_path.clone(), Arc::clone(&self.block_manager));
@@ -135,13 +109,7 @@ impl Entry {
             block_manager.set_mutation_batch(publication.token.clone());
         }
         let permit = self.acquire_writer_slot().await?;
-        // Strategy validates labels and identifies records superseded by this write.
-        let mut preparation = self.system_behavior.prepare_write(self, &labels).await?;
-        // Retrying an errored record replaces it in place, so it must not be
-        // removed as though it were an older attachment generation.
-        preparation
-            .superseded_record_timestamps
-            .retain(|timestamp| *timestamp != time);
+        self.system_behavior.prepare_write(self, &labels).await?;
 
         let settings = self.settings.read().await?;
         let mut block_ref = {
@@ -230,9 +198,6 @@ impl Entry {
                                 self.path.clone(),
                                 Arc::clone(&self.block_manager),
                                 completion,
-                                preparation.superseded_record_timestamps,
-                                self.bucket_name.clone(),
-                                self.name.clone(),
                             )));
                         };
                     }
@@ -285,9 +250,6 @@ impl Entry {
             self.path.clone(),
             Arc::clone(&self.block_manager),
             completion,
-            preparation.superseded_record_timestamps,
-            self.bucket_name.clone(),
-            self.name.clone(),
         )))
     }
 
