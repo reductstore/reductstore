@@ -344,7 +344,7 @@ def test_meta_entry_requires_key_label(base_url, session, bucket):
     assert resp.status_code == 422
 
 
-def test_meta_entry_upsert_by_key(base_url, session, bucket):
+def test_meta_entry_keeps_previous_version_by_key(base_url, session, bucket):
     entry = "a/x/y/$meta"
 
     headers = {"x-reduct-label-key": "schema"}
@@ -359,7 +359,8 @@ def test_meta_entry_upsert_by_key(base_url, session, bucket):
     assert resp.status_code == 200
 
     resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts=1000")
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert resp.content == b'{"v":1}'
 
     resp = session.get(f"{base_url}/b/{bucket}/{entry}?ts=1010")
     assert resp.status_code == 200

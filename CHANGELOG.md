@@ -14,6 +14,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Retain the previous attachment version during replacement so replica listings cannot observe a missing attachment key, [PR-1712](https://github.com/reductstore/reductstore/pull/1712)
+- Retry replica queries after reloading indexes that disagree with cached block descriptors, [PR-1706](https://github.com/reductstore/reductstore/pull/1706)
+- Keep replica reads responsive while refreshed block indexes invalidate remote cache files, [PR-1703](https://github.com/reductstore/reductstore/pull/1703)
+- Validate restored replica block indexes against their publication marker so stale cached indexes cannot hide attachments, [PR-1701](https://github.com/reductstore/reductstore/pull/1701)
+- Preserve the system log capture sink when logger initialization is repeated, [PR-1697](https://github.com/reductstore/reductstore/pull/1697)
 - Reject invalid Zenoh query locality values at startup instead of silently defaulting to `Any`, [PR-1667](https://github.com/reductstore/reductstore/pull/1667)
 - Redact inline Zenoh configuration, certificates, and credentials from startup logs and configuration error messages, [PR-1667](https://github.com/reductstore/reductstore/pull/1667)
 - Prevent admitted mutations from escaping the publication sync snapshot and leaving pending remote mutations, [#1695](https://github.com/reductstore/reductstore/pull/1695)
@@ -36,6 +41,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Use the shared ReductStore Debian base image for runtime containers, [PR-1639](https://github.com/reductstore/reductstore/pull/1639)
 - Publish entry mutations atomically for read-only replicas, [PR-1637](https://github.com/reductstore/reductstore/pull/1637) by @atimin
 - Replace formatted `ReductError` constructors with error macros, [PR-1631](https://github.com/reductstore/reductstore/pull/1631) by @vintcessun
+
+## 1.21.5 - 2026-10-27
+
+### Fixed
+
+- Persist system events when instance or event names contain characters unsupported by storage entry paths, [PR-1699](https://github.com/reductstore/reductstore/pull/1699)
+
+### Changed
+
+- Update Rust dependencies, [PR-1700](https://github.com/reductstore/reductstore/pull/1700)
 
 ## 1.21.4 - 2026-10-21
 

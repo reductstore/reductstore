@@ -13,7 +13,7 @@ use crate::storage::block_manager::BlockManager;
 use crate::storage::entry::RecordReader;
 use crate::storage::query::base::{Query, QueryOptions};
 use log::{debug, trace};
-use reduct_base::error::ErrorCode::NoContent;
+use reduct_base::error::ErrorCode::{NoContent, TooEarly};
 use reduct_base::error::ReductError;
 use reduct_base::unprocessable_entity;
 use std::cmp::{max, min};
@@ -25,6 +25,12 @@ use tokio::task::JoinHandle;
 use tokio::time::sleep;
 
 pub(crate) type QueryRx = Receiver<Result<RecordReader, ReductError>>;
+type QueryFactory =
+    Arc<dyn Fn() -> Result<Box<dyn Query + Send + Sync>, ReductError> + Send + Sync>;
+
+pub(in crate::storage) struct ReplicaQueryRecovery {
+    pub(in crate::storage) rebuild: QueryFactory,
+}
 
 const QUERY_BUFFER_SIZE: usize = 64;
 const MIN_FULL_CHANNEL_SLEEP: Duration = Duration::from_micros(10);
@@ -80,6 +86,7 @@ pub(super) fn spawn_query_task(
     mut query: Box<dyn Query + Send + Sync>,
     options: QueryOptions,
     block_manager: Arc<AsyncRwLock<BlockManager>>,
+    recovery: Option<ReplicaQueryRecovery>,
 ) -> (QueryRx, JoinHandle<()>) {
     let (tx, rx) = tokio::sync::mpsc::channel(QUERY_BUFFER_SIZE);
 
@@ -87,6 +94,8 @@ pub(super) fn spawn_query_task(
     let handle = tokio::spawn(async move {
         trace!("Query task for '{}' id={} running", task_group, id);
         let mut watcher = QueryWatcher::new();
+        let mut emitted_record = false;
+        let mut recovery_attempts = 0;
 
         loop {
             let group = task_group.clone();
@@ -111,7 +120,42 @@ pub(super) fn spawn_query_task(
             }
 
             let next_result = query.next(block_manager.clone()).await;
+            if next_result
+                .as_ref()
+                .is_err_and(|err| err.status == TooEarly)
+                && !emitted_record
+                && recovery_attempts < 3
+                && recovery.is_some()
+            {
+                recovery_attempts += 1;
+                let recovery = recovery.as_ref().unwrap();
+                match BlockManager::reload_replica_index(&block_manager).await {
+                    Ok(_)
+                    | Err(ReductError {
+                        status: TooEarly, ..
+                    }) => {}
+                    Err(err) => {
+                        if tx.send(Err(err)).await.is_err() {
+                            debug!("Query '{}' id={} task channel closed", group, id);
+                        }
+                        break;
+                    }
+                }
+
+                match (recovery.rebuild)() {
+                    Ok(rebuilt) => query = rebuilt,
+                    Err(err) => {
+                        if tx.send(Err(err)).await.is_err() {
+                            debug!("Query '{}' id={} task channel closed", group, id);
+                        }
+                        break;
+                    }
+                }
+                tokio::task::yield_now().await;
+                continue;
+            }
             let query_err = next_result.as_ref().err().cloned();
+            let sent_record = next_result.is_ok();
 
             let send_result = tx.send(next_result).await;
 
@@ -122,6 +166,7 @@ pub(super) fn spawn_query_task(
 
             // notify the watcher that we sent a result
             watcher.send_success();
+            emitted_record |= sent_record;
 
             if let Some(err) = query_err {
                 if err.status == NoContent && options.continuous {
@@ -188,6 +233,7 @@ mod tests {
     use prost_wkt_types::Timestamp;
     use reduct_base::io::ReadRecord;
     use rstest::*;
+    use std::sync::atomic::AtomicUsize;
     use test_log::test as log_test;
     use tokio::time::timeout;
 
@@ -260,6 +306,7 @@ mod tests {
             query,
             options,
             block_manager.await,
+            None,
         );
 
         timeout(Duration::from_secs(1), async {
@@ -297,6 +344,7 @@ mod tests {
             query,
             options,
             block_manager.clone(),
+            None,
         );
         assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 0);
         assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 1);
@@ -332,6 +380,7 @@ mod tests {
             query,
             options,
             block_manager.clone(),
+            None,
         );
         assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 0);
         assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 1);
@@ -387,6 +436,7 @@ mod tests {
             query,
             options,
             block_manager.clone(),
+            None,
         );
         drop(rx); // drop the receiver to simulate a closed channel
         assert!(timeout(Duration::from_millis(1000), handle)
@@ -427,6 +477,315 @@ mod tests {
         io: IoConfig,
     }
 
+    struct TooEarlyQuery {
+        io: IoConfig,
+    }
+
+    #[async_trait::async_trait]
+    impl Query for TooEarlyQuery {
+        async fn next(
+            &mut self,
+            _block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) -> Result<RecordReader, ReductError> {
+            Err(ReductError::too_early("replica is catching up"))
+        }
+
+        fn io_settings(&self) -> &IoConfig {
+            &self.io
+        }
+    }
+
+    struct OneRecordThenTooEarlyQuery {
+        io: IoConfig,
+        sent_record: bool,
+    }
+
+    #[async_trait::async_trait]
+    impl Query for OneRecordThenTooEarlyQuery {
+        async fn next(
+            &mut self,
+            _block_manager: Arc<AsyncRwLock<BlockManager>>,
+        ) -> Result<RecordReader, ReductError> {
+            if self.sent_record {
+                return Err(ReductError::too_early("replica is catching up"));
+            }
+            self.sent_record = true;
+            Ok(RecordReader::form_record(
+                "entry",
+                Record {
+                    timestamp: Some(Timestamp {
+                        seconds: 0,
+                        nanos: 0,
+                    }),
+                    begin: 0,
+                    end: 0,
+                    state: 1,
+                    labels: vec![],
+                    content_type: String::new(),
+                },
+            ))
+        }
+
+        fn io_settings(&self) -> &IoConfig {
+            &self.io
+        }
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_rebuilds_after_pre_output_too_early(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let rebuilds = Arc::new(AtomicUsize::new(0));
+        let recovery = ReplicaQueryRecovery {
+            rebuild: Arc::new({
+                let rebuilds = Arc::clone(&rebuilds);
+                move || {
+                    rebuilds.fetch_add(1, Ordering::SeqCst);
+                    build_query(
+                        "entry".to_string(),
+                        0,
+                        5,
+                        QueryOptions::default(),
+                        IoConfig::default(),
+                    )
+                }
+            }),
+        };
+
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(TooEarlyQuery {
+                io: IoConfig::default(),
+            }),
+            QueryOptions::default(),
+            Arc::clone(&block_manager),
+            Some(recovery),
+        );
+
+        assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 0);
+        assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 1);
+        assert_eq!(rx.recv().await.unwrap().err().unwrap().status, NoContent);
+        assert_eq!(rebuilds.load(Ordering::SeqCst), 1);
+        handle.await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_propagates_too_early_without_replica_recovery(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(TooEarlyQuery {
+                io: IoConfig::default(),
+            }),
+            QueryOptions::default(),
+            block_manager.await,
+            None,
+        );
+
+        assert_eq!(rx.recv().await.unwrap().err().unwrap().status, TooEarly);
+        handle.await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_propagates_rebuild_error_after_replica_recovery(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let recovery = ReplicaQueryRecovery {
+            rebuild: Arc::new(|| Err(ReductError::internal_server_error("rebuild failed"))),
+        };
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(TooEarlyQuery {
+                io: IoConfig::default(),
+            }),
+            QueryOptions::default(),
+            block_manager.await,
+            Some(recovery),
+        );
+
+        assert_eq!(
+            rx.recv().await.unwrap().err().unwrap().status,
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        handle.await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_rebuilds_after_busy_replica_reload(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let _guard = block_manager.write().await.unwrap();
+        let rebuilds = Arc::new(AtomicUsize::new(0));
+        let recovery = ReplicaQueryRecovery {
+            rebuild: Arc::new({
+                let rebuilds = Arc::clone(&rebuilds);
+                move || {
+                    rebuilds.fetch_add(1, Ordering::SeqCst);
+                    Err(ReductError::internal_server_error("rebuild failed"))
+                }
+            }),
+        };
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(TooEarlyQuery {
+                io: IoConfig::default(),
+            }),
+            QueryOptions::default(),
+            Arc::clone(&block_manager),
+            Some(recovery),
+        );
+
+        assert_eq!(
+            rx.recv().await.unwrap().err().unwrap().status,
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        assert_eq!(rebuilds.load(Ordering::SeqCst), 1);
+        handle.await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_propagates_fatal_replica_reload_error() {
+        let path = tempfile::tempdir()
+            .unwrap()
+            .keep()
+            .join("bucket")
+            .join("entry");
+        let file_cache = build_test_file_cache();
+        let index = BlockIndex::new(path.join("index"), Arc::clone(&file_cache));
+        index.save().await.unwrap();
+        let block_manager = Arc::new(AsyncRwLock::new(
+            BlockManager::build(
+                path.clone(),
+                index,
+                "bucket".to_string(),
+                "entry".to_string(),
+                Arc::new(Cfg {
+                    role: crate::cfg::InstanceRole::Replica,
+                    data_path: path.clone(),
+                    ..Default::default()
+                }),
+                Default::default(),
+                file_cache,
+            )
+            .await
+            .unwrap(),
+        ));
+        std::fs::write(crate::storage::entry::publication::path(&path), [0xff]).unwrap();
+        let rebuilds = Arc::new(AtomicUsize::new(0));
+        let recovery = ReplicaQueryRecovery {
+            rebuild: Arc::new({
+                let rebuilds = Arc::clone(&rebuilds);
+                move || {
+                    rebuilds.fetch_add(1, Ordering::SeqCst);
+                    Ok(Box::new(TooEarlyQuery {
+                        io: IoConfig::default(),
+                    }))
+                }
+            }),
+        };
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(TooEarlyQuery {
+                io: IoConfig::default(),
+            }),
+            QueryOptions::default(),
+            block_manager,
+            Some(recovery),
+        );
+
+        assert_eq!(
+            rx.recv().await.unwrap().err().unwrap().status,
+            reduct_base::error::ErrorCode::InternalServerError
+        );
+        assert_eq!(rebuilds.load(Ordering::SeqCst), 0);
+        handle.await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_stops_after_three_pre_output_recoveries(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let rebuilds = Arc::new(AtomicUsize::new(0));
+        let recovery = ReplicaQueryRecovery {
+            rebuild: Arc::new({
+                let rebuilds = Arc::clone(&rebuilds);
+                move || {
+                    rebuilds.fetch_add(1, Ordering::SeqCst);
+                    Ok(Box::new(TooEarlyQuery {
+                        io: IoConfig::default(),
+                    }))
+                }
+            }),
+        };
+
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(TooEarlyQuery {
+                io: IoConfig::default(),
+            }),
+            QueryOptions::default(),
+            block_manager,
+            Some(recovery),
+        );
+
+        assert_eq!(rx.recv().await.unwrap().err().unwrap().status, TooEarly);
+        assert_eq!(rebuilds.load(Ordering::SeqCst), 3);
+        handle.await.unwrap();
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn query_does_not_rebuild_after_emitting_a_record(
+        #[future] block_manager: Arc<AsyncRwLock<BlockManager>>,
+    ) {
+        let block_manager = block_manager.await;
+        let rebuilds = Arc::new(AtomicUsize::new(0));
+        let recovery = ReplicaQueryRecovery {
+            rebuild: Arc::new({
+                let rebuilds = Arc::clone(&rebuilds);
+                move || {
+                    rebuilds.fetch_add(1, Ordering::SeqCst);
+                    Ok(Box::new(TooEarlyQuery {
+                        io: IoConfig::default(),
+                    }))
+                }
+            }),
+        };
+
+        let (mut rx, handle) = spawn_query_task(
+            0,
+            "bucket/entry".to_string(),
+            Box::new(OneRecordThenTooEarlyQuery {
+                io: IoConfig::default(),
+                sent_record: false,
+            }),
+            QueryOptions::default(),
+            block_manager,
+            Some(recovery),
+        );
+
+        assert_eq!(rx.recv().await.unwrap().unwrap().meta().timestamp(), 0);
+        assert_eq!(rx.recv().await.unwrap().err().unwrap().status, TooEarly);
+        assert_eq!(rebuilds.load(Ordering::SeqCst), 0);
+        handle.await.unwrap();
+    }
+
     #[async_trait::async_trait]
     impl Query for PanickingQuery {
         async fn next(
@@ -464,6 +823,7 @@ mod tests {
             query,
             options,
             block_manager,
+            None,
         );
 
         // spawn_blocking panic should close the channel without hanging the task

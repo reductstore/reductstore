@@ -621,7 +621,6 @@ impl ExtRepository {
         meta_name: &str,
     ) -> Result<Map<String, serde_json::Value>, ReductError> {
         let mut entry_map = Map::new();
-        let mut records_read = 0;
         loop {
             let Some(result) = rx.recv().await else { break };
             let mut record = match result {
@@ -640,8 +639,17 @@ impl ExtRepository {
                 continue;
             }
 
-            records_read += 1;
-            if records_read > MAX_META_ATTACHMENTS {
+            if record
+                .meta()
+                .labels()
+                .get("remove")
+                .is_some_and(|value| value == "true")
+            {
+                entry_map.remove(&key);
+                continue;
+            }
+
+            if !entry_map.contains_key(&key) && entry_map.len() >= MAX_META_ATTACHMENTS as usize {
                 return Err(unprocessable_entity!(
                     "Too many meta attachments in '{}/{}': maximum {} records are supported",
                     bucket_name,
@@ -701,6 +709,7 @@ pub(super) mod tests {
     use super::*;
     use crate::cfg::Cfg;
     use crate::storage::engine::StorageEngine;
+    use crate::storage::entry::update_labels::UpdateLabels;
     use crate::storage::entry::RecordReader;
     use crate::storage::proto::Record;
     use async_stream::stream;
@@ -717,6 +726,7 @@ pub(super) mod tests {
     use reduct_base::Labels;
     use rstest::{fixture, rstest};
     use serde_json::json;
+    use std::collections::HashSet;
     use std::pin::Pin;
     use std::task::{Context, Poll};
     use tempfile::tempdir;
@@ -1379,6 +1389,92 @@ pub(super) mod tests {
                     .await
                     .unwrap(),
                 Some(json!({"entry": {"$another-ext": {"scale": 100}}}))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn resolves_retained_attachment_versions_to_the_latest_value(
+            mock_ext: MockIoExtension,
+        ) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$test-ext",
+                br#"{"version":1}"#,
+                1,
+            )
+            .await;
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$test-ext",
+                br#"{"version":2}"#,
+                2,
+            )
+            .await;
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            assert_eq!(
+                repo.get_ext_attachments("bucket", "entry", &QueryEntry::default())
+                    .await
+                    .unwrap(),
+                Some(json!({"entry": {"$test-ext": {"version": 2}}}))
+            );
+        }
+
+        #[rstest]
+        #[tokio::test(flavor = "multi_thread")]
+        async fn tombstone_hides_retained_attachment_versions(mock_ext: MockIoExtension) {
+            let storage = create_storage().await;
+            storage
+                .create_bucket("bucket", BucketSettings::default())
+                .await
+                .unwrap();
+            write_meta_record(
+                &storage,
+                "bucket",
+                "entry/$meta",
+                "$test-ext",
+                br#"{"version":1}"#,
+                1,
+            )
+            .await;
+
+            let bucket = storage
+                .get_bucket("bucket")
+                .await
+                .unwrap()
+                .upgrade_and_unwrap();
+            let entry = bucket
+                .get_entry("entry/$meta")
+                .await
+                .unwrap()
+                .upgrade()
+                .unwrap();
+            entry
+                .update_labels(vec![UpdateLabels {
+                    time: 1,
+                    update: Labels::from_iter([("remove".to_string(), "true".to_string())]),
+                    remove: HashSet::new(),
+                }])
+                .await
+                .unwrap();
+
+            let repo = mocked_ext_repo_with_storage("test-ext", mock_ext, Some(storage));
+            assert_eq!(
+                repo.get_ext_attachments("bucket", "entry", &QueryEntry::default())
+                    .await
+                    .unwrap(),
+                None
             );
         }
 

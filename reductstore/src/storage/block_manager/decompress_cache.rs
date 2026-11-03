@@ -107,6 +107,7 @@ static NEXT_OWNER_ID: AtomicU64 = AtomicU64::new(1);
 /// (1 µs resolution on macOS), so file names get a counter.
 static NEXT_FILE_ID: AtomicU64 = AtomicU64::new(1);
 
+#[derive(Clone)]
 pub(super) struct DecompressCache {
     /// Unique owner id, part of every key of this handle.
     owner: u64,

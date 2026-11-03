@@ -420,4 +420,41 @@ mod tests {
             .await
             .unwrap();
     }
+
+    #[rstest]
+    #[tokio::test(flavor = "multi_thread")]
+    async fn writes_unsafe_names_to_sanitized_path(#[future] storage: Arc<StorageEngine>) {
+        use reduct_base::io::ReadRecord;
+
+        let storage = storage.await;
+        let mut writer = writer(Arc::clone(&storage));
+        let mut event = system_event(SystemEventKind::Lifecycle, false);
+        event.instance = "plant.example.com".to_string();
+        event.entry_name = "SP.9322".to_string();
+        event.payload = json!({"policy_name": "SP.9322"});
+
+        writer.log_event(event).await.unwrap();
+
+        let bucket = storage
+            .get_bucket(SYSTEM_BUCKET_NAME)
+            .await
+            .unwrap()
+            .upgrade_and_unwrap();
+        let entry_path = "lifecycle/plant_example_com/SP_9322";
+        let latest_record = Arc::clone(&bucket)
+            .info()
+            .await
+            .unwrap()
+            .entries
+            .into_iter()
+            .find(|entry| entry.name == entry_path)
+            .expect("sanitized system-event entry must exist")
+            .latest_record;
+        let mut reader = bucket.begin_read(entry_path, latest_record).await.unwrap();
+        let record = reader.read_chunk().unwrap().unwrap();
+        let persisted: serde_json::Value = serde_json::from_slice(&record).unwrap();
+
+        assert_eq!(persisted["instance"], "plant.example.com");
+        assert_eq!(persisted["policy_name"], "SP.9322");
+    }
 }

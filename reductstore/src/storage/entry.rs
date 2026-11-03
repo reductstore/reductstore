@@ -15,15 +15,17 @@ pub(crate) mod update_labels;
 mod write_record;
 
 use crate::cfg::io::IoConfig;
-use crate::cfg::Cfg;
+use crate::cfg::{Cfg, InstanceRole};
 use crate::core::file_cache::FileCache;
 use crate::core::sync::AsyncRwLock;
 use crate::core::weak::Weak;
 use crate::storage::block_manager::block_index::BlockIndexSummary;
-use crate::storage::block_manager::BlockManager;
+use crate::storage::block_manager::{BlockManager, ReplicaReloadOutcome};
 use crate::storage::in_flight::InFlightIoLimiter;
 use crate::storage::query::base::QueryOptions;
-use crate::storage::query::{build_query, next_query_id, spawn_query_task, QueryRx};
+use crate::storage::query::{
+    build_query, next_query_id, spawn_query_task, QueryRx, ReplicaQueryRecovery,
+};
 pub(crate) use io::record_reader::RecordReader;
 pub(crate) use io::record_writer::{RecordDrainer, RecordWriter};
 use log::debug;
@@ -114,85 +116,11 @@ impl Entry {
     }
 
     pub(crate) async fn reload_index_on_replica(&self) -> Result<(), ReductError> {
-        const RELOAD_ATTEMPTS: usize = 3;
-
-        for attempt in 1..=RELOAD_ATTEMPTS {
-            let reload = {
-                let Some(block_manager) = self.block_manager.try_read() else {
-                    if attempt == RELOAD_ATTEMPTS {
-                        debug!(
-                            "Skipping replica index reload for {}/{} because block manager remained busy",
-                            self.bucket_name, self.name
-                        );
-                        return Ok(());
-                    }
-                    tokio::task::yield_now().await;
-                    continue;
-                };
-
-                block_manager.prepare_replica_index_reload()
-            };
-
-            let Some(reload) = reload else {
-                return Ok(());
-            };
-
-            let result = async {
-                let before = publication::load_fresh(&self.path, &self.file_cache).await?;
-                if matches!(
-                    before,
-                    Some(publication::Publication {
-                        state: publication::PublicationState::Updating,
-                        ..
-                    })
-                ) {
-                    return Err(reduct_base::too_early!("Entry publication is updating"));
-                }
-
-                if before.as_ref().and_then(publication::Publication::id)
-                    == reload.accepted_publication().id().cloned()
-                {
-                    return Ok(());
-                }
-
-                let updated_index = reload.load_candidate(&self.file_cache).await?;
-                let after = publication::load_fresh(&self.path, &self.file_cache).await?;
-                let publication = publication::validate_window(before, after)?;
-                reload.validate_successor(&publication)?;
-
-                let Some(mut block_manager) = self.block_manager.try_write() else {
-                    return Err(reduct_base::too_early!(
-                        "Block manager is busy while installing replica index"
-                    ));
-                };
-
-                block_manager
-                    .apply_replica_index_reload(reload, updated_index, publication)
-                    .await?;
-                self.update_info_cache(Arc::new(block_manager.index().aggregate_stats()));
-                Ok(())
-            }
-            .await;
-
-            match result {
-                Ok(()) => return Ok(()),
-                Err(err)
-                    if err.status() == reduct_base::error::ErrorCode::TooEarly
-                        && attempt < RELOAD_ATTEMPTS =>
-                {
-                    debug!(
-                        "Retrying replica index reload for {}/{} after transient publication state (attempt {}/{})",
-                        self.bucket_name, self.name, attempt, RELOAD_ATTEMPTS
-                    );
-                    tokio::task::yield_now().await;
-                }
-                Err(err) => return Err(err),
-            }
+        match BlockManager::reload_replica_index(&self.block_manager).await? {
+            ReplicaReloadOutcome::Unchanged => {}
+            ReplicaReloadOutcome::Applied(summary) => self.update_info_cache(summary),
         }
-
-        Err(reduct_base::too_early!(
-            "Replica index reload did not observe a stable publication"
-        ))
+        Ok(())
     }
 
     /// Query records for a time range.
@@ -205,9 +133,7 @@ impl Entry {
     ///
     /// * `u64` - The query ID.
     /// * `HTTPError` - The error if any.
-    pub async fn query(&self, mut query_parameters: QueryEntry) -> Result<u64, ReductError> {
-        self.system_behavior
-            .apply_default_query_filters(&mut query_parameters);
+    pub async fn query(&self, query_parameters: QueryEntry) -> Result<u64, ReductError> {
         let (start, stop) = self.get_query_time_range(&query_parameters).await?;
         let id = next_query_id();
         let block_manager = Arc::clone(&self.block_manager);
@@ -222,8 +148,30 @@ impl Entry {
         )?;
 
         let io_settings = query.as_ref().io_settings().clone();
-        let (rx, task_handle) =
-            spawn_query_task(id, self.task_group(), query, options.clone(), block_manager);
+        let recovery = (self.cfg.role == InstanceRole::Replica).then(|| ReplicaQueryRecovery {
+            rebuild: Arc::new({
+                let entry_name = self.name.clone();
+                let options = options.clone();
+                let io_defaults = self.cfg.io_conf.clone();
+                move || {
+                    build_query(
+                        entry_name.clone(),
+                        start,
+                        stop,
+                        options.clone(),
+                        io_defaults.clone(),
+                    )
+                }
+            }),
+        });
+        let (rx, task_handle) = spawn_query_task(
+            id,
+            self.task_group(),
+            query,
+            options.clone(),
+            block_manager,
+            recovery,
+        );
 
         self.queries.write().await?.insert(
             id,
@@ -713,6 +661,135 @@ mod tests {
             assert_eq!(info.name, "entry");
             assert_eq!(info.record_count, 2);
             assert_eq!(info.size, 90);
+        }
+    }
+
+    mod replica_reload {
+        use super::*;
+        use crate::cfg::InstanceRole;
+        use std::io::SeekFrom;
+
+        async fn replica_with_pending_update(
+            entry_settings: EntrySettings,
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) -> Arc<Entry> {
+            let primary = entry(entry_settings.clone(), path, Arc::clone(&file_cache)).await;
+            write_stub_record(&primary, 1).await;
+            primary.sync_fs().await.unwrap();
+
+            let mut replica_cfg = Cfg::default();
+            replica_cfg.role = InstanceRole::Replica;
+            let replica = Arc::new(
+                Entry::builder()
+                    .path(primary.path().clone())
+                    .name("entry")
+                    .bucket_name("bucket")
+                    .settings(entry_settings)
+                    .cfg(replica_cfg.into())
+                    .usage_counters(Default::default())
+                    .file_cache(file_cache)
+                    .restore()
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+
+            write_stub_record(&primary, 2).await;
+            primary.sync_fs().await.unwrap();
+            replica
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn applied_reload_updates_info_cache(
+            entry_settings: EntrySettings,
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) {
+            let replica = replica_with_pending_update(entry_settings, path, file_cache).await;
+
+            replica.reload_index_on_replica().await.unwrap();
+
+            assert_eq!(
+                replica
+                    .info_cache
+                    .read()
+                    .await
+                    .unwrap()
+                    .as_ref()
+                    .unwrap()
+                    .record_count,
+                2
+            );
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn unchanged_reload_does_not_update_info_cache(
+            entry_settings: EntrySettings,
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) {
+            let replica = replica_with_pending_update(entry_settings, path, file_cache).await;
+            replica.reload_index_on_replica().await.unwrap();
+            *replica.info_cache.write().await.unwrap() = None;
+
+            replica.reload_index_on_replica().await.unwrap();
+
+            assert!(replica.info_cache.read().await.unwrap().is_none());
+        }
+
+        #[rstest]
+        #[tokio::test]
+        async fn does_not_block_index_reads_while_invalidating_cache(
+            entry_settings: EntrySettings,
+            path: PathBuf,
+            file_cache: Arc<FileCache>,
+        ) {
+            let primary = entry(entry_settings.clone(), path, Arc::clone(&file_cache)).await;
+            write_stub_record(&primary, 1).await;
+            primary.sync_fs().await.unwrap();
+
+            let mut replica_cfg = Cfg::default();
+            replica_cfg.role = InstanceRole::Replica;
+            let replica = Arc::new(
+                Entry::builder()
+                    .path(primary.path().clone())
+                    .name("entry")
+                    .bucket_name("bucket")
+                    .settings(entry_settings)
+                    .cfg(replica_cfg.into())
+                    .usage_counters(Default::default())
+                    .file_cache(Arc::clone(&file_cache))
+                    .restore()
+                    .await
+                    .unwrap()
+                    .unwrap(),
+            );
+
+            write_stub_record(&primary, 2).await;
+            primary.sync_fs().await.unwrap();
+
+            let data_guard = file_cache
+                .read(&primary.path().join("1.blk"), SeekFrom::Start(0))
+                .await
+                .unwrap();
+            let reload = {
+                let replica = Arc::clone(&replica);
+                tokio::spawn(async move { replica.reload_index_on_replica().await })
+            };
+            tokio::time::sleep(Duration::from_millis(25)).await;
+            assert!(!reload.is_finished());
+
+            tokio::time::timeout(Duration::from_millis(100), replica.size())
+                .await
+                .expect("replica index reads must not wait for cache invalidation")
+                .unwrap();
+
+            drop(data_guard);
+            reload.await.unwrap().unwrap();
+            assert_eq!(replica.info().await.unwrap().record_count, 2);
         }
     }
 

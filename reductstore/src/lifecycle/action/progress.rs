@@ -5,7 +5,7 @@ use crate::core::duration::parse_duration_to_micros;
 use crate::lifecycle::action::LifecycleContext;
 use crate::storage::engine::StorageEngine;
 use crate::storage::entry::entry_matches_pattern;
-use crate::syslog::{SYSTEM_BUCKET_NAME, SYSTEM_LIFECYCLE_ENTRY_PREFIX};
+use crate::syslog::{sanitize_path_segment, SYSTEM_BUCKET_NAME, SYSTEM_LIFECYCLE_ENTRY_PREFIX};
 use reduct_base::error::ReductError;
 use reduct_base::io::ReadRecord;
 use reduct_base::msg::lifecycle_api::LifecycleSettings;
@@ -194,29 +194,12 @@ pub(crate) async fn read_progress(
 }
 
 fn lifecycle_stats_entry_path(instance_name: &str, policy_name: &str) -> String {
-    let instance = if instance_name.is_empty() {
-        "unknown"
-    } else {
-        instance_name
-    };
     format!(
         "{}/{}/{}",
         SYSTEM_LIFECYCLE_ENTRY_PREFIX,
-        instance,
-        sanitize_policy_name(policy_name)
+        sanitize_path_segment(instance_name),
+        sanitize_path_segment(policy_name)
     )
-}
-
-fn sanitize_policy_name(name: &str) -> String {
-    name.chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || matches!(ch, '-' | '_' | '.') {
-                ch
-            } else {
-                '_'
-            }
-        })
-        .collect()
 }
 
 #[cfg(test)]

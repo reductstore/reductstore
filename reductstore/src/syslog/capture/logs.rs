@@ -149,6 +149,7 @@ impl LogCapture {
                 error!("Log capture task failed to join: {:?}", err);
             }
         }
+        Logger::clear_sink();
 
         let dropped = self.dropped.load(Ordering::Relaxed);
         if dropped > 0 {

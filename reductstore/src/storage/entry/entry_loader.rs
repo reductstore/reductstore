@@ -91,6 +91,12 @@ impl EntryLoader {
             None
         };
 
+        if publication_before.is_some() {
+            file_cache
+                .invalidate_local_cache_file(&path.join(BLOCK_INDEX_FILE))
+                .await?;
+        }
+
         let mut entry = match Self::try_restore_entry_from_index(
             path.clone(),
             entry_name.clone(),
@@ -178,12 +184,20 @@ impl EntryLoader {
                     }
                     Err(err) => return Err(err),
                 };
-            entry
+            let result = entry
                 .block_manager
                 .write()
                 .await?
                 .initialize_replica_publication(accepted_publication)
-                .await?;
+                .await;
+            match result {
+                Ok(()) => {}
+                Err(err) if err.status() == reduct_base::error::ErrorCode::TooEarly => {
+                    debug!("Skipping replica entry {:?}: {}", path, err);
+                    return Ok(None);
+                }
+                Err(err) => return Err(err),
+            }
         }
 
         {
@@ -664,7 +678,10 @@ mod tests {
     use crate::storage::entry::tests::{
         entry, entry_settings, file_cache, path, write_stub_record,
     };
-    use crate::storage::proto::{record, us_to_ts, Block, BlockIndex as BlockIndexProto, Record};
+    use crate::storage::proto::{
+        entry_publication, record, us_to_ts, Block, BlockIndex as BlockIndexProto,
+        EntryPublication, Record,
+    };
     use std::fs;
     use std::io::SeekFrom;
 
@@ -854,6 +871,58 @@ mod tests {
         .unwrap();
 
         assert!(entry.is_none());
+    }
+
+    #[rstest]
+    #[case(true)]
+    #[case(false)]
+    #[tokio::test]
+    async fn test_restore_replica_validates_published_index(
+        entry_settings: EntrySettings,
+        path: PathBuf,
+        file_cache: Arc<FileCache>,
+        #[case] matching_crc: bool,
+    ) {
+        let entry = entry(entry_settings.clone(), path.clone(), file_cache.clone()).await;
+        write_stub_record(&entry, 1).await;
+        entry.sync_fs().await.unwrap();
+
+        let entry_path = path.join(entry.name());
+        let index = BlockIndex::try_load(entry_path.join(BLOCK_INDEX_FILE), file_cache.clone())
+            .await
+            .unwrap();
+        let index_crc64 = if matching_crc {
+            index.crc64()
+        } else {
+            index.crc64().wrapping_add(1)
+        };
+        fs::write(
+            publication::path(&entry_path),
+            EntryPublication {
+                incarnation: "test-incarnation".to_string(),
+                generation: 2,
+                state: entry_publication::State::Ready as i32,
+                block_index_crc64: Some(index_crc64),
+            }
+            .encode_to_vec(),
+        )
+        .unwrap();
+
+        let cfg = Cfg {
+            role: Replica,
+            ..Default::default()
+        };
+        let restored = EntryLoader::restore_entry(
+            entry_path,
+            entry_settings,
+            Arc::new(cfg),
+            Default::default(),
+            file_cache,
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(restored.is_some(), matching_crc);
     }
 
     #[rstest]
