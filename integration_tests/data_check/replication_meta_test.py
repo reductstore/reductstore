@@ -84,7 +84,7 @@ async def check():
         async def updated_on_dest():
             old_data = await read_record(dest, meta_entry, meta_ts_1)
             new_data = await read_record(dest, meta_entry, meta_ts_2)
-            return old_data is None and new_data == b'{"version":2}'
+            return old_data == b'{"version":1}' and new_data == b'{"version":2}'
 
         await wait_until(updated_on_dest, "meta update replication")
 

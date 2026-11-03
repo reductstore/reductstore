@@ -70,7 +70,9 @@ def load_result(file: Path) -> dict[int, list[int]]:
                 )
             record_size = int(parts[0])
             if record_size in result:
-                raise ValueError(f"{file}:{line_number}: duplicate record size {record_size}")
+                raise ValueError(
+                    f"{file}:{line_number}: duplicate record size {record_size}"
+                )
             values = list(map(int, parts[1:]))
             if any(value < 0 for value in values):
                 raise ValueError(f"{file}:{line_number}: values must be non-negative")

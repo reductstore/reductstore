@@ -248,14 +248,17 @@ impl Entry {
     }
 
     pub(super) async fn remove_records_in_current_mutation(
+        &self,
         timestamps: Vec<u64>,
-        block_manager: Arc<AsyncRwLock<BlockManager>>,
-        bucket_name: &str,
-        entry_name: &str,
     ) -> Result<(), ReductError> {
-        Self::inner_remove_records(timestamps, block_manager, bucket_name, entry_name)
-            .await
-            .map(|_| ())
+        Self::inner_remove_records(
+            timestamps,
+            Arc::clone(&self.block_manager),
+            &self.bucket_name,
+            &self.name,
+        )
+        .await
+        .map(|_| ())
     }
 
     async fn inner_remove_records(
