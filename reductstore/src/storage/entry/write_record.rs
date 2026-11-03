@@ -49,10 +49,9 @@ impl InFlightWriteRecord {
 
     async fn release_publication_after(&mut self, terminal: bool) {
         if terminal {
-            let _ = match self.completion.take() {
-                Some(completion) => completion.await,
-                None => Ok(false),
-            };
+            if let Some(completion) = self.completion.take() {
+                let _ = completion.await;
+            }
             self.publication.take();
             self.coordinator
                 .schedule_publish(self.entry_path.clone(), Arc::clone(&self.block_manager));
