@@ -8,10 +8,6 @@ use reduct_base::msg::entry_api::QueryEntry;
 use reduct_base::{unprocessable_entity, Labels};
 use serde_json::json;
 
-pub(crate) struct WritePreparation {
-    pub(crate) superseded_record_timestamps: Vec<u64>,
-}
-
 /// Reserved segment for system metadata entries.
 ///
 /// Rules:
@@ -21,8 +17,7 @@ pub(crate) struct WritePreparation {
 /// - `$meta` entries are excluded from user-facing entry counts/lists.
 /// - FIFO quota eviction must ignore `$meta` entries as removal candidates.
 /// - Every `$meta` record must include label `key`.
-/// - `$meta` behaves as upsert-by-key: writing a record with `key=K` removes existing `$meta`
-///   records with the same key before adding the new one.
+/// - `$meta` retains attachment versions; readers select the latest record for each key.
 /// - Updating a `$meta` record with label `remove=true` creates a tombstone (label-only update)
 ///   and does not physically delete the record.
 pub(crate) const META_ENTRY_SEGMENT: &str = "$meta";
@@ -70,41 +65,23 @@ pub(crate) trait SystemEntryBehavior {
         Ok(())
     }
 
-    async fn prepare_write(
-        &self,
-        entry: &Entry,
-        labels: &Labels,
-    ) -> Result<WritePreparation, ReductError>;
-
-    fn apply_default_query_filters(&self, query: &mut QueryEntry);
+    async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError>;
 }
 
 pub(crate) struct RegularEntryBehavior;
 
 #[async_trait]
 impl SystemEntryBehavior for RegularEntryBehavior {
-    async fn prepare_write(
-        &self,
-        _entry: &Entry,
-        _labels: &Labels,
-    ) -> Result<WritePreparation, ReductError> {
-        Ok(WritePreparation {
-            superseded_record_timestamps: vec![],
-        })
+    async fn prepare_write(&self, _entry: &Entry, _labels: &Labels) -> Result<(), ReductError> {
+        Ok(())
     }
-
-    fn apply_default_query_filters(&self, _query: &mut QueryEntry) {}
 }
 
 pub(crate) struct MetaEntryBehavior;
 
 #[async_trait]
 impl SystemEntryBehavior for MetaEntryBehavior {
-    async fn prepare_write(
-        &self,
-        entry: &Entry,
-        labels: &Labels,
-    ) -> Result<WritePreparation, ReductError> {
+    async fn prepare_write(&self, entry: &Entry, labels: &Labels) -> Result<(), ReductError> {
         let Some(key) = labels.get("key") else {
             return Err(unprocessable_entity!(
                 "System entry '{}' records must contain label 'key'",
@@ -119,17 +96,14 @@ impl SystemEntryBehavior for MetaEntryBehavior {
             ));
         }
 
-        // escape system names started with $
+        // Preserve the current attachment while pruning older history before
+        // the replacement starts. This leaves at most one prior version.
         let key = if key.starts_with('$') {
             format!("${}", key)
         } else {
             key.to_string()
         };
-
-        // Find the previous version now, but retain it until the replacement is
-        // written successfully. Removing it here could make a failed write lose
-        // the last readable attachment.
-        let superseded_record_timestamps = entry
+        let mut timestamps = entry
             .query_record_timestamps(QueryEntry {
                 start: Some(0),
                 stop: Some(u64::MAX),
@@ -140,32 +114,11 @@ impl SystemEntryBehavior for MetaEntryBehavior {
                 ..Default::default()
             })
             .await?;
-        Ok(WritePreparation {
-            superseded_record_timestamps,
-        })
-    }
+        timestamps.sort_unstable();
+        timestamps.pop();
+        entry.remove_records_in_current_mutation(timestamps).await?;
 
-    fn apply_default_query_filters(&self, query: &mut QueryEntry) {
-        // Filter out tombstoned records (remove=true) by injecting $not condition
-        let exclude = json!([{
-            "$and": [
-                {"$has": "remove"}, {"&remove": {"$eq": true}}
-            ]
-        }]);
-
-        let when = query.when.get_or_insert_with(|| json!({}));
-        match when.as_object_mut().unwrap().entry("$not") {
-            serde_json::map::Entry::Vacant(entry) => {
-                entry.insert(exclude);
-            }
-            serde_json::map::Entry::Occupied(mut entry) => {
-                entry
-                    .get_mut()
-                    .as_array_mut()
-                    .unwrap()
-                    .push(exclude.get(0).unwrap().clone());
-            }
-        }
+        Ok(())
     }
 
     fn validate_remove_records(&self, entry_name: &str) -> Result<(), ReductError> {
@@ -336,7 +289,7 @@ mod tests {
 
     #[tokio::test]
     #[serial]
-    async fn meta_prepare_write_collects_existing_records_with_same_key() {
+    async fn meta_write_retains_only_the_previous_version() {
         let entry = build_entry("entry/$meta").await;
         write_record(
             &entry,
@@ -346,15 +299,23 @@ mod tests {
         .await;
         assert!(entry.begin_read(1).await.is_ok());
 
-        let preparation = MetaEntryBehavior
-            .prepare_write(
-                &entry,
-                &Labels::from_iter([("key".to_string(), "schema".to_string())]),
-            )
-            .await
-            .unwrap();
-
-        assert_eq!(preparation.superseded_record_timestamps, vec![1]);
+        write_record(
+            &entry,
+            2,
+            Labels::from_iter([("key".to_string(), "schema".to_string())]),
+        )
+        .await;
         assert!(entry.begin_read(1).await.is_ok());
+        assert!(entry.begin_read(2).await.is_ok());
+
+        write_record(
+            &entry,
+            3,
+            Labels::from_iter([("key".to_string(), "schema".to_string())]),
+        )
+        .await;
+        assert!(entry.begin_read(1).await.is_err());
+        assert!(entry.begin_read(2).await.is_ok());
+        assert!(entry.begin_read(3).await.is_ok());
     }
 }
