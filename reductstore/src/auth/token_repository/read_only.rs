@@ -21,7 +21,7 @@ use crate::syslog::{AUDIT_BUCKET_NAME, SYSTEM_AUDIT_ENTRY_PREFIX, SYSTEM_BUCKET_
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use log::{debug, error};
+use log::{debug, error, warn};
 use prost::Message;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::FullBucketInfo;
@@ -128,13 +128,28 @@ impl ReadOnlyTokenRepository {
     async fn load_repo(&self) -> Result<HashMap<String, Token>, ReductError> {
         let api_token = self.cfg.api_token.as_str().to_string();
 
-        self.file_cache.discard_recursive(&self.config_path).await?; // ensure we update it from backend
+        let started = Instant::now();
+        warn!("Replica token refresh: discarding cached repository");
+        let discard = self.file_cache.discard_recursive(&self.config_path).await;
+        warn!(
+            "Replica token refresh: cache discard completed in {:?}, success={}",
+            started.elapsed(),
+            discard.is_ok()
+        );
+        discard?;
         let mut repo: HashMap<String, Token> = HashMap::new();
-        match self
+        let started = Instant::now();
+        warn!("Replica token refresh: opening repository file");
+        let file = self
             .file_cache
             .read(&self.config_path, SeekFrom::Start(0))
-            .await
-        {
+            .await;
+        warn!(
+            "Replica token refresh: file open completed in {:?}, success={}",
+            started.elapsed(),
+            file.is_ok()
+        );
+        match file {
             Ok(mut lock) => {
                 debug!(
                     "Loading token repository from {}",
@@ -142,7 +157,13 @@ impl ReadOnlyTokenRepository {
                 );
 
                 let mut buf = Vec::new();
+                let started = Instant::now();
+                warn!("Replica token refresh: reading repository file");
                 lock.read_to_end(&mut buf)?;
+                warn!(
+                    "Replica token refresh: file read completed in {:?}",
+                    started.elapsed()
+                );
 
                 let proto_repo = TokenRepo::decode(&mut Bytes::from(buf)).map_err(|e| {
                     internal_server_error!("Could not decode token repository: {}", e)
@@ -202,7 +223,15 @@ impl ReadOnlyTokenRepository {
 
         *last_sync = Instant::now();
 
-        self.repo = self.load_repo().await?;
+        let started = Instant::now();
+        warn!("Replica token refresh: loading updated snapshot");
+        let repo = self.load_repo().await;
+        warn!(
+            "Replica token refresh: snapshot load completed in {:?}, success={}",
+            started.elapsed(),
+            repo.is_ok()
+        );
+        self.repo = repo?;
         self.auth_cache.clear();
 
         Ok(())

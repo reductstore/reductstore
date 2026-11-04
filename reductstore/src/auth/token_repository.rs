@@ -426,6 +426,10 @@ impl TokenRepositoryBuilder {
         storage: Option<Arc<StorageEngine>>,
         file_cache: Arc<FileCache>,
     ) -> BoxedTokenRepository {
+        if self.cfg.api_token == ApiToken::NoToken {
+            return Box::new(NoAuthRepository::new()) as BoxedTokenRepository;
+        }
+
         if self.cfg.role == InstanceRole::Replica {
             return Box::new(
                 ReadOnlyTokenRepository::new(config_path, self.cfg.clone(), storage, file_cache)
@@ -433,13 +437,8 @@ impl TokenRepositoryBuilder {
             ) as BoxedTokenRepository;
         }
 
-        match self.cfg.api_token {
-            ApiToken::NoToken => Box::new(NoAuthRepository::new()) as BoxedTokenRepository,
-            api_token => {
-                Box::new(TokenRepository::new(config_path, api_token, storage, file_cache).await)
-                    as BoxedTokenRepository
-            }
-        }
+        Box::new(TokenRepository::new(config_path, self.cfg.api_token, storage, file_cache).await)
+            as BoxedTokenRepository
     }
 }
 
@@ -650,6 +649,7 @@ mod tests {
     async fn test_token_repository_builder_replica_read_only() {
         let mut cfg = Cfg::default();
         cfg.role = InstanceRole::Replica;
+        cfg.api_token = ApiToken::Initialized("token".to_string());
         let path = tempdir().unwrap().keep();
 
         let mut repo = TokenRepositoryBuilder::new(cfg).build(path).await;
@@ -665,6 +665,22 @@ mod tests {
             .err()
             .unwrap();
         assert_eq!(err, forbidden!("Cannot generate token in read-only mode"));
+    }
+
+    #[tokio::test]
+    async fn test_token_repository_builder_replica_with_disabled_auth() {
+        let cfg = Cfg {
+            role: InstanceRole::Replica,
+            api_token: ApiToken::NoToken,
+            ..Default::default()
+        };
+        let path = tempdir().unwrap().keep();
+
+        let mut repo = TokenRepositoryBuilder::new(cfg).build(path).await;
+        let token = repo.validate_token(None, None).await.unwrap();
+
+        assert_eq!(token.name, "AUTHENTICATION-DISABLED");
+        assert!(token.permissions.unwrap().full_access);
     }
 
     #[test]

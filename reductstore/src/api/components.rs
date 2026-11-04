@@ -20,7 +20,7 @@ use crate::replication::ManageReplications;
 use crate::storage::engine::StorageEngine;
 use crate::syslog::SystemEventLogger;
 use axum::http::HeaderMap;
-use log::error;
+use log::{error, warn};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::io::BoxedReadRecord;
 use reduct_base::service_unavailable;
@@ -28,6 +28,7 @@ use serde::de::StdError;
 use std::fmt::{Debug, Display, Formatter};
 use std::net::IpAddr;
 use std::sync::Arc;
+use std::time::Instant;
 use tokio::sync::mpsc::Receiver;
 use tokio::sync::Mutex;
 
@@ -92,17 +93,34 @@ impl StateKeeper {
             .and_then(|header| header.to_str().ok())
             .and_then(|value| value.parse::<IpAddr>().ok());
 
-        components
+        let started = Instant::now();
+        warn!("Authorization: waiting for token repository lock");
+        let token_repo = components.token_repo.write().await;
+        warn!(
+            "Authorization: token repository lock wait completed in {:?}, success={}",
+            started.elapsed(),
+            token_repo.is_ok()
+        );
+        let mut token_repo = token_repo?;
+        let started = Instant::now();
+        let authorization = components
             .auth
             .check(
                 headers
                     .get("Authorization")
                     .map(|header| header.to_str().unwrap_or("")),
                 client_ip,
-                components.token_repo.write().await?.as_mut(),
+                token_repo.as_mut(),
                 policy,
             )
-            .await?;
+            .await;
+        drop(token_repo);
+        warn!(
+            "Authorization: validation completed in {:?}, success={}",
+            started.elapsed(),
+            authorization.is_ok()
+        );
+        authorization?;
 
         components.license_device_guard.check(headers)?;
 
