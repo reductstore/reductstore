@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Prevent replica index refreshes from blocking unrelated cached file reads, [PR-1713](https://github.com/reductstore/reductstore/pull/1713)
 - Retain the previous attachment version during replacement so replica listings cannot observe a missing attachment key, [PR-1712](https://github.com/reductstore/reductstore/pull/1712)
 - Retry replica queries after reloading indexes that disagree with cached block descriptors, [PR-1706](https://github.com/reductstore/reductstore/pull/1706)
 - Keep replica reads responsive while refreshed block indexes invalidate remote cache files, [PR-1703](https://github.com/reductstore/reductstore/pull/1703)
