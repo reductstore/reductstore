@@ -212,8 +212,6 @@ fn validate_bucket_name(name: &str) -> Result<(), RoutingError> {
             reason: "is empty".to_string(),
         });
     }
-    // delegate the charset rule to storage so bucket naming stays in one place; the
-    // empty check above stays because the rule accepts an empty name
     crate::storage::engine::check_name_convention(name).map_err(|_| {
         RoutingError::InvalidBucketName {
             bucket: name.to_string(),
