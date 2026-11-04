@@ -206,25 +206,20 @@ impl BucketRouter {
 }
 
 fn validate_bucket_name(name: &str) -> Result<(), RoutingError> {
-    let reject = |reason: &str| {
-        Err(RoutingError::InvalidBucketName {
-            bucket: name.to_string(),
-            reason: reason.to_string(),
-        })
-    };
-
     if name.is_empty() {
-        return reject("is empty");
+        return Err(RoutingError::InvalidBucketName {
+            bucket: name.to_string(),
+            reason: "is empty".to_string(),
+        });
     }
-    // charset mirrors storage::engine::check_name_convention; rejecting '$' also keeps a key
-    // expression from reaching a system bucket. No length cap, to match storage.
-    if !name
-        .chars()
-        .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-    {
-        return reject("may contain only letters, digits and [-,_] symbols");
-    }
-    Ok(())
+    // delegate the charset rule to storage so bucket naming stays in one place; the
+    // empty check above stays because the rule accepts an empty name
+    crate::storage::engine::check_name_convention(name).map_err(|_| {
+        RoutingError::InvalidBucketName {
+            bucket: name.to_string(),
+            reason: "may contain only letters, digits and [-,_] symbols".to_string(),
+        }
+    })
 }
 
 fn validate_entry_name(entry: &str) -> Result<(), RoutingError> {

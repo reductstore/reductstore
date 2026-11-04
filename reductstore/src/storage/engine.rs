@@ -679,9 +679,11 @@ impl StorageEngine {
     }
 }
 
-pub(super) fn check_name_convention(name: &str) -> Result<(), ReductError> {
-    let regex = regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap();
-    if !regex.is_match(name) {
+static NAME_CONVENTION_REGEX: std::sync::LazyLock<regex::Regex> =
+    std::sync::LazyLock::new(|| regex::Regex::new(r"^[A-Za-z0-9_-]*$").unwrap());
+
+pub(crate) fn check_name_convention(name: &str) -> Result<(), ReductError> {
+    if !NAME_CONVENTION_REGEX.is_match(name) {
         return Err(unprocessable_entity!(
             "Bucket or entry name can contain only letters, digests and [-,_] symbols",
         ));

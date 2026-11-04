@@ -564,12 +564,8 @@ fn split_list(raw: &str) -> Vec<String> {
         .collect()
 }
 
-// mirrors storage::engine::check_name_convention, which is not reachable from cfg
 fn is_valid_bucket_name(name: &str) -> bool {
-    !name.is_empty()
-        && name
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+    !name.is_empty() && crate::storage::engine::check_name_convention(name).is_ok()
 }
 
 fn block_label(kind: &str, id: Option<&str>) -> String {
