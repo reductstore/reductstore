@@ -9,7 +9,7 @@ use crate::syslog::path::entry_path;
 use crate::syslog::{LogSystemEvent, SystemEvent};
 use async_trait::async_trait;
 use bytes::Bytes;
-use log::error;
+use log::{error, warn};
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::unprocessable_entity;
 use reqwest::header::{HeaderMap, HeaderValue, CONTENT_LENGTH, CONTENT_TYPE};
@@ -102,7 +102,22 @@ impl ForwardSystemLogger {
 #[async_trait]
 impl LogSystemEvent for ForwardSystemLogger {
     async fn log_event(&mut self, event: SystemEvent) -> Result<(), ReductError> {
-        self.log_forward(event).await
+        // Do not instrument forwarded log events: the log capture sink could
+        // otherwise recursively forward these diagnostic messages.
+        let audit = matches!(&event.kind, crate::syslog::SystemEventKind::Audit);
+        let started = std::time::Instant::now();
+        if audit {
+            warn!("audit_forward_diag stage=remote_post event=start");
+        }
+        let result = self.log_forward(event).await;
+        if audit {
+            warn!(
+                "audit_forward_diag stage=remote_post event=end elapsed={:?} success={}",
+                started.elapsed(),
+                result.is_ok()
+            );
+        }
+        result
     }
 }
 

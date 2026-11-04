@@ -1116,14 +1116,13 @@ mod tests {
         events: Arc<std::sync::Mutex<Vec<crate::syslog::SystemEvent>>>,
         fail: bool,
     ) -> SystemEventSink {
-        SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingSystemLogger {
-                events,
-                fail,
-            })
-                as Box<dyn crate::syslog::LogSystemEvent + Send + Sync>)),
-            instance_name: "instance-1".to_string(),
-        }
+        SystemEventSink::new(
+            Arc::new(AsyncRwLock::new(
+                Box::new(CapturingSystemLogger { events, fail })
+                    as Box<dyn crate::syslog::LogSystemEvent + Send + Sync>,
+            )),
+            "instance-1".to_string(),
+        )
     }
 
     #[rstest]

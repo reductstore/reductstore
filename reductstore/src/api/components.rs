@@ -27,6 +27,7 @@ use reduct_base::service_unavailable;
 use serde::de::StdError;
 use std::fmt::{Debug, Display, Formatter};
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::mpsc::Receiver;
@@ -62,6 +63,7 @@ pub struct Components {
 /// Both the HTTP API and Zenoh API use this to wait for the server to be ready
 /// and obtain references to the storage engine and other services.
 pub(crate) const CLIENT_IP_HEADER: &str = "x-reduct-client-ip";
+static AUTH_DIAGNOSTIC_ID: AtomicU64 = AtomicU64::new(1);
 
 pub struct StateKeeper {
     rx: AsyncRwLock<Receiver<Components>>,
@@ -86,7 +88,17 @@ impl StateKeeper {
     where
         P: Policy,
     {
-        let components = self.wait_components().await?;
+        let id = AUTH_DIAGNOSTIC_ID.fetch_add(1, Ordering::Relaxed);
+        let started = Instant::now();
+        warn!("auth_diag id={} stage=components event=start", id);
+        let components = self.wait_components().await;
+        warn!(
+            "auth_diag id={} stage=components event=end elapsed={:?} success={}",
+            id,
+            started.elapsed(),
+            components.is_ok()
+        );
+        let components = components?;
 
         let client_ip = headers
             .get(CLIENT_IP_HEADER)
@@ -94,33 +106,36 @@ impl StateKeeper {
             .and_then(|value| value.parse::<IpAddr>().ok());
 
         let started = Instant::now();
-        warn!("Authorization: waiting for token repository lock");
-        let token_repo = components.token_repo.write().await;
+        warn!("auth_diag id={} stage=token_lock event=start", id);
+        let repo = components.token_repo.write().await;
         warn!(
-            "Authorization: token repository lock wait completed in {:?}, success={}",
+            "auth_diag id={} stage=token_lock event=end elapsed={:?} success={}",
+            id,
             started.elapsed(),
-            token_repo.is_ok()
+            repo.is_ok()
         );
-        let mut token_repo = token_repo?;
+        let mut repo = repo?;
         let started = Instant::now();
-        let authorization = components
+        warn!("auth_diag id={} stage=validation event=start", id);
+        let result = components
             .auth
             .check(
                 headers
                     .get("Authorization")
                     .map(|header| header.to_str().unwrap_or("")),
                 client_ip,
-                token_repo.as_mut(),
+                repo.as_mut(),
                 policy,
             )
             .await;
-        drop(token_repo);
+        drop(repo);
         warn!(
-            "Authorization: validation completed in {:?}, success={}",
+            "auth_diag id={} stage=validation event=end elapsed={:?} success={}",
+            id,
             started.elapsed(),
-            authorization.is_ok()
+            result.is_ok()
         );
-        authorization?;
+        result?;
 
         components.license_device_guard.check(headers)?;
 

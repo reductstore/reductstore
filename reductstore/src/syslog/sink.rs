@@ -11,6 +11,7 @@
 
 use crate::core::sync::AsyncRwLock;
 use crate::replication::TransactionNotification;
+use crate::syslog::aggregate::audit::SharedSystemEventAggregator;
 use crate::syslog::SystemEvent;
 use async_trait::async_trait;
 use reduct_base::error::ReductError;
@@ -43,4 +44,35 @@ pub(crate) type BoxedSystemLogger = Box<dyn LogSystemEvent + Send + Sync>;
 pub(crate) struct SystemEventSink {
     pub(crate) system_logger: Arc<AsyncRwLock<BoxedSystemLogger>>,
     pub(crate) instance_name: String,
+    audit: Option<SharedSystemEventAggregator>,
+}
+
+impl SystemEventSink {
+    pub(crate) fn new(
+        system_logger: Arc<AsyncRwLock<BoxedSystemLogger>>,
+        instance_name: String,
+    ) -> Self {
+        Self {
+            system_logger,
+            instance_name,
+            audit: None,
+        }
+    }
+
+    pub(crate) fn with_audit_aggregator(mut self, audit: SharedSystemEventAggregator) -> Self {
+        self.audit = Some(audit);
+        self
+    }
+
+    /// Enqueue audit events without acquiring the shared routing lock. Other
+    /// event families retain synchronous write-through behavior.
+    pub(crate) async fn log_event(&self, event: SystemEvent) -> Result<(), ReductError> {
+        if event.kind == crate::syslog::SystemEventKind::Audit {
+            if let Some(audit) = &self.audit {
+                return audit.log_event(event).await;
+            }
+        }
+
+        self.system_logger.write().await?.log_event(event).await
+    }
 }

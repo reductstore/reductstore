@@ -11,10 +11,13 @@ use axum::extract::State;
 use axum::http::{Request, StatusCode};
 use axum::middleware::Next;
 use axum::response::IntoResponse;
-use log::debug;
+use log::{debug, warn};
 use std::net::IpAddr;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
+
+static AUDIT_DIAGNOSTIC_ID: AtomicU64 = AtomicU64::new(1);
 
 pub(super) async fn audit_requests(
     State(keeper): State<Arc<StateKeeper>>,
@@ -38,7 +41,23 @@ pub(super) async fn audit_requests(
         return Ok(response);
     }
 
+    let id = AUDIT_DIAGNOSTIC_ID.fetch_add(1, Ordering::Relaxed);
+    warn!(
+        "audit_diag id={} stage=handler event=end elapsed={:?}",
+        id,
+        start.elapsed()
+    );
+    let stage_started = Instant::now();
+    warn!("audit_diag id={} stage=components event=start", id);
     let components = get_audit_components(&keeper).await;
+    warn!(
+        "audit_diag id={} stage=components event=end elapsed={:?} success={}",
+        id,
+        stage_started.elapsed(),
+        components.is_some()
+    );
+    let stage_started = Instant::now();
+    warn!("audit_diag id={} stage=token_resolution event=start", id);
     let token_name = resolve_audit_token_name(
         response.status(),
         auth_header.as_deref(),
@@ -46,6 +65,12 @@ pub(super) async fn audit_requests(
         components.as_ref(),
     )
     .await;
+    warn!(
+        "audit_diag id={} stage=token_resolution event=end elapsed={:?} resolved={}",
+        id,
+        stage_started.elapsed(),
+        token_name.is_some()
+    );
 
     if let (Some(token_name), Some(components)) = (token_name, components) {
         let message = response
@@ -56,6 +81,7 @@ pub(super) async fn audit_requests(
             .to_string();
 
         write_audit_event(
+            id,
             &components,
             token_name,
             method,
@@ -68,6 +94,11 @@ pub(super) async fn audit_requests(
         .await;
     }
 
+    warn!(
+        "audit_diag id={} stage=response_return event=end elapsed={:?}",
+        id,
+        start.elapsed()
+    );
     Ok(response)
 }
 
@@ -113,6 +144,7 @@ pub(super) async fn resolve_audit_token_name(
 }
 
 async fn write_audit_event(
+    diagnostic_id: u64,
     components: &Arc<Components>,
     token_name: String,
     method: String,
@@ -147,12 +179,15 @@ async fn write_audit_event(
     };
 
     let sink = components.system_events.sink();
-    match sink.system_logger.write().await {
-        Ok(mut logger) => {
-            if let Err(err) = logger.log_event(event).await {
-                debug!("Failed to persist audit event: {}", err);
-            }
-        }
-        Err(err) => debug!("Failed to lock system event logger: {}", err),
-    };
+    let started = Instant::now();
+    let result = sink.log_event(event).await;
+    warn!(
+        "audit_diag id={} stage=enqueue elapsed={:?} success={}",
+        diagnostic_id,
+        started.elapsed(),
+        result.is_ok()
+    );
+    if let Err(err) = result {
+        debug!("Failed to enqueue audit event: {}", err);
+    }
 }

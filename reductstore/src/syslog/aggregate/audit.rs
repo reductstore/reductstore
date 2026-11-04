@@ -13,8 +13,10 @@ use reduct_base::internal_server_error;
 use std::collections::HashMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 use tokio::sync::mpsc;
+use tokio::sync::mpsc::error::TrySendError;
 use tokio::time::{Duration, Instant};
 
 pub(crate) const AUDIT_CHANNEL_SIZE: usize = 1024;
@@ -35,18 +37,18 @@ pub(crate) trait SystemEventAggregator: Send + Sync {
     async fn log_event(&self, event: SystemEvent) -> Result<(), ReductError>;
 }
 
-pub(crate) type BoxedSystemEventAggregator = Box<dyn SystemEventAggregator + Send + Sync>;
+pub(crate) type SharedSystemEventAggregator = Arc<dyn SystemEventAggregator + Send + Sync>;
 
 /// Build the audit aggregator that batches `api_call` events in a background
 /// worker and flushes them through the shared `$system` `writer`.
 pub(crate) fn build_audit_aggregator(
     writer: Arc<AsyncRwLock<BoxedSystemLogger>>,
-) -> BoxedSystemEventAggregator {
+) -> SharedSystemEventAggregator {
     let handler: SystemEventHandler = Arc::new(move |event| {
         let writer = Arc::clone(&writer);
         Box::pin(async move { writer.write().await?.log_event(event).await })
     });
-    Box::new(ApiAuditEventAggregator::new(handler))
+    Arc::new(ApiAuditEventAggregator::new(handler))
 }
 
 /// Wrap an already-built `$system` writer into an aggregated audit logger: a
@@ -64,7 +66,7 @@ pub(crate) fn aggregated_audit_logger(inner: BoxedSystemLogger) -> BoxedSystemLo
 /// [`aggregated_audit_logger`]).
 #[cfg(test)]
 struct AggregatedAuditLogger {
-    aggregator: BoxedSystemEventAggregator,
+    aggregator: SharedSystemEventAggregator,
 }
 
 #[cfg(test)]
@@ -126,6 +128,7 @@ pub(crate) fn make_event(key: AuditAggregateKey, aggregate: AuditAggregate) -> S
 
 pub(crate) struct ApiAuditEventAggregator {
     tx: mpsc::Sender<SystemEvent>,
+    dropped_events: AtomicU64,
     #[cfg(test)]
     #[allow(dead_code)]
     pub state: Arc<AsyncRwLock<AuditState>>,
@@ -140,16 +143,29 @@ impl ApiAuditEventAggregator {
 
         Self {
             tx,
+            dropped_events: AtomicU64::new(0),
             #[cfg(test)]
             state,
         }
     }
 
     async fn enqueue(&self, event: SystemEvent) -> Result<(), ReductError> {
-        self.tx
-            .send(event)
-            .await
-            .map_err(|_| internal_server_error!("Audit worker is not available"))
+        match self.tx.try_send(event) {
+            Ok(()) => Ok(()),
+            Err(TrySendError::Full(_)) => {
+                let dropped = self.dropped_events.fetch_add(1, Ordering::Relaxed) + 1;
+                if dropped.is_power_of_two() {
+                    log::warn!(
+                        "Audit queue is full; dropped {} event(s) while the worker is unavailable",
+                        dropped
+                    );
+                }
+                Ok(())
+            }
+            Err(TrySendError::Closed(_)) => {
+                Err(internal_server_error!("Audit worker is not available"))
+            }
+        }
     }
 
     async fn run_worker(
@@ -603,6 +619,7 @@ mod tests {
         drop(rx);
         let aggregator = ApiAuditEventAggregator {
             tx,
+            dropped_events: AtomicU64::new(0),
             state: Arc::new(AsyncRwLock::new(AuditState::default())),
         };
 
@@ -612,6 +629,22 @@ mod tests {
             reduct_base::error::ErrorCode::InternalServerError
         );
         assert_eq!(err.message, "Audit worker is not available");
+    }
+
+    #[rstest]
+    #[tokio::test]
+    async fn log_event_drops_when_worker_queue_is_full() {
+        let (tx, _rx) = mpsc::channel(1);
+        let aggregator = ApiAuditEventAggregator {
+            tx,
+            dropped_events: AtomicU64::new(0),
+            state: Arc::new(AsyncRwLock::new(AuditState::default())),
+        };
+
+        aggregator.log_event(make_test_event(1)).await.unwrap();
+        aggregator.log_event(make_test_event(2)).await.unwrap();
+
+        assert_eq!(aggregator.dropped_events.load(Ordering::Relaxed), 1);
     }
 
     #[rstest]

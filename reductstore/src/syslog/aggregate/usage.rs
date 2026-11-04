@@ -243,12 +243,12 @@ mod tests {
     }
 
     fn capturing_sink(events: Arc<Mutex<Vec<SystemEvent>>>, fail: bool) -> SystemEventSink {
-        SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(
+        SystemEventSink::new(
+            Arc::new(AsyncRwLock::new(
                 Box::new(CapturingLogger { events, fail }) as Box<dyn LogSystemEvent + Send + Sync>
             )),
-            instance_name: "instance-1".to_string(),
-        }
+            "instance-1".to_string(),
+        )
     }
 
     #[fixture]
@@ -594,10 +594,8 @@ mod tests {
         generate_traffic(&storage).await;
 
         let logger = build_usage_system_logger(&cfg, Arc::clone(&storage)).await;
-        let sink = SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(logger)),
-            instance_name: "instance-1".to_string(),
-        };
+        let sink =
+            SystemEventSink::new(Arc::new(AsyncRwLock::new(logger)), "instance-1".to_string());
         let mut last_flush = Instant::now();
         UsageEventAggregator::flush(&sink, &storage, &counters, &mut last_flush).await;
 

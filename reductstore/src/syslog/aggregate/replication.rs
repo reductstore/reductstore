@@ -262,12 +262,12 @@ mod tests {
     }
 
     fn aggregator(events: Arc<Mutex<Vec<SystemEvent>>>, fail: bool) -> ReplicationEventAggregator {
-        let sink = SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(
+        let sink = SystemEventSink::new(
+            Arc::new(AsyncRwLock::new(
                 Box::new(CapturingLogger { events, fail }) as Box<dyn LogSystemEvent + Send + Sync>
             )),
-            instance_name: "instance-1".to_string(),
-        };
+            "instance-1".to_string(),
+        );
         ReplicationEventAggregator::new(sink, "repl-1".to_string(), "bucket-1")
     }
 
@@ -443,14 +443,14 @@ mod tests {
         #[case] src_bucket: &str,
         #[case] expected_replicate: bool,
     ) {
-        let sink = SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(Box::new(CapturingLogger {
+        let sink = SystemEventSink::new(
+            Arc::new(AsyncRwLock::new(Box::new(CapturingLogger {
                 events: Arc::clone(&events),
                 fail: false,
             })
                 as Box<dyn LogSystemEvent + Send + Sync>)),
-            instance_name: "instance-1".to_string(),
-        };
+            "instance-1".to_string(),
+        );
         let mut agg = ReplicationEventAggregator::new(sink, "repl-1".to_string(), src_bucket);
         agg.record_pass(0, 0.1, &[(Ok(()), 1, 10)]).await;
         agg.flush().await;
@@ -498,10 +498,8 @@ mod tests {
         );
 
         let logger = build_replication_system_logger(&cfg, Arc::clone(&storage)).await;
-        let sink = SystemEventSink {
-            system_logger: Arc::new(AsyncRwLock::new(logger)),
-            instance_name: "instance-1".to_string(),
-        };
+        let sink =
+            SystemEventSink::new(Arc::new(AsyncRwLock::new(logger)), "instance-1".to_string());
         let mut agg = ReplicationEventAggregator::new(sink, "repl-1".to_string(), "bucket-1");
 
         agg.record_pass(2, 0.5, &[(Ok(()), 3, 120)]).await;
