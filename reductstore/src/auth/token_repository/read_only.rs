@@ -21,7 +21,7 @@ use crate::syslog::{AUDIT_BUCKET_NAME, SYSTEM_AUDIT_ENTRY_PREFIX, SYSTEM_BUCKET_
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use log::{debug, error, warn};
+use log::{debug, error};
 use prost::Message;
 use reduct_base::error::{ErrorCode, ReductError};
 use reduct_base::msg::bucket_api::FullBucketInfo;
@@ -144,25 +144,9 @@ impl ReadOnlyTokenRepository {
     ) -> Result<HashMap<String, Token>, ReductError> {
         let api_token = cfg.api_token.as_str().to_string();
 
-        let started = Instant::now();
-        warn!("replica_auth_diag stage=discard event=start");
-        let discard = file_cache.discard_recursive(&config_path).await;
-        warn!(
-            "replica_auth_diag stage=discard event=end elapsed={:?} success={}",
-            started.elapsed(),
-            discard.is_ok()
-        );
-        discard?;
+        file_cache.discard_recursive(&config_path).await?;
         let mut repo: HashMap<String, Token> = HashMap::new();
-        let started = Instant::now();
-        warn!("replica_auth_diag stage=open event=start");
-        let file = file_cache.read(&config_path, SeekFrom::Start(0)).await;
-        warn!(
-            "replica_auth_diag stage=open event=end elapsed={:?} success={}",
-            started.elapsed(),
-            file.is_ok()
-        );
-        match file {
+        match file_cache.read(&config_path, SeekFrom::Start(0)).await {
             Ok(mut lock) => {
                 debug!(
                     "Loading token repository from {}",
@@ -170,15 +154,7 @@ impl ReadOnlyTokenRepository {
                 );
 
                 let mut buf = Vec::new();
-                let started = Instant::now();
-                warn!("replica_auth_diag stage=read event=start");
-                let read = lock.read_to_end(&mut buf);
-                warn!(
-                    "replica_auth_diag stage=read event=end elapsed={:?} success={}",
-                    started.elapsed(),
-                    read.is_ok()
-                );
-                read?;
+                lock.read_to_end(&mut buf)?;
 
                 let proto_repo = TokenRepo::decode(&mut Bytes::from(buf)).map_err(|e| {
                     internal_server_error!("Could not decode token repository: {}", e)
@@ -229,8 +205,6 @@ impl ReadOnlyTokenRepository {
 
     async fn update_repo(&mut self) -> Result<(), ReductError> {
         if self.refresh.as_ref().is_some_and(JoinHandle::is_finished) {
-            warn!("replica_auth_diag stage=install event=start");
-            let started = Instant::now();
             let refresh = self.refresh.take().expect("finished refresh must exist");
             match refresh.await {
                 Ok(Ok(repo)) => {
@@ -244,10 +218,6 @@ impl ReadOnlyTokenRepository {
                     error!("Replica token repository refresh task failed: {}", err);
                 }
             }
-            warn!(
-                "replica_auth_diag stage=install event=end elapsed={:?}",
-                started.elapsed()
-            );
         }
 
         if self.refresh.is_some() {
@@ -268,15 +238,7 @@ impl ReadOnlyTokenRepository {
         let cfg = self.cfg.clone();
         let file_cache = Arc::clone(&self.file_cache);
         self.refresh = Some(tokio::spawn(async move {
-            let started = Instant::now();
-            warn!("replica_auth_diag stage=background_refresh event=start implementation=async_handoff_v1");
-            let repo = Self::load_repo_from(config_path, cfg, file_cache).await;
-            warn!(
-                "replica_auth_diag stage=background_refresh event=end elapsed={:?} success={}",
-                started.elapsed(),
-                repo.is_ok()
-            );
-            repo
+            Self::load_repo_from(config_path, cfg, file_cache).await
         }));
 
         Ok(())

@@ -7,40 +7,17 @@ use crate::auth::policy::AuthenticatedPolicy;
 use axum::extract::State;
 use axum_extra::headers::HeaderMap;
 
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
-
-static INFO_DIAGNOSTIC_ID: AtomicU64 = AtomicU64::new(1);
 
 // GET /info
 pub(super) async fn info(
     State(keeper): State<Arc<StateKeeper>>,
     headers: HeaderMap,
 ) -> Result<ServerInfoAxum, HttpError> {
-    let id = INFO_DIAGNOSTIC_ID.fetch_add(1, Ordering::Relaxed);
-    let started = Instant::now();
-    log::warn!("info_diag id={} stage=authorization event=start", id);
     let components = keeper
         .get_with_permissions(&headers, AuthenticatedPolicy {})
-        .await;
-    log::warn!(
-        "info_diag id={} stage=authorization event=end elapsed={:?} success={}",
-        id,
-        started.elapsed(),
-        components.is_ok()
-    );
-    let components = components?;
-    let started = Instant::now();
-    log::warn!("info_diag id={} stage=storage_info event=start", id);
-    let info = components.storage.info().await;
-    log::warn!(
-        "info_diag id={} stage=storage_info event=end elapsed={:?} success={}",
-        id,
-        started.elapsed(),
-        info.is_ok()
-    );
-    Ok(info?.into())
+        .await?;
+    Ok(components.storage.info().await?.into())
 }
 
 #[cfg(test)]
