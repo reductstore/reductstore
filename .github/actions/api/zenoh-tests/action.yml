@@ -21,6 +21,10 @@ inputs:
     description: 'Inline user:password dictionary (one per line).'
     required: false
     default: ''
+  routing_mode:
+    description: 'Zenoh routing configuration: "unindexed" for no-ID settings, "indexed" for RS_ZENOH_{SUB,QUERY}_<ID>_* blocks.'
+    required: false
+    default: 'unindexed'
 runs:
   using: 'composite'
   steps:
@@ -63,6 +67,28 @@ runs:
           echo "connect=tcp/127.0.0.1:7447" >> $GITHUB_OUTPUT
         fi
 
+    - name: Build Zenoh routing configuration
+      id: routing
+      shell: bash
+      env:
+        ROUTING_MODE: ${{ inputs.routing_mode }}
+      run: |
+        if [ "$ROUTING_MODE" = "indexed" ]; then
+          source integration_tests/zenoh/routing/env.sh
+          : > /tmp/zenoh-routing.env
+          for variable in "${ZENOH_ROUTING_ENV_VARS[@]}"; do
+            printf '%s=%s\n' "$variable" "${!variable}" >> /tmp/zenoh-routing.env
+          done
+          echo "routing_tests=1" >> $GITHUB_OUTPUT
+        else
+          cat > /tmp/zenoh-routing.env <<'EOF'
+        RS_ZENOH_SUB_KEYEXPRS=**
+        RS_ZENOH_QUERY_KEYEXPRS=**
+        EOF
+          echo "routing_tests=" >> $GITHUB_OUTPUT
+        fi
+        cat /tmp/zenoh-routing.env
+
     - name: Run ReductStore
       shell: bash
       env:
@@ -75,8 +101,7 @@ runs:
           --env RS_DISABLE_AUTH=true \
           --env RS_ZENOH_ENABLED=1 \
           --env RS_ZENOH_CONFIG="${{ steps.zenoh-endpoint.outputs.config }}" \
-          --env RS_ZENOH_SUB_KEYEXPRS="**" \
-          --env RS_ZENOH_QUERY_KEYEXPRS="**" \
+          --env-file /tmp/zenoh-routing.env \
           --env RS_ZENOH_TLS_ROOT_CA \
           --env RS_ZENOH_TLS_CONNECT_CERT \
           --env RS_ZENOH_TLS_CONNECT_KEY \
@@ -107,6 +132,7 @@ runs:
         docker run --network=host \
           --env STORAGE_URL=http://127.0.0.1:8383 \
           --env ZENOH_CONNECT=${{ steps.zenoh-endpoint.outputs.connect }} \
+          --env RS_ZENOH_ROUTING_TESTS=${{ steps.routing.outputs.routing_tests }} \
           --env RS_ZENOH_TLS_ROOT_CA \
           --env RS_ZENOH_TLS_CONNECT_CERT \
           --env RS_ZENOH_TLS_CONNECT_KEY \

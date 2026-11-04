@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Add key-prefix Zenoh bucket routing and multiple key expression support, [PR-1667](https://github.com/reductstore/reductstore/pull/1667)
+
 ### Fixed
 
 - Retain the previous attachment version during replacement so replica listings cannot observe a missing attachment key, [PR-1712](https://github.com/reductstore/reductstore/pull/1712)

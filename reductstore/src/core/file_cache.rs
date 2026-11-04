@@ -368,6 +368,7 @@ impl FileCache {
     }
 
     /// Starts a batch. Paths are claimed explicitly by batch-aware mutations.
+    #[cfg(test)]
     pub async fn begin_batch(&self) -> Result<FileBatch, ReductError> {
         self.begin_batch_with_scope(None).await
     }

@@ -46,6 +46,8 @@ use tokio::task::JoinHandle;
 
 pub(crate) use builder::EntryBuilder;
 pub(crate) use pattern::entry_matches_pattern;
+#[cfg(feature = "zenoh-api")]
+pub(crate) use pattern::matches_patterns;
 
 struct QueryHandle {
     rx: Arc<AsyncRwLock<QueryRx>>,
